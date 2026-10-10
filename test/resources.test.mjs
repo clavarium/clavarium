@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, mkdirSync, renameSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Resources } from '../server/resources.mjs';
@@ -17,6 +17,9 @@ function bench(t, { failView = false } = {}) {
         host: async (argv) => {
             host.push(argv.join(' '));
             if (failView && argv.join(' ').startsWith('view make')) return { code: 1, stdout: '', stderr: 'fuse: device not found' };
+            /* What the host program does for a folder, without the root part. */
+            if (argv[0] === 'folder' && argv[1] === 'make') mkdirSync(join(dir, 'resources', argv[2]), { recursive: true });
+            if (argv[0] === 'folder' && argv[1] === 'aside') { mkdirSync(join(dir, 'removed'), { recursive: true }); renameSync(join(dir, 'resources', argv[2]), join(dir, 'removed', `${argv[2]}-then`)); }
             return { code: 0, stdout: '', stderr: '' };
         },
         dataDir: dir, uid: 1001, gid: 1002,
@@ -26,10 +29,10 @@ function bench(t, { failView = false } = {}) {
 
 test('a READ attachment mounts the read-only view, never the folder itself', async (t) => {
     const b = bench(t);
-    b.resources.create({ name: 'notes' });
+    await b.resources.create({ name: 'notes' });
     assert.ok(existsSync(join(b.dir, 'resources', 'notes')));
     await b.resources.attach('alpha', 'notes', 'read');
-    assert.deepEqual(b.host, ['view make notes']);
+    assert.deepEqual(b.host, ['folder make notes', 'view make notes']);
     /* A name, never a path: the host program decides which directory that is. */
     assert.deepEqual(b.vm, ['mount clv-alpha view notes 1001 1002']);
     assert.deepEqual(b.resources.of('alpha'), [{ name: 'notes', access: 'read' }]);
@@ -37,7 +40,7 @@ test('a READ attachment mounts the read-only view, never the folder itself', asy
 
 test('a WRITE attachment mounts the folder; the same folder can be read by another conversation', async (t) => {
     const b = bench(t);
-    b.resources.create({ name: 'reports' });
+    await b.resources.create({ name: 'reports' });
     await b.resources.attach('alpha', 'reports', 'write');
     await b.resources.attach('beta', 'reports', 'read');
     assert.deepEqual(b.vm, [
@@ -49,7 +52,7 @@ test('a WRITE attachment mounts the folder; the same folder can be read by anoth
 
 test('changing the level detaches first; "none" detaches; asking twice does nothing', async (t) => {
     const b = bench(t);
-    b.resources.create({ name: 'notes' });
+    await b.resources.create({ name: 'notes' });
     await b.resources.attach('alpha', 'notes', 'write');
     await b.resources.attach('alpha', 'notes', 'write');
     await b.resources.attach('alpha', 'notes', 'read');
@@ -61,7 +64,7 @@ test('changing the level detaches first; "none" detaches; asking twice does noth
 
 test('no view, no read attachment: nothing is mounted when the view cannot be made', async (t) => {
     const b = bench(t, { failView: true });
-    b.resources.create({ name: 'notes' });
+    await b.resources.create({ name: 'notes' });
     await assert.rejects(b.resources.attach('alpha', 'notes', 'read'), /read-only view could not be made/);
     assert.deepEqual(b.vm, []);
     assert.deepEqual(b.resources.of('alpha'), []);
@@ -69,7 +72,7 @@ test('no view, no read attachment: nothing is mounted when the view cannot be ma
 
 test('after a restart, the views of read attachments are put back, and only those', async (t) => {
     const b = bench(t);
-    b.resources.create({ name: 'notes' }); b.resources.create({ name: 'reports' });
+    await b.resources.create({ name: 'notes' }); await b.resources.create({ name: 'reports' });
     await b.resources.attach('alpha', 'notes', 'read');
     await b.resources.attach('alpha', 'reports', 'write');
     b.host.length = 0;
@@ -79,9 +82,9 @@ test('after a restart, the views of read attachments are put back, and only thos
 
 test('bad names, unknown resources and unknown levels are refused; archiving forgets the attachments', async (t) => {
     const b = bench(t);
-    assert.throws(() => b.resources.create({ name: '../etc' }), /name/);
-    b.resources.create({ name: 'notes' });
-    assert.throws(() => b.resources.create({ name: 'notes' }), /already/);
+    await assert.rejects(b.resources.create({ name: '../etc' }), /name/);
+    await b.resources.create({ name: 'notes' });
+    await assert.rejects(b.resources.create({ name: 'notes' }), /already/);
     await assert.rejects(b.resources.attach('alpha', 'nope', 'read'), /No such resource/);
     await assert.rejects(b.resources.attach('alpha', 'notes', 'admin'), /Access is/);
     await assert.rejects(b.resources.attach('Bad Name', 'notes', 'read'), /Not a conversation/);
@@ -92,14 +95,14 @@ test('bad names, unknown resources and unknown levels are refused; archiving for
 
 test('a folder is removed only when attached nowhere, and its files are moved aside, not erased', async (t) => {
     const b = bench(t);
-    b.resources.create({ name: 'notes' });
+    await b.resources.create({ name: 'notes' });
     writeFileSync(join(b.dir, 'resources', 'notes', 'keep.txt'), 'precious');
     await b.resources.attach('alpha', 'notes', 'read');
     await assert.rejects(b.resources.remove('notes'), /still attached to: alpha/);
     await b.resources.attach('alpha', 'notes', 'none');
     b.host.length = 0;
     await b.resources.remove('notes');
-    assert.deepEqual(b.host, ['view close notes'], 'its read-only view is closed first');
+    assert.deepEqual(b.host, ['view close notes', 'folder aside notes'], 'its read-only view is closed first');
     assert.deepEqual(b.resources.list(), []);
     assert.equal(existsSync(join(b.dir, 'resources', 'notes')), false);
     const aside = readdirSync(join(b.dir, 'removed'));
@@ -118,7 +121,7 @@ test('a mount the VM manager already holds is replaced, not reported as a failur
         return { code: 0, stdout: '', stderr: '' };
     }, ['vmm']);
     const resources = new Resources({ store: new Store(join(dir, 'resources.json')), vms, host: async () => ({ code: 0, stdout: '', stderr: '' }), dataDir: dir, uid: 1, gid: 1 });
-    resources.create({ name: 'notes' });
+    await resources.create({ name: 'notes' });
     await resources.attach('alpha', 'notes', 'write');
     assert.deepEqual(calls, ['mount', 'umount', 'mount']);
     assert.deepEqual(resources.of('alpha'), [{ name: 'notes', access: 'write' }]);

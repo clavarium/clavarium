@@ -21,7 +21,6 @@
  * program refuses to mount a view that is not in place: the failure is a
  * folder that is not there, never a writable one.
  */
-import { mkdirSync, renameSync, existsSync } from 'node:fs';
 import { isConversationName } from './names.mjs';
 import { Refusal } from './conversations.mjs';
 
@@ -47,10 +46,14 @@ export class Resources {
             .map((r) => ({ name: r.name, access: r.attachments[conversation] }));
     }
 
-    create({ name }) {
+    /* The folder is MADE BY THE HOST PROGRAM, in a directory that belongs to
+       root: this server fills its folders but cannot replace one by a link
+       to somewhere else, which is what would otherwise get mounted. */
+    async create({ name }) {
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
-        mkdirSync(this.folder(name), { recursive: true });
+        const made = await this.#host(['folder', 'make', name]);
+        if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);
         const resource = { name, type: 'folder', attachments: {}, createdAt: new Date().toISOString() };
         this.#store.put(resource);
         return resource;
@@ -110,9 +113,8 @@ export class Resources {
         if (used.length > 0) throw new Refusal(409, `This folder is still attached to: ${used.join(', ')}. Switch it Off there first.`);
         const closed = await this.#host(['view', 'close', name]);
         if (closed.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(closed.stderr)}`);
-        const aside = `${this.#root}/removed`;
-        mkdirSync(aside, { recursive: true });
-        if (existsSync(this.folder(name))) renameSync(this.folder(name), `${aside}/${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+        const aside = await this.#host(['folder', 'aside', name]);
+        if (aside.code !== 0) throw new Refusal(502, `The folder could not be put aside: ${firstLine(aside.stderr)}`);
         this.#store.remove(name);
     }
 

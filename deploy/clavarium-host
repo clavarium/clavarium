@@ -14,6 +14,11 @@
 # WHAT IT WILL NOT DO, whatever is asked:
 #   - mount anything but a folder of the data directory into a VM. A mount is
 #     served as root: any other path would be a way to read the host's files;
+#   - follow a path the server could have bent. The server owns the data
+#     directory, so a compromised server could replace a folder by a link to
+#     /etc and ask for it to be mounted. Hence: the directories whose entries
+#     get mounted (resources/, views/) BELONG TO ROOT, their entries are made
+#     and moved by this program only, and it checks both before each use;
 #   - touch a VM whose name is not one of ours ("clv-" + a conversation name);
 #   - load a network rule that is not, line for line, one of the known shapes.
 #
@@ -40,7 +45,7 @@ VM_ID="1000"
 CONF="/etc/clavarium/host.conf"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|view|net> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|folder|view|net> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""
 while [ $# -gt 0 ]; do
@@ -64,6 +69,23 @@ run() { if [ "$SAY" = "yes" ]; then printf '%s\n' "$*"; else exec "$@"; fi; }
 is_name() { [[ "$1" =~ ^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$ ]]; }
 vm_of() { is_name "${1#clv-}" && [ "$1" != "${1#clv-}" ] || refuse "not one of our VMs: ${1:-<empty>}"; }
 number() { [[ "$1" =~ ^[0-9]{1,6}$ ]] || refuse "not a number: ${1:-<empty>}"; }
+
+# One of the directories of the data directory that only root may arrange
+# (resources, views, removed): made if missing, and refused if it is a link or
+# belongs to anyone else -- then its entries cannot be trusted either.
+kept() {
+    [ "$SAY" = "yes" ] && return 0
+    local d="$DATA/$1"
+    [ -e "$d" ] || [ -L "$d" ] || install -d -o root -g root -m 0755 "$d"
+    [ -d "$d" ] && [ ! -L "$d" ] && [ "$(stat -c %u "$d")" = "0" ] \
+        || refuse "$d must be a directory that belongs to root (chown root:root, once, by hand)"
+}
+# A folder of ours: a real directory, directly under resources/.
+folder_of() {
+    kept resources
+    [ "$SAY" = "yes" ] && return 0
+    [ -d "$DATA/resources/$1" ] && [ ! -L "$DATA/resources/$1" ] || refuse "no such folder: $1"
+}
 
 [ $# -ge 2 ] || usage
 AREA="$1"; VERB="$2"; shift 2
@@ -91,27 +113,45 @@ case "$AREA $VERB" in
         # <vm> <folder|view> <resource> <uid> <gid>
         [ $# -eq 5 ] || usage; vm_of "$1"; is_name "$3" || refuse "not a folder name: $3"; number "$4"; number "$5"
         case "$2" in
-            folder) source="$DATA/resources/$3" ;;
-            view)   source="$DATA/views/$3"
+            folder) folder_of "$3"; source="$DATA/resources/$3" ;;
+            view)   kept views; source="$DATA/views/$3"
                     # A read attachment must meet the VIEW, never a bare directory.
                     [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the read-only view of $3 is not in place" ;;
             *) refuse "a mount is of a folder or of a view" ;;
         esac
-        [ "$SAY" = "yes" ] || [ -d "$source" ] || refuse "no such folder: $3"
         run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$1:/resources/$3" ;;
     "vm umount")
         [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a folder name: $2"
         run "$MULTIPASS" umount "$1:/resources/$2" ;;
+    "folder make")
+        # The folder is made here, and given to the account that owns the data
+        # directory: the server fills it, but cannot replace it.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        kept resources; owner="OWNER:GROUP"
+        if [ "$SAY" != "yes" ]; then
+            [ ! -e "$DATA/resources/$1" ] && [ ! -L "$DATA/resources/$1" ] || refuse "this folder exists already: $1"
+            owner="$(stat -c %u:%g "$DATA")"
+        fi
+        run install -d -o "${owner%:*}" -g "${owner#*:}" -m 0755 "$DATA/resources/$1" ;;
+    "folder aside")
+        # Taken off the list: MOVED ASIDE, never erased.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        folder_of "$1"; kept removed
+        if [ "$SAY" != "yes" ]; then
+            ! mountpoint -q "$DATA/views/$1" || refuse "the read-only view of $1 is still open"
+        fi
+        run mv -T -n "$DATA/resources/$1" "$DATA/removed/$1-$(date -u +%Y%m%dT%H%M%SZ)-$$" ;;
     "view make")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        folder_of "$1"; kept views
         if [ "$SAY" != "yes" ]; then
-            [ -d "$DATA/resources/$1" ] || refuse "no such folder: $1"
             mkdir -p "$DATA/views/$1"
             mountpoint -q "$DATA/views/$1" && exit 0
         fi
         run bindfs -r -o allow_other "$DATA/resources/$1" "$DATA/views/$1" ;;
     "view close")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        kept views
         if [ "$SAY" != "yes" ]; then mountpoint -q "$DATA/views/$1" || exit 0; fi
         run umount "$DATA/views/$1" ;;
     "net taps")

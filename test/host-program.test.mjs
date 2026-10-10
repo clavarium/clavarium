@@ -25,6 +25,7 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['vm', 'umount', 'clv-demo', 'reports'], 'multipass umount clv-demo:/resources/reports'],
         [['view', 'make', 'reports'], 'bindfs -r -o allow_other /var/lib/clavarium/resources/reports /var/lib/clavarium/views/reports'],
         [['view', 'close', 'reports'], 'umount /var/lib/clavarium/views/reports'],
+        [['folder', 'make', 'reports'], 'install -d -o OWNER -g GROUP -m 0755 /var/lib/clavarium/resources/reports'],
         [['net', 'taps'], 'pgrep -a qemu-system'],
         [['net', 'bridge'], 'ip -4 -o addr show mpqemubr0'],
     ];
@@ -52,9 +53,11 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
         ['vm', 'exec', 'primary', '--', 'id'], ['vm', 'delete', 'someone-else'], ['vm', 'stop', 'clv-'], ['vm', 'start', 'clv-Bad'],
         ['vm', 'launch', 'clv-demo', '64'], ['vm', 'launch', 'clv-demo', '1024M'], ['vm', 'exec', 'clv-demo', 'id'],
         ['vm', 'shell', 'clv-demo'], ['vm', 'set', 'local.driver=lxd'], ['vm', 'transfer', '/etc/shadow', 'clv-demo:/tmp/x'],
-        ['net', 'flush'], ['host', 'run', 'id'],
+        ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['folder', 'aside', '/etc'], ['folder', 'erase', 'reports'],
     ]) assert.equal(host(...args).code, 78, args.join(' '));
     assert.equal(host('vm').code, 64);
+    const aside = host('folder', 'aside', 'reports');
+    assert.match(aside.out, /^mv -T -n \/var\/lib\/clavarium\/resources\/reports \/var\/lib\/clavarium\/removed\/reports-\d{8}T\d{6}Z-\d+$/, 'moved aside, never erased');
     /* Outside "say only", the data directory cannot be chosen by the caller. */
     const real = spawnSync('/bin/bash', [PROGRAM, '--data', '/tmp', 'net', 'taps'], { encoding: 'utf8' });
     assert.equal(real.status, 78);

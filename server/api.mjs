@@ -117,7 +117,7 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
-        if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
+        if (pathname === '/api/resources' && resources) return send(201, await resources.create(body)), true;
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unlisted && resources) { await resources.remove(unlisted[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;

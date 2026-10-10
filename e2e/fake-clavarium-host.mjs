@@ -12,7 +12,7 @@
  * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}, data/...
  */
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
+import { mkdirSync, renameSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const DIR = process.env.FAKE_VM_DIR;
@@ -25,6 +25,12 @@ const folderOf = (name) => join(DATA, 'resources', name);
 const viewOf = (name) => join(DATA, 'views', name);
 const marker = (name) => `${viewOf(name)}.mounted`;
 
+if (area === 'folder' && verb === 'make') { mkdirSync(folderOf(argv[0]), { recursive: true }); process.exit(0); }
+if (area === 'folder' && verb === 'aside') {
+    mkdirSync(join(DATA, 'removed'), { recursive: true });
+    renameSync(folderOf(argv[0]), join(DATA, 'removed', `${argv[0]}-${Date.now()}`));
+    process.exit(0);
+}
 if (area === 'view' && verb === 'make') {
     const [name] = argv;
     if (existsSync(marker(name))) process.exit(0);
