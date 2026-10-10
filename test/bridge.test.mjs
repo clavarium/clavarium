@@ -5,6 +5,13 @@ import { once } from 'node:events';
 import WebSocket from 'ws';
 import { attachBridge, sameOrigin, CLOSE_ENDED, CLOSE_TAKEN } from '../server/bridge.mjs';
 
+/* The next piece of terminal output a screen receives (the bridge's own
+   words, such as "ready", are text frames and are skipped). */
+const nextOutput = (ws) => new Promise((resolve) => {
+    const listen = (data, binary) => { if (binary) { ws.off('message', listen); resolve(data.toString()); } };
+    ws.on('message', listen);
+});
+
 /* A PTY that records what it is told and says what the test wants. */
 function fakeTerminals() {
     const made = [];
@@ -46,11 +53,9 @@ test('keystrokes go in as they are, output comes out as it is, a resize is obeye
     await b.until(() => term.sizes.length === 1);
     assert.deepEqual([term.written, term.sizes], [['ls\r'], [[90, 30]]]);
 
-    const received = once(ws, 'message');
+    const received = nextOutput(ws);
     term.data('\x1b[32mhello\x1b[0m');
-    const [data, binary] = await received;
-    assert.equal(binary, true);
-    assert.equal(data.toString(), '\x1b[32mhello\x1b[0m');
+    assert.equal(await received, '\x1b[32mhello\x1b[0m');
 
     /* The screen leaves: the terminal stays open for the next one. */
     ws.close();
@@ -69,10 +74,12 @@ test('a screen that comes back finds the terminal as it was, at once, and the to
     const term = b.terminals.made[0];
     await b.until(() => term.sizes.length === 2);
     assert.equal(b.terminals.made.length, 1, 'no second terminal was opened');
-    assert.deepEqual(term.sizes, [[90, 19], [90, 20]], 'a line short, then right: a full redraw');
-    const received = once(second, 'message');
+    assert.deepEqual(term.sizes, [[90, 19], [90, 20]], 'a line short, then right, a moment apart: a full redraw');
+    const got = [];
+    second.on('message', (d, binary) => got.push(binary ? d.toString() : JSON.parse(d.toString()).type));
     term.data('still here');
-    assert.equal((await received)[0].toString(), 'still here');
+    await b.until(() => got.includes('still here'));
+    assert.ok(got.includes('ready'), 'the screen is told in words that its terminal is attached');
     second.send(Buffer.from('x'));
     await b.until(() => term.written.includes('x'));
     second.close();
@@ -86,9 +93,9 @@ test('a channel that drops while the tool still runs is reopened by itself; when
     b.terminals.made[0].exit();                      /* the channel dropped */
     await b.until(() => b.terminals.made.length === 2);
     assert.equal(ws.readyState, 1, 'the screen was not closed');
-    const received = once(ws, 'message');
+    const received = nextOutput(ws);
     b.terminals.made[1].data('back');
-    assert.equal((await received)[0].toString(), 'back');
+    assert.equal(await received, 'back');
     running = false;
     const closed = once(ws, 'close');
     b.terminals.made[1].exit();                      /* the tool exited */

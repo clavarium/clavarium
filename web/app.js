@@ -91,6 +91,7 @@
             }
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
+            if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; setTimeout(() => { fit.fit(); sendSize(); }, 300); }
             if (message.type === 'status') {
                 say(String(message.text), 'connecting');
                 /* In the middle of the screen too: a small word in the header is

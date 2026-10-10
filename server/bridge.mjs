@@ -8,6 +8,7 @@
  *                       text frame     {"type":"resize","cols":n,"rows":n}
  *   server -> browser   binary frame   terminal output
  *                       text frame     {"type":"taken"}  another screen took over
+ *                                      {"type":"ready"}  the terminal is attached
  *                                      {"type":"status","text":...}  e.g. waking
  *                                      {"type":"error","text":...}   then close 1011
  *   close 1000  the tool exited, the session is over
@@ -26,6 +27,7 @@ export const CLOSE_ENDED = 1000;
 export const CLOSE_TAKEN = 4001;
 /* A channel that dropped is reopened after a moment, a few times a minute at most. */
 export const REOPEN_AFTER_MS = 1000;
+export const REDRAW_AFTER_MS = 250;
 export const REOPEN_MAX = 5;
 const COLS = [2, 500];
 const ROWS = [2, 300];
@@ -84,12 +86,18 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
     const live = new Map();          /* name -> { terminal, sink, cols, rows } */
     const reopened = new Map();      /* name -> times of recent automatic reopenings */
 
+    /* A terminal that has just closed refuses a new size with an error that
+       would take the whole server down: a size nobody will see is not worth that. */
+    const resize = (kept, cols, rows) => { try { kept.terminal.resize(cols, rows); } catch { /* closed meanwhile */ } };
+
     function close(name) {
         const kept = live.get(name);
         if (!kept) return;
         live.delete(name);
         kept.sink = null;
-        kept.terminal.kill();
+        /* A terminal whose program is already gone refuses to be killed
+           again, loudly: there is nothing left to do about it. */
+        try { kept.terminal.kill(); } catch { /* already gone */ }
     }
 
     /* Opens the terminal of `name` and keeps it; `sink` is the screen that
@@ -144,8 +152,13 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
                makes the tool draw its whole screen for the newcomer. */
             kept.sink = viewer; kept.cols = cols; kept.rows = rows;
             onRejoin(name);
-            kept.terminal.resize(cols, Math.max(2, rows - 1));
-            kept.terminal.resize(cols, rows);
+            /* The two sizes are sent APART. Sent together, they reached the
+               machine as one change to the size it already had: nothing was
+               redrawn, and the page waited for an output that never came
+               (measured on the live site: a reload stayed blank). */
+            const taken = kept;
+            resize(taken, cols, Math.max(2, rows - 1));
+            setTimeout(() => { if (live.get(name) === taken && taken.sink === viewer) resize(taken, taken.cols, taken.rows); }, REDRAW_AFTER_MS);
         } else {
             try { kept = await open(name, cols, rows, viewer, say); }
             catch (error) {
@@ -156,6 +169,9 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             }
             if (gone) kept.sink = null;
         }
+        /* Said in so many words: the page must not have to guess, from an
+           output that may not come, that its terminal is there. */
+        if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'ready' }));
         const mine = kept;
         viewer.on('message', (data, binary) => {
             if (mine.sink !== viewer) return;
@@ -164,7 +180,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             try { message = JSON.parse(data.toString()); } catch { return; }
             if (message?.type === 'resize' && within(message.cols, COLS) && within(message.rows, ROWS)) {
                 mine.cols = message.cols; mine.rows = message.rows;
-                mine.terminal.resize(message.cols, message.rows);
+                resize(mine, message.cols, message.rows);
             }
         });
     }
