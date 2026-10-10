@@ -16,6 +16,7 @@
 import { WebSocketServer } from 'ws';
 import { isConversationName } from './names.mjs';
 import { Seats } from './seats.mjs';
+import { makeOriginCheck } from './gate.mjs';
 
 export const PATH = '/terminal';
 export const CLOSE_ENDED = 1000;
@@ -27,20 +28,17 @@ const within = (n, [low, high]) => Number.isInteger(n) && n >= low && n <= high;
 
 /* A page from another site, open in the same browser, must not be able to
    attach: a WebSocket is not covered by the same-origin policy, so the Origin
-   header is compared by hand. */
-export function sameOrigin(headers) {
-    const origin = headers.origin;
-    const host = headers.host;
-    if (typeof origin !== 'string' || typeof host !== 'string') return false;
-    return origin === `http://${host}` || origin === `https://${host}`;
-}
+   header is compared by hand. Kept under this name for the callers that have
+   no declared public address. */
+export const sameOrigin = makeOriginCheck();
 
 /* `spawn(name, cols, rows, say)` returns a PTY-like object (write, resize,
    kill, onData, onExit), or a promise of one; `say(text)` tells the screen
    what is taking time. Injected, so tests need neither tmux nor a real PTY.
    `onLeft(name)` is called when a screen goes away, `onEnded(name)` when the
-   terminal ended by itself rather than because the screen left. */
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {} }) {
+   terminal ended by itself rather than because the screen left. `originOk`
+   and `gate` decide who may attach at all: see gate.mjs. */
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local' }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
 
@@ -48,7 +46,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const url = new URL(request.url ?? '/', 'http://local');
         if (url.pathname !== PATH) return;
         const name = url.searchParams.get('c') ?? '';
-        if (!isConversationName(name) || !sameOrigin(request.headers)) { socket.destroy(); return; }
+        if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
         sockets.handleUpgrade(request, socket, head, (viewer) => {

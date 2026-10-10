@@ -35,7 +35,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -60,7 +60,7 @@ export async function handleApi(request, response, conversations, headers, resou
             return true;
         }
         if (request.method === 'POST' && pathname === '/api/files/import') {
-            if (!sameOrigin(request.headers) || request.headers['content-type'] !== 'application/octet-stream') {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') {
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
             return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request)), true;
@@ -74,7 +74,7 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
-        if (!sameOrigin(request.headers) || !String(request.headers['content-type'] ?? '').startsWith('application/json')) {
+        if (!originOk(request.headers) || !String(request.headers['content-type'] ?? '').startsWith('application/json')) {
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request);

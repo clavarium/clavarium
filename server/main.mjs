@@ -2,8 +2,10 @@
  *
  * Two ways to run it:
  *
- *   node server/main.mjs --multipass "sudo multipass" --data /path/to/data
- *       conversations are VMs, created from the page
+ *   node server/main.mjs --multipass "sudo multipass" --data /path/to/data \
+ *        [--operators you@example.com --public-origin https://clav.example.com]
+ *       conversations are VMs, created from the page. With --operators, an
+ *       authenticating proxy must stand in front: see gate.mjs
  *
  *   node server/main.mjs --command "your-tool" --cwd /path/to/work
  *       no VM: one tool on this machine, at /?c=<name>. For development.
@@ -20,6 +22,7 @@ import { Store } from './store.mjs';
 import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
 import { Resources } from './resources.mjs';
+import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -46,9 +49,16 @@ export function option(argv, name, fallback) {
 /* A tmux inside a tmux refuses to start: the variable does not travel. */
 const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => key !== 'TMUX' && key !== 'TMUX_PANE'));
 
-function serve(port, conversations, resources) {
+const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
+
+function serve(port, conversations, resources, { gate = () => 'local', originOk } = {}) {
     const server = createServer(async (request, response) => {
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources)) return;
+        /* Before anything else, static files included: see gate.mjs. */
+        if (gate(request.headers) === undefined) {
+            response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
+            return;
+        }
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk)) return;
         const file = FILES[new URL(request.url ?? '/', 'http://local').pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -73,13 +83,15 @@ export function start({ port, command, cwd, env = process.env }) {
 
 /* The product: conversations are VMs. `prefix` is how the VM manager is
    reached on this installation, as an argument vector. */
-export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'] }) {
+export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin }) {
+    const gate = makeGate(operators);
+    const originOk = makeOriginCheck(publicOrigin);
     const vms = new Vms(runner(prefix), prefix);
     const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools: loadTools() });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: runner(sudo), dataDir });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
-    const { server, listening } = serve(port, all, folders);
+    const { server, listening } = serve(port, all, folders, { gate, originOk });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
@@ -87,6 +99,7 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
         },
         onLeft: (name) => all.left(name),
         onEnded: (name) => { void all.ended(name); },
+        gate, originOk,
     });
     return listening;
 }
@@ -97,7 +110,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const multipass = option(argv, 'multipass', '');
     if (multipass) {
         const dataDir = option(argv, 'data', `${process.cwd()}/data`);
-        const server = await startHome({ port, prefix: multipass.split(' ').filter(Boolean), dataDir });
+        /* Behind the edge: who the operators are, and the address people use. */
+        const operators = readOperators(option(argv, 'operators', ''));
+        const publicOrigin = option(argv, 'public-origin', '') || undefined;
+        if (operators.length === 0) console.log('No --operators: development mode, anyone on this machine is the operator.');
+        const server = await startHome({ port, prefix: multipass.split(' ').filter(Boolean), dataDir, operators, publicOrigin });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);
