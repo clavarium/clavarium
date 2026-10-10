@@ -200,17 +200,30 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <p class="note" style="margin-top:8px">No inbound port at home. The relay is optional: on a public server, the same stack runs without it. This whole layer is taken over from the current system, where it works.</p>
 
     <h2>Life of a conversation</h2>
-    <div class="scroll"><div class="dia" style="min-width:820px">
+    <div class="scroll"><div class="dia" style="min-width:980px">
       <div class="zone"><h3>1 · Create</h3><div class="box">name, tool, size, resources</div></div>
       <div class="arrow"><i>→</i></div>
       <div class="zone"><h3>2 · Build</h3><div class="box">launch VM<br>install the tool<br>mount resources</div></div>
       <div class="arrow"><i>→</i></div>
       <div class="zone"><h3>3 · Use</h3><div class="box">open terminal<br><span class="mono">tmux new -A … tool</span></div></div>
       <div class="arrow"><i>→</i></div>
-      <div class="zone"><h3>4 · Sleep</h3><div class="box">no viewer, idle → suspend<br>RAM returned</div></div>
+      <div class="zone"><h3>4 · Leave, come back</h3><div class="box">closing the page stops nothing: the tool keeps working</div></div>
       <div class="arrow"><i>→</i></div>
-      <div class="zone"><h3>5 · Archive</h3><div class="box">VM deleted<br>resources stay</div></div>
+      <div class="zone"><h3>5 · Rest</h3><div class="box">the tool has exited → VM stopped<br>or <b>Sleep</b>, by hand</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>6 · Archive</h3><div class="box">VM deleted<br>resources stay</div></div>
     </div></div>
+
+    <h2>When does a VM stop?</h2>
+    <div class="scroll"><table>
+      <tr><th>Situation</th><th>What happens</th><th>Why</th></tr>
+      <tr><td>You close the page, lock the phone, lose the network</td><td><b>Nothing.</b> The tool keeps running in its VM</td><td>long jobs must finish without a screen attached</td></tr>
+      <tr><td>The tool has exited</td><td>the VM is <b>stopped</b> after a short delay</td><td>nothing runs any more; memory is returned, the disk is kept</td></tr>
+      <tr><td>You press <b>Sleep</b></td><td>the VM is suspended, the tool frozen as it is</td><td>your decision, when you know it is waiting for you</td></tr>
+      <tr><td>The tool is running and nobody watches</td><td><b>Nothing, in version 1.</b> No automatic sleep</td><td>telling “thinking for an hour” from “idle” cannot be done safely without reading the tool; a wrong guess would freeze real work</td></tr>
+      <tr><td>You open the conversation again</td><td>the VM starts or wakes; the tool is started again if needed</td><td>one gesture</td></tr>
+    </table></div>
+    <p class="note">Later, if wanted: an opt-in automatic sleep per conversation, on strict signs only (no screen attached, no terminal output and no processor use for a long, chosen time).</p>
 
     <h2>What the server is made of</h2>
     <div class="grid g3">
@@ -223,7 +236,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <div class="scroll"><table>
       <tr><th>State</th><th>RAM</th><th>Disk</th><th>On an 8 GB host</th></tr>
       <tr><td>Running</td><td>1 GB (Claude Code) to 3 GB (heavier tools)</td><td>≈ 3 GB</td><td>3 to 4 at once</td></tr>
-      <tr><td>Suspended</td><td>0</td><td>≈ 3 GB + RAM image</td><td>limited by disk</td></tr>
+      <tr><td>Stopped, or asleep</td><td>0</td><td>≈ 3 GB (+ RAM image when asleep)</td><td>limited by disk</td></tr>
     </table></div>
   </section>
 
@@ -584,7 +597,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <h2>Settled by the operator</h2>
     <div class="scroll"><table>
       <tr><th>Question</th><th>Decision</th></tr>
-      <tr><td>One VM per conversation?</td><td>Yes; idle VMs are suspended automatically</td></tr>
+      <tr><td>One VM per conversation?</td><td>Yes. It keeps running when the page is closed; stopped once the tool has exited; Sleep by hand. No automatic sleep in version 1</td></tr>
       <tr><td>Where does the code start?</td><td>New repository; the proven parts are ported, in English</td></tr>
       <tr><td>Phone use</td><td>Terminal + key row + dictation</td></tr>
       <tr><td>One person at a time</td><td>The newest screen takes over; the other waits</td></tr>
@@ -614,7 +627,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><th>#</th><th>Slice</th><th>Proof at the end</th></tr>
       <tr><td>0</td><td><b>Repository and rules</b>: hooks, English, checks</td><td>a commit with a forbidden word is refused</td></tr>
       <tr><td>1</td><td><b>The terminal</b>: xterm.js ⇄ PTY ⇄ tmux, newest screen takes over</td><td>a real CLI tool used from the browser; second screen takes over</td></tr>
-      <tr><td>2</td><td><b>Conversation = VM</b>: create, install the tool, open, suspend when idle, archive</td><td>a conversation created from the page, asleep after idling, awake on open</td></tr>
+      <tr><td>2</td><td><b>Conversation = VM</b>: create, install the tool, open, keep running unattended, stop after the tool exits, Sleep by hand, archive</td><td>a job keeps running with the page closed; the VM stops after the tool exits and starts again on open</td></tr>
       <tr><td>3</td><td><b>Folders</b>: attach, read-only enforced by the host, read-write, shared by two VMs</td><td>VM B cannot write where it is read-only, even as root; sees A's file at once</td></tr>
       <tr><td>4</td><td><b>Edge</b>: OIDC gate and blind relay, as today</td><td>reached from the internet through the relay; nothing without sign-on</td></tr>
       <tr><td>5</td><td><b>Hands</b>: shortcuts, key row, voice typed into the terminal</td><td>a spoken sentence answered by the tool, no keyboard</td></tr>
