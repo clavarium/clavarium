@@ -11,6 +11,8 @@
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
+ *   GET  /api/voice                         is dictation available?
+ *   POST /api/voice                         the body IS a WAV recording -> {text}
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>  the body IS the file
@@ -21,6 +23,7 @@
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
 import { list, download, importFile } from './files.mjs';
+import { transcribe, AUDIO_MAX } from './voice.mjs';
 
 const BODY_MAX = 16 * 1024;
 
@@ -38,7 +41,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -54,6 +57,15 @@ export async function handleApi(request, response, conversations, headers, resou
         return resources.folder(found.name);
     };
     try {
+        if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null }), true;
+        if (request.method === 'POST' && pathname === '/api/voice') {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'audio/wav') {
+                return send(403, { error: 'This request does not come from this site.' }), true;
+            }
+            const parts = []; let size = 0;
+            for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
+            return send(200, { text: await transcribe(voice, Buffer.concat(parts)) }), true;
+        }
         if (request.method === 'GET' && pathname === '/api/files') return send(200, await list(attached(), query.get('p') ?? '')), true;
         if (request.method === 'GET' && pathname === '/api/files/download') {
             const file = await download(attached(), query.get('p') ?? '');

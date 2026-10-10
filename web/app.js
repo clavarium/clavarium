@@ -51,7 +51,7 @@
     const sendSize = () => {
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
     };
-    const disconnect = () => { wanted = false; socket?.close(); socket = undefined; };
+    const disconnect = () => { wanted = false; socket?.close(); socket = undefined; stopVoice?.(); };
 
     function connect() {
         disconnect();
@@ -251,6 +251,52 @@
             await paintShortcuts();
         } catch (error) { $('shortcut-error').textContent = error.message; $('shortcut-error').hidden = false; }
     });
+
+    /* ---------- voice ---------- */
+    /* The microphone stays open; each phrase is typed into the terminal as it
+       is understood, exactly as if typed. With "auto", Enter is pressed once
+       the person has stopped: a new phrase beginning cancels the pending Enter. */
+    const AUTO_ENTER_MS = 900;
+    const WORDS = { calibrating: 'Listening to the room...', listening: 'Listening.', hearing: 'Hearing you...', transcribing: 'Writing what you said...' };
+    let stopListening = null;
+    let autoEnter = false;
+    let enterTimer;
+    const voiceLine = $('voice-line');
+    const sayVoice = (text, kind) => { voiceLine.textContent = text; voiceLine.dataset.state = kind; voiceLine.hidden = text === ''; };
+    function stopVoice() {
+        stopListening?.(); stopListening = null; clearTimeout(enterTimer);
+        $('mic').setAttribute('aria-pressed', 'false'); $('mic').textContent = 'Dictate';
+        sayVoice('', '');
+    }
+    $('mic').addEventListener('click', async () => {
+        if (stopListening) { stopVoice(); terminal.focus(); return; }
+        try {
+            stopListening = await window.clavariumVoice.listen({
+                state: (word) => sayVoice(WORDS[word] ?? word, word),
+                speech: () => clearTimeout(enterTimer),
+                phrase: (text) => {
+                    send(`${text} `);
+                    sayVoice(`Typed: ${text}`, 'listening');
+                    if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => send('\r'), AUTO_ENTER_MS); }
+                },
+                error: (message) => sayVoice(message, 'calibrating'),
+            });
+            $('mic').setAttribute('aria-pressed', 'true'); $('mic').textContent = 'Stop';
+        } catch { sayVoice('The microphone is not available. Allow it for this site, then try again.', 'calibrating'); }
+        terminal.focus();
+    });
+    $('auto').addEventListener('click', () => {
+        autoEnter = !autoEnter;
+        $('auto').setAttribute('aria-pressed', String(autoEnter));
+        if (!autoEnter) clearTimeout(enterTimer);
+        terminal.focus();
+    });
+    async function offerVoice() {
+        const available = window.clavariumVoice ? await window.clavariumVoice.available() : false;
+        $('mic').hidden = $('auto').hidden = !available;
+    }
+    window.addEventListener('clavarium-voice-ready', () => { void offerVoice(); });
+    void offerVoice();
 
     /* ---------- folders ---------- */
     const LEVELS = [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
