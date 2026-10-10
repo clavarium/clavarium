@@ -30,6 +30,7 @@ import { Devices } from './devices.mjs';
 import { handleDoor, deviceConversation } from './door.mjs';
 import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
+import { Network } from './network.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -69,7 +70,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -88,7 +89,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -135,9 +136,13 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault: new Vault(vaultKey ?? `${dataDir}/vault.key`), vms });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
-    all.prepare = (name) => secrets.deliver(name);
+    const network = new Network({ host: runner(sudo), offline: () => all.offline() });
+    /* The rules follow what runs: applied now, and again each time a
+       conversation is opened, since a VM that just started has a new tap. */
+    await network.apply();
+    all.prepare = async (name) => { await network.apply(); await secrets.deliver(name); };
     all.through = [RUNNER];
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);

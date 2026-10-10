@@ -324,6 +324,10 @@
     function paintChips() {
         const chips = $('chips');
         chips.replaceChildren();
+        if (conversations.find((x) => x.name === current)?.offline === true) {
+            const chip = document.createElement('span'); chip.className = 'chip'; chip.dataset.access = 'offline'; chip.textContent = 'offline';
+            chips.append(chip);
+        }
         for (const r of conversations.find((x) => x.name === current)?.resources ?? []) {
             const chip = document.createElement('span');
             chip.className = 'chip'; chip.dataset.access = r.access;
@@ -359,7 +363,18 @@
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;
+        const offline = conversations.find((x) => x.name === current)?.offline === true;
+        for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSecrets();
+    }
+    for (const b of $('network').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/network`, { online: b.dataset.online === 'true' }); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+            await refresh();
+            await paintPanel();
+        });
     }
     /* Secrets: a name and a switch. A value goes in and never comes back. */
     async function paintSecrets() {

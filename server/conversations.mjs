@@ -125,6 +125,14 @@ export class Conversations {
         if (r.code !== 0) throw new Refusal(502, `The machine did not go to sleep: ${firstLine(r.stderr)}`);
     }
 
+    /* Online or offline: remembered here, enforced by network.mjs. */
+    setOffline(name, offline) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        this.#store.patch(name, { offline: offline === true });
+    }
+
+    offline() { return this.#store.all().filter((c) => c.offline === true).map((c) => c.name); }
+
     async archive(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
         this.#cancelStop(name);

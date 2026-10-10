@@ -11,6 +11,7 @@
  *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
  *   GET  /api/conversations/<name>/devices
  *   POST /api/devices/<id>/revoke
+ *   POST /api/conversations/<name>/network  {online}
  *   GET  /api/secrets                       names only: a value never comes back
  *   POST /api/secrets                       {name, value}  create or replace
  *   POST /api/secrets/<NAME>/remove
@@ -48,7 +49,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -110,6 +111,12 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
+        const wired = /^\/api\/conversations\/([^/]+)\/network$/.exec(pathname);
+        if (wired && network) {
+            conversations.setOffline(decodeURIComponent(wired[1]), body.online !== true);
+            if (!(await network.apply())) throw new Refusal(502, 'The network rules could not be applied on the host.');
+            return send(200, { ok: true, online: body.online === true }), true;
+        }
         const handed = /^\/api\/conversations\/([^/]+)\/secrets$/.exec(pathname);
         if (handed && secrets) {
             const conversation = decodeURIComponent(handed[1]);

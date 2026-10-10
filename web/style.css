@@ -112,3 +112,4 @@ html[data-door="device"] #room { height: 100%; }
 #secret-new { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
 #secret-new label { font-size: 12px; color: var(--ink2); }
 #secret-new input { flex: 1; min-width: 120px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+.chip[data-access="offline"] { color: var(--warn); border-color: var(--warn); }

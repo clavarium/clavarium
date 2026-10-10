@@ -49,6 +49,11 @@
           <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
         </form>
+        <div class="panel-top"><b>Network</b></div>
+        <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
+        <div class="levels" id="network" role="group" aria-label="Network of this conversation">
+          <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
+        </div>
         <div class="panel-top"><b>Secrets</b></div>
         <p class="hint">A secret switched on here is handed to the tool of this conversation, as a file under <code>/run/secrets/</code> and as a variable of the same name. The tool can read it and send it anywhere: give narrow keys you can revoke. It takes effect the next time the tool starts.</p>
         <div id="secret-rows"></div>
