@@ -75,7 +75,7 @@ ssh-keygen -l -f "$check" >/dev/null 2>&1 || { rm -f -- "$check"; refuse "this i
 rm -f -- "$check"
 for port in 443 80 "$TLS_PORT" "$HTTP_PORT"; do
     # (On a second run, the tunnel itself holds two of them: that is the SSH server.)
-    if ss -ltnpH "sport = :$port" 2>/dev/null | grep -v '"sshd"' | grep -q .; then refuse "something already listens on port $port here: a relay needs 443 and 80 for itself"; fi
+    if ss -ltnpH "sport = :$port" 2>/dev/null | grep -v '"sshd' | grep -q .; then refuse "something already listens on port $port here: a relay needs 443 and 80 for itself"; fi
 done
 
 step "packages"
@@ -102,6 +102,11 @@ Match User $ACCOUNT
     AllowAgentForwarding no
     PermitTunnel no
     ForceCommand /bin/false
+    # A tunnel that died without saying so gives its ports back within minutes.
+    ClientAliveInterval 30
+    ClientAliveCountMax 3
+# What follows this file in the server's settings is for everybody again.
+Match all
 SSHD
 if ! sshd -t; then rm -f -- "$SSHD_FILE"; refuse "the SSH server refused these settings; they were taken out again"; fi
 systemctl reload ssh.service 2>/dev/null || systemctl reload sshd.service
