@@ -168,6 +168,8 @@ export async function handleApi(request, response, conversations, headers, resou
             await resources.attach(conversation, String(body.resource ?? ''), String(body.access ?? ''));
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
+        const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
+        if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
         const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));

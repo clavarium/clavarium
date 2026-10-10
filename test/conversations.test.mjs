@@ -158,3 +158,38 @@ test('a build cut short by a restart is marked failed, with what to do', async (
     assert.equal(after.phase, 'failed');
     assert.match(after.error, /restarted/);
 });
+
+test('building again: for a machine that is gone or a build that failed; a working machine is refused', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await assert.rejects(all.rebuild('demo'), /has its machine/);
+    await assert.rejects(all.rebuild('nope'), /No such conversation/);
+    /* The machine disappears behind the server's back. */
+    b.states.delete('clv-demo');
+    await assert.rejects(all.open('demo'), (e) => e.status === 410);
+    b.calls.length = 0;
+    const again = await all.rebuild('demo');
+    assert.equal(again.phase, 'building');
+    await assert.rejects(all.rebuild('demo'), /still being built/, 'asked twice, built once');
+    await all.built;
+    assert.equal(b.calls.filter((c) => c.startsWith('launch')).length, 1);
+    assert.ok(!b.calls.some((c) => c.startsWith('delete')), 'nothing to clear away');
+    assert.equal(all.list()[0].phase, 'ready');
+});
+
+test('building again after a failed build clears away what the failure left', async (t) => {
+    let fail = true;
+    const b = bench(t, { exec: (argv) => (fail && argv.includes('install-tool') ? { code: 1, stdout: '', stderr: 'no network' } : undefined) });
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.equal(all.list()[0].phase, 'failed');
+    fail = false; b.calls.length = 0;
+    await all.rebuild('demo');
+    await all.built;
+    assert.deepEqual(b.calls.slice(0, 2), ['info clv-demo', 'delete clv-demo']);
+    assert.equal(all.list()[0].phase, 'ready');
+    assert.equal(all.list()[0].error, undefined);
+});

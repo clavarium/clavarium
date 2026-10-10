@@ -198,7 +198,9 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     /* The terminal of a running machine is opened before anybody asks: a
        conversation just built, and at start every conversation whose machine
        runs. A page then shows its terminal at once. */
-    all.ready = (name) => { void bridge.warm(name); };
+    /* A machine is ready: its folders are shown in it (after a rebuild there
+       are some), then its terminal is opened and kept. */
+    all.ready = (name) => { void (async () => { await folders.remount(name).catch(() => {}); await bridge.warm(name); })(); };
     void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) await bridge.warm(name); })();
     return listening;
 }

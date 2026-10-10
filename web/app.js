@@ -72,7 +72,7 @@
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
-        let failure = '';
+        let failure = ''; let machineGone = false;
         /* Open means the bridge answered, not that the machine is awake yet. */
         mine.onopen = () => { say('opening', 'connecting'); terminal.focus(); };
         mine.onmessage = (event) => {
@@ -99,7 +99,7 @@
                    three, with nothing else to read). */
                 show(`${message.text} This can take a few minutes: the machine was stopped.`);
             }
-            if (message.type === 'error') failure = String(message.text);
+            if (message.type === 'error') { failure = String(message.text); machineGone = message.gone === true; }
         };
         mine.onclose = (event) => {
             if (socket !== mine || !wanted) return;       /* we moved on, or closed it ourselves */
@@ -111,7 +111,10 @@
                 show(home ? 'The tool has exited. Its machine will stop in a minute.' : 'The tool has exited. The session is over.', 'Start it again', connect);
             } else if (event.code === CLOSE_FAILED) {
                 say('not available', 'ended');
-                show(failure || 'The terminal could not be opened.', 'Try again', connect);
+                /* Its machine is gone (a backup put back elsewhere, a machine
+                   deleted by hand): the owner can have it built again. */
+                if (machineGone && !DEVICE) show(`${failure} What was on its disk is lost; its folders are kept.`, 'Build its machine again', () => void rebuild());
+                else show(failure || 'The terminal could not be opened.', 'Try again', connect);
                 /* On a device this is often the owner closing the conversation:
                    asking again says so in plain words, instead of an error. */
                 if (DEVICE) void refresh();
@@ -168,7 +171,7 @@
             show(`${c.step ?? 'Building'}... (${minutes < 1 ? 'started less than a minute ago' : `${minutes} min so far`}; a new machine takes a few minutes)`);
             return;
         }
-        if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', 'Archive it', () => archive(true)); return; }
+        if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
         if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
         if (!socket) { terminal.reset(); connect(); }
@@ -771,6 +774,13 @@
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
     });
+    async function rebuild() {
+        const name = current;
+        disconnect();
+        say('building', 'connecting'); show('Building its machine again...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/rebuild`); await refresh(); enter(); }
+        catch (error) { show(error.message, 'Close', enter); }
+    }
     async function archive(confirmed) {
         const name = current;
         if (!confirmed) {

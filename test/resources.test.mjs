@@ -126,3 +126,15 @@ test('a mount the VM manager already holds is replaced, not reported as a failur
     assert.deepEqual(calls, ['mount', 'umount', 'mount']);
     assert.deepEqual(resources.of('alpha'), [{ name: 'notes', access: 'write' }]);
 });
+
+test('a machine built again gets its folders back: the view for reading, the folder for writing', async (t) => {
+    const b = bench(t);
+    await b.resources.create({ name: 'notes' }); await b.resources.create({ name: 'reports' });
+    await b.resources.attach('alpha', 'notes', 'read');
+    await b.resources.attach('alpha', 'reports', 'write');
+    b.vm.length = 0; b.host.length = 0;
+    assert.deepEqual(await b.resources.remount('alpha'), []);
+    assert.deepEqual(b.vm, ['mount clv-alpha view notes 1001 1002', 'mount clv-alpha folder reports 1001 1002']);
+    assert.deepEqual(b.host, ['view make notes']);
+    assert.deepEqual(await b.resources.remount('nobody'), []);
+});

@@ -105,6 +105,22 @@ export class Resources {
         this.#store.put(resource);
     }
 
+    /* The machine of a conversation was built again: what was attached to
+       it is shown in the new one. A folder that cannot be shown just now
+       stays in the list, and the failure is returned, not thrown: the
+       conversation itself is fine. */
+    async remount(conversation) {
+        const failed = [];
+        for (const { name, access } of this.of(conversation)) {
+            try {
+                if (access === 'read') await this.ensureView(name);
+                const r = await this.#vms.mount(conversation, access === 'read' ? 'view' : 'folder', name, this.#uid, this.#gid);
+                if (r.code !== 0 && !/already mounted/i.test(`${r.stderr}${r.stdout}`)) failed.push(name);
+            } catch { failed.push(name); }
+        }
+        return failed;
+    }
+
     /* Removes a folder from the list. Only one that is attached nowhere; and
        its content is MOVED ASIDE, not erased: deleting somebody's files is
        not something a click on a web page should be able to finish. */

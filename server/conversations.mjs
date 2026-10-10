@@ -22,7 +22,7 @@ export class Refusal extends Error {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map();
+    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set();
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -38,7 +38,7 @@ export class Conversations {
         /* A build interrupted by a restart of this server cannot be resumed
            blindly: it is marked failed, and says so. */
         for (const c of store.all()) {
-            if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Archive it and create it again.' });
+            if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
         }
     }
 
@@ -88,8 +88,39 @@ export class Conversations {
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
         this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined });
+        /* A machine that has just been built holds nothing of what was put
+           in the one before it: the next opening prepares it from nothing.
+           (Without this, a machine built again started with no runner, and
+           its tool "exited" at once -- caught by an end-to-end test.) */
+        this.#fresh.add(name);
         this.ready(name);
         return undefined;
+    }
+
+    /* Builds the machine of a conversation AGAIN: after a build that failed,
+       or when the machine is gone (a backup put back on a new computer brings
+       the conversation's name, tool and folders, not its machine). What was
+       on the old machine's disk is not brought back: nothing here can.
+       A conversation that has a working machine is refused -- this is not a
+       reset button. */
+    async rebuild(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase === 'building') throw new Refusal(409, 'This conversation is still being built.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
+        const state = await this.#vms.state(name);
+        if (state !== undefined && c.phase !== 'failed') throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
+        this.#cancelStop(name);
+        this.drop(name);
+        /* Marked first: two requests cannot both start a build. */
+        this.#store.patch(name, { phase: 'building', step: 'Starting the machine', error: undefined, asleep: false, buildingSince: new Date().toISOString() });
+        this.built = (async () => {
+            /* What a failed build left behind is cleared away first. */
+            if (state !== undefined) await this.#vms.remove(name);
+            return this.#build(name, tool, c.memoryMb);
+        })();
+        return this.#store.get(name);
     }
 
     /* What a terminal must run to reach this conversation. Wakes the VM first. */
@@ -103,8 +134,9 @@ export class Conversations {
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         const state = await this.#vms.state(name);
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
-        const woke = state !== 'Running';
-        if (woke) {
+        const stopped = state !== 'Running';
+        const woke = this.#fresh.delete(name) || stopped;
+        if (stopped) {
             say('Waking the machine...');
             const started = await this.#vms.start(name);
             if (started.code !== 0) { this.left(name); throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`); }

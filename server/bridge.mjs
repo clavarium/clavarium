@@ -164,7 +164,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             catch (error) {
                 /* Only a message written for the person is passed on. */
                 const text = typeof error?.status === 'number' ? error.message : 'The terminal could not be opened.';
-                if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text })); viewer.close(1011, 'cannot open'); }
+                if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text, gone: error?.status === 410 })); viewer.close(1011, 'cannot open'); }
                 return;
             }
             if (gone) kept.sink = null;
