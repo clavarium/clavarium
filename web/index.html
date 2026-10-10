@@ -3,6 +3,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <title>Clavarium</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon.svg">
+<meta name="theme-color" content="#0f141a">
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 <div id="app">
@@ -29,6 +32,7 @@
       <span id="chips" class="chips"></span>
       <button type="button" id="files-open" hidden>Files</button>
       <button type="button" id="folders" hidden>Folders</button>
+      <button type="button" id="share" hidden>Share</button>
       <button type="button" id="sleep" hidden>Sleep</button>
       <button type="button" id="archive" hidden>Archive</button>
     </header>
@@ -60,6 +64,17 @@
         </div>
         <p id="files-readonly" class="hint" hidden>Attached read-only: nothing can be imported here.</p>
         <p id="files-error" class="error" role="alert" hidden></p>
+      </div>
+      <div id="sharing" class="sheet" hidden>
+        <div class="panel-top"><b>Share this conversation</b><button type="button" id="sharing-close">Close</button></div>
+        <p class="hint">Whoever scans this code gets this conversation, and only this one: its terminal, its shortcuts, dictation and its files. They are root in its machine, like the tool: share what you would give them.</p>
+        <div class="row"><button type="button" id="sharing-new" class="primary">Show a code</button><span id="sharing-status" class="hint" role="status"></span></div>
+        <img id="sharing-qr" alt="Pairing code to scan" hidden>
+        <p id="sharing-link" class="hint link" hidden></p>
+        <p id="sharing-error" class="error" role="alert" hidden></p>
+        <b>Paired devices</b>
+        <div id="sharing-devices"></div>
+        <p id="sharing-none" class="hint" hidden>No device is paired with this conversation.</p>
       </div>
       <div id="notice" hidden>
         <p id="notice-text"></p>

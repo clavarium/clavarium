@@ -101,3 +101,10 @@ footer#keys { border-top: 0; }
 #voice-line[data-state="transcribing"]::before, #voice-line[data-state="calibrating"]::before { background: var(--warn); }
 #mic[aria-pressed="true"] { background: var(--danger); border-color: var(--danger); color: #1b0606; }
 #auto[aria-pressed="true"] { border-color: var(--brass); color: var(--brass); }
+#sharing-qr { width: 220px; max-width: 70%; background: #fff; padding: 10px; border-radius: 10px; }
+.link { overflow-wrap: anywhere; user-select: all; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.device { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.device b { flex: 1; min-width: 120px; } .device small { color: var(--ink2); }
+.device button.danger { border-color: var(--danger); color: var(--danger); }
+html[data-door="device"] #app { display: block; }
+html[data-door="device"] #room { height: 100%; }

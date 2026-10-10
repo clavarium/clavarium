@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-door="device">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Clavarium</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg">
+<meta name="theme-color" content="#0f141a">
+<link rel="stylesheet" href="vendor/xterm.css">
+<link rel="stylesheet" href="style.css">
+<div id="app">
+  <section id="room">
+    <header>
+      <b id="name"></b>
+      <span id="tool" class="tag" hidden></span>
+      <span id="state" data-state="connecting">connecting</span>
+      <span id="chips" class="chips"></span>
+      <button type="button" id="files-open" hidden>Files</button>
+    </header>
+    <main>
+      <div id="terminal"></div>
+      <div id="files" class="sheet" hidden>
+        <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
+        <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
+        <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
+        <div id="files-path" class="path"></div>
+        <div id="files-rows"></div>
+        <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        <div class="row" id="files-actions" hidden>
+          <button type="button" id="files-import" class="primary">Import a file or a photo</button>
+          <input type="file" id="files-pick" multiple hidden>
+          <span id="files-status" class="hint" role="status"></span>
+        </div>
+        <p id="files-readonly" class="hint" hidden>Attached read-only: nothing can be imported here.</p>
+        <p id="files-error" class="error" role="alert" hidden></p>
+      </div>
+      <div id="notice" hidden>
+        <p id="notice-text"></p>
+        <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
+      </div>
+    </main>
+    <p id="voice-line" role="status" hidden></p>
+    <!-- Saved texts, sent with one click. -->
+    <div id="shortcuts" hidden>
+      <div id="shortcut-row" class="chips-row"></div>
+    </div>
+    <!-- The keys a phone keyboard does not have. -->
+    <footer id="keys">
+      <button type="button" data-keys="esc">Esc</button>
+      <button type="button" data-keys="tab">Tab</button>
+      <button type="button" data-keys="left" aria-label="Left">&larr;</button>
+      <button type="button" data-keys="down" aria-label="Down">&darr;</button>
+      <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
+      <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
+      <button type="button" data-keys="enter" class="wide">Enter</button>
+      <button type="button" id="mic" aria-pressed="false" hidden>Dictate</button>
+      <button type="button" id="auto" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>
+    </footer>
+  </section>
+</div>
+<script src="vendor/xterm.js"></script>
+<script src="vendor/fit.js"></script>
+<script src="device.js"></script>
+<script src="app.js"></script>
+<script type="module" src="voice.js"></script>
+</html>

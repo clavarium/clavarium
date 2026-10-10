@@ -25,6 +25,9 @@ import { Resources } from './resources.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 import { Shortcuts } from './shortcuts.mjs';
 import { voiceConfig } from './voice.mjs';
+import QRCode from 'qrcode';
+import { Devices } from './devices.mjs';
+import { handleDoor, deviceConversation } from './door.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -32,14 +35,23 @@ const FILES = {
     '/app.js': ['web/app.js', 'text/javascript; charset=utf-8'],
     '/style.css': ['web/style.css', 'text/css; charset=utf-8'],
     '/voice.js': ['web/voice.js', 'text/javascript; charset=utf-8'],
+    '/icon.svg': ['web/icon.svg', 'image/svg+xml'],
+    '/manifest.webmanifest': ['web/manifest.webmanifest', 'application/manifest+json'],
+    '/sw.js': ['web/sw.js', 'text/javascript; charset=utf-8'],
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],
     '/vendor/xterm.js': ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
     '/vendor/fit.js': ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
 };
+/* The device door serves the same files under /c/: that prefix is the only
+   one the edge lets through without sign-on. Its page differs; nothing else. */
+const DEVICE_FILES = Object.fromEntries(Object.entries(FILES).filter(([path]) => path !== '/').map(([path, file]) => [`/c${path}`, file]));
+DEVICE_FILES['/c/'] = ['web/device.html', 'text/html; charset=utf-8'];
+DEVICE_FILES['/c/device.js'] = ['web/device.js', 'text/javascript; charset=utf-8'];
+
 /* Nothing loads from anywhere else, and nothing may frame the page. */
 const HEADERS = {
-    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'cache-control': 'no-store',
@@ -55,20 +67,32 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door } = {}) {
+    const sendFile = async (response, file) => {
+        response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
+    };
     const server = createServer(async (request, response) => {
+        const { pathname } = new URL(request.url ?? '/', 'http://local');
+        /* The device door first, and apart: it never consults the gate. */
+        if (door && pathname.startsWith('/c/')) {
+            if (await handleDoor(request, response, door)) return;
+            const file = DEVICE_FILES[pathname];
+            if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) { response.writeHead(404, HEADERS).end(); return; }
+            await sendFile(response, file);
+            return;
+        }
         /* Before anything else, static files included: see gate.mjs. */
         if (gate(request.headers) === undefined) {
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice)) return;
-        const file = FILES[new URL(request.url ?? '/', 'http://local').pathname];
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing)) return;
+        const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
             return;
         }
-        response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
+        await sendFile(response, file);
     });
     return { server, listening: new Promise((ready) => server.listen(port, '127.0.0.1', () => ready(server))) };
 }
@@ -96,7 +120,17 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice: voiceConfig(env) });
+    const voice = voiceConfig(env);
+    const devices = new Devices(new Store(`${dataDir}/devices.json`));
+    const sharing = {
+        devices,
+        /* Where a pairing address points: the declared public address, or in
+           development the address the operator is using right now. */
+        origin: (headers) => (publicOrigin ? new URL(publicOrigin).origin : `http://${headers.host}`),
+        qr: (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
+    };
+    const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')) };
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
@@ -105,6 +139,7 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
         onLeft: (name) => all.left(name),
         onEnded: (name) => { void all.ended(name); },
         gate, originOk,
+        deviceName: (headers) => deviceConversation(devices, headers),
     });
     return listening;
 }

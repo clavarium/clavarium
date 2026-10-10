@@ -1,0 +1,11 @@
+{
+  "name": "Clavarium",
+  "short_name": "Clavarium",
+  "description": "One conversation with a command-line assistant, in its own machine.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#0f141a",
+  "theme_color": "#0f141a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

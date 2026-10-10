@@ -19,6 +19,9 @@ import { Seats } from './seats.mjs';
 import { makeOriginCheck } from './gate.mjs';
 
 export const PATH = '/terminal';
+/* The same terminal, for a paired device: the conversation is not in the
+   address, it is the one the device was bound to. */
+export const DEVICE_PATH = '/c/terminal';
 export const CLOSE_ENDED = 1000;
 export const CLOSE_TAKEN = 4001;
 const COLS = [2, 500];
@@ -38,15 +41,21 @@ export const sameOrigin = makeOriginCheck();
    `onLeft(name)` is called when a screen goes away, `onEnded(name)` when the
    terminal ended by itself rather than because the screen left. `originOk`
    and `gate` decide who may attach at all: see gate.mjs. */
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local' }) {
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
 
     server.on('upgrade', (request, socket, head) => {
         const url = new URL(request.url ?? '/', 'http://local');
-        if (url.pathname !== PATH) return;
-        const name = url.searchParams.get('c') ?? '';
-        if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
+        let name;
+        if (url.pathname === DEVICE_PATH) {
+            /* A device: no operator identity is looked at, and none is needed. */
+            name = deviceName(request.headers) ?? '';
+            if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
+        } else if (url.pathname === PATH) {
+            name = url.searchParams.get('c') ?? '';
+            if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
+        } else return;
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
         sockets.handleUpgrade(request, socket, head, (viewer) => {

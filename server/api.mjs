@@ -8,6 +8,9 @@
  *   GET  /api/resources
  *   POST /api/resources                     {name}
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
+ *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
+ *   GET  /api/conversations/<name>/devices
+ *   POST /api/devices/<id>/revoke
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
@@ -41,7 +44,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -87,6 +90,8 @@ export async function handleApi(request, response, conversations, headers, resou
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
+            const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
+            if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -97,6 +102,18 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
+        const share = /^\/api\/conversations\/([^/]+)\/share$/.exec(pathname);
+        if (share && sharing) {
+            const conversation = decodeURIComponent(share[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            const { code, minutes } = sharing.devices.share(conversation);
+            /* The code rides in the fragment: it is never sent to a server by
+               the browser that opens the address, so it reaches no log. */
+            const url = `${sharing.origin(request.headers)}/c/#${code}`;
+            return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
+        }
+        const revoked = /^\/api\/devices\/([0-9a-f-]{36})\/revoke$/.exec(pathname);
+        if (revoked && sharing) { sharing.devices.revoke(revoked[1]); return send(200, { ok: true }), true; }
         const unwanted = /^\/api\/shortcuts\/([0-9a-f-]{36})\/remove$/.exec(pathname);
         if (unwanted && shortcuts) { shortcuts.remove(unwanted[1]); return send(200, { ok: true }), true; }
         const attach = /^\/api\/conversations\/([^/]+)\/resources$/.exec(pathname);
@@ -110,6 +127,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;

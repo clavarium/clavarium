@@ -10,7 +10,13 @@
     /* What each key of the row sends, as a terminal expects it. */
     const KEYS = { esc: '\x1b', tab: '\t', enter: '\r', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' };
 
-    const $ = (id) => document.getElementById(id);
+    /* A paired device gets the same page with less in it, and asks its own
+       door: see server/door.mjs. */
+    const DEVICE = document.documentElement.dataset.door === 'device';
+    const API = DEVICE ? '/c/api' : '/api';
+    /* On the device page some controls do not exist; what would have been
+       done to them is done to a detached element instead, and is lost. */
+    const $ = (id) => document.getElementById(id) ?? document.createElement('div');
     const app = $('app');
     const state = $('state');
     const notice = $('notice');
@@ -62,7 +68,8 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const mine = new WebSocket(`${scheme}://${location.host}/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`);
+        const where = DEVICE ? `/c/terminal?cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
+        const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
         let failure = '';
@@ -113,8 +120,8 @@
         document.title = current ? `${current} - Clavarium` : 'Clavarium';
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         $('sleep').hidden = $('archive').hidden = !c;
-        $('folders').hidden = $('files-open').hidden = !c || c.phase !== 'ready';
-        $('panel').hidden = $('files').hidden = true;
+        $('folders').hidden = $('files-open').hidden = $('share').hidden = !c || c.phase !== 'ready';
+        $('panel').hidden = $('files').hidden = $('sharing').hidden = true;
         paintChips();
         $('keys').hidden = !current;
         if (home) void paintShortcuts(); else $('shortcuts').hidden = true;
@@ -161,12 +168,25 @@
     async function refresh() {
         clearTimeout(pollTimer);
         try {
-            const r = await fetch('/api/conversations');
-            if (!r.ok) throw new Error('no api');
             const before = conversations.find((x) => x.name === current)?.phase;
-            conversations = await r.json();
+            if (DEVICE) {
+                let r = await fetch(`${API}/me`);
+                if (r.status === 401) {
+                    /* The session ended: the device signs again, quietly. */
+                    const door = await window.clavariumDoor();
+                    if (!door.ok) { disconnect(); say('not paired', 'ended'); show(door.message); return; }
+                    r = await fetch(`${API}/me`);
+                }
+                if (!r.ok) throw new Error('no api');
+                const me = await r.json();
+                conversations = [me]; current = me.name;
+            } else {
+                const r = await fetch(`${API}/conversations`);
+                if (!r.ok) throw new Error('no api');
+                conversations = await r.json();
+                $('list').hidden = false; $('back').hidden = false;
+            }
             home = true;
-            $('list').hidden = false; $('back').hidden = false;
             paint();
             paintChips();
             const now = conversations.find((x) => x.name === current)?.phase;
@@ -178,7 +198,7 @@
     /* ---------- creating ---------- */
     let chosenTool = '';
     async function openCreate() {
-        const tools = await (await fetch('/api/tools')).json();
+        const tools = await (await fetch(`${API}/tools`)).json();
         const box = $('create-tools');
         box.replaceChildren();
         chosenTool = tools[0]?.id ?? '';
@@ -202,7 +222,7 @@
         event.preventDefault();
         const name = $('create-name').value.trim();
         try {
-            await post('/api/conversations', { name, tool: chosenTool });
+            await post(`${API}/conversations`, { name, tool: chosenTool });
             $('create').hidden = true; $('create-name').value = '';
             await refresh();
             select(name);
@@ -217,7 +237,7 @@
     let removing = false;
     async function paintShortcuts() {
         let all = [];
-        try { const r = await fetch('/api/shortcuts'); if (r.ok) all = await r.json(); else return; } catch { return; }
+        try { const r = await fetch(`${API}/shortcuts`); if (r.ok) all = await r.json(); else return; } catch { return; }
         $('shortcuts').hidden = !current;
         const row = $('shortcut-row');
         row.replaceChildren();
@@ -228,7 +248,7 @@
             b.textContent = removing ? `Remove "${shortcut.label}"` : shortcut.label;
             b.title = shortcut.enter ? `Sends: ${shortcut.text}` : `Types, without sending: ${shortcut.text}`;
             b.addEventListener('click', async () => {
-                if (removing) { await post(`/api/shortcuts/${shortcut.id}/remove`).catch(() => {}); await paintShortcuts(); return; }
+                if (removing) { await post(`${API}/shortcuts/${shortcut.id}/remove`).catch(() => {}); await paintShortcuts(); return; }
                 send(shortcut.text);
                 if (shortcut.enter) setTimeout(() => send('\r'), ENTER_AFTER_MS);
                 terminal.focus();
@@ -236,6 +256,7 @@
             row.append(b);
         }
         const quiet = (text, run) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'quiet'; b.textContent = text; b.addEventListener('click', run); row.append(b); };
+        if (DEVICE) return;
         if (removing) quiet('Done', () => { removing = false; void paintShortcuts(); });
         else {
             quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-label').focus(); });
@@ -246,7 +267,7 @@
     $('shortcut-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         try {
-            await post('/api/shortcuts', { label: $('shortcut-label').value, text: $('shortcut-text').value, enter: $('shortcut-enter').checked });
+            await post(`${API}/shortcuts`, { label: $('shortcut-label').value, text: $('shortcut-text').value, enter: $('shortcut-enter').checked });
             $('shortcut-label').value = ''; $('shortcut-text').value = ''; $('shortcut-new').hidden = true;
             await paintShortcuts();
         } catch (error) { $('shortcut-error').textContent = error.message; $('shortcut-error').hidden = false; }
@@ -311,7 +332,7 @@
         }
     }
     async function paintPanel() {
-        const all = await (await fetch('/api/resources')).json();
+        const all = await (await fetch(`${API}/resources`)).json();
         const mine = new Map((conversations.find((x) => x.name === current)?.resources ?? []).map((r) => [r.name, r.access]));
         const rows = $('panel-rows');
         rows.replaceChildren();
@@ -327,7 +348,7 @@
                 b.addEventListener('click', async () => {
                     for (const other of levels.children) other.disabled = true;
                     $('panel-error').hidden = true;
-                    try { await post(`/api/conversations/${encodeURIComponent(current)}/resources`, { resource: resource.name, access }); }
+                    try { await post(`${API}/conversations/${encodeURIComponent(current)}/resources`, { resource: resource.name, access }); }
                     catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
                     await refresh();
                     await paintPanel();
@@ -344,7 +365,7 @@
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
-        try { await post('/api/resources', { name: $('folder-name').value.trim() }); $('folder-name').value = ''; }
+        try { await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         await paintPanel();
     });
@@ -379,7 +400,7 @@
         if (!filesOf) return;
         let listing;
         try {
-            const r = await fetch(`/api/files?${filesQuery()}`);
+            const r = await fetch(`${API}/files?${filesQuery()}`);
             listing = await r.json();
             if (!r.ok) throw new Error(listing.error || 'The folder could not be read.');
         } catch (error) { $('files-error').textContent = error.message; $('files-error').hidden = false; return; }
@@ -404,7 +425,7 @@
             detail.textContent = entry.folder ? 'open' : `${sizeOf(entry.size)} - download`;
             row.append(kind, label, detail);
             if (entry.folder) { row.type = 'button'; row.addEventListener('click', () => { filesAt = inner; void paintFiles(); }); }
-            else { row.href = `/api/files/download?${filesQuery({ p: inner })}`; row.setAttribute('download', entry.name); }
+            else { row.href = `${API}/files/download?${filesQuery({ p: inner })}`; row.setAttribute('download', entry.name); }
             rows.append(row);
         }
         $('files-empty').hidden = listing.entries.length > 0;
@@ -418,7 +439,7 @@
         for (const file of $('files-pick').files) {
             status.textContent = `Importing ${file.name}...`;
             try {
-                const r = await fetch(`/api/files/import?${filesQuery({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                const r = await fetch(`${API}/files/import?${filesQuery({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'The import failed.');
                 status.textContent = `Imported as ${j.name}.`;
@@ -428,12 +449,55 @@
         await paintFiles();
     });
 
+    /* ---------- sharing ---------- */
+    async function paintDevices() {
+        const list = await (await fetch(`${API}/conversations/${encodeURIComponent(current)}/devices`)).json();
+        const rows = $('sharing-devices');
+        rows.replaceChildren();
+        for (const device of list) {
+            const row = document.createElement('div'); row.className = 'device';
+            const label = document.createElement('b'); label.textContent = device.label;
+            const seen = document.createElement('small');
+            seen.textContent = device.seenAt ? `last opened ${new Date(device.seenAt).toLocaleString()}` : 'never opened';
+            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Revoke';
+            /* Two clicks, and the second one is not where the first was. */
+            remove.addEventListener('click', () => {
+                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = 'Yes, remove this device';
+                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
+                keep.addEventListener('click', () => { void paintDevices(); });
+                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/revoke`).catch(() => {}); await paintDevices(); });
+                remove.replaceWith(keep, sure);
+            });
+            row.append(label, seen, remove);
+            rows.append(row);
+        }
+        $('sharing-none').hidden = list.length > 0;
+    }
+    $('share').addEventListener('click', async () => {
+        $('panel').hidden = $('files').hidden = true;
+        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true;
+        $('sharing-status').textContent = '';
+        await paintDevices();
+        $('sharing').hidden = false;
+    });
+    $('sharing-close').addEventListener('click', () => { $('sharing').hidden = true; terminal.focus(); });
+    $('sharing-new').addEventListener('click', async () => {
+        $('sharing-error').hidden = true;
+        try {
+            const shared = await post(`${API}/conversations/${encodeURIComponent(current)}/share`);
+            $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
+            $('sharing-qr').hidden = false;
+            $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
+            $('sharing-status').textContent = `Works once, for ${shared.minutes} minutes.`;
+        } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
+    });
+
     /* ---------- resting and archiving ---------- */
     $('sleep').addEventListener('click', async () => {
         const name = current;
         disconnect();
         say('going to sleep', 'connecting');
-        try { await post(`/api/conversations/${encodeURIComponent(name)}/sleep`); say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); }
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
     });
     async function archive(confirmed) {
@@ -444,16 +508,26 @@
             return;
         }
         disconnect();
-        try { await post(`/api/conversations/${encodeURIComponent(name)}/archive`); await refresh(); select(''); }
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/archive`); await refresh(); select(''); }
         catch (error) { show(error.message, 'Close', enter); }
     }
     $('archive').addEventListener('click', () => { void archive(false); });
     $('back').addEventListener('click', () => select(''));
 
     /* ---------- start ---------- */
-    view(current ? 'room' : 'list');
-    refresh().then(() => {
-        if (!home) { view('room'); if (!NAME.test(current)) { current = ''; } }
+    async function start() {
+        if (DEVICE) {
+            view('room');
+            say('pairing', 'connecting');
+            const door = await window.clavariumDoor();
+            if (!door.ok) { say('not paired', 'ended'); $('keys').hidden = true; show(door.message); return; }
+        } else {
+            view(current ? 'room' : 'list');
+            if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+        }
+        await refresh();
+        if (!home) { view('room'); if (!NAME.test(current)) current = ''; }
         enter();
-    });
+    }
+    void start();
 })();
