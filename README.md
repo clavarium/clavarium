@@ -66,6 +66,18 @@ security layers, resources, app and sharing, rules, decisions, plan) and
 `app-designs.html` (three first design ideas for the installable app). Open
 either file in a browser.
 
+## Tests
+
+    npm test             # unit and integration tests: no VM, no browser
+    npm run test:e2e     # end to end: the real server, a real browser, real terminals
+    npm run check        # everything a push runs
+
+The end-to-end suite drives the real pages against the real server and real
+tmux sessions; only the VM manager and the privileged host commands are
+stand-ins (`e2e/fake-multipass.mjs`, `e2e/fake-host.mjs`). It needs a browser:
+the `playwright` package, or `CLAVARIUM_E2E_PLAYWRIGHT` pointing at one.
+Without a browser its tests are skipped, and say so.
+
 ## Working here
 
 Read `CONVENTIONS.md` first. Then:

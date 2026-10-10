@@ -6,14 +6,15 @@
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
   "scripts": {
     "start": "node server/main.mjs",
-    "test": "node --test",
-    "check": "npm run check:hooks && npm run check:shapes && npm run check:names && npm run check:shell && npm test",
+    "test": "node --test \"test/*.test.mjs\"",
+    "check": "npm run check:hooks && npm run check:shapes && npm run check:names && npm run check:shell && npm test && npm run test:e2e",
     "check:shapes": "node tools/check-shapes.mjs",
     "check:names": "node tools/check-ai-names.mjs",
     "check:shell": "node tools/check-shell.mjs",
     "hooks": "git config core.hooksPath hooks",
     "prepare": "git config core.hooksPath hooks || true",
-    "check:hooks": "node tools/check-hooks.mjs"
+    "check:hooks": "node tools/check-hooks.mjs",
+    "test:e2e": "node --test --test-concurrency=1 \"e2e/*.e2e.mjs\""
   },
   "engines": {
     "node": ">=22"

@@ -115,11 +115,11 @@ export function start({ port, command, cwd, env = process.env }) {
 
 /* The product: conversations are VMs. `prefix` is how the VM manager is
    reached on this installation, as an argument vector. */
-export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin, vaultKey }) {
+export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const vms = new Vms(runner(prefix), prefix);
-    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools: loadTools() });
+    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: runner(sudo), dataDir });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
