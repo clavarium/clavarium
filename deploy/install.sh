@@ -3,15 +3,13 @@
 # INSTALLS CLAVARIUM ON THIS MACHINE. One command, parameters only: it asks
 # nothing, and can be run again to upgrade.
 #
-#   sudo deploy/install.sh --domain clav.example.com --operator you@example.com --core-only
+#   sudo deploy/install.sh --domain clav.example.com --operator you@example.com
 #
 #   --domain NAME      the address people will use (https://NAME)
 #   --operator EMAIL   who may use it; repeat for several people
 #   --port N           the loopback port of the server (default 7717)
-#   --core-only        the server only: no authenticating edge in front. For a
-#                      machine that has its own, and for tests. REQUIRED for
-#                      now: the edge step is not written yet, and this script
-#                      says so rather than leave a server open to no one.
+#   --core-only        the server only: no edge in front. For a machine that
+#                      has its own authenticating proxy.
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # WHAT IT SETS UP, and why it is safe to leave running:
@@ -24,7 +22,12 @@
 #   - the data in /var/lib/clavarium; the directories whose content gets
 #     mounted into VMs belong to root (see clavarium-host);
 #   - the key of the vault APART from the data (/var/lib/clavarium-vault): a
-#     copy of the data alone does not open the secrets.
+#     copy of the data alone does not open the secrets;
+#   - THE EDGE, unless --core-only: the only thing that listens to the outside
+#     (TLS), the sign-in in front of everything, and a small identity provider
+#     that knows the operators. Each is a pinned release, checked against a
+#     checksum written here, and runs as its own account. Every operator gets
+#     a password made on this machine, SHOWN ONCE at the end.
 #
 # Exit codes: 0 done; 64 bad parameters; 78 this machine is refused.
 # ---------------------------------------------------------------------------
@@ -38,9 +41,20 @@ VAULT="/var/lib/clavarium-vault"
 ETC="/etc/clavarium"
 HOST_PROGRAM="/usr/local/sbin/clavarium-host"
 UNIT="/etc/systemd/system/clavarium.service"
+# The edge: exact releases, exact checksums (sha256 of what is downloaded).
+CADDY_VERSION="2.11.4"
+CADDY_SHA256="527fbf917c39189a1e3b31d34fa955601680b2d5c8055d2a87b8b9588dec7bb9"
+PROXY_VERSION="v7.15.4"
+PROXY_SHA256="4fbe902189aab713d9c0519b90a645032d4636ecb523dc36f5cc312d8ebef1e2"
+# The identity provider publishes no archive, only a container image. What is
+# fetched is the one layer of that image that holds the program, named by its
+# checksum: no container tool is needed, and nothing else of the image is used.
+DEX_VERSION="v2.45.1"
+DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
+DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] --core-only [--dry-run]" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--core-only] [--dry-run]" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
@@ -64,7 +78,6 @@ for operator in "${each[@]}"; do
     [[ "$operator" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || bad "--operator is an e-mail address, lower case: $operator"
 done
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || bad "--port is a number from 1024 to 65535"
-[ "$CORE_ONLY" = "yes" ] || bad "the edge step (sign-in in front of the server) is not written yet: add --core-only, and put your own authenticating proxy in front"
 
 # The Node.js the server runs on: the same pinned version, with the same
 # checksum, as the one put in the VMs. One place says which (server/tools.mjs).
@@ -80,7 +93,7 @@ would install Clavarium:
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
   code        $CODE (root)      data  $DATA      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
-  edge        none (--core-only)
+  edge        $([ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
 PLAN
     exit 0
 fi
@@ -98,7 +111,7 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 # bindfs: the read-only views. nftables: the network rules. build-essential
 # and python3: one module of the server (the terminal) is compiled here.
-apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd >/dev/null
+apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl >/dev/null
 snap list multipass >/dev/null 2>&1 || snap install multipass >/dev/null
 
 step "account"
@@ -172,5 +185,227 @@ curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$PORT/" || refuse "the serve
 sudo -u "$ACCOUNT" sudo -n -l "$HOST_PROGRAM" >/dev/null || refuse "the account cannot reach its one program"
 if sudo -u "$ACCOUNT" sudo -n -l /bin/sh >/dev/null 2>&1; then refuse "the account can run more than its one program as root"; fi
 
-echo "Clavarium is installed: 127.0.0.1:$PORT, for $OPERATORS."
-echo "It answers nobody yet: put an authenticating proxy in front, for https://$DOMAIN."
+if [ "$CORE_ONLY" = "yes" ]; then
+    echo "Clavarium is installed: 127.0.0.1:$PORT, for $OPERATORS."
+    echo "It answers nobody yet: put an authenticating proxy in front, for https://$DOMAIN."
+    exit 0
+fi
+
+# ------------------------------- THE EDGE ---------------------------------
+# Downloads one file and refuses it unless it has the expected checksum.
+fetch() { # <url> <sha256> <destination> [extra curl arguments...]
+    local url="$1" sum="$2" to="$3"; shift 3
+    curl --proto '=https' --tlsv1.2 -fsSL --max-time 600 "$@" -o "$to" "$url"
+    echo "$sum  $to" | sha256sum -c - >/dev/null || refuse "not the expected checksum: $url"
+}
+account() { id "$1" >/dev/null 2>&1 || useradd --system --home-dir "$2" --no-create-home --shell /usr/sbin/nologin "$1"; }
+
+step "edge: programs"
+work="$(mktemp -d)"
+if [ "$(/usr/local/bin/caddy version 2>/dev/null | cut -d' ' -f1)" != "v$CADDY_VERSION" ]; then
+    fetch "https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION/caddy_${CADDY_VERSION}_linux_amd64.tar.gz" "$CADDY_SHA256" "$work/caddy.tgz"
+    tar -xzf "$work/caddy.tgz" -C "$work" --no-same-owner caddy
+    install -o root -g root -m 0755 "$work/caddy" /usr/local/bin/caddy
+fi
+if ! /usr/local/bin/oauth2-proxy --version 2>/dev/null | grep -q " $PROXY_VERSION "; then
+    fetch "https://github.com/oauth2-proxy/oauth2-proxy/releases/download/$PROXY_VERSION/oauth2-proxy-$PROXY_VERSION.linux-amd64.tar.gz" "$PROXY_SHA256" "$work/proxy.tgz"
+    tar -xzf "$work/proxy.tgz" -C "$work" --no-same-owner --strip-components=1
+    install -o root -g root -m 0755 "$work/oauth2-proxy" /usr/local/bin/oauth2-proxy
+fi
+if [ "$(sha256sum /usr/local/bin/dex 2>/dev/null | cut -d' ' -f1)" != "$DEX_SHA256" ]; then
+    token="$(curl --proto '=https' --tlsv1.2 -fsSL --max-time 60 'https://ghcr.io/token?scope=repository:dexidp/dex:pull' | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+    [ -n "$token" ] || refuse "the registry gave no anonymous token for the identity provider"
+    fetch "https://ghcr.io/v2/dexidp/dex/blobs/sha256:$DEX_LAYER" "$DEX_LAYER" "$work/dex.tgz" -H "Authorization: Bearer $token"
+    tar -xzf "$work/dex.tgz" -C "$work" --no-same-owner usr/local/bin/dex
+    echo "$DEX_SHA256  $work/usr/local/bin/dex" | sha256sum -c - >/dev/null || refuse "the identity provider is not the expected program"
+    install -o root -g root -m 0755 "$work/usr/local/bin/dex" /usr/local/bin/dex
+fi
+rm -rf -- "$work"
+
+step "edge: accounts and settings"
+account caddy /var/lib/caddy; account dex /var/lib/dex; account oauth2-proxy /nonexistent
+install -d -o caddy -g caddy -m 0700 /var/lib/caddy
+install -d -o dex -g dex -m 0700 /var/lib/dex
+install -d -o root -g root -m 0755 /etc/caddy /etc/oauth2-proxy
+install -d -o root -g dex -m 0750 /etc/dex
+
+# The identity file holds the operators and their passwords. It is written
+# ONCE: running this script again keeps it, and the passwords with it.
+PASSWORDS=""
+if [ ! -e /etc/dex/config.yaml ]; then
+    client_secret="$(openssl rand -hex 32)"
+    cookie_secret="$(openssl rand -base64 32 | tr '+/' '-_')"
+    identity="$(mktemp)"
+    cat > "$identity" <<DEX
+# Who may sign in to Clavarium on THIS machine. Written by install.sh.
+issuer: https://$DOMAIN/dex
+storage:
+  type: sqlite3
+  config:
+    file: /var/lib/dex/dex.db
+web:
+  # Loopback only: the TLS front publishes it under /dex.
+  http: 127.0.0.1:5556
+oauth2:
+  skipApprovalScreen: true
+staticClients:
+  - id: clavarium
+    name: Clavarium
+    secret: $client_secret
+    redirectURIs:
+      - https://$DOMAIN/oauth2/callback
+enablePasswordDB: true
+staticPasswords:
+DEX
+    for operator in "${each[@]}"; do
+        password="$(openssl rand -base64 18 | tr '+/' '-_')"
+        # On standard input: a password never sits on a command line.
+        hash="$(printf '%s\n' "$password" | /usr/local/bin/caddy hash-password)"
+        [[ "$hash" == \$2* ]] || refuse "the password could not be hashed"
+        printf '  - email: "%s"\n    hash: "%s"\n    username: "%s"\n    userID: "%s"\n' \
+            "$operator" "$hash" "${operator%%@*}" "$(cat /proc/sys/kernel/random/uuid)" >> "$identity"
+        PASSWORDS="$PASSWORDS    $operator    $password"$'\n'
+    done
+    install -o root -g dex -m 0640 "$identity" /etc/dex/config.yaml; rm -f -- "$identity"
+
+    # The sign-in proxy talks to the identity provider on the loopback, by
+    # explicit addresses: it does not depend on this machine resolving its own
+    # public name, nor on the certificate being issued yet.
+    proxy="$(mktemp)"
+    cat > "$proxy" <<PROXY
+provider = "oidc"
+client_id = "clavarium"
+client_secret = "$client_secret"
+cookie_secret = "$cookie_secret"
+oidc_issuer_url = "https://$DOMAIN/dex"
+skip_oidc_discovery = true
+login_url = "https://$DOMAIN/dex/auth"
+redeem_url = "http://127.0.0.1:5556/dex/token"
+oidc_jwks_url = "http://127.0.0.1:5556/dex/keys"
+redirect_url = "https://$DOMAIN/oauth2/callback"
+# Who is an operator is decided by the identity file, and again by the server.
+email_domains = ["*"]
+cookie_secure = true
+cookie_samesite = "lax"
+set_xauthrequest = true
+reverse_proxy = true
+skip_provider_button = true
+# The operators were chosen by whoever installed this: no "grant access" page.
+approval_prompt = "auto"
+http_address = "127.0.0.1:4180"
+upstreams = ["http://127.0.0.1:$PORT/"]
+# A paired device does not sign in: its own door (/c/) checks its key. The
+# identity headers are stripped there, so nobody can claim to be an operator.
+skip_auth_routes = ["^/c/"]
+skip_auth_strip_headers = true
+PROXY
+    install -o root -g root -m 0600 "$proxy" /etc/oauth2-proxy/oauth2-proxy.cfg; rm -f -- "$proxy"
+else
+    echo "   the identity file exists: kept, with its operators and passwords."
+    echo "   (to start again: remove /etc/dex/config.yaml and run this script again)"
+    sed -i "s#^upstreams = .*#upstreams = [\"http://127.0.0.1:$PORT/\"]#" /etc/oauth2-proxy/oauth2-proxy.cfg
+fi
+
+cat > /etc/caddy/Caddyfile <<CADDY
+# The only thing on this machine that listens to the outside.
+$DOMAIN {
+	tls {
+		issuer acme {
+			disable_tlsalpn_challenge
+		}
+		issuer internal
+	}
+	handle /dex/* {
+		reverse_proxy 127.0.0.1:5556
+	}
+	handle {
+		reverse_proxy 127.0.0.1:4180
+	}
+}
+CADDY
+
+step "edge: services"
+cat > /etc/systemd/system/caddy.service <<'CADDYUNIT'
+[Unit]
+Description=Caddy - the TLS front of this machine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=caddy
+Group=caddy
+Environment=XDG_DATA_HOME=/var/lib/caddy XDG_CONFIG_HOME=/var/lib/caddy
+ExecStart=/usr/local/bin/caddy run --config /etc/caddy/Caddyfile
+ExecReload=/usr/local/bin/caddy reload --config /etc/caddy/Caddyfile
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+CADDYUNIT
+cat > /etc/systemd/system/dex.service <<'DEXUNIT'
+[Unit]
+Description=Dex - who the operators of this machine are
+After=network.target
+
+[Service]
+User=dex
+ExecStart=/usr/local/bin/dex serve /etc/dex/config.yaml
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/dex
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+DEXUNIT
+cat > /etc/systemd/system/oauth2-proxy.service <<'PROXYUNIT'
+[Unit]
+Description=oauth2-proxy - the sign-in in front of Clavarium
+After=network-online.target dex.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=oauth2-proxy
+Group=oauth2-proxy
+LoadCredential=oauth2-proxy.cfg:/etc/oauth2-proxy/oauth2-proxy.cfg
+ExecStart=/usr/local/bin/oauth2-proxy --config %d/oauth2-proxy.cfg
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+PROXYUNIT
+systemctl daemon-reload
+systemctl enable --quiet caddy.service dex.service oauth2-proxy.service
+systemctl restart dex.service caddy.service oauth2-proxy.service
+
+step "edge: checks"
+local_get() { curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN$1" || true; }
+for _ in $(seq 1 30); do
+    [ "$(local_get /dex/.well-known/openid-configuration)" = "200" ] && [ "$(local_get /oauth2/sign_in)" = "200" ] && break
+    sleep 2
+done
+for service in caddy dex oauth2-proxy; do
+    systemctl is-active --quiet "$service.service" || refuse "$service did not stay up: journalctl -u $service"
+done
+[ "$(local_get /dex/.well-known/openid-configuration)" = "200" ] || refuse "the identity provider does not answer through the front"
+# Not signed in: the server must be out of reach.
+case "$(local_get /api/conversations)" in 302|401|403) : ;; *) refuse "the server answers somebody who has not signed in" ;; esac
+
+echo
+echo "Clavarium is installed:   https://$DOMAIN"
+if [ -n "$PASSWORDS" ]; then
+    echo "Sign in with (shown ONCE, kept nowhere in clear):"
+    printf '%s' "$PASSWORDS"
+else
+    echo "Operators and passwords: unchanged."
+fi
+echo "The name $DOMAIN must lead to this machine (ports 80 and 443), directly or through a relay."

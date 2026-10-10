@@ -4,6 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NODE_VERSION } from '../server/tools.mjs';
 
@@ -41,10 +42,18 @@ test('a parameter that would end up in a command line is refused unless it is ex
     }
 });
 
-test('without --core-only it stops and says why: the edge step is not written yet', () => {
-    const r = install('--domain', 'clav.example.com', '--operator', 'owner@example.com', '--dry-run');
-    assert.equal(r.code, 64);
-    assert.match(r.err, /edge step .* not written yet/);
+test('the edge is part of it unless --core-only says the machine has its own', () => {
+    const whole = install('--domain', 'clav.example.com', '--operator', 'owner@example.com', '--dry-run');
+    assert.equal(whole.code, 0, whole.err);
+    assert.match(whole.out, /edge\s+caddy .*oauth2-proxy .*dex /);
+    assert.match(install(...GOOD).out, /edge\s+none \(--core-only\)/);
+});
+
+test('every program of the edge is pinned by a checksum written in the script', () => {
+    const text = readFileSync(SCRIPT, 'utf8');
+    for (const name of ['CADDY_SHA256', 'PROXY_SHA256', 'DEX_LAYER', 'DEX_SHA256']) assert.match(text, new RegExp(`^${name}="[0-9a-f]{64}"$`, 'm'), name);
+    /* A password or a secret never sits on a command line. */
+    assert.ok(!/--plaintext|--client-secret|--cookie-secret/.test(text));
 });
 
 test('it will not go further than its parameters unless it is root', { skip: process.getuid() === 0 }, () => {
