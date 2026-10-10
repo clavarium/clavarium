@@ -8,6 +8,10 @@
 #   --domain NAME      the address people will use (https://NAME)
 #   --operator EMAIL   who may use it; repeat for several people
 #   --port N           the loopback port of the server (default 7717)
+#   --relay HOST       this machine is at home, with no public address: it
+#                      dials out to a relay (see relay.sh) and is reached
+#                      through it. Nothing here then listens to the outside.
+#   --relay-port N     the SSH port of the relay (default 22)
 #   --core-only        the server only: no edge in front. For a machine that
 #                      has its own authenticating proxy.
 #   --dry-run          check the parameters, say what would be done, do nothing
@@ -54,16 +58,18 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--core-only] [--dry-run]" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--dry-run]" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"
+DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
         --operator) [ -n "${2:-}" ] || bad "--operator needs a value"; OPERATORS="${OPERATORS:+$OPERATORS,}$2"; shift 2 ;;
         --port) PORT="${2:-}"; shift 2 || bad "--port needs a value" ;;
+        --relay) RELAY="${2:-}"; [ -n "$RELAY" ] || bad "--relay needs a value"; shift 2 ;;
+        --relay-port) RELAY_PORT="${2:-}"; shift 2 || bad "--relay-port needs a value" ;;
         --core-only) CORE_ONLY="yes"; shift ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
@@ -78,6 +84,11 @@ for operator in "${each[@]}"; do
     [[ "$operator" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || bad "--operator is an e-mail address, lower case: $operator"
 done
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || bad "--port is a number from 1024 to 65535"
+if [ -n "$RELAY" ]; then
+    [[ "$RELAY" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$|^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || bad "--relay is the name or the address of the relay machine"
+    [[ "$RELAY_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$RELAY_PORT" -ge 1 ] && [ "$RELAY_PORT" -le 65535 ] || bad "--relay-port is a port number"
+    [ "$CORE_ONLY" = "no" ] || bad "--relay comes with the edge: it cannot go with --core-only"
+fi
 
 # The Node.js the server runs on: the same pinned version, with the same
 # checksum, as the one put in the VMs. One place says which (server/tools.mjs).
@@ -94,6 +105,7 @@ would install Clavarium:
   code        $CODE (root)      data  $DATA      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
   edge        $([ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
+  reached     $([ -n "$RELAY" ] && echo "through the relay $RELAY (this machine dials out; nothing here listens to the outside)" || echo "directly: ports 443 and 80 of this machine")
 PLAN
     exit 0
 fi
@@ -306,9 +318,13 @@ else
     sed -i "s#^upstreams = .*#upstreams = [\"http://127.0.0.1:$PORT/\"]#" /etc/oauth2-proxy/oauth2-proxy.cfg
 fi
 
+# Behind a relay, the front listens on the loopback only: the tunnel is the
+# one way in.
+BIND=""; [ -z "$RELAY" ] || BIND="	bind 127.0.0.1"
 cat > /etc/caddy/Caddyfile <<CADDY
-# The only thing on this machine that listens to the outside.
+# The only thing on this machine that takes what comes from the outside.
 $DOMAIN {
+$BIND
 	tls {
 		issuer acme {
 			disable_tlsalpn_challenge
@@ -400,6 +416,52 @@ done
 # Not signed in: the server must be out of reach.
 case "$(local_get /api/conversations)" in 302|401|403) : ;; *) refuse "the server answers somebody who has not signed in" ;; esac
 
+# ------------------------------ THE TUNNEL --------------------------------
+TUNNEL_KEY=""; RELAY_PRINT=""
+if [ -n "$RELAY" ]; then
+    step "tunnel to the relay"
+    apt-get install -y -qq openssh-client >/dev/null
+    account clavarium-tunnel /nonexistent
+    install -d -o clavarium-tunnel -g clavarium-tunnel -m 0700 /var/lib/clavarium-tunnel
+    # The private key is made here and never leaves this machine.
+    [ -e /var/lib/clavarium-tunnel/key ] || sudo -u clavarium-tunnel ssh-keygen -q -t ed25519 -N '' -C clavarium-tunnel -f /var/lib/clavarium-tunnel/key
+    # The relay's identity is taken once and then held: a different machine
+    # answering later at the same address is refused.
+    if [ ! -s /var/lib/clavarium-tunnel/known_hosts ]; then
+        scanned="$(ssh-keyscan -T 15 -t ed25519 -p "$RELAY_PORT" "$RELAY" 2>/dev/null || true)"
+        [ -n "$scanned" ] || refuse "the relay $RELAY does not answer on port $RELAY_PORT"
+        printf '%s\n' "$scanned" > /var/lib/clavarium-tunnel/known_hosts
+        chown clavarium-tunnel:clavarium-tunnel /var/lib/clavarium-tunnel/known_hosts
+    fi
+    cat > /etc/systemd/system/clavarium-tunnel.service <<TUNNEL
+[Unit]
+Description=Clavarium - the outgoing tunnel to the relay
+After=network-online.target caddy.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=clavarium-tunnel
+Group=clavarium-tunnel
+# Only TLS (443) and the certificate challenge (80) are carried.
+ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile=/var/lib/clavarium-tunnel/key -o UserKnownHostsFile=/var/lib/clavarium-tunnel/known_hosts -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -R *:8443:127.0.0.1:443 -R *:8080:127.0.0.1:80 -p $RELAY_PORT clavarium-tunnel@$RELAY
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
+TUNNEL
+    systemctl daemon-reload
+    systemctl enable --quiet clavarium-tunnel.service
+    systemctl restart clavarium-tunnel.service
+    TUNNEL_KEY="$(cat /var/lib/clavarium-tunnel/key.pub)"
+    RELAY_PRINT="$(ssh-keygen -l -f /var/lib/clavarium-tunnel/known_hosts | cut -d' ' -f2 | head -1)"
+fi
+
 echo
 echo "Clavarium is installed:   https://$DOMAIN"
 if [ -n "$PASSWORDS" ]; then
@@ -408,4 +470,12 @@ if [ -n "$PASSWORDS" ]; then
 else
     echo "Operators and passwords: unchanged."
 fi
-echo "The name $DOMAIN must lead to this machine (ports 80 and 443), directly or through a relay."
+if [ -n "$RELAY" ]; then
+    echo
+    echo "ON THE RELAY ($RELAY), run this one command; the tunnel then comes up by itself:"
+    echo "    sudo deploy/relay.sh --key \"$TUNNEL_KEY\""
+    echo "It will print this, and it must be the same:    $RELAY_PRINT"
+    echo "The name $DOMAIN must lead to the relay."
+else
+    echo "The name $DOMAIN must lead to this machine (ports 443 and 80)."
+fi

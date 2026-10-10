@@ -61,3 +61,14 @@ test('it will not go further than its parameters unless it is root', { skip: pro
     assert.equal(r.code, 78);
     assert.match(r.err, /as root/);
 });
+
+test('behind a relay it says so; a relay without the edge, or a relay that is not a machine name, is refused', () => {
+    const base = ['--domain', 'clav.example.com', '--operator', 'owner@example.com', '--dry-run'];
+    const r = install(...base, '--relay', 'relay.example.net');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /through the relay relay\.example\.net .*nothing here listens to the outside/);
+    assert.match(install(...base).out, /reached\s+directly/);
+    for (const extra of [['--relay', 'relay.example.net', '--core-only'], ['--relay', 'relay.example.net -o ProxyCommand=id'], ['--relay', ['user', 'relay.example.net'].join('@')], ['--relay', 'relay.example.net', '--relay-port', '22 -v']]) {
+        assert.equal(install(...base, ...extra).code, 64, extra.join(' '));
+    }
+});
