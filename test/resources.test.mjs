@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Resources } from '../server/resources.mjs';
@@ -89,4 +89,22 @@ test('bad names, unknown resources and unknown levels are refused; archiving for
     await b.resources.attach('alpha', 'notes', 'write');
     b.resources.forget('alpha');
     assert.deepEqual(b.resources.of('alpha'), []);
+});
+
+test('a folder is removed only when attached nowhere, and its files are moved aside, not erased', async (t) => {
+    const b = bench(t);
+    b.resources.create({ name: 'notes' });
+    writeFileSync(join(b.dir, 'resources', 'notes', 'keep.txt'), 'precious');
+    await b.resources.attach('alpha', 'notes', 'read');
+    await assert.rejects(b.resources.remove('notes'), /still attached to: alpha/);
+    await b.resources.attach('alpha', 'notes', 'none');
+    b.host.length = 0;
+    await b.resources.remove('notes');
+    assert.deepEqual(b.host.map((c) => c.split(' ')[0]), ['mountpoint', 'umount'], 'its read-only view is closed first');
+    assert.deepEqual(b.resources.list(), []);
+    assert.equal(existsSync(join(b.dir, 'resources', 'notes')), false);
+    const aside = readdirSync(join(b.dir, 'removed'));
+    assert.equal(aside.length, 1);
+    assert.equal(readFileSync(join(b.dir, 'removed', aside[0], 'keep.txt'), 'utf8'), 'precious');
+    await assert.rejects(b.resources.remove('notes'), /No such folder/);
 });

@@ -21,7 +21,7 @@
  * is not in place, what gets mounted is an empty directory: the failure is an
  * empty folder in the VM, never a writable one.
  */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, renameSync, existsSync } from 'node:fs';
 import { isConversationName } from './names.mjs';
 import { Refusal } from './conversations.mjs';
 import { RESOURCES } from './vm.mjs';
@@ -96,6 +96,24 @@ export class Resources {
         if (r.code !== 0) throw new Refusal(502, `The folder could not be attached: ${firstLine(r.stderr)}`);
         resource.attachments[conversation] = access;
         this.#store.put(resource);
+    }
+
+    /* Removes a folder from the list. Only one that is attached nowhere; and
+       its content is MOVED ASIDE, not erased: deleting somebody's files is
+       not something a click on a web page should be able to finish. */
+    async remove(name) {
+        const resource = this.#store.get(name);
+        if (!resource) throw new Refusal(404, 'No such folder.');
+        const used = Object.keys(resource.attachments ?? {});
+        if (used.length > 0) throw new Refusal(409, `This folder is still attached to: ${used.join(', ')}. Switch it Off there first.`);
+        if ((await this.#host(['mountpoint', '-q', this.view(name)])).code === 0) {
+            const r = await this.#host(['umount', this.view(name)]);
+            if (r.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(r.stderr)}`);
+        }
+        const aside = `${this.#root}/removed`;
+        mkdirSync(aside, { recursive: true });
+        if (existsSync(this.folder(name))) renameSync(this.folder(name), `${aside}/${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+        this.#store.remove(name);
     }
 
     /* A conversation was archived: its VM is gone, and its attachments with it. */

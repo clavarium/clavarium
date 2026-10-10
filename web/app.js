@@ -360,7 +360,20 @@
                 });
                 levels.append(b);
             }
-            row.append(label, levels);
+            /* Offered only where it can work: a folder attached nowhere. */
+            if (Object.keys(resource.attachments ?? {}).length === 0) {
+                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+                remove.addEventListener('click', () => {
+                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove ${resource.name} (its files are kept aside on the server)`;
+                    sure.addEventListener('click', async () => {
+                        try { await post(`${API}/resources/${resource.name}/remove`); }
+                        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+                        await paintPanel();
+                    });
+                    remove.replaceWith(sure);
+                });
+                row.append(label, levels, remove);
+            } else row.append(label, levels);
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;

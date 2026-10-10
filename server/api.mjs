@@ -7,6 +7,7 @@
  *   POST /api/conversations/<name>/archive
  *   GET  /api/resources
  *   POST /api/resources                     {name}
+ *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
  *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
  *   GET  /api/conversations/<name>/devices
@@ -117,6 +118,8 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
+        const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
+        if (unlisted && resources) { await resources.remove(unlisted[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
