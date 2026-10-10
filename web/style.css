@@ -143,3 +143,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #mailbox-box summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 #mailbox-new { display: grid; gap: 6px; }
 .folder small.hint { font-weight: normal; }
+#mailbox-new input { min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#mailbox-new .row input { flex: 1; }
+#mailbox-new #mailbox-port { flex: 0 0 90px; }
+#mailbox-new label { font-size: 13px; color: var(--muted, inherit); margin-top: 4px; }
