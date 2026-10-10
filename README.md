@@ -63,6 +63,13 @@ The host needs `tmux` and `bindfs` (the read-only views).
     # It prints each operator's password once. --core-only leaves the front out.
     sudo deploy/install.sh --domain clav.example.com --operator you@example.com
 
+    # a relay for a machine at home (run on the relay; install.sh --relay prints the line)
+    sudo deploy/relay.sh --key "ssh-ed25519 AAAA... clavarium-tunnel"
+
+    # a backup is two files -- the archive, and the key of the vault apart
+    sudo deploy/backup.sh --to /path/to/a/folder
+    sudo deploy/restore.sh clavarium-DATE.tgz --vault-key clavarium-DATE.vault-key
+
     # development, no VM: one tool on this machine
     node server/main.mjs --command "your-tool" --cwd /path/to/work
     # then open http://127.0.0.1:7717/?c=demo
