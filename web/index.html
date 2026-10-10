@@ -27,13 +27,14 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
+      <button type="button" id="files-open" hidden>Files</button>
       <button type="button" id="folders" hidden>Folders</button>
       <button type="button" id="sleep" hidden>Sleep</button>
       <button type="button" id="archive" hidden>Archive</button>
     </header>
     <main>
       <div id="terminal"></div>
-      <div id="panel" hidden>
+      <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b>Folders</b><button type="button" id="panel-close">Close</button></div>
         <p class="hint">A folder attached here appears in this conversation's machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
         <div id="panel-rows"></div>
@@ -44,6 +45,21 @@
           <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
         </form>
+      </div>
+      <div id="files" class="sheet" hidden>
+        <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
+        <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
+        <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
+        <div id="files-path" class="path"></div>
+        <div id="files-rows"></div>
+        <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        <div class="row" id="files-actions" hidden>
+          <button type="button" id="files-import" class="primary">Import a file or a photo</button>
+          <input type="file" id="files-pick" multiple hidden>
+          <span id="files-status" class="hint" role="status"></span>
+        </div>
+        <p id="files-readonly" class="hint" hidden>Attached read-only: nothing can be imported here.</p>
+        <p id="files-error" class="error" role="alert" hidden></p>
       </div>
       <div id="notice" hidden>
         <p id="notice-text"></p>

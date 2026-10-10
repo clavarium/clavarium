@@ -8,12 +8,16 @@
  *   GET  /api/resources
  *   POST /api/resources                     {name}
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
+ *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
+ *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
+ *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>  the body IS the file
  *
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
+import { list, download, importFile } from './files.mjs';
 
 const BODY_MAX = 16 * 1024;
 
@@ -37,7 +41,30 @@ export async function handleApi(request, response, conversations, headers, resou
     const send = (status, body) => {
         response.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
     };
+    /* Files are reached THROUGH a conversation: only a folder attached to it,
+       and writing only where the attachment says "write". */
+    const query = new URL(request.url ?? '/', 'http://local').searchParams;
+    const attached = (need) => {
+        const found = resources?.of(query.get('c') ?? '').find((r) => r.name === query.get('r'));
+        if (!found) throw new Refusal(404, 'This folder is not attached to this conversation.');
+        if (need === 'write' && found.access !== 'write') throw new Refusal(403, 'This folder is attached read-only.');
+        return resources.folder(found.name);
+    };
     try {
+        if (request.method === 'GET' && pathname === '/api/files') return send(200, await list(attached(), query.get('p') ?? '')), true;
+        if (request.method === 'GET' && pathname === '/api/files/download') {
+            const file = await download(attached(), query.get('p') ?? '');
+            response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
+                'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+            file.stream.pipe(response);
+            return true;
+        }
+        if (request.method === 'POST' && pathname === '/api/files/import') {
+            if (!sameOrigin(request.headers) || request.headers['content-type'] !== 'application/octet-stream') {
+                return send(403, { error: 'This request does not come from this site.' }), true;
+            }
+            return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request)), true;
+        }
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {

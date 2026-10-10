@@ -113,8 +113,8 @@
         document.title = current ? `${current} - Clavarium` : 'Clavarium';
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         $('sleep').hidden = $('archive').hidden = !c;
-        $('folders').hidden = !c || c.phase !== 'ready';
-        $('panel').hidden = true;
+        $('folders').hidden = $('files-open').hidden = !c || c.phase !== 'ready';
+        $('panel').hidden = $('files').hidden = true;
         paintChips();
         $('keys').hidden = !current;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
@@ -249,7 +249,7 @@
         }
         $('panel-empty').hidden = all.length > 0;
     }
-    $('folders').addEventListener('click', async () => { await paintPanel(); $('panel').hidden = false; });
+    $('folders').addEventListener('click', async () => { $('files').hidden = true; await paintPanel(); $('panel').hidden = false; });
     $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -257,6 +257,85 @@
         try { await post('/api/resources', { name: $('folder-name').value.trim() }); $('folder-name').value = ''; }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         await paintPanel();
+    });
+
+    /* ---------- files ---------- */
+    /* The folders kept by the server and attached here: listed, downloaded,
+       imported into. A file name is shown as text and never interpreted. */
+    let filesOf = '';            /* the attached folder being shown */
+    let filesAt = '';            /* the path inside it */
+    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+    const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
+    async function paintFiles() {
+        const mine = conversations.find((x) => x.name === current)?.resources ?? [];
+        if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
+        const tabs = $('files-tabs');
+        tabs.replaceChildren();
+        for (const r of mine) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.textContent = `${r.name} - ${r.access}`; b.setAttribute('role', 'tab');
+            b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
+            b.addEventListener('click', () => { filesOf = r.name; filesAt = ''; void paintFiles(); });
+            tabs.append(b);
+        }
+        const rows = $('files-rows'); const path = $('files-path');
+        rows.replaceChildren(); path.replaceChildren();
+        $('files-none').hidden = mine.length > 0;
+        $('files-error').hidden = true;
+        const writable = mine.find((r) => r.name === filesOf)?.access === 'write';
+        $('files-actions').hidden = !filesOf || !writable;
+        $('files-readonly').hidden = !filesOf || writable;
+        $('files-empty').hidden = true;
+        if (!filesOf) return;
+        let listing;
+        try {
+            const r = await fetch(`/api/files?${filesQuery()}`);
+            listing = await r.json();
+            if (!r.ok) throw new Error(listing.error || 'The folder could not be read.');
+        } catch (error) { $('files-error').textContent = error.message; $('files-error').hidden = false; return; }
+        filesAt = listing.path;
+        /* The trail: the folder, then each level, each one a way back. */
+        const parts = filesAt ? filesAt.split('/') : [];
+        const crumb = (text, to) => {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text;
+            b.addEventListener('click', () => { filesAt = to; void paintFiles(); });
+            path.append(b);
+        };
+        crumb(filesOf, '');
+        parts.forEach((part, i) => { path.append('/'); crumb(part, parts.slice(0, i + 1).join('/')); });
+        for (const entry of listing.entries) {
+            const inner = filesAt ? `${filesAt}/${entry.name}` : entry.name;
+            const row = document.createElement(entry.folder ? 'button' : 'a');
+            row.className = 'file'; row.dataset.folder = String(entry.folder);
+            const kind = document.createElement('span'); kind.className = 'kind';
+            kind.textContent = entry.folder ? 'DIR' : (entry.name.includes('.') ? entry.name.split('.').pop().slice(0, 4).toUpperCase() : 'FILE');
+            const label = document.createElement('span'); label.className = 'label'; label.textContent = entry.name;
+            const detail = document.createElement('small');
+            detail.textContent = entry.folder ? 'open' : `${sizeOf(entry.size)} - download`;
+            row.append(kind, label, detail);
+            if (entry.folder) { row.type = 'button'; row.addEventListener('click', () => { filesAt = inner; void paintFiles(); }); }
+            else { row.href = `/api/files/download?${filesQuery({ p: inner })}`; row.setAttribute('download', entry.name); }
+            rows.append(row);
+        }
+        $('files-empty').hidden = listing.entries.length > 0;
+    }
+    $('files-open').addEventListener('click', async () => { $('panel').hidden = true; await paintFiles(); $('files').hidden = false; });
+    $('files-close').addEventListener('click', () => { $('files').hidden = true; terminal.focus(); });
+    $('files-import').addEventListener('click', () => $('files-pick').click());
+    $('files-pick').addEventListener('change', async () => {
+        const status = $('files-status');
+        $('files-error').hidden = true;
+        for (const file of $('files-pick').files) {
+            status.textContent = `Importing ${file.name}...`;
+            try {
+                const r = await fetch(`/api/files/import?${filesQuery({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                const j = await r.json().catch(() => ({}));
+                if (!r.ok) throw new Error(j.error || 'The import failed.');
+                status.textContent = `Imported as ${j.name}.`;
+            } catch (error) { status.textContent = ''; $('files-error').textContent = `${file.name}: ${error.message}`; $('files-error').hidden = false; }
+        }
+        $('files-pick').value = '';
+        await paintFiles();
     });
 
     /* ---------- resting and archiving ---------- */
