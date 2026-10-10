@@ -108,3 +108,19 @@ test('a folder is removed only when attached nowhere, and its files are moved as
     assert.equal(readFileSync(join(b.dir, 'removed', aside[0], 'keep.txt'), 'utf8'), 'precious');
     await assert.rejects(b.resources.remove('notes'), /No such folder/);
 });
+
+test('a mount the VM manager already holds is replaced, not reported as a failure', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-res-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const calls = []; let first = true;
+    const vms = new Vms(async (argv) => {
+        calls.push(argv[0]);
+        if (argv[0] === 'mount' && first) { first = false; return { code: 2, stdout: '', stderr: 'mount failed: "/resources/notes" is already mounted in \'clv-alpha\'' }; }
+        return { code: 0, stdout: '', stderr: '' };
+    }, ['vmm']);
+    const resources = new Resources({ store: new Store(join(dir, 'resources.json')), vms, host: async () => ({ code: 0, stdout: '', stderr: '' }), dataDir: dir, uid: 1, gid: 1 });
+    resources.create({ name: 'notes' });
+    await resources.attach('alpha', 'notes', 'write');
+    assert.deepEqual(calls, ['mount', 'umount', 'mount']);
+    assert.deepEqual(resources.of('alpha'), [{ name: 'notes', access: 'write' }]);
+});

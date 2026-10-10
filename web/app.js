@@ -79,7 +79,12 @@
             /* Binary is terminal output. Text is the bridge talking to the page. */
             if (typeof event.data !== 'string') {
                 /* Output is the proof the terminal is there: "waking" is over. */
-                if (state.dataset.state !== 'live') say('live', 'live');
+                if (state.dataset.state !== 'live') {
+                    say('live', 'live');
+                    /* Asking for the size again makes the tool redraw whole:
+                       after a re-attach the first typed line was misplaced. */
+                    setTimeout(() => { fit.fit(); sendSize(); }, 300);
+                }
                 terminal.write(new Uint8Array(event.data));
                 return;
             }
@@ -109,6 +114,14 @@
     terminal.onData(send);
     terminal.onResize(sendSize);
     new ResizeObserver(() => fit.fit()).observe($('terminal'));
+    /* A CLICK ON A KEY MUST NOT TAKE THE TERMINAL'S FOCUS. Found by a tester:
+       the Esc button did nothing. Clicking it blurred the terminal, which
+       tells the tool "focus lost", then came our Escape, then "focus back":
+       the Escape arrived glued to the next sequence and was read as part of
+       it. Keeping the focus where it is sends the Escape alone. */
+    for (const zone of ['keys', 'shortcut-row']) {
+        $(zone).addEventListener('pointerdown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
+    }
     for (const button of document.querySelectorAll('#keys button')) {
         button.addEventListener('click', () => { send(KEYS[button.dataset.keys]); terminal.focus(); });
     }
@@ -124,11 +137,21 @@
         $('panel').hidden = $('files').hidden = $('sharing').hidden = true;
         paintChips();
         $('keys').hidden = !current;
-        if (home) void paintShortcuts(); else $('shortcuts').hidden = true;
+        if (home && current) void paintShortcuts();
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
-        if (c && c.phase === 'building') { disconnect(); say('building', 'connecting'); show(`${c.step ?? 'Building'}...`); return; }
+        const usable = Boolean(c) && c.phase === 'ready';
+        $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
+        $('sleep').hidden = !usable || c.asleep === true;
+        if (c && c.phase === 'building') {
+            disconnect(); say('building', 'connecting');
+            const minutes = c.buildingSince ? Math.floor((Date.now() - Date.parse(c.buildingSince)) / 60000) : 0;
+            show(`${c.step ?? 'Building'}... (${minutes < 1 ? 'started less than a minute ago' : `${minutes} min so far`}; a new machine takes a few minutes)`);
+            return;
+        }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', 'Archive it', () => archive(true)); return; }
+        /* Asleep because somebody asked: it stays asleep until somebody asks. */
+        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
     }
@@ -159,7 +182,8 @@
             const dot = document.createElement('span'); dot.className = 'dot';
             title.append(dot, c.name);
             const sub = document.createElement('small');
-            sub.textContent = c.phase === 'ready' ? c.toolLabel : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : `${c.toolLabel} - failed`;
+            sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : `${c.toolLabel} - failed`;
+            if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
             b.addEventListener('click', () => select(c.name));
             items.append(b);
@@ -169,7 +193,8 @@
     async function refresh() {
         clearTimeout(pollTimer);
         try {
-            const before = conversations.find((x) => x.name === current)?.phase;
+            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}` : '');
+            const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
                 let r = await fetch(`${API}/me`);
                 if (r.status === 401) {
@@ -190,8 +215,8 @@
             home = true;
             paint();
             paintChips();
-            const now = conversations.find((x) => x.name === current)?.phase;
-            if (before !== now || now === 'building') enter();
+            const now = mark(conversations.find((x) => x.name === current));
+            if (before !== now || now.startsWith('building')) enter();
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building') ? 2500 : 10000);
     }
@@ -260,7 +285,7 @@
         if (DEVICE) return;
         if (removing) quiet('Done', () => { removing = false; void paintShortcuts(); });
         else {
-            quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-label').focus(); });
+            quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-enter').checked = true; $('shortcut-label').focus(); });
             if (all.length > 0) quiet('Remove...', () => { removing = true; void paintShortcuts(); });
         }
     }
@@ -304,7 +329,10 @@
                 error: (message) => sayVoice(message, 'calibrating'),
             });
             $('mic').setAttribute('aria-pressed', 'true'); $('mic').textContent = 'Stop';
-        } catch { sayVoice('The microphone is not available. Allow it for this site, then try again.', 'calibrating'); }
+        } catch {
+            sayVoice('The microphone is not available. Allow it for this site, then try again.', 'calibrating');
+            setTimeout(() => { if (!stopListening) sayVoice('', ''); }, 6000);
+        }
         terminal.focus();
     });
     $('auto').addEventListener('click', () => {
@@ -353,6 +381,7 @@
                 b.addEventListener('click', async () => {
                     for (const other of levels.children) other.disabled = true;
                     $('panel-error').hidden = true;
+                    b.textContent = access === 'none' ? 'Detaching...' : 'Attaching...';
                     try { await post(`${API}/conversations/${encodeURIComponent(current)}/resources`, { resource: resource.name, access }); }
                     catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
                     await refresh();
@@ -410,6 +439,7 @@
                     try { await post(`${API}/conversations/${encodeURIComponent(current)}/secrets`, { secret: secret.name, attached }); }
                     catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
                     await paintSecrets();
+                    $('secret-note').textContent = `${secret.name}: ${attached ? 'will be handed' : 'will no longer be handed'} to the tool the next time it starts (leave the tool, then "Start it again").`;
                 });
                 levels.append(b);
             }
@@ -611,7 +641,8 @@
         const name = current;
         disconnect();
         say('going to sleep', 'connecting');
-        try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); }
+        show('Going to sleep...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
     });
     async function archive(confirmed) {
@@ -622,6 +653,7 @@
             return;
         }
         disconnect();
+        say('archiving', 'connecting'); show('Archiving: deleting its machine...');
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/archive`); await refresh(); select(''); }
         catch (error) { show(error.message, 'Close', enter); }
     }

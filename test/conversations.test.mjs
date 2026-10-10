@@ -45,6 +45,7 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     await all.built;
     assert.deepEqual(b.calls, [
         'launch 24.04 --name clv-demo --memory 1024M --disk 8G --cpus 1 --timeout 900',
+        'exec clv-demo -- sudo -n snap install multipass-sshfs',
         'exec clv-demo -- sudo -n mkdir -p /work',
         'exec clv-demo -- sudo -n chown ubuntu:ubuntu /work',
         'exec clv-demo -- sudo install-tool',
@@ -121,6 +122,18 @@ test('a link that merely broke stops nothing: the session is still there, the to
     await new Promise((r) => setTimeout(r, 60));
     assert.equal(b.states.get('clv-demo'), 'Running');
     assert.equal(b.calls.some((c) => c.startsWith('stop')), false);
+});
+
+test('a sleep that was asked for is remembered until the conversation is opened on purpose', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.sleep('demo');
+    assert.equal(all.list()[0].asleep, true);
+    assert.equal(b.make().list()[0].asleep, true, 'and it survives a restart of the server');
+    await all.open('demo');
+    assert.equal(all.list()[0].asleep, false);
 });
 
 test('Sleep suspends; archive deletes the machine and forgets the conversation', async (t) => {

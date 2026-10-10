@@ -49,7 +49,7 @@ export class Resources {
     }
 
     create({ name }) {
-        if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens, and starts with a letter.');
+        if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         mkdirSync(this.folder(name), { recursive: true });
         const resource = { name, type: 'folder', attachments: {}, createdAt: new Date().toISOString() };
@@ -92,7 +92,14 @@ export class Resources {
         if (access === 'none') return;
         if (access === 'read') await this.ensureView(name);
         const source = access === 'read' ? this.view(name) : this.folder(name);
-        const r = await this.#vms.mount(conversation, source, target, this.#uid, this.#gid);
+        let r = await this.#vms.mount(conversation, source, target, this.#uid, this.#gid);
+        /* The VM manager already has a mount there that our list does not
+           know about (an earlier attempt that outlived its request): it is
+           replaced rather than reported as a failure. */
+        if (r.code !== 0 && /already mounted/i.test(`${r.stderr}${r.stdout}`)) {
+            await this.#vms.umount(conversation, target);
+            r = await this.#vms.mount(conversation, source, target, this.#uid, this.#gid);
+        }
         if (r.code !== 0) throw new Refusal(502, `The folder could not be attached: ${firstLine(r.stderr)}`);
         resource.attachments[conversation] = access;
         this.#store.put(resource);

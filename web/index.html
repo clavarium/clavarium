@@ -13,12 +13,12 @@
     <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
     <form id="create" hidden autocomplete="off">
       <label for="create-name">Name</label>
-      <input id="create-name" name="name" required maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
+      <input id="create-name" name="name" required maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
       <span class="legend">What runs in it</span>
       <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
       <p id="create-error" class="error" role="alert" hidden></p>
       <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
-        <span class="hint">about 2 minutes</span></div>
+        <span class="hint">a new machine takes a few minutes</span></div>
     </form>
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
@@ -52,7 +52,7 @@
         <p id="panel-error" class="error" role="alert" hidden></p>
         <form id="folder-new" autocomplete="off">
           <label for="folder-name">New folder</label>
-          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="reports" spellcheck="false" autocapitalize="none" required>
+          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
         </form>
         <div class="panel-top"><b>Network</b></div>
@@ -75,9 +75,10 @@
         <p class="hint">A secret switched on here is handed to the tool of this conversation, as a file under <code>/run/secrets/</code> and as a variable of the same name. The tool can read it and send it anywhere: give narrow keys you can revoke. It takes effect the next time the tool starts.</p>
         <div id="secret-rows"></div>
         <p id="secret-empty" class="hint" hidden>No secret yet.</p>
+        <p id="secret-note" class="hint" role="status"></p>
         <form id="secret-new" autocomplete="off">
           <label for="secret-name">New secret, or a new value for an existing one</label>
-          <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
+          <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
             <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
             <button type="submit" class="primary">Save</button></div>
         </form>

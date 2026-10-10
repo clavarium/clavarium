@@ -124,3 +124,4 @@ a.button { font: 600 13px var(--sans); text-decoration: none; border-radius: 7px
   #mic, #auto { order: -1; flex: 1 0 auto; }
   #mic { flex-basis: 55%; padding-block: 12px; }
 }
+.item[data-asleep="true"] .dot { background: var(--ink2); }

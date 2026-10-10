@@ -47,7 +47,7 @@ export class Conversations {
     }
 
     create({ name, tool, memoryMb }) {
-        if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens, and starts with a letter.');
+        if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
         if (!chosen) throw new Refusal(400, 'Unknown tool.');
         const memory = memoryMb ?? chosen.memoryMb;
@@ -55,7 +55,7 @@ export class Conversations {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
-        const conversation = { name, tool, memoryMb: memory, phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString() };
+        const conversation = { name, tool, memoryMb: memory, phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
         this.#store.put(conversation);
         this.built = this.#build(name, chosen, memory);
         return conversation;
@@ -65,6 +65,13 @@ export class Conversations {
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
         const launched = await this.#vms.launch(name, memoryMb);
         if (launched.code !== 0) return fail('The machine did not start', launched);
+        /* What sharing a folder needs inside the VM, put there NOW. Left to
+           the first attachment, it made that one take over a minute -- longer
+           than the edge waits for an answer, so the page said "failed" about
+           an attachment that then succeeded (seen by a tester). */
+        this.#store.patch(name, { step: 'Preparing the machine' });
+        const sharing = await this.#vms.exec(name, ['sudo', '-n', 'snap', 'install', 'multipass-sshfs'], { timeoutMs: STEP_MS });
+        if (sharing.code !== 0) return fail('The machine could not be prepared for shared folders', sharing);
         for (const argv of [['sudo', '-n', 'mkdir', '-p', WORK], ['sudo', '-n', 'chown', `${VM_USER}:${VM_USER}`, WORK]]) {
             const made = await this.#vms.exec(name, argv);
             if (made.code !== 0) return fail('The work folder could not be created', made);
@@ -75,7 +82,7 @@ export class Conversations {
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
-        this.#store.patch(name, { phase: 'ready', step: undefined });
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined });
         return undefined;
     }
 
@@ -85,6 +92,8 @@ export class Conversations {
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : 'This conversation could not be built.');
         this.#cancelStop(name);
+        /* Opening is the explicit gesture that ends a sleep. */
+        if (c.asleep) this.#store.patch(name, { asleep: false });
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         const state = await this.#vms.state(name);
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
@@ -126,6 +135,9 @@ export class Conversations {
         this.#cancelStop(name);
         const r = await this.#vms.suspend(name);
         if (r.code !== 0) throw new Refusal(502, `The machine did not go to sleep: ${firstLine(r.stderr)}`);
+        /* Remembered: a sleep that was asked for holds until somebody wakes
+           it on purpose. A page that merely reloads must not wake it. */
+        this.#store.patch(name, { asleep: true });
     }
 
     /* Online or offline: remembered here, enforced by network.mjs. */

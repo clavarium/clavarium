@@ -25,7 +25,7 @@ test('the two kinds: sent with Enter, or left to be completed', (t) => {
     const sent = s.add({ label: 'Compact', text: '/compact', enter: true });
     const left = s.add({ label: 'Fix', text: 'Fix the bug in ', enter: false });
     assert.deepEqual([sent.enter, left.enter, left.text], [true, false, 'Fix the bug in ']);
-    assert.equal(s.add({ label: 'x', text: 'y' }).enter, false, 'Enter is never pressed unless asked');
+    assert.equal(s.add({ label: 'plain', text: 'y' }).enter, false, 'Enter is never pressed unless asked');
 });
 
 test('a text with a line break is refused: it would press Enter early', (t) => {
@@ -37,7 +37,8 @@ test('a text with a line break is refused: it would press Enter early', (t) => {
 
 test('there is a ceiling, and removing an unknown shortcut says so', (t) => {
     const s = new Shortcuts(new Store(fresh(t)));
-    while (s.list().length < SHORTCUTS_MAX) s.add({ label: 'x', text: 'y' });
-    assert.throws(() => s.add({ label: 'x', text: 'y' }), /already/);
+    for (let i = 0; s.list().length < SHORTCUTS_MAX; i++) s.add({ label: `x${i}`, text: 'y' });
+    assert.throws(() => s.add({ label: 'one more', text: 'y' }), /already 30/);
+    assert.throws(() => s.add({ label: 'x0', text: 'z' }), /already has this label/);
     assert.throws(() => s.remove('00000000-0000-4000-8000-000000000000'), /No such/);
 });

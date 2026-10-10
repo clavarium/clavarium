@@ -47,6 +47,7 @@ export class Shortcuts {
     add({ label, text, enter }) {
         if (!oneLine(label, LABEL_MAX)) throw new Refusal(400, `A label is one line of at most ${LABEL_MAX} characters.`);
         if (!oneLine(text, TEXT_MAX)) throw new Refusal(400, `The text is one line of at most ${TEXT_MAX} characters.`);
+        if (this.#items().some((x) => x.label === label.trim())) throw new Refusal(409, 'A shortcut already has this label.');
         if (this.#items().length >= SHORTCUTS_MAX) throw new Refusal(409, `There are already ${SHORTCUTS_MAX} shortcuts. Remove one first.`);
         const shortcut = { name: randomUUID(), label: label.trim(), text, enter: enter === true };
         this.#store.put(shortcut);
