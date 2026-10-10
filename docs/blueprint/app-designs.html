@@ -1,0 +1,1196 @@
+<title>Clavarium App Designs</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#f5f7f9; --surface:#ffffff; --surface2:#edf1f5; --line:#d8e0e9;
+  --ink:#111a24; --ink2:#516075; --ink3:#8090a4;
+  --brass:#8a6a22; --brass-soft:rgba(154,117,38,.12); --brass-line:rgba(154,117,38,.38);
+  --ok:#256b53; --warn:#a44e17; --danger:#9c2c28;
+  --term:#0f141a; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#e8eef6; --vm:#eef4ec; --edge:#f6efe2;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1319; --surface:#161d26; --surface2:#1d2631; --line:#2b3745;
+  --ink:#e7edf4; --ink2:#a3b1c2; --ink3:#74849a;
+  --brass:#d2a94e; --brass-soft:rgba(210,169,78,.14); --brass-line:rgba(210,169,78,.42);
+  --ok:#5fc39d; --warn:#e39a5c; --danger:#ee7f79;
+  --term:#080b0f; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#18222f; --vm:#17241c; --edge:#262014; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#161d26; --surface2:#1d2631; --line:#2b3745;
+  --ink:#e7edf4; --ink2:#a3b1c2; --ink3:#74849a;
+  --brass:#d2a94e; --brass-soft:rgba(210,169,78,.14); --brass-line:rgba(210,169,78,.42);
+  --ok:#5fc39d; --warn:#e39a5c; --danger:#ee7f79;
+  --term:#080b0f; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#18222f; --vm:#17241c; --edge:#262014; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:18px;padding-block:22px 60px}
+.wrap>h1{font-size:26px;margin:0 0 2px}
+.wrap>.lead{color:var(--ink2);margin:0 0 14px;max-width:70ch}
+.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;gap:6px;overflow-x:auto;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:18px}
+.tabs button{font:600 13px var(--sans);color:var(--ink2);background:transparent;border:1px solid transparent;border-radius:999px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected="true"]{background:var(--brass-soft);border-color:var(--brass-line);color:var(--ink)}
+.tabs button:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.who{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:16px;max-width:76ch}
+.who b{display:block}.who span{color:var(--ink2);font-size:14px}
+.panel{overflow-x:auto}
+</style>
+<div class="wrap">
+<h1>Clavarium · app designs</h1>
+<p class="lead">Three first ideas for the installable app, each drawn for a different person. Same fixed structure: tools on top, the tool's own terminal in the middle, shortcuts, voice and keys at the bottom. Static mockups, nothing is wired.</p>
+<div class="tabs" role="tablist" aria-label="Designs">
+<button role="tab" id="t-a" aria-controls="p-a" aria-selected="true">A · You, all day</button>
+<button role="tab" id="t-b" aria-controls="p-b" aria-selected="false">B · An invited relative</button>
+<button role="tab" id="t-c" aria-controls="p-c" aria-selected="false">C · Tablet, files first</button>
+</div>
+<section id="p-a" role="tabpanel" aria-labelledby="t-a"><div class="who"><b>The owner who uses it all day</b><span>Speed and density: the terminal gets every pixel, helpers under the thumb, dangerous keys out of reach.</span></div><div class="panel"><style>
+.design-a, .design-a * { box-sizing: border-box; }
+.design-a { font-family: var(--sans); color: var(--ink); background: var(--bg); padding: 16px; max-width: 100%; font-size: 13px; line-height: 1.35; }
+.design-a .a-h { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
+.design-a .a-sub { color: var(--ink2); margin: 0 0 16px; max-width: 60ch; }
+.design-a .a-row { display: flex; flex-wrap: wrap; gap: 24px 20px; align-items: flex-start; margin-bottom: 28px; }
+.design-a .a-fig { margin: 0; min-width: 0; max-width: 100%; }
+.design-a .a-cap { font-size: 12px; font-weight: 700; margin: 0 0 6px; }
+.design-a .a-cap span { font-weight: 400; color: var(--ink3); }
+.design-a .a-note { font-size: 11px; color: var(--ink2); margin: 8px 0 0; max-width: 300px; }
+
+/* ---------- device frames ---------- */
+.design-a .a-phone { position: relative; width: 300px; max-width: 100%; height: 620px; border: 8px solid var(--ink); border-radius: 34px; overflow: hidden; display: flex; flex-direction: column; background: var(--term); }
+.design-a .a-tablet { width: 1024px; max-width: 100%; border: 10px solid var(--ink); border-radius: 26px; overflow: hidden; display: flex; flex-wrap: wrap; background: var(--term); }
+
+/* ---------- top bar ---------- */
+.design-a .a-top { display: flex; align-items: center; gap: 4px; padding: 4px 6px; background: var(--surface); border-bottom: 1px solid var(--line); min-width: 0; flex: none; }
+.design-a .a-state { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 1 1 0; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface2); font-size: 11px; }
+.design-a .a-state b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600; }
+.design-a .a-state i { font-style: normal; color: var(--ink2); white-space: nowrap; }
+.design-a .a-state.is-wait { border-color: var(--warn); }
+.design-a .a-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ink3); }
+.design-a .a-dot.ok { background: var(--ok); }
+.design-a .a-dot.warn { background: var(--warn); }
+.design-a .a-dot.danger { background: var(--danger); }
+.design-a .a-tb { flex: none; height: 28px; padding: 0 8px; display: flex; align-items: center; gap: 4px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 11px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.design-a .a-tb.on { background: var(--brass-soft); border-color: var(--brass-line); }
+.design-a .a-tb em { font-style: normal; font-size: 10px; min-width: 14px; text-align: center; padding: 0 3px; border-radius: 7px; background: var(--brass-soft); border: 1px solid var(--brass-line); }
+.design-a .a-chips { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.design-a .a-chip { font-size: 10px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink2); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.design-a .a-chip b { color: var(--ink); font-weight: 600; }
+
+/* ---------- terminal ---------- */
+.design-a .a-term { flex: 1 1 0; min-height: 0; min-width: 0; overflow: hidden; background: var(--term); color: var(--term-ink); font-family: var(--mono); font-size: 10px; line-height: 1.5; padding: 6px 8px; display: flex; flex-direction: column; justify-content: flex-end; }
+.design-a .a-term p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.design-a .a-term .d { color: var(--term-dim); }
+.design-a .a-term .y { color: #e0b860; }
+.design-a .a-term .g { color: #7fd1a8; }
+.design-a .a-box { border: 1px solid var(--term-dim); border-radius: 4px; padding: 4px 6px; margin-top: 4px; }
+.design-a .a-box.hot { border-color: #e0b860; }
+.design-a .a-cur { display: inline-block; width: 6px; height: 11px; background: var(--term-ink); vertical-align: -1px; }
+
+/* ---------- one-tap approval ---------- */
+.design-a .a-ask { flex: none; display: flex; gap: 5px; padding: 5px 6px; background: var(--surface); border-top: 2px solid var(--warn); min-width: 0; }
+.design-a .a-ans { flex: 1 1 0; min-width: 0; height: 40px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+.design-a .a-ans kbd { font-family: var(--mono); font-size: 10px; width: 16px; height: 16px; line-height: 14px; text-align: center; border: 1px solid currentColor; border-radius: 4px; flex: none; }
+.design-a .a-ans.yes { flex: 2 1 0; background: var(--brass); border-color: var(--brass); color: var(--bg); font-size: 13px; }
+
+/* ---------- bottom helpers ---------- */
+.design-a .a-bot { flex: none; display: flex; flex-direction: column; gap: 5px; padding: 5px 6px 9px; background: var(--surface); border-top: 1px solid var(--line); min-width: 0; }
+.design-a .a-shorts { display: flex; gap: 5px; overflow: hidden; min-width: 0; }
+.design-a .a-short { flex: none; height: 30px; padding: 0 10px; display: flex; align-items: center; border-radius: 15px; border: 1px solid var(--brass-line); background: var(--brass-soft); color: var(--ink); font-size: 11px; font-weight: 600; white-space: nowrap; }
+.design-a .a-short.cmd { font-family: var(--mono); }
+.design-a .a-short.add { background: var(--surface); border-style: dashed; color: var(--ink2); padding: 0 9px; }
+.design-a .a-keys { display: flex; gap: 4px; min-width: 0; }
+.design-a .a-k { flex: 1 1 0; min-width: 0; height: 32px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 7px; background: var(--surface2); color: var(--ink); font-family: var(--mono); font-size: 11px; white-space: nowrap; }
+.design-a .a-thumb { display: flex; gap: 5px; align-items: stretch; min-width: 0; }
+.design-a .a-kill { flex: none; width: 46px; height: 44px; margin-right: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px dashed var(--danger); border-radius: 8px; background: var(--surface); color: var(--danger); font-family: var(--mono); font-size: 10px; line-height: 1.2; }
+.design-a .a-kill small { font-family: var(--sans); font-size: 8px; color: var(--ink3); letter-spacing: .04em; text-transform: uppercase; }
+.design-a .a-mic { flex: 1 1 0; min-width: 0; height: 44px; display: flex; align-items: center; gap: 7px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 22px; background: var(--surface2); font-size: 11px; color: var(--ink2); }
+.design-a .a-mic.live { border-color: var(--danger); color: var(--ink); }
+.design-a .a-mic-i { flex: none; width: 8px; height: 13px; border-radius: 4px; background: var(--ink); position: relative; margin: 0 3px; }
+.design-a .a-mic-i::after { content: ""; position: absolute; left: -4px; right: -4px; top: 5px; height: 10px; border: 1.5px solid var(--ink); border-top: 0; border-radius: 0 0 8px 8px; }
+.design-a .a-mic.live .a-mic-i, .design-a .a-mic.live .a-mic-i::after { background: var(--danger); border-color: var(--danger); }
+.design-a .a-mic.live .a-mic-i::after { background: none; }
+.design-a .a-mic span { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-a .a-auto { flex: none; display: flex; align-items: center; gap: 4px; font-size: 10px; color: var(--ink2); }
+.design-a .a-tog { width: 24px; height: 14px; border-radius: 7px; background: var(--line); position: relative; flex: none; }
+.design-a .a-tog::after { content: ""; position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); }
+.design-a .a-tog.on { background: var(--ok); }
+.design-a .a-tog.on::after { left: 12px; }
+.design-a .a-enter { flex: none; width: 62px; height: 44px; display: flex; align-items: center; justify-content: center; border-radius: 10px; border: 1px solid var(--ink); background: var(--ink); color: var(--bg); font-family: var(--mono); font-size: 12px; font-weight: 700; }
+
+/* ---------- sheets ---------- */
+.design-a .a-dim { position: absolute; inset: 0; background: var(--term); opacity: .6; }
+.design-a .a-sheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--surface); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; display: flex; flex-direction: column; min-width: 0; padding-bottom: 10px; }
+.design-a .a-grab { width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 6px auto 2px; flex: none; }
+.design-a .a-sh { display: flex; align-items: center; gap: 6px; padding: 4px 12px 6px; min-width: 0; }
+.design-a .a-sh b { font-size: 14px; }
+.design-a .a-sh span { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: 10px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-a .a-x { flex: none; width: 26px; height: 26px; border-radius: 13px; background: var(--surface2); border: 1px solid var(--line); display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--ink2); }
+.design-a .a-sec { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); padding: 8px 12px 3px; }
+.design-a .a-li { display: flex; align-items: center; gap: 8px; padding: 0 6px 0 12px; min-height: 38px; border-top: 1px solid var(--line); min-width: 0; }
+.design-a .a-li .n { flex: 1 1 0; min-width: 0; font-family: var(--mono); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-a .a-li .m { flex: none; font-size: 10px; color: var(--ink3); white-space: nowrap; }
+.design-a .a-ico { flex: none; width: 14px; height: 11px; border-radius: 2px; background: var(--brass); position: relative; }
+.design-a .a-ico::before { content: ""; position: absolute; left: 0; top: -3px; width: 7px; height: 4px; border-radius: 2px 2px 0 0; background: var(--brass); }
+.design-a .a-ico.f { width: 11px; height: 14px; background: none; border: 1.5px solid var(--ink3); }
+.design-a .a-ico.f::before { display: none; }
+.design-a .a-dl { flex: none; min-width: 34px; height: 30px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface2); display: flex; align-items: center; justify-content: center; font-size: 11px; color: var(--ink); }
+.design-a .a-acts { display: flex; gap: 6px; padding: 8px 10px 0; border-top: 1px solid var(--line); min-width: 0; }
+.design-a .a-btn { flex: 1 1 0; min-width: 0; height: 42px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface2); color: var(--ink); font-size: 12px; font-weight: 600; display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+.design-a .a-btn.pri { background: var(--brass); border-color: var(--brass); color: var(--bg); }
+.design-a .a-btn.quiet { flex: none; padding: 0 12px; background: none; color: var(--ink2); }
+.design-a .a-btn.del { flex: none; padding: 0 10px; background: none; border-color: var(--danger); color: var(--danger); font-size: 11px; }
+
+/* ---------- first launch ---------- */
+.design-a .a-pair { padding: 4px 14px 2px; }
+.design-a .a-pair h4 { margin: 0 0 2px; font-size: 16px; display: flex; align-items: center; gap: 7px; }
+.design-a .a-pair p { margin: 0 0 10px; font-size: 11px; color: var(--ink2); }
+.design-a .a-conv { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface2); min-width: 0; margin-bottom: 8px; }
+.design-a .a-conv div { flex: 1 1 0; min-width: 0; }
+.design-a .a-conv b { display: block; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-a .a-conv small { font-size: 10px; color: var(--ink2); }
+.design-a .a-inst { border: 1px dashed var(--brass-line); background: var(--brass-soft); border-radius: 10px; padding: 8px 10px; font-size: 11px; display: flex; gap: 8px; align-items: center; min-width: 0; }
+.design-a .a-inst div { flex: 1 1 0; min-width: 0; }
+.design-a .a-inst b { display: block; }
+.design-a .a-inst span { color: var(--ink2); }
+.design-a .a-inst u { text-decoration: none; flex: none; font-size: 10px; color: var(--ink2); padding: 6px; }
+
+/* ---------- share ---------- */
+.design-a .a-qrw { display: flex; gap: 12px; align-items: center; padding: 4px 12px 10px; min-width: 0; }
+.design-a .a-qr { flex: none; width: 112px; height: 112px; position: relative; border: 6px solid var(--bg); outline: 1px solid var(--line); background-color: var(--bg); background-image: conic-gradient(var(--ink) 90deg, transparent 0 180deg, var(--ink) 0 270deg, transparent 0), linear-gradient(90deg, var(--ink) 34%, transparent 0 67%, var(--ink) 0); background-size: 10px 10px, 15px 5px; }
+.design-a .a-qr i { position: absolute; width: 30px; height: 30px; border: 5px solid var(--ink); background: var(--bg); outline: 3px solid var(--bg); }
+.design-a .a-qr i::after { content: ""; position: absolute; inset: 4px; background: var(--ink); }
+.design-a .a-qr i:nth-child(1) { left: 0; top: 0; }
+.design-a .a-qr i:nth-child(2) { right: 0; top: 0; }
+.design-a .a-qr i:nth-child(3) { left: 0; bottom: 0; }
+.design-a .a-qrt { flex: 1 1 0; min-width: 0; font-size: 11px; color: var(--ink2); }
+.design-a .a-qrt b { display: block; font-size: 13px; color: var(--ink); margin-bottom: 2px; }
+.design-a .a-qrt .a-btn { flex: none; height: 32px; margin-top: 8px; font-size: 11px; }
+.design-a .a-dev { flex: 1 1 0; min-width: 0; }
+.design-a .a-dev b { display: block; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.design-a .a-dev small { font-size: 10px; color: var(--ink3); }
+.design-a .a-li.tall { min-height: 46px; }
+.design-a .a-rev { flex: none; height: 28px; padding: 0 9px; border-radius: 8px; border: 1px solid var(--line); background: none; color: var(--ink2); font-size: 10px; display: flex; align-items: center; }
+.design-a .a-conf { margin: 0 8px; padding: 8px; border: 1px solid var(--danger); border-radius: 10px; background: var(--surface2); }
+.design-a .a-conf p { margin: 0 0 7px; font-size: 11px; }
+.design-a .a-conf div { display: flex; gap: 6px; min-width: 0; }
+
+/* ---------- tablet ---------- */
+.design-a .a-main { flex: 9 1 460px; min-width: 0; min-height: 600px; display: flex; flex-direction: column; }
+.design-a .a-main .a-term { font-size: 12px; padding: 10px 14px; }
+.design-a .a-main .a-top { padding: 6px 8px; gap: 6px; flex-wrap: wrap; }
+.design-a .a-main .a-state { flex: 0 1 auto; }
+.design-a .a-main .a-chips { flex: 1 1 160px; }
+.design-a .a-main .a-bot { flex-direction: row; flex-wrap: wrap; align-items: center; padding: 6px 8px 8px; }
+.design-a .a-main .a-keys { flex: 1 1 230px; }
+.design-a .a-main .a-thumb { flex: 3 1 280px; }
+.design-a .a-main .a-k { height: 44px; }
+.design-a .a-rail { flex: 1 1 240px; min-width: 0; background: var(--surface); border-left: 1px solid var(--line); display: flex; flex-direction: column; padding-bottom: 8px; }
+.design-a .a-rail .a-short { height: 40px; border-radius: 9px; margin: 0 8px 5px; justify-content: space-between; gap: 8px; min-width: 0; flex: none; }
+.design-a .a-rail .a-short kbd { font-family: var(--mono); font-size: 9px; color: var(--ink3); font-weight: 400; flex: none; }
+.design-a .a-rail .a-short span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.design-a .a-drop { margin: 8px; padding: 12px 8px; border: 1px dashed var(--line); border-radius: 10px; text-align: center; font-size: 11px; color: var(--ink2); }
+.design-a .a-grow { flex: 1 1 0; min-height: 8px; }
+
+/* ---------- legend + why ---------- */
+.design-a .a-legend { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; max-width: 300px; }
+.design-a .a-legend .a-state { flex: none; height: 24px; font-size: 10px; }
+.design-a .a-why { border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 12px 14px; max-width: 760px; }
+.design-a .a-why h3 { margin: 0 0 6px; font-size: 13px; }
+.design-a .a-why ul { margin: 0; padding-left: 18px; color: var(--ink2); font-size: 12px; }
+.design-a .a-why li { margin: 3px 0; }
+.design-a .a-why li b { color: var(--ink); }
+</style>
+
+<div class="design-a">
+  <h2 class="a-h">A · Thumb-first terminal</h2>
+  <p class="a-sub">One thin bar on top, three rows at the bottom, everything else is terminal. Safe things under the thumb, dangerous things far from it.</p>
+
+  <div class="a-row">
+
+    <!-- ============ A. conversation ============ -->
+    <figure class="a-fig">
+      <p class="a-cap">A · Conversation <span>— waiting for you</span></p>
+      <div class="a-phone">
+        <div class="a-top">
+          <div class="a-state is-wait"><span class="a-dot warn"></span><b>api-refactor</b><i>waiting</i></div>
+          <div class="a-tb">Files</div>
+          <div class="a-tb">Res <em>4</em></div>
+          <div class="a-tb">Share</div>
+        </div>
+        <div class="a-term">
+          <p><span class="d">&gt;</span> fix the flaky login test</p>
+          <p>&nbsp;</p>
+          <p><span class="g">●</span> Read(tests/login.test.ts)</p>
+          <p class="d">  ⎿ 84 lines</p>
+          <p><span class="g">●</span> Search("waitForSession")</p>
+          <p class="d">  ⎿ 3 matches in 2 files</p>
+          <p><span class="g">●</span> The test sleeps 200 ms instead of
+  waiting for the session cookie.</p>
+          <p><span class="g">●</span> Update(src/auth/session.ts)</p>
+          <p class="d">  ⎿ +6 −2</p>
+          <p class="d">    41 - await sleep(200)</p>
+          <p class="g">    41 + await waitForSession(page)</p>
+          <p><span class="y">●</span> Bash(npm test -- login)</p>
+          <div class="a-box hot">
+            <p class="y">Bash command</p>
+            <p>  npm test -- login</p>
+            <p class="d">  Run the login test file</p>
+            <p>&nbsp;</p>
+            <p>Do you want to proceed?</p>
+            <p class="y">❯ 1. Yes</p>
+            <p>  2. Yes, and don't ask again for
+     npm test</p>
+            <p>  3. No, tell Claude what to do</p>
+          </div>
+        </div>
+        <div class="a-ask">
+          <div class="a-ans"><kbd>3</kbd>No</div>
+          <div class="a-ans"><kbd>2</kbd>Always</div>
+          <div class="a-ans yes"><kbd>1</kbd>Yes</div>
+        </div>
+        <div class="a-bot">
+          <div class="a-shorts">
+            <div class="a-short">Run the tests</div>
+            <div class="a-short">Yes, go on</div>
+            <div class="a-short cmd">/compact</div>
+            <div class="a-short add">+</div>
+          </div>
+          <div class="a-keys">
+            <div class="a-k">Esc</div><div class="a-k">Tab</div><div class="a-k">←</div><div class="a-k">↓</div><div class="a-k">↑</div><div class="a-k">→</div>
+          </div>
+          <div class="a-thumb">
+            <div class="a-kill">^C<small>hold</small></div>
+            <div class="a-mic"><i class="a-mic-i"></i><span>Mic</span><div class="a-auto">auto<i class="a-tog on"></i></div></div>
+            <div class="a-enter">⏎</div>
+          </div>
+        </div>
+      </div>
+      <p class="a-note">The numbered prompt becomes three big keys; <b>Yes</b> sits under the right thumb. The bar only exists while a prompt is on screen.</p>
+      <div class="a-legend">
+        <div class="a-state"><span class="a-dot ok"></span><i>running</i></div>
+        <div class="a-state is-wait"><span class="a-dot warn"></span><i>waiting</i></div>
+        <div class="a-state"><span class="a-dot"></span><i>asleep · tap to wake</i></div>
+      </div>
+    </figure>
+
+    <!-- ============ B. files ============ -->
+    <figure class="a-fig">
+      <p class="a-cap">B · Files sheet</p>
+      <div class="a-phone">
+        <div class="a-top">
+          <div class="a-state"><span class="a-dot ok"></span><b>api-refactor</b><i>running</i></div>
+          <div class="a-tb on">Files</div>
+          <div class="a-tb">Res <em>4</em></div>
+          <div class="a-tb">Share</div>
+        </div>
+        <div class="a-term" style="justify-content:flex-start">
+          <p><span class="g">●</span> Bash(npm test -- login)</p>
+          <p class="d">  ⎿ PASS tests/login.test.ts</p>
+          <p class="d">    12 passed, 0 failed (4.1 s)</p>
+          <p><span class="g">●</span> Write(report.md)</p>
+          <p class="d">  ⎿ 31 lines</p>
+          <p class="y">✻ Summarising… <span class="d">(esc to interrupt)</span></p>
+        </div>
+        <div class="a-dim"></div>
+        <div class="a-sheet" style="top:132px">
+          <div class="a-grab"></div>
+          <div class="a-sh"><b>Files</b><span>~/api-refactor</span><div class="a-x">✕</div></div>
+          <div class="a-sec">Changed just now</div>
+          <div class="a-li"><i class="a-ico f"></i><span class="n">report.md</span><span class="m">1 kB · 10 s</span><div class="a-dl">↓</div></div>
+          <div class="a-li"><i class="a-ico f"></i><span class="n">src/auth/session.ts</span><span class="m">3 kB · 2 min</span><div class="a-dl">↓</div></div>
+          <div class="a-sec">Browse</div>
+          <div class="a-li"><i class="a-ico"></i><span class="n">src/</span><span class="m">42</span><div class="a-dl">↓ zip</div></div>
+          <div class="a-li"><i class="a-ico"></i><span class="n">tests/</span><span class="m">17</span><div class="a-dl">↓ zip</div></div>
+          <div class="a-li"><i class="a-ico"></i><span class="n">uploads/</span><span class="m">2</span><div class="a-dl">↓ zip</div></div>
+          <div class="a-li"><i class="a-ico f"></i><span class="n">package.json</span><span class="m">2 kB</span><div class="a-dl">↓</div></div>
+          <div class="a-li"><i class="a-ico f"></i><span class="n">README.md</span><span class="m">4 kB</span><div class="a-dl">↓</div></div>
+          <div class="a-grow"></div>
+          <div class="a-acts">
+            <div class="a-btn">Send file</div>
+            <div class="a-btn pri">Send photo</div>
+          </div>
+        </div>
+      </div>
+      <p class="a-note">What the tool just touched comes first — that is what I download nine times out of ten. Sending is at the bottom, by the thumb; the path is typed into the terminal after upload.</p>
+    </figure>
+
+    <!-- ============ C. first launch ============ -->
+    <figure class="a-fig">
+      <p class="a-cap">C · First launch <span>— after the scan</span></p>
+      <div class="a-phone">
+        <div class="a-top">
+          <div class="a-state"><span class="a-dot"></span><b>api-refactor</b><i>asleep</i></div>
+          <div class="a-tb">Files</div>
+          <div class="a-tb">Res <em>4</em></div>
+        </div>
+        <div class="a-term" style="justify-content:flex-start">
+          <p class="d">&gt; fix the flaky login test</p>
+          <p class="d">● Read(tests/login.test.ts)</p>
+          <p class="d">● Update(src/auth/session.ts)</p>
+          <p class="d">● Bash(npm test -- login)</p>
+          <p class="d">  ⎿ 12 passed, 0 failed</p>
+          <p class="d">● Done. The login test now waits for
+  the session cookie.</p>
+          <p>&nbsp;</p>
+          <p class="d">&gt; <span class="a-cur"></span></p>
+        </div>
+        <div class="a-dim"></div>
+        <div class="a-sheet">
+          <div class="a-grab"></div>
+          <div class="a-pair">
+            <h4><span class="a-dot ok"></span>This phone is paired</h4>
+            <p>It opens this one conversation, nothing else.</p>
+            <div class="a-conv">
+              <span class="a-dot"></span>
+              <div><b>api-refactor</b><small>Claude Code · asleep since 14:02</small></div>
+            </div>
+            <div class="a-inst">
+              <div><b>Install this app</b><span>Share ↑ then “Add to Home Screen”. Opens full screen, straight to the terminal.</span></div>
+              <u>Later</u>
+            </div>
+          </div>
+          <div class="a-acts" style="border-top:0">
+            <div class="a-btn pri">Wake and open</div>
+          </div>
+        </div>
+      </div>
+      <p class="a-note">No welcome tour. The last screen of the terminal is already behind the card; one tap wakes the VM and lands on it.</p>
+    </figure>
+
+    <!-- ============ D. share ============ -->
+    <figure class="a-fig">
+      <p class="a-cap">D · Share sheet <span>— owner</span></p>
+      <div class="a-phone">
+        <div class="a-top">
+          <div class="a-state"><span class="a-dot ok"></span><b>api-refactor</b><i>running</i></div>
+          <div class="a-tb">Files</div>
+          <div class="a-tb">Res <em>4</em></div>
+          <div class="a-tb on">Share</div>
+        </div>
+        <div class="a-term" style="justify-content:flex-start">
+          <p><span class="g">●</span> Bash(npm test -- login)</p>
+          <p class="d">  ⎿ 12 passed, 0 failed (4.1 s)</p>
+        </div>
+        <div class="a-dim"></div>
+        <div class="a-sheet" style="top:78px">
+          <div class="a-grab"></div>
+          <div class="a-sh"><b>Share</b><span>api-refactor</span><div class="a-x">✕</div></div>
+          <div class="a-qrw">
+            <div class="a-qr"><i></i><i></i><i></i></div>
+            <div class="a-qrt"><b>Scan to join</b>One device per code. Expires in 9:41.<div class="a-btn">New code</div></div>
+          </div>
+          <div class="a-sec">Paired devices · 3</div>
+          <div class="a-li tall"><span class="a-dot ok"></span><div class="a-dev"><b>This phone</b><small>owner · now</small></div></div>
+          <div class="a-li tall"><span class="a-dot ok"></span><div class="a-dev"><b>Léa’s iPhone</b><small>typing · now</small></div><div class="a-rev">Revoke…</div></div>
+          <div class="a-li tall" style="border-bottom:0"><span class="a-dot"></span><div class="a-dev"><b>Office iPad</b><small>last seen 3 days ago</small></div></div>
+          <div class="a-conf">
+            <p><b>Revoke Office iPad?</b> It loses this conversation at once.</p>
+            <div>
+              <div class="a-btn del">Revoke</div>
+              <div class="a-btn">Keep</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="a-note">Revoke is always two taps, and the second step puts <b>Keep</b> under the thumb and <b>Revoke</b> on the far side.</p>
+    </figure>
+  </div>
+
+  <!-- ============ E. tablet ============ -->
+  <figure class="a-fig" style="margin-bottom:28px">
+    <p class="a-cap">E · Tablet landscape <span>— running, dictating</span></p>
+    <div class="a-tablet">
+      <div class="a-main">
+        <div class="a-top">
+          <div class="a-state"><span class="a-dot ok"></span><b>api-refactor</b><i>running</i></div>
+          <div class="a-chips">
+            <span class="a-chip"><b>git</b> acme/api · main</span>
+            <span class="a-chip"><b>folder</b> ~/design-docs</span>
+            <span class="a-chip"><b>mail</b> ci@example.com</span>
+            <span class="a-chip"><b>secret</b> NPM_TOKEN</span>
+            <span class="a-chip">+</span>
+          </div>
+          <div class="a-tb">Share</div>
+        </div>
+        <div class="a-term">
+          <p><span class="d">&gt;</span> fix the flaky login test</p>
+          <p>&nbsp;</p>
+          <p><span class="g">●</span> Read(tests/login.test.ts)</p>
+          <p class="d">  ⎿ 84 lines</p>
+          <p><span class="g">●</span> The test sleeps 200 ms instead of waiting for the session cookie. I'll replace the sleep.</p>
+          <p><span class="g">●</span> Update(src/auth/session.ts)</p>
+          <p class="d">  ⎿ +6 −2</p>
+          <p class="d">    41 - await sleep(200)</p>
+          <p class="g">    41 + await waitForSession(page, { timeout: 5000 })</p>
+          <p><span class="g">●</span> Bash(npm test -- login)</p>
+          <p class="d">  ⎿ PASS tests/login.test.ts</p>
+          <p class="d">    12 passed, 0 failed (4.1 s)</p>
+          <p><span class="g">●</span> Write(report.md)</p>
+          <p class="d">  ⎿ 31 lines</p>
+          <p>&nbsp;</p>
+          <p class="y">✻ Summarising… <span class="d">(38 s · esc to interrupt)</span></p>
+          <div class="a-box">
+            <p><span class="d">&gt;</span> and add a test for the timeout case<span class="a-cur"></span></p>
+          </div>
+          <p class="d">  ⏵⏵ auto-accept edits on · 61% context left</p>
+        </div>
+        <div class="a-bot">
+          <div class="a-kill">^C<small>hold</small></div>
+          <div class="a-keys">
+            <div class="a-k">Esc</div><div class="a-k">Tab</div><div class="a-k">←</div><div class="a-k">↓</div><div class="a-k">↑</div><div class="a-k">→</div>
+          </div>
+          <div class="a-thumb">
+            <div class="a-mic live"><i class="a-mic-i"></i><span>Listening — “…for the timeout case”</span><div class="a-auto">auto<i class="a-tog on"></i></div></div>
+            <div class="a-enter">⏎</div>
+          </div>
+        </div>
+      </div>
+      <div class="a-rail">
+        <div class="a-sec">Shortcuts</div>
+        <div class="a-short"><span>Run the tests</span><kbd>1</kbd></div>
+        <div class="a-short"><span>Yes, go on</span><kbd>2</kbd></div>
+        <div class="a-short cmd"><span>/compact</span><kbd>3</kbd></div>
+        <div class="a-short add"><span>+ Save a text</span></div>
+        <div class="a-sec">Changed just now</div>
+        <div class="a-li"><i class="a-ico f"></i><span class="n">report.md</span><span class="m">10 s</span><div class="a-dl">↓</div></div>
+        <div class="a-li"><i class="a-ico f"></i><span class="n">src/auth/session.ts</span><span class="m">2 min</span><div class="a-dl">↓</div></div>
+        <div class="a-li"><i class="a-ico"></i><span class="n">All files…</span><span class="m">61</span></div>
+        <div class="a-grow"></div>
+        <div class="a-drop">Drop a file or photo here<br>to send it to the conversation</div>
+      </div>
+    </div>
+    <p class="a-note" style="max-width:640px">The terminal keeps the full height. Files and shortcuts stop being sheets and live in a right-hand rail, where the holding thumb already is; resources fit in the top bar as chips.</p>
+  </figure>
+
+  <div class="a-why">
+    <h3>Why this design</h3>
+    <ul>
+      <li><b>The terminal owns the screen.</b> One 36 px bar on top, three rows below; on a phone about two thirds of the height is raw terminal, and on a tablet the helpers move to a side rail instead of stacking.</li>
+      <li><b>One tap to approve.</b> When the tool prints a numbered question, the options appear as big keys just above the helpers, with Yes on the thumb side — no keyboard, no aiming at a digit.</li>
+      <li><b>Thumb map.</b> Enter, mic and shortcuts sit in the easy arc; Ctrl+C is in the far corner, dashed, and needs a hold; Revoke needs two taps and the confirm step puts Keep under the thumb.</li>
+      <li><b>Voice is a mode, not a dialog.</b> The mic is the widest key of the bottom row and shows the live phrase in place; “auto” presses Enter for me, so a whole exchange can be hands-off.</li>
+      <li><b>Least sure:</b> the approval bar depends on recognising prompts in raw terminal output across several tools. If detection is wrong even rarely, a big Yes key is the worst possible place for a mistake — it may need to stay a plain “1 / 2 / 3” row.</li>
+    </ul>
+  </div>
+</div>
+</div></section>
+<section id="p-b" role="tabpanel" aria-labelledby="t-b" hidden><div class="who"><b>A relative who received a QR code</b><span>Never saw a terminal. Large targets, plain words, voice as the main action.</span></div><div class="panel"><style>
+.design-b, .design-b * { box-sizing: border-box; }
+.design-b { font-family: var(--sans); color: var(--ink); background: var(--bg); padding: 16px 12px; max-width: 100%; overflow: hidden; line-height: 1.35; font-size: 14px; }
+.design-b .head { margin: 0 0 16px; }
+.design-b .head-t { font-size: 20px; font-weight: 700; }
+.design-b .head-s { color: var(--ink2); font-size: 14px; margin-top: 2px; }
+.design-b .row { display: flex; flex-wrap: wrap; gap: 24px 20px; align-items: flex-start; }
+.design-b .cell { flex: 0 1 300px; min-width: 0; max-width: 100%; }
+.design-b .cap { font-size: 13px; color: var(--ink2); margin: 0 0 8px; font-weight: 600; }
+.design-b .cap-e { margin-top: 24px; }
+.design-b .cap b { color: var(--brass); margin-right: 6px; }
+
+/* frames */
+.design-b .ph { width: 300px; max-width: 100%; border: 7px solid var(--ink); border-radius: 30px; overflow: hidden; background: var(--bg); }
+.design-b .scr { position: relative; height: 680px; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); }
+.design-b .tab { width: 100%; max-width: 1024px; border: 9px solid var(--ink); border-radius: 26px; overflow: hidden; background: var(--bg); margin-top: 8px; }
+.design-b .tscr { display: flex; flex-direction: column; min-width: 0; }
+
+/* TOP */
+.design-b .top { padding: 8px 8px 6px; background: var(--surface); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; flex: none; }
+.design-b .state { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; font-size: 14px; font-weight: 700; min-width: 0; border: 1px solid var(--line); background: var(--surface2); }
+.design-b .state.wait { background: var(--brass-soft); border-color: var(--brass-line); }
+.design-b .state .txt { flex: 1 1 auto; min-width: 0; }
+.design-b .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; background: var(--ink3); }
+.design-b .dot.wait { background: var(--warn); }
+.design-b .dot.run { background: var(--ok); }
+.design-b .tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.design-b .tool { flex: 1 1 90px; min-width: 0; min-height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); font-size: 15px; font-weight: 700; padding: 6px 8px; }
+.design-b .tool.on { border-color: var(--brass); background: var(--brass-soft); }
+.design-b .ico { flex: none; width: 18px; height: 14px; border: 2px solid var(--brass); border-radius: 3px; position: relative; }
+.design-b .ico.folder::before { content: ""; position: absolute; left: -2px; top: -6px; width: 9px; height: 5px; background: var(--brass); border-radius: 2px 2px 0 0; }
+.design-b .ico.qr { width: 16px; height: 16px; border-style: dotted; }
+.design-b .uses { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 12px; color: var(--ink2); }
+.design-b .chip { border: 1px solid var(--line); background: var(--surface2); color: var(--ink); border-radius: 999px; padding: 3px 9px; font-size: 12px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.design-b .btn-s { flex: none; border: 1px solid var(--brass-line); background: var(--bg); color: var(--ink); border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+
+/* MIDDLE */
+.design-b .term { flex: 1 1 0; min-height: 0; min-width: 0; background: var(--term); color: var(--term-ink); font-family: var(--mono); font-size: 11.5px; line-height: 1.5; padding: 10px; white-space: pre-wrap; overflow-wrap: anywhere; overflow: hidden; }
+.design-b .term .d { color: var(--term-dim); }
+.design-b .term .y { color: #e0b860; }
+.design-b .term .g { color: #7fd1a8; }
+.design-b .term .box { display: block; border: 1px solid #e0b860; border-radius: 6px; padding: 6px 8px; margin-top: 6px; }
+.design-b .term .cur { display: inline-block; width: 7px; height: 13px; background: var(--term-ink); vertical-align: -2px; }
+
+/* BOTTOM */
+.design-b .bot { flex: none; background: var(--surface); border-top: 1px solid var(--line); padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.design-b .lbl { font-size: 11px; font-weight: 700; color: var(--ink3); text-transform: uppercase; letter-spacing: .06em; }
+.design-b .ans { display: flex; gap: 6px; }
+.design-b .big { flex: 1 1 0; min-width: 0; min-height: 50px; border-radius: 14px; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: 18px; font-weight: 800; border: 2px solid var(--line); background: var(--bg); }
+.design-b .big.yes { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+.design-b .big.no { border-color: var(--danger); color: var(--danger); }
+.design-b .sends { font-family: var(--mono); font-size: 10px; font-weight: 400; border: 1px solid currentColor; border-radius: 4px; padding: 0 4px; opacity: .8; }
+.design-b .saved { display: flex; gap: 6px; overflow: hidden; }
+.design-b .saved.wrap { flex-wrap: wrap; }
+.design-b .sc { flex: none; max-width: 100%; border: 1px solid var(--line); background: var(--surface2); border-radius: 10px; padding: 7px 10px; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-b .voice { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.design-b .speak { flex: 1 1 0; min-width: 0; min-height: 56px; border-radius: 28px; background: var(--brass); color: var(--bg); display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 18px; font-weight: 800; padding: 6px 12px; }
+.design-b .speak.live { background: var(--brass-soft); color: var(--ink); border: 2px solid var(--brass); }
+.design-b .mic { flex: none; width: 12px; height: 20px; border-radius: 6px; background: currentColor; position: relative; margin-bottom: 6px; }
+.design-b .mic::after { content: ""; position: absolute; left: -5px; right: -5px; top: 8px; height: 16px; border: 2px solid currentColor; border-top: 0; border-radius: 0 0 11px 11px; }
+.design-b .auto { flex: none; width: 76px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--ink2); text-align: center; line-height: 1.15; }
+.design-b .sw { width: 44px; height: 24px; border-radius: 12px; background: var(--ok); position: relative; }
+.design-b .sw::after { content: ""; position: absolute; right: 3px; top: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--bg); }
+.design-b .keys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 5px; }
+.design-b .key { min-width: 0; min-height: 38px; border: 1px solid var(--line); border-radius: 9px; background: var(--bg); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; line-height: 1.1; }
+.design-b .key small { font-family: var(--mono); font-size: 9.5px; font-weight: 400; color: var(--ink3); }
+.design-b .key.ok { border-color: var(--brass); background: var(--brass-soft); }
+.design-b .key.stop { border-color: var(--danger); color: var(--danger); }
+
+/* sheets */
+.design-b .dim { opacity: .3; display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; }
+.design-b .sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; background: var(--surface); border-top: 2px solid var(--brass-line); border-radius: 20px 20px 0 0; padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.design-b .sh-h { display: flex; align-items: center; gap: 8px; }
+.design-b .sh-t { flex: 1 1 auto; min-width: 0; font-size: 20px; font-weight: 800; }
+.design-b .close { flex: none; border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 8px 14px; font-size: 14px; font-weight: 700; }
+.design-b .two { display: flex; gap: 8px; }
+.design-b .act { flex: 1 1 0; min-width: 0; min-height: 64px; border-radius: 14px; background: var(--brass-soft); border: 1px solid var(--brass-line); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 15px; font-weight: 800; text-align: center; padding: 6px; }
+.design-b .act small { font-weight: 400; font-size: 11px; color: var(--ink2); }
+.design-b .crumb { font-size: 13px; color: var(--ink2); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.design-b .crumb b { color: var(--ink); }
+.design-b .list { display: flex; flex-direction: column; min-width: 0; }
+.design-b .li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); min-width: 0; }
+.design-b .li .n { flex: 1 1 0; min-width: 0; }
+.design-b .li .n1 { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-b .li .n2 { font-size: 12px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.design-b .doc { flex: none; width: 16px; height: 20px; border: 2px solid var(--ink3); border-radius: 3px; }
+.design-b .get { flex: none; border: 1px solid var(--brass); color: var(--ink); background: var(--bg); border-radius: 10px; padding: 8px 10px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+.design-b .get.rm { border-color: var(--danger); color: var(--danger); }
+.design-b .open { flex: none; color: var(--ink3); font-size: 20px; padding: 0 6px; }
+.design-b .note { font-size: 12px; color: var(--ink2); }
+
+/* first launch */
+.design-b .hello { flex: 1 1 0; min-height: 0; padding: 22px 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+.design-b .paired { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; color: var(--ok); }
+.design-b .tick { flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--ok); color: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 15px; }
+.design-b .h1 { font-size: 25px; font-weight: 800; line-height: 1.15; }
+.design-b .steps { display: flex; flex-direction: column; gap: 10px; }
+.design-b .step { display: flex; gap: 10px; align-items: flex-start; font-size: 16px; }
+.design-b .num { flex: none; width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--brass); color: var(--brass); font-weight: 800; display: flex; align-items: center; justify-content: center; font-size: 14px; }
+.design-b .card { border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.design-b .card-t { font-size: 17px; font-weight: 800; }
+.design-b .card-s { font-size: 13px; color: var(--ink2); display: flex; align-items: center; gap: 7px; }
+.design-b .primary { min-height: 54px; border-radius: 14px; background: var(--brass); color: var(--bg); display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; text-align: center; padding: 6px 10px; }
+.design-b .inst { margin-top: auto; border: 1px dashed var(--brass-line); background: var(--brass-soft); border-radius: 14px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+.design-b .inst .n { flex: 1 1 0; min-width: 0; font-size: 13px; }
+.design-b .inst .n b { display: block; font-size: 15px; }
+
+/* share */
+.design-b .qr { align-self: center; width: 168px; height: 168px; max-width: 100%; position: relative; border: 8px solid var(--bg); border-radius: 8px; background-color: var(--bg); background-image: repeating-linear-gradient(0deg, var(--ink) 0 6px, var(--bg) 6px 18px), repeating-linear-gradient(90deg, var(--ink) 0 6px, var(--bg) 6px 12px); background-size: 100% 100%, 100% 100%; background-blend-mode: normal; }
+.design-b .qr::before { content: ""; position: absolute; inset: 0; background-image: repeating-linear-gradient(90deg, var(--bg) 0 7px, var(--ink) 7px 12px, var(--bg) 12px 30px); opacity: .55; }
+.design-b .qr i { position: absolute; width: 40px; height: 40px; border: 8px solid var(--ink); background: var(--bg); outline: 4px solid var(--bg); }
+.design-b .qr i::after { content: ""; position: absolute; inset: 5px; background: var(--ink); }
+.design-b .qr i.a { left: 0; top: 0; }
+.design-b .qr i.b { right: 0; top: 0; }
+.design-b .qr i.c { left: 0; bottom: 0; }
+.design-b .center { text-align: center; font-size: 14px; }
+
+/* tablet */
+.design-b .ttop { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; }
+.design-b .ttop .state { flex: 1 1 220px; }
+.design-b .ttop .tools { flex: 1 1 220px; }
+.design-b .ttop .uses { flex: 2 1 240px; min-width: 0; }
+.design-b .tmid { display: flex; flex-wrap: wrap; min-width: 0; }
+.design-b .tmid .term { flex: 3 1 420px; min-height: 330px; font-size: 13.5px; padding: 14px; }
+.design-b .side { flex: 1 1 250px; min-width: 0; background: var(--surface); border-left: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.design-b .side .sh-t { font-size: 17px; }
+.design-b .tbot { flex-direction: row; flex-wrap: wrap; gap: 10px 14px; padding: 10px; }
+.design-b .grp { flex: 1 1 250px; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.design-b .heard { font-size: 12px; color: var(--ink2); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* why */
+.design-b .why { margin-top: 24px; border: 1px solid var(--line); background: var(--surface); border-radius: 14px; padding: 12px 14px; max-width: 760px; }
+.design-b .why-t { font-weight: 800; font-size: 15px; margin-bottom: 6px; }
+.design-b .why-l { display: flex; gap: 8px; font-size: 13.5px; color: var(--ink2); padding: 3px 0; }
+.design-b .why-l::before { content: "\2022"; color: var(--brass); flex: none; }
+.design-b .why-l b { color: var(--ink); }
+</style>
+
+<div class="design-b">
+  <div class="head">
+    <div class="head-t">B · The invited relative</div>
+    <div class="head-s">Big keys, plain words, voice first. The terminal stays raw; the helpers make it safe to touch.</div>
+  </div>
+
+  <div class="row">
+
+    <!-- A -->
+    <div class="cell">
+      <div class="cap"><b>A</b>Conversation</div>
+      <div class="ph"><div class="scr">
+        <div class="top">
+          <div class="state wait"><span class="dot wait"></span><span class="txt">Waiting for your answer</span></div>
+          <div class="tools">
+            <div class="tool"><span class="ico folder"></span>Files</div>
+            <div class="tool"><span class="ico qr"></span>Share</div>
+          </div>
+          <div class="uses">It can use: <span class="chip">Holiday photos</span><span class="chip">Mailbox</span></div>
+        </div>
+<div class="term"><span class="d">&gt;</span> Put my holiday photos in one
+  album and send it to Anna
+
+<span class="g">●</span> Read(Photos/2026-08)
+  <span class="d">⎿ 48 photos found</span>
+<span class="g">●</span> Bash(zip album.zip *.jpg)
+  <span class="d">⎿ album.zip · 86 MB</span>
+<span class="box"><span class="y">Do you want to send this email
+to anna@example.com?</span>
+<span class="y">❯ 1. Yes</span>
+  2. Yes, and don't ask again
+  3. No, tell it what to change</span></div>
+        <div class="bot">
+          <div class="ans">
+            <div class="big yes">Yes <span class="sends">1</span></div>
+            <div class="big no">No <span class="sends">Esc</span></div>
+          </div>
+          <div class="saved">
+            <span class="sc">Explain simply</span><span class="sc">Go on</span><span class="sc">Start again</span>
+          </div>
+          <div class="voice">
+            <div class="speak"><span class="mic"></span>Tap and speak</div>
+            <div class="auto"><span class="sw"></span>Send when I stop</div>
+          </div>
+          <div class="keys">
+            <div class="key">Back<small>Esc</small></div>
+            <div class="key">Up<small>↑</small></div>
+            <div class="key">Down<small>↓</small></div>
+            <div class="key ok">OK<small>Enter</small></div>
+            <div class="key">Next<small>Tab</small></div>
+            <div class="key">Left<small>←</small></div>
+            <div class="key">Right<small>→</small></div>
+            <div class="key stop">Stop<small>Ctrl+C</small></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- B -->
+    <div class="cell">
+      <div class="cap"><b>B</b>Files, opened over the terminal</div>
+      <div class="ph"><div class="scr">
+        <div class="dim">
+          <div class="top">
+            <div class="state wait"><span class="dot wait"></span><span class="txt">Waiting for your answer</span></div>
+          </div>
+          <div class="term"><span class="d">&gt;</span> Put my holiday photos in one album</div>
+        </div>
+        <div class="sheet">
+          <div class="sh-h"><div class="sh-t">Files</div><div class="close">Close</div></div>
+          <div class="two">
+            <div class="act">Send a photo<small>from this phone</small></div>
+            <div class="act">Send a file<small>from this phone</small></div>
+          </div>
+          <div class="crumb"><span class="btn-s">‹ Back</span> Home › <b>Holiday photos</b></div>
+          <div class="list">
+            <div class="li"><span class="ico folder"></span><div class="n"><div class="n1">2026-08 Brittany</div><div class="n2">Folder · 48 photos</div></div><span class="open">›</span></div>
+            <div class="li"><span class="doc"></span><div class="n"><div class="n1">album.zip</div><div class="n2">86 MB · made just now</div></div><span class="get">Save</span></div>
+            <div class="li"><span class="doc"></span><div class="n"><div class="n1">letter-to-anna.txt</div><div class="n2">2 KB · today</div></div><span class="get">Save</span></div>
+            <div class="li"><span class="doc"></span><div class="n"><div class="n1">IMG_2231-beach-sunset.jpg</div><div class="n2">3.1 MB · 14 Aug</div></div><span class="get">Save</span></div>
+            <div class="li"><span class="doc"></span><div class="n"><div class="n1">IMG_2232.jpg</div><div class="n2">2.8 MB · 14 Aug</div></div><span class="get">Save</span></div>
+          </div>
+          <div class="note">"Save" puts a copy on this phone. Nothing is deleted.</div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- C -->
+    <div class="cell">
+      <div class="cap"><b>C</b>First launch, after the scan</div>
+      <div class="ph"><div class="scr">
+        <div class="hello">
+          <div class="paired"><span class="tick">✓</span>This phone is connected</div>
+          <div class="h1">Hello. Marc shared an assistant with you.</div>
+          <div class="steps">
+            <div class="step"><span class="num">1</span><span>Speak to it. Your words appear on the dark screen.</span></div>
+            <div class="step"><span class="num">2</span><span>It works, and writes what it does.</span></div>
+            <div class="step"><span class="num">3</span><span>When it asks, press <b>Yes</b> or <b>No</b>.</span></div>
+          </div>
+          <div class="card">
+            <div class="card-t">Family photos</div>
+            <div class="card-s"><span class="dot"></span>Asleep · wakes in about 10 seconds</div>
+            <div class="primary">Wake it and start</div>
+          </div>
+          <div class="inst">
+            <div class="n"><b>Install this app</b>Keep it on your home screen.</div>
+            <span class="get">Install</span>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+    <!-- D -->
+    <div class="cell">
+      <div class="cap"><b>D</b>Share, seen by the owner</div>
+      <div class="ph"><div class="scr">
+        <div class="dim">
+          <div class="top">
+            <div class="state"><span class="dot run"></span><span class="txt">Working…</span></div>
+          </div>
+          <div class="term"><span class="g">●</span> Read(Photos/2026-08)</div>
+        </div>
+        <div class="sheet">
+          <div class="sh-h"><div class="sh-t">Share</div><div class="close">Close</div></div>
+          <div class="qr"><i class="a"></i><i class="b"></i><i class="c"></i></div>
+          <div class="center"><b>Scan with a phone camera.</b><br><span class="note">It becomes their conversation. Code valid 10 min.</span></div>
+          <div class="two">
+            <div class="act">New code</div>
+            <div class="act">Copy link</div>
+          </div>
+          <div class="lbl">Who can open it</div>
+          <div class="list">
+            <div class="li"><div class="n"><div class="n1">Marc's laptop</div><div class="n2">This device · owner</div></div></div>
+            <div class="li"><div class="n"><div class="n1">Dad's phone</div><div class="n2">Open now</div></div><span class="get rm">Revoke</span></div>
+            <div class="li"><div class="n"><div class="n1">Living-room tablet</div><div class="n2">Last seen 3 days ago</div></div><span class="get rm">Revoke</span></div>
+          </div>
+        </div>
+      </div></div>
+    </div>
+
+  </div>
+
+  <!-- E -->
+  <div class="cap cap-e"><b>E</b>Tablet, landscape: files stay open beside the terminal</div>
+  <div class="tab"><div class="tscr">
+    <div class="top ttop">
+      <div class="state"><span class="dot run"></span><span class="txt">Working… you can wait</span><span class="btn-s">Put to sleep</span></div>
+      <div class="tools">
+        <div class="tool on"><span class="ico folder"></span>Files</div>
+        <div class="tool"><span class="ico qr"></span>Share</div>
+      </div>
+      <div class="uses">It can use: <span class="chip">Holiday photos</span><span class="chip">Mailbox</span><span class="chip">family-site (git)</span><span class="chip">Mail password</span></div>
+    </div>
+    <div class="tmid">
+<div class="term"><span class="d">&gt;</span> Put my holiday photos in one album and send it to Anna
+
+<span class="g">●</span> Read(Photos/2026-08)
+  <span class="d">⎿ 48 photos found</span>
+<span class="g">●</span> Bash(zip album.zip *.jpg)
+  <span class="d">⎿ album.zip · 86 MB</span>
+<span class="box"><span class="y">Do you want to send this email to anna@example.com?</span>
+<span class="y">❯ 1. Yes</span>
+  2. Yes, and don't ask again for emails
+  3. No, and tell it what to change <span class="d">(Esc)</span></span>
+<span class="g">●</span> Send(anna@example.com, album.zip)
+  <span class="d">⎿ Sending… 41 %</span>
+
+<span class="d">&gt;</span> and tell her we arrive on Sunday <span class="cur"></span></div>
+      <div class="side">
+        <div class="sh-h"><div class="sh-t">Files</div></div>
+        <div class="two">
+          <div class="act">Send a photo</div>
+          <div class="act">Send a file</div>
+        </div>
+        <div class="crumb">Home › <b>Holiday photos</b></div>
+        <div class="list">
+          <div class="li"><span class="ico folder"></span><div class="n"><div class="n1">2026-08 Brittany</div><div class="n2">48 photos</div></div><span class="open">›</span></div>
+          <div class="li"><span class="doc"></span><div class="n"><div class="n1">album.zip</div><div class="n2">86 MB · just now</div></div><span class="get">Save</span></div>
+          <div class="li"><span class="doc"></span><div class="n"><div class="n1">letter-to-anna.txt</div><div class="n2">2 KB · today</div></div><span class="get">Save</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="bot tbot">
+      <div class="grp">
+        <div class="ans">
+          <div class="big yes">Yes <span class="sends">1</span></div>
+          <div class="big no">No <span class="sends">Esc</span></div>
+        </div>
+        <div class="saved wrap">
+          <span class="sc">Explain simply</span><span class="sc">Go on</span><span class="sc">Start again</span><span class="sc">+ Add</span>
+        </div>
+      </div>
+      <div class="grp">
+        <div class="voice">
+          <div class="speak live"><span class="mic"></span>Listening… tap to stop</div>
+          <div class="auto"><span class="sw"></span>Send when I stop</div>
+        </div>
+        <div class="heard">Heard: "and tell her we arrive on Sunday"</div>
+      </div>
+      <div class="grp">
+        <div class="keys">
+          <div class="key">Back<small>Esc</small></div>
+          <div class="key">Up<small>↑</small></div>
+          <div class="key">Down<small>↓</small></div>
+          <div class="key ok">OK<small>Enter</small></div>
+          <div class="key">Next<small>Tab</small></div>
+          <div class="key">Left<small>←</small></div>
+          <div class="key">Right<small>→</small></div>
+          <div class="key stop">Stop<small>Ctrl+C</small></div>
+        </div>
+      </div>
+    </div>
+  </div></div>
+
+  <div class="why">
+    <div class="why-t">Why this design</div>
+    <div class="why-l"><span><b>Words first, key names second.</b> Every key says what it does (Back, OK, Stop); the real key (Esc, Enter, Ctrl+C) is the small print.</span></div>
+    <div class="why-l"><span><b>Yes / No are the first shortcuts,</b> always in the same place right under the terminal; each shows the key it sends, so nothing is parsed or hidden.</span></div>
+    <div class="why-l"><span><b>Voice is the biggest control,</b> with "Send when I stop" on by default, so a whole exchange can happen without the keyboard.</span></div>
+    <div class="why-l"><span><b>The state line is a sentence</b> ("Waiting for your answer"), and first launch is three numbered lines plus one button that also wakes the conversation.</span></div>
+    <div class="why-l"><span><b>Least sure:</b> "Yes = 1, No = Esc" fits Claude Code but not every tool; the mapping may need to be set per tool, or the keys may mislead.</span></div>
+  </div>
+</div>
+</div></section>
+<section id="p-c" role="tabpanel" aria-labelledby="t-c" hidden><div class="who"><b>A tablet user who lives in files</b><span>The terminal gives orders; the files are the result. Preview, download, drop in a photo.</span></div><div class="panel"><style>
+.design-c{font-family:var(--sans);color:var(--ink);font-size:13px;line-height:1.4;max-width:100%;box-sizing:border-box}
+.design-c *{box-sizing:border-box;min-width:0}
+.design-c .hd{margin:0 0 14px}
+.design-c .hd b{font-size:17px;display:block}
+.design-c .hd span{color:var(--ink2)}
+.design-c .row{display:flex;flex-wrap:wrap;gap:22px 18px;align-items:flex-start;margin-bottom:26px}
+.design-c .fig{margin:0;max-width:100%}
+.design-c .cap{font-size:11px;color:var(--ink3);margin:0 0 6px;letter-spacing:.04em;text-transform:uppercase}
+.design-c .cap b{color:var(--brass)}
+
+/* frames */
+.design-c .ph{width:300px;max-width:100%;height:620px;border:6px solid var(--ink);border-radius:30px;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
+.design-c .tb{width:1024px;max-width:100%;border:6px solid var(--ink);border-radius:22px;overflow:hidden;display:flex;flex-direction:column;background:var(--bg)}
+
+/* top */
+.design-c .top{background:var(--surface);border-bottom:1px solid var(--line);padding:8px 10px;display:flex;flex-direction:column;gap:7px;flex:none}
+.design-c .l{display:flex;align-items:center;gap:6px;max-width:100%}
+.design-c .wrap{flex-wrap:wrap}
+.design-c .grow{flex:1 1 auto}
+.design-c .nm{font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.design-c .st{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:99px;border:1px solid var(--line);background:var(--surface2);white-space:nowrap;flex:none}
+.design-c .st i{width:7px;height:7px;border-radius:50%;background:var(--warn)}
+.design-c .st.ok i{background:var(--ok)}
+.design-c .tl{display:inline-flex;align-items:center;gap:5px;height:32px;padding:0 10px;border:1px solid var(--line);border-radius:9px;background:var(--surface2);font-size:12px;font-weight:600;white-space:nowrap;flex:none}
+.design-c .tl.on{background:var(--brass-soft);border-color:var(--brass-line)}
+.design-c .tl.pri{background:var(--brass);border-color:var(--brass);color:var(--bg)}
+.design-c .tl.sm{height:26px;font-size:11px;padding:0 8px}
+.design-c .split{display:inline-flex;flex:none}
+.design-c .split .tl:first-child{border-radius:9px 0 0 9px}
+.design-c .split .tl:last-child{border-radius:0 9px 9px 0;border-left:0;padding:0 9px;font-size:15px;color:var(--brass)}
+.design-c .n{display:inline-block;min-width:16px;padding:0 4px;border-radius:99px;background:var(--brass);color:var(--bg);font-size:10px;line-height:16px;text-align:center;font-weight:700}
+.design-c .chips{display:flex;gap:5px;overflow:hidden}
+.design-c .chip{flex:none;font-size:10.5px;padding:2px 7px;border:1px solid var(--line);border-radius:99px;color:var(--ink2);background:var(--bg);white-space:nowrap}
+.design-c .chip b{color:var(--ink3);font-weight:600;margin-right:3px}
+.design-c .nw{display:flex;align-items:center;gap:6px;padding:5px 8px;border:1px solid var(--brass-line);background:var(--brass-soft);border-radius:8px;font-size:11px}
+.design-c .nw span{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.design-c .nw b{color:var(--brass);flex:none}
+.design-c .dot{width:7px;height:7px;border-radius:50%;background:var(--brass);flex:none;display:inline-block}
+
+/* terminal */
+.design-c .tm{flex:1 1 0;min-height:0;background:var(--term);color:var(--term-ink);font-family:var(--mono);font-size:10px;line-height:1.55;padding:8px 9px;overflow:hidden;white-space:pre-wrap;overflow-wrap:anywhere}
+.design-c .tm .d{color:var(--term-dim)}
+.design-c .tm .g{color:#7fd1a8}
+.design-c .tm .y{color:#e0b860}
+.design-c .tm .f{color:#e0b860;text-decoration:underline dotted}
+.design-c .tm .ask{display:block;border:1px solid #e0b860;border-radius:4px;padding:4px 6px;margin-top:4px}
+.design-c .tm .cur{display:inline-block;width:6px;height:11px;background:var(--term-ink);vertical-align:-1px}
+.design-c .tm.peek{flex:none;height:92px;display:flex;flex-direction:column;justify-content:flex-end;opacity:.55}
+.design-c .tm.big{font-size:12px;padding:12px 14px;flex:3 1 420px;min-height:430px}
+
+/* bottom */
+.design-c .bt{background:var(--surface);border-top:1px solid var(--line);padding:7px 8px 9px;display:flex;flex-direction:column;gap:6px;flex:none}
+.design-c .sc{flex:none;font-size:11px;padding:5px 9px;border:1px solid var(--brass-line);background:var(--brass-soft);border-radius:8px;white-space:nowrap;font-weight:600}
+.design-c .sc.add{border-style:dashed;background:var(--surface);color:var(--ink3)}
+.design-c .scs{display:flex;gap:5px;overflow:hidden}
+.design-c .vo{display:flex;align-items:center;gap:8px;padding:4px 8px 4px 4px;border:1px solid var(--line);border-radius:99px;background:var(--bg)}
+.design-c .mic{width:28px;height:28px;border-radius:50%;background:var(--danger);flex:none;display:flex;align-items:center;justify-content:center}
+.design-c .mic i{width:8px;height:13px;border-radius:5px;background:var(--bg);display:block}
+.design-c .wv{display:flex;align-items:center;gap:2px;flex:1 1 auto;height:18px;overflow:hidden}
+.design-c .wv i{width:2px;border-radius:2px;background:var(--ink3);height:6px;flex:none}
+.design-c .wv i:nth-child(3n){height:14px}
+.design-c .wv i:nth-child(4n+1){height:10px}
+.design-c .wv i:nth-child(7n){height:18px}
+.design-c .vt{font-size:11px;color:var(--ink2);white-space:nowrap;flex:none}
+.design-c .tg{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;flex:none}
+.design-c .tg i{width:26px;height:15px;border-radius:99px;background:var(--ok);display:block;position:relative}
+.design-c .tg i::after{content:"";position:absolute;right:2px;top:2px;width:11px;height:11px;border-radius:50%;background:var(--bg)}
+.design-c .ks{display:flex;gap:4px}
+.design-c .k{flex:1 1 0;height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface2);font-family:var(--mono);font-size:10.5px;display:flex;align-items:center;justify-content:center;white-space:nowrap}
+.design-c .k.w{flex:1.5 1 0}
+.design-c .k.e{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.design-c .k.c{color:var(--danger)}
+
+/* sheet */
+.design-c .sh{flex:1 1 0;min-height:0;background:var(--surface);border-top:1px solid var(--line);border-radius:16px 16px 0 0;margin-top:-10px;position:relative;padding:6px 10px 10px;display:flex;flex-direction:column;gap:7px;overflow:hidden}
+.design-c .hdl{width:36px;height:4px;border-radius:4px;background:var(--line);margin:0 auto;flex:none}
+.design-c .ttl{font-weight:700;font-size:14px}
+.design-c .sub{font-size:11px;color:var(--ink2)}
+.design-c .x{width:24px;height:24px;border-radius:50%;background:var(--surface2);display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--ink2);flex:none}
+.design-c .snd{display:flex;gap:6px}
+.design-c .sb{flex:1 1 0;border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:7px 4px 6px;text-align:center;font-size:11px;font-weight:600}
+.design-c .sb.pri{border-color:var(--brass-line);background:var(--brass-soft)}
+.design-c .sb u{display:block;text-decoration:none;font-size:15px;line-height:18px;color:var(--brass)}
+.design-c .up{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--ink2)}
+.design-c .bar{flex:1 1 auto;height:4px;border-radius:4px;background:var(--surface2);overflow:hidden}
+.design-c .bar i{display:block;width:62%;height:100%;background:var(--brass)}
+.design-c .lb{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink3);font-weight:700;display:flex;align-items:center;gap:6px;margin-top:2px}
+.design-c .lb.new{color:var(--brass)}
+.design-c .fl{display:flex;flex-direction:column}
+.design-c .fr{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--line)}
+.design-c .fr:last-child{border-bottom:0}
+.design-c .fr.sel{background:var(--brass-soft);margin:0 -6px;padding:6px;border-radius:8px;border-bottom:0}
+.design-c .kd{width:30px;height:30px;border-radius:6px;border:1px solid var(--line);background:var(--surface2);font-family:var(--mono);font-size:8.5px;font-weight:700;color:var(--ink2);display:flex;align-items:center;justify-content:center;flex:none}
+.design-c .kd.img{background:linear-gradient(135deg,var(--brass-soft) 50%,var(--brass-line) 50%);color:var(--ink)}
+.design-c .kd.dir{border-style:dashed}
+.design-c .fn{flex:1 1 auto}
+.design-c .fn b{display:block;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.design-c .fn span{display:block;font-size:10.5px;color:var(--ink3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.design-c .dl{width:28px;height:28px;border-radius:8px;border:1px solid var(--line);background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:13px;flex:none}
+.design-c .rv{font-size:11px;font-weight:600;color:var(--danger);border:1px solid var(--line);border-radius:7px;padding:3px 8px;flex:none}
+.design-c .cta{margin-top:auto;height:36px;border-radius:10px;background:var(--brass);color:var(--bg);font-weight:700;font-size:12.5px;display:flex;align-items:center;justify-content:center;flex:none}
+
+/* first launch */
+.design-c .fst{flex:1 1 auto;padding:26px 16px 14px;display:flex;flex-direction:column;gap:12px;background:var(--bg)}
+.design-c .okc{width:44px;height:44px;border-radius:50%;background:var(--ok);color:var(--bg);font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.design-c .hl{font-size:19px;font-weight:700;line-height:1.2}
+.design-c .card{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:10px;display:flex;flex-direction:column;gap:7px}
+.design-c .card.tip{border-style:dashed;border-color:var(--brass-line);background:var(--brass-soft)}
+.design-c .stp{display:flex;gap:6px;flex-wrap:wrap;font-size:11px;color:var(--ink2);align-items:center}
+.design-c .stp b{border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:1px 6px;color:var(--ink)}
+
+/* share */
+.design-c .qr{width:132px;height:132px;margin:0 auto;border:8px solid var(--surface);outline:1px solid var(--line);border-radius:4px;position:relative;flex:none;background:conic-gradient(var(--ink) 25%,var(--surface) 0 50%,var(--ink) 0 75%,var(--surface) 0) 0 0/12px 12px}
+.design-c .qr i{position:absolute;width:32px;height:32px;border:6px solid var(--ink);background:var(--surface);outline:3px solid var(--surface)}
+.design-c .qr i::after{content:"";position:absolute;inset:4px;background:var(--ink)}
+.design-c .qr i:nth-child(1){left:0;top:0}
+.design-c .qr i:nth-child(2){right:0;top:0}
+.design-c .qr i:nth-child(3){left:0;bottom:0}
+.design-c .ctr{text-align:center}
+
+/* tablet */
+.design-c .tb .top{flex-direction:row;flex-wrap:wrap;align-items:center;padding:9px 12px;gap:8px}
+.design-c .tb .nm{font-size:14px}
+.design-c .tbb{display:flex;flex-wrap:wrap}
+.design-c .fp{flex:1 1 300px;background:var(--surface);border-left:1px solid var(--line);padding:10px 12px;display:flex;flex-direction:column;gap:8px}
+.design-c .pv{border:1px solid var(--line);border-radius:10px;background:var(--bg);padding:9px;display:flex;gap:10px}
+.design-c .pg{width:96px;height:128px;flex:none;background:var(--surface);border:1px solid var(--line);border-radius:3px;padding:9px 8px;display:flex;flex-direction:column;gap:4px}
+.design-c .pg i{display:block;height:3px;border-radius:2px;background:var(--line)}
+.design-c .pg i.h{height:6px;width:70%;background:var(--ink3)}
+.design-c .pg i.s{width:55%}
+.design-c .pg .ch{display:flex;align-items:flex-end;gap:4px;height:40px;margin:4px 0;border-bottom:1px solid var(--line)}
+.design-c .pg .ch u{flex:1 1 0;background:var(--brass);border-radius:2px 2px 0 0;height:40%}
+.design-c .pg .ch u:nth-child(2){height:62%}
+.design-c .pg .ch u:nth-child(3){height:50%}
+.design-c .pg .ch u:nth-child(4){height:95%}
+.design-c .pva{flex:1 1 auto;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+.design-c .tb .bt{flex-direction:row;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:9px 12px}
+.design-c .tb .scs{flex:2 1 300px;flex-wrap:wrap}
+.design-c .tb .vo{flex:1 1 230px}
+.design-c .tb .ks{flex:1 1 300px}
+.design-c .tb .k{height:34px;font-size:11.5px}
+
+/* why */
+.design-c .why{border:1px solid var(--line);border-radius:12px;background:var(--surface);padding:12px 14px;max-width:760px}
+.design-c .why b{display:block;margin-bottom:4px}
+.design-c .why ul{margin:0;padding-left:18px;color:var(--ink2)}
+.design-c .why li{margin:3px 0}
+.design-c .why em{color:var(--warn);font-style:normal;font-weight:600}
+</style>
+
+<div class="design-c">
+  <div class="hd">
+    <b>C · Files beside the terminal</b>
+    <span>You give orders in the terminal; the result is a file. Files are one tap away, always say what is new, and take a photo in two taps.</span>
+  </div>
+
+  <div class="row">
+
+    <!-- A -->
+    <div class="fig">
+      <p class="cap"><b>A</b> Conversation</p>
+      <div class="ph">
+        <div class="top">
+          <div class="l"><span class="nm grow">Q3 sales report</span><span class="st"><i></i>Waiting for you</span></div>
+          <div class="l">
+            <span class="split"><span class="tl on">Files <span class="n">3</span></span><span class="tl">＋</span></span>
+            <span class="tl">Resources</span>
+            <span class="grow"></span>
+            <span class="tl">Share</span>
+          </div>
+          <div class="chips"><span class="chip"><b>dir</b>reports</span><span class="chip"><b>git</b>acme/site</span><span class="chip"><b>mail</b>sales@</span><span class="chip"><b>key</b>1</span></div>
+          <div class="nw"><i class="dot"></i><span>q3-report.pdf, chart-revenue.png +1</span><b>View ›</b></div>
+        </div>
+<div class="tm"><span class="d">&gt;</span> Build the Q3 sales report as a PDF with a revenue chart
+
+<span class="g">●</span> Read(data/sales-q3.xlsx)
+  <span class="d">⎿ 1,248 rows</span>
+<span class="g">●</span> Bash(python make_chart.py)
+  <span class="d">⎿ wrote</span> <span class="f">out/chart-revenue.png</span>
+<span class="g">●</span> Write(<span class="f">out/q3-report.pdf</span>)
+  <span class="d">⎿ 6 pages, 412 KB</span>
+<span class="g">●</span> Bash(git push origin main)
+<span class="ask"><span class="y">Do you want to push to acme/site?</span>
+<span class="g">❯ 1. Yes</span>
+  2. Yes, and don't ask again
+  3. No, tell Claude what to do</span></div>
+        <div class="bt">
+          <div class="scs"><span class="sc">Yes, go on</span><span class="sc">Run the tests</span><span class="sc">/compact</span><span class="sc add">＋</span></div>
+          <div class="vo"><span class="mic"><i></i></span><span class="wv"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="tg">auto ⏎ <i></i></span></div>
+          <div class="ks"><span class="k">Esc</span><span class="k">Tab</span><span class="k">←</span><span class="k">↑</span><span class="k">↓</span><span class="k">→</span><span class="k c">^C</span><span class="k w e">⏎</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- B -->
+    <div class="fig">
+      <p class="cap"><b>B</b> Files sheet</p>
+      <div class="ph">
+        <div class="top"><div class="l"><span class="nm grow">Q3 sales report</span><span class="st"><i></i>Waiting for you</span></div></div>
+<div class="tm peek"><span><span class="y">Do you want to push to acme/site?</span>
+<span class="g">❯ 1. Yes</span>
+  2. Yes, and don't ask again
+  3. No, tell Claude what to do</span></div>
+        <div class="sh">
+          <i class="hdl"></i>
+          <div class="l"><span class="ttl">Files</span><span class="sub grow">out/</span><span class="x">✕</span></div>
+          <div class="snd"><span class="sb pri"><u>◉</u>Camera</span><span class="sb"><u>▦</u>Photos</span><span class="sb"><u>▤</u>Document</span></div>
+          <div class="up"><span>IMG_2041.jpg → in/</span><span class="bar"><i></i></span><span>62%</span></div>
+          <div class="lb new"><i class="dot"></i>New since 14:02 · 3</div>
+          <div class="fl">
+            <div class="fr"><span class="kd">PDF</span><span class="fn"><b>q3-report.pdf</b><span>6 pages · 412 KB · 2 min ago</span></span><span class="dl">↓</span></div>
+            <div class="fr"><span class="kd img">PNG</span><span class="fn"><b>chart-revenue.png</b><span>1600×900 · 3 min ago</span></span><span class="dl">↓</span></div>
+            <div class="fr"><span class="kd">XLS</span><span class="fn"><b>summary.xlsx</b><span>2 sheets · 5 min ago</span></span><span class="dl">↓</span></div>
+          </div>
+          <div class="lb">Earlier</div>
+          <div class="fl">
+            <div class="fr"><span class="kd dir">dir</span><span class="fn"><b>data/</b><span>4 files</span></span><span class="sub">›</span></div>
+            <div class="fr"><span class="kd">WEB</span><span class="fn"><b>index.html</b><span>yesterday</span></span><span class="dl">↓</span></div>
+          </div>
+          <div class="cta">↓ Download 3 new</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- C -->
+    <div class="fig">
+      <p class="cap"><b>C</b> First launch after scan</p>
+      <div class="ph">
+        <div class="fst">
+          <span class="okc">✓</span>
+          <div class="hl">This device is paired.</div>
+          <div class="sub">It shows one conversation — yours now.</div>
+          <div class="card">
+            <div class="l"><span class="nm grow">Q3 sales report</span><span class="st ok"><i></i>Running</span></div>
+            <div class="sub">Claude Code · shared by Marc</div>
+            <div class="l"><i class="dot"></i><span class="sub grow">3 files ready to look at</span></div>
+          </div>
+          <div class="card tip">
+            <b>Install this app</b>
+            <div class="stp"><b>Share</b>›<b>Add to Home Screen</b></div>
+            <div class="sub">Opens full screen, straight to this conversation.</div>
+          </div>
+          <div class="cta">Open conversation</div>
+          <div class="sub ctr">Not now, stay in the browser</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- D -->
+    <div class="fig">
+      <p class="cap"><b>D</b> Share sheet (owner)</p>
+      <div class="ph">
+        <div class="top"><div class="l"><span class="nm grow">Q3 sales report</span><span class="st ok"><i></i>Running</span></div></div>
+<div class="tm peek" style="height:46px"><span><span class="g">●</span> Write(out/q3-report.pdf)</span></div>
+        <div class="sh">
+          <i class="hdl"></i>
+          <div class="l"><span class="ttl grow">Share this conversation</span><span class="x">✕</span></div>
+          <div class="qr"><i></i><i></i><i></i></div>
+          <div class="sub ctr">Scan with a phone or tablet. Whoever scans sees only this conversation and its files.</div>
+          <div class="l" style="justify-content:center"><span class="sub">Valid 9:41</span><span class="tl sm">New code</span><span class="tl sm">Copy link</span></div>
+          <div class="lb">Paired devices · 3</div>
+          <div class="fl">
+            <div class="fr"><span class="kd">TAB</span><span class="fn"><b>Léa's iPad</b><span>this device · owner</span></span></div>
+            <div class="fr"><span class="kd">PH</span><span class="fn"><b>Marc's Pixel</b><span>active now</span></span><span class="rv">Revoke</span></div>
+            <div class="fr"><span class="kd">TAB</span><span class="fn"><b>Kitchen tablet</b><span>seen 2 days ago</span></span><span class="rv">Revoke</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- E -->
+  <div class="fig" style="margin-bottom:26px">
+    <p class="cap"><b>E</b> Tablet landscape — Files as a side panel</p>
+    <div class="tb">
+      <div class="top">
+        <span class="nm">Q3 sales report</span>
+        <span class="st"><i></i>Waiting for you</span>
+        <span class="chips grow"><span class="chip"><b>dir</b>reports</span><span class="chip"><b>git</b>acme/site</span><span class="chip"><b>mail</b>sales@</span><span class="chip"><b>key</b>1 secret</span></span>
+        <span class="tl">Resources</span>
+        <span class="tl">Share</span>
+        <span class="split"><span class="tl on">Files <span class="n">3</span></span><span class="tl">＋</span></span>
+      </div>
+      <div class="tbb">
+<div class="tm big"><span class="d">&gt;</span> Build the Q3 sales report as a PDF with a revenue chart
+
+<span class="g">●</span> Read(data/sales-q3.xlsx)
+  <span class="d">⎿ 1,248 rows, 3 regions</span>
+<span class="g">●</span> Bash(python make_chart.py --out out/chart-revenue.png)
+  <span class="d">⎿ wrote</span> <span class="f">out/chart-revenue.png</span>
+<span class="g">●</span> Write(<span class="f">out/summary.xlsx</span>)
+  <span class="d">⎿ 2 sheets</span>
+<span class="g">●</span> Write(<span class="f">out/q3-report.pdf</span>)
+  <span class="d">⎿ 6 pages, 412 KB</span>
+
+The report is ready. I also want to publish it to the site.
+
+<span class="g">●</span> Bash(git push origin main)
+<span class="ask"><span class="y">Do you want to push to acme/site?</span>
+<span class="g">❯ 1. Yes</span>
+  2. Yes, and don't ask again for git push
+  3. No, tell Claude what to do differently</span>
+<span class="cur"></span></div>
+        <div class="fp">
+          <div class="l"><span class="ttl">Files</span><span class="sub grow">out/</span><span class="tl sm">Hide ›</span></div>
+          <div class="snd"><span class="sb pri"><u>◉</u>Camera</span><span class="sb"><u>▦</u>Photos</span><span class="sb"><u>▤</u>Document</span></div>
+          <div class="lb new"><i class="dot"></i>New since 14:02 · 3<span class="grow"></span><span class="sub">Mark seen</span></div>
+          <div class="fl">
+            <div class="fr sel"><span class="kd">PDF</span><span class="fn"><b>q3-report.pdf</b><span>6 pages · 412 KB · 2 min ago</span></span><span class="dl">↓</span></div>
+            <div class="fr"><span class="kd img">PNG</span><span class="fn"><b>chart-revenue.png</b><span>1600×900 · 3 min ago</span></span><span class="dl">↓</span></div>
+            <div class="fr"><span class="kd">XLS</span><span class="fn"><b>summary.xlsx</b><span>2 sheets · 5 min ago</span></span><span class="dl">↓</span></div>
+          </div>
+          <div class="pv">
+            <div class="pg"><i class="h"></i><i></i><i class="s"></i><div class="ch"><u></u><u></u><u></u><u></u></div><i></i><i></i><i class="s"></i></div>
+            <div class="pva">
+              <span class="sub">Preview · page 1 of 6</span>
+              <span class="tl sm pri">↓ Download</span>
+              <span class="tl sm">Open full screen</span>
+              <span class="tl sm">Type its path in terminal</span>
+            </div>
+          </div>
+          <div class="lb">Earlier</div>
+          <div class="fl">
+            <div class="fr"><span class="kd dir">dir</span><span class="fn"><b>data/</b><span>4 files</span></span><span class="sub">›</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="bt">
+        <div class="scs"><span class="sc">Yes, go on</span><span class="sc">Run the tests</span><span class="sc">/compact</span><span class="sc">Make it a PDF</span><span class="sc add">＋</span></div>
+        <div class="vo"><span class="mic"><i></i></span><span class="wv"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span class="vt">Listening</span><span class="tg">auto ⏎ <i></i></span></div>
+        <div class="ks"><span class="k">Esc</span><span class="k">Tab</span><span class="k">←</span><span class="k">↑</span><span class="k">↓</span><span class="k">→</span><span class="k c">^C</span><span class="k w e">⏎</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="why">
+    <b>Why this design</b>
+    <ul>
+      <li>Files are the result, so they sit next to the terminal: side panel on tablet, bottom sheet on phone, with the approval prompt still visible above.</li>
+      <li>"New since you last looked" is everywhere: a count on the Files button, a strip under the tools, a section at the top of the list, and one "Download 3 new" button.</li>
+      <li>Photo in two taps: the ＋ glued to Files, then Camera. The upload shows its progress and lands in <i>in/</i>.</li>
+      <li>File paths printed in the terminal are tappable and open the preview; the preview can type the path back into the terminal.</li>
+      <li><em>Least sure:</em> the phone top is tall (tools + chips + new-files strip) and takes lines away from the terminal; the strip may need to fold into the Files badge.</li>
+    </ul>
+  </div>
+</div>
+</div></section>
+</div>
+<script>
+(function(){var tabs=[].slice.call(document.querySelectorAll('[role="tab"]'));
+function show(id){tabs.forEach(function(t){var on=t.id===id;t.setAttribute('aria-selected',on?'true':'false');document.getElementById(t.getAttribute('aria-controls')).hidden=!on;});}
+tabs.forEach(function(t){t.addEventListener('click',function(){show(t.id);try{history.replaceState(null,'','#'+t.id.slice(2));}catch(e){}});});
+var h=(location.hash||'').slice(1);if(h&&document.getElementById('t-'+h))show('t-'+h);})();
+</script>

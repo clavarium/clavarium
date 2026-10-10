@@ -1,0 +1,13 @@
+{
+  "name": "clavarium",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
+  "scripts": {
+    "check": "npm run check:shapes && npm run check:names && npm run check:shell",
+    "check:shapes": "node tools/check-shapes.mjs",
+    "check:names": "node tools/check-ai-names.mjs",
+    "check:shell": "node tools/check-shell.mjs"
+  }
+}

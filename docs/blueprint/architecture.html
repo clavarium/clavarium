@@ -1,0 +1,640 @@
+<title>Clavarium Blueprint</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+/* Layout: one sticky tab bar, one panel at a time; diagrams are boxes-and-arrows built from the same tokens. */
+:root{
+  --bg:#f5f7f9; --surface:#ffffff; --surface2:#edf1f5; --line:#d8e0e9;
+  --ink:#111a24; --ink2:#516075; --ink3:#8090a4;
+  --brass:#8a6a22; --brass-soft:rgba(154,117,38,.12); --brass-line:rgba(154,117,38,.38);
+  --ok:#256b53; --warn:#a44e17; --danger:#9c2c28;
+  --term:#0f141a; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#e8eef6; --vm:#eef4ec; --edge:#f6efe2;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  --r:10px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1319; --surface:#161d26; --surface2:#1d2631; --line:#2b3745;
+  --ink:#e7edf4; --ink2:#a3b1c2; --ink3:#74849a;
+  --brass:#d2a94e; --brass-soft:rgba(210,169,78,.14); --brass-line:rgba(210,169,78,.42);
+  --ok:#5fc39d; --warn:#e39a5c; --danger:#ee7f79;
+  --term:#080b0f; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#18222f; --vm:#17241c; --edge:#262014; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1319; --surface:#161d26; --surface2:#1d2631; --line:#2b3745;
+  --ink:#e7edf4; --ink2:#a3b1c2; --ink3:#74849a;
+  --brass:#d2a94e; --brass-soft:rgba(210,169,78,.14); --brass-line:rgba(210,169,78,.42);
+  --ok:#5fc39d; --warn:#e39a5c; --danger:#ee7f79;
+  --term:#080b0f; --term-ink:#d6dde6; --term-dim:#7d8b9b;
+  --host:#18222f; --vm:#17241c; --edge:#262014; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;margin:0}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:18px;padding-block:22px 60px}
+h1{font-size:26px;margin:0 0 2px;letter-spacing:-.01em}
+h2{font-size:18px;margin:26px 0 10px;text-wrap:balance}
+h3{font-size:13px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink2);font-weight:600}
+p{margin:0 0 10px;max-width:68ch}
+.lead{color:var(--ink2);margin-bottom:14px}
+code,.mono{font-family:var(--mono);font-size:.9em}
+.tabs{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);display:flex;gap:6px;overflow-x:auto;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:18px}
+.tabs button{font:600 13px var(--sans);color:var(--ink2);background:transparent;border:1px solid transparent;border-radius:999px;padding:7px 13px;cursor:pointer;white-space:nowrap}
+.tabs button[aria-selected="true"]{background:var(--brass-soft);border-color:var(--brass-line);color:var(--ink)}
+.tabs button:focus-visible,.pick:focus-visible{outline:2px solid var(--brass);outline-offset:2px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(280px,1fr))}
+.g3{grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:14px;min-width:0}
+.card p:last-child{margin-bottom:0}
+.tag{display:inline-block;font:600 11px var(--mono);padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--ink2);background:var(--surface2)}
+.tag.b{border-color:var(--brass-line);background:var(--brass-soft);color:var(--ink)}
+.tag.ok{color:var(--ok)} .tag.no{color:var(--danger)} .tag.w{color:var(--warn)}
+.scroll{overflow-x:auto}
+/* ---------- diagrams ---------- */
+.dia{display:flex;align-items:stretch;gap:0;min-width:760px}
+.zone{flex:1;border:1.5px dashed var(--line);border-radius:14px;padding:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.zone>h3{margin-bottom:2px}
+.zone.edge{background:var(--edge)} .zone.host{background:var(--host);flex:1.5} .zone.vm{background:var(--vm);flex:1.5}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:13px}
+.box b{display:block;font-size:13px}
+.box small{color:var(--ink2);font-size:12px}
+.box.k{border-color:var(--brass-line);box-shadow:inset 3px 0 0 var(--brass)}
+.arrow{align-self:center;flex:0 0 74px;text-align:center;font:500 11px var(--mono);color:var(--ink2);line-height:1.25}
+.arrow i{display:block;font-style:normal;font-size:20px;color:var(--brass);line-height:1}
+.rings{display:grid;gap:0;max-width:760px}
+.ring{border:1.5px solid var(--line);border-radius:14px;padding:10px 12px 12px;background:var(--surface)}
+.ring .ring{margin-top:8px}
+.ring>.rh{display:flex;gap:8px;align-items:baseline;flex-wrap:wrap;margin-bottom:2px}
+.ring>.rh b{font-size:14px} .ring>.rh span{color:var(--ink2);font-size:13px}
+.rings>.ring{background:var(--surface2)}.ring.r1{background:var(--edge)} .ring.r2{background:var(--host)} .ring.r3{background:var(--vm)} .ring.r4{background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px;min-width:620px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color:var(--ink2)}
+/* ---------- mockups ---------- */
+.mock{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface);min-width:0}
+.mock .bar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.mock .bar .sp{flex:1}
+.app{display:grid;grid-template-columns:230px 1fr;min-height:430px}
+.side{border-right:1px solid var(--line);padding:10px;display:flex;flex-direction:column;gap:6px;background:var(--surface2);min-width:0}
+.conv{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:8px 10px;font-size:13px}
+.conv.on{border-color:var(--brass);box-shadow:0 0 0 1px var(--brass)}
+.conv b{display:block} .conv small{color:var(--ink2)}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:var(--ink3)}
+.dot.run{background:var(--ok)} .dot.wait{background:var(--warn)}
+.btn{font:600 12px var(--sans);border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:6px 10px;display:inline-block}
+.btn.p{background:var(--brass);border-color:var(--brass);color:#fff}
+.main{display:flex;flex-direction:column;min-width:0}
+.term{background:var(--term);color:var(--term-ink);font:12.5px/1.45 var(--mono);padding:12px;flex:1;white-space:pre-wrap;overflow-wrap:anywhere;min-height:240px}
+.term .d{color:var(--term-dim)} .term .a{color:#e0b860} .term .g{color:#7fd1a8}
+.keys{display:flex;gap:6px;padding:8px 10px;border-top:1px solid var(--line);flex-wrap:wrap;background:var(--surface2)}
+.keys span{font:600 11px var(--mono);border:1px solid var(--line);border-radius:6px;padding:4px 8px;background:var(--surface)}
+.keys .pre{font-family:var(--sans);border-color:var(--brass-line);background:var(--brass-soft)}.keys .pre.add{background:var(--surface);border-style:dashed;color:var(--ink2)}
+.keys .in{flex:1;min-width:120px;font-weight:400;color:var(--ink3)}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.phone{width:290px;max-width:100%;margin:0 auto;border:1px solid var(--line);border-radius:26px;overflow:hidden;background:var(--surface)}
+.phone .term{min-height:300px;font-size:11px}
+.form{display:grid;gap:10px;padding:14px}
+.field{display:grid;gap:4px;font-size:13px}
+.field label{font-weight:600}
+.input{border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:var(--surface);font-size:13px;color:var(--ink)}
+.opts{display:flex;gap:6px;flex-wrap:wrap}
+.opt{border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;background:var(--surface)}
+.opt.on{border-color:var(--brass);background:var(--brass-soft);font-weight:600}
+.row{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:13px;flex-wrap:wrap}
+.row:last-child{border-bottom:0}
+.row .n{font-weight:600;min-width:120px} .row .sp{flex:1}
+.q{display:grid;gap:6px}
+.q .pick{font:500 13px var(--sans);text-align:left;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:8px 10px;cursor:pointer}
+.q .pick[aria-pressed="true"]{border-color:var(--brass);background:var(--brass-soft);font-weight:600}
+.q .rec{font:600 10px var(--mono);color:var(--brass);margin-left:6px}
+.note{font-size:13px;color:var(--ink2)}
+@media (max-width:640px){.app{grid-template-columns:1fr}.side{border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+
+<div class="wrap">
+  <h1>Clavarium</h1>
+  <p class="lead">A conversation is a VM with a terminal in it. Everything else is a folder. Agreed architecture; the plan waits for a go.</p>
+
+  <div class="tabs" role="tablist" aria-label="Sections">
+    <button role="tab" id="t-idea" aria-controls="p-idea" aria-selected="true">Idea</button>
+    <button role="tab" id="t-arch" aria-controls="p-arch" aria-selected="false">Architecture</button>
+    <button role="tab" id="t-sec" aria-controls="p-sec" aria-selected="false">Security layers</button>
+    <button role="tab" id="t-res" aria-controls="p-res" aria-selected="false">Resources</button>
+    <button role="tab" id="t-share" aria-controls="p-share" aria-selected="false">App &amp; sharing</button>
+    <button role="tab" id="t-mock" aria-controls="p-mock" aria-selected="false">Mockups</button>
+    <button role="tab" id="t-rules" aria-controls="p-rules" aria-selected="false">Rules</button>
+    <button role="tab" id="t-open" aria-controls="p-open" aria-selected="false">Decided</button>
+    <button role="tab" id="t-plan" aria-controls="p-plan" aria-selected="false">Plan</button>
+  </div>
+
+  <!-- ================= IDEA ================= -->
+  <section id="p-idea" role="tabpanel" aria-labelledby="t-idea">
+    <div class="grid g3">
+      <div class="card"><h3>Conversation</h3><p><b>= one Multipass VM</b> + one command running in tmux. The command is a setting: Claude Code, OpenCode, OpenHands, a shell.</p></div>
+      <div class="card"><h3>Screen</h3><p><b>= the raw terminal</b>, in the browser. No chat layer, no cards, no parsing of the tool's output.</p></div>
+      <div class="card"><h3>Resource</h3><p><b>= a folder in the VM.</b> A directory, a git repository, a mailbox, a secret: all of them arrive as files.</p></div>
+    </div>
+
+    <h2>What changes</h2>
+    <div class="scroll"><table>
+      <tr><th>Today (experimental)</th><th>Clavarium</th></tr>
+      <tr><td>Chat UI rebuilt on top of each tool (stream parser, approval cards, question cards, file cards)</td><td>The tool's own terminal UI, shown as is</td></tr>
+      <tr><td>One adapter per tool, fragile to tool updates</td><td>No adapter: any CLI works the day it ships</td></tr>
+      <tr><td>Mail, calendar, files wired into the server as LLM tools</td><td>Mounted as files; the agent reads them like any folder</td></tr>
+      <tr><td>Agents, conversations, engines, guests: several concepts</td><td>Two concepts: conversation, resource</td></tr>
+      <tr><td>French code and docs</td><td>English everywhere</td></tr>
+    </table></div>
+
+    <h2>Already proven</h2>
+    <div class="grid g2">
+      <div class="card"><p><span class="tag ok">measured</span> Browser terminal (xterm.js) ⇄ WebSocket ⇄ PTY ⇄ tmux ⇄ real Claude Code on the subscription: display, typing, reload keeps the session, resize follows. Prototype: <b>128 lines</b>.</p></div>
+      <div class="card"><p><span class="tag w">friction seen</span> Two viewers of different sizes fight over the terminal size. Phone works for short answers only. Mouse selection needs Shift.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= ARCHITECTURE ================= -->
+  <section id="p-arch" role="tabpanel" aria-labelledby="t-arch" hidden>
+    <h2>One keystroke, end to end</h2>
+    <div class="scroll"><div class="dia">
+      <div class="zone edge"><h3>Browser</h3>
+        <div class="box k"><b>xterm.js</b><small>draws the terminal</small></div>
+        <div class="box"><b>Conversation list</b><small>plain HTML</small></div>
+        <div class="box"><b>Shortcuts · voice</b><small>turn a click or a sentence into keystrokes</small></div>
+      </div>
+      <div class="arrow"><i>⇄</i>HTTPS<br>WebSocket</div>
+      <div class="zone host"><h3>Host · Clavarium</h3>
+        <div class="box"><b>Gate</b><small>TLS, single sign-on, origin check</small></div>
+        <div class="box k"><b>Terminal bridge</b><small>one PTY per viewer, no state kept</small></div>
+        <div class="box"><b>Conversations</b><small>create, start, stop, delete VMs</small></div>
+        <div class="box"><b>Resources</b><small>turn things into folders, mount them</small></div>
+        <div class="box"><b>Vault</b><small>secrets, sealed at rest</small></div>
+        <div class="box"><b>Speech-to-text</b><small>audio in, text out; nothing kept</small></div>
+      </div>
+      <div class="arrow"><i>⇄</i>multipass<br>exec · mount</div>
+      <div class="zone vm"><h3>VM · owned by the agent</h3>
+        <div class="box k"><b>tmux session</b><small>survives reloads and server restarts</small></div>
+        <div class="box"><b>The tool</b><small>claude · opencode · openhands · bash</small></div>
+        <div class="box"><b>/resources/…</b><small>mounted folders</small></div>
+        <div class="box"><b>sudo, full disk</b><small>the agent is root here</small></div>
+      </div>
+    </div></div>
+    <p class="note" style="margin-top:8px">Brass edge = the path of a keystroke. The server never reads what the tool prints.</p>
+
+    <h2>Where it runs: at home, behind a blind relay</h2>
+    <div class="scroll"><div class="dia" style="min-width:900px">
+      <div class="zone edge" style="flex:.8"><h3>Browser</h3>
+        <div class="box">anywhere on the internet</div>
+      </div>
+      <div class="arrow"><i>→</i>HTTPS<br>your domain</div>
+      <div class="zone" style="flex:1"><h3>Relay · small public server</h3>
+        <div class="box k"><b>Forwards bytes</b><small>decrypts nothing, stores nothing</small></div>
+        <div class="box"><b>No Clavarium here</b><small>no data, no keys, no VMs</small></div>
+      </div>
+      <div class="arrow"><i>⇠</i>tunnel dialled<br>FROM home</div>
+      <div class="zone host" style="flex:2.2"><h3>Home · the whole of Clavarium</h3>
+        <div class="box k"><b>TLS ends here</b><small>the certificate lives at home</small></div>
+        <div class="box k"><b>Sign-on (OIDC)</b><small>identity provider + auth proxy, as today</small></div>
+        <div class="box"><b>Clavarium</b><small>loopback only; trusts identity from the auth proxy alone</small></div>
+        <div class="box"><b>VMs</b><small>one per conversation</small></div>
+      </div>
+    </div></div>
+    <p class="note" style="margin-top:8px">No inbound port at home. The relay is optional: on a public server, the same stack runs without it. This whole layer is taken over from the current system, where it works.</p>
+
+    <h2>Life of a conversation</h2>
+    <div class="scroll"><div class="dia" style="min-width:820px">
+      <div class="zone"><h3>1 · Create</h3><div class="box">name, tool, size, resources</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>2 · Build</h3><div class="box">launch VM<br>install the tool<br>mount resources</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>3 · Use</h3><div class="box">open terminal<br><span class="mono">tmux new -A … tool</span></div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>4 · Sleep</h3><div class="box">no viewer, idle → suspend<br>RAM returned</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>5 · Archive</h3><div class="box">VM deleted<br>resources stay</div></div>
+    </div></div>
+
+    <h2>What the server is made of</h2>
+    <div class="grid g3">
+      <div class="card"><h3>Kept from today</h3><p>Blind relay + home-dialled tunnel · TLS at home · OIDC sign-on · bounded <span class="mono">multipass</span> wrapper · PTY + WebSocket transport · vault · git push done by the host · one-click shortcuts · voice dictation with auto-send.</p></div>
+      <div class="card"><h3>New</h3><p>xterm.js as the terminal display · resource → folder builders · per-conversation mounts.</p></div>
+      <div class="card"><h3>Gone</h3><p>Chat thread · tool adapters · approval and question cards · server-side LLM tools · journal reader.</p></div>
+    </div>
+
+    <h2>Cost of “one VM per conversation”</h2>
+    <div class="scroll"><table>
+      <tr><th>State</th><th>RAM</th><th>Disk</th><th>On an 8 GB host</th></tr>
+      <tr><td>Running</td><td>1 GB (Claude Code) to 3 GB (heavier tools)</td><td>≈ 3 GB</td><td>3 to 4 at once</td></tr>
+      <tr><td>Suspended</td><td>0</td><td>≈ 3 GB + RAM image</td><td>limited by disk</td></tr>
+    </table></div>
+  </section>
+
+  <!-- ================= SECURITY ================= -->
+  <section id="p-sec" role="tabpanel" aria-labelledby="t-sec" hidden>
+    <h2>Five walls, from outside in</h2>
+    <div class="scroll"><div class="rings">
+      <div class="ring"><div class="rh"><b>0 · Relay</b><span>public, but blind: it carries encrypted bytes to a tunnel that home opened. Compromised, it can cut the line, not read it.</span></div>
+      <div class="ring r1"><div class="rh"><b>1 · Edge, at home</b><span>TLS ends here; OIDC sign-on (identity provider + auth proxy), one operator. No inbound port, no subdomain.</span></div>
+        <div class="ring r2"><div class="rh"><b>2 · Host process</b><span>listens on loopback, accepts identity from the auth proxy only; unprivileged user; may only call a wrapper that accepts a fixed list of <span class="mono">multipass</span> verbs.</span></div>
+          <div class="ring r3"><div class="rh"><b>3 · VM boundary</b><span>the agent is root inside and sees nothing of the host.</span></div>
+            <div class="ring r4"><div class="rh"><b>4 · Mounts</b><span>the only doors: chosen per conversation, each one read-only or read-write; read-only is enforced by the host.</span></div></div>
+          </div>
+        </div>
+      </div>
+      </div>
+    </div></div>
+
+    <h2>Who can reach what</h2>
+    <div class="scroll"><table>
+      <tr><th></th><th>Operator (browser)</th><th>Clavarium (host)</th><th>Agent (in its VM)</th></tr>
+      <tr><td>Its own VM: disk, sudo, network</td><td>through the terminal</td><td>through the wrapper</td><td><span class="tag ok">everything</span></td></tr>
+      <tr><td>Attached resources</td><td>manages them</td><td>builds and mounts them</td><td><span class="tag ok">as files</span></td></tr>
+      <tr><td>Resources not attached</td><td>manages them</td><td>yes</td><td><span class="tag no">invisible</span></td></tr>
+      <tr><td>Other conversations' VMs</td><td>yes</td><td>yes</td><td><span class="tag no">no</span></td></tr>
+      <tr><td>Host disk, vault key</td><td>no</td><td>yes</td><td><span class="tag no">no</span></td></tr>
+      <tr><td>Sign-in mailbox (links, codes)</td><td>sees the strip in the conversation</td><td>watches it, read-only</td><td><span class="tag no">never enters the VM</span></td></tr>
+      <tr><td>Git push key, mailbox password</td><td>sets them once</td><td>uses them on the agent's behalf</td><td><span class="tag no">never enters the VM</span></td></tr>
+      <tr><td>Secrets attached to the conversation</td><td>sets them</td><td>delivers them</td><td><span class="tag w">readable: it is root</span></td></tr>
+    </table></div>
+
+    <h2>Two kinds of secret</h2>
+    <div class="grid g2">
+      <div class="card"><h3>Stays on the host</h3><p>The host acts with it: pushes a branch, syncs a mailbox. A compromised agent cannot leak it.</p><p class="note">git deploy key · IMAP password · OAuth refresh tokens</p></div>
+      <div class="card"><h3>Handed to the agent</h3><p>The tool needs it to run. Assume the agent can read and send it anywhere. Give narrow, revocable keys only.</p><p class="note">model API key for OpenHands · a test database password</p></div>
+    </div>
+
+    <h2>How a handed secret travels</h2>
+    <div class="scroll"><div class="dia" style="min-width:780px">
+      <div class="zone host"><h3>Vault (host)</h3><div class="box">sealed on disk</div></div>
+      <div class="arrow"><i>→</i>stdin of<br>multipass exec</div>
+      <div class="zone vm"><h3>VM · memory only</h3><div class="box"><span class="mono">/run/secrets/NAME</span><small>tmpfs, gone at shutdown</small></div></div>
+      <div class="arrow"><i>→</i>at launch</div>
+      <div class="zone vm"><h3>The tool</h3><div class="box">file path, or exported as <span class="mono">NAME=…</span> for this process only</div></div>
+    </div></div>
+    <p class="note" style="margin-top:8px">Never in an argument list, never on a shared mount, never written to the VM disk by Clavarium, never logged.</p>
+
+    <h2>What the terminal changes</h2>
+    <div class="grid g2">
+      <div class="card"><h3>Simpler</h3><p>Nothing printed by the agent is interpreted by the page: no HTML, no links made clickable, no cards. The whole “hostile output” surface shrinks to one terminal emulator.</p></div>
+      <div class="card"><h3>To watch</h3><p>The tool's own approval prompts are the only brake inside the VM. That is acceptable because the VM holds nothing but what was attached.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= RESOURCES ================= -->
+  <section id="p-res" role="tabpanel" aria-labelledby="t-res" hidden>
+    <h2>Everything becomes a folder</h2>
+    <div class="scroll"><div class="dia" style="min-width:820px">
+      <div class="zone edge"><h3>The real thing</h3>
+        <div class="box">A directory on the host</div>
+        <div class="box">A git repository (remote)</div>
+        <div class="box">A mailbox (IMAP)</div>
+        <div class="box">A secret</div>
+      </div>
+      <div class="arrow"><i>→</i>builder<br>on the host</div>
+      <div class="zone host"><h3>Host folder</h3>
+        <div class="box">the directory itself</div>
+        <div class="box">a clone, one branch per conversation</div>
+        <div class="box">one <span class="mono">.eml</span> per message + an index</div>
+        <div class="box"><i>no folder: see Security</i></div>
+      </div>
+      <div class="arrow"><i>→</i>multipass<br>mount (SSHFS)</div>
+      <div class="zone vm"><h3>In the VM</h3>
+        <div class="box mono">/resources/notes/</div>
+        <div class="box mono">/resources/website/</div>
+        <div class="box mono">/resources/inbox/</div>
+        <div class="box mono">/run/secrets/OVH_KEY</div>
+      </div>
+    </div></div>
+
+    <h2>The four mounted types of version 1</h2>
+    <div class="scroll"><table>
+      <tr><th>Type</th><th>Agent sees</th><th>Access, chosen per conversation</th><th>Who writes back</th></tr>
+      <tr><td><b>Folder</b></td><td>the files, live</td><td>read-only (default) or read-write</td><td>any conversation attached read-write</td></tr>
+      <tr><td><b>Git repository</b></td><td>a working tree on its own branch</td><td>read-only or read-write (default)</td><td>agent commits; <b>host pushes</b> when the operator says so</td></tr>
+      <tr><td><b>Mailbox</b></td><td>messages as files, newest first, last 12 months</td><td>read-only, always</td><td>nobody: the mailbox is never modified</td></tr>
+      <tr><td><b>Secret</b></td><td>a file in memory, or a variable</td><td>attached or not</td><td>—</td></tr>
+    </table></div>
+    <p class="note">Later types follow the same contract: calendar (one <span class="mono">.ics</span> per event), cloud drive, issue tracker. A type is one builder that produces a folder.</p>
+
+    <h2>One folder, several VMs, two levels of access</h2>
+    <div class="scroll"><div class="dia" style="min-width:860px">
+      <div class="zone vm"><h3>Conversation A</h3><div class="box"><b>Claude Code</b><small>writes the report</small></div><div class="box mono">/resources/reports/ <span class="tag ok">read-write</span></div></div>
+      <div class="arrow"><i>⇄</i>writes</div>
+      <div class="zone host"><h3>Host · one real folder</h3><div class="box k"><b>reports</b><small>a file written by A is seen by B at once</small></div><div class="box">the level is chosen <b>per attachment</b>, not per resource</div></div>
+      <div class="arrow"><i>→</i>reads only</div>
+      <div class="zone vm"><h3>Conversation B</h3><div class="box"><b>Claude Code</b><small>reviews the report</small></div><div class="box mono">/resources/reports/ <span class="tag">read-only</span></div></div>
+    </div></div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Read-only is enforced on the host</h3><p>The agent is root in its VM, so a “read-only” flag inside the VM would be worth nothing. The host exposes a read-only view of the folder and mounts that view.</p><p class="note">Checked: the Multipass mount command has no read-only option of its own. The host-side view is the first thing to prove on a real VM.</p></div>
+      <div class="card"><h3>Two writers, one folder</h3><p>Allowed. Files are shared live; two agents editing the same file at once will overwrite each other, as two people would. For code, a git resource gives each conversation its own branch instead.</p></div>
+    </div>
+
+    <h2>Git only: who lets a push out <span class="tag w">parked, designed later</span></h2>
+    <div class="scroll"><div class="dia" style="min-width:820px">
+      <div class="zone vm"><h3>Agent, in its VM</h3><div class="box">commits freely on its own branch</div><div class="box">has no push key</div></div>
+      <div class="arrow"><i>→</i>asks</div>
+      <div class="zone"><h3>Operator · review screen</h3><div class="box k"><b>What would go out</b><small>commits and diff, read on the host</small></div><div class="box"><b>Allow push</b> · <b>Refuse</b></div></div>
+      <div class="arrow"><i>→</i>if allowed</div>
+      <div class="zone host"><h3>Host</h3><div class="box">pushes with the key it keeps</div></div>
+    </div></div>
+    <p class="note" style="margin-top:8px">A small screen of its own, specific to git resources and to the operator. It builds on what was designed in the current system. Not part of the first slices: the core (conversation, terminal, folders) comes first.</p>
+
+    <h2>A special one: the sign-in mailbox</h2>
+    <p class="note">A mailbox dedicated to a tool's account (Claude Code, for instance), set per conversation. Clavarium watches it for one thing only: sign-in mails. It is not a mail client, and the agent never sees it.</p>
+    <div class="scroll"><div class="dia" style="min-width:900px">
+      <div class="zone vm"><h3>1 · In the terminal</h3><div class="box">the tool says “not signed in” and asks for your email</div></div>
+      <div class="arrow"><i>→</i>the provider<br>sends a mail</div>
+      <div class="zone edge"><h3>2 · Dedicated mailbox</h3><div class="box">“Your sign-in link”</div></div>
+      <div class="arrow"><i>→</i>read-only<br>IMAP</div>
+      <div class="zone host"><h3>3 · Clavarium (host)</h3><div class="box k"><b>Sign-in watcher</b><small>keeps only mails from known senders that carry a sign-in link or code</small></div></div>
+      <div class="arrow"><i>→</i>seconds<br>later</div>
+      <div class="zone"><h3>4 · In the conversation</h3><div class="box k">a strip next to the terminal: <b>Open sign-in link</b> · or the code, with <b>Copy</b></div><div class="box">you sign in, paste the code in the terminal. No other app opened.</div></div>
+    </div></div>
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card"><h3>Stays on the host</h3><p>Mailbox password in the vault. Never mounted, never in a VM: an agent that could read sign-in mails could sign itself in elsewhere.</p></div>
+      <div class="card"><h3>Narrow by design</h3><p>Known senders only, HTTPS links to the provider's own domains only, last few minutes only. Everything else in the mailbox is ignored and never shown.</p></div>
+      <div class="card"><h3>Never touches the mailbox</h3><p>Nothing is marked read, moved or deleted. No sending.</p></div>
+    </div>
+
+    <h2>Many to many</h2>
+    <div class="scroll"><div class="dia" style="min-width:700px">
+      <div class="zone"><h3>Conversations</h3>
+        <div class="box"><b>Website redesign</b><small>Claude Code</small></div>
+        <div class="box"><b>Plugin follow-up</b><small>OpenCode</small></div>
+      </div>
+      <div class="arrow"><i>⇄</i>attach<br>detach</div>
+      <div class="zone"><h3>Resources</h3>
+        <div class="box">website <span class="tag">git</span> → both</div>
+        <div class="box">inbox <span class="tag">mail</span> → Plugin follow-up</div>
+        <div class="box">notes <span class="tag">folder</span> → Website redesign</div>
+        <div class="box">OVH_KEY <span class="tag">secret</span> → Plugin follow-up</div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- ================= APP & SHARING ================= -->
+  <section id="p-share" role="tabpanel" aria-labelledby="t-share" hidden>
+    <div class="grid g3">
+      <div class="card"><h3>An app, not a store download</h3><p>An installable web app (PWA) on phone, tablet or computer. Same pages as the browser, simplified on small screens.</p></div>
+      <div class="card"><h3>The app shows one conversation</h3><p>The tool's own interface in the middle. No history, no message list to manage: the tool keeps its own.</p></div>
+      <div class="card"><h3>A conversation is a silo</h3><p>Its VM, its resources, its secrets. Shared with someone, it simply becomes theirs to use.</p></div>
+    </div>
+
+    <h2>The screen, top to bottom</h2>
+    <div class="scroll"><div class="dia" style="min-width:700px;flex-direction:column;gap:8px">
+      <div class="zone" style="flex-direction:row;align-items:center;flex-wrap:wrap"><h3 style="margin:0 8px 0 0">Top · tools</h3><span class="tag b">Files</span><span class="tag">Resources</span><span class="tag">Share</span><span class="tag">Sleep / wake</span><span class="tag w">sign-in strip, when a link arrives</span></div>
+      <div class="zone vm"><h3>Middle · the tool's own interface</h3><div class="box k"><b>Terminal (xterm.js)</b><small>Claude Code, OpenCode, OpenHands… exactly as they draw themselves</small></div></div>
+      <div class="zone" style="flex-direction:row;align-items:center;flex-wrap:wrap"><h3 style="margin:0 8px 0 0">Bottom · your hands</h3><span class="tag b">Shortcuts</span><span class="tag b">🎙 Voice</span><span class="tag">Keys: Esc Tab ↑ ↓ Enter</span></div>
+    </div></div>
+    <p class="note" style="margin-top:8px"><b>Files</b> means the files held in Clavarium: the folders attached to this conversation. Not the device's own storage, not the rest of the VM disk. Two gestures cross the border: <b>import</b> a file or a photo from outside into a Clavarium folder, and <b>download</b> a copy.</p>
+    <div class="scroll"><div class="dia" style="min-width:760px">
+      <div class="zone edge"><h3>Outside</h3><div class="box">a file or photo on the phone, tablet or computer</div></div>
+      <div class="arrow"><i>→</i>Import<br><i>←</i>Download</div>
+      <div class="zone host"><h3>Clavarium folders</h3><div class="box k"><b>Files</b> shows exactly these<small>the resources attached to the conversation</small></div><div class="box">import lands in a folder attached read-write</div></div>
+      <div class="arrow"><i>⇄</i>mounted</div>
+      <div class="zone vm"><h3>VM</h3><div class="box mono">/resources/…</div><div class="box">the rest of the VM disk is the agent's own: not shown in Files</div></div>
+    </div></div>
+
+    <h2>Sharing one conversation by QR code</h2>
+    <div class="scroll"><div class="dia" style="min-width:880px">
+      <div class="zone"><h3>1 · You</h3><div class="box k"><b>Share</b> in the conversation</div><div class="box">a QR code appears<small>one use, expires in minutes</small></div></div>
+      <div class="arrow"><i>→</i>scan</div>
+      <div class="zone"><h3>2 · Their device</h3><div class="box">opens the app page</div><div class="box k">creates its own key<small>never leaves the device</small></div></div>
+      <div class="arrow"><i>→</i>pairing</div>
+      <div class="zone host"><h3>3 · Clavarium</h3><div class="box">binds that key to <b>this conversation only</b></div><div class="box">listed under Share: rename, revoke</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone vm"><h3>4 · Their app</h3><div class="box">“Install” → icon on the home screen</div><div class="box">sees one conversation, nothing else</div></div>
+    </div></div>
+
+    <h2>One account, separate lives</h2>
+    <div class="scroll"><div class="dia" style="min-width:860px">
+      <div class="zone"><h3>Devices</h3>
+        <div class="box k"><b>Phone</b><small>paired by QR · label “phone”</small></div>
+        <div class="box k"><b>Tablet</b><small>paired by QR · label “tablet”</small></div>
+      </div>
+      <div class="arrow"><i>→</i>each device<br>its own key</div>
+      <div class="zone host"><h3>Conversations (silos)</h3>
+        <div class="box"><b>Personal</b><small>own VM · own tool login · own sign-in mailbox · own folders</small></div>
+        <div class="box"><b>Work</b><small>own VM · another login · another mailbox · other folders</small></div>
+      </div>
+      <div class="arrow"><i>✕</i>nothing<br>crosses</div>
+      <div class="zone"><h3>What a device knows</h3>
+        <div class="box">its one conversation</div>
+        <div class="box">not your name, not your email, not the other conversations</div>
+      </div>
+    </div></div>
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card"><h3>No identity at the device door</h3><p>A paired device proves a key, not who you are. No sign-on, no email asked. You give it a label; that is all Clavarium records.</p></div>
+      <div class="card"><h3>Each conversation its own accounts</h3><p>The tool login, the sign-in mailbox and the secrets belong to the conversation. Personal and work never share one.</p></div>
+      <div class="card"><h3>One person at a time</h3><p>A conversation has one active screen. Opening it elsewhere takes the terminal over; the previous screen says so and waits.</p></div>
+    </div>
+
+    <h2>Two doors, one house</h2>
+    <div class="scroll"><table>
+      <tr><th></th><th>Operator door</th><th>Device door (QR)</th></tr>
+      <tr><td>Proves</td><td>who you are: OIDC sign-on</td><td>only that it was paired: a key held by the device. No name, no email</td></tr>
+      <tr><td>Sees</td><td>all conversations, resources, secrets settings</td><td><b>one conversation</b>: its terminal, shortcuts, voice, files</td></tr>
+      <tr><td>Can create, attach, delete</td><td>yes</td><td>no</td></tr>
+      <tr><td>Ends when</td><td>sign-out</td><td>the operator revokes the device, or archives the conversation</td></tr>
+    </table></div>
+    <p class="note">This pairing already exists in the current system (invitations, device keys, revocation). It is kept; what changes is that it opens a terminal instead of a chat.</p>
+
+    <h2>What “it becomes theirs” implies</h2>
+    <div class="grid g2">
+      <div class="card"><h3>They are root in that VM too</h3><p>Whoever holds the terminal can do what the agent can: read every attached resource and every handed secret. Share a conversation only with what you would give that person.</p></div>
+      <div class="card"><h3>The tool's account travels with it</h3><p>A conversation logged into your Claude subscription is used on your subscription by whoever you share it with. For someone else, prefer a conversation on an open model, or their own login.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= MOCKUPS ================= -->
+  <section id="p-mock" role="tabpanel" aria-labelledby="t-mock" hidden>
+    <h2>1 · A conversation (desktop)</h2>
+    <div class="mock">
+      <div class="app">
+        <div class="side">
+          <span class="btn p">+ New conversation</span>
+          <div class="conv on"><b><span class="dot run"></span>Website redesign</b><small>Claude Code · 3 resources</small></div>
+          <div class="conv"><b><span class="dot wait"></span>Plugin follow-up</b><small>OpenCode · waiting for you</small></div>
+          <div class="conv"><b><span class="dot"></span>Tax paperwork</b><small>OpenHands · asleep</small></div>
+          <div style="flex:1"></div>
+          <span class="btn">Resources</span>
+        </div>
+        <div class="main">
+          <div class="bar"><b>Website redesign</b><span class="tag b">Claude Code</span>
+            <span class="chips"><span class="tag ok">website · write</span><span class="tag ok">reports · write</span><span class="tag">notes · read</span><span class="tag">inbox · read</span></span>
+            <span class="sp"></span><span class="btn">Files</span><span class="btn">⋯</span></div>
+          <div class="bar" style="background:var(--brass-soft)"><span class="tag b">sign-in</span><span>Sign-in link received 12 s ago, from the provider</span><span class="sp"></span><span class="btn p">Open link</span><span class="btn">Dismiss</span></div>
+          <div class="term"><span class="d">╭──────────────────────────────────────────────╮
+│ ✻ Claude Code            /resources/website  │
+╰──────────────────────────────────────────────╯</span>
+
+<span class="a">❯</span> Read the last mail from the agency and update the footer.
+
+<span class="g">●</span> Read(/resources/inbox/2026-10-09-agency.eml)
+<span class="g">●</span> Edit(footer.html)
+
+<span class="d">Do you want to make this edit to footer.html?</span>
+<span class="a">❯ 1. Yes</span>
+  2. Yes, allow all edits this session
+  3. No
+
+<span class="d">Esc to cancel</span></div>
+          <div class="bar" style="border-top:1px solid var(--line);border-bottom:0"><span class="dot run"></span><span class="note">Listening… last phrase typed: “and also check the contact page”</span></div>
+          <div class="keys"><span class="pre">Run the tests</span><span class="pre">Summarise what you did</span><span class="pre">/compact</span><span class="pre">git status</span><span class="pre add">+ shortcut</span></div>
+          <div class="keys"><span>Esc</span><span>Tab</span><span>↑</span><span>↓</span><span>Enter</span><span>Ctrl+C</span><span class="in">Optional input line (handy on a phone)…</span><span>Send</span><span class="pre">🎙 Dictate into the terminal</span><span title="press Enter when I stop talking">⚡ auto</span></div>
+        </div>
+      </div>
+    </div>
+    <p class="note" style="margin-top:8px">The brass strip appears only when a sign-in mail has just arrived in the dedicated mailbox. The dark area is the tool itself, drawn by xterm.js. Clavarium adds three things around it, all kept from today: one-click shortcuts, the key row, and voice dictation that types into the terminal as you speak.</p>
+
+    <h2>What the three helpers do</h2>
+    <div class="scroll"><div class="dia" style="min-width:860px">
+      <div class="zone"><h3>Shortcut · one click</h3>
+        <div class="box k"><b>Run the tests</b><small>a saved text, per operator</small></div>
+        <div class="box">two kinds, as today: <b>sent as is</b> (Enter included) or <b>placed in the input line</b> to complete</div>
+      </div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>Voice · as today</h3>
+        <div class="box k"><b>🎙 speak</b><small>the mic stays open while you talk</small></div>
+        <div class="box">each pause closes a phrase → speech-to-text (local Whisper, or the hosted open model)</div>
+        <div class="box">the phrase is <b>typed straight into the terminal</b>, at the tool's cursor, phrase after phrase. <b>⚡ auto</b> also presses Enter when you stop</div>
+      </div>
+      <div class="arrow"><i>→</i>typed into<br>the terminal</div>
+      <div class="zone vm"><h3>The tool</h3>
+        <div class="box">receives keystrokes, exactly as if typed</div>
+        <div class="box">no special channel: works with every CLI</div>
+      </div>
+    </div></div>
+
+    <h2>2 · New conversation</h2>
+    <div class="grid g2">
+      <div class="mock"><div class="form">
+        <div class="field"><label>Name</label><div class="input">Plugin follow-up</div></div>
+        <div class="field"><label>What runs in it</label><div class="opts"><span class="opt on">Claude Code</span><span class="opt">OpenCode</span><span class="opt">OpenHands</span><span class="opt">Shell</span><span class="opt">Other command…</span></div></div>
+        <div class="field"><label>Size</label><div class="opts"><span class="opt on">1 GB</span><span class="opt">2 GB</span><span class="opt">4 GB</span></div></div>
+        <div class="field"><label>Resources</label><div class="opts"><span class="opt on">website · git · <b>write</b></span><span class="opt on">reports · folder · <b>read</b></span><span class="opt on">inbox · mail · read</span><span class="opt">notes · folder</span><span class="opt">OVH_KEY · secret</span></div><span class="note">Tap an attached folder to switch between read and write.</span></div>
+        <div><span class="btn p">Create</span> <span class="note">about 2 minutes the first time</span></div>
+      </div></div>
+      <div class="card"><h3>Why so few fields</h3><p>A conversation is three choices: a tool, a size, what it may see. Model, keys and login are the tool's own business, done once in its terminal.</p></div>
+    </div>
+
+    <h2>3 · Resources</h2>
+    <div class="mock">
+      <div class="bar"><b>Resources</b><span class="sp"></span><span class="btn p">+ Add</span></div>
+      <div class="row"><span class="n">website</span><span class="tag">git</span><span class="note">branch per conversation · host pushes</span><span class="sp"></span><span class="tag">2 conversations</span></div>
+      <div class="row"><span class="n">reports</span><span class="tag">folder</span><span class="note">shared live</span><span class="sp"></span><span class="tag ok">Website redesign · write</span><span class="tag">Plugin follow-up · read</span></div>
+      <div class="row"><span class="n">notes</span><span class="tag">folder</span><span class="note"></span><span class="sp"></span><span class="tag">Website redesign · read</span></div>
+      <div class="row"><span class="n">inbox</span><span class="tag">mail</span><span class="note">read-only · synced 4 min ago</span><span class="sp"></span><span class="tag">1 conversation</span></div>
+      <div class="row"><span class="n">OVH_KEY</span><span class="tag w">secret</span><span class="note">handed to the agent · never shown again</span><span class="sp"></span><span class="tag">1 conversation</span></div>
+    </div>
+
+    <h2>4 · Phone</h2>
+    <div class="grid g2">
+      <div class="phone">
+        <div class="bar"><b>‹ Plugin follow-up</b><span class="sp"></span><span class="tag b">OpenCode</span></div>
+        <div class="term"><span class="d">opencode · /resources/website</span>
+
+<span class="g">●</span> ran tests: 41 passed
+
+<span class="d">Allow command?</span>
+<span class="a">npm publish --dry-run</span>
+<span class="a">❯ Yes</span>   No</div>
+        <div class="keys"><span class="pre">Yes, go on</span><span class="pre">Run the tests</span><span class="pre">/compact</span></div>
+        <div class="keys"><span>Esc</span><span>Tab</span><span>↑</span><span>↓</span><span>Enter</span><span>^C</span></div>
+        <div class="keys"><span class="in">Type…</span><span>Send</span><span class="pre">🎙</span><span>⚡</span></div>
+      </div>
+      <div class="card"><h3>Honest limit</h3><p>A terminal on a phone is fine to read, approve and answer briefly. Long work stays a desktop activity. Shortcuts, the key row and dictation are what make it usable at all.</p><p class="note">Measured at 390 px: 55 columns, typing received. Virtual keyboard and scrolling by finger: not tested yet.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= RULES ================= -->
+  <section id="p-rules" role="tabpanel" aria-labelledby="t-rules" hidden>
+    <h2>Taken from your existing hooks</h2>
+    <div class="scroll"><table>
+      <tr><th>When</th><th>Hook</th><th>Refuses</th></tr>
+      <tr><td>every commit</td><td class="mono">pre-commit</td><td>a name that identifies anyone (the list lives outside the repository) · an assistant's name in the added lines or the git identity</td></tr>
+      <tr><td>every commit message</td><td class="mono">commit-msg</td><td>an assistant signature: no co-author trailer, no session link</td></tr>
+      <tr><td>every push</td><td class="mono">pre-push</td><td>the same guards over every commit being pushed · any failure of the full check suite</td></tr>
+    </table></div>
+    <h2>Where the forbidden words live</h2>
+    <div class="scroll"><div class="dia" style="min-width:760px">
+      <div class="zone"><h3>Repository (public)</h3><div class="box"><span class="mono">hooks/</span> and the checkers</div><div class="box">knows only <b>how to find</b> the guard</div></div>
+      <div class="arrow"><i>→</i>git config<br>guard = path</div>
+      <div class="zone host"><h3>Operator's machine only</h3><div class="box k"><b>Guard script + word list</b><small>first name, last name, companies, domains, machines</small></div><div class="box">never committed, never pushed</div></div>
+      <div class="arrow"><i>→</i></div>
+      <div class="zone"><h3>Result</h3><div class="box">no guard declared → <b>no commit</b></div><div class="box">a listed word in the change → refused, the word is not echoed</div></div>
+    </div></div>
+    <div class="scroll"><table style="display:none">
+    </table></div>
+    <p class="note" style="margin-top:8px">The hooks and the two checkers (assistant names, identifying shapes) are public and reusable as they are. One piece is missing on purpose: the list of forbidden words, which must be supplied from outside the repository.</p>
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card"><h3>English only</h3><p>Code, comments (plain ASCII, the why), docs, commit messages, default UI strings. Other languages are label files.</p></div>
+      <div class="card"><h3>Nothing identifies anyone</h3><p>No person, company, domain, machine path. <span class="mono">example.com</span> everywhere.</p></div>
+      <div class="card"><h3>Fix the cause, never the check</h3><p>A commit is cheap, a push is gated. No guard without a cheap way to be right.</p></div>
+    </div>
+
+    <h2>Proposed for this rewrite</h2>
+    <div class="grid g3">
+      <div class="card"><h3>Agree, then code</h3><p>No feature without a diagram or a mockup accepted first. This page is the first one.</p></div>
+      <div class="card"><h3>Stay small</h3><p>The server never parses a tool's output. A new tool is a line of configuration, not code.</p></div>
+      <div class="card"><h3>Prove it for real</h3><p>Each slice ends with one run against a real VM and a real tool, with a screenshot.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= DECIDED ================= -->
+  <section id="p-open" role="tabpanel" aria-labelledby="t-open" hidden>
+    <h2>Settled by the operator</h2>
+    <div class="scroll"><table>
+      <tr><th>Question</th><th>Decision</th></tr>
+      <tr><td>One VM per conversation?</td><td>Yes; idle VMs are suspended automatically</td></tr>
+      <tr><td>Where does the code start?</td><td>New repository; the proven parts are ported, in English</td></tr>
+      <tr><td>Phone use</td><td>Terminal + key row + dictation</td></tr>
+      <tr><td>One person at a time</td><td>The newest screen takes over; the other waits</td></tr>
+      <tr><td>Secrets handed to the agent</td><td>File in memory + optional variable</td></tr>
+      <tr><td>Mailbox as files</td><td>Read-only, never modified</td></tr>
+      <tr><td>Network from the VM</td><td>Open, with an off switch per conversation</td></tr>
+      <tr><td>A shared conversation (QR)</td><td>Full use: terminal, shortcuts, voice, files</td></tr>
+      <tr><td>Sign-in strip</td><td>Shown to the operator only</td></tr>
+      <tr><td>Files</td><td>Clavarium's folders only, plus import from outside</td></tr>
+      <tr><td>Git push</td><td>Agent commits, operator reviews, host pushes (screen designed later)</td></tr>
+      <tr><td>Folders</td><td>Shareable between VMs; read-only or read-write per attachment</td></tr>
+      <tr><td>Edge</td><td>Blind relay + OIDC, as today</td></tr>
+    </table></div>
+    <h2>Still open</h2>
+    <div class="grid g2">
+      <div class="card"><h3>App design</h3><p>Which of the three ideas, or which mix. Proposed: layout of A, plain-word labels of B as a per-conversation option, Files panel of C.</p></div>
+      <div class="card"><h3>Forbidden word list</h3><p>Lives outside the repository, declared to the hooks by a git setting. The list already used by the current system (22 entries) is the starting point; to be reviewed and completed by the operator.</p></div>
+      <div class="card"><h3>Dictation rhythm</h3><p>Text arrives phrase by phrase, at each pause, not word by word. Good enough?</p></div>
+      <div class="card"><h3>Download</h3><p>Keep a “download a copy to the device” gesture in Files, next to import?</p></div>
+    </div>
+  </section>
+
+  <!-- ================= PLAN ================= -->
+  <section id="p-plan" role="tabpanel" aria-labelledby="t-plan" hidden>
+    <p class="lead">Small slices. Each ends with one run on a real machine and a screenshot. Nothing starts before your go.</p>
+    <div class="scroll"><table>
+      <tr><th>#</th><th>Slice</th><th>Proof at the end</th></tr>
+      <tr><td>0</td><td><b>Repository and rules</b>: hooks, English, checks</td><td>a commit with a forbidden word is refused</td></tr>
+      <tr><td>1</td><td><b>The terminal</b>: xterm.js ⇄ PTY ⇄ tmux, newest screen takes over</td><td>a real CLI tool used from the browser; second screen takes over</td></tr>
+      <tr><td>2</td><td><b>Conversation = VM</b>: create, install the tool, open, suspend when idle, archive</td><td>a conversation created from the page, asleep after idling, awake on open</td></tr>
+      <tr><td>3</td><td><b>Folders</b>: attach, read-only enforced by the host, read-write, shared by two VMs</td><td>VM B cannot write where it is read-only, even as root; sees A's file at once</td></tr>
+      <tr><td>4</td><td><b>Edge</b>: OIDC gate and blind relay, as today</td><td>reached from the internet through the relay; nothing without sign-on</td></tr>
+      <tr><td>5</td><td><b>Hands</b>: shortcuts, key row, voice typed into the terminal</td><td>a spoken sentence answered by the tool, no keyboard</td></tr>
+      <tr><td>6</td><td><b>App and sharing</b>: installable app, QR pairing, one conversation per device, revoke</td><td>a phone paired by QR sees one conversation; revoked, it sees none</td></tr>
+      <tr><td>7</td><td><b>Secrets and sign-in</b>: handed secrets, sign-in mailbox strip, network switch</td><td>a real sign-in done without leaving the conversation</td></tr>
+      <tr><td>8</td><td><b>More resources</b>: mailbox as files, git with push review</td><td>the agent answers from a real mail; a push waits for your click</td></tr>
+    </table></div>
+    <div class="grid g2" style="margin-top:12px">
+      <div class="card"><h3>Order, and why</h3><p>1 to 3 are the product. 3 comes early because host-enforced read-only is the one technical unknown. Everything after is carried over or added around a core that already works.</p></div>
+      <div class="card"><h3>Not in the plan</h3><p>Chat view, tool adapters, server-side LLM tools, guests by email. The current system stays untouched as a reference.</p></div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var tabs=[].slice.call(document.querySelectorAll('[role="tab"]'));
+  function show(id){tabs.forEach(function(t){var on=t.id===id;t.setAttribute('aria-selected',on?'true':'false');document.getElementById(t.getAttribute('aria-controls')).hidden=!on;});}
+  tabs.forEach(function(t){t.addEventListener('click',function(){show(t.id);try{history.replaceState(null,'','#'+t.id.slice(2));}catch(e){}});});
+  var h=(location.hash||'').slice(1);if(h&&document.getElementById('t-'+h))show('t-'+h);
+
+})();
+</script>
