@@ -19,17 +19,17 @@ function fakeTerminals() {
     return { made, spawn };
 }
 
-async function bench(t) {
+async function bench(t, hooks = {}) {
     const terminals = fakeTerminals();
     const server = createServer();
-    attachBridge(server, terminals);
+    const bridge = attachBridge(server, { ...terminals, ...hooks });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const host = `127.0.0.1:${server.address().port}`;
     const open = (query, origin = `http://${host}`) => new WebSocket(`ws://${host}/terminal?${query}`, { headers: { origin } });
     t.after(() => server.close());
     const until = async (cond) => { for (let i = 0; i < 200 && !cond(); i++) await new Promise((r) => setTimeout(r, 10)); assert.ok(cond(), 'condition never became true'); };
-    return { terminals, host, open, until };
+    return { terminals, host, open, until, bridge };
 }
 
 test('keystrokes go in as they are, output comes out as it is, a resize is obeyed within bounds', async (t) => {
@@ -52,11 +52,64 @@ test('keystrokes go in as they are, output comes out as it is, a resize is obeye
     assert.equal(binary, true);
     assert.equal(data.toString(), '\x1b[32mhello\x1b[0m');
 
+    /* The screen leaves: the terminal stays open for the next one. */
     ws.close();
-    await b.until(() => term.killed === 1);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.equal(term.killed, 0);
 });
 
-test('the newest screen takes over: the first is told, then closed with its own code, and is not unseated twice', async (t) => {
+test('a screen that comes back finds the terminal as it was, at once, and the tool is asked to redraw', async (t) => {
+    const b = await bench(t);
+    const first = b.open('c=demo&cols=100&rows=30');
+    await once(first, 'open');
+    first.close();
+    await once(first, 'close');
+    const second = b.open('c=demo&cols=90&rows=20');
+    await once(second, 'open');
+    const term = b.terminals.made[0];
+    await b.until(() => term.sizes.length === 2);
+    assert.equal(b.terminals.made.length, 1, 'no second terminal was opened');
+    assert.deepEqual(term.sizes, [[90, 19], [90, 20]], 'a line short, then right: a full redraw');
+    const received = once(second, 'message');
+    term.data('still here');
+    assert.equal((await received)[0].toString(), 'still here');
+    second.send(Buffer.from('x'));
+    await b.until(() => term.written.includes('x'));
+    second.close();
+});
+
+test('a channel that drops while the tool still runs is reopened by itself; when the tool has exited, it is not', async (t) => {
+    let running = true;
+    const b = await bench(t, { onEnded: async () => running });
+    const ws = b.open('c=demo');
+    await once(ws, 'open');
+    b.terminals.made[0].exit();                      /* the channel dropped */
+    await b.until(() => b.terminals.made.length === 2);
+    assert.equal(ws.readyState, 1, 'the screen was not closed');
+    const received = once(ws, 'message');
+    b.terminals.made[1].data('back');
+    assert.equal((await received)[0].toString(), 'back');
+    running = false;
+    const closed = once(ws, 'close');
+    b.terminals.made[1].exit();                      /* the tool exited */
+    assert.equal((await closed)[0], CLOSE_ENDED);
+    assert.equal(b.terminals.made.length, 2);
+});
+
+test('a machine known to run has its terminal opened before any screen asks; a dropped one is closed at once', async (t) => {
+    const b = await bench(t);
+    await b.bridge.warm('demo');
+    assert.equal(b.terminals.made.length, 1);
+    const ws = b.open('c=demo');
+    await once(ws, 'open');
+    await b.until(() => b.terminals.made[0].sizes.length === 2);
+    assert.equal(b.terminals.made.length, 1, 'the screen took the one already open');
+    b.bridge.drop('demo');
+    assert.equal(b.terminals.made[0].killed, 1);
+    ws.close();
+});
+
+test('the newest screen takes over: the first is told, then closed with its own code, and the terminal passes to the newcomer', async (t) => {
     const b = await bench(t);
     const first = b.open('c=demo');
     await once(first, 'open');
@@ -67,10 +120,12 @@ test('the newest screen takes over: the first is told, then closed with its own 
     await once(second, 'open');
     const [code] = await closed;
     assert.deepEqual([told, code], [[{ type: 'taken' }], CLOSE_TAKEN]);
-    await b.until(() => b.terminals.made[0].killed === 1);
-    assert.equal(b.terminals.made[1].killed, 0, 'the screen that took over keeps its terminal');
+    assert.equal(b.terminals.made.length, 1, 'one terminal, handed over');
+    assert.equal(b.terminals.made[0].killed, 0);
+    /* What the first screen still sends is no longer typed. */
     second.send(Buffer.from('x'));
-    await b.until(() => b.terminals.made[1].written.length === 1);
+    await b.until(() => b.terminals.made[0].written.length === 1);
+    assert.deepEqual(b.terminals.made[0].written, ['x']);
     second.close();
 });
 

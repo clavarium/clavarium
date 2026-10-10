@@ -24,6 +24,9 @@ export const PATH = '/terminal';
 export const DEVICE_PATH = '/c/terminal';
 export const CLOSE_ENDED = 1000;
 export const CLOSE_TAKEN = 4001;
+/* A channel that dropped is reopened after a moment, a few times a minute at most. */
+export const REOPEN_AFTER_MS = 1000;
+export const REOPEN_MAX = 5;
 const COLS = [2, 500];
 const ROWS = [2, 300];
 
@@ -38,10 +41,12 @@ export const sameOrigin = makeOriginCheck();
 /* `spawn(name, cols, rows, say)` returns a PTY-like object (write, resize,
    kill, onData, onExit), or a promise of one; `say(text)` tells the screen
    what is taking time. Injected, so tests need neither tmux nor a real PTY.
-   `onLeft(name)` is called when a screen goes away, `onEnded(name)` when the
-   terminal ended by itself rather than because the screen left. `originOk`
-   and `gate` decide who may attach at all: see gate.mjs. */
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined }) {
+   `onLeft(name)` is called when a screen goes away; `onEnded(name)` when the
+   terminal ended by itself, and answers (a promise of) whether the tool is
+   still running, in which case only the channel dropped; `onRejoin(name)`
+   when a screen takes a terminal that was already open. `originOk` and
+   `gate` decide who may attach at all: see gate.mjs. */
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {} }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
 
@@ -63,6 +68,59 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         });
     });
 
+    /* THE TERMINAL OF A RUNNING MACHINE STAYS OPEN, screen or no screen.
+     *
+     * Opening a terminal into a VM costs one to three seconds (measured: the
+     * VM manager is asked for the machine's state, then opens a channel into
+     * it). Paid at every page load, the owner felt it at once. So the channel
+     * is opened when the machine is known to run and KEPT: a screen that
+     * arrives takes it as it is and asks the tool to redraw, at once. A
+     * screen that takes the conversation from another gets it the same way.
+     *
+     * If the channel drops while the tool is still running, it is reopened by
+     * itself. It is closed on purpose only when the machine is put to sleep,
+     * stopped or deleted (`drop`), or when this server stops.
+     */
+    const live = new Map();          /* name -> { terminal, sink, cols, rows } */
+    const reopened = new Map();      /* name -> times of recent automatic reopenings */
+
+    function close(name) {
+        const kept = live.get(name);
+        if (!kept) return;
+        live.delete(name);
+        kept.sink = null;
+        kept.terminal.kill();
+    }
+
+    /* Opens the terminal of `name` and keeps it; `sink` is the screen that
+       receives its output, if there is one. */
+    async function open(name, cols, rows, sink, say = () => {}) {
+        const terminal = await spawn(name, cols, rows, say);
+        /* While it was being opened another one may have been: the newest wins. */
+        if (live.has(name)) close(name);
+        const kept = { terminal, sink, cols, rows };
+        live.set(name, kept);
+        terminal.onData((bytes) => { if (kept.sink?.readyState === 1) kept.sink.send(bytes, { binary: true }); });
+        terminal.onExit(async () => {
+            if (live.get(name) !== kept) return;              /* we closed it ourselves */
+            live.delete(name);
+            /* Asked, not guessed: is the tool still running in there? */
+            const stillRunning = await onEnded(name);
+            const recent = (reopened.get(name) ?? []).filter((at) => Date.now() - at < 60_000);
+            if (stillRunning && recent.length < REOPEN_MAX && !live.has(name)) {
+                /* Only the channel dropped: it is reopened, for whoever is there or will come. */
+                reopened.set(name, [...recent, Date.now()]);
+                setTimeout(() => {
+                    if (live.has(name)) return;
+                    open(name, kept.cols, kept.rows, kept.sink).then(() => { if (!kept.sink) onLeft(name); }, () => kept.sink?.close(1011, 'cannot reopen'));
+                }, REOPEN_AFTER_MS).unref?.();
+                return;
+            }
+            kept.sink?.close(CLOSE_ENDED, 'ended');
+        });
+        return kept;
+    }
+
     async function seat(viewer, name, cols, rows) {
         const previous = seats.take(name, viewer);
         if (previous) {
@@ -70,34 +128,57 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             previous.close(CLOSE_TAKEN, 'taken over');
         }
         let gone = false;
-        let terminal;
-        viewer.on('close', () => { gone = true; seats.leave(name, viewer); onLeft(name); terminal?.kill(); });
-        const say = (text) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', text })); };
-        try { terminal = await spawn(name, cols, rows, say); }
-        catch (error) {
-            /* Only a message written for the person is passed on. */
-            const text = typeof error?.status === 'number' ? error.message : 'The terminal could not be opened.';
-            if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text })); viewer.close(1011, 'cannot open'); }
-            return;
-        }
-        /* The screen left while the terminal was being opened. */
-        if (gone) { terminal.kill(); return; }
-
-        terminal.onData((bytes) => { if (viewer.readyState === 1) viewer.send(bytes, { binary: true }); });
-        terminal.onExit(() => {
-            if (gone) return;                 /* we killed it: the screen left */
-            onEnded(name);
-            viewer.close(CLOSE_ENDED, 'ended');
+        viewer.on('close', () => {
+            gone = true;
+            if (seats.holder(name) !== viewer) return;       /* replaced: the terminal went on with the newcomer */
+            seats.leave(name, viewer);
+            onLeft(name);
+            const kept = live.get(name);
+            if (kept?.sink === viewer) kept.sink = null;     /* the terminal stays open */
         });
+        const say = (text) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', text })); };
+
+        let kept = live.get(name);
+        if (kept) {
+            /* Taken as it is. The size is set a line short, then right: that
+               makes the tool draw its whole screen for the newcomer. */
+            kept.sink = viewer; kept.cols = cols; kept.rows = rows;
+            onRejoin(name);
+            kept.terminal.resize(cols, Math.max(2, rows - 1));
+            kept.terminal.resize(cols, rows);
+        } else {
+            try { kept = await open(name, cols, rows, viewer, say); }
+            catch (error) {
+                /* Only a message written for the person is passed on. */
+                const text = typeof error?.status === 'number' ? error.message : 'The terminal could not be opened.';
+                if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text })); viewer.close(1011, 'cannot open'); }
+                return;
+            }
+            if (gone) kept.sink = null;
+        }
+        const mine = kept;
         viewer.on('message', (data, binary) => {
-            if (binary) { terminal.write(data.toString()); return; }
+            if (mine.sink !== viewer) return;
+            if (binary) { mine.terminal.write(data.toString()); return; }
             let message;
             try { message = JSON.parse(data.toString()); } catch { return; }
             if (message?.type === 'resize' && within(message.cols, COLS) && within(message.rows, ROWS)) {
-                terminal.resize(message.cols, message.rows);
+                mine.cols = message.cols; mine.rows = message.rows;
+                mine.terminal.resize(message.cols, message.rows);
             }
         });
     }
 
-    return { seats };
+    /* Opens the terminal of a machine known to run, before anybody asks: the
+       first screen then shows it at once. Does nothing if it is open already. */
+    async function warm(name) {
+        if (live.has(name)) return;
+        try { await open(name, 120, 40, null); onLeft(name); } catch { /* it will be opened when a screen asks */ }
+    }
+
+    server.on('close', () => { for (const name of [...live.keys()]) close(name); });
+
+    /* `drop(name)` closes a kept terminal at once: the machine is being put
+       to sleep, stopped or deleted, and a channel into it would hang. */
+    return { seats, drop: close, warm };
 }

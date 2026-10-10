@@ -37,22 +37,27 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.sees('off=[]');
 });
 
-test('opening a conversation again does not deliver again what is already there', { skip: SKIP }, async (t) => {
-    /* Asked by the owner: "it takes a few seconds to connect". Each command
-       sent into a machine costs time; a second opening must send only what
-       the terminal itself needs. */
+test('reloading the page sends nothing into the machine: its terminal is already open', { skip: SKIP }, async (t) => {
+    /* Asked by the owner: "when I reload, the terminal takes time to connect;
+       the tunnel should stay open while the machine runs". Asking the VM
+       manager for the machine's state and opening a channel into it cost
+       seconds; neither happens any more for a machine whose terminal is kept. */
     const b = await bench(t);
     const me = await b.person();
     await me.create('quick');
+    await me.type('echo before-the-reload');
+    await me.sees('before-the-reload');
     const { readFileSync, writeFileSync } = await import('node:fs');
     const log = `${b.dir}/exec-log`;
     process.env.FAKE_VM_LOG = log;
     writeFileSync(log, '');
+    const started = Date.now();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
+    await me.sees('before-the-reload');
+    const took = Date.now() - started;
     const sent = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
     delete process.env.FAKE_VM_LOG;
-    /* (The terminal's own attachment goes through its PTY and is not in this
-       log: what is counted here is every OTHER command sent to the machine.) */
-    assert.deepEqual(sent.map((l) => l.split(' ')[0]), ['info'], `only the machine's state is asked: ${sent.join(' ; ')}`);
+    assert.deepEqual(sent, [], `nothing is asked of the VM manager: ${sent.join(' ; ')}`);
+    assert.ok(took < 4000, `the page and its terminal were back in ${took} ms`);
 });

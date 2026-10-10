@@ -27,6 +27,11 @@ export class Conversations {
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
     through = [];
+    /* Set by the server: closes at once a terminal kept open for a screen
+       that might come back. Called before a machine is slept, stopped or deleted. */
+    drop = () => {};
+    /* Set by the server: told when a conversation has just become usable. */
+    ready = () => {};
 
     constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS }) {
         this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs;
@@ -83,6 +88,7 @@ export class Conversations {
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
         this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined });
+        this.ready(name);
         return undefined;
     }
 
@@ -111,6 +117,13 @@ export class Conversations {
         return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...tool.command], WORK));
     }
 
+    /* A screen takes over a terminal that was kept open: the machine is
+       known to be running, nothing has to be asked or delivered. */
+    rejoin(name) {
+        this.#cancelStop(name);
+        this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
+    }
+
     /* A screen went away, for whatever reason. */
     left(name) {
         const n = (this.#watching.get(name) ?? 1) - 1;
@@ -121,21 +134,30 @@ export class Conversations {
        gone), or only the link broke (the session is still there). Asked, not
        guessed: tmux knows. */
     async ended(name) {
-        if (!this.#store.get(name)) return;
+        if (!this.#store.get(name)) return false;
         const alive = await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]);
-        if (alive.code === 0) return;
+        /* true: the tool is still there, only the channel to it dropped. */
+        if (alive.code === 0) return true;
         this.#cancelStop(name);
         const timer = setTimeout(() => {
             this.#timers.delete(name);
-            if (!this.#watching.has(name)) void this.#vms.stop(name);
+            if (!this.#watching.has(name)) { this.drop(name); void this.#vms.stop(name); }
         }, this.#stopDelayMs);
         timer.unref?.();
         this.#timers.set(name, timer);
+        return false;
     }
+
+    /* The conversations whose machine should be running: built, not asleep. */
+    awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
+
+    /* Whether the machine of a conversation runs right now. */
+    async running(name) { return (await this.#vms.state(name)) === 'Running'; }
 
     async sleep(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
         this.#cancelStop(name);
+        this.drop(name);
         const r = await this.#vms.suspend(name);
         if (r.code !== 0) throw new Refusal(502, `The machine did not go to sleep: ${firstLine(r.stderr)}`);
         /* Remembered: a sleep that was asked for holds until somebody wakes
@@ -154,6 +176,7 @@ export class Conversations {
     async archive(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
         this.#cancelStop(name);
+        this.drop(name);
         this.#store.remove(name);
         if (await this.#vms.state(name) !== undefined) await this.#vms.remove(name);
     }

@@ -164,16 +164,23 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     };
     all.through = [RUNNER];
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin });
-    attachBridge(server, {
+    const bridge = attachBridge(server, {
+        onRejoin: (name) => all.rejoin(name),
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
             return pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
         },
         onLeft: (name) => all.left(name),
-        onEnded: (name) => { void all.ended(name); },
+        onEnded: (name) => all.ended(name),
         gate, originOk,
         deviceName: (headers) => deviceConversation(devices, headers),
     });
+    all.drop = (name) => bridge.drop(name);
+    /* The terminal of a running machine is opened before anybody asks: a
+       conversation just built, and at start every conversation whose machine
+       runs. A page then shows its terminal at once. */
+    all.ready = (name) => { void bridge.warm(name); };
+    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) await bridge.warm(name); })();
     return listening;
 }
 
