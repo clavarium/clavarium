@@ -14,6 +14,9 @@ export const DISK_GB = 8;
    directory: the path then names nobody, and sits next to /resources. */
 export const WORK = '/work';
 export const VM_USER = 'ubuntu';
+export const VM_UID = 1000;
+/* Where attached folders appear in every VM. */
+export const RESOURCES = '/resources';
 const LAUNCH_SECONDS = 900;
 const PREFIX = 'clv-';
 
@@ -59,6 +62,16 @@ export class Vms {
         const r = await this.run(['info', name, '--format', 'json']);
         if (r.code !== 0) return undefined;
         try { return JSON.parse(r.stdout).info?.[name]?.state; } catch { return undefined; }
+    }
+
+    /* Mounts a host folder in the VM. The map makes files written in the VM
+       belong, on the host, to the account this server runs as. */
+    mount(conversation, source, target, uid, gid) {
+        return this.run(['mount', '-u', `${uid}:${VM_UID}`, '-g', `${gid}:${VM_UID}`, source, `${vmName(conversation)}:${target}`], { timeoutMs: 600_000 });
+    }
+
+    umount(conversation, target) {
+        return this.run(['umount', `${vmName(conversation)}:${target}`], { timeoutMs: 120_000 });
     }
 
     start(conversation) { return this.run(['start', vmName(conversation)], { timeoutMs: 300_000 }); }

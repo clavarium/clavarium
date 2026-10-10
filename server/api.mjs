@@ -5,6 +5,9 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/archive
+ *   GET  /api/resources
+ *   POST /api/resources                     {name}
+ *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
  *
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
@@ -28,7 +31,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers) {
+export async function handleApi(request, response, conversations, headers, resources) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -37,7 +40,10 @@ export async function handleApi(request, response, conversations, headers) {
     try {
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
-            if (pathname === '/api/conversations') return send(200, conversations.list()), true;
+            if (pathname === '/api/conversations') {
+                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [] }))), true;
+            }
+            if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -46,9 +52,18 @@ export async function handleApi(request, response, conversations, headers) {
         }
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
+        if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
+        const attach = /^\/api\/conversations\/([^/]+)\/resources$/.exec(pathname);
+        if (attach && resources) {
+            const conversation = decodeURIComponent(attach[1]);
+            if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
+            await resources.attach(conversation, String(body.resource ?? ''), String(body.access ?? ''));
+            return send(200, { ok: true, resources: resources.of(conversation) }), true;
+        }
         const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));
+        if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;

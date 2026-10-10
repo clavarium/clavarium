@@ -19,6 +19,7 @@ import { Conversations } from './conversations.mjs';
 import { Store } from './store.mjs';
 import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
+import { Resources } from './resources.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -45,9 +46,9 @@ export function option(argv, name, fallback) {
 /* A tmux inside a tmux refuses to start: the variable does not travel. */
 const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key]) => key !== 'TMUX' && key !== 'TMUX_PANE'));
 
-function serve(port, conversations) {
+function serve(port, conversations, resources) {
     const server = createServer(async (request, response) => {
-        if (conversations && await handleApi(request, response, conversations, HEADERS)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources)) return;
         const file = FILES[new URL(request.url ?? '/', 'http://local').pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -72,13 +73,13 @@ export function start({ port, command, cwd, env = process.env }) {
 
 /* The product: conversations are VMs. `prefix` is how the VM manager is
    reached on this installation, as an argument vector. */
-export function startHome({ port, prefix, dataDir, env = process.env, conversations }) {
-    const all = conversations ?? new Conversations({
-        store: new Store(`${dataDir}/conversations.json`),
-        vms: new Vms(runner(prefix), prefix),
-        tools: loadTools(),
-    });
-    const { server, listening } = serve(port, all);
+export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'] }) {
+    const vms = new Vms(runner(prefix), prefix);
+    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools: loadTools() });
+    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: runner(sudo), dataDir });
+    /* Before anything can start a VM: see resources.mjs. */
+    await folders.ensureViews();
+    const { server, listening } = serve(port, all, folders);
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
