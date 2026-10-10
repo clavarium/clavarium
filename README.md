@@ -32,11 +32,12 @@ either file in a browser.
 
 ## Working here
 
-Read `CONVENTIONS.md` first. Then, once per clone:
+Read `CONVENTIONS.md` first. Then:
 
-    git config core.hooksPath hooks
-    git config clavarium.guard <path to your leak guard>
+    npm install          # also wires the hooks (npm run hooks does only that)
 
-Without a declared guard, nothing commits. That is on purpose.
+Put your leak guard next to the clone, as `../.clavarium-guard/guard.sh`. The
+hooks find it there by themselves; `hooks/guard.sh` lists the other ways.
+Without a guard, nothing commits. That is on purpose.
 
     npm run check    # what a push runs

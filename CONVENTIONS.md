@@ -21,8 +21,11 @@ a GitHub noreply address.
 Two guards enforce it, and neither replaces the other:
 
 - **names** have no shape. The list lives outside the repository, because a
-  list of words that must not be published cannot be published. `hooks/guard.sh`
-  says how to declare it. No guard declared, no commit.
+  list of words that must not be published cannot be published. The hooks
+  look for it next to the repository, at `../.clavarium-guard/guard.sh`: a
+  relative path, so that no restart and no new clone can lose it. No guard
+  found, no commit. `npm run check` fails if the hooks are not wired or the
+  guard does not answer.
 - **shapes** need no secret list: a home directory, an email address, a machine
   address. `tools/check-shapes.mjs` refuses them, here and anywhere.
 
