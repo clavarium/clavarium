@@ -113,6 +113,9 @@
         document.title = current ? `${current} - Clavarium` : 'Clavarium';
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         $('sleep').hidden = $('archive').hidden = !c;
+        $('folders').hidden = !c || c.phase !== 'ready';
+        $('panel').hidden = true;
+        paintChips();
         $('keys').hidden = !current;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
@@ -164,6 +167,7 @@
             home = true;
             $('list').hidden = false; $('back').hidden = false;
             paint();
+            paintChips();
             const now = conversations.find((x) => x.name === current)?.phase;
             if (before !== now || now === 'building') enter();
         } catch { /* a server without VMs has no list: the page is one terminal */ }
@@ -202,6 +206,57 @@
             await refresh();
             select(name);
         } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
+    });
+
+    /* ---------- folders ---------- */
+    const LEVELS = [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
+    function paintChips() {
+        const chips = $('chips');
+        chips.replaceChildren();
+        for (const r of conversations.find((x) => x.name === current)?.resources ?? []) {
+            const chip = document.createElement('span');
+            chip.className = 'chip'; chip.dataset.access = r.access;
+            chip.textContent = `${r.name} - ${r.access}`;
+            chips.append(chip);
+        }
+    }
+    async function paintPanel() {
+        const all = await (await fetch('/api/resources')).json();
+        const mine = new Map((conversations.find((x) => x.name === current)?.resources ?? []).map((r) => [r.name, r.access]));
+        const rows = $('panel-rows');
+        rows.replaceChildren();
+        for (const resource of all) {
+            const row = document.createElement('div'); row.className = 'folder';
+            const label = document.createElement('b'); label.textContent = resource.name;
+            const levels = document.createElement('div'); levels.className = 'levels';
+            levels.setAttribute('role', 'group'); levels.setAttribute('aria-label', `Access of this conversation to ${resource.name}`);
+            for (const [access, text] of LEVELS) {
+                const b = document.createElement('button');
+                b.type = 'button'; b.textContent = text;
+                b.setAttribute('aria-pressed', (mine.get(resource.name) ?? 'none') === access ? 'true' : 'false');
+                b.addEventListener('click', async () => {
+                    for (const other of levels.children) other.disabled = true;
+                    $('panel-error').hidden = true;
+                    try { await post(`/api/conversations/${encodeURIComponent(current)}/resources`, { resource: resource.name, access }); }
+                    catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+                    await refresh();
+                    await paintPanel();
+                });
+                levels.append(b);
+            }
+            row.append(label, levels);
+            rows.append(row);
+        }
+        $('panel-empty').hidden = all.length > 0;
+    }
+    $('folders').addEventListener('click', async () => { await paintPanel(); $('panel').hidden = false; });
+    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+    $('folder-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        try { await post('/api/resources', { name: $('folder-name').value.trim() }); $('folder-name').value = ''; }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await paintPanel();
     });
 
     /* ---------- resting and archiving ---------- */

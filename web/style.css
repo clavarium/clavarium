@@ -57,3 +57,21 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
   #app[data-view="room"] #list, #app[data-view="list"] #room { display: none; }
 }
 @media (min-width: 701px) { #back { display: none; } }
+.chips { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
+.chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); white-space: nowrap; }
+.chip[data-access="write"] { color: var(--ok); border-color: var(--ok); }
+#panel { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--panel); overflow-y: auto; }
+.panel-top { display: flex; align-items: center; justify-content: space-between; }
+#panel-rows { display: flex; flex-direction: column; }
+.folder { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.folder b { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; }
+.levels { display: flex; }
+.levels button { border-radius: 0; margin-left: -1px; }
+.levels button:first-child { border-radius: 7px 0 0 7px; margin-left: 0; }
+.levels button:last-child { border-radius: 0 7px 7px 0; }
+.levels button[aria-pressed="true"] { background: rgba(210, 169, 78, .18); border-color: var(--brass); position: relative; }
+#folder-new { display: flex; flex-direction: column; gap: 6px; max-width: 420px; }
+#folder-new label { font-size: 12px; color: var(--ink2); }
+#folder-new input { flex: 1; min-width: 0; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+@media (max-width: 700px) { #chips { display: none; } }

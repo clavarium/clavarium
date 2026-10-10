@@ -337,7 +337,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <div class="zone vm"><h3>Conversation B</h3><div class="box"><b>Claude Code</b><small>reviews the report</small></div><div class="box mono">/resources/reports/ <span class="tag">read-only</span></div></div>
     </div></div>
     <div class="grid g2" style="margin-top:12px">
-      <div class="card"><h3>Read-only is enforced on the host</h3><p>The agent is root in its VM, so a “read-only” flag inside the VM would be worth nothing. The host exposes a read-only view of the folder and mounts that view.</p><p class="note">Checked: the Multipass mount command has no read-only option of its own. The host-side view is the first thing to prove on a real VM.</p></div>
+      <div class="card"><h3>Read-only is enforced on the host</h3><p>The agent is root in its VM, so a “read-only” flag inside the VM would be worth nothing. The host exposes a read-only view of the folder and mounts that view.</p><p class="note"><span class="tag ok">proved on a real VM</span> The view is made by a userspace filesystem. As root inside the VM, create, delete, rename, chmod and remount were all refused, while a file added on the host appeared at once.</p><p class="note"><span class="tag no">tried, failed</span> A plain bind mount remounted read-only did not hold: root in the VM wrote through it. It is not used.</p></div>
       <div class="card"><h3>Two writers, one folder</h3><p>Allowed. Files are shared live; two agents editing the same file at once will overwrite each other, as two people would. For code, a git resource gives each conversation its own branch instead.</p></div>
     </div>
 
