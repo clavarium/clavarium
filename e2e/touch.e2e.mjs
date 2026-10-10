@@ -58,17 +58,34 @@ test('what was copied elsewhere is pasted into the terminal, by the button or th
     await me.page.evaluate(() => navigator.clipboard.writeText('echo pasted-by-button'));
     await me.page.locator('#copy-open').click();
     await me.page.locator('#paste-now').click();
+    await me.sees('echo pasted-by-button');
     await me.page.keyboard.press('Enter');
-    await me.sees('pasted-by-button\npasted-by-button'.split('\n')[0]);
     await me.until('the command ran', async () => (await me.screen()).split('pasted-by-button').length >= 3);
     /* Without the permission, the field does the same job. */
     await me.context.clearPermissions();
     await me.page.locator('#copy-open').click();
     await me.page.fill('#paste-text', 'echo pasted-by-field');
     await me.page.locator('#paste-send').click();
+    await me.sees('echo pasted-by-field');
     await me.page.keyboard.press('Enter');
     await me.until('the second command ran', async () => (await me.screen()).split('pasted-by-field').length >= 3).catch(async (e) => { throw new Error(`${e.message}; screen: ${JSON.stringify((await me.screen()).trim().slice(-200))}; sheet shown: ${await me.page.locator('#copy').isVisible()}; field: ${JSON.stringify(await me.page.inputValue('#paste-text'))}`); });
     assert.equal(await me.page.locator('#copy').isVisible(), false, 'the sheet closes itself after a paste');
+});
+
+test('an Enter pressed while the browser is still reading what was copied does not paste a second time', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('hasty');
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    /* A slow clipboard, as when the browser asks first. */
+    await me.page.evaluate(() => { navigator.clipboard.readText = () => new Promise((done) => setTimeout(() => done('pasted-once'), 700)); });
+    await me.page.locator('#copy-open').click();
+    await me.page.locator('#paste-now').click();
+    await me.page.keyboard.press('Enter');
+    await me.page.keyboard.press('Enter');
+    await me.sees('pasted-once');
+    await wait(900);
+    assert.equal((await me.screen()).split('pasted-once').length, 2, 'pasted once');
 });
 
 /* The lines currently shown, top to bottom. */

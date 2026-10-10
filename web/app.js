@@ -533,12 +533,21 @@
         terminal.focus();
         if (text) terminal.paste(text);
     };
+    let reading = false;
     $('paste-now').addEventListener('click', async () => {
+        /* Reading what was copied takes a moment (the browser may ask). An
+           Enter pressed meanwhile must not press this button again: it lets
+           go of the focus at once, and a second press is ignored (a test
+           caught two pastes and no Enter). */
+        if (reading) return;
+        reading = true;
+        $('paste-now').blur();
         try {
             const text = await navigator.clipboard.readText();
             if (text === '') { $('paste-status').textContent = 'There is nothing to paste.'; return; }
             pasteIntoTerminal(text);
         } catch { $('paste-status').textContent = 'This browser did not let the page read what you copied. Use the field below.'; $('paste-text').focus(); }
+        finally { reading = false; }
     });
     $('paste-send').addEventListener('click', () => { const text = $('paste-text').value; $('paste-text').value = ''; pasteIntoTerminal(text); });
 

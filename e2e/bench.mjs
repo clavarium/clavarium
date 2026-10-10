@@ -42,7 +42,7 @@ const TOOLS = readTools(JSON.stringify([
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
-export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {}) {
+export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
     const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
@@ -56,7 +56,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {
         sudo: [process.execPath, join(HERE, 'fake-host.mjs')],
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
-    const browser = await playwright.chromium.launch();
+    /* `microphone`: a WAV file the browser will hear as its microphone. */
+    const browser = await playwright.chromium.launch(microphone ? { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', `--use-file-for-fake-audio-capture=${microphone}`] } : {});
     const contexts = [];
     t.after(async () => {
         await browser.close();
@@ -69,7 +70,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {
 
     /* A person at a screen. `phone: true` is a small touch screen. */
     async function person({ phone = false, at = '/', context: given } = {}) {
-        const context = given ?? await browser.newContext(phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true });
+        const context = given ?? await browser.newContext(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true });
         contexts.push(context);
         const page = await context.newPage();
         const errors = [];
