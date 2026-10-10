@@ -28,6 +28,8 @@ import { voiceConfig } from './voice.mjs';
 import QRCode from 'qrcode';
 import { Devices } from './devices.mjs';
 import { handleDoor, deviceConversation } from './door.mjs';
+import { Vault } from './vault.mjs';
+import { Secrets, RUNNER } from './secrets.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -67,7 +69,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -86,7 +88,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -111,7 +113,7 @@ export function start({ port, command, cwd, env = process.env }) {
 
 /* The product: conversations are VMs. `prefix` is how the VM manager is
    reached on this installation, as an argument vector. */
-export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin }) {
+export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin, vaultKey }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const vms = new Vms(runner(prefix), prefix);
@@ -130,7 +132,12 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
         qr: (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
     };
     const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')) };
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door });
+    const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault: new Vault(vaultKey ?? `${dataDir}/vault.key`), vms });
+    /* Each opening: the runner and the attached secrets are put in the VM,
+       and the tool is started through the runner. */
+    all.prepare = (name) => secrets.deliver(name);
+    all.through = [RUNNER];
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
@@ -154,7 +161,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const operators = readOperators(option(argv, 'operators', ''));
         const publicOrigin = option(argv, 'public-origin', '') || undefined;
         if (operators.length === 0) console.log('No --operators: development mode, anyone on this machine is the operator.');
-        const server = await startHome({ port, prefix: multipass.split(' ').filter(Boolean), dataDir, operators, publicOrigin });
+        const vaultKey = option(argv, 'vault-key', '') || undefined;
+        const server = await startHome({ port, prefix: multipass.split(' ').filter(Boolean), dataDir, operators, publicOrigin, vaultKey });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

@@ -359,7 +359,48 @@
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;
+        await paintSecrets();
     }
+    /* Secrets: a name and a switch. A value goes in and never comes back. */
+    async function paintSecrets() {
+        const all = await (await fetch(`${API}/secrets`)).json();
+        const rows = $('secret-rows');
+        rows.replaceChildren();
+        for (const secret of all) {
+            const row = document.createElement('div'); row.className = 'folder';
+            const label = document.createElement('b'); label.textContent = secret.name;
+            const levels = document.createElement('div'); levels.className = 'levels';
+            levels.setAttribute('role', 'group'); levels.setAttribute('aria-label', `Hand ${secret.name} to this conversation`);
+            const on = secret.conversations.includes(current);
+            for (const [attached, text] of [[false, 'Off'], [true, 'Handed to the tool']]) {
+                const b = document.createElement('button');
+                b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(on === attached));
+                b.addEventListener('click', async () => {
+                    $('panel-error').hidden = true;
+                    try { await post(`${API}/conversations/${encodeURIComponent(current)}/secrets`, { secret: secret.name, attached }); }
+                    catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+                    await paintSecrets();
+                });
+                levels.append(b);
+            }
+            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
+            remove.addEventListener('click', () => {
+                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, delete ${secret.name}`;
+                sure.addEventListener('click', async () => { await post(`${API}/secrets/${secret.name}/remove`).catch(() => {}); await paintSecrets(); });
+                remove.replaceWith(sure);
+            });
+            row.append(label, levels, remove);
+            rows.append(row);
+        }
+        $('secret-empty').hidden = all.length > 0;
+    }
+    $('secret-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); $('secret-name').value = ''; $('secret-value').value = ''; }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await paintSecrets();
+    });
     $('folders').addEventListener('click', async () => { $('files').hidden = true; await paintPanel(); $('panel').hidden = false; });
     $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
     $('folder-new').addEventListener('submit', async (event) => {

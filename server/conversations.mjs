@@ -23,6 +23,10 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 
 export class Conversations {
     #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map();
+    /* Set by the server: prepares the VM before the tool is attached, and
+       names the program the tool is started through. See secrets.mjs. */
+    prepare = async () => {};
+    through = [];
 
     constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS }) {
         this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs;
@@ -86,8 +90,10 @@ export class Conversations {
             const started = await this.#vms.start(name);
             if (started.code !== 0) { this.left(name); throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`); }
         }
+        try { await this.prepare(name); }
+        catch (error) { this.left(name); throw error; }
         const tool = this.#tools.find((t) => t.id === c.tool);
-        return this.#vms.execArgv(name, attachCommand(SESSION, tool.command, WORK));
+        return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...tool.command], WORK));
     }
 
     /* A screen went away, for whatever reason. */

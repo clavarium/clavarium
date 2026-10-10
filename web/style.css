@@ -105,6 +105,10 @@ footer#keys { border-top: 0; }
 .link { overflow-wrap: anywhere; user-select: all; font-family: ui-monospace, Menlo, Consolas, monospace; }
 .device { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .device b { flex: 1; min-width: 120px; } .device small { color: var(--ink2); }
-.device button.danger { border-color: var(--danger); color: var(--danger); }
+button.danger { border-color: var(--danger); color: var(--danger); }
 html[data-door="device"] #app { display: block; }
 html[data-door="device"] #room { height: 100%; }
+#secret-rows { display: flex; flex-direction: column; }
+#secret-new { display: flex; flex-direction: column; gap: 6px; max-width: 560px; }
+#secret-new label { font-size: 12px; color: var(--ink2); }
+#secret-new input { flex: 1; min-width: 120px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }

@@ -11,6 +11,10 @@
  *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
  *   GET  /api/conversations/<name>/devices
  *   POST /api/devices/<id>/revoke
+ *   GET  /api/secrets                       names only: a value never comes back
+ *   POST /api/secrets                       {name, value}  create or replace
+ *   POST /api/secrets/<NAME>/remove
+ *   POST /api/conversations/<name>/secrets  {secret, attached}
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
@@ -44,7 +48,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -86,10 +90,11 @@ export async function handleApi(request, response, conversations, headers, resou
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
-                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [] }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [] }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
+            if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
             const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             return send(404, { error: 'Not found.' }), true;
@@ -102,6 +107,16 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
+        if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
+        const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
+        if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
+        const handed = /^\/api\/conversations\/([^/]+)\/secrets$/.exec(pathname);
+        if (handed && secrets) {
+            const conversation = decodeURIComponent(handed[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
+            return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
+        }
         const share = /^\/api\/conversations\/([^/]+)\/share$/.exec(pathname);
         if (share && sharing) {
             const conversation = decodeURIComponent(share[1]);
@@ -128,6 +143,7 @@ export async function handleApi(request, response, conversations, headers, resou
         await conversations[action[2]](decodeURIComponent(action[1]));
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') secrets?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;

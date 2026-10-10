@@ -31,7 +31,7 @@
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
       <button type="button" id="files-open" hidden>Files</button>
-      <button type="button" id="folders" hidden>Folders</button>
+      <button type="button" id="folders" hidden>Folders &amp; secrets</button>
       <button type="button" id="share" hidden>Share</button>
       <button type="button" id="sleep" hidden>Sleep</button>
       <button type="button" id="archive" hidden>Archive</button>
@@ -48,6 +48,16 @@
           <label for="folder-name">New folder</label>
           <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
+        </form>
+        <div class="panel-top"><b>Secrets</b></div>
+        <p class="hint">A secret switched on here is handed to the tool of this conversation, as a file under <code>/run/secrets/</code> and as a variable of the same name. The tool can read it and send it anywhere: give narrow keys you can revoke. It takes effect the next time the tool starts.</p>
+        <div id="secret-rows"></div>
+        <p id="secret-empty" class="hint" hidden>No secret yet.</p>
+        <form id="secret-new" autocomplete="off">
+          <label for="secret-name">New secret, or a new value for an existing one</label>
+          <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
+            <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
+            <button type="submit" class="primary">Save</button></div>
         </form>
       </div>
       <div id="files" class="sheet" hidden>
