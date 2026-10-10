@@ -25,7 +25,10 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   folder can be shared by several conversations; read-only is enforced on the
   host; a Files panel lists, downloads and imports.
 
-Not yet: sign-on, shortcuts and voice, the installable app, delivery.
+- **4 - the edge**: with `--operators`, an authenticating proxy must stand in
+  front; pages, API and terminal refuse anyone who is not a declared operator.
+
+Not yet: shortcuts and voice, the installable app, secrets, delivery.
 
 The host needs `tmux` and `bindfs` (the read-only views).
 
