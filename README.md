@@ -20,7 +20,14 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   `config/tools.json`; it keeps running when the page is closed, stops a
   minute after the tool has exited, sleeps and wakes on request, is archived.
 
-Not yet: folders, sign-on, shortcuts and voice, the installable app, delivery.
+- **3 - folders**: a folder kept by the server is attached to a conversation
+  read-only or read-write and appears under `/resources/` in its VM; the same
+  folder can be shared by several conversations; read-only is enforced on the
+  host; a Files panel lists, downloads and imports.
+
+Not yet: sign-on, shortcuts and voice, the installable app, delivery.
+
+The host needs `tmux` and `bindfs` (the read-only views).
 
     npm install
 
