@@ -117,3 +117,10 @@ html[data-door="device"] #room { height: 100%; }
 #signin-text { flex: 1; min-width: 160px; }
 a.button { font: 600 13px var(--sans); text-decoration: none; border-radius: 7px; padding: 7px 11px; background: var(--brass); color: var(--on-brass); }
 #signin-form input { flex: 1; min-width: 130px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+/* On a narrow screen the key row wraps instead of hiding its end, and
+   dictation comes first: by voice is how a phone is used. */
+@media (max-width: 700px) {
+  footer#keys { flex-wrap: wrap; overflow-x: visible; }
+  #mic, #auto { order: -1; flex: 1 0 auto; }
+  #mic { flex-basis: 55%; padding-block: 12px; }
+}
