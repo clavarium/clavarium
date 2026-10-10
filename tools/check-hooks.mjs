@@ -35,7 +35,9 @@ if (process.env.CI === 'true') {
     const alive = spawnSync('hooks/guard.sh', ['--self-test'], { encoding: 'utf8' });
     if (alive.status !== 0) {
         problems.push(`the leak guard is not answering: ${(alive.stdout || alive.stderr || '').trim().split('\n')[0]}`);
-    } else {
+    } else if (problems.length === 0) {
+        /* Said only when BOTH are true. It once said "wired" above a refusal
+           about the wiring, and the first line is the one people read. */
         console.log(`hooks: wired; ${alive.stdout.trim()}`);
     }
 }
