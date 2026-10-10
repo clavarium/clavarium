@@ -1,0 +1,23 @@
+[
+  {
+    "id": "claude-code",
+    "label": "Claude Code",
+    "command": ["claude"],
+    "memoryMb": 1024,
+    "install": ["node", ["sudo", "-n", "npm", "install", "-g", "--no-fund", "--no-audit", "@anthropic-ai/claude-code"]]
+  },
+  {
+    "id": "opencode",
+    "label": "OpenCode",
+    "command": ["opencode"],
+    "memoryMb": 1024,
+    "install": ["node", ["sudo", "-n", "npm", "install", "-g", "--no-fund", "--no-audit", "opencode-ai"]]
+  },
+  {
+    "id": "shell",
+    "label": "Shell",
+    "command": ["bash", "-l"],
+    "memoryMb": 768,
+    "install": []
+  }
+]

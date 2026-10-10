@@ -1,25 +1,58 @@
-/* The terminal owns the screen: one thin bar above, one key row below. */
+/* The terminal owns the screen. On a wide screen the list sits beside it; on
+   a narrow one, the list and the conversation are two screens. */
 :root {
-  --bg: #0f141a; --bar: #161d26; --line: #2b3745; --ink: #e7edf4; --ink2: #a3b1c2;
-  --brass: #d2a94e; --ok: #5fc39d; --warn: #e39a5c;
+  --bg: #0f141a; --bar: #161d26; --panel: #131a22; --line: #2b3745; --ink: #e7edf4; --ink2: #a3b1c2;
+  --brass: #d2a94e; --on-brass: #1b1405; --ok: #5fc39d; --warn: #e39a5c; --danger: #ee7f79;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px var(--sans); }
-body { display: flex; flex-direction: column; height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
-header { display: flex; align-items: center; gap: 10px; padding: 7px 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+body { height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
+[hidden] { display: none !important; }
+button { font: 600 13px var(--sans); color: var(--ink); background: #222c38; border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
+button.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+#app { display: flex; height: 100%; }
+#list { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+#list .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+#items { display: flex; flex-direction: column; gap: 6px; }
+.item { display: block; width: 100%; text-align: left; padding: 9px 10px; background: var(--bar); font-weight: 400; }
+.item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
+.item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item small { color: var(--ink2); }
+.item .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink2); }
+.item[data-phase="ready"] .dot { background: var(--ok); }
+.item[data-phase="building"] .dot { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.item[data-phase="failed"] .dot { background: var(--danger); }
+@keyframes pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .item .dot { animation: none !important; } }
+#create { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bar); border: 1px solid var(--line); border-radius: 8px; }
+#create label, #create .legend { font-size: 12px; color: var(--ink2); }
+#create input { font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; }
+.choices { display: flex; flex-wrap: wrap; gap: 6px; }
+.choices button[aria-checked="true"] { border-color: var(--brass); background: rgba(210, 169, 78, .16); }
+.row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hint { color: var(--ink2); font-size: 12px; margin: 0; }
+.error { color: var(--danger); font-size: 13px; margin: 0; }
+#room { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bar); border-bottom: 1px solid var(--line); min-height: 44px; }
 header b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#state { font-size: 12px; color: var(--ink2); }
+header button { padding: 5px 9px; }
+#back { font-size: 20px; line-height: 1; padding: 2px 10px; }
+.tag { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--brass); color: var(--brass); white-space: nowrap; }
+#state { font-size: 12px; color: var(--ink2); white-space: nowrap; }
 #state::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink2); }
 #state[data-state="live"]::before { background: var(--ok); }
 #state[data-state="waiting"]::before, #state[data-state="ended"]::before { background: var(--warn); }
 main { position: relative; flex: 1; min-height: 0; }
 #terminal { position: absolute; inset: 0; padding: 4px; }
-#notice { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(15, 20, 26, .9); }
-#notice[hidden] { display: none; }
-#notice p { margin: 0; max-width: 32ch; font-size: 16px; }
-#notice button { background: var(--brass); color: #1b1405; border: 0; border-radius: 8px; padding: 10px 18px; font: 600 15px var(--sans); cursor: pointer; }
+#notice { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(15, 20, 26, .92); }
+#notice p { margin: 0; max-width: 36ch; font-size: 16px; }
+#notice button { padding: 10px 18px; font-size: 15px; }
 footer { display: flex; gap: 6px; padding: 6px 8px; background: var(--bar); border-top: 1px solid var(--line); overflow-x: auto; }
-footer button { flex: 0 0 auto; min-width: 44px; background: #222c38; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 9px 12px; font: 600 13px var(--sans); cursor: pointer; }
-footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var(--brass); color: #1b1405; }
-button:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
+footer button { flex: 0 0 auto; min-width: 44px; padding: 9px 12px; }
+footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+@media (max-width: 700px) {
+  #list { flex-basis: 100%; border-right: 0; }
+  #app[data-view="room"] #list, #app[data-view="list"] #room { display: none; }
+}

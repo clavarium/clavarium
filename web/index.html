@@ -5,27 +5,49 @@
 <title>Clavarium</title>
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
-<header>
-  <b id="name"></b>
-  <span id="state" data-state="connecting">connecting</span>
-</header>
-<main>
-  <div id="terminal"></div>
-  <div id="notice" hidden>
-    <p id="notice-text"></p>
-    <button id="notice-action" type="button"></button>
-  </div>
-</main>
-<!-- The keys a phone keyboard does not have. -->
-<footer id="keys">
-  <button type="button" data-keys="esc">Esc</button>
-  <button type="button" data-keys="tab">Tab</button>
-  <button type="button" data-keys="left" aria-label="Left">&larr;</button>
-  <button type="button" data-keys="down" aria-label="Down">&darr;</button>
-  <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
-  <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
-  <button type="button" data-keys="enter" class="wide">Enter</button>
-</footer>
+<div id="app">
+  <aside id="list" hidden>
+    <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
+    <form id="create" hidden autocomplete="off">
+      <label for="create-name">Name</label>
+      <input id="create-name" name="name" required maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
+      <span class="legend">What runs in it</span>
+      <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
+      <p id="create-error" class="error" role="alert" hidden></p>
+      <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
+        <span class="hint">about 2 minutes</span></div>
+    </form>
+    <div id="items"></div>
+    <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
+  </aside>
+  <section id="room">
+    <header>
+      <button type="button" id="back" aria-label="All conversations" hidden>&lsaquo;</button>
+      <b id="name"></b>
+      <span id="tool" class="tag" hidden></span>
+      <span id="state" data-state="connecting">connecting</span>
+      <button type="button" id="sleep" hidden>Sleep</button>
+      <button type="button" id="archive" hidden>Archive</button>
+    </header>
+    <main>
+      <div id="terminal"></div>
+      <div id="notice" hidden>
+        <p id="notice-text"></p>
+        <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
+      </div>
+    </main>
+    <!-- The keys a phone keyboard does not have. -->
+    <footer id="keys">
+      <button type="button" data-keys="esc">Esc</button>
+      <button type="button" data-keys="tab">Tab</button>
+      <button type="button" data-keys="left" aria-label="Left">&larr;</button>
+      <button type="button" data-keys="down" aria-label="Down">&darr;</button>
+      <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
+      <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
+      <button type="button" data-keys="enter" class="wide">Enter</button>
+    </footer>
+  </section>
+</div>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/fit.js"></script>
 <script src="/app.js"></script>

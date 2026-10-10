@@ -1,0 +1,36 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readTools, loadTools, NODE_STEPS, NODE_SHA256 } from '../server/tools.mjs';
+
+test('the shipped catalogue loads, and no step of it is a shell line', () => {
+    const tools = loadTools();
+    assert.ok(tools.length >= 2);
+    for (const t of tools) {
+        for (const step of t.steps) {
+            assert.ok(!step.argv.includes('-c') || step.argv[0] === 'sha256sum', `${t.id}: ${step.argv.join(' ')}`);
+            assert.ok(!step.argv.some((a) => /[|;&`$]/.test(a) && !a.startsWith('https://')), `${t.id}: a step looks like shell`);
+        }
+    }
+});
+
+test('the runtime is checked BEFORE it is unpacked, with a checksum that comes from here', () => {
+    /* The program of each step: the first word, or the one after `sudo -n`. */
+    const program = (argv) => (argv[0] === 'sudo' ? argv[2] : argv[0]);
+    const order = NODE_STEPS.map((s) => program(s.argv)).filter((p) => ['curl', 'sha256sum', 'tar'].includes(p));
+    assert.deepEqual(order, ['curl', 'sha256sum', 'tar'], 'download, then check, then unpack');
+    const check = NODE_STEPS.find((s) => s.argv[0] === 'sha256sum');
+    assert.ok(check.input.startsWith(NODE_SHA256));
+    const download = NODE_STEPS.find((s) => s.argv[0] === 'curl');
+    assert.ok(download.argv.includes('=https'), 'never anything but HTTPS');
+});
+
+test('a malformed catalogue is refused with the name of what is wrong', () => {
+    const one = (extra) => JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 1024, install: [], ...extra }]);
+    assert.equal(readTools(one({}))[0].id, 'x');
+    assert.throws(() => readTools(one({ command: 'x --flag' })), /argument vector/);
+    assert.throws(() => readTools(one({ command: ['x', ';', 'y'] })), /argument vector/);
+    assert.throws(() => readTools(one({ install: ['curl https://example.com | sh'] })), /install step/);
+    assert.throws(() => readTools(one({ memoryMb: 64 })), /memoryMb/);
+    assert.throws(() => readTools(one({ id: 'Bad Id' })), /tool id/);
+    assert.throws(() => readTools('[]'), /empty/);
+});

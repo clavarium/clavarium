@@ -8,6 +8,8 @@
  *                       text frame     {"type":"resize","cols":n,"rows":n}
  *   server -> browser   binary frame   terminal output
  *                       text frame     {"type":"taken"}  another screen took over
+ *                                      {"type":"status","text":...}  e.g. waking
+ *                                      {"type":"error","text":...}   then close 1011
  *   close 1000  the tool exited, the session is over
  *   close 4001  taken over: do not reconnect by yourself
  */
@@ -33,9 +35,12 @@ export function sameOrigin(headers) {
     return origin === `http://${host}` || origin === `https://${host}`;
 }
 
-/* `spawn(name, cols, rows)` returns a PTY-like object: write, resize, kill,
-   onData, onExit. Injected so that tests need neither tmux nor a real PTY. */
-export function attachBridge(server, { spawn }) {
+/* `spawn(name, cols, rows, say)` returns a PTY-like object (write, resize,
+   kill, onData, onExit), or a promise of one; `say(text)` tells the screen
+   what is taking time. Injected, so tests need neither tmux nor a real PTY.
+   `onLeft(name)` is called when a screen goes away, `onEnded(name)` when the
+   terminal ended by itself rather than because the screen left. */
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {} }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
 
@@ -51,18 +56,32 @@ export function attachBridge(server, { spawn }) {
         });
     });
 
-    function seat(viewer, name, cols, rows) {
+    async function seat(viewer, name, cols, rows) {
         const previous = seats.take(name, viewer);
         if (previous) {
             previous.send(JSON.stringify({ type: 'taken' }));
             previous.close(CLOSE_TAKEN, 'taken over');
         }
+        let gone = false;
         let terminal;
-        try { terminal = spawn(name, cols, rows); }
-        catch { seats.leave(name, viewer); viewer.close(1011, 'cannot open the terminal'); return; }
+        viewer.on('close', () => { gone = true; seats.leave(name, viewer); onLeft(name); terminal?.kill(); });
+        const say = (text) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', text })); };
+        try { terminal = await spawn(name, cols, rows, say); }
+        catch (error) {
+            /* Only a message written for the person is passed on. */
+            const text = typeof error?.status === 'number' ? error.message : 'The terminal could not be opened.';
+            if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text })); viewer.close(1011, 'cannot open'); }
+            return;
+        }
+        /* The screen left while the terminal was being opened. */
+        if (gone) { terminal.kill(); return; }
 
         terminal.onData((bytes) => { if (viewer.readyState === 1) viewer.send(bytes, { binary: true }); });
-        terminal.onExit(() => { seats.leave(name, viewer); viewer.close(CLOSE_ENDED, 'ended'); });
+        terminal.onExit(() => {
+            if (gone) return;                 /* we killed it: the screen left */
+            onEnded(name);
+            viewer.close(CLOSE_ENDED, 'ended');
+        });
         viewer.on('message', (data, binary) => {
             if (binary) { terminal.write(data.toString()); return; }
             let message;
@@ -71,8 +90,6 @@ export function attachBridge(server, { spawn }) {
                 terminal.resize(message.cols, message.rows);
             }
         });
-        /* Kills the tmux CLIENT. The session, and the tool in it, go on. */
-        viewer.on('close', () => { seats.leave(name, viewer); terminal.kill(); });
     }
 
     return { seats };
