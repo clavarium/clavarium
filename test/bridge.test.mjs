@@ -70,13 +70,14 @@ test('a screen that comes back finds the terminal as it was, at once, and the to
     first.close();
     await once(first, 'close');
     const second = b.open('c=demo&cols=90&rows=20');
+    /* Listening from the very first frame: "ready" is said at once. */
+    const got = [];
+    second.on('message', (d, binary) => got.push(binary ? d.toString() : JSON.parse(d.toString()).type));
     await once(second, 'open');
     const term = b.terminals.made[0];
     await b.until(() => term.sizes.length === 2);
     assert.equal(b.terminals.made.length, 1, 'no second terminal was opened');
     assert.deepEqual(term.sizes, [[90, 19], [90, 20]], 'a line short, then right, a moment apart: a full redraw');
-    const got = [];
-    second.on('message', (d, binary) => got.push(binary ? d.toString() : JSON.parse(d.toString()).type));
     term.data('still here');
     await b.until(() => got.includes('still here'));
     assert.ok(got.includes('ready'), 'the screen is told in words that its terminal is attached');
