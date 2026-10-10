@@ -42,16 +42,16 @@ done
 # 1. Check before touching anything.
 listing="$(tar -tzf "$ARCHIVE" 2>/dev/null)" || refuse "this is not an archive that can be read"
 grep -qx 'BACKUP.txt' <<< "$listing" || refuse "this archive was not made by backup.sh"
-grep -q '^var/lib/clavarium/' <<< "$listing" || refuse "this archive holds no Clavarium data"
+grep -q '^home/clavarium/' <<< "$listing" || refuse "this archive holds no Clavarium data"
 # Nothing in it may land outside the places a backup is made of.
-if grep -Ev '^(BACKUP\.txt|var/lib/(clavarium|caddy|dex|clavarium-tunnel)(/|$)|etc/(clavarium|dex|oauth2-proxy|caddy)(/|$))' <<< "$listing" | grep -q .; then
+if grep -Ev '^(BACKUP\.txt|home/clavarium(/|$)|var/lib/(caddy|dex|clavarium-tunnel)(/|$)|etc/(clavarium|dex|oauth2-proxy|caddy)(/|$))' <<< "$listing" | grep -q .; then
     refuse "this archive holds files that are not part of a backup"
 fi
 if grep -q '\.\.' <<< "$listing"; then refuse "this archive holds a path that climbs out"; fi
 if [ -n "$VAULT_KEY" ]; then [ "$(wc -c < "$VAULT_KEY")" -eq 32 ] || refuse "this is not a vault key (32 bytes expected)"; fi
 tar -xzOf "$ARCHIVE" BACKUP.txt
 has_secrets="no"
-if tar -xzOf "$ARCHIVE" var/lib/clavarium/secrets.json 2>/dev/null | grep -q '"name"'; then has_secrets="yes"; fi
+if tar -xzOf "$ARCHIVE" home/clavarium/secrets.json 2>/dev/null | grep -q '"name"'; then has_secrets="yes"; fi
 if [ "$has_secrets" = "yes" ] && [ -z "$VAULT_KEY" ]; then
     refuse "this backup holds sealed secrets: give the key that opens them (--vault-key FILE)"
 fi
@@ -76,11 +76,11 @@ fi
 aside="$ROOT/var/backups/clavarium-before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$aside"; chmod 700 "$aside"
 present=()
-for part in var/lib/clavarium var/lib/clavarium-vault etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
+for part in home/clavarium var/lib/clavarium-vault etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
     [ -e "$ROOT/$part" ] && present+=("$part")
 done
 [ "${#services[@]}" -eq 0 ] || systemctl stop "${services[@]}"
-[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='var/lib/clavarium/views' -C "$ROOT/" "${present[@]}"
+[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='home/clavarium/views' -C "$ROOT/" "${present[@]}"
 echo "what was here is set aside: $aside/state.tgz"
 
 back() {
@@ -101,7 +101,7 @@ fi
 if [ "$REAL" = "yes" ]; then
     chown clavarium:clavarium /var/lib/clavarium-vault /var/lib/clavarium-vault/vault.key 2>/dev/null || true
     # What gets mounted into VMs is arranged by root only: see clavarium-host.
-    install -d -o root -g root -m 0755 /var/lib/clavarium/resources /var/lib/clavarium/views /var/lib/clavarium/removed
+    install -d -o root -g root -m 0755 /home/clavarium/resources /home/clavarium/views /home/clavarium/removed
     systemctl daemon-reload
     systemctl start "${services[@]}"
     # 4. Every service must come up (up to 30 s) AND HOLD: one that starts,
@@ -127,6 +127,6 @@ if [ "$REAL" = "yes" ]; then
     while read -r name; do
         [ -n "$name" ] || continue
         multipass info "clv-$name" >/dev/null 2>&1 || missing="$missing $name"
-    done < <(sed -n 's/^ *"name": "\([a-z0-9-]*\)",\{0,1\}$/\1/p' /var/lib/clavarium/conversations.json 2>/dev/null)
+    done < <(sed -n 's/^ *"name": "\([a-z0-9-]*\)",\{0,1\}$/\1/p' /home/clavarium/conversations.json 2>/dev/null)
     [ -z "$missing" ] || echo "These conversations have no machine here (archive them, then create them again):$missing"
 fi

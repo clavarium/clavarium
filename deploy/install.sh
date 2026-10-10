@@ -23,8 +23,11 @@
 #     rule that allows it. Everything that needs root goes through it;
 #   - the code in /opt/clavarium, owned by root: the server cannot rewrite
 #     itself;
-#   - the data in /var/lib/clavarium; the directories whose content gets
-#     mounted into VMs belong to root (see clavarium-host);
+#   - the data in /home/clavarium, the account's home; the directories whose
+#     content gets mounted into VMs belong to root (see clavarium-host).
+#     UNDER /home ON PURPOSE: the VM manager is confined and can only share
+#     folders from there. Anywhere else, a folder "does not exist" for it
+#     (found on a real machine: nothing could be attached from /var/lib);
 #   - the key of the vault APART from the data (/var/lib/clavarium-vault): a
 #     copy of the data alone does not open the secrets;
 #   - THE EDGE, unless --core-only: the only thing that listens to the outside
@@ -40,7 +43,7 @@ set -euo pipefail
 SUPPORTED="24.04 26.04"
 ACCOUNT="clavarium"
 CODE="/opt/clavarium"
-DATA="/var/lib/clavarium"
+DATA="/home/clavarium"
 VAULT="/var/lib/clavarium-vault"
 ETC="/etc/clavarium"
 HOST_PROGRAM="/usr/local/sbin/clavarium-host"
@@ -130,6 +133,7 @@ snap list multipass >/dev/null 2>&1 || snap install multipass >/dev/null
 
 step "account"
 id "$ACCOUNT" >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --no-create-home --shell /usr/sbin/nologin "$ACCOUNT"
+[ "$(getent passwd "$ACCOUNT" | cut -d: -f6)" = "$DATA" ] || usermod --home "$DATA" "$ACCOUNT"
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0750 "$DATA"
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0700 "$VAULT"
 # What gets mounted into VMs is arranged by root only: see clavarium-host.

@@ -41,13 +41,13 @@ if [ -z "$ROOT" ]; then
     [ "$(id -u)" -eq 0 ] || refuse "run it as root (sudo)"
     ROOT="/"
 fi
-[ -d "$ROOT/var/lib/clavarium" ] || refuse "there is no Clavarium data here ($ROOT/var/lib/clavarium)"
+[ -d "$ROOT/home/clavarium" ] || refuse "there is no Clavarium data here ($ROOT/home/clavarium)"
 KEY="$ROOT/var/lib/clavarium-vault/vault.key"
 
 # Everything that would be needed on a new machine, if it exists here.
 # (The read-only views are not content: they are mirrors, made again at start.)
 parts=()
-for part in var/lib/clavarium etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
+for part in home/clavarium etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
     [ -e "$ROOT/$part" ] && parts+=("$part")
 done
 
@@ -58,7 +58,7 @@ trap 'rm -rf -- "$note"' EXIT
 {
     echo "Clavarium backup, made $stamp"
     echo "Conversations (their machines are NOT in this backup):"
-    sed -n 's/^ *"name": "\([a-z0-9-]*\)",\{0,1\}$/  \1/p' "$ROOT/var/lib/clavarium/conversations.json" 2>/dev/null || true
+    sed -n 's/^ *"name": "\([a-z0-9-]*\)",\{0,1\}$/  \1/p' "$ROOT/home/clavarium/conversations.json" 2>/dev/null || true
 } > "$note/BACKUP.txt"
 
 # The identity provider keeps a small database: it is still while it is copied.
@@ -66,7 +66,7 @@ dex_was_up="no"
 if [ "$ROOT" = "/" ] && systemctl is-active --quiet dex.service 2>/dev/null; then dex_was_up="yes"; systemctl stop dex.service; fi
 umask 077
 status=0
-tar -czf "$archive" --exclude='var/lib/clavarium/views' --exclude='*.tmp' -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
+tar -czf "$archive" --exclude='home/clavarium/views' --exclude='*.tmp' -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
 [ "$dex_was_up" = "no" ] || systemctl start dex.service
 # (1: a file changed while it was read -- the copy is still whole.)
 [ "$status" -le 1 ] || { rm -f -- "$archive"; refuse "the archive could not be written"; }

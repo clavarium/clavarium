@@ -32,6 +32,9 @@ const RULES = [
         name: 'a home directory',
         why: 'It names a user, and often a machine and a client with them.',
         find: /\/(home|Users)\/[A-Za-z0-9._-]+\//g,
+        /* The product's own service account is nobody: its home is where the
+           installer puts the data (the VM manager only shares from /home). */
+        allow: (m) => m === '/home/clavarium/',
     },
     {
         name: 'an email address',
