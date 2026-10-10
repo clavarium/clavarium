@@ -40,6 +40,8 @@ const FILES = {
     '/style.css': ['web/style.css', 'text/css; charset=utf-8'],
     '/voice.js': ['web/voice.js', 'text/javascript; charset=utf-8'],
     '/icon.svg': ['web/icon.svg', 'image/svg+xml'],
+    '/icon-192.png': ['web/icon-192.png', 'image/png'],
+    '/icon-512.png': ['web/icon-512.png', 'image/png'],
     '/manifest.webmanifest': ['web/manifest.webmanifest', 'application/manifest+json'],
     '/sw.js': ['web/sw.js', 'text/javascript; charset=utf-8'],
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],

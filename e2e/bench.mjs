@@ -14,6 +14,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { startHome } from '../server/main.mjs';
 import { readTools } from '../server/tools.mjs';
@@ -43,10 +44,14 @@ export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
+    /* A speech-to-text engine that hears the same sentence whatever it is sent. */
+    const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
+    await new Promise((ready) => engine.listen(0, '127.0.0.1', ready));
     process.env.FAKE_VM_DIR = dir;
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: TOOLS, stopDelayMs,
+        env: { ...process.env, CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         prefix: [process.execPath, join(HERE, 'fake-multipass.mjs')],
         sudo: [process.execPath, join(HERE, 'fake-host.mjs')],
     });
@@ -55,7 +60,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {
     const contexts = [];
     t.after(async () => {
         await browser.close();
-        server.closeAllConnections?.(); server.close();
+        server.closeAllConnections?.(); server.close(); engine.close();
         for (const line of spawnSync('sh', ['-c', 'ls /tmp/tmux-$(id -u) 2>/dev/null'], { encoding: 'utf8' }).stdout.split('\n')) {
             if (line.startsWith('e2e-clv-')) spawnSync('tmux', ['-L', line, 'kill-server'], { stdio: 'ignore' });
         }
@@ -63,8 +68,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1' } = {
     });
 
     /* A person at a screen. `phone: true` is a small touch screen. */
-    async function person({ phone = false, at = '/' } = {}) {
-        const context = await browser.newContext(phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true });
+    async function person({ phone = false, at = '/', context: given } = {}) {
+        const context = given ?? await browser.newContext(phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true });
         contexts.push(context);
         const page = await context.newPage();
         const errors = [];

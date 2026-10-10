@@ -95,7 +95,7 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 #shortcut-new input:not([type]) , #shortcut-new input[maxlength] { font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; }
 .check { font-size: 13px; color: var(--ink2); display: flex; align-items: center; gap: 6px; }
 footer#keys { border-top: 0; }
-#voice-line { margin: 0; padding: 5px 12px; font-size: 13px; color: var(--ink2); background: var(--bar); border-top: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#voice-line { margin: 0; padding: 5px 12px; font-size: 13px; color: var(--ink2); background: var(--bar); border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 #voice-line::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--ok); }
 #voice-line[data-state="hearing"]::before { background: var(--danger); }
 #voice-line[data-state="transcribing"]::before, #voice-line[data-state="calibrating"]::before { background: var(--warn); }
@@ -125,3 +125,11 @@ a.button { font: 600 13px var(--sans); text-decoration: none; border-radius: 7px
   #mic { flex-basis: 55%; padding-block: 12px; }
 }
 .item[data-asleep="true"] .dot { background: var(--ink2); }
+footer button.careful { border-style: dashed; color: var(--ink2); }
+/* On a touch screen every control is at least a fingertip high. */
+@media (max-width: 700px) {
+  button, a.button, .file { min-height: 44px; }
+  .chips-row button { padding-block: 10px; }
+  #state, .tag { font-size: 13px; }
+  footer button.careful { order: 5; }
+}

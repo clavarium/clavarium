@@ -61,11 +61,14 @@
                    not stay stuck on a key the server has forgotten. */
                 device = await pair(code);
             }
-            if (!device) return { ok: false, message: 'This device is not paired with a conversation. Ask its owner for a code to scan.' };
+            if (!device) return { ok: false, message: 'This device is not connected to a conversation. Ask the person who invited you for a new code to scan.' };
             await session(device);
             return { ok: true };
         } catch (error) {
-            return { ok: false, message: error.message };
+            /* Said for the person, with what to do next. */
+            const known = /not paired|removed/.test(error.message) ? 'This conversation was closed, or this device was removed from it. Ask the person who invited you for a new code to scan.'
+                : /not valid any more/.test(error.message) ? 'This code was already used, or is too old. Ask the person who invited you for a new one.' : error.message;
+            return { ok: false, message: known };
         }
     };
     /* The owner removed this device: forget the key, so a new code can pair it. */

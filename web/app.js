@@ -8,7 +8,7 @@
     const RETRY_MS = 1500;
     const NAME = /^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
     /* What each key of the row sends, as a terminal expects it. */
-    const KEYS = { esc: '\x1b', tab: '\t', enter: '\r', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' };
+    const KEYS = { esc: '\x1b', tab: '\t', enter: '\r', stop: '\x03', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' };
 
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
@@ -81,6 +81,7 @@
                 /* Output is the proof the terminal is there: "waking" is over. */
                 if (state.dataset.state !== 'live') {
                     say('live', 'live');
+                    notice.hidden = true;
                     /* Asking for the size again makes the tool redraw whole:
                        after a re-attach the first typed line was misplaced. */
                     setTimeout(() => { fit.fit(); sendSize(); }, 300);
@@ -90,7 +91,13 @@
             }
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
-            if (message.type === 'status') say(String(message.text), 'connecting');
+            if (message.type === 'status') {
+                say(String(message.text), 'connecting');
+                /* In the middle of the screen too: a small word in the header is
+                   not enough for a wait that can last minutes (a tester waited
+                   three, with nothing else to read). */
+                show(`${message.text} This can take a few minutes: the machine was stopped.`);
+            }
             if (message.type === 'error') failure = String(message.text);
         };
         mine.onclose = (event) => {
@@ -104,8 +111,12 @@
             } else if (event.code === CLOSE_FAILED) {
                 say('not available', 'ended');
                 show(failure || 'The terminal could not be opened.', 'Try again', connect);
+                /* On a device this is often the owner closing the conversation:
+                   asking again says so in plain words, instead of an error. */
+                if (DEVICE) void refresh();
             } else {
                 say('reconnecting', 'connecting');
+                if (DEVICE) void refresh();       /* removed meanwhile? then say it, do not retry for ever */
                 setTimeout(() => { if (socket === mine && wanted) connect(); }, RETRY_MS);
             }
         };
@@ -200,7 +211,7 @@
                 if (r.status === 401) {
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
-                    if (!door.ok) { disconnect(); say('not paired', 'ended'); show(door.message); return; }
+                    if (!door.ok) { shut(door.message); return; }
                     r = await fetch(`${API}/me`);
                 }
                 if (!r.ok) throw new Error('no api');
@@ -476,7 +487,7 @@
        imported into. A file name is shown as text and never interpreted. */
     let filesOf = '';            /* the attached folder being shown */
     let filesAt = '';            /* the path inside it */
-    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
+    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
     const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
     async function paintFiles() {
         const mine = conversations.find((x) => x.name === current)?.resources ?? [];
@@ -660,13 +671,38 @@
     $('archive').addEventListener('click', () => { void archive(false); });
     $('back').addEventListener('click', () => select(''));
 
+    /* A device whose door is closed: say why, and leave nothing on screen
+       that can no longer work (a tester found Files still offered after the
+       device had been removed). */
+    function shut(message) {
+        disconnect(); clearTimeout(pollTimer);
+        say('not connected', 'ended');
+        for (const id of ['keys', 'shortcuts', 'files-open', 'files', 'tool']) $(id).hidden = true;
+        $('chips').replaceChildren();
+        show(message);
+    }
+    /* A new code opened in the same tab is a new pairing: the page starts over. */
+    if (DEVICE) window.addEventListener('hashchange', () => { if (location.hash.length > 1) location.reload(); });
+
     /* ---------- start ---------- */
     async function start() {
         if (DEVICE) {
             view('room');
-            say('pairing', 'connecting');
+            const fresh = location.hash.length > 1;      /* arriving with a code: a first visit */
+            say(fresh ? 'pairing' : 'connecting', 'connecting');
             const door = await window.clavariumDoor();
-            if (!door.ok) { say('not paired', 'ended'); $('keys').hidden = true; show(door.message); return; }
+            if (!door.ok) { shut(door.message); return; }
+            await refresh();
+            void offerVoice();          /* only now is there a session to ask with */
+            if (fresh && home) {
+                /* The one thing a first-time visitor is told, before the dark screen. */
+                const c = conversations[0];
+                $('name').textContent = c?.name ?? '';
+                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.`, 'Start', () => { notice.hidden = true; enter(); });
+                return;
+            }
+            enter();
+            return;
         } else {
             view(current ? 'room' : 'list');
             if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
