@@ -76,7 +76,10 @@ export class Network {
         const wanted = this.#offline().filter((name) => taps[name]);
         /* Without the host's address the "offline" rules cannot be written
            safely; the silo rule still can, and is. */
-        const r = await this.#host(['nft', '-f', '-'], { input: ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0') });
+        /* As ONE argument, not on standard input: this firewall tool refuses
+           a pipe as its input file (measured), and nothing in the rules is
+           secret. Every name in them was checked by readTaps. */
+        const r = await this.#host(['nft', ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0')]);
         return r.code === 0 && (bridge !== undefined || wanted.length === 0);
     }
 }
