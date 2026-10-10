@@ -57,6 +57,11 @@ The host needs `tmux` and `bindfs` (the read-only views).
     node server/main.mjs --host "sudo -n /usr/local/sbin/clavarium-host" --data /path/to/data
     # then open http://127.0.0.1:7717/
 
+    # or, on a fresh Ubuntu Server (24.04, 26.04), everything above in one command:
+    # an account with no rights, the one program it may run as root, a service.
+    # (The sign-in edge is not installed by it yet: hence --core-only.)
+    sudo deploy/install.sh --domain clav.example.com --operator you@example.com --core-only
+
     # development, no VM: one tool on this machine
     node server/main.mjs --command "your-tool" --cwd /path/to/work
     # then open http://127.0.0.1:7717/?c=demo

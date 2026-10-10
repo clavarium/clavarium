@@ -12,7 +12,7 @@
     "check:names": "node tools/check-ai-names.mjs",
     "check:shell": "node tools/check-shell.mjs",
     "hooks": "git config core.hooksPath hooks",
-    "prepare": "git config core.hooksPath hooks || true",
+    "prepare": "git config core.hooksPath hooks 2>/dev/null || true",
     "check:hooks": "node tools/check-hooks.mjs",
     "test:e2e": "node --test --test-concurrency=1 \"e2e/*.e2e.mjs\""
   },
