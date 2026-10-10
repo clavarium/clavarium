@@ -56,7 +56,10 @@
             if (code) {
                 /* The code is used once: it leaves the address bar at once. */
                 history.replaceState(null, '', location.pathname);
-                if (!device) device = await pair(code);
+                /* A new code always makes a new pairing, with a new key: a device
+                   that was removed, or is moved to another conversation, must
+                   not stay stuck on a key the server has forgotten. */
+                device = await pair(code);
             }
             if (!device) return { ok: false, message: 'This device is not paired with a conversation. Ask its owner for a code to scan.' };
             await session(device);
