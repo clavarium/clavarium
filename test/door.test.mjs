@@ -17,7 +17,7 @@ async function bench(t) {
     writeFileSync(join(dir, 'resources.json'), JSON.stringify([
         { name: 'photos', type: 'folder', attachments: { family: 'write' } }, { name: 'accounts', type: 'folder', attachments: { work: 'write' } }]));
     const origin = 'https://clav.example.com';
-    const server = await startHome({ port: 0, prefix: ['true'], sudo: ['true'], dataDir: dir, operators: ['owner@example.com'], publicOrigin: origin });
+    const server = await startHome({ port: 0, host: ['true'], dataDir: dir, operators: ['owner@example.com'], publicOrigin: origin });
     t.after(() => { server.close(); rmSync(dir, { recursive: true, force: true }); });
     const base = `http://127.0.0.1:${server.address().port}`;
     const operator = (path, body) => fetch(base + path, { method: body === undefined ? 'GET' : 'POST',

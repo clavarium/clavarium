@@ -1,6 +1,8 @@
 /* ONE CONVERSATION, ONE VM. This file is the only one that knows how a VM is
-   driven: every call is an argument vector handed to the VM manager, through
-   whatever prefix the installation uses to reach it.
+   driven. The server has no rights of its own: every call is an argument
+   vector handed to the HOST PROGRAM (deploy/clavarium-host), the one bounded
+   thing it may run as root, which checks each name again and refuses any
+   verb it does not know. What is written here is that program's language.
  *
  * Nothing here takes a string to parse: a conversation name has been checked
  * before it gets here, and it is checked again, because this is where it
@@ -8,15 +10,13 @@
 import { execFile } from 'node:child_process';
 import { isConversationName } from './names.mjs';
 
-export const IMAGE = '24.04';
-export const DISK_GB = 8;
 /* Where the tool starts, in its VM. At the root rather than in a home
    directory: the path then names nobody, and sits next to /resources. */
 export const WORK = '/work';
 export const VM_USER = 'ubuntu';
-export const VM_UID = 1000;
-/* Where attached folders appear in every VM. */
-export const RESOURCES = '/resources';
+/* Attached folders appear in every VM under /resources/<name>: the host
+   program decides that path. */
+/* The host program gives a launch this long; a little more is waited here. */
 const LAUNCH_SECONDS = 900;
 const PREFIX = 'clv-';
 
@@ -38,44 +38,46 @@ export function runner(prefix) {
 }
 
 export class Vms {
-    /* `run(argv, options)` reaches the VM manager; `prefix` is the same route
-       as an argument vector, for the one caller that needs a terminal. */
+    /* `run(argv, options)` reaches the host program; `prefix` is the same
+       route as an argument vector, for the one caller that needs a terminal. */
     constructor(run, prefix) { this.run = run; this.prefix = prefix; }
 
     launch(conversation, memoryMb) {
-        return this.run(['launch', IMAGE, '--name', vmName(conversation), '--memory', `${memoryMb}M`,
-            '--disk', `${DISK_GB}G`, '--cpus', '1', '--timeout', String(LAUNCH_SECONDS)], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
+        return this.run(['vm', 'launch', vmName(conversation), String(memoryMb)], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
     }
 
     exec(conversation, argv, options) {
-        return this.run(['exec', vmName(conversation), '--', ...argv], options);
+        return this.run(['vm', 'exec', vmName(conversation), '--', ...argv], options);
     }
 
     /* What a terminal attaches to: the same `exec`, as an argument vector. */
     execArgv(conversation, argv) {
-        return [...this.prefix, 'exec', vmName(conversation), '--', ...argv];
+        return [...this.prefix, 'vm', 'exec', vmName(conversation), '--', ...argv];
     }
 
     /* "Running", "Stopped", "Suspended", ... or undefined when there is no VM. */
     async state(conversation) {
         const name = vmName(conversation);
-        const r = await this.run(['info', name, '--format', 'json']);
+        const r = await this.run(['vm', 'info', name]);
         if (r.code !== 0) return undefined;
         try { return JSON.parse(r.stdout).info?.[name]?.state; } catch { return undefined; }
     }
 
-    /* Mounts a host folder in the VM. The map makes files written in the VM
-       belong, on the host, to the account this server runs as. */
-    mount(conversation, source, target, uid, gid) {
-        return this.run(['mount', '-u', `${uid}:${VM_UID}`, '-g', `${gid}:${VM_UID}`, source, `${vmName(conversation)}:${target}`], { timeoutMs: 600_000 });
+    /* Shows a folder kept by this server in the VM, under /resources/<name>.
+       `kind` is 'folder' (the folder itself: read and write) or 'view' (its
+       read-only view). A NAME is given, never a path: which directory that
+       is on the host is decided by the host program, not here. `uid`/`gid`:
+       files written in the VM belong, on the host, to this account. */
+    mount(conversation, kind, name, uid, gid) {
+        return this.run(['vm', 'mount', vmName(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
 
-    umount(conversation, target) {
-        return this.run(['umount', `${vmName(conversation)}:${target}`], { timeoutMs: 120_000 });
+    umount(conversation, name) {
+        return this.run(['vm', 'umount', vmName(conversation), name], { timeoutMs: 120_000 });
     }
 
-    start(conversation) { return this.run(['start', vmName(conversation)], { timeoutMs: 300_000 }); }
-    stop(conversation) { return this.run(['stop', vmName(conversation)], { timeoutMs: 300_000 }); }
-    suspend(conversation) { return this.run(['suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
-    remove(conversation) { return this.run(['delete', '--purge', vmName(conversation)], { timeoutMs: 300_000 }); }
+    start(conversation) { return this.run(['vm', 'start', vmName(conversation)], { timeoutMs: 300_000 }); }
+    stop(conversation) { return this.run(['vm', 'stop', vmName(conversation)], { timeoutMs: 300_000 }); }
+    suspend(conversation) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
+    remove(conversation) { return this.run(['vm', 'delete', vmName(conversation)], { timeoutMs: 300_000 }); }
 }

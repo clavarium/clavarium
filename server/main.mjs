@@ -2,10 +2,12 @@
  *
  * Two ways to run it:
  *
- *   node server/main.mjs --multipass "sudo multipass" --data /path/to/data \
+ *   node server/main.mjs --host "sudo -n /usr/local/sbin/clavarium-host" --data /path/to/data \
  *        [--operators you@example.com --public-origin https://clav.example.com]
- *       conversations are VMs, created from the page. With --operators, an
- *       authenticating proxy must stand in front: see gate.mjs
+ *       conversations are VMs, created from the page. --host is how the one
+ *       privileged program is reached (deploy/clavarium-host); the data
+ *       directory must be the one that program was told (/etc/clavarium/host.conf).
+ *       With --operators, an authenticating proxy must stand in front: see gate.mjs
  *
  *   node server/main.mjs --command "your-tool" --cwd /path/to/work
  *       no VM: one tool on this machine, at /?c=<name>. For development.
@@ -115,14 +117,16 @@ export function start({ port, command, cwd, env = process.env }) {
     return listening;
 }
 
-/* The product: conversations are VMs. `prefix` is how the VM manager is
-   reached on this installation, as an argument vector. */
-export async function startHome({ port, prefix, dataDir, env = process.env, conversations, resources, sudo = ['sudo', '-n'], operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs }) {
+/* The product: conversations are VMs. `host` is how the host program is
+   reached on this installation, as an argument vector: it is the ONLY thing
+   this server runs with more rights than its own. */
+export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
-    const vms = new Vms(runner(prefix), prefix);
+    const asHost = runner(host);
+    const vms = new Vms(asHost, host);
     const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
-    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: runner(sudo), dataDir });
+    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
@@ -141,7 +145,7 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
-    const network = new Network({ host: runner(sudo), offline: () => all.offline() });
+    const network = new Network({ host: asHost, offline: () => all.offline() });
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
     await network.apply();
@@ -187,15 +191,15 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const argv = process.argv.slice(2);
     const port = Number(option(argv, 'port', '7717'));
-    const multipass = option(argv, 'multipass', '');
-    if (multipass) {
+    const host = option(argv, 'host', '');
+    if (host) {
         const dataDir = option(argv, 'data', `${process.cwd()}/data`);
         /* Behind the edge: who the operators are, and the address people use. */
         const operators = readOperators(option(argv, 'operators', ''));
         const publicOrigin = option(argv, 'public-origin', '') || undefined;
         if (operators.length === 0) console.log('No --operators: development mode, anyone on this machine is the operator.');
         const vaultKey = option(argv, 'vault-key', '') || undefined;
-        const server = await startHome({ port, prefix: multipass.split(' ').filter(Boolean), dataDir, operators, publicOrigin, vaultKey });
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, operators, publicOrigin, vaultKey });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

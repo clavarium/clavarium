@@ -7,18 +7,16 @@ import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Vms } from '../server/vm.mjs';
 
-function bench(t, { mounted = false, failBindfs = false } = {}) {
+function bench(t, { failView = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-res-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const vm = []; const host = [];
-    const views = new Set();
     const resources = new Resources({
         store: new Store(join(dir, 'resources.json')),
-        vms: new Vms(async (argv) => { vm.push(argv.join(' ')); return { code: 0, stdout: '', stderr: '' }; }, ['vmm']),
+        vms: new Vms(async (argv) => { vm.push(argv.slice(1).join(' ')); return { code: 0, stdout: '', stderr: '' }; }, ['vmm']),
         host: async (argv) => {
             host.push(argv.join(' '));
-            if (argv[0] === 'mountpoint') return { code: mounted || views.has(argv[2]) ? 0 : 1, stdout: '', stderr: '' };
-            if (argv[0] === 'bindfs') { if (failBindfs) return { code: 1, stdout: '', stderr: 'fuse: device not found' }; views.add(argv.at(-1)); }
+            if (failView && argv.join(' ').startsWith('view make')) return { code: 1, stdout: '', stderr: 'fuse: device not found' };
             return { code: 0, stdout: '', stderr: '' };
         },
         dataDir: dir, uid: 1001, gid: 1002,
@@ -31,8 +29,9 @@ test('a READ attachment mounts the read-only view, never the folder itself', asy
     b.resources.create({ name: 'notes' });
     assert.ok(existsSync(join(b.dir, 'resources', 'notes')));
     await b.resources.attach('alpha', 'notes', 'read');
-    assert.deepEqual(b.host, [`mountpoint -q ${b.dir}/views/notes`, `bindfs -r -o allow_other ${b.dir}/resources/notes ${b.dir}/views/notes`]);
-    assert.deepEqual(b.vm, [`mount -u 1001:1000 -g 1002:1000 ${b.dir}/views/notes clv-alpha:/resources/notes`]);
+    assert.deepEqual(b.host, ['view make notes']);
+    /* A name, never a path: the host program decides which directory that is. */
+    assert.deepEqual(b.vm, ['mount clv-alpha view notes 1001 1002']);
     assert.deepEqual(b.resources.of('alpha'), [{ name: 'notes', access: 'read' }]);
 });
 
@@ -42,8 +41,8 @@ test('a WRITE attachment mounts the folder; the same folder can be read by anoth
     await b.resources.attach('alpha', 'reports', 'write');
     await b.resources.attach('beta', 'reports', 'read');
     assert.deepEqual(b.vm, [
-        `mount -u 1001:1000 -g 1002:1000 ${b.dir}/resources/reports clv-alpha:/resources/reports`,
-        `mount -u 1001:1000 -g 1002:1000 ${b.dir}/views/reports clv-beta:/resources/reports`,
+        'mount clv-alpha folder reports 1001 1002',
+        'mount clv-beta view reports 1001 1002',
     ]);
     assert.deepEqual(b.resources.list()[0].attachments, { alpha: 'write', beta: 'read' });
 });
@@ -61,7 +60,7 @@ test('changing the level detaches first; "none" detaches; asking twice does noth
 });
 
 test('no view, no read attachment: nothing is mounted when the view cannot be made', async (t) => {
-    const b = bench(t, { failBindfs: true });
+    const b = bench(t, { failView: true });
     b.resources.create({ name: 'notes' });
     await assert.rejects(b.resources.attach('alpha', 'notes', 'read'), /read-only view could not be made/);
     assert.deepEqual(b.vm, []);
@@ -75,7 +74,7 @@ test('after a restart, the views of read attachments are put back, and only thos
     await b.resources.attach('alpha', 'reports', 'write');
     b.host.length = 0;
     await b.resources.ensureViews();
-    assert.deepEqual(b.host, [`mountpoint -q ${b.dir}/views/notes`]);
+    assert.deepEqual(b.host, ['view make notes']);
 });
 
 test('bad names, unknown resources and unknown levels are refused; archiving forgets the attachments', async (t) => {
@@ -100,7 +99,7 @@ test('a folder is removed only when attached nowhere, and its files are moved as
     await b.resources.attach('alpha', 'notes', 'none');
     b.host.length = 0;
     await b.resources.remove('notes');
-    assert.deepEqual(b.host.map((c) => c.split(' ')[0]), ['mountpoint', 'umount'], 'its read-only view is closed first');
+    assert.deepEqual(b.host, ['view close notes'], 'its read-only view is closed first');
     assert.deepEqual(b.resources.list(), []);
     assert.equal(existsSync(join(b.dir, 'resources', 'notes')), false);
     const aside = readdirSync(join(b.dir, 'removed'));
@@ -114,8 +113,8 @@ test('a mount the VM manager already holds is replaced, not reported as a failur
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = []; let first = true;
     const vms = new Vms(async (argv) => {
-        calls.push(argv[0]);
-        if (argv[0] === 'mount' && first) { first = false; return { code: 2, stdout: '', stderr: 'mount failed: "/resources/notes" is already mounted in \'clv-alpha\'' }; }
+        calls.push(argv[1]);
+        if (argv[1] === 'mount' && first) { first = false; return { code: 2, stdout: '', stderr: 'mount failed: "/resources/notes" is already mounted in \'clv-alpha\'' }; }
         return { code: 0, stdout: '', stderr: '' };
     }, ['vmm']);
     const resources = new Resources({ store: new Store(join(dir, 'resources.json')), vms, host: async () => ({ code: 0, stdout: '', stderr: '' }), dataDir: dir, uid: 1, gid: 1 });

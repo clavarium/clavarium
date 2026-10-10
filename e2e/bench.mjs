@@ -1,7 +1,7 @@
 /* THE END-TO-END BENCH: the real server, a real browser, real terminals.
  *
  * Only the VM manager and the privileged host commands are stand-ins (see
- * fake-multipass.mjs and fake-host.mjs): everything the product itself does
+ * fake-clavarium-host.mjs): everything the product itself does
  * -- pages, API, WebSocket bridge, tmux sessions, files, pairing -- runs for
  * real. A test here fails for the reasons a person would be let down.
  *
@@ -52,8 +52,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: TOOLS, stopDelayMs,
         env: { ...process.env, CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
-        prefix: [process.execPath, join(HERE, 'fake-multipass.mjs')],
-        sudo: [process.execPath, join(HERE, 'fake-host.mjs')],
+        host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
     /* `microphone`: a WAV file the browser will hear as its microphone. */

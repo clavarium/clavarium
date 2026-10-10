@@ -31,24 +31,24 @@ test('every conversation is a silo, always; an offline one reaches the host only
 test('the rules are handed to the firewall whole, rebuilt from what runs now', async () => {
     const calls = [];
     const host = async (argv, options) => {
-        calls.push({ argv: argv[0] === 'nft' ? 'nft <rules>' : argv.join(' '), input: argv[0] === 'nft' ? argv[1] : options?.input });
-        if (argv[0] === 'pgrep') return { code: 0, stdout: PROCESSES, stderr: '' };
-        if (argv[0] === 'ip') return { code: 0, stdout: '3: mpqemubr0    inet 127.0.0.1/24 brd', stderr: '' };
+        calls.push({ argv: argv[1] === 'apply' ? 'net apply <rules>' : argv.join(' '), input: argv[1] === 'apply' ? argv[2] : options?.input });
+        if (argv[1] === 'taps') return { code: 0, stdout: PROCESSES, stderr: '' };
+        if (argv[1] === 'bridge') return { code: 0, stdout: '3: mpqemubr0    inet 127.0.0.1/24 brd', stderr: '' };
         return { code: 0, stdout: '', stderr: '' };
     };
     /* "gone" is offline but not running: nothing to filter, and no error. */
     const network = new Network({ host, offline: () => ['second', 'gone'] });
     assert.equal(await network.apply(), true);
-    assert.deepEqual(calls.map((c) => c.argv), ['pgrep -a qemu-system', 'ip -4 -o addr show mpqemubr0', 'nft <rules>']);
+    assert.deepEqual(calls.map((c) => c.argv), ['net taps', 'net bridge', 'net apply <rules>']);
     assert.ok(calls[2].input.includes('iifname "tap-918e9b07222" drop'));
     assert.ok(!calls[2].input.includes('evil'));
 });
 
 test('a firewall that refuses, or a host address that cannot be read, is reported: nothing is said to be cut that is not', async () => {
-    const refusing = new Network({ offline: () => ['first'], host: async (argv) => (argv[0] === 'nft' ? { code: 1, stdout: '', stderr: 'x' } : { code: 0, stdout: argv[0] === 'pgrep' ? PROCESSES : 'inet 127.0.0.1/24', stderr: '' }) });
+    const refusing = new Network({ offline: () => ['first'], host: async (argv) => (argv[1] === 'apply' ? { code: 1, stdout: '', stderr: 'x' } : { code: 0, stdout: argv[1] === 'taps' ? PROCESSES : 'inet 127.0.0.1/24', stderr: '' }) });
     assert.equal(await refusing.apply(), false);
-    const blind = new Network({ offline: () => ['first'], host: async (argv) => ({ code: 0, stdout: argv[0] === 'pgrep' ? PROCESSES : '', stderr: '' }) });
+    const blind = new Network({ offline: () => ['first'], host: async (argv) => ({ code: 0, stdout: argv[1] === 'taps' ? PROCESSES : '', stderr: '' }) });
     assert.equal(await blind.apply(), false);
-    const nothingAsked = new Network({ offline: () => [], host: async (argv) => ({ code: 0, stdout: argv[0] === 'pgrep' ? PROCESSES : '', stderr: '' }) });
+    const nothingAsked = new Network({ offline: () => [], host: async (argv) => ({ code: 0, stdout: argv[1] === 'taps' ? PROCESSES : '', stderr: '' }) });
     assert.equal(await nothingAsked.apply(), true);
 });

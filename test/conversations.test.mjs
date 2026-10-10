@@ -19,11 +19,13 @@ function bench(t, answers = {}) {
     const calls = [];
     const states = new Map();
     const run = async (argv, options) => {
-        calls.push(argv.join(' '));
-        const verb = argv[0];
+        /* Every call starts with the area, "vm": it is checked, then left out. */
+        assert.equal(argv[0], 'vm');
+        calls.push(argv.slice(1).join(' '));
+        const verb = argv[1];
         const override = answers[verb]?.(argv, options);
         if (override) return override;
-        const vm = verb === 'launch' ? argv[argv.indexOf('--name') + 1] : verb === 'delete' ? argv[2] : argv[1];
+        const vm = argv[2];
         if (verb === 'launch') states.set(vm, 'Running');
         if (verb === 'start') states.set(vm, 'Running');
         if (verb === 'stop') states.set(vm, 'Stopped');
@@ -44,7 +46,7 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     assert.equal(made.phase, 'building');
     await all.built;
     assert.deepEqual(b.calls, [
-        'launch 24.04 --name clv-demo --memory 1024M --disk 8G --cpus 1 --timeout 900',
+        'launch clv-demo 1024',
         'exec clv-demo -- sudo -n snap install multipass-sshfs',
         'exec clv-demo -- sudo -n mkdir -p /work',
         'exec clv-demo -- sudo -n chown ubuntu:ubuntu /work',
@@ -84,10 +86,10 @@ test('opening wakes a stopped machine, and the terminal runs the tool alone in t
     b.calls.length = 0;
     const said = [];
     const argv = await all.open('demo', (x) => said.push(x));
-    assert.deepEqual(b.calls, ['info clv-demo --format json', 'start clv-demo']);
+    assert.deepEqual(b.calls, ['info clv-demo', 'start clv-demo']);
     assert.deepEqual(said, ['Waking the machine...']);
-    assert.deepEqual(argv.slice(0, 13), ['vmm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'new-session', '-A', '-s', SESSION, '-c', '/work']);
-    assert.deepEqual(argv.slice(13, 15), ['tool', '--go']);
+    assert.deepEqual(argv.slice(0, 14), ['vmm', 'vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'new-session', '-A', '-s', SESSION, '-c', '/work']);
+    assert.deepEqual(argv.slice(14, 16), ['tool', '--go']);
     await assert.rejects(all.open('nope'), /No such conversation/);
 });
 
@@ -146,7 +148,7 @@ test('Sleep suspends; archive deletes the machine and forgets the conversation',
     await all.archive('demo');
     assert.equal(b.states.has('clv-demo'), false);
     assert.deepEqual(all.list(), []);
-    assert.ok(b.calls.includes('delete --purge clv-demo'));
+    assert.ok(b.calls.includes('delete clv-demo'));
 });
 
 test('a build cut short by a restart is marked failed, with what to do', async (t) => {

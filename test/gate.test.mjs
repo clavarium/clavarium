@@ -27,7 +27,7 @@ test('behind the edge, the origin is compared with the declared public address, 
 
 test('a real server behind the edge: pages, API and terminal all refuse whoever is not an operator', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'clv-gate-'));
-    const server = await startHome({ port: 0, prefix: ['true'], sudo: ['true'], dataDir: dir, operators: ['owner@example.com'], publicOrigin: 'https://clav.example.com' });
+    const server = await startHome({ port: 0, host: ['true'], dataDir: dir, operators: ['owner@example.com'], publicOrigin: 'https://clav.example.com' });
     t.after(() => { server.close(); rmSync(dir, { recursive: true, force: true }); });
     const base = `http://127.0.0.1:${server.address().port}`;
     const as = (email) => (email ? { 'x-forwarded-email': email } : {});

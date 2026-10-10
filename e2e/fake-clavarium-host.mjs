@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-/* A STAND-IN FOR THE VM MANAGER, for end-to-end tests on a machine with no
-   VM. It speaks the few verbs the server uses and plays each "VM" as a
-   directory: what would run inside the VM runs here, with its paths moved
-   under that directory, and with a tmux server of its own per VM.
+/* A STAND-IN FOR THE HOST PROGRAM (deploy/clavarium-host), for end-to-end
+   tests on a machine with no VM and no root. It speaks the same verbs, and
+   plays each "VM" as a directory: what would run inside the VM runs here,
+   with its paths moved under that directory, and with a tmux server of its
+   own per VM. A read-only view is a marked link; network rules go to a file.
  *
  * It exists so that the REAL server, the REAL page and REAL terminals can be
- * exercised together. It is not a sandbox and protects nothing.
+ * exercised together. It is not a sandbox and protects nothing: what the
+ * real program refuses is tested on the real program (test/host-program).
  *
- * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}
+ * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}, data/...
  */
 import { spawnSync, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
@@ -15,10 +17,29 @@ import { dirname, join } from 'node:path';
 
 const DIR = process.env.FAKE_VM_DIR;
 if (!DIR) { console.error('FAKE_VM_DIR is not set'); process.exit(64); }
-const argv = process.argv.slice(2);
-const verb = argv[0];
+const [area, verb, ...argv] = process.argv.slice(2);
 /* For the tests that count what is sent into a machine. */
-if (process.env.FAKE_VM_LOG) appendFileSync(process.env.FAKE_VM_LOG, `${verb} ${argv.slice(1, 6).join(' ')}\n`);
+if (process.env.FAKE_VM_LOG && area === 'vm') appendFileSync(process.env.FAKE_VM_LOG, `${verb} ${argv.slice(0, 5).join(' ')}\n`);
+const DATA = join(DIR, 'data');
+const folderOf = (name) => join(DATA, 'resources', name);
+const viewOf = (name) => join(DATA, 'views', name);
+const marker = (name) => `${viewOf(name)}.mounted`;
+
+if (area === 'view' && verb === 'make') {
+    const [name] = argv;
+    if (existsSync(marker(name))) process.exit(0);
+    mkdirSync(dirname(viewOf(name)), { recursive: true });
+    rmSync(viewOf(name), { recursive: true, force: true });
+    symlinkSync(folderOf(name), viewOf(name)); writeFileSync(marker(name), '');
+    process.exit(0);
+}
+if (area === 'view' && verb === 'close') { rmSync(viewOf(argv[0]), { force: true }); rmSync(marker(argv[0]), { force: true }); process.exit(0); }
+if (area === 'net') {
+    if (verb === 'apply') { writeFileSync(`${DIR}/network-rules`, argv[0]); appendFileSync(`${DIR}/network-log`, `${Date.now()}\n`); process.exit(0); }
+    /* taps, bridge: no VM runs here, so there is nothing to list. */
+    process.exit(verb === 'taps' ? 1 : 0);
+}
+if (area !== 'vm') { console.error(`REFUSED: unknown verb: ${area} ${verb}`); process.exit(78); }
 const home = (vm) => join(DIR, 'vms', vm);
 const root = (vm) => join(home(vm), 'root');
 const stateOf = (vm) => (existsSync(join(home(vm), 'state')) ? readFileSync(join(home(vm), 'state'), 'utf8') : undefined);
@@ -30,7 +51,7 @@ const socket = (vm) => `e2e-${vm}`.slice(0, 40);
 const killTmux = (vm) => spawnSync('tmux', ['-L', socket(vm), 'kill-server'], { stdio: 'ignore' });
 
 if (verb === 'launch') {
-    const vm = argv[argv.indexOf('--name') + 1];
+    const vm = argv[0];
     if (stateOf(vm)) fail(`launch failed: instance "${vm}" already exists`);
     mkdirSync(join(root(vm), 'resources'), { recursive: true });
     setState(vm, 'Running');
@@ -40,13 +61,13 @@ if (verb === 'launch') {
     process.exit(0);
 }
 if (verb === 'info') {
-    const s = stateOf(argv[1]);
-    if (!s) fail(`info failed: instance "${argv[1]}" does not exist`);
-    console.log(JSON.stringify({ info: { [argv[1]]: { state: s } } }));
+    const s = stateOf(argv[0]);
+    if (!s) fail(`info failed: instance "${argv[0]}" does not exist`);
+    console.log(JSON.stringify({ info: { [argv[0]]: { state: s } } }));
     process.exit(0);
 }
 if (verb === 'start' || verb === 'stop' || verb === 'suspend') {
-    const vm = argv[1];
+    const vm = argv[0];
     if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
     /* A stopped machine has lost its processes; a suspended one has not. */
     if (verb === 'stop') killTmux(vm);
@@ -54,14 +75,17 @@ if (verb === 'start' || verb === 'stop' || verb === 'suspend') {
     process.exit(0);
 }
 if (verb === 'delete') {
-    const vm = argv.at(-1);
+    const vm = argv[0];
     killTmux(vm);
     rmSync(home(vm), { recursive: true, force: true });
     process.exit(0);
 }
 if (verb === 'mount') {
-    const [source, target] = argv.slice(-2);
-    const [vm, path] = target.split(':');
+    const [vm, kind, name] = argv;
+    /* As the real program: a read attachment meets the view, or nothing. */
+    if (kind === 'view' && !existsSync(marker(name))) { console.error(`REFUSED: the read-only view of ${name} is not in place`); process.exit(78); }
+    const source = kind === 'view' ? viewOf(name) : folderOf(name);
+    const path = `/resources/${name}`;
     const link = inVm(vm, path);
     if (existsSync(link) || lstatSync(link, { throwIfNoEntry: false })) fail(`mount failed: "${path}" is already mounted in '${vm}'`);
     mkdirSync(dirname(link), { recursive: true });
@@ -69,12 +93,11 @@ if (verb === 'mount') {
     process.exit(0);
 }
 if (verb === 'umount') {
-    const [vm, path] = argv[1].split(':');
-    rmSync(inVm(vm, path), { force: true });
+    rmSync(inVm(argv[0], `/resources/${argv[1]}`), { force: true });
     process.exit(0);
 }
 if (verb === 'exec') {
-    const vm = argv[1];
+    const vm = argv[0];
     if (stateOf(vm) !== 'Running') fail(`exec failed: instance "${vm}" is not running`);
     let command = argv.slice(argv.indexOf('--') + 1);
     if (command[0] === 'sudo') command = command.slice(command[1] === '-n' ? 2 : 1);

@@ -13,7 +13,7 @@ function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-sec-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = [];
-    const vms = new Vms(async (argv, options) => { calls.push({ argv: argv.join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; }, ['vmm']);
+    const vms = new Vms(async (argv, options) => { calls.push({ argv: argv.slice(1).join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; }, ['vmm']);
     const secrets = new Secrets({ store: new Store(join(dir, 'secrets.json')), vault: new Vault(join(dir, 'vault.key')), vms });
     return { dir, calls, secrets };
 }

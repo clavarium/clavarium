@@ -20,7 +20,6 @@
  */
 import { isConversationName } from './names.mjs';
 
-export const BRIDGE = 'mpqemubr0';
 export const TABLE = 'clavarium';
 const TAP = /^tap-[0-9a-f]{1,12}$/;
 
@@ -64,22 +63,23 @@ export function ruleset(taps, offline, bridgeAddress) {
 export class Network {
     #host; #offline;
 
-    /* `host(argv, {input})` runs a privileged command on the host;
+    /* `host(argv)` reaches the host program;
        `offline()` returns the names of the conversations switched offline. */
     constructor({ host, offline }) { this.#host = host; this.#offline = offline; }
 
     /* Rebuilds the rules from what runs now. Returns false, and says nothing
        is filtered, only if the firewall refused the table. */
     async apply() {
-        const taps = readTaps((await this.#host(['pgrep', '-a', 'qemu-system'])).stdout);
-        const bridge = readBridgeAddress((await this.#host(['ip', '-4', '-o', 'addr', 'show', BRIDGE])).stdout);
+        const taps = readTaps((await this.#host(['net', 'taps'])).stdout);
+        const bridge = readBridgeAddress((await this.#host(['net', 'bridge'])).stdout);
         const wanted = this.#offline().filter((name) => taps[name]);
         /* Without the host's address the "offline" rules cannot be written
            safely; the silo rule still can, and is. */
         /* As ONE argument, not on standard input: this firewall tool refuses
            a pipe as its input file (measured), and nothing in the rules is
-           secret. Every name in them was checked by readTaps. */
-        const r = await this.#host(['nft', ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0')]);
+           secret. Every name in them was checked by readTaps, and the host
+           program checks every line again before loading it. */
+        const r = await this.#host(['net', 'apply', ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0')]);
         return r.code === 0 && (bridge !== undefined || wanted.length === 0);
     }
 }

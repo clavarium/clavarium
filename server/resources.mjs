@@ -17,14 +17,13 @@
  *     Create, delete, rename, chmod and remount were all refused, while a
  *     file added on the host appeared in the VM at once.
  *
- * So a read attachment mounts the VIEW, never the folder itself. If the view
- * is not in place, what gets mounted is an empty directory: the failure is an
- * empty folder in the VM, never a writable one.
+ * So a read attachment mounts the VIEW, never the folder itself. The host
+ * program refuses to mount a view that is not in place: the failure is a
+ * folder that is not there, never a writable one.
  */
 import { mkdirSync, renameSync, existsSync } from 'node:fs';
 import { isConversationName } from './names.mjs';
 import { Refusal } from './conversations.mjs';
-import { RESOURCES } from './vm.mjs';
 
 export const ACCESS = ['read', 'write'];
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
@@ -32,7 +31,7 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 export class Resources {
     #store; #vms; #host; #root; #uid; #gid;
 
-    /* `host(argv)` runs a privileged command on the host (the view needs it). */
+    /* `host(argv)` reaches the host program (making a view needs root). */
     constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid() }) {
         this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid;
     }
@@ -59,10 +58,7 @@ export class Resources {
 
     /* The read-only view of a folder, made if it is not already there. */
     async ensureView(name) {
-        const view = this.view(name);
-        mkdirSync(view, { recursive: true });
-        if ((await this.#host(['mountpoint', '-q', view])).code === 0) return;
-        const r = await this.#host(['bindfs', '-r', '-o', 'allow_other', this.folder(name), view]);
+        const r = await this.#host(['view', 'make', name]);
         if (r.code !== 0) throw new Refusal(502, `The read-only view could not be made: ${firstLine(r.stderr)}`);
     }
 
@@ -80,25 +76,24 @@ export class Resources {
         if (!resource) throw new Refusal(404, 'No such resource.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
         if (access !== 'none' && !ACCESS.includes(access)) throw new Refusal(400, 'Access is "read", "write" or "none".');
-        const target = `${RESOURCES}/${name}`;
         const before = resource.attachments[conversation];
         if (before === access || (before === undefined && access === 'none')) return;
         if (before !== undefined) {
-            const r = await this.#vms.umount(conversation, target);
+            const r = await this.#vms.umount(conversation, name);
             if (r.code !== 0) throw new Refusal(502, `The folder could not be detached: ${firstLine(r.stderr)}`);
             delete resource.attachments[conversation];
             this.#store.put(resource);
         }
         if (access === 'none') return;
         if (access === 'read') await this.ensureView(name);
-        const source = access === 'read' ? this.view(name) : this.folder(name);
-        let r = await this.#vms.mount(conversation, source, target, this.#uid, this.#gid);
+        const kind = access === 'read' ? 'view' : 'folder';
+        let r = await this.#vms.mount(conversation, kind, name, this.#uid, this.#gid);
         /* The VM manager already has a mount there that our list does not
            know about (an earlier attempt that outlived its request): it is
            replaced rather than reported as a failure. */
         if (r.code !== 0 && /already mounted/i.test(`${r.stderr}${r.stdout}`)) {
-            await this.#vms.umount(conversation, target);
-            r = await this.#vms.mount(conversation, source, target, this.#uid, this.#gid);
+            await this.#vms.umount(conversation, name);
+            r = await this.#vms.mount(conversation, kind, name, this.#uid, this.#gid);
         }
         if (r.code !== 0) throw new Refusal(502, `The folder could not be attached: ${firstLine(r.stderr)}`);
         resource.attachments[conversation] = access;
@@ -113,10 +108,8 @@ export class Resources {
         if (!resource) throw new Refusal(404, 'No such folder.');
         const used = Object.keys(resource.attachments ?? {});
         if (used.length > 0) throw new Refusal(409, `This folder is still attached to: ${used.join(', ')}. Switch it Off there first.`);
-        if ((await this.#host(['mountpoint', '-q', this.view(name)])).code === 0) {
-            const r = await this.#host(['umount', this.view(name)]);
-            if (r.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(r.stderr)}`);
-        }
+        const closed = await this.#host(['view', 'close', name]);
+        if (closed.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(closed.stderr)}`);
         const aside = `${this.#root}/removed`;
         mkdirSync(aside, { recursive: true });
         if (existsSync(this.folder(name))) renameSync(this.folder(name), `${aside}/${name}-${new Date().toISOString().replace(/[:.]/g, '-')}`);

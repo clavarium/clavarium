@@ -51,8 +51,10 @@ The host needs `tmux` and `bindfs` (the read-only views).
 
     npm install
 
-    # the product: conversations are Multipass VMs
-    node server/main.mjs --multipass "sudo multipass" --data /path/to/data
+    # the product: conversations are Multipass VMs. The server has no rights
+    # of its own: it reaches root only through deploy/clavarium-host, which
+    # reads its data directory from /etc/clavarium/host.conf (DATA=/path/to/data)
+    node server/main.mjs --host "sudo -n /usr/local/sbin/clavarium-host" --data /path/to/data
     # then open http://127.0.0.1:7717/
 
     # development, no VM: one tool on this machine
@@ -73,8 +75,8 @@ either file in a browser.
     npm run check        # everything a push runs
 
 The end-to-end suite drives the real pages against the real server and real
-tmux sessions; only the VM manager and the privileged host commands are
-stand-ins (`e2e/fake-multipass.mjs`, `e2e/fake-host.mjs`). It needs a browser:
+tmux sessions; only the privileged host program is a stand-in
+(`e2e/fake-clavarium-host.mjs`, which plays each VM as a directory). It needs a browser:
 the `playwright` package, or `CLAVARIUM_E2E_PLAYWRIGHT` pointing at one.
 Without a browser its tests are skipped, and say so.
 
