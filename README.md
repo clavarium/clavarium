@@ -33,7 +33,11 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   terminal; "auto" presses Enter once the person has stopped. Dictation needs
   `CLAVARIUM_TRANSCRIPTION_URL` (and `_KEY`) in the environment.
 
-Not yet: the installable app and sharing, secrets, delivery.
+- **6 - the app and sharing**: the page is installable; a conversation is
+  shared with a one-use QR code; the device that scans it makes its own key,
+  sees that one conversation under `/c/` and nothing else, and can be revoked.
+
+Not yet: secrets, the sign-in mailbox, mailbox and git resources, delivery.
 
 The host needs `tmux` and `bindfs` (the read-only views).
 
