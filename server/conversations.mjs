@@ -39,6 +39,9 @@ export class Conversations {
 
     tools() { return this.#tools.map(({ id, label, memoryMb }) => ({ id, label, memoryMb })); }
 
+    /* The sign-in rules of a conversation's tool, or undefined. */
+    signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
+
     list() {
         return this.#store.all().map((c) => ({ ...c, toolLabel: this.#tools.find((t) => t.id === c.tool)?.label ?? c.tool }));
     }

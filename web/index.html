@@ -36,6 +36,12 @@
       <button type="button" id="sleep" hidden>Sleep</button>
       <button type="button" id="archive" hidden>Archive</button>
     </header>
+    <div id="signin-strip" hidden>
+      <span class="tag">sign-in</span>
+      <span id="signin-text"></span>
+      <a id="signin-open" class="button primary" target="_blank" rel="noopener noreferrer">Open sign-in link</a>
+      <button type="button" id="signin-dismiss">Dismiss</button>
+    </div>
     <main>
       <div id="terminal"></div>
       <div id="panel" class="sheet" hidden>
@@ -53,6 +59,17 @@
         <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
         <div class="levels" id="network" role="group" aria-label="Network of this conversation">
           <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
+        </div>
+        <div id="signin-setup" hidden>
+          <div class="panel-top"><b>Sign-in mailbox</b></div>
+          <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
+          <p id="signin-state" class="hint"></p>
+          <form id="signin-form" autocomplete="off">
+            <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
+              <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
+              <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">
+              <button type="submit" class="primary">Save</button><button type="button" id="signin-remove">Remove</button></div>
+          </form>
         </div>
         <div class="panel-top"><b>Secrets</b></div>
         <p class="hint">A secret switched on here is handed to the tool of this conversation, as a file under <code>/run/secrets/</code> and as a variable of the same name. The tool can read it and send it anywhere: give narrow keys you can revoke. It takes effect the next time the tool starts.</p>

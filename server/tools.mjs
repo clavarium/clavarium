@@ -45,7 +45,15 @@ export function readTools(text) {
             if (!isArgv(s)) throw new Error(`${t.id}: an install step must be "node" or an argument vector`);
             return [{ argv: s }];
         });
-        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), memoryMb: t.memoryMb, steps: Object.freeze(steps) });
+        /* Optional: whose mail is a sign-in mail for this tool, and where its
+           links may lead. See signin.mjs. */
+        let signin;
+        if (t.signin !== undefined) {
+            const domains = (list) => Array.isArray(list) && list.length > 0 && list.every((d) => typeof d === 'string' && /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(d));
+            if (!domains(t.signin.senders) || !domains(t.signin.links)) throw new Error(`${t.id}: signin needs "senders" and "links", lists of domain names`);
+            signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]) });
+        }
+        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), memoryMb: t.memoryMb, steps: Object.freeze(steps), signin });
     });
 }
 

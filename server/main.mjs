@@ -31,6 +31,7 @@ import { handleDoor, deviceConversation } from './door.mjs';
 import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
+import { SignInMailboxes } from './signin.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -70,7 +71,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -89,7 +90,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -133,7 +134,9 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
         qr: (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
     };
     const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')) };
-    const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault: new Vault(vaultKey ?? `${dataDir}/vault.key`), vms });
+    const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
+    const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms });
+    const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
     const network = new Network({ host: runner(sudo), offline: () => all.offline() });
@@ -142,7 +145,7 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     await network.apply();
     all.prepare = async (name) => { await network.apply(); await secrets.deliver(name); };
     all.through = [RUNNER];
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);

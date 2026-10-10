@@ -130,6 +130,7 @@
         if (c && c.phase === 'building') { disconnect(); say('building', 'connecting'); show(`${c.step ?? 'Building'}...`); return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', 'Archive it', () => archive(true)); return; }
         if (!socket) { terminal.reset(); connect(); }
+        void watchSignIn();
     }
     function select(name) {
         if (name !== current) { disconnect(); terminal.reset(); }
@@ -366,6 +367,7 @@
         const offline = conversations.find((x) => x.name === current)?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSecrets();
+        await paintSignIn();
     }
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {
@@ -504,6 +506,49 @@
         $('files-pick').value = '';
         await paintFiles();
     });
+
+    /* ---------- sign-in mailbox ---------- */
+    /* While a conversation with a mailbox is open, the page asks every few
+       seconds whether a sign-in mail has just arrived, and shows its link. The
+       link is opened in a new tab; nothing here follows it. */
+    const SIGNIN_EVERY_MS = 6000;
+    const dismissed = new Set();
+    let signinTimer;
+    async function watchSignIn() {
+        clearTimeout(signinTimer);
+        if (DEVICE || !home || !current) { $('signin-strip').hidden = true; return; }
+        const name = current;
+        try {
+            const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/signin`);
+            const j = r.ok ? await r.json() : { configured: false, items: [] };
+            if (name !== current) return;
+            const item = (j.items ?? []).find((i) => !dismissed.has(i.link));
+            $('signin-strip').hidden = !item;
+            if (item) {
+                const seconds = Math.max(0, Math.round((Date.now() - Date.parse(item.at)) / 1000));
+                const ago = seconds < 90 ? `${seconds} s ago` : `${Math.round(seconds / 60)} min ago`;
+                $('signin-text').textContent = `Sign-in link received ${ago} from ${item.from}${item.verified ? '' : ' (sender NOT verified by the mailbox)'}`;
+                $('signin-open').href = item.link;
+                $('signin-dismiss').onclick = () => { dismissed.add(item.link); $('signin-strip').hidden = true; };
+            }
+            if (j.configured) signinTimer = setTimeout(watchSignIn, SIGNIN_EVERY_MS);
+        } catch { signinTimer = setTimeout(watchSignIn, SIGNIN_EVERY_MS * 3); }
+    }
+    async function paintSignIn() {
+        const j = await (await fetch(`${API}/conversations/${encodeURIComponent(current)}/signin`)).json();
+        $('signin-setup').hidden = !j.available;
+        $('signin-state').textContent = j.configured ? `Watching ${j.user} on ${j.host}.${j.failure ? ` Not readable just now: ${j.failure}` : ''}` : 'No mailbox is set for this conversation.';
+        $('signin-remove').hidden = !j.configured;
+    }
+    $('signin-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        $('signin-state').textContent = 'Reading the mailbox once, to check...';
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: $('signin-host').value, user: $('signin-user').value, password: $('signin-password').value }); $('signin-password').value = ''; }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        await paintSignIn(); void watchSignIn();
+    });
+    $('signin-remove').addEventListener('click', async () => { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: '' }).catch(() => {}); await paintSignIn(); void watchSignIn(); });
 
     /* ---------- sharing ---------- */
     async function paintDevices() {

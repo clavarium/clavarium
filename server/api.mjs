@@ -12,6 +12,8 @@
  *   GET  /api/conversations/<name>/devices
  *   POST /api/devices/<id>/revoke
  *   POST /api/conversations/<name>/network  {online}
+ *   GET  /api/conversations/<name>/signin   {available, configured, host, user, items}
+ *   POST /api/conversations/<name>/signin   {host, port?, user, password}; empty host removes
  *   GET  /api/secrets                       names only: a value never comes back
  *   POST /api/secrets                       {name, value}  create or replace
  *   POST /api/secrets/<NAME>/remove
@@ -49,7 +51,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -96,6 +98,14 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
+            const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
+            if (watched && signin) {
+                const conversation = decodeURIComponent(watched[1]);
+                const settings = signin.settings(conversation);
+                /* A mailbox that cannot be read just now is not an error of the page. */
+                const items = settings.configured ? await signin.recent(conversation).catch((e) => ({ failure: e.message })) : [];
+                return send(200, { ...settings, items: Array.isArray(items) ? items : [], failure: items.failure ?? null }), true;
+            }
             const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
             return send(404, { error: 'Not found.' }), true;
@@ -116,6 +126,12 @@ export async function handleApi(request, response, conversations, headers, resou
             conversations.setOffline(decodeURIComponent(wired[1]), body.online !== true);
             if (!(await network.apply())) throw new Refusal(502, 'The network rules could not be applied on the host.');
             return send(200, { ok: true, online: body.online === true }), true;
+        }
+        const mailbox = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
+        if (mailbox && signin) {
+            const conversation = decodeURIComponent(mailbox[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            return send(200, await signin.set(conversation, body)), true;
         }
         const handed = /^\/api\/conversations\/([^/]+)\/secrets$/.exec(pathname);
         if (handed && secrets) {
@@ -151,6 +167,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') secrets?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') signin?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;
