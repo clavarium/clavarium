@@ -68,6 +68,9 @@ The host needs `tmux` and `bindfs` (the read-only views).
     # It prints each operator's password once. --core-only leaves the front out.
     sudo deploy/install.sh --domain clav.example.com --operator you@example.com
 
+    # or all of it as one VM on any computer that has Multipass (the computer is left alone)
+    deploy/appliance.sh --domain clav.example.com --operator you@example.com --relay relay.example.net
+
     # a relay for a machine at home (run on the relay; install.sh --relay prints the line)
     sudo deploy/relay.sh --key "ssh-ed25519 AAAA... clavarium-tunnel"
 

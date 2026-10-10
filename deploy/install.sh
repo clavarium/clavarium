@@ -120,6 +120,8 @@ grep -Eq '(vmx|svm)' /proc/cpuinfo || echo "install: WARNING: this processor doe
 
 step "packages"
 export DEBIAN_FRONTEND=noninteractive
+# Installing packages must not stop to ask which services to restart, nor fill the screen with it.
+export NEEDRESTART_SUSPEND=1
 apt-get update -qq
 # bindfs: the read-only views. nftables: the network rules. build-essential
 # and python3: one module of the server (the terminal) is compiled here.

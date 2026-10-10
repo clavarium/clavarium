@@ -630,22 +630,22 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <p class="lead">One line to get a home, one line to get a relay. Parameters, never questions.</p>
     <div class="scroll"><div class="dia" style="min-width:880px">
       <div class="zone host"><h3>Home · way A · the appliance</h3>
-        <div class="box k"><b>A complete virtual machine</b><small>everything already inside</small></div>
-        <div class="box mono">one command starts it</div>
+        <div class="box k"><b>A complete virtual machine</b><small>started with Multipass on any computer; the computer itself is left alone</small></div>
+        <div class="box mono">deploy/appliance.sh</div>
       </div>
       <div class="arrow"><i>or</i></div>
       <div class="zone host"><h3>Home · way B · the script</h3>
-        <div class="box k"><b>A fresh Ubuntu Server LTS</b><small>one stated version, nothing else supported</small></div>
-        <div class="box mono">one command downloads and installs everything</div>
+        <div class="box k"><b>A fresh Ubuntu Server LTS</b><small>24.04 or 26.04, nothing else supported</small></div>
+        <div class="box mono">deploy/install.sh</div>
       </div>
       <div class="arrow"><i>+</i>if home has<br>no public address</div>
       <div class="zone"><h3>Relay</h3>
-        <div class="box k"><b>A small public server</b></div>
-        <div class="box mono">one command sets it up</div>
+        <div class="box k"><b>A small public server</b><small>blind: it carries bytes, TLS ends at home</small></div>
+        <div class="box mono">deploy/relay.sh</div>
       </div>
     </div></div>
     <div class="grid g3" style="margin-top:12px">
-      <div class="card"><h3>One line each</h3><p>Three commands exist, and no fourth: start the appliance, install on Ubuntu, set up the relay.</p></div>
+      <div class="card"><h3>One line each</h3><p>Three commands set it up: start the appliance, install on Ubuntu, set up the relay. Two more keep it: backup (the archive, and the vault key apart) and restore.</p></div>
       <div class="card"><h3>Parameters, not prompts</h3><p>Everything a command needs is on its line: domain, operator email, relay address. It never stops to ask. Run twice, it ends in the same state.</p></div>
       <div class="card"><h3>Strict about the ground</h3><p>The script refuses any system other than the one it names, before touching anything, and says why.</p></div>
     </div>
@@ -654,9 +654,11 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><th>What</th><th>Where it is run</th><th>Parameters (examples)</th></tr>
       <tr><td>Start the appliance</td><td>any machine that can run a VM</td><td class="mono">--domain clav.example.com --operator you@example.com [--relay relay.example.com]</td></tr>
       <tr><td>Install on Ubuntu</td><td>a fresh Ubuntu Server LTS</td><td class="mono">--domain clav.example.com --operator you@example.com [--relay relay.example.com]</td></tr>
-      <tr><td>Set up the relay</td><td>the small public server</td><td class="mono">--domain clav.example.com</td></tr>
+      <tr><td>Set up the relay</td><td>the small public server</td><td class="mono">--key "ssh-ed25519 AAAA…" <span style="font-family:inherit">(the home's public key; the installer prints the whole line)</span></td></tr>
+      <tr><td>Back up</td><td>home</td><td class="mono">--to /a/folder</td></tr>
+      <tr><td>Restore</td><td>home, after an install</td><td class="mono">clavarium-DATE.tgz --vault-key clavarium-DATE.vault-key</td></tr>
     </table></div>
-    <p class="note">The exact parameters are explained on the product's website, written later. The current system already ships these three (image builder, installer, relay script); they are ported, not reinvented.</p>
+    <p class="note">The exact parameters are explained on the product's website, written later. Whoever installs gets each operator's password once, on the screen. The server runs as an account with no rights; the one thing it may do as root is a bounded program (clavarium-host). A conversation's machine is not in a backup: what must last belongs in an attached folder.</p>
   </section>
 
   <!-- ================= PLAN ================= -->
