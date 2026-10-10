@@ -28,7 +28,12 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
 - **4 - the edge**: with `--operators`, an authenticating proxy must stand in
   front; pages, API and terminal refuse anyone who is not a declared operator.
 
-Not yet: shortcuts and voice, the installable app, secrets, delivery.
+- **5 - hands**: one-click shortcuts (sent, or left to complete), and
+  dictation: the microphone stays open and each phrase is typed into the
+  terminal; "auto" presses Enter once the person has stopped. Dictation needs
+  `CLAVARIUM_TRANSCRIPTION_URL` (and `_KEY`) in the environment.
+
+Not yet: the installable app and sharing, secrets, delivery.
 
 The host needs `tmux` and `bindfs` (the read-only views).
 
