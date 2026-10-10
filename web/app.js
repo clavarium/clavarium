@@ -66,10 +66,16 @@
         socket = mine;
         mine.binaryType = 'arraybuffer';
         let failure = '';
-        mine.onopen = () => { say('live', 'live'); terminal.focus(); };
+        /* Open means the bridge answered, not that the machine is awake yet. */
+        mine.onopen = () => { say('opening', 'connecting'); terminal.focus(); };
         mine.onmessage = (event) => {
             /* Binary is terminal output. Text is the bridge talking to the page. */
-            if (typeof event.data !== 'string') { terminal.write(new Uint8Array(event.data)); return; }
+            if (typeof event.data !== 'string') {
+                /* Output is the proof the terminal is there: "waking" is over. */
+                if (state.dataset.state !== 'live') say('live', 'live');
+                terminal.write(new Uint8Array(event.data));
+                return;
+            }
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
             if (message.type === 'status') say(String(message.text), 'connecting');
