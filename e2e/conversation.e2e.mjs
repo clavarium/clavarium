@@ -51,6 +51,28 @@ test('the Esc key of the key row reaches the tool, alone', { skip: SKIP }, async
     await me.sees("GOT-$'\\E[A'-END", 5000);
 });
 
+test('what is on screen can be had as ordinary text, to select by touch or copy whole', { skip: SKIP }, async (t) => {
+    /* Asked for by the owner, on a tablet: a long press on the terminal selects nothing. */
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('copyable');
+    await me.type('echo first-line; echo "the address is https://example.com/a?b=1"');
+    await me.sees('https://example.com/a?b=1');
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await me.page.locator('#copy-open').click();
+    const text = await me.page.locator('#copy-text').inputValue();
+    assert.match(text, /first-line\nthe address is https:\/\/example\.com\/a\?b=1\nready> ?$/);
+    /* A real text field: the browser selects in it as in any other. */
+    await me.page.locator('#copy-text').selectText();
+    assert.equal(await me.page.evaluate(() => getSelection().toString().length > 0 || document.getElementById('copy-text').selectionEnd > 0), true);
+    await me.page.locator('#copy-all').click();
+    await me.until('copied', async () => (await me.page.locator('#copy-status').innerText()) === 'Copied.');
+    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), text);
+    await me.page.locator('#copy-close').click();
+    await me.type('echo still-typing');
+    await me.sees('still-typing');
+});
+
 test('the newest screen takes the conversation; the other is told and can take it back', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const desk = await b.person();

@@ -97,12 +97,15 @@ export class Conversations {
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
         const state = await this.#vms.state(name);
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
-        if (state !== 'Running') {
+        const woke = state !== 'Running';
+        if (woke) {
             say('Waking the machine...');
             const started = await this.#vms.start(name);
             if (started.code !== 0) { this.left(name); throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`); }
         }
-        try { await this.prepare(name); }
+        /* `woke` tells the preparation that the machine has just started:
+           whatever was put in its memory before is gone. */
+        try { await this.prepare(name, woke); }
         catch (error) { this.left(name); throw error; }
         const tool = this.#tools.find((t) => t.id === c.tool);
         return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...tool.command], WORK));

@@ -82,6 +82,12 @@ export class Secrets {
         for (const s of this.#store.all()) if (s.attachments?.[conversation]) { delete s.attachments[conversation]; this.#store.put(s); }
     }
 
+    /* What a delivery to this conversation would contain, as one string that
+       changes whenever a delivery would differ: names and sealed values. */
+    signature(conversation) {
+        return this.#store.all().filter((s) => s.attachments?.[conversation]).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
+    }
+
     /* Puts in the VM exactly the secrets attached NOW, and the runner. Called
        each time the conversation is opened: a detached secret disappears from
        the VM, a new one appears, and a restarted VM gets them back. */

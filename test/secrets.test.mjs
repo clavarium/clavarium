@@ -92,3 +92,17 @@ test('the runner, for real: each delivered file becomes a variable of the tool, 
     assert.ok(out.startsWith('sk-1|line one\nline two|sh\n'), out);
     assert.ok(!/run\.sh/.test(out.split('\n').pop() ?? ''), 'the runner became the tool: it is not its parent');
 });
+
+test('the signature of a delivery changes when, and only when, a delivery would differ', (t) => {
+    const b = bench(t);
+    const empty = b.secrets.signature('alpha');
+    b.secrets.set({ name: 'K', value: 'one' });
+    assert.equal(b.secrets.signature('alpha'), empty, 'a secret that is not attached changes nothing');
+    b.secrets.attach('alpha', 'K', true);
+    const attached = b.secrets.signature('alpha');
+    assert.notEqual(attached, empty);
+    assert.equal(b.secrets.signature('alpha'), attached, 'asked twice, it is the same');
+    b.secrets.set({ name: 'K', value: 'two' });
+    assert.notEqual(b.secrets.signature('alpha'), attached, 'a new value is a new delivery');
+    assert.ok(!b.secrets.signature('alpha').includes('two'), 'and the signature carries no value in clear');
+});

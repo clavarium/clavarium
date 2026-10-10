@@ -133,3 +133,4 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
   #state, .tag { font-size: 13px; }
   footer button.careful { order: 5; }
 }
+#copy-text { flex: 1; min-height: 200px; width: 100%; resize: none; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; white-space: pre; overflow: auto; }

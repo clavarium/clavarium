@@ -10,13 +10,15 @@
  * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}
  */
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const DIR = process.env.FAKE_VM_DIR;
 if (!DIR) { console.error('FAKE_VM_DIR is not set'); process.exit(64); }
 const argv = process.argv.slice(2);
 const verb = argv[0];
+/* For the tests that count what is sent into a machine. */
+if (process.env.FAKE_VM_LOG) appendFileSync(process.env.FAKE_VM_LOG, `${verb} ${argv.slice(1, 6).join(' ')}\n`);
 const home = (vm) => join(DIR, 'vms', vm);
 const root = (vm) => join(home(vm), 'root');
 const stateOf = (vm) => (existsSync(join(home(vm), 'state')) ? readFileSync(join(home(vm), 'state'), 'utf8') : undefined);

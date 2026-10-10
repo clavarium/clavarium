@@ -151,7 +151,8 @@
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         $('sleep').hidden = $('archive').hidden = !c;
         $('folders').hidden = $('files-open').hidden = $('share').hidden = !c || c.phase !== 'ready';
-        $('panel').hidden = $('files').hidden = $('sharing').hidden = true;
+        $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
+        $('panel').hidden = $('files').hidden = $('sharing').hidden = $('copy').hidden = true;
         paintChips();
         $('keys').hidden = !current;
         if (home && current) void paintShortcuts();
@@ -488,6 +489,38 @@
         await paintPanel();
     });
 
+    /* ---------- copying text ---------- */
+    /* A terminal in a page draws its own text: a long press on a tablet
+       selects nothing, and a tool that takes the mouse takes even a drag. So
+       the text is offered again as ordinary text, which every device knows
+       how to select and copy. Everything the terminal still holds, top to
+       bottom, with the empty lines at the end removed. */
+    function screenText() {
+        const buffer = terminal.buffer.active;
+        const lines = [];
+        for (let i = 0; i < buffer.length; i++) lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
+        while (lines.length > 0 && lines.at(-1).trim() === '') lines.pop();
+        return lines.join('\n');
+    }
+    $('copy-open').addEventListener('click', () => {
+        $('files').hidden = $('panel').hidden = $('sharing').hidden = true;
+        $('copy-text').value = screenText();
+        $('copy-status').textContent = '';
+        $('copy').hidden = false;
+        /* Shown from its end: the last lines are what one comes for. */
+        $('copy-text').scrollTop = $('copy-text').scrollHeight;
+    });
+    $('copy-close').addEventListener('click', () => { $('copy').hidden = true; terminal.focus(); });
+    $('copy-all').addEventListener('click', async () => {
+        const field = $('copy-text');
+        try { await navigator.clipboard.writeText(field.value); $('copy-status').textContent = 'Copied.'; }
+        catch {
+            /* No clipboard permission: select it all, the person copies. */
+            field.focus(); field.select();
+            $('copy-status').textContent = 'Selected: now use Copy.';
+        }
+    });
+
     /* ---------- files ---------- */
     /* The folders kept by the server and attached here: listed, downloaded,
        imported into. A file name is shown as text and never interpreted. */
@@ -683,7 +716,7 @@
     function shut(message) {
         disconnect(); clearTimeout(pollTimer);
         say('not connected', 'ended');
-        for (const id of ['keys', 'shortcuts', 'files-open', 'files', 'tool']) $(id).hidden = true;
+        for (const id of ['keys', 'shortcuts', 'files-open', 'files', 'tool', 'copy-open', 'copy']) $(id).hidden = true;
         $('chips').replaceChildren();
         show(message);
     }

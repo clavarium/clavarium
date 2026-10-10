@@ -31,6 +31,7 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
+      <button type="button" id="copy-open" hidden>Copy text</button>
       <button type="button" id="files-open" hidden>Files</button>
       <button type="button" id="folders" hidden>Folders &amp; secrets</button>
       <button type="button" id="share" hidden>Share</button>
@@ -83,6 +84,12 @@
             <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
             <button type="submit" class="primary">Save</button></div>
         </form>
+      </div>
+      <div id="copy" class="sheet" hidden>
+        <div class="panel-top"><b>Text of the screen</b><button type="button" id="copy-close">Close</button></div>
+        <p class="hint">The terminal draws its text itself, so it cannot be selected by touch. Here is the same text as ordinary text: select what you need, or copy it all.</p>
+        <div class="row"><button type="button" id="copy-all" class="primary">Copy everything</button><span id="copy-status" class="hint" role="status"></span></div>
+        <textarea id="copy-text" readonly spellcheck="false" aria-label="Text of the screen"></textarea>
       </div>
       <div id="files" class="sheet" hidden>
         <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>

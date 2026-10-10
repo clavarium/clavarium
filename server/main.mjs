@@ -145,7 +145,23 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
     await network.apply();
-    all.prepare = async (name) => { await network.apply(); await secrets.deliver(name); };
+    /* OPENING MUST BE QUICK. Each command sent into a VM costs a noticeable
+       part of a second, and delivering secrets takes several: done at every
+       opening, it made each page load wait for seconds (felt by the owner).
+       So a delivery is remembered: it is done again only when the machine
+       has just started, or when what is attached to it has changed. The
+       network rules, cheap, are still refreshed every time, alongside. */
+    const delivered = new Map();
+    all.prepare = async (name, woke) => {
+        const wanted = secrets.signature(name);
+        const rules = network.apply();
+        if (woke || delivered.get(name) !== wanted) {
+            delivered.delete(name);
+            await secrets.deliver(name);
+            delivered.set(name, wanted);
+        }
+        await rules;
+    };
     all.through = [RUNNER];
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin });
     attachBridge(server, {
