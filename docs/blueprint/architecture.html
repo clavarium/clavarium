@@ -123,6 +123,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <button role="tab" id="t-mock" aria-controls="p-mock" aria-selected="false">Mockups</button>
     <button role="tab" id="t-rules" aria-controls="p-rules" aria-selected="false">Rules</button>
     <button role="tab" id="t-open" aria-controls="p-open" aria-selected="false">Decided</button>
+    <button role="tab" id="t-ship" aria-controls="p-ship" aria-selected="false">Delivery</button>
     <button role="tab" id="t-plan" aria-controls="p-plan" aria-selected="false">Plan</button>
   </div>
 
@@ -610,6 +611,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><td>Git push</td><td>Agent commits, operator reviews, host pushes (screen designed later)</td></tr>
       <tr><td>Folders</td><td>Shareable between VMs; read-only or read-write per attachment</td></tr>
       <tr><td>Edge</td><td>Blind relay + OIDC, as today</td></tr>
+      <tr><td>Delivery</td><td>Two ways to get a home (ready VM, or script on one stated Ubuntu Server LTS) and a relay: one command line each, parameters only</td></tr>
     </table></div>
     <h2>Still open</h2>
     <div class="grid g2">
@@ -618,6 +620,40 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <div class="card"><h3>Dictation rhythm</h3><p>Text arrives phrase by phrase, at each pause, not word by word. Good enough?</p></div>
       <div class="card"><h3>Download</h3><p>Keep a “download a copy to the device” gesture in Files, next to import?</p></div>
     </div>
+  </section>
+
+  <!-- ================= DELIVERY ================= -->
+  <section id="p-ship" role="tabpanel" aria-labelledby="t-ship" hidden>
+    <p class="lead">One line to get a home, one line to get a relay. Parameters, never questions.</p>
+    <div class="scroll"><div class="dia" style="min-width:880px">
+      <div class="zone host"><h3>Home · way A · the appliance</h3>
+        <div class="box k"><b>A complete virtual machine</b><small>everything already inside</small></div>
+        <div class="box mono">one command starts it</div>
+      </div>
+      <div class="arrow"><i>or</i></div>
+      <div class="zone host"><h3>Home · way B · the script</h3>
+        <div class="box k"><b>A fresh Ubuntu Server LTS</b><small>one stated version, nothing else supported</small></div>
+        <div class="box mono">one command downloads and installs everything</div>
+      </div>
+      <div class="arrow"><i>+</i>if home has<br>no public address</div>
+      <div class="zone"><h3>Relay</h3>
+        <div class="box k"><b>A small public server</b></div>
+        <div class="box mono">one command sets it up</div>
+      </div>
+    </div></div>
+    <div class="grid g3" style="margin-top:12px">
+      <div class="card"><h3>One line each</h3><p>Three commands exist, and no fourth: start the appliance, install on Ubuntu, set up the relay.</p></div>
+      <div class="card"><h3>Parameters, not prompts</h3><p>Everything a command needs is on its line: domain, operator email, relay address. It never stops to ask. Run twice, it ends in the same state.</p></div>
+      <div class="card"><h3>Strict about the ground</h3><p>The script refuses any system other than the one it names, before touching anything, and says why.</p></div>
+    </div>
+    <h2>The shape of the three lines</h2>
+    <div class="scroll"><table>
+      <tr><th>What</th><th>Where it is run</th><th>Parameters (examples)</th></tr>
+      <tr><td>Start the appliance</td><td>any machine that can run a VM</td><td class="mono">--domain clav.example.com --operator you@example.com [--relay relay.example.com]</td></tr>
+      <tr><td>Install on Ubuntu</td><td>a fresh Ubuntu Server LTS</td><td class="mono">--domain clav.example.com --operator you@example.com [--relay relay.example.com]</td></tr>
+      <tr><td>Set up the relay</td><td>the small public server</td><td class="mono">--domain clav.example.com</td></tr>
+    </table></div>
+    <p class="note">The exact parameters are explained on the product's website, written later. The current system already ships these three (image builder, installer, relay script); they are ported, not reinvented.</p>
   </section>
 
   <!-- ================= PLAN ================= -->
@@ -634,6 +670,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><td>6</td><td><b>App and sharing</b>: installable app, QR pairing, one conversation per device, revoke</td><td>a phone paired by QR sees one conversation; revoked, it sees none</td></tr>
       <tr><td>7</td><td><b>Secrets and sign-in</b>: handed secrets, sign-in mailbox strip, network switch</td><td>a real sign-in done without leaving the conversation</td></tr>
       <tr><td>8</td><td><b>More resources</b>: mailbox as files, git with push review</td><td>the agent answers from a real mail; a push waits for your click</td></tr>
+      <tr><td>9</td><td><b>Delivery</b>: the one-line installer for Ubuntu, the appliance image, the one-line relay</td><td>a fresh machine becomes a working home with one command and no question</td></tr>
     </table></div>
     <div class="grid g2" style="margin-top:12px">
       <div class="card"><h3>Order, and why</h3><p>1 to 3 are the product. 3 comes early because host-enforced read-only is the one technical unknown. Everything after is carried over or added around a core that already works.</p></div>
