@@ -37,12 +37,13 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   shared with a one-use QR code; the device that scans it makes its own key,
   sees that one conversation under `/c/` and nothing else, and can be revoked.
 
-- **7 (in progress) - secrets and network**: a secret is sealed at rest and
-  handed to a tool as a file in memory and a variable; a conversation can be
-  switched offline, and conversations never reach each other, both enforced
-  on the host.
+- **7 - secrets, network, sign-in**: a secret is sealed at rest and handed to
+  a tool as a file in memory and a variable; a conversation can be switched
+  offline, and conversations never reach each other, both enforced on the
+  host; a mailbox dedicated to a tool's account is watched, read-only, and
+  its sign-in link shown to the operator next to the terminal.
 
-Not yet: the sign-in mailbox, mailbox and git resources, delivery.
+Not yet: mailbox and git resources, delivery.
 
 The host also needs `nft` (the network rules).
 
