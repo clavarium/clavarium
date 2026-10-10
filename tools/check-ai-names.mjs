@@ -153,7 +153,10 @@ if (mode === 'message') {
     let inSelf = false;
     for (const l of diff.split('\n')) {
         if (l.startsWith('+++ ')) { inSelf = l.slice(4).replace(/^b\//, '') === SELF; continue; }
-        if (!inSelf && l.startsWith('+')) added.push(l);
+        /* Without its leading `+`: a trailer is recognised at the START of a
+           line, and the diff marker stood in the way -- a co-author line added
+           to a file went straight through until this was measured. */
+        if (!inSelf && l.startsWith('+')) added.push(l.slice(1));
     }
     bad = bad.concat(findings(added.join('\n'), 'a line this commit adds', false));
 } else if (mode === 'range') {
