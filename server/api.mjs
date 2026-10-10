@@ -8,6 +8,9 @@
  *   GET  /api/resources
  *   POST /api/resources                     {name}
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
+ *   GET  /api/shortcuts
+ *   POST /api/shortcuts                     {label, text, enter}
+ *   POST /api/shortcuts/<id>/remove
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>  the body IS the file
@@ -35,7 +38,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -71,6 +74,7 @@ export async function handleApi(request, response, conversations, headers, resou
                 return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [] }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
+            if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -80,6 +84,9 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, resources.create(body)), true;
+        if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
+        const unwanted = /^\/api\/shortcuts\/([0-9a-f-]{36})\/remove$/.exec(pathname);
+        if (unwanted && shortcuts) { shortcuts.remove(unwanted[1]); return send(200, { ok: true }), true; }
         const attach = /^\/api\/conversations\/([^/]+)\/resources$/.exec(pathname);
         if (attach && resources) {
             const conversation = decodeURIComponent(attach[1]);

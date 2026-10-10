@@ -66,6 +66,17 @@
         <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
       </div>
     </main>
+    <!-- Saved texts, sent with one click. -->
+    <div id="shortcuts" hidden>
+      <div id="shortcut-row" class="chips-row"></div>
+      <form id="shortcut-new" hidden autocomplete="off">
+        <input id="shortcut-label" maxlength="40" placeholder="Label on the button" required aria-label="Label on the button">
+        <input id="shortcut-text" maxlength="2000" placeholder="Text typed into the terminal" required aria-label="Text typed into the terminal">
+        <label class="check"><input type="checkbox" id="shortcut-enter" checked> press Enter after it</label>
+        <div class="row"><button type="submit" class="primary">Save</button><button type="button" id="shortcut-cancel">Cancel</button>
+          <span id="shortcut-error" class="error" role="alert" hidden></span></div>
+      </form>
+    </div>
     <!-- The keys a phone keyboard does not have. -->
     <footer id="keys">
       <button type="button" data-keys="esc">Esc</button>

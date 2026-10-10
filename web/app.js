@@ -117,6 +117,7 @@
         $('panel').hidden = $('files').hidden = true;
         paintChips();
         $('keys').hidden = !current;
+        if (home) void paintShortcuts(); else $('shortcuts').hidden = true;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         if (c && c.phase === 'building') { disconnect(); say('building', 'connecting'); show(`${c.step ?? 'Building'}...`); return; }
@@ -206,6 +207,49 @@
             await refresh();
             select(name);
         } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
+    });
+
+    /* ---------- shortcuts ---------- */
+    /* A shortcut is keystrokes: its text, then Enter if it says so. The pause
+       before Enter lets the tool take the text in first (measured: an Enter
+       that follows too closely is read as part of a paste). */
+    const ENTER_AFTER_MS = 300;
+    let removing = false;
+    async function paintShortcuts() {
+        let all = [];
+        try { const r = await fetch('/api/shortcuts'); if (r.ok) all = await r.json(); else return; } catch { return; }
+        $('shortcuts').hidden = !current;
+        const row = $('shortcut-row');
+        row.replaceChildren();
+        for (const shortcut of all) {
+            const b = document.createElement('button');
+            b.type = 'button'; b.className = removing ? 'saved removing' : 'saved';
+            b.dataset.enter = String(shortcut.enter);
+            b.textContent = removing ? `Remove "${shortcut.label}"` : shortcut.label;
+            b.title = shortcut.enter ? `Sends: ${shortcut.text}` : `Types, without sending: ${shortcut.text}`;
+            b.addEventListener('click', async () => {
+                if (removing) { await post(`/api/shortcuts/${shortcut.id}/remove`).catch(() => {}); await paintShortcuts(); return; }
+                send(shortcut.text);
+                if (shortcut.enter) setTimeout(() => send('\r'), ENTER_AFTER_MS);
+                terminal.focus();
+            });
+            row.append(b);
+        }
+        const quiet = (text, run) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'quiet'; b.textContent = text; b.addEventListener('click', run); row.append(b); };
+        if (removing) quiet('Done', () => { removing = false; void paintShortcuts(); });
+        else {
+            quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-label').focus(); });
+            if (all.length > 0) quiet('Remove...', () => { removing = true; void paintShortcuts(); });
+        }
+    }
+    $('shortcut-cancel').addEventListener('click', () => { $('shortcut-new').hidden = true; });
+    $('shortcut-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try {
+            await post('/api/shortcuts', { label: $('shortcut-label').value, text: $('shortcut-text').value, enter: $('shortcut-enter').checked });
+            $('shortcut-label').value = ''; $('shortcut-text').value = ''; $('shortcut-new').hidden = true;
+            await paintShortcuts();
+        } catch (error) { $('shortcut-error').textContent = error.message; $('shortcut-error').hidden = false; }
     });
 
     /* ---------- folders ---------- */

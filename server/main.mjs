@@ -23,6 +23,7 @@ import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
 import { Resources } from './resources.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
+import { Shortcuts } from './shortcuts.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -51,14 +52,14 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts } = {}) {
     const server = createServer(async (request, response) => {
         /* Before anything else, static files included: see gate.mjs. */
         if (gate(request.headers) === undefined) {
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts)) return;
         const file = FILES[new URL(request.url ?? '/', 'http://local').pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -91,7 +92,8 @@ export async function startHome({ port, prefix, dataDir, env = process.env, conv
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: runner(sudo), dataDir });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
-    const { server, listening } = serve(port, all, folders, { gate, originOk });
+    const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts });
     attachBridge(server, {
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
