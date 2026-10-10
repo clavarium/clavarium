@@ -8,13 +8,27 @@ A conversation is a VM with a terminal in it. Everything else is a folder.
 - **Resource**: a folder mounted in the VM. A directory, a git repository, a
   mailbox and a secret all arrive as files.
 
-Nothing is built yet. The agreed design is in `docs/blueprint/`:
+## Where it stands
 
-- `architecture.html`: architecture, security layers, resources, app and
-  sharing, rules, what is decided, and the plan in nine slices;
-- `app-designs.html`: three first design ideas for the installable app.
+Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
+"Plan". Done so far:
 
-Open either file in a browser.
+- **0 - repository and rules**: hooks, checks, conventions.
+- **1 - the terminal**: a browser page drives a command-line tool running alone
+  in tmux; a reload finds the same session; the newest screen takes over.
+
+Not yet: VMs, folders, sign-on, shortcuts and voice, the installable app.
+
+    npm install
+    node server/main.mjs --command "your-tool" --cwd /path/to/work
+    # then open http://127.0.0.1:7717/?c=demo
+
+It listens on the loopback interface only.
+
+The agreed design is in `docs/blueprint/`: `architecture.html` (architecture,
+security layers, resources, app and sharing, rules, decisions, plan) and
+`app-designs.html` (three first design ideas for the installable app). Open
+either file in a browser.
 
 ## Working here
 

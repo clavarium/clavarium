@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Clavarium</title>
+<link rel="stylesheet" href="/vendor/xterm.css">
+<link rel="stylesheet" href="/style.css">
+<header>
+  <b id="name"></b>
+  <span id="state" data-state="connecting">connecting</span>
+</header>
+<main>
+  <div id="terminal"></div>
+  <div id="notice" hidden>
+    <p id="notice-text"></p>
+    <button id="notice-action" type="button"></button>
+  </div>
+</main>
+<!-- The keys a phone keyboard does not have. -->
+<footer id="keys">
+  <button type="button" data-keys="esc">Esc</button>
+  <button type="button" data-keys="tab">Tab</button>
+  <button type="button" data-keys="left" aria-label="Left">&larr;</button>
+  <button type="button" data-keys="down" aria-label="Down">&darr;</button>
+  <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
+  <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
+  <button type="button" data-keys="enter" class="wide">Enter</button>
+</footer>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/fit.js"></script>
+<script src="/app.js"></script>
+</html>
