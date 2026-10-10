@@ -29,6 +29,10 @@ test('a phone that scans the code is welcomed in plain words, then sees that con
     /* Before any dark screen: what this is, and what to do. */
     await phone.until('the welcome is shown', async () => /You are connected to "family"/.test(await phone.page.locator('#notice-text').innerText().catch(() => '')));
     assert.equal(new URL(phone.page.url()).hash, '', 'the code has left the address bar');
+    /* The welcome waits for the person: it is still there seconds later (on
+       the live site the terminal's first output used to wipe it away). */
+    await wait(3000);
+    assert.equal(await phone.page.locator('#notice-action', { hasText: 'Start' }).isVisible(), true);
     await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
     await phone.until('the phone is live', async () => (await phone.state()) === 'live');
     await phone.type('echo from-the-phone');

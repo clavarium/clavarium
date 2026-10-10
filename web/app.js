@@ -138,7 +138,13 @@
     }
 
     /* ---------- one conversation ---------- */
+    /* True while a first-time visitor is reading the welcome: the terminal is
+       not opened behind it, or its first output would wipe the welcome away
+       (seen on the live site: the "Start" button vanished before it could be
+       pressed). */
+    let welcoming = false;
     function enter() {
+        if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
         $('name').textContent = current || 'No conversation';
         document.title = current ? `${current} - Clavarium` : 'Clavarium';
@@ -692,13 +698,14 @@
             say(fresh ? 'pairing' : 'connecting', 'connecting');
             const door = await window.clavariumDoor();
             if (!door.ok) { shut(door.message); return; }
+            welcoming = fresh;
             await refresh();
             void offerVoice();          /* only now is there a session to ask with */
             if (fresh && home) {
                 /* The one thing a first-time visitor is told, before the dark screen. */
                 const c = conversations[0];
                 $('name').textContent = c?.name ?? '';
-                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.`, 'Start', () => { notice.hidden = true; enter(); });
+                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); });
                 return;
             }
             enter();
