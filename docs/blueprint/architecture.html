@@ -262,12 +262,15 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><td>Its own VM: disk, sudo, network</td><td>through the terminal</td><td>through the wrapper</td><td><span class="tag ok">everything</span></td></tr>
       <tr><td>Attached resources</td><td>manages them</td><td>builds and mounts them</td><td><span class="tag ok">as files</span></td></tr>
       <tr><td>Resources not attached</td><td>manages them</td><td>yes</td><td><span class="tag no">invisible</span></td></tr>
-      <tr><td>Other conversations' VMs</td><td>yes</td><td>yes</td><td><span class="tag no">no</span></td></tr>
+      <tr><td>Other conversations' VMs</td><td>yes</td><td>yes</td><td><span class="tag no">no</span> <span class="tag ok">proved</span></td></tr>
+      <tr><td>The internet</td><td>—</td><td>yes</td><td><span class="tag ok">yes</span> unless switched <span class="tag w">offline</span> for that conversation <span class="tag ok">proved</span></td></tr>
       <tr><td>Host disk, vault key</td><td>no</td><td>yes</td><td><span class="tag no">no</span></td></tr>
       <tr><td>Sign-in mailbox (links, codes)</td><td>sees the strip in the conversation</td><td>watches it, read-only</td><td><span class="tag no">never enters the VM</span></td></tr>
       <tr><td>Git push key, mailbox password</td><td>sets them once</td><td>uses them on the agent's behalf</td><td><span class="tag no">never enters the VM</span></td></tr>
       <tr><td>Secrets attached to the conversation</td><td>sets them</td><td>delivers them</td><td><span class="tag w">readable: it is root</span></td></tr>
     </table></div>
+
+    <p class="note">Both network rules live on the host and are keyed on the VM's network cable, which the VM cannot change. Tried as root inside a real VM: offline, it could not get out even by taking another address, and name resolution stopped; its terminal and folders kept working; the VM next to it stayed online. A VM is filtered a moment after it starts, not before.</p>
 
     <h2>Two kinds of secret</h2>
     <div class="grid g2">

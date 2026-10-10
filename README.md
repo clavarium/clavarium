@@ -37,7 +37,14 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   shared with a one-use QR code; the device that scans it makes its own key,
   sees that one conversation under `/c/` and nothing else, and can be revoked.
 
-Not yet: secrets, the sign-in mailbox, mailbox and git resources, delivery.
+- **7 (in progress) - secrets and network**: a secret is sealed at rest and
+  handed to a tool as a file in memory and a variable; a conversation can be
+  switched offline, and conversations never reach each other, both enforced
+  on the host.
+
+Not yet: the sign-in mailbox, mailbox and git resources, delivery.
+
+The host also needs `nft` (the network rules).
 
 The host needs `tmux` and `bindfs` (the read-only views).
 
