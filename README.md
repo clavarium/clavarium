@@ -45,6 +45,11 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
 
 Not yet: mailbox and git resources, delivery.
 
+A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its
+recent messages become files that a conversation reads and never writes; the
+mailbox itself is never changed. For a mail server of your own whose
+certificate authority is private, `CLAVARIUM_MAIL_CA` names its file.
+
 The host also needs `nft` (the network rules).
 
 The host needs `tmux` and `bindfs` (the read-only views).

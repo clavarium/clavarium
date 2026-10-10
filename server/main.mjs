@@ -12,6 +12,7 @@
  *   node server/main.mjs --command "your-tool" --cwd /path/to/work
  *       no VM: one tool on this machine, at /?c=<name>. For development.
  */
+import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -34,6 +35,7 @@ import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
 import { SignInMailboxes } from './signin.mjs';
+import { Mailboxes, recentMessages } from './mailbox.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -75,7 +77,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -94,7 +96,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -117,10 +119,12 @@ export function start({ port, command, cwd, env = process.env }) {
     return listening;
 }
 
+const MAIL_EVERY_MS = 120_000;
+
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs }) {
+export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -167,7 +171,18 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
         await rules;
     };
     all.through = [RUNNER];
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin });
+    /* Mailboxes kept as folders: brought up to date now and then, never
+       because a tool asked. */
+    /* CLAVARIUM_MAIL_CA: the certificate authority of a mail server of your
+       own, as a file, when it is not one every machine already trusts. A
+       mailbox is still never read without checking who answers. */
+    const mailCa = (env.CLAVARIUM_MAIL_CA ?? '').trim() ? readFileSync(env.CLAVARIUM_MAIL_CA.trim()) : undefined;
+    const reader = mailReader ?? ((settings) => recentMessages(settings, { ca: mailCa }));
+    const mailboxes = new Mailboxes({ store: new Store(`${dataDir}/mailboxes.json`), vault, resources: folders, reader });
+    const mailTimer = setInterval(() => { void mailboxes.syncAll(); }, MAIL_EVERY_MS);
+    mailTimer.unref();
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes });
+    server.on('close', () => clearInterval(mailTimer));
     const bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         spawn: async (name, cols, rows, say) => {

@@ -385,15 +385,24 @@
     }
     async function paintPanel() {
         const all = await (await fetch(`${API}/resources`)).json();
+        const boxes = DEVICE ? [] : await (await fetch(`${API}/mailboxes`)).json().catch(() => []);
         const mine = new Map((conversations.find((x) => x.name === current)?.resources ?? []).map((r) => [r.name, r.access]));
         const rows = $('panel-rows');
         rows.replaceChildren();
         for (const resource of all) {
             const row = document.createElement('div'); row.className = 'folder';
             const label = document.createElement('b'); label.textContent = resource.name;
+            const box = resource.type === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
+            if (resource.type === 'mailbox') {
+                const about = document.createElement('small'); about.className = 'hint';
+                about.textContent = box ? ` mailbox of ${box.user} - ${box.failure ? box.failure : `${box.messages} message(s)`}` : ' mailbox';
+                label.append(about);
+            }
             const levels = document.createElement('div'); levels.className = 'levels';
             levels.setAttribute('role', 'group'); levels.setAttribute('aria-label', `Access of this conversation to ${resource.name}`);
             for (const [access, text] of LEVELS) {
+                /* Somebody's mail is read, never written. */
+                if (resource.type === 'mailbox' && access === 'write') continue;
                 const b = document.createElement('button');
                 b.type = 'button'; b.textContent = text;
                 b.setAttribute('aria-pressed', (mine.get(resource.name) ?? 'none') === access ? 'true' : 'false');
@@ -482,6 +491,18 @@
     });
     $('folders').addEventListener('click', async () => { $('files').hidden = true; await paintPanel(); $('panel').hidden = false; });
     $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+    $('mailbox-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('mailbox-error').hidden = true;
+        const button = $('mailbox-new').querySelector('button[type=submit]');
+        button.disabled = true; button.textContent = 'Reading the mailbox...';
+        try {
+            await post(`${API}/mailboxes`, { name: $('mailbox-name').value.trim(), host: $('mailbox-host').value.trim(), port: $('mailbox-port').value.trim(), user: $('mailbox-user').value.trim(), password: $('mailbox-password').value });
+            $('mailbox-new').reset(); $('mailbox-box').open = false;
+        } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
+        button.disabled = false; button.textContent = 'Add';
+        await paintPanel();
+    });
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;

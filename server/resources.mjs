@@ -49,12 +49,12 @@ export class Resources {
     /* The folder is MADE BY THE HOST PROGRAM, in a directory that belongs to
        root: this server fills its folders but cannot replace one by a link
        to somewhere else, which is what would otherwise get mounted. */
-    async create({ name }) {
+    async create({ name, type = 'folder' }) {
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         const made = await this.#host(['folder', 'make', name]);
         if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);
-        const resource = { name, type: 'folder', attachments: {}, createdAt: new Date().toISOString() };
+        const resource = { name, type, attachments: {}, createdAt: new Date().toISOString() };
         this.#store.put(resource);
         return resource;
     }
@@ -79,6 +79,8 @@ export class Resources {
         if (!resource) throw new Refusal(404, 'No such resource.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
         if (access !== 'none' && !ACCESS.includes(access)) throw new Refusal(400, 'Access is "read", "write" or "none".');
+        /* A mailbox is somebody's mail: a tool reads it, and never writes in it. */
+        if (resource.type === 'mailbox' && access === 'write') throw new Refusal(400, 'A mailbox is read-only.');
         const before = resource.attachments[conversation];
         if (before === access || (before === undefined && access === 'none')) return;
         if (before !== undefined) {

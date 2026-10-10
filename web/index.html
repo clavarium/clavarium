@@ -57,6 +57,22 @@
           <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
         </form>
+        <details id="mailbox-box">
+          <summary>Add a mailbox as a folder</summary>
+          <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
+          <form id="mailbox-new" autocomplete="off">
+            <label for="mailbox-name">Folder name</label>
+            <input id="mailbox-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="inbox" spellcheck="false" autocapitalize="off" required>
+            <label for="mailbox-host">Mail server (IMAP, TLS)</label>
+            <div class="row"><input id="mailbox-host" placeholder="imap.example.com" spellcheck="false" autocapitalize="off" required><input id="mailbox-port" inputmode="numeric" placeholder="993" aria-label="Port" size="5"></div>
+            <label for="mailbox-user">User</label>
+            <input id="mailbox-user" spellcheck="false" autocapitalize="off" autocomplete="off" required>
+            <label for="mailbox-password">Password</label>
+            <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password" required>
+              <button type="submit" class="primary">Add</button></div>
+            <p id="mailbox-error" class="error" role="alert" hidden></p>
+          </form>
+        </details>
         <div class="panel-top"><b>Network</b></div>
         <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
         <div class="levels" id="network" role="group" aria-label="Network of this conversation">

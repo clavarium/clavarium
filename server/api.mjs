@@ -52,7 +52,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -99,6 +99,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
+            if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
                 const conversation = decodeURIComponent(watched[1]);
@@ -119,7 +120,10 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, await resources.create(body)), true;
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
-        if (unlisted && resources) { await resources.remove(unlisted[1]); return send(200, { ok: true }), true; }
+        if (unlisted && resources) { await resources.remove(unlisted[1]); mailboxes?.forget(unlisted[1]); return send(200, { ok: true }), true; }
+        if (pathname === '/api/mailboxes' && mailboxes) return send(201, await mailboxes.add(body)), true;
+        const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
+        if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);

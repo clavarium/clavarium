@@ -137,3 +137,9 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #paste-text { flex: 1; min-height: 70px; width: 100%; resize: none; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; }
 /* The page never scrolls or zooms under a finger on the terminal: the drag is for the terminal. */
 #terminal { touch-action: none; }
+
+/* Adding a mailbox: folded away until asked for. */
+#mailbox-box { margin: 12px 0; }
+#mailbox-box summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+#mailbox-new { display: grid; gap: 6px; }
+.folder small.hint { font-weight: normal; }
