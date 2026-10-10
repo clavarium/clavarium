@@ -506,7 +506,7 @@
     $('copy-open').addEventListener('click', () => {
         $('files').hidden = $('panel').hidden = $('sharing').hidden = true;
         $('copy-text').value = screenText();
-        $('copy-status').textContent = '';
+        $('copy-status').textContent = ''; $('paste-status').textContent = '';
         $('copy').hidden = false;
         /* Shown from its end: the last lines are what one comes for. */
         $('copy-text').scrollTop = $('copy-text').scrollHeight;
@@ -521,6 +521,51 @@
             $('copy-status').textContent = 'Selected: now use Copy.';
         }
     });
+
+    /* Pasting. What is pasted goes through the terminal's own paste, which
+       tells the tool "this is a paste" when the tool asked to know: a pasted
+       line break is then not an Enter. */
+    const pasteIntoTerminal = (text) => {
+        /* The button that was pressed gives the focus back first: left on it,
+           the next Enter pressed it again and pasted twice (caught by a test). */
+        document.activeElement?.blur?.();
+        $('copy').hidden = true;
+        terminal.focus();
+        if (text) terminal.paste(text);
+    };
+    $('paste-now').addEventListener('click', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            if (text === '') { $('paste-status').textContent = 'There is nothing to paste.'; return; }
+            pasteIntoTerminal(text);
+        } catch { $('paste-status').textContent = 'This browser did not let the page read what you copied. Use the field below.'; $('paste-text').focus(); }
+    });
+    $('paste-send').addEventListener('click', () => { const text = $('paste-text').value; $('paste-text').value = ''; pasteIntoTerminal(text); });
+
+    /* ---------- a finger is a wheel ---------- */
+    /* On a touch screen there is no wheel, and a terminal in a page does not
+       scroll under a finger by itself. A vertical drag is turned into the
+       wheel events the terminal already understands: it scrolls its own
+       history, or passes the wheel to a tool that asked for the mouse, as
+       with a real wheel. A touch that does not move stays a tap. */
+    const STEP_PX = 18;                      /* one wheel notch per this much finger travel */
+    let touchY = null; let carried = 0;
+    const area = $('terminal');
+    area.addEventListener('touchstart', (event) => { if (event.touches.length === 1) { touchY = event.touches[0].clientY; carried = 0; } }, { passive: true });
+    area.addEventListener('touchmove', (event) => {
+        if (touchY === null || event.touches.length !== 1) return;
+        const touch = event.touches[0];
+        carried += touchY - touch.clientY;           /* finger up: the text moves up, as on any touch screen */
+        touchY = touch.clientY;
+        const target = area.querySelector('.xterm-screen') ?? area;
+        while (Math.abs(carried) >= STEP_PX) {
+            const down = carried > 0;
+            carried -= down ? STEP_PX : -STEP_PX;
+            target.dispatchEvent(new WheelEvent('wheel', { deltaY: down ? 60 : -60, deltaMode: 0, clientX: touch.clientX, clientY: touch.clientY, bubbles: true, cancelable: true }));
+        }
+        event.preventDefault();
+    }, { passive: false });
+    area.addEventListener('touchend', () => { touchY = null; });
 
     /* ---------- files ---------- */
     /* The folders kept by the server and attached here: listed, downloaded,

@@ -133,4 +133,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
   #state, .tag { font-size: 13px; }
   footer button.careful { order: 5; }
 }
-#copy-text { flex: 1; min-height: 200px; width: 100%; resize: none; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; white-space: pre; overflow: auto; }
+#copy-text { flex: 2; min-height: 160px; width: 100%; resize: none; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; white-space: pre; overflow: auto; }
+#paste-text { flex: 1; min-height: 70px; width: 100%; resize: none; font: 13px/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 10px; }
+/* The page never scrolls or zooms under a finger on the terminal: the drag is for the terminal. */
+#terminal { touch-action: none; }
