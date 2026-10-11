@@ -104,16 +104,26 @@ test('a path the tool printed is clicked in the terminal and opens in Files, sho
     assert.deepEqual(me.errors, []);
 });
 
-test('on a tablet, a finger on the path opens it too; and a file on the machine\'s own disk is said to be out of reach', { skip: SKIP }, async (t) => {
+test('on a tablet, a finger on the path opens it too -- even a file on the machine\'s own disk, fetched for the occasion', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person({ phone: true });
     await me.create('by-finger', 'Shell', { onDisk: true });
-    await me.type('echo x > made.txt; clear; echo "Ready: /work/made.txt"');
-    await me.sees('Ready: /work/made.txt');
-    const at = await whereIs(me.page, '/work/made.txt');
-    await me.page.touchscreen.tap(at.x, at.y);
-    await me.until('it says where the file is, and what to do', async () => /on the disk of the machine/.test(await me.page.locator('#notice-text').innerText()));
-    assert.match(await me.page.locator('#notice-text').innerText(), /keep its work here/);
+    writeFileSync(join(b.dir, 'vms', 'clv-by-finger', 'root', 'work', 'summary.pdf'), smallPdf());
+    await me.type('clear; echo "Ready: /work/summary.pdf"; echo "Gone: /work/never-made.txt"');
+    await me.sees('Gone: /work/never-made.txt');
+    const tap = async (text) => { const at = await whereIs(me.page, text); await me.page.touchscreen.tap(at.x, at.y); };
+    await tap('/work/summary.pdf');
+    await me.until('the PDF is drawn', async () => (await me.page.locator('#preview-body canvas').count()) === 1, 30_000);
+    assert.match(await me.page.locator('#preview-note').innerText(), /1 page\. Read from the disk of the machine: this file is not kept here/);
+    /* Its Download button saves the same bytes. */
+    const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
+    assert.equal(download.suggestedFilename(), 'summary.pdf');
+    await me.page.locator('#files-close').click();
+    /* A path that leads nowhere says so. */
+    await tap('/work/never-made.txt');
+    await me.until('it says the file is not there', async () => /not on the machine/.test(await me.page.locator('#preview-note').innerText()));
+    /* Nothing but /work is ever read from a machine. */
+    assert.equal(await me.page.evaluate(async () => (await fetch('/api/files/machine?c=by-finger&p=/etc/hostname')).status), 400);
 });
 
 test('the screen can be light or dark: the terminal follows, and the choice is kept on this device', { skip: SKIP }, async (t) => {

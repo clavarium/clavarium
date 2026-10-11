@@ -15,6 +15,9 @@ export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
 /* Moving a work folder: what must stay free after it, and how long a copy may take. */
 export const ROOM_MB = 1024;
+/* A file shown straight from a machine's disk: where, and how large at most. */
+const MACHINE_PATH = /^\/work(\/[A-Za-z0-9._@+%~-]+)+$/;
+export const MACHINE_FILE_MAX = 5 * 1024 * 1024;
 const MOVE_MS = 30 * 60_000;
 
 /* An error whose message is meant for the person, and safe to show. */
@@ -199,6 +202,30 @@ export class Conversations {
         timer.unref?.();
         this.#timers.set(name, timer);
         return false;
+    }
+
+    /* ONE FILE OF THE MACHINE'S OWN DISK, read for the person who asked to
+       see it (a path on their screen, clicked). Only under /work, only a
+       plain path, only a regular file of a modest size; read as the
+       machine's ordinary user, never as root. Nothing is kept of it here. */
+    async machineFile(name, path) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+        if (typeof path !== 'string' || path.length > 1024 || !MACHINE_PATH.test(path) || path.split('/').includes('..') || path.split('/').includes('.')) {
+            throw new Refusal(400, 'Only a file under /work can be shown, by a plain path.');
+        }
+        if (await this.#vms.state(name) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.');
+        const stat = await this.#vms.exec(name, ['stat', '-L', '-c', '%F %s', '--', path]);
+        if (stat.code !== 0) throw new Refusal(404, 'This file is not on the machine (any more).');
+        const size = Number(stat.stdout.trim().split(' ').pop());
+        if (!stat.stdout.startsWith('regular') || !Number.isInteger(size)) throw new Refusal(400, 'This is not a file.');
+        if (size > MACHINE_FILE_MAX) throw new Refusal(413, `This file is too large to be shown from the machine's disk (${Math.round(size / 1048576)} MB). Ask the tool to copy it into an attached folder.`);
+        /* As text on the way out of the machine: a channel made for commands
+           is not trusted with raw bytes. */
+        const read = await this.#vms.exec(name, ['base64', '-w', '0', '--', path], { timeoutMs: 120_000 });
+        if (read.code !== 0) throw new Refusal(502, `The file could not be read: ${firstLine(read.stderr)}`);
+        return { name: path.split('/').pop(), bytes: Buffer.from(read.stdout, 'base64') };
     }
 
     /* MOVES WHERE THE TOOL WORKS, with its files: to a folder kept by the

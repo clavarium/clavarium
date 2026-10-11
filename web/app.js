@@ -729,14 +729,18 @@
         $('preview').hidden = true;
         $('files-rows').hidden = false; $('files-path').hidden = false;
     }
-    async function preview(inner, name, size) {
+    /* `from`: an address to read the file at instead of its place in a folder
+       kept here (a file of the machine's own disk). */
+    async function preview(inner, name, size, from) {
         closePreview();
-        const address = `${API}/files/download?${filesQuery({ p: inner })}`;
+        const address = from ?? `${API}/files/download?${filesQuery({ p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
         $('files-rows').hidden = true; $('files-path').hidden = true; $('files-empty').hidden = true;
         $('preview').hidden = false;
-        const note = (text) => { $('preview-note').textContent = text; $('preview-note').hidden = !text; };
+        /* A file read from the machine's disk says so, whatever else is said. */
+        const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
         if (!known) { note('This kind of file is not shown here. Download it to open it.'); return; }
@@ -805,6 +809,18 @@
         /* What this page knows may be a few seconds old (a folder attached
            from another screen): it asks again before saying no. */
         if (!reachable()) await refresh();
+        if (!reachable() && !inResources) {
+            /* On the disk of the machine, not kept here: it is fetched from
+               the machine for this once, and shown all the same. */
+            $('panel').hidden = true; notice.hidden = true;
+            filesOf = ''; filesAt = '';
+            await paintFiles();
+            $('files').hidden = false;
+            $('files-none').hidden = true;
+            const name = text.split('/').pop();
+            await preview('', name, 0, `${API}/files/machine?${new URLSearchParams({ c: current, p: text })}`);
+            return;
+        }
         if (!reachable()) {
             show(inResources ? `"${tab}" is not a folder attached to this conversation.`
                 : 'This file is on the disk of the machine: it cannot be shown here. Ask the tool to copy it into an attached folder (/resources/...), or keep its work here ("Folders & secrets", "Where the tool works").',

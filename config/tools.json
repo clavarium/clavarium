@@ -17,7 +17,18 @@
         "--no-fund",
         "--no-audit",
         "@anthropic-ai/claude-code"
-      ]
+      ],
+      {
+        "argv": [
+          "install",
+          "-D",
+          "-m",
+          "0600",
+          "/dev/stdin",
+          ".claude/settings.json"
+        ],
+        "input": "{\n  \"theme\": \"dark-ansi\"\n}\n"
+      }
     ],
     "signin": {
       "senders": [

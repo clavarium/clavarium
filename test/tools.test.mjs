@@ -34,3 +34,21 @@ test('a malformed catalogue is refused with the name of what is wrong', () => {
     assert.throws(() => readTools(one({ id: 'Bad Id' })), /tool id/);
     assert.throws(() => readTools('[]'), /empty/);
 });
+
+test('Claude Code is set to take its colours from the terminal, so that the page decides light or dark', () => {
+    const steps = loadTools().find((t) => t.id === 'claude-code').steps;
+    const settings = steps.find((s) => s.argv.at(-1) === '.claude/settings.json');
+    assert.ok(settings, 'a step writes its settings');
+    assert.deepEqual(JSON.parse(settings.input), { theme: 'dark-ansi' });
+    /* After the tool itself: its own install must not overwrite it. */
+    assert.ok(steps.indexOf(settings) > steps.findIndex((s) => s.argv.includes('@anthropic-ai/claude-code')));
+});
+
+test('a step with input is a small file handed over apart, and nothing else', () => {
+    const base = { id: 'x', label: 'X', command: ['x'], memoryMb: 1024 };
+    const ok = readTools(JSON.stringify([{ ...base, install: [{ argv: ['install', '/dev/stdin', 'f'], input: 'a' }] }]));
+    assert.deepEqual(ok[0].steps, [{ argv: ['install', '/dev/stdin', 'f'], input: 'a' }]);
+    for (const bad of [{ argv: 'install f', input: 'a' }, { argv: ['install'] }, { argv: ['install'], input: 7 }, { argv: ['install'], input: 'x'.repeat(5000) }]) {
+        assert.throws(() => readTools(JSON.stringify([{ ...base, install: [bad] }])));
+    }
+});

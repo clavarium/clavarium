@@ -42,7 +42,14 @@ export function readTools(text) {
         if (!Array.isArray(t.install)) throw new Error(`${t.id}: install must be a list of steps`);
         const steps = t.install.flatMap((s) => {
             if (s === 'node') return NODE_STEPS;
-            if (!isArgv(s)) throw new Error(`${t.id}: an install step must be "node" or an argument vector`);
+            /* A step that writes a small file gives its content apart, to go
+               on standard input: { "argv": [...], "input": "..." }. Steps run
+               in the home of the machine's user, so a path can be relative. */
+            if (s && typeof s === 'object' && !Array.isArray(s)) {
+                if (!isArgv(s.argv) || typeof s.input !== 'string' || s.input.length > 4096) throw new Error(`${t.id}: a step with input needs "argv" and a short "input"`);
+                return [{ argv: s.argv, input: s.input }];
+            }
+            if (!isArgv(s)) throw new Error(`${t.id}: an install step must be "node", an argument vector, or { argv, input }`);
             return [{ argv: s }];
         });
         /* Optional: whose mail is a sign-in mail for this tool, and where its

@@ -322,3 +322,29 @@ test('a copy that fails is undone: the work is where it was, and the tool is sta
     assert.equal(b.calls.at(-1), 'work aside demo');
     assert.deepEqual(started, ['demo']);
 });
+
+test('a file of the machine\'s own disk is read for whoever asked to see it: under /work only, a plain path, a modest size', async (t) => {
+    const content = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff, 0x10]);
+    let kind = 'regular file'; let size = content.length;
+    const b = bench(t, { exec: (argv) => {
+        const cmd = argv.slice(argv.indexOf('--') + 1);
+        if (cmd[0] === 'stat') return { code: 0, stdout: `${kind} ${size}\n`, stderr: '' };
+        if (cmd[0] === 'base64') return { code: 0, stdout: content.toString('base64'), stderr: '' };
+        return undefined;
+    } });
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool', workOnDisk: true });
+    await all.built;
+    b.calls.length = 0;
+    const file = await all.machineFile('demo', '/work/out/summary.pdf');
+    assert.equal(file.name, 'summary.pdf');
+    assert.deepEqual(file.bytes, content, 'raw bytes arrive whole');
+    assert.deepEqual(b.calls, ['info clv-demo', 'exec clv-demo -- stat -L -c %F %s -- /work/out/summary.pdf', 'exec clv-demo -- base64 -w 0 -- /work/out/summary.pdf']);
+    assert.ok(!b.calls.some((c) => c.includes('sudo')), 'never as root');
+    for (const path of ['/etc/shadow', '/work/../etc/shadow', '/work', '/work/', 'work/x', '/work/a b', '/work/x;id', '/work/$(id)', '/workx/y', '/work/./x', '/root/.ssh/id_ed25519', '']) {
+        await assert.rejects(all.machineFile('demo', path), /Only a file under \/work/, path);
+    }
+    kind = 'directory'; await assert.rejects(all.machineFile('demo', '/work/out'), /not a file/);
+    kind = 'regular file'; size = 50 * 1024 * 1024; await assert.rejects(all.machineFile('demo', '/work/big.iso'), /too large .*50 MB/);
+    await assert.rejects(all.machineFile('nope', '/work/x'), /No such conversation/);
+});

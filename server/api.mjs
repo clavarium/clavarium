@@ -85,6 +85,13 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, { text: await transcribe(voice, Buffer.concat(parts)) }), true;
         }
         if (request.method === 'GET' && pathname === '/api/files') return send(200, await list(attached(), query.get('p') ?? '')), true;
+        if (request.method === 'GET' && pathname === '/api/files/machine') {
+            const file = await conversations.machineFile(query.get('c') ?? '', query.get('p') ?? '');
+            response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.bytes.length,
+                'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+            response.end(file.bytes);
+            return true;
+        }
         if (request.method === 'GET' && pathname === '/api/files/download') {
             const file = await download(attached(), query.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
