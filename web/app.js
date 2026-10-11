@@ -169,6 +169,37 @@
         button.addEventListener('click', () => { send(KEYS[button.dataset.keys]); terminal.focus(); });
     }
 
+    /* ---------- the on-screen keyboard, on demand ---------- */
+    /* On a phone or a tablet, a finger on the terminal used to call the
+       on-screen keyboard every time -- to scroll, to tap a path, to look --
+       and it took half the screen from someone who did not want to type
+       (said by the owner). The terminal still takes the focus, so the key
+       row, the shortcuts, dictation and a real keyboard go on working; but
+       the browser is told NOT to raise its keyboard (inputmode "none", the
+       standard way, nothing to do with which tool runs). "Keyboard" raises
+       it, and puts it away again. */
+    const touchScreen = matchMedia('(pointer: coarse)').matches;
+    let keyboardWanted = false;
+    const applyKeyboard = () => {
+        const field = terminal.textarea;
+        if (!field || !touchScreen) return;
+        field.setAttribute('inputmode', keyboardWanted ? 'text' : 'none');
+        $('kbd').setAttribute('aria-pressed', String(keyboardWanted));
+        $('kbd').textContent = keyboardWanted ? 'Hide keyboard' : 'Keyboard';
+    };
+    if (touchScreen) {
+        $('kbd').hidden = false;
+        applyKeyboard();
+        $('kbd').addEventListener('click', () => {
+            keyboardWanted = !keyboardWanted;
+            /* A browser reads the hint when the field takes the focus: it is
+               let go and taken again, so that the change is seen at once. */
+            terminal.blur();
+            applyKeyboard();
+            terminal.focus();
+        });
+    }
+
     /* ---------- one conversation ---------- */
     /* True while a first-time visitor is reading the welcome: the terminal is
        not opened behind it, or its first output would wipe the welcome away

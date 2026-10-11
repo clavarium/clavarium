@@ -93,3 +93,34 @@ function visible(text) { return text; }
 async function visibleNow(person) {
     return person.page.evaluate(() => { const t = window.clavariumTerminal, buffer = t.buffer.active; let s = ''; for (let i = buffer.viewportY; i < buffer.viewportY + t.rows; i++) s += `${(buffer.getLine(i)?.translateToString(true) ?? '').trim()}\n`; return s; });
 }
+
+test('on a touch screen the on-screen keyboard comes on demand: a finger on the terminal does not call it', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('quiet');
+    const field = () => me.page.evaluate(() => ({ mode: window.clavariumTerminal.textarea.getAttribute('inputmode'), focused: document.activeElement === window.clavariumTerminal.textarea }));
+    assert.equal(await me.page.locator('#kbd').isVisible(), true);
+    assert.equal((await field()).mode, 'none', 'the browser is told not to raise its keyboard');
+    /* A finger on the terminal: it takes the focus (keys still arrive), the hint stays. */
+    const box = await me.page.locator('#terminal').boundingBox();
+    await me.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    assert.deepEqual(await field(), { mode: 'none', focused: true });
+    /* The key row and a real keyboard go on working without it. */
+    await me.type('echo no-keyboard-needed');
+    await me.sees('\nno-keyboard-needed');
+    /* Asked for: raised, and the button says how to put it away. */
+    await me.page.locator('#kbd').tap();
+    assert.deepEqual(await field(), { mode: 'text', focused: true });
+    assert.equal(await me.page.locator('#kbd').innerText(), 'Hide keyboard');
+    await me.page.locator('#kbd').tap();
+    assert.equal((await field()).mode, 'none');
+    assert.equal(await me.page.locator('#kbd').innerText(), 'Keyboard');
+});
+
+test('with a mouse and a real keyboard nothing changes: no button, no hint', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('desk');
+    assert.equal(await me.page.locator('#kbd').isVisible(), false);
+    assert.equal(await me.page.evaluate(() => window.clavariumTerminal.textarea.getAttribute('inputmode')), null);
+});
