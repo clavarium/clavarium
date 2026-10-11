@@ -63,6 +63,10 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
   #app[data-view="room"] #list, #app[data-view="list"] #room { display: none; }
 }
 @media (min-width: 701px) { #back { display: none; } }
+/* The list folded away with one click, on a wide screen: the terminal takes the room. */
+@media (min-width: 701px) { #app[data-list="folded"] #list { display: none; } }
+@media (max-width: 700px) { #fold { display: none; } }
+#fold { font-size: 16px; line-height: 1; padding: 4px 9px; }
 .chips { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
 .chip { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); white-space: nowrap; }
 .chip[data-access="write"] { color: var(--ok); border-color: var(--ok); }

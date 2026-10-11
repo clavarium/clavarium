@@ -49,6 +49,24 @@
         fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
         theme: { background: '#0f141a' },
     });
+    /* ---------- the list of conversations, folded away or not ---------- */
+    /* One click hides it and the terminal takes the room; one click brings
+       it back. Kept on this device. */
+    const applyFold = (folded) => {
+        app.dataset.list = folded ? 'folded' : 'open';
+        $('fold').textContent = folded ? '\u00bb' : '\u00ab';
+        $('fold').setAttribute('aria-pressed', String(folded));
+        $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+    };
+    let listFolded = false;
+    try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
+    $('fold').addEventListener('click', () => {
+        listFolded = !listFolded;
+        try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
+        applyFold(listFolded);
+        fit.fit(); terminal.focus();
+    });
+
     /* ---------- light or dark ---------- */
     /* A choice of this screen, kept on this device. The TOOL has its own
        colours: one made for a dark screen should be told the screen is light
@@ -77,6 +95,7 @@
     const fit = new FitAddon.FitAddon();
     terminal.loadAddon(fit);
     terminal.open($('terminal'));
+    if (!DEVICE) applyFold(listFolded);
     fit.fit();
     window.clavariumTerminal = terminal; /* for the end-to-end proof */
 

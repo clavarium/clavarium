@@ -155,3 +155,21 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     await me.page.locator('#theme').click();
     assert.equal((await look()).theme, 'dark');
 });
+
+test('the list of conversations folds away with one click and comes back; the terminal takes the room', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('roomy');
+    const cols = () => me.page.evaluate(() => window.clavariumTerminal.cols);
+    const before = await cols();
+    await me.page.locator('#fold').click();
+    assert.equal(await me.page.locator('#list').isVisible(), false);
+    await me.until('the terminal is wider', async () => (await cols()) > before);
+    await me.type('echo still-typing');
+    await me.sees('\nstill-typing');
+    await me.page.reload();
+    await me.until('back and live', async () => (await me.state()) === 'live');
+    assert.equal(await me.page.locator('#list').isVisible(), false, 'kept across a reload');
+    await me.page.locator('#fold').click();
+    assert.equal(await me.page.locator('#list').isVisible(), true);
+});
