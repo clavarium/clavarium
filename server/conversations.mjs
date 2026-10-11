@@ -13,6 +13,9 @@ import { WORK, VM_USER } from './vm.mjs';
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
 const STEP_MS = 15 * 60_000;
+/* Moving a work folder: what must stay free after it, and how long a copy may take. */
+export const ROOM_MB = 1024;
+const MOVE_MS = 30 * 60_000;
 
 /* An error whose message is meant for the person, and safe to show. */
 export class Refusal extends Error {
@@ -40,6 +43,9 @@ export class Conversations {
         /* A build interrupted by a restart of this server cannot be resumed
            blindly: it is marked failed, and says so. */
         for (const c of store.all()) {
+            /* A move cut short leaves the machine as it was at that moment:
+               it is said, with where to look, rather than guessed at. */
+            if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
         }
     }
@@ -142,7 +148,7 @@ export class Conversations {
     async open(name, say = () => {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
-        if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : 'This conversation could not be built.');
+        if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'building' ? 'This conversation is still being built.' : c.phase === 'moving' ? 'This conversation is moving its work folder.' : 'This conversation could not be built.');
         this.#cancelStop(name);
         /* Opening is the explicit gesture that ends a sleep. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
@@ -193,6 +199,103 @@ export class Conversations {
         timer.unref?.();
         this.#timers.set(name, timer);
         return false;
+    }
+
+    /* MOVES WHERE THE TOOL WORKS, with its files: to a folder kept by the
+       server ('kept': seen in Files, outlives the machine, of a fixed size)
+       or to the machine's own disk ('disk': faster for a large project).
+     *
+     * The tool is stopped for the move and started again after it: it runs
+     * IN that folder. Nothing is touched before these are known to hold:
+     *   - the destination keeps at least ROOM_MB free after the copy;
+     *   - going to a kept folder, no symbolic link of the work points upwards
+     *     ("../") or to an absolute path. Tried on a real machine: a kept
+     *     folder takes a link to a file next to it, and REFUSES those -- which
+     *     is what a project's installed packages are full of.
+     * A copy that fails is undone: the work stays where it was.
+     * The answer comes at once; the move goes on, and `moved` says how it
+     * ended. */
+    async moveWork(name, to) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (to !== 'kept' && to !== 'disk') throw new Refusal(400, 'The work goes to "kept" or to "disk".');
+        if (c.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+        if ((c.work ?? 'disk') === to) throw new Refusal(409, to === 'kept' ? 'Its work is already kept here.' : 'It already works on the disk of its machine.');
+        if (await this.#vms.state(name) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.');
+        const inVm = (argv, timeoutMs = 60_000) => this.#vms.exec(name, ['sudo', '-n', ...argv], { timeoutMs });
+        const said = (r) => firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
+
+        /* --- what must hold, before anything is touched --- */
+        const measured = await inVm(['du', '-sm', WORK], MOVE_MS);
+        const size = Number.parseInt(measured.stdout, 10);
+        if (measured.code !== 0 || !Number.isInteger(size)) throw new Refusal(502, `The size of the work folder could not be read: ${said(measured)}`);
+        if (to === 'kept') {
+            const link = await inVm(['find', WORK, '-type', 'l', '(', '-lname', '/*', '-o', '-lname', '*..*', ')', '-print', '-quit'], MOVE_MS);
+            if (link.code !== 0) throw new Refusal(502, `The work folder could not be looked through: ${said(link)}`);
+            if (link.stdout.trim() !== '') throw new Refusal(409, `Not moved: its work holds symbolic links that point upwards or outside (the first: ${firstLine(link.stdout)}). A folder kept here refuses those: this project stays on the disk of its machine.`);
+            const made = await this.#vms.workMake(name);
+            if (made.code !== 0) throw new Refusal(502, `The kept folder could not be made: ${said(made)}`);
+            const room = await this.#vms.workRoom(name);
+            const short = !room ? 'the room left could not be read' : size + ROOM_MB > room.disk ? `it holds ${size} MB and its kept folder has ${room.disk} MB` : size + ROOM_MB > room.host ? `it holds ${size} MB and the server has ${room.host} MB left` : undefined;
+            if (short) { await this.#vms.workAside(name); throw new Refusal(409, `Not moved: ${short}. At least ${ROOM_MB} MB must stay free after the move.`); }
+        } else {
+            const free = await inVm(['df', '-m', '--output=avail', '/']);
+            const left = Number.parseInt(free.stdout.trim().split('\n').pop(), 10);
+            if (free.code !== 0 || !Number.isInteger(left)) throw new Refusal(502, `The room left on the machine's disk could not be read: ${said(free)}`);
+            if (size + ROOM_MB > left) throw new Refusal(409, `Not moved: its work holds ${size} MB and the disk of its machine has ${left} MB left. At least ${ROOM_MB} MB must stay free after the move.`);
+        }
+
+        this.#cancelStop(name);
+        this.#store.patch(name, { phase: 'moving', step: 'Stopping the tool', moved: undefined });
+        this.moved = (async () => {
+            const step = (text) => this.#store.patch(name, { step: text });
+            let failure;
+            try {
+                this.drop(name);
+                await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server']);
+                failure = to === 'kept' ? await this.#toKept(name, inVm, said, step) : await this.#toDisk(name, inVm, said, step);
+            } catch { failure = 'The move stopped on an unexpected error.'; }
+            if (!this.#store.get(name)) return;
+            this.#store.patch(name, {
+                phase: 'ready', step: undefined, ...(failure ? {} : { work: to }),
+                moved: failure ? `Not moved: ${failure} Its work is where it was.` : to === 'kept' ? 'Its work is now kept here: see it in Files.' : 'It now works on the disk of its machine.',
+            });
+            /* The tool is started again, where its work now is. */
+            this.ready(name);
+        })();
+        return this.#store.get(name);
+    }
+
+    async #toKept(name, inVm, said, step) {
+        const before = `${WORK}.before-move`;
+        const undo = async () => { await this.#vms.workUnmount(name); await inVm(['rmdir', WORK]); await inVm(['mv', '-T', before, WORK]); await this.#vms.workAside(name); };
+        const aside = await inVm(['mv', '-T', WORK, before]);
+        if (aside.code !== 0) { await this.#vms.workAside(name); return `the work folder could not be set aside (${said(aside)}).`; }
+        const shown = await this.#vms.workMount(name, this.#uid, this.#gid);
+        if (shown.code !== 0) { await undo(); return `the kept folder could not be shown in the machine (${said(shown)}).`; }
+        step('Copying its files');
+        const copied = await inVm(['cp', '-r', '--no-dereference', '--preserve=mode,timestamps', `${before}/.`, `${WORK}/`], MOVE_MS);
+        if (copied.code !== 0) { await undo(); return `the copy failed (${said(copied)}).`; }
+        await inVm(['rm', '-rf', before], MOVE_MS);
+        return undefined;
+    }
+
+    async #toDisk(name, inVm, said, step) {
+        const moving = `${WORK}.moving`;
+        step('Copying its files');
+        await inVm(['rm', '-rf', moving], MOVE_MS);
+        const made = await inVm(['mkdir', moving]);
+        const copied = made.code === 0 ? await inVm(['cp', '-r', '--no-dereference', '--preserve=mode,timestamps', `${WORK}/.`, `${moving}/`], MOVE_MS) : made;
+        if (copied.code !== 0) { await inVm(['rm', '-rf', moving], MOVE_MS); return `the copy failed (${said(copied)}).`; }
+        await inVm(['chown', '-R', `${VM_USER}:${VM_USER}`, moving], MOVE_MS);
+        const out = await this.#vms.workUnmount(name);
+        if (out.code !== 0) { await inVm(['rm', '-rf', moving], MOVE_MS); return `the kept folder could not be taken out of the machine (${said(out)}).`; }
+        await inVm(['rmdir', WORK]);
+        const placed = await inVm(['mv', '-T', moving, WORK]);
+        if (placed.code !== 0) { await this.#vms.workMount(name, this.#uid, this.#gid); return `the copy could not be put in place (${said(placed)}).`; }
+        /* What was kept here is put aside on the server, not erased. */
+        await this.#vms.workAside(name);
+        return undefined;
     }
 
     /* After a restart of the host, the disks the conversations work in are

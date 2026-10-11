@@ -171,6 +171,7 @@
             show(`${c.step ?? 'Building'}... (${minutes < 1 ? 'started less than a minute ago' : `${minutes} min so far`}; a new machine takes a few minutes)`);
             return;
         }
+        if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
         if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
@@ -204,7 +205,7 @@
             const dot = document.createElement('span'); dot.className = 'dot';
             title.append(dot, c.name);
             const sub = document.createElement('small');
-            sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : `${c.toolLabel} - failed`;
+            sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : `${c.toolLabel} - failed`;
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
             b.addEventListener('click', () => select(c.name));
@@ -240,7 +241,7 @@
             const now = mark(conversations.find((x) => x.name === current));
             if (before !== now || now.startsWith('building')) enter();
         } catch { /* a server without VMs has no list: the page is one terminal */ }
-        if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building') ? 2500 : 10000);
+        if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving') ? 2500 : 10000);
     }
 
     /* ---------- creating ---------- */
@@ -437,6 +438,25 @@
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;
+        /* Where the tool works, and the way to the other place. */
+        const here = conversations.find((x) => x.name === current);
+        const kept = here?.work === 'kept';
+        $('work-box').hidden = DEVICE || !here;
+        $('work-now').textContent = kept
+            ? 'In a folder kept here: you see its files in Files, and they outlive the machine. It has a fixed size, and refuses symbolic links that point upwards or outside: a code project that installs packages belongs on the disk of its machine.'
+            : 'On the disk of its machine: faster for a large code project, but its files are not shown in Files and go with the machine.';
+        $('work-moved').textContent = here?.moved ?? ''; $('work-moved').hidden = !here?.moved;
+        $('work-move').textContent = kept ? 'Move its work to the disk of its machine...' : 'Keep its work here (shown in Files)...';
+        $('work-move').onclick = () => {
+            const to = kept ? 'disk' : 'kept';
+            /* The question is asked over the terminal, not under this panel. */
+            $('panel').hidden = true;
+            show(`Move the work of "${current}" ${kept ? 'to the disk of its machine' : 'into a folder kept here'}? THE TOOL IS STOPPED AND STARTED AGAIN: what it is doing now is interrupted, and a tool that keeps a conversation must be asked to resume it. Its files are copied; the move is refused if less than 1 GB would stay free${kept ? '' : ', or if the work holds symbolic links that a kept folder refuses'}.`,
+                'Move it', async () => {
+                    try { await post(`${API}/conversations/${encodeURIComponent(current)}/work`, { to }); await refresh(); enter(); }
+                    catch (error) { show(error.message, 'Back to the terminal', enter); }
+                }, () => { notice.hidden = true; terminal.focus(); });
+        };
         const offline = conversations.find((x) => x.name === current)?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSecrets();

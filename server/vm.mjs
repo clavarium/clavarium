@@ -78,6 +78,14 @@ export class Vms {
     workMount(conversation, uid, gid) {
         return this.run(['vm', 'mount', vmName(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
+    workUnmount(conversation) { return this.run(['vm', 'unwork', vmName(conversation)], { timeoutMs: 120_000 }); }
+    /* Megabytes left: { disk, host }, or undefined if it cannot be told. */
+    async workRoom(conversation) {
+        vmName(conversation);
+        const r = await this.run(['work', 'room', conversation]);
+        const m = /^disk (\d+) host (\d+)$/m.exec(r.stdout ?? '');
+        return r.code === 0 && m ? { disk: Number(m[1]), host: Number(m[2]) } : undefined;
+    }
     workAside(conversation) { vmName(conversation); return this.run(['work', 'aside', conversation]); }
 
     umount(conversation, name) {

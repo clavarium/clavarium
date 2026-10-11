@@ -222,3 +222,103 @@ test('a work folder that cannot be shown in the machine fails the build, and say
     await all.built;
     assert.match(all.list()[0].error, /work folder could not be shown.*no sshfs/);
 });
+
+/* A machine with a work folder, for the moves: answers what a move asks. */
+function moving(t, { size = 40, links = '', vmFree = 5000, room = 'disk 9000 host 20000', failCopy = false } = {}) {
+    const b = bench(t, {
+        exec: (argv) => {
+            const cmd = argv.slice(argv.indexOf('--') + 1).join(' ');
+            if (cmd.startsWith('sudo -n du ')) return { code: 0, stdout: `${size}\t/work\n`, stderr: '' };
+            if (cmd.startsWith('sudo -n find ')) return { code: 0, stdout: links, stderr: '' };
+            if (cmd.startsWith('sudo -n df ')) return { code: 0, stdout: ` Avail\n ${vmFree}\n`, stderr: '' };
+            if (failCopy && cmd.startsWith('sudo -n cp ')) return { code: 1, stdout: '', stderr: 'cp: error writing: Input/output error' };
+            return undefined;
+        },
+        work: (argv) => (argv[1] === 'room' ? { code: 0, stdout: `${room}\n`, stderr: '' } : undefined),
+    });
+    return b;
+}
+const inVm = (calls) => calls.filter((c) => c.startsWith('exec ')).map((c) => c.replace('exec clv-demo -- sudo -n ', '').replace('exec clv-demo -- ', ''));
+
+test('moving the work to a kept folder: checked, the tool stopped, copied, the tool started again', async (t) => {
+    const b = moving(t);
+    const started = [];
+    const all = b.make(); all.ready = (name) => started.push(name);
+    all.create({ name: 'demo', tool: 'tool', workOnDisk: true });
+    await all.built;
+    b.calls.length = 0; started.length = 0;
+    const answer = await all.moveWork('demo', 'kept');
+    assert.equal(answer.phase, 'moving');
+    await assert.rejects(all.open('demo'), /moving its work folder/);
+    await all.moved;
+    assert.deepEqual(inVm(b.calls), [
+        'du -sm /work', 'find /work -type l ( -lname /* -o -lname *..* ) -print -quit', 'tmux -L clavarium kill-server',
+        'mv -T /work /work.before-move', 'cp -r --no-dereference --preserve=mode,timestamps /work.before-move/. /work/', 'rm -rf /work.before-move',
+    ]);
+    assert.ok(b.calls.indexOf('work room demo') < b.calls.findIndex((c) => c.includes('kill-server')), 'room is known before the tool is stopped');
+    const c = all.list()[0];
+    assert.deepEqual([c.phase, c.work], ['ready', 'kept']);
+    assert.match(c.moved, /now kept here/);
+    assert.deepEqual(started, ['demo']);
+    await assert.rejects(all.moveWork('demo', 'kept'), /already kept/);
+});
+
+test('moving the work to the disk of the machine, and what was kept is put aside', async (t) => {
+    const b = moving(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    b.calls.length = 0;
+    await all.moveWork('demo', 'disk');
+    await all.moved;
+    assert.deepEqual(inVm(b.calls), [
+        'du -sm /work', 'df -m --output=avail /', 'tmux -L clavarium kill-server',
+        'rm -rf /work.moving', 'mkdir /work.moving', 'cp -r --no-dereference --preserve=mode,timestamps /work/. /work.moving/', 'chown -R ubuntu:ubuntu /work.moving',
+        'rmdir /work', 'mv -T /work.moving /work',
+    ]);
+    assert.ok(b.calls.includes('unwork clv-demo'));
+    assert.equal(b.calls.at(-1), 'work aside demo');
+    assert.equal(all.list()[0].work, 'disk');
+});
+
+test('a move is refused, with nothing touched, unless a gigabyte stays free', async (t) => {
+    const cases = [
+        [{ size: 8500 }, 'kept', /it holds 8500 MB and its kept folder has 9000 MB/],
+        [{ size: 100, room: 'disk 9000 host 900' }, 'kept', /the server has 900 MB left/],
+        [{ links: '/work/node_modules/.bin/tool\n' }, 'kept', /links that point upwards or outside \(the first: \/work\/node_modules\/.bin\/tool\)/],
+    ];
+    for (const [options, to, message] of cases) {
+        const b = moving(t, options);
+        const all = b.make();
+        all.create({ name: 'demo', tool: 'tool', workOnDisk: true });
+        await all.built;
+        b.calls.length = 0;
+        await assert.rejects(all.moveWork('demo', to), message);
+        assert.ok(!b.calls.some((c) => c.includes('kill-server') || c.includes(' mv ') || c.includes(' cp ')), 'the tool goes on, its files are where they were');
+        assert.deepEqual([all.list()[0].phase, all.list()[0].work], ['ready', 'disk']);
+    }
+    const b = moving(t, { size: 4500, vmFree: 5000 });
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await assert.rejects(all.moveWork('demo', 'disk'), /4500 MB and the disk of its machine has 5000 MB left/);
+    await assert.rejects(all.moveWork('demo', 'elsewhere'), /"kept" or to "disk"/);
+    await assert.rejects(all.moveWork('nope', 'disk'), /No such conversation/);
+});
+
+test('a copy that fails is undone: the work is where it was, and the tool is started again', async (t) => {
+    const b = moving(t, { failCopy: true });
+    const started = [];
+    const all = b.make(); all.ready = (name) => started.push(name);
+    all.create({ name: 'demo', tool: 'tool', workOnDisk: true });
+    await all.built;
+    b.calls.length = 0; started.length = 0;
+    await all.moveWork('demo', 'kept');
+    await all.moved;
+    const c = all.list()[0];
+    assert.deepEqual([c.phase, c.work], ['ready', 'disk']);
+    assert.match(c.moved, /Not moved: the copy failed \(cp: error writing: Input\/output error\)\. Its work is where it was\./);
+    assert.deepEqual(inVm(b.calls).slice(-2), ['rmdir /work', 'mv -T /work.before-move /work']);
+    assert.equal(b.calls.at(-1), 'work aside demo');
+    assert.deepEqual(started, ['demo']);
+});

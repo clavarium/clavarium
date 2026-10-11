@@ -175,6 +175,8 @@ export async function handleApi(request, response, conversations, headers, resou
             await resources.attach(conversation, String(body.resource ?? ''), String(body.access ?? ''));
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
+        const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
+        if (moved) return send(202, await conversations.moveWork(decodeURIComponent(moved[1]), body.to)), true;
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
         if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
         const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);

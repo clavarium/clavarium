@@ -49,7 +49,10 @@ Where the tool works (`/work`) is a folder kept by the server: what the tool
 makes is seen in Files and outlives its machine. It is a disk of a fixed size
 (10 GB; `WORK_MB=` in `/etc/clavarium/host.conf` changes it), so a tool that
 runs away fills its own disk and not the host's. A conversation can be created
-to work on its machine's own disk instead (faster for a large code project).
+to work on its machine's own disk instead, and moved from one to the other
+later (its tool is stopped for the move; a gigabyte must stay free). A kept
+folder refuses symbolic links that point upwards or outside -- what installed
+packages are full of -- so a code project belongs on the machine's disk.
 Attached folders have no such limit yet.
 
 A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its

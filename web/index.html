@@ -18,7 +18,7 @@
       <span class="legend">What runs in it</span>
       <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
       <label class="check"><input type="checkbox" id="create-disk"> Work on the machine's own disk</label>
-      <p class="hint">Unticked, what the tool makes is kept here: you see it in Files, and it outlives the machine. Tick it for a large code project: it is faster, but those files are not shown here and go with the machine.</p>
+      <p class="hint">Unticked, what the tool makes is kept here: you see it in Files, and it outlives the machine. Tick it for a code project that installs packages: a folder kept here refuses the links they make, and is slower. Those files are then not shown here and go with the machine. It can be changed later.</p>
       <p id="create-error" class="error" role="alert" hidden></p>
       <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
         <span class="hint">a new machine takes a few minutes</span></div>
@@ -59,6 +59,12 @@
           <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
             <button type="submit" class="primary">Create</button></div>
         </form>
+        <div id="work-box">
+          <div class="panel-top"><b>Where the tool works</b></div>
+          <p id="work-now" class="hint"></p>
+          <p id="work-moved" class="hint" hidden></p>
+          <button type="button" id="work-move"></button>
+        </div>
         <details id="mailbox-box">
           <summary>Add a mailbox as a folder</summary>
           <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>

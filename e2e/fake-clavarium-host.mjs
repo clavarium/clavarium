@@ -12,7 +12,7 @@
  * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}, data/...
  */
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdirSync, renameSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
+import { mkdirSync, rmdirSync, renameSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const DIR = process.env.FAKE_VM_DIR;
@@ -47,6 +47,8 @@ if (area === 'work' && verb === 'make') {
     }
     process.exit(0);
 }
+/* Room left: plenty, unless a test says otherwise. */
+if (area === 'work' && verb === 'room') { console.log(process.env.FAKE_WORK_ROOM ?? 'disk 9000 host 20000'); process.exit(0); }
 if (area === 'work' && verb === 'aside') {
     const [name] = argv;
     if (existsSync(workHome(name))) {
@@ -77,7 +79,8 @@ const stateOf = (vm) => (existsSync(join(home(vm), 'state')) ? readFileSync(join
 const setState = (vm, s) => writeFileSync(join(home(vm), 'state'), s);
 const fail = (message, code = 2) => { console.error(message); process.exit(code); };
 /* A path of the VM, as a path here. */
-const inVm = (vm, path) => (path.startsWith('/') ? join(root(vm), path) : path);
+/* ("dir/." and "dir/" mean something to cp: the ending is kept.) */
+const inVm = (vm, path) => (path.startsWith('/') ? join(root(vm), path) + (path.endsWith('/.') ? '/.' : path.endsWith('/') && path !== '/' ? '/' : '') : path);
 const socket = (vm) => `e2e-${vm}`.slice(0, 40);
 const killTmux = (vm) => spawnSync('tmux', ['-L', socket(vm), 'kill-server'], { stdio: 'ignore' });
 
@@ -113,6 +116,8 @@ if (verb === 'delete') {
 }
 if (verb === 'mount') {
     const [vm, kind, name] = argv;
+    /* (A real mount covers an empty directory; here it must not be in the way.) */
+    if (kind === 'work') { try { rmdirSync(inVm(vm, '/work')); } catch { /* not there, or not empty: said below */ } }
     /* As the real program: a read attachment meets the view, or nothing. */
     if (kind === 'view' && !existsSync(marker(name))) { console.error(`REFUSED: the read-only view of ${name} is not in place`); process.exit(78); }
     const source = kind === 'work' ? join(workHome(name), 'work') : kind === 'view' ? viewOf(name) : folderOf(name);
@@ -123,6 +128,7 @@ if (verb === 'mount') {
     symlinkSync(source, link);
     process.exit(0);
 }
+if (verb === 'unwork') { rmSync(inVm(argv[0], '/work'), { force: true }); mkdirSync(inVm(argv[0], '/work')); process.exit(0); }
 if (verb === 'umount') {
     rmSync(inVm(argv[0], `/resources/${argv[1]}`), { force: true });
     process.exit(0);
@@ -145,7 +151,7 @@ if (verb === 'exec') {
         chmodSync(target, Number.parseInt(rest[rest.indexOf('-m') + 1], 8));
         process.exit(0);
     }
-    if (program === 'find') {
+    if (program === 'find' && rest.includes('-delete')) {
         const dir = inVm(vm, rest[0]);
         for (const name of existsSync(dir) ? readdirSync(dir) : []) rmSync(join(dir, name), { recursive: true, force: true });
         process.exit(0);
@@ -160,6 +166,6 @@ if (verb === 'exec') {
         child.on('error', () => process.exit(127));
         child.on('exit', (code) => process.exit(code ?? 1));
     }
-} else if (!['launch', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount'].includes(verb)) {
+} else if (!['launch', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork'].includes(verb)) {
     fail(`unknown verb: ${verb}`, 64);
 }

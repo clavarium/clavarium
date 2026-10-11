@@ -139,6 +139,11 @@ case "$AREA $VERB" in
             *) refuse "a mount is of a folder, of a view or of a work folder" ;;
         esac
         run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$target" ;;
+    "vm unwork")
+        # The work folder is taken out of its machine (its work moves to the
+        # machine's own disk, or a move is undone).
+        [ $# -eq 1 ] || usage; vm_of "$1"
+        run "$MULTIPASS" umount "$1:/work" ;;
     "vm umount")
         [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a folder name: $2"
         run "$MULTIPASS" umount "$1:/resources/$2" ;;
@@ -196,6 +201,17 @@ case "$AREA $VERB" in
             mount -o loop,nosuid,nodev,discard "$img" "$at"
             rmdir "$at/lost+found" 2>/dev/null || true
         fi
+        exit 0 ;;
+    "work room")
+        # How much room is left, in megabytes: in the conversation's work
+        # disk, and on the host that holds it. Asked before a move, so that
+        # one is refused instead of filling either.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
+        at="$DATA/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'df %s %s\n' "$at" "$DATA"; exit 0; fi
+        kept work
+        mountpoint -q "$at" || refuse "the work disk of $1 is not in place"
+        printf 'disk %s host %s\n' "$(df -m --output=avail "$at" | tail -1 | tr -d ' ')" "$(df -m --output=avail "$DATA" | tail -1 | tr -d ' ')"
         exit 0 ;;
     "work aside")
         # The conversation is archived: its work is PUT ASIDE, never erased --
