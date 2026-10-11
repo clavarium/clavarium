@@ -5,11 +5,17 @@
   --brass: #d2a94e; --on-brass: #1b1405; --ok: #5fc39d; --warn: #e39a5c; --danger: #ee7f79;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
+/* A light screen, for whoever reads better dark on light. The terminal gets
+   colours of its own for it (app.js): a tool's "white" must stay readable. */
+:root[data-theme="light"] {
+  --bg: #fbfbfa; --bar: #eef0f3; --panel: #ffffff; --line: #c5cdd8; --ink: #17202b; --ink2: #4f5d6d;
+  --brass: #c79a3a; --on-brass: #1b1405; --ok: #1f7a5a; --warn: #a3581a; --danger: #b3261e; --button: #e6eaef;
+}
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px var(--sans); }
 body { height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
 [hidden] { display: none !important; }
-button { font: 600 13px var(--sans); color: var(--ink); background: #222c38; border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
+button { font: 600 13px var(--sans); color: var(--ink); background: var(--button, #222c38); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
 button.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 #app { display: flex; height: 100%; }

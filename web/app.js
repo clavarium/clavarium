@@ -46,6 +46,31 @@
         fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
         theme: { background: '#0f141a' },
     });
+    /* ---------- light or dark ---------- */
+    /* A choice of this screen, kept on this device. The TOOL has its own
+       colours: one made for a dark screen should be told the screen is light
+       (in Claude Code: /theme). */
+    const DARK = { background: '#0f141a' };
+    const LIGHT = {
+        background: '#fbfbfa', foreground: '#17202b', cursor: '#17202b', cursorAccent: '#fbfbfa', selectionBackground: '#b9d2f5',
+        black: '#17202b', red: '#b3261e', green: '#1f7a3d', yellow: '#8a6100', blue: '#1d4fbf', magenta: '#8b2fa8', cyan: '#0f6f7d', white: '#5d6876',
+        brightBlack: '#6b7684', brightRed: '#c9372c', brightGreen: '#23863f', brightYellow: '#9a6c00', brightBlue: '#2f63d6', brightMagenta: '#a23fc0', brightCyan: '#138496', brightWhite: '#2c3642',
+    };
+    const applyTheme = (light) => {
+        document.documentElement.dataset.theme = light ? 'light' : 'dark';
+        terminal.options.theme = light ? LIGHT : DARK;
+        document.querySelector('meta[name=theme-color]')?.setAttribute('content', light ? LIGHT.background : DARK.background);
+        $('theme').textContent = light ? 'Dark' : 'Light';
+    };
+    let lightScreen = false;
+    try { lightScreen = localStorage.getItem('clavarium-theme') === 'light'; } catch { /* a private window: the choice lasts as long as the page */ }
+    applyTheme(lightScreen);
+    $('theme').addEventListener('click', () => {
+        lightScreen = !lightScreen;
+        try { localStorage.setItem('clavarium-theme', lightScreen ? 'light' : 'dark'); } catch { /* as above */ }
+        applyTheme(lightScreen);
+        terminal.focus();
+    });
     const fit = new FitAddon.FitAddon();
     terminal.loadAddon(fit);
     terminal.open($('terminal'));
@@ -767,6 +792,9 @@
        else on the machine's disk is said to be out of reach. */
     const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
     async function openPath(text) {
+        /* A finger on the terminal also calls the on-screen keyboard: it is
+           sent away, the file is what was asked for. */
+        terminal.blur(); document.activeElement?.blur?.();
         const inResources = /^\/resources\/([^/]+)\/(.*)$/.exec(text);
         const tab = inResources ? inResources[1] : 'work';
         const inner = inResources ? inResources[2] : text.slice('/work/'.length);
