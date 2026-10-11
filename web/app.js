@@ -1194,7 +1194,7 @@
     }
     $('share').addEventListener('click', async () => {
         $('panel').hidden = $('files').hidden = true;
-        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy').hidden = true;
+        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy-row').hidden = true;
         $('sharing-status').textContent = '';
         await paintShareChoice();
         await paintDevices();
@@ -1208,7 +1208,7 @@
             $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
             $('sharing-qr').hidden = false;
             $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
-            $('sharing-copy').hidden = false; $('sharing-copy').textContent = 'Copy the link';
+            $('sharing-copy-row').hidden = false; $('sharing-copy').textContent = 'Copy the link';
             $('sharing-copy').onclick = async () => { try { await navigator.clipboard.writeText(shared.url); $('sharing-copy').textContent = 'Copied'; } catch { $('sharing-copy').textContent = 'Select the link above and copy it'; } };
             $('sharing-status').textContent = `Works once, for ${shared.minutes} minutes.`;
         } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
