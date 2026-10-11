@@ -1009,6 +1009,36 @@
     if (DEVICE) window.addEventListener('hashchange', () => { if (location.hash.length > 1) location.reload(); });
 
     /* ---------- start ---------- */
+    /* ---------- install as an app ---------- */
+    /* The page can be installed; it now SAYS so, with a button, instead of
+       leaving it to a browser menu nobody opens. Where the browser lets a
+       page ask (Chrome, Edge, Android), the button asks. On an iPhone or an
+       iPad no page can ask: the button explains the two taps it takes.
+       Already running as an app: there is nothing to offer. */
+    const asApp = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    let installEvent = null;
+    let installOffered = false;
+    const offerInstall = () => { installOffered = true; $('install').hidden = false; };
+    addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); installEvent = event; offerInstall(); });
+    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; });
+    if (apple && !asApp) offerInstall();
+    $('install').addEventListener('click', async () => {
+        const back = () => { notice.hidden = true; terminal.focus(); };
+        if (installEvent) {
+            const asked = installEvent; installEvent = null;
+            asked.prompt();
+            const choice = await asked.userChoice.catch(() => ({ outcome: 'dismissed' }));
+            if (choice.outcome === 'accepted') { installOffered = false; $('install').hidden = true; }
+            else installEvent = asked;
+            return;
+        }
+        show(DEVICE
+            ? 'To install it: touch the Share button of the browser (the square with an arrow), then "Add to Home Screen". IMPORTANT, on an iPhone or iPad: the installed app does not share anything with this page, so it will ask to be paired again -- ask the person who shared this conversation for a new code, and open it once the app is installed.'
+            : 'To install it: touch the Share button of the browser (the square with an arrow), then "Add to Home Screen". The app will ask you to sign in once.',
+        'Back', back);
+    });
+
     async function start() {
         if (DEVICE) {
             view('room');
@@ -1023,7 +1053,7 @@
                 /* The one thing a first-time visitor is told, before the dark screen. */
                 const c = conversations[0];
                 $('name').textContent = c?.name ?? '';
-                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); });
+                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.${installOffered ? ' To keep it at hand, "Install the app" at the top puts it on this device like any other app.' : ''}`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); });
                 return;
             }
             enter();
