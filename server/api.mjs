@@ -134,7 +134,8 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
-        if (pathname === '/api/resources' && resources) return send(201, await resources.create(body)), true;
+        /* A folder, or a git repository (empty, or cloned from `from`). A mailbox has its own way in. */
+        if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from })), true;
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unlisted && resources) {
             const gone = resources.get(unlisted[1]);

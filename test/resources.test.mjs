@@ -155,3 +155,34 @@ test('attachments kept by an earlier version are taken over into the table of ri
     assert.deepEqual(upgraded.list()[0].attachments, { alpha: 'write', beta: 'read' });
     assert.equal(store.get('reports').attachments, undefined);
 });
+
+test('a git repository is a folder that starts as one: made empty or cloned, by git run once, with hooks off', async (t) => {
+    const b = bench(t);
+    const ran = [];
+    const grants = new Grants();
+    const make = (fail) => new Resources({ store: new Store(join(b.dir, 'git.json')), vms: new Vms(async (argv) => { b.vm.push(argv.slice(1).join(' ')); return { code: 0, stdout: '', stderr: '' }; }, ['x']),
+        host: async (argv) => { b.host.push(argv.join(' ')); if (argv[0] === 'folder' && argv[1] === 'make') mkdirSync(join(b.dir, 'resources', argv[2]), { recursive: true }); return { code: 0, stdout: '', stderr: '' }; },
+        dataDir: b.dir, uid: 1, gid: 1, grants, git: async (argv, cwd) => { ran.push({ argv: argv.join(' '), cwd }); return fail ? { code: 128, stderr: 'fatal: repository not found' } : { code: 0, stderr: '' }; } });
+    const resources = make(false);
+    const empty = await resources.create({ name: 'site', type: 'git' });
+    assert.equal(empty.type, 'git');
+    assert.deepEqual(ran[0], { argv: '-c core.hooksPath=/dev/null -c protocol.file.allow=never init --quiet --initial-branch=main', cwd: join(b.dir, 'resources', 'site') });
+    const cloned = await resources.create({ name: 'docs', type: 'git', from: 'https://example.com/team/docs.git' });
+    assert.equal(cloned.from, 'https://example.com/team/docs.git');
+    assert.match(ran[1].argv, /clone --quiet --no-recurse-submodules -- https:\/\/example\.com\/team\/docs\.git \.$/);
+    assert.equal(resources.assetOf(cloned), 'git:docs');
+    /* Attached like a folder: the view to read, the folder to write. */
+    await resources.attach('alpha', 'docs', 'read');
+    assert.equal(grants.rightsOf('conversation:alpha', 'git:docs'), 'r');
+    /* Where it may come from: https, and nothing a command line could take for an option. */
+    for (const from of ['http://example.com/x.git', 'ssh://git@example.com/x.git', 'git@example.com:x.git', 'https://user:pw@example.com/x.git', '--upload-pack=id', 'file:///etc', 'https://example.com/x y.git']) {
+        await assert.rejects(resources.create({ name: 'bad', type: 'git', from }), /https address/, from);
+    }
+    assert.equal(ran.length, 2, 'git was not run for any of those');
+    /* A clone that fails leaves no folder on the list; what was made is put aside. */
+    const failing = make(true);
+    await assert.rejects(failing.create({ name: 'ghost', type: 'git', from: 'https://example.com/none.git' }), /could not be cloned: fatal: repository not found/);
+    assert.equal(failing.list().some((r) => r.name === 'ghost'), false);
+    assert.equal(b.host.at(-1), 'folder aside ghost');
+    await assert.rejects(resources.create({ name: 'odd', type: 'shadow' }), /folder, a mailbox or a git repository/);
+});

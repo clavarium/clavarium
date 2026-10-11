@@ -113,3 +113,33 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await me.until('the folder is gone from the list', async () => (await me.page.locator('.folder', { hasText: 'reports' }).count()) === 0);
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
+
+test('a git repository is added from the page, attached like a folder, and is a repository for the tool', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('coder');
+    await me.page.locator('#folders').click();
+    await me.page.locator('#git-box summary').click();
+    await me.page.fill('#git-name', 'site');
+    await me.page.locator('#git-new button[type=submit]').click();
+    await me.until('the repository is listed', async () => (await me.page.locator('.folder', { hasText: 'site' }).count()) > 0);
+    const row = me.page.locator('#panel-rows .folder', { hasText: 'site' });
+    assert.match(await row.innerText(), /git repository/);
+    await row.locator('.levels button', { hasText: 'Write' }).click();
+    await me.until('attached', async () => (await me.page.locator('#chips').innerText()).includes('site - write'));
+    await me.page.locator('#panel-close').click();
+    await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
+    await me.sees('## No commits yet on main');
+    await me.sees('\n1\n');
+    /* Its files are in Files; what git keeps for itself is not. */
+    await me.page.locator('#files-open').click();
+    await me.page.locator('#files-tabs button', { hasText: 'site' }).click();
+    await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('README.md'));
+    assert.equal((await me.page.locator('#files-rows').innerText()).includes('.git'), false);
+    await me.page.locator('#files-close').click();
+    /* And it can be given in a share, to read or to write, as any other thing. */
+    await me.page.locator('#share').click();
+    assert.deepEqual(await me.page.locator('#sharing-what .folder', { hasText: 'site - git' }).locator('.levels button').allInnerTexts(), ['No', 'Read', 'Write']);
+    /* An address that is not https is refused before git is run. */
+    assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'ssh://git@example.com/x.git' })).body.error, /https address/);
+});

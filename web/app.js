@@ -483,6 +483,11 @@
             const row = document.createElement('div'); row.className = 'folder';
             const label = document.createElement('b'); label.textContent = resource.name;
             const box = resource.type === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
+            if (resource.type === 'git') {
+                const about = document.createElement('small'); about.className = 'hint';
+                about.textContent = resource.from ? ` git repository, from ${new URL(resource.from).hostname}` : ' git repository';
+                label.append(about);
+            }
             if (resource.type === 'mailbox') {
                 const about = document.createElement('small'); about.className = 'hint';
                 about.textContent = box ? ` mailbox of ${box.user} - ${box.failure ? box.failure : `${box.messages} message(s)`}` : ' mailbox';
@@ -600,6 +605,18 @@
     });
     $('folders').addEventListener('click', async () => { $('files').hidden = true; await paintPanel(); $('panel').hidden = false; });
     $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+    $('git-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('git-error').hidden = true;
+        const button = $('git-new').querySelector('button[type=submit]');
+        button.disabled = true; button.textContent = $('git-from').value.trim() ? 'Cloning...' : 'Making...';
+        try {
+            await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from: $('git-from').value.trim() });
+            $('git-new').reset(); $('git-box').open = false;
+        } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
+        button.disabled = false; button.textContent = 'Add';
+        await paintPanel();
+    });
     $('mailbox-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('mailbox-error').hidden = true;

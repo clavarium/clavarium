@@ -149,14 +149,14 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #terminal { touch-action: none; }
 
 /* Adding a mailbox: folded away until asked for. */
-#mailbox-box { margin: 12px 0; }
-#mailbox-box summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
-#mailbox-new { display: grid; gap: 6px; }
+#mailbox-box, #git-box { margin: 12px 0; }
+#mailbox-box summary, #git-box summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
+#mailbox-new, #git-new { display: grid; gap: 6px; }
 .folder small.hint { font-weight: normal; }
-#mailbox-new input { min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
-#mailbox-new .row input { flex: 1; }
+#mailbox-new input, #git-new input { min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#mailbox-new .row input, #git-new .row input { flex: 1; }
 #mailbox-new #mailbox-port { flex: 0 0 90px; }
-#mailbox-new label { font-size: 13px; color: var(--muted, inherit); margin-top: 4px; }
+#mailbox-new label, #git-new label { font-size: 13px; color: var(--muted, inherit); margin-top: 4px; }
 
 /* A file, shown in a window over the screen. */
 #viewer { position: absolute; inset: 0; z-index: 6; display: flex; align-items: stretch; justify-content: center; padding: 10px; background: rgba(8, 11, 15, 0.72); }

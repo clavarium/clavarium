@@ -128,7 +128,7 @@ export NEEDRESTART_SUSPEND=1
 apt-get update -qq
 # bindfs: the read-only views. nftables: the network rules. build-essential
 # and python3: one module of the server (the terminal) is compiled here.
-apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl >/dev/null
+apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl git >/dev/null
 snap list multipass >/dev/null 2>&1 || snap install multipass >/dev/null
 
 step "account"

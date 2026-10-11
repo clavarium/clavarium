@@ -55,6 +55,16 @@ folder refuses symbolic links that point upwards or outside -- what installed
 packages are full of -- so a code project belongs on the machine's disk.
 Attached folders have no such limit yet.
 
+Who may do what with what is one table (`server/grants.mjs`): a subject (a
+conversation, or a device's pairing), an asset (conversation, folder, mailbox,
+git repository, secret) and rights -- read, write, use. Attaching a folder to
+a conversation and sharing with a device are lines of the same table. A share
+is a chosen list in one code; a secret is never shared with a device.
+
+A git repository can be added (Folders, "Add a git repository"): empty, or
+cloned from an https address. It is then a folder like any other. Git is run
+by the server once, at creation, and never in a repository a tool has written.
+
 A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its
 recent messages become files that a conversation reads and never writes; the
 mailbox itself is never changed. For a mail server of your own whose

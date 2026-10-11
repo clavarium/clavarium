@@ -133,6 +133,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <div class="card"><h3>Conversation</h3><p><b>= one Multipass VM</b> + one command running in tmux. The command is a setting: Claude Code, OpenCode, OpenHands, a shell.</p></div>
       <div class="card"><h3>Screen</h3><p><b>= the raw terminal</b>, in the browser. No chat layer, no cards, no parsing of the tool's output.</p></div>
       <div class="card"><h3>Resource</h3><p><b>= a folder in the VM.</b> A directory, a git repository, a mailbox, a secret: all of them arrive as files.</p></div>
+      <div class="card"><h3>Rights</h3><p><b>read · write · use</b>, one table. Conversation: use. Folder, git: read, write. Mailbox: read (write = send, file: later). Secret: use, by a conversation only.</p></div>
     </div>
 
     <h2>What changes</h2>
@@ -611,6 +612,8 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><td>A shared conversation (QR)</td><td>Full use: terminal, shortcuts, voice, files</td></tr>
       <tr><td>Sign-in strip</td><td>Shown to the operator only</td></tr>
       <tr><td>Files</td><td>Clavarium's folders only, plus import from outside</td></tr>
+      <tr><td>Who may do what</td><td>One table for everything: a subject (a conversation, a device), an asset (conversation, folder, mailbox, git, secret), rights (read, write, use). Attaching and sharing are the same thing in it</td></tr>
+      <tr><td>A share</td><td>A chosen list in one code: conversations to use, other things to read or to write. A conversation brings its own files; anything else must be given. Never a secret</td></tr>
       <tr><td>Where the tool works</td><td>A folder kept by Clavarium, shown in Files, of a fixed size; on the machine's own disk only if asked at creation (large code projects)</td></tr>
       <tr><td>Git push</td><td>Agent commits, operator reviews, host pushes (screen designed later)</td></tr>
       <tr><td>Folders</td><td>Shareable between VMs; read-only or read-write per attachment</td></tr>

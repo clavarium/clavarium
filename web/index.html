@@ -69,6 +69,18 @@
           <p id="work-moved" class="hint" hidden></p>
           <button type="button" id="work-move"></button>
         </div>
+        <details id="git-box">
+          <summary>Add a git repository</summary>
+          <p class="hint">A folder that starts as a repository: empty, or cloned from an https address. It is attached and shared like a folder, to read or to write. What the tool commits stays in it; pushing elsewhere is the tool's business, with what you hand it.</p>
+          <form id="git-new" autocomplete="off">
+            <label for="git-name">Name</label>
+            <input id="git-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website" spellcheck="false" autocapitalize="off" required>
+            <label for="git-from">Clone from (optional)</label>
+            <div class="row"><input id="git-from" inputmode="url" placeholder="https://example.com/project.git" spellcheck="false" autocapitalize="off">
+              <button type="submit" class="primary">Add</button></div>
+            <p id="git-error" class="error" role="alert" hidden></p>
+          </form>
+        </details>
         <details id="mailbox-box">
           <summary>Add a mailbox as a folder</summary>
           <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
