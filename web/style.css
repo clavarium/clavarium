@@ -166,3 +166,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #preview-body { overflow: auto; flex: 1; min-height: 0; }
 #preview-body img, #preview-body canvas { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; background: #fff; border-radius: 4px; }
 #preview-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); margin: 0; }
+
+#others-add { display: grid; gap: 6px; margin-top: 12px; }
+#others-add input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }

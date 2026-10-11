@@ -39,6 +39,13 @@
         <div class="panel-top"><b>Conversations on this device</b><button type="button" id="others-close">Close</button></div>
         <p class="hint">Each conversation was shared with this device by a code of its own. To add another, scan its code. Removing one here takes it off this device only.</p>
         <div id="others-rows"></div>
+        <form id="others-add" autocomplete="off">
+          <label for="others-link">Add a conversation: paste the link you were sent</label>
+          <div class="row"><input id="others-link" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://.../c/#..." required>
+            <button type="submit" class="primary">Add</button></div>
+          <p class="hint">For when the code cannot be scanned from here -- an app installed on an iPhone or iPad does not see what its browser opened.</p>
+          <p id="others-error" class="error" role="alert" hidden></p>
+        </form>
       </div>
       <div id="files" class="sheet" hidden>
         <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>

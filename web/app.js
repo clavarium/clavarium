@@ -952,7 +952,7 @@
     }
     $('share').addEventListener('click', async () => {
         $('panel').hidden = $('files').hidden = true;
-        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true;
+        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy').hidden = true;
         $('sharing-status').textContent = '';
         await paintDevices();
         $('sharing').hidden = false;
@@ -965,6 +965,8 @@
             $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
             $('sharing-qr').hidden = false;
             $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
+            $('sharing-copy').hidden = false; $('sharing-copy').textContent = 'Copy the link';
+            $('sharing-copy').onclick = async () => { try { await navigator.clipboard.writeText(shared.url); $('sharing-copy').textContent = 'Copied'; } catch { $('sharing-copy').textContent = 'Select the link above and copy it'; } };
             $('sharing-status').textContent = `Works once, for ${shared.minutes} minutes.`;
         } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
     });
@@ -1072,6 +1074,15 @@
         };
     }
     $('others-close').addEventListener('click', () => { $('others-sheet').hidden = true; terminal.focus(); });
+    /* A link pasted instead of scanned: only its code is taken, and it is
+       handed to this page exactly as a scanned one would be. */
+    $('others-add').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const code = /#([A-Za-z0-9_-]{43})\s*$/.exec($('others-link').value.trim())?.[1];
+        if (!code) { $('others-error').textContent = 'This is not a link to a shared conversation. It ends with "#" and a long code.'; $('others-error').hidden = false; return; }
+        $('others-link').value = '';
+        location.hash = code;
+    });
 
     async function start() {
         if (DEVICE) {

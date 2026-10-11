@@ -139,6 +139,21 @@ test('several conversations on the same device: each code adds one, the device p
     await phone.until('garden is live', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'garden');
     assert.equal(await phone.page.locator('#others').innerText(), 'Conversations (2)');
     assert.deepEqual((await owner.api('/api/conversations/family/devices')).body.length, 1, 'the first pairing is still there');
+    /* A third way in, for an installed app that cannot scan: the link, pasted. */
+    await owner.create('workshop');
+    await phone.page.locator('#others').click();
+    await phone.page.fill('#others-link', 'not a link');
+    await phone.page.locator('#others-add button[type=submit]').click();
+    assert.match(await phone.page.locator('#others-error').innerText(), /not a link to a shared conversation/);
+    await phone.page.fill('#others-link', b.origin + await codeFor('workshop'));
+    await phone.page.locator('#others-add button[type=submit]').click();
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('workshop is live', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'workshop');
+    assert.equal(await phone.page.locator('#others').innerText(), 'Conversations (3)');
+    await phone.page.locator('#others').click();
+    await phone.page.locator('#others-rows .folder', { hasText: 'workshop' }).locator('button', { hasText: 'Remove from this device' }).click();
+    await phone.page.locator('#others-rows .folder', { hasText: 'workshop' }).locator('button', { hasText: 'Yes, remove it' }).click();
+    await phone.until('back to two', async () => (await phone.page.locator('#others').innerText().catch(() => '')) === 'Conversations (2)' && (await phone.state()) === 'live');
     /* Back to the first one: its terminal is as it was left. */
     await phone.page.locator('#others').click();
     assert.match(await phone.page.locator('#others-rows').innerText(), /garden \(shown now\)/);
