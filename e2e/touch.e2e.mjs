@@ -140,6 +140,23 @@ async function spanOf(page, text) {
         return null;
     }, text);
 }
+/* Selects a text with the mouse, Shift held, until it is the selection and
+   it is copied. (A screen still being redrawn drops a selection in the
+   making: it is made again, as a person would.) */
+async function mouseSelect(me, text) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+        await new Promise((r) => setTimeout(r, 300));
+        const at = await spanOf(me.page, text);
+        assert.ok(at, `${text} is on the screen`);
+        await me.page.keyboard.down('Shift');
+        await me.page.mouse.move(at.from - 3, at.y); await me.page.mouse.down(); await me.page.mouse.move(at.to + 3, at.y, { steps: 6 }); await me.page.mouse.up();
+        await me.page.keyboard.up('Shift');
+        await new Promise((r) => setTimeout(r, 1500));
+        if ((await me.page.evaluate(() => navigator.clipboard.readText())) === text) return;
+    }
+    assert.fail(`${text} was never selected and copied: ${JSON.stringify(await me.page.evaluate(async () => ({ selected: window.clavariumTerminal.getSelection(), focus: document.hasFocus(), sheet: !document.getElementById('copy').hidden, viewer: !document.getElementById('viewer').hidden, notice: document.getElementById('notice').hidden ? '' : document.getElementById('notice-text').textContent, clip: await navigator.clipboard.readText().catch((e) => String(e)) })))}`);
+}
+
 /* A finger: down, held, moved, lifted -- as the browser tells a page. */
 async function finger(page, steps) {
     const client = await page.context().newCDPSession(page);
@@ -179,10 +196,40 @@ test('with a mouse, text selected with Shift held is copied when the button is r
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.type('clear; echo "order 7741-B is ready"');
     await me.sees('order 7741-B is ready');
-    const at = await spanOf(me.page, '7741-B');
-    await me.page.keyboard.down('Shift');
-    await me.page.mouse.move(at.from - 3, at.y); await me.page.mouse.down(); await me.page.mouse.move(at.to + 3, at.y, { steps: 6 }); await me.page.mouse.up();
-    await me.page.keyboard.up('Shift');
-    await me.until('it is copied', async () => (await me.page.evaluate(() => navigator.clipboard.readText())) === '7741-B');
+    await mouseSelect(me, '7741-B');
     assert.match(await me.page.locator('#flash').innerText(), /Copied: 6 characters/);
+});
+
+test('what was selected is offered for what it is: a web address opens elsewhere, a file opens here; nothing else is offered', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('offers');
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await me.type('echo "the report" > report.txt; mkdir -p out; echo deep > out/q3.txt; clear; echo "See https://example.com/docs/page?x=1 for more."; echo "Wrote report.txt and out/q3.txt"; echo "bad: javascript:alert(1) and https://user:pw@example.org/x end"; echo "also ftp://example.net/f end"; echo "plain words here"');
+    await me.sees('plain words here');
+    const select = async (text) => { await mouseSelect(me, text); return me.page.locator('#flash-act'); };
+    /* A web address: the button names the site, and it opens in another tab. */
+    const link = await select('https://example.com/docs/page?x=1');
+    assert.equal(await link.innerText(), 'Open example.com');
+    const [popup] = await Promise.all([me.context.waitForEvent('page'), link.click()]);
+    assert.equal(popup.url().startsWith('https://example.com/docs/page?x=1') || popup.url() === 'about:blank', true);
+    assert.equal(await popup.evaluate(() => window.opener), null, 'the other tab knows nothing of this one');
+    await popup.close();
+    await me.page.bringToFront();      /* back on this tab, as the person is: a page out of sight may not write what is copied */
+    /* A file, by a relative name: shown in the window of this page. */
+    const file = await select('report.txt');
+    assert.equal(await file.innerText(), 'Show the file');
+    await file.click();
+    await me.until('the file is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('the report'));
+    await me.page.locator('#preview-close').click();
+    const deep = await select('out/q3.txt');
+    await deep.click();
+    await me.until('the deeper file is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('deep'));
+    await me.page.locator('#preview-close').click();
+    /* What must never be offered: another scheme, an address carrying a name and a password, plain words. */
+    for (const text of ['javascript:alert(1)', 'https://user:pw@example.org/x', 'ftp://example.net/f', 'plain words']) {
+        const none = await select(text);
+        assert.equal(await none.isVisible(), false, text);
+    }
+    assert.deepEqual(me.errors, []);
 });

@@ -679,7 +679,42 @@
     const PRESS_MS = 450; const SLOP_PX = 9;
     let pressTimer = null; let pressAt = null; let selecting = false; let anchor = null;
     let flashTimer = null;
-    const flash = (text) => { $('flash').textContent = text; $('flash').hidden = false; clearTimeout(flashTimer); flashTimer = setTimeout(() => { $('flash').hidden = true; }, 1800); };
+    /* A word said for a moment; with `action`, a small menu: what was selected
+       is offered for what it is, and stays a little longer. */
+    const flash = (text, action) => {
+        $('flash-text').textContent = text;
+        $('flash-act').hidden = !action;
+        if (action) { $('flash-act').textContent = action.label; $('flash-act').onclick = () => { $('flash').hidden = true; action.run(); }; }
+        $('flash').dataset.menu = String(Boolean(action));
+        $('flash').hidden = false;
+        clearTimeout(flashTimer); flashTimer = setTimeout(() => { $('flash').hidden = true; }, action ? 7000 : 1800);
+    };
+    /* WHAT A SELECTION IS, when it is one thing: a web address, or a file.
+       Nothing is ever opened by itself; the button says where it leads.
+         - a web address: http or https only, no name-and-password in it; the
+           button shows the SITE it goes to, and it opens in another tab that
+           is told nothing about this one;
+         - a file: a path under /work or an attached folder -- or a plain
+           relative path, taken from where the tool works. It opens in the
+           window of this page, as a tapped path does. */
+    function whatIs(selected) {
+        /* A tool wraps a long address or path over several lines: rejoined. */
+        const one = selected.trim().replace(/\s*\n\s*/g, '').replace(/[.,;:)\]'"]+$/, '').replace(/^['"(\[]+/, '');
+        if (one === '' || one.length > 2000 || /\s/.test(one)) return undefined;
+        if (/^https?:\/\//i.test(one)) {
+            let url;
+            try { url = new URL(one); } catch { return undefined; }
+            if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.username !== '' || url.password !== '' || url.hostname === '') return undefined;
+            return { label: `Open ${url.hostname}`, run: () => { window.open(url.href, '_blank', 'noopener,noreferrer'); } };
+        }
+        if (/^[a-z][a-z0-9+.-]*:/i.test(one)) return undefined;      /* any other scheme: never */
+        if (PATH_ONLY.test(one)) return { label: 'Show the file', run: () => { void openPath(one); } };
+        /* A relative path with a name that looks like a file, or a folder and a name. */
+        if (/^(?:\.\/)?[A-Za-z0-9._@+%~-]+(?:\/[A-Za-z0-9._@+%~-]+)*$/.test(one) && (one.includes('/') || /\.[A-Za-z0-9]{1,8}$/.test(one)) && !one.split('/').includes('..')) {
+            return { label: 'Show the file', run: () => { void openPath(`/work/${one.replace(/^\.\//, '')}`); } };
+        }
+        return undefined;
+    }
     const cellAt = (x, y) => {
         const box = (area.querySelector('.xterm-screen') ?? area).getBoundingClientRect();
         const col = Math.max(0, Math.min(terminal.cols - 1, Math.floor(((x - box.left) * terminal.cols) / box.width)));
@@ -693,7 +728,8 @@
     async function copySelection() {
         const text = terminal.getSelection();
         if (!text.trim()) return;
-        try { await navigator.clipboard.writeText(text); flash(`Copied: ${text.length} character${text.length > 1 ? 's' : ''}`); }
+        const action = whatIs(text);
+        try { await navigator.clipboard.writeText(text); flash(`Copied: ${text.length} character${text.length > 1 ? 's' : ''}`, action); }
         catch {
             /* The browser did not let the page write: the same text, as ordinary text, to copy by hand. */
             $('copy-text').value = text; $('copy').hidden = false; $('copy-text').focus(); $('copy-text').select();
@@ -737,11 +773,22 @@
     /* The terminal keeps its mouse events to itself, so the end of a
        selection is not seen as a click: it is seen as a selection that has
        stopped changing for a moment. */
-    let settle = null;
+    let settle = []; let lastCopied = '';
     terminal.onSelectionChange(() => {
-        clearTimeout(settle);
-        if (touchScreen || !terminal.hasSelection()) return;
-        settle = setTimeout(() => { if (terminal.hasSelection()) void copySelection(); }, 350);
+        for (const timer of settle) clearTimeout(timer);
+        settle = [];
+        if (touchScreen) return;
+        /* Looked at once things are still -- and once more a little later:
+           the terminal reports a selection as empty for a moment after it is
+           made (seen in a test: the text was selected, and nothing copied). */
+        const look = () => {
+            const now = terminal.getSelection();
+            if (!now.trim()) { lastCopied = ''; return; }
+            if (now === lastCopied) return;
+            lastCopied = now;
+            void copySelection();
+        };
+        settle = [setTimeout(look, 350), setTimeout(look, 1100)];
     });
 
     area.addEventListener('touchstart', (event) => { if (event.touches.length === 1) { touchY = event.touches[0].clientY; carried = 0; } }, { passive: true });
@@ -919,6 +966,7 @@
        /work/ or /resources/<folder>/ that is on the screen can be clicked or
        tapped, and opens in Files. Only those two places exist here; anything
        else on the machine's disk is said to be out of reach. */
+    const PATH_ONLY = /^\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+$/;
     const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
     async function openPath(text) {
         /* A finger on the terminal also calls the on-screen keyboard: it is

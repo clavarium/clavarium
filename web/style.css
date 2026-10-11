@@ -171,4 +171,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #others-add input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 
 /* A word said for a moment (text copied). */
-#flash { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 7; margin: 0; padding: 8px 14px; border-radius: 999px; background: var(--brass); color: var(--on-brass); font-weight: 600; font-size: 13px; pointer-events: none; }
+#flash { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 7; display: flex; align-items: center; gap: 10px; max-width: calc(100% - 24px); padding: 8px 14px; border-radius: 999px; background: var(--panel); color: var(--ink); border: 1px solid var(--brass); font-weight: 600; font-size: 13px; pointer-events: none; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35); }
+#flash[data-menu="true"] { pointer-events: auto; }
+#flash-act { min-height: 40px; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
