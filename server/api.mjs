@@ -69,10 +69,14 @@ export async function handleApi(request, response, conversations, headers, resou
             if (c?.work !== 'kept') throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
             return resources.workFolder(c.name);
         }
-        const found = resources?.of(query.get('c') ?? '').find((r) => r.name === query.get('r'));
-        if (!found) throw new Refusal(404, 'This folder is not attached to this conversation.');
-        if (need === 'write' && found.access !== 'write') throw new Refusal(403, 'This folder is attached read-only.');
-        return resources.folder(found.name);
+        /* THE OWNER MAY DO EVERYTHING, ALWAYS: this is the owner's side, so any
+           folder, repository or mailbox is reachable, attached to the
+           conversation shown or not. (A mailbox is never written by hand: it
+           is a copy that the next reading of the mail would undo.) */
+        const any = resources?.get(query.get('r') ?? '');
+        if (!any) throw new Refusal(404, 'No such folder.');
+        if (need === 'write' && any.type === 'mailbox') throw new Refusal(403, 'A mailbox is a copy of the mail: nothing can be added to it here.');
+        return resources.folder(any.name);
     };
     try {
         if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null }), true;

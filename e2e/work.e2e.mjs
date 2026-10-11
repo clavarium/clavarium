@@ -35,7 +35,7 @@ test('asked to work on the disk of its machine, a conversation keeps nothing her
     await me.sees('\nok');
     assert.equal((await me.api('/api/conversations')).body[0].work, 'disk');
     await me.page.locator('#files-open').click();
-    assert.equal(await me.page.locator('#files-tabs button').count(), 0);
+    await me.until('no folder is shown', async () => (await me.page.locator('#files-tabs button').count()) === 0);
     assert.match(await me.page.locator('#files-none').innerText(), /works on the disk of its machine/);
     assert.equal((await me.page.evaluate(async () => (await fetch('/api/files?c=big-project&r=work&p=')).status)), 404);
 });
@@ -73,7 +73,7 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     await me.type('cat early.txt late.txt; echo both-there');
     await me.sees('made before the move\nmade after');
     await me.page.locator('#files-open').click();
-    assert.equal(await me.page.locator('#files-tabs button').count(), 0);
+    await me.until('no folder is shown', async () => (await me.page.locator('#files-tabs button').count()) === 0);
     await me.page.locator('#files-close').click();
     /* A link made by the tool travels as a link. */
     await me.type('ln -s early.txt link-to-it; echo linked');

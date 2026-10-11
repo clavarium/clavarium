@@ -129,6 +129,9 @@ test('a composed share: two conversations and a folder of its own, each with its
     assert.deepEqual((await (await get('/files?c=family&r=accounts&p=')).json()).entries.map((e) => e.name), ['bank.txt']);
     const write = await fetch(`${b.base}/c/api/${tablet.id}/files/import?c=family&r=accounts&p=&name=x.txt`, { method: 'POST', headers: { origin: b.origin, 'content-type': 'application/octet-stream', cookie: tablet.cookie }, body: 'x' });
     assert.equal(write.status, 403);
+    /* Through the conversation `work`, where that folder is attached to write, it may write: the larger of the two ways holds. */
+    const through = await fetch(`${b.base}/c/api/${tablet.id}/files/import?c=work&r=accounts&p=&name=y.txt`, { method: 'POST', headers: { origin: b.origin, 'content-type': 'application/octet-stream', cookie: tablet.cookie }, body: 'y' });
+    assert.equal(through.status, 201);
     /* The owner sees who has what, takes one thing back, and the rest stays. */
     const seen = (await (await b.operator('/api/devices')).json()).find((d) => d.id === tablet.id);
     assert.deepEqual(seen.grants.map((g) => `${g.asset} ${g.rights}`), ['conversation:family x', 'conversation:work x', 'folder:accounts r']);
@@ -150,4 +153,13 @@ test('a device given only a folder, and no conversation: it reads the folder, an
     assert.equal((await b.device(`/c/api/${reader.id}/shortcuts`, { cookie: reader.cookie })).status, 404);
     const refused = await new Promise((done) => { const ws = new WebSocket(`${b.base.replace('http', 'ws')}/c/terminal?d=${reader.id}`, { headers: { origin: b.origin, cookie: reader.cookie } }); ws.on('open', () => { ws.close(); done('opened'); }); ws.on('error', () => done('refused')); });
     assert.equal(refused, 'refused');
+});
+
+test('the owner reaches every folder, attached to the conversation shown or not', async (t) => {
+    const b = await bench(t);
+    /* `accounts` is attached to `work`, not to `family`: the owner still reads it, and writes in it, from there. */
+    assert.deepEqual((await (await b.operator('/api/files?c=family&r=accounts&p=')).json()).entries.map((e) => e.name), ['bank.txt']);
+    const put = await fetch(`${b.base}/api/files/import?c=family&r=accounts&p=&name=owner.txt`, { method: 'POST', headers: { 'x-forwarded-email': 'owner@example.com', origin: b.origin, 'content-type': 'application/octet-stream' }, body: 'x' });
+    assert.equal(put.status, 201);
+    assert.equal((await b.operator('/api/files?c=family&r=nowhere&p=')).status, 404);
 });

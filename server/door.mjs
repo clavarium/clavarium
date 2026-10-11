@@ -89,10 +89,12 @@ export async function handleDoor(request, response, { devices, conversations, re
                 if (mine?.work !== 'kept') throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
                 return resources.workFolder(name);
             }
-            const found = (mine ? resources.of(name) : []).find((r) => r.name === wanted) ?? own.find((r) => r.name === wanted);
-            if (!found) throw new Refusal(404, 'This folder is not attached to this conversation.');
-            if (need === 'write' && found.access !== 'write') throw new Refusal(403, 'This folder is attached read-only.');
-            return resources.folder(found.name);
+            /* Reached both ways -- through the conversation and by a right of
+               its own -- the device has the larger of the two. */
+            const ways = [(mine ? resources.of(name) : []).find((r) => r.name === wanted), own.find((r) => r.name === wanted)].filter(Boolean);
+            if (ways.length === 0) throw new Refusal(404, 'This folder is not attached to this conversation.');
+            if (need === 'write' && !ways.some((w) => w.access === 'write')) throw new Refusal(403, 'This folder is attached read-only.');
+            return resources.folder(ways[0].name);
         };
 
         if (request.method === 'GET' && route === '/me') {
