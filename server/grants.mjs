@@ -52,9 +52,18 @@ export function readRights(asset, rights) {
     return [...'rwx'].filter((r) => asked.includes(r)).join('');
 }
 
+/* A table kept in memory only: for tests, and for a part built without one. */
+export class MemoryStore {
+    #items = new Map();
+    all() { return [...this.#items.values()].map((x) => ({ ...x })); }
+    get(name) { const x = this.#items.get(name); return x ? { ...x } : undefined; }
+    put(item) { this.#items.set(item.name, { ...item }); }
+    remove(name) { this.#items.delete(name); }
+}
+
 export class Grants {
     #store;
-    constructor(store) { this.#store = store; }
+    constructor(store = new MemoryStore()) { this.#store = store; }
 
     #key(subject, asset) { return `${subject}|${asset}`; }
 

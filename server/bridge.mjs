@@ -58,7 +58,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         if (url.pathname === DEVICE_PATH) {
             /* A device: no operator identity is looked at, and none is needed. */
             /* `d`: which of its pairings this device speaks for. */
-            name = deviceName(request.headers, url.searchParams.get('d') ?? '') ?? '';
+            name = deviceName(request.headers, url.searchParams.get('d') ?? '', url.searchParams.get('c') ?? undefined) ?? '';
             if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
         } else if (url.pathname === PATH) {
             name = url.searchParams.get('c') ?? '';

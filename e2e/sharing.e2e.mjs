@@ -206,3 +206,62 @@ test('a device paired before several conversations were possible keeps its conve
     await phone.until('it is in its conversation again', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'family', 30_000);
     assert.equal((await owner.api('/api/conversations/family/devices')).body.length, 1, 'the same pairing, not a new one');
 });
+
+test('a share is composed: two conversations and a folder to read, in one code; the owner sees who has what and takes one thing back', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('family');
+    await owner.create('garden');
+    await owner.api('/api/resources', { name: 'recipes' });
+    await owner.type('echo "soup" > ../resources/x 2>/dev/null; echo ok');
+    await owner.page.locator('#share').click();
+    const choose = (label, level) => owner.page.locator('#sharing-what .folder', { hasText: label }).locator('.levels button', { hasText: level }).click();
+    /* The conversation shown is chosen already; the rest is asked for. */
+    assert.equal(await owner.page.locator('#sharing-what .folder', { hasText: 'garden - conversation' }).locator('button[aria-pressed=true]').innerText(), 'Use');
+    await choose('family - conversation', 'Use');
+    await choose('recipes - folder', 'Read');
+    await owner.page.locator('#sharing-new').click();
+    await owner.until('the code is shown', async () => owner.page.locator('#sharing-link').isVisible());
+    const url = (await owner.page.locator('#sharing-link').innerText()).replace(/^https?:\/\/[^/]+/, '');
+    const tablet = await b.person({ phone: true, at: url });
+    await tablet.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await tablet.until('live', async () => (await tablet.state()) === 'live');
+    assert.equal(await tablet.page.locator('#others').innerText(), 'Conversations (2)');
+    /* The folder given to the device itself: read, never written. */
+    await tablet.page.locator('#files-open').click();
+    const tab = tablet.page.locator('#files-tabs button', { hasText: 'recipes' });
+    assert.match(await tab.innerText(), /recipes - read \(given to this device\)/);
+    await tab.click();
+    await tablet.until('read-only is said', async () => tablet.page.locator('#files-readonly').isVisible());
+    await tablet.page.locator('#files-close').click();
+    /* The owner sees all of it on that device, and takes the folder back: the rest stays. */
+    await owner.page.locator('#sharing-close').click();
+    await owner.page.locator('#share').click();
+    const device = owner.page.locator('#sharing-devices .device').first();
+    await owner.until('what it was given is listed', async () => /family \(conversation\): use/.test(await device.innerText()) && /recipes \(folder\): read/.test(await device.innerText()));
+    await device.locator('.given .chip', { hasText: 'recipes' }).locator('button').click();
+    await owner.until('the folder is taken back', async () => !/recipes/.test(await owner.page.locator('#sharing-devices').innerText()));
+    await tablet.page.reload();
+    await tablet.until('live again', async () => (await tablet.state()) === 'live');
+    await tablet.page.locator('#files-open').click();
+    assert.equal(await tablet.page.locator('#files-tabs button', { hasText: 'recipes' }).count(), 0);
+    assert.equal(await tablet.page.locator('#others').innerText(), 'Conversations (2)');
+});
+
+test('a device given a folder and no conversation shows its files, and nothing else', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('private');
+    await owner.api('/api/resources', { name: 'album' });
+    await owner.api('/api/conversations/private/resources', { resource: 'album', access: 'write' });
+    await owner.type('echo "a picture" > ../resources/album/one.txt; echo ok');
+    await owner.sees('\nok');
+    const shared = await owner.api('/api/shares', { grants: [{ asset: 'folder:album', rights: 'rw' }] });
+    const viewer = await b.person({ phone: true, at: shared.body.url.replace(/^https?:\/\/[^/]+/, '') });
+    await viewer.until('its files are shown', async () => (await viewer.page.locator('#files-rows').innerText().catch(() => '')).includes('one.txt'));
+    assert.equal(await viewer.page.locator('#name').innerText(), 'Shared files');
+    assert.equal(await viewer.page.locator('#keys').isVisible(), false, 'no terminal, no keys');
+    await viewer.page.locator('#files-rows .file', { hasText: 'one.txt' }).click();
+    await viewer.until('the file is shown', async () => (await viewer.page.locator('#preview-body pre').innerText().catch(() => '')).includes('a picture'));
+    assert.equal(await viewer.page.locator('#files-import').isVisible(), true, 'given to write: it can add a file');
+});

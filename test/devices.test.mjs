@@ -6,13 +6,15 @@ import { join } from 'node:path';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { Devices, readCookie, sessionCookie, cookieNameOf, SESSION_COOKIE } from '../server/devices.mjs';
 import { Store } from '../server/store.mjs';
+import { Grants } from '../server/grants.mjs';
 
 function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-dev-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     let now = Date.parse('2030-01-01T00:00:00Z');
-    const devices = new Devices(new Store(join(dir, 'devices.json')), () => now);
-    return { devices, later: (ms) => { now += ms; }, path: join(dir, 'devices.json') };
+    const grants = () => new Grants(new Store(join(dir, 'grants.json')));
+    const devices = new Devices(new Store(join(dir, 'devices.json')), () => now, grants());
+    return { dir, devices, grants, later: (ms) => { now += ms; }, path: join(dir, 'devices.json') };
 }
 /* What the pairing page does with WebCrypto, done here with the same curve. */
 function phone() {
@@ -100,7 +102,7 @@ test('pairings survive a restart; sessions and codes do not, and neither is writ
     const one = paired(b);
     const session = one.openSession();
     const code = b.devices.share('family').code;
-    const again = new Devices(new Store(b.path));
+    const again = new Devices(new Store(b.path), undefined, b.grants());
     assert.deepEqual(again.of('family').map((d) => d.id), [one.device]);
     assert.equal(again.conversationOf(session), undefined);
     assert.throws(() => again.pair({ code, key: phone().jwk }), /not valid any more/);
@@ -126,4 +128,40 @@ test('the session cookie is for the device door only, and unreadable by scripts'
     for (const part of ['Path=/c/', 'HttpOnly', 'SameSite=Strict', 'Secure', 'Max-Age=43200']) assert.ok(cookie.includes(part), part);
     assert.equal(readCookie(`other=1; ${SESSION_COOKIE}=abc; x=y`, SESSION_COOKIE), 'abc');
     assert.equal(readCookie(undefined, SESSION_COOKIE), undefined);
+});
+
+test('one code gives a chosen list: conversations to use, folders to read or write -- and never a secret', (t) => {
+    const b = bench(t);
+    const p = phone();
+    const { code } = b.devices.share([{ asset: 'conversation:family', rights: 'x' }, { asset: 'conversation:garden', rights: 'x' }, { asset: 'folder:photos', rights: 'r' }, { asset: 'git:site', rights: 'rw' }]);
+    const { device } = b.devices.pair({ code, key: p.jwk, label: 'Tablet' });
+    assert.deepEqual(b.devices.conversationsOf(device), ['family', 'garden']);
+    assert.deepEqual(b.devices.grantsOf(device).map((g) => `${g.asset} ${g.rights}`), ['conversation:family x', 'conversation:garden x', 'folder:photos r', 'git:site rw']);
+    const session = b.devices.open(device, p.sign(b.devices.challenge(device).nonce)).session;
+    /* It names the conversation it speaks for; one it was not given falls back on its own. */
+    assert.equal(b.devices.conversationOf(session, device, 'garden'), 'garden');
+    assert.equal(b.devices.conversationOf(session, device, 'private-work'), 'family');
+    assert.deepEqual(b.devices.of('garden').map((d) => d.id), [device]);
+    assert.throws(() => b.devices.share([{ asset: 'secret:MODEL_KEY', rights: 'x' }]), /never shared with a device/);
+    assert.throws(() => b.devices.share([{ asset: 'folder:photos', rights: 'x' }]), /takes these rights/);
+    assert.throws(() => b.devices.share([]), /at least one thing/);
+});
+
+test('one thing can be taken back; what is gone takes its rights; a device left with nothing is removed', (t) => {
+    const b = bench(t);
+    const { code } = b.devices.share([{ asset: 'conversation:family', rights: 'x' }, { asset: 'folder:photos', rights: 'rw' }]);
+    const { device } = b.devices.pair({ code, key: phone().jwk });
+    b.devices.take(device, 'folder:photos');
+    assert.deepEqual(b.devices.grantsOf(device).map((g) => g.asset), ['conversation:family']);
+    b.devices.forget('family');
+    assert.deepEqual(b.devices.all(), [], 'nothing left: the pairing is gone');
+});
+
+test('a pairing made before the table of rights existed keeps its conversation', (t) => {
+    const b = bench(t);
+    const store = new Store(b.path);
+    store.put({ name: '0f8fad5b-d9cb-469f-a165-70867728950e', conversation: 'family', key: phone().jwk, label: 'Phone', createdAt: '2030-01-01T00:00:00.000Z' });
+    const upgraded = new Devices(new Store(b.path), undefined, b.grants());
+    assert.deepEqual(upgraded.conversationsOf('0f8fad5b-d9cb-469f-a165-70867728950e'), ['family']);
+    assert.equal(new Store(b.path).get('0f8fad5b-d9cb-469f-a165-70867728950e').conversation, undefined);
 });

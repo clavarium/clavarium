@@ -23,6 +23,7 @@
  */
 import { isConversationName } from './names.mjs';
 import { Refusal } from './conversations.mjs';
+import { Grants, conversationSubject } from './grants.mjs';
 
 export const ACCESS = ['read', 'write'];
 /* How the page names a conversation's own work folder, next to its attached folders. */
@@ -30,11 +31,20 @@ export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Resources {
-    #store; #vms; #host; #root; #uid; #gid;
+    #store; #vms; #host; #root; #uid; #gid; #grants;
 
     /* `host(argv)` reaches the host program (making a view needs root). */
-    constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid() }) {
-        this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid;
+    /* `grants`: the one table of rights. "Attached, read" is a line of it:
+       the conversation may read the folder. */
+    constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants() }) {
+        this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid; this.#grants = grants;
+        /* What an earlier version kept inside each folder's own record is
+           taken over into the table, once. */
+        for (const r of store.all()) {
+            if (r.attachments === undefined) continue;
+            for (const [conversation, access] of Object.entries(r.attachments)) this.#grants.give(conversationSubject(conversation), this.assetOf(r), access === 'write' ? 'rw' : 'r');
+            delete r.attachments; store.put(r);
+        }
     }
 
     folder(name) { return `${this.#root}/resources/${name}`; }
@@ -45,12 +55,21 @@ export class Resources {
         return `${this.#root}/work/${conversation}`;
     }
 
-    list() { return this.#store.all(); }
+    /* How the table of rights names one of these. */
+    assetOf(resource) { return `${resource.type === 'mailbox' || resource.type === 'git' ? resource.type : 'folder'}:${resource.name}`; }
+    #attachments(resource) {
+        const map = {};
+        for (const g of this.#grants.on(this.assetOf(resource))) if (g.subject.startsWith('conversation:')) map[g.subject.slice('conversation:'.length)] = g.rights.includes('w') ? 'write' : 'read';
+        return map;
+    }
+
+    /* Each with where it is attached, as the page shows it. */
+    list() { return this.#store.all().map((r) => ({ ...r, attachments: this.#attachments(r) })); }
+    get(name) { return this.#store.get(name); }
 
     /* What one conversation has attached: [{ name, access }]. */
     of(conversation) {
-        return this.#store.all().filter((r) => r.attachments?.[conversation])
-            .map((r) => ({ name: r.name, access: r.attachments[conversation] }));
+        return this.#store.all().map((r) => ({ name: r.name, access: this.#attachments(r)[conversation] })).filter((r) => r.access !== undefined);
     }
 
     /* The folder is MADE BY THE HOST PROGRAM, in a directory that belongs to
@@ -62,9 +81,9 @@ export class Resources {
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         const made = await this.#host(['folder', 'make', name]);
         if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);
-        const resource = { name, type, attachments: {}, createdAt: new Date().toISOString() };
+        const resource = { name, type, createdAt: new Date().toISOString() };
         this.#store.put(resource);
-        return resource;
+        return { ...resource, attachments: {} };
     }
 
     /* The read-only view of a folder, made if it is not already there. */
@@ -77,7 +96,7 @@ export class Resources {
        any VM is started, so a read attachment never meets a bare directory. */
     async ensureViews() {
         for (const r of this.#store.all()) {
-            if (Object.values(r.attachments ?? {}).includes('read')) await this.ensureView(r.name);
+            if (Object.values(this.#attachments(r)).includes('read')) await this.ensureView(r.name);
         }
     }
 
@@ -89,13 +108,14 @@ export class Resources {
         if (access !== 'none' && !ACCESS.includes(access)) throw new Refusal(400, 'Access is "read", "write" or "none".');
         /* A mailbox is somebody's mail: a tool reads it, and never writes in it. */
         if (resource.type === 'mailbox' && access === 'write') throw new Refusal(400, 'A mailbox is read-only.');
-        const before = resource.attachments[conversation];
+        const subject = conversationSubject(conversation); const asset = this.assetOf(resource);
+        const had = this.#grants.rightsOf(subject, asset);
+        const before = had === '' ? undefined : had.includes('w') ? 'write' : 'read';
         if (before === access || (before === undefined && access === 'none')) return;
         if (before !== undefined) {
             const r = await this.#vms.umount(conversation, name);
             if (r.code !== 0) throw new Refusal(502, `The folder could not be detached: ${firstLine(r.stderr)}`);
-            delete resource.attachments[conversation];
-            this.#store.put(resource);
+            this.#grants.take(subject, asset);
         }
         if (access === 'none') return;
         if (access === 'read') await this.ensureView(name);
@@ -109,8 +129,7 @@ export class Resources {
             r = await this.#vms.mount(conversation, kind, name, this.#uid, this.#gid);
         }
         if (r.code !== 0) throw new Refusal(502, `The folder could not be attached: ${firstLine(r.stderr)}`);
-        resource.attachments[conversation] = access;
-        this.#store.put(resource);
+        this.#grants.give(subject, asset, access === 'write' ? 'rw' : 'r');
     }
 
     /* The machine of a conversation was built again: what was attached to
@@ -135,19 +154,19 @@ export class Resources {
     async remove(name) {
         const resource = this.#store.get(name);
         if (!resource) throw new Refusal(404, 'No such folder.');
-        const used = Object.keys(resource.attachments ?? {});
+        const used = Object.keys(this.#attachments(resource));
         if (used.length > 0) throw new Refusal(409, `This folder is still attached to: ${used.join(', ')}. Switch it Off there first.`);
         const closed = await this.#host(['view', 'close', name]);
         if (closed.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(closed.stderr)}`);
         const aside = await this.#host(['folder', 'aside', name]);
         if (aside.code !== 0) throw new Refusal(502, `The folder could not be put aside: ${firstLine(aside.stderr)}`);
         this.#store.remove(name);
+        /* Whoever else had a right on it (a device it was shared with) loses it. */
+        this.#grants.forgetAsset(this.assetOf(resource));
     }
 
     /* A conversation was archived: its VM is gone, and its attachments with it. */
     forget(conversation) {
-        for (const r of this.#store.all()) {
-            if (r.attachments?.[conversation]) { delete r.attachments[conversation]; this.#store.put(r); }
-        }
+        for (const r of this.#store.all()) this.#grants.take(conversationSubject(conversation), this.assetOf(r));
     }
 }

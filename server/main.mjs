@@ -36,6 +36,7 @@ import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
+import { Grants } from './grants.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -133,13 +134,15 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const asHost = runner(host);
     const vms = new Vms(asHost, host);
     const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
-    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir });
+    /* Who may do what with what: ONE table, shared by everything below. */
+    const grants = new Grants(new Store(`${dataDir}/grants.json`));
+    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, grants });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
     await all.ensureWork?.();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     const voice = voiceConfig(env);
-    const devices = new Devices(new Store(`${dataDir}/devices.json`));
+    const devices = new Devices(new Store(`${dataDir}/devices.json`), undefined, grants);
     const sharing = {
         devices,
         /* Where a pairing address points: the declared public address, or in
@@ -149,7 +152,7 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     };
     const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')) };
     const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
-    const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms });
+    const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms, grants });
     const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
@@ -196,7 +199,7 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
         onLeft: (name) => all.left(name),
         onEnded: (name) => all.ended(name),
         gate, originOk,
-        deviceName: (headers, pairing) => deviceConversation(devices, headers, pairing),
+        deviceName: (headers, pairing, wanted) => deviceConversation(devices, headers, pairing, wanted),
     });
     all.drop = (name) => bridge.drop(name);
     /* The terminal of a running machine is opened before anybody asks: a

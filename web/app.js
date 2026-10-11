@@ -17,6 +17,7 @@
        the address is completed once the device has signed in. */
     let API = DEVICE ? '/c/api' : '/api';
     let pairing = '';
+    let deviceShared = [];
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
     const $ = (id) => document.getElementById(id) ?? document.createElement('div');
@@ -115,7 +116,7 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const where = DEVICE ? `/c/terminal?d=${pairing}&cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
+        const where = DEVICE ? `/c/terminal?d=${pairing}&c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
@@ -297,18 +298,23 @@
             const mark = (x) => (x ? `${x.phase}/${x.asleep === true}` : '');
             const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
-                let r = await fetch(`${API}/me`);
+                const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
+                let r = await fetch(mePath());
                 if (r.status === 401) {
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
                     if (!door.ok) { shut(door.message); return; }
                     /* The conversation shown was taken away, another one remains: it is shown instead. */
                     if (door.pairing !== pairing) { location.reload(); return; }
-                    r = await fetch(`${API}/me`);
+                    r = await fetch(mePath());
                 }
                 if (!r.ok) throw new Error('no api');
                 const me = await r.json();
-                conversations = [me]; current = me.name;
+                /* What this device was given for itself, next to its conversations. */
+                deviceShared = me.shared ?? [];
+                /* The conversation shown was taken back and another remains: the page starts over on it. */
+                if (current && me.name !== current) { location.reload(); return; }
+                conversations = me.name ? [me] : []; current = me.name ?? '';
             } else {
                 const r = await fetch(`${API}/conversations`);
                 if (!r.ok) throw new Error('no api');
@@ -836,13 +842,16 @@
     async function paintFiles() {
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
-        const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...(here?.resources ?? [])];
+        const attachedHere = here?.resources ?? [];
+        const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere,
+            /* On a device: what it was given for itself, whatever the conversation. */
+            ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true }))];
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
         for (const r of mine) {
             const b = document.createElement('button');
-            b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access}`; b.setAttribute('role', 'tab');
+            b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access}${r.given ? ' (given to this device)' : ''}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
             b.addEventListener('click', () => { filesOf = r.name; filesAt = ''; void paintFiles(); });
             tabs.append(b);
@@ -1104,8 +1113,37 @@
     $('signin-remove').addEventListener('click', async () => { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: '' }).catch(() => {}); await paintSignIn(); void watchSignIn(); });
 
     /* ---------- sharing ---------- */
+    /* A share is a chosen list: conversations to use, and other things --
+       folders, mailboxes, repositories -- each to read or to write. One code
+       gives the whole list to one device. */
+    const RIGHT_WORDS = { r: 'read', rw: 'read and write', x: 'use' };
+    const assetLabel = (asset) => { const [type, name] = asset.split(':'); return `${name} (${type})`; };
+    async function paintShareChoice() {
+        const box = $('sharing-what');
+        box.replaceChildren();
+        const things = await (await fetch(`${API}/resources`)).json();
+        const row = (asset, label, levels, chosen) => {
+            const line = document.createElement('div'); line.className = 'folder'; line.dataset.asset = asset;
+            const name = document.createElement('b'); name.textContent = label;
+            const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What the code gives on ${label}`);
+            for (const [rights, text] of [['', 'No'], ...levels]) {
+                const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = rights;
+                b.setAttribute('aria-pressed', String(rights === chosen));
+                b.addEventListener('click', () => { for (const other of group.children) other.setAttribute('aria-pressed', String(other === b)); });
+                group.append(b);
+            }
+            line.append(name, group); box.append(line);
+        };
+        for (const c of conversations.filter((x) => x.phase === 'ready')) row(`conversation:${c.name}`, `${c.name} - conversation`, [['x', 'Use']], c.name === current ? 'x' : '');
+        for (const r of things) {
+            const type = r.type === 'mailbox' || r.type === 'git' ? r.type : 'folder';
+            row(`${type}:${r.name}`, `${r.name} - ${type}`, type === 'mailbox' ? [['r', 'Read']] : [['r', 'Read'], ['rw', 'Write']], '');
+        }
+    }
+    const chosenGrants = () => [...$('sharing-what').children].map((line) => ({ asset: line.dataset.asset, rights: line.querySelector('button[aria-pressed=true]')?.dataset.rights ?? '' })).filter((g) => g.rights !== '');
+
     async function paintDevices() {
-        const list = await (await fetch(`${API}/conversations/${encodeURIComponent(current)}/devices`)).json();
+        const list = await (await fetch(`${API}/devices`)).json();
         const rows = $('sharing-devices');
         rows.replaceChildren();
         for (const device of list) {
@@ -1123,6 +1161,16 @@
                 remove.replaceWith(keep, sure);
             });
             row.append(label, seen, remove);
+            /* What it was given, each thing with its own way back. */
+            const given = document.createElement('div'); given.className = 'given';
+            for (const g of device.grants) {
+                const item = document.createElement('span'); item.className = 'chip'; item.dataset.access = g.rights.includes('w') ? 'write' : 'read';
+                item.textContent = `${assetLabel(g.asset)}: ${RIGHT_WORDS[g.rights] ?? g.rights} `;
+                const take = document.createElement('button'); take.type = 'button'; take.textContent = 'x'; take.setAttribute('aria-label', `Take ${assetLabel(g.asset)} back from ${device.label}`);
+                take.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset: g.asset }).catch(() => {}); await paintDevices(); });
+                item.append(take); given.append(item);
+            }
+            row.append(given);
             rows.append(row);
         }
         $('sharing-none').hidden = list.length > 0;
@@ -1131,6 +1179,7 @@
         $('panel').hidden = $('files').hidden = true;
         $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy').hidden = true;
         $('sharing-status').textContent = '';
+        await paintShareChoice();
         await paintDevices();
         $('sharing').hidden = false;
     });
@@ -1138,7 +1187,7 @@
     $('sharing-new').addEventListener('click', async () => {
         $('sharing-error').hidden = true;
         try {
-            const shared = await post(`${API}/conversations/${encodeURIComponent(current)}/share`);
+            const shared = await post(`${API}/shares`, { grants: chosenGrants() });
             $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
             $('sharing-qr').hidden = false;
             $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
@@ -1232,11 +1281,11 @@
         $('others').onclick = () => {
             const rows = $('others-rows');
             rows.replaceChildren();
-            const line = (label, id, isCurrent) => {
+            const line = (label, id, isCurrent, conversation) => {
                 const row = document.createElement('div'); row.className = 'folder';
                 const name = document.createElement('b'); name.textContent = isCurrent ? `${label} (shown now)` : label;
                 const open = document.createElement('button'); open.type = 'button'; open.className = 'primary'; open.textContent = 'Open'; open.hidden = isCurrent;
-                open.addEventListener('click', () => { void window.clavariumShowPairing(id); });
+                open.addEventListener('click', () => { void window.clavariumShowPairing(id, conversation); });
                 const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Remove from this device';
                 leave.addEventListener('click', () => {
                     leave.textContent = 'Yes, remove it'; leave.className = 'danger';
@@ -1244,8 +1293,8 @@
                 });
                 row.append(name, open, leave); rows.append(row);
             };
-            line(current, pairing, true);
-            for (const o of others) line(o.name, o.pairing, false);
+            line(current || 'Shared files', pairing, true, current || null);
+            for (const o of others) line(o.name ?? 'Shared files', o.pairing, false, o.name);
             $('files').hidden = true; $('copy').hidden = true;
             $('others-sheet').hidden = false;
         };
@@ -1268,11 +1317,19 @@
             say(fresh ? 'pairing' : 'connecting', 'connecting');
             const door = await window.clavariumDoor();
             if (!door.ok) { shut(door.message); return; }
-            pairing = door.pairing; API = `/c/api/${pairing}`;
+            pairing = door.pairing; API = `/c/api/${pairing}`; current = door.conversation ?? '';
             document.documentElement.dataset.pairing = pairing;      /* not a secret: a name, useless without the key */
             offerOthers(door.others);
-            welcoming = fresh;
+            welcoming = fresh && door.conversation !== null;
             await refresh();
+            if (door.conversation === null) {
+                /* Given folders and no conversation: this page is their files, and nothing else. */
+                for (const id of ['keys', 'shortcuts', 'copy-open', 'theme', 'files-close']) $(id).hidden = true;
+                $('name').textContent = 'Shared files'; document.title = 'Shared files - Clavarium';
+                say('', 'ended'); notice.hidden = true;
+                await paintFiles(); $('files').hidden = false;
+                return;
+            }
             void offerVoice();          /* only now is there a session to ask with */
             if (fresh && home) {
                 /* The one thing a first-time visitor is told, before the dark screen. */

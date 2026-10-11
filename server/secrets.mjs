@@ -18,6 +18,7 @@
  * belong here, and never enters a VM.
  */
 import { Refusal } from './conversations.mjs';
+import { Grants, conversationSubject } from './grants.mjs';
 import { isConversationName } from './names.mjs';
 import { VM_USER } from './vm.mjs';
 
@@ -47,13 +48,23 @@ exec "$@"
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Secrets {
-    #store; #vault; #vms;
+    #store; #vault; #vms; #grants;
 
-    constructor({ store, vault, vms }) { this.#store = store; this.#vault = vault; this.#vms = vms; }
+    /* `grants`: the one table of rights. "Handed to a conversation" is a
+       line of it: the conversation may USE the secret. */
+    constructor({ store, vault, vms, grants = new Grants() }) {
+        this.#store = store; this.#vault = vault; this.#vms = vms; this.#grants = grants;
+        for (const s of store.all()) {
+            if (s.attachments === undefined) continue;
+            for (const conversation of Object.keys(s.attachments)) this.#grants.give(conversationSubject(conversation), `secret:${s.name}`, 'x');
+            delete s.attachments; store.put(s);
+        }
+    }
+    #handed(conversation, name) { return this.#grants.can(conversationSubject(conversation), `secret:${name}`, 'x'); }
 
     /* Names and where they are attached. Never a value. */
-    list() { return this.#store.all().map(({ name, attachments, createdAt }) => ({ name, conversations: Object.keys(attachments ?? {}), createdAt })); }
-    of(conversation) { return this.#store.all().filter((s) => s.attachments?.[conversation]).map((s) => s.name); }
+    list() { return this.#store.all().map(({ name, createdAt }) => ({ name, conversations: this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)), createdAt })); }
+    of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
 
     /* Creates, or replaces the value of, a secret. */
     set({ name, value }) {
@@ -61,31 +72,31 @@ export class Secrets {
         if (typeof value !== 'string' || value === '' || Buffer.byteLength(value) > VALUE_MAX) throw new Refusal(400, `A value is between 1 byte and ${VALUE_MAX / 1024} KB.`);
         if (value.includes('\0')) throw new Refusal(400, 'A value cannot contain a null byte.');
         const before = this.#store.get(name);
-        this.#store.put({ name, sealed: this.#vault.seal(value), attachments: before?.attachments ?? {}, createdAt: before?.createdAt ?? new Date().toISOString() });
+        this.#store.put({ name, sealed: this.#vault.seal(value), createdAt: before?.createdAt ?? new Date().toISOString() });
         return { name };
     }
 
     remove(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such secret.');
         this.#store.remove(name);
+        this.#grants.forgetAsset(`secret:${name}`);
     }
 
     attach(conversation, name, attached) {
         const secret = this.#store.get(name);
         if (!secret) throw new Refusal(404, 'No such secret.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
-        if (attached) secret.attachments[conversation] = true; else delete secret.attachments[conversation];
-        this.#store.put(secret);
+        if (attached) this.#grants.give(conversationSubject(conversation), `secret:${name}`, 'x'); else this.#grants.take(conversationSubject(conversation), `secret:${name}`);
     }
 
     forget(conversation) {
-        for (const s of this.#store.all()) if (s.attachments?.[conversation]) { delete s.attachments[conversation]; this.#store.put(s); }
+        for (const s of this.#store.all()) this.#grants.take(conversationSubject(conversation), `secret:${s.name}`);
     }
 
     /* What a delivery to this conversation would contain, as one string that
        changes whenever a delivery would differ: names and sealed values. */
     signature(conversation) {
-        return this.#store.all().filter((s) => s.attachments?.[conversation]).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
+        return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
     }
 
     /* Puts in the VM exactly the secrets attached NOW, and the runner. Called
@@ -100,7 +111,7 @@ export class Secrets {
         await run(['sudo', '-n', 'install', '-d', '-m', '0755', SECRETS_DIR]);
         await run(['sudo', '-n', 'find', SECRETS_DIR, '-mindepth', '1', '-delete']);
         for (const secret of this.#store.all()) {
-            if (!secret.attachments?.[conversation]) continue;
+            if (!this.#handed(conversation, secret.name)) continue;
             await run(['sudo', '-n', 'install', '-m', '0600', '-o', VM_USER, '-g', VM_USER, '/dev/stdin', `${SECRETS_DIR}/${secret.name}`], this.#vault.open(secret.sealed));
         }
     }

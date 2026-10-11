@@ -140,16 +140,17 @@
         <p id="files-error" class="error" role="alert" hidden></p>
       </div>
       <div id="sharing" class="sheet" hidden>
-        <div class="panel-top"><b>Share this conversation</b><button type="button" id="sharing-close">Close</button></div>
-        <p class="hint">Whoever scans this code gets this conversation, and only this one: its terminal, its shortcuts, dictation and its files. They are root in its machine, like the tool: share what you would give them.</p>
+        <div class="panel-top"><b>Share</b><button type="button" id="sharing-close">Close</button></div>
+        <p class="hint">Choose what the code gives. A conversation is given whole: its terminal, its shortcuts, dictation, and the files of that conversation. Whoever has it is root in its machine, like the tool. Anything else is given by itself, to read or to write.</p>
+        <div id="sharing-what"></div>
         <div class="row"><button type="button" id="sharing-new" class="primary">Show a code</button><span id="sharing-status" class="hint" role="status"></span></div>
         <img id="sharing-qr" alt="Pairing code to scan" hidden>
         <p id="sharing-link" class="hint link" hidden></p>
         <div class="row"><button type="button" id="sharing-copy" hidden>Copy the link</button><span class="hint">to send it instead of showing the code: it works once, for ten minutes.</span></div>
         <p id="sharing-error" class="error" role="alert" hidden></p>
-        <b>Paired devices</b>
+        <b>Devices, and what each was given</b>
         <div id="sharing-devices"></div>
-        <p id="sharing-none" class="hint" hidden>No device is paired with this conversation.</p>
+        <p id="sharing-none" class="hint" hidden>No device was given anything.</p>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>

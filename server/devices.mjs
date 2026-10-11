@@ -23,11 +23,13 @@
  */
 import { randomBytes, randomUUID, createPublicKey, verify, timingSafeEqual, createHash } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
+import { Grants, readRights, pairingSubject, typeOf, nameOf } from './grants.mjs';
 
 export const CODE_MINUTES = 10;
 export const SESSION_HOURS = 12;
 export const CHALLENGE_SECONDS = 60;
 export const DEVICES_MAX = 20;       /* per conversation */
+export const SHARE_MAX = 30;         /* things given by one code */
 export const LABEL_MAX = 40;
 
 const token = () => randomBytes(32).toString('base64url');
@@ -46,38 +48,81 @@ function readPublicKey(jwk) {
 }
 
 export class Devices {
-    #store; #now;
-    #codes = new Map();        /* sha256(code) -> { conversation, expires } */
+    #store; #now; #grants;
+    #codes = new Map();        /* sha256(code) -> { grants: [{ asset, rights }], expires } */
     #challenges = new Map();   /* device id -> { nonce, expires } */
     #sessions = new Map();     /* sha256(session) -> { device, expires } */
 
-    constructor(store, now = () => Date.now()) { this.#store = store; this.#now = now; }
+    /* `grants`: the one table of rights. What a code gives a device is lines
+       of it: use this conversation, read that folder. */
+    constructor(store, now = () => Date.now(), grants = new Grants()) {
+        this.#store = store; this.#now = now; this.#grants = grants;
+        /* An earlier version bound a pairing to one conversation, in its own
+           record: taken over into the table, once. */
+        for (const d of store.all()) {
+            if (d.conversation === undefined) continue;
+            this.#grants.give(pairingSubject(d.name), `conversation:${d.conversation}`, 'x');
+            delete d.conversation; store.put(d);
+        }
+    }
+
+    /* What one pairing was given: [{ asset, type, name, rights }]. */
+    grantsOf(id) { return this.#grants.of(pairingSubject(id)); }
+    conversationsOf(id) { return this.#grants.of(pairingSubject(id), 'conversation').map((g) => g.name); }
+    #shown(d) { return { id: d.name, label: d.label, createdAt: d.createdAt, seenAt: d.seenAt ?? null, grants: this.grantsOf(d.name).map(({ asset, rights }) => ({ asset, rights })) }; }
 
     /* ---- operator side ---- */
 
-    share(conversation) {
-        if (this.of(conversation).length >= DEVICES_MAX) throw new Refusal(409, `A conversation is shared with at most ${DEVICES_MAX} devices.`);
+    /* A code for ONE device, giving it a chosen list: conversations to use,
+       folders, mailboxes or repositories to read or to write. `what` is that
+       list, [{ asset, rights }] -- or, for short, the name of a conversation. */
+    share(what) {
+        const asked = typeof what === 'string' ? [{ asset: `conversation:${what}`, rights: 'x' }] : what;
+        if (!Array.isArray(asked) || asked.length === 0) throw new Refusal(400, 'A share gives at least one thing.');
+        if (asked.length > SHARE_MAX) throw new Refusal(400, `A share gives at most ${SHARE_MAX} things.`);
+        const given = new Map();
+        for (const g of asked) {
+            const rights = readRights(g?.asset, g?.rights);
+            if (typeOf(g.asset) === 'secret') throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
+            given.set(g.asset, rights);
+        }
+        for (const asset of given.keys()) {
+            if (typeOf(asset) === 'conversation' && this.of(nameOf(asset)).length >= DEVICES_MAX) throw new Refusal(409, `A conversation is shared with at most ${DEVICES_MAX} devices.`);
+        }
         const code = token();
         /* Only a digest is kept: a code read from memory or a dump opens nothing. */
-        this.#codes.set(digest(code).toString('hex'), { conversation, expires: this.#now() + CODE_MINUTES * 60_000 });
+        this.#codes.set(digest(code).toString('hex'), { grants: [...given].map(([asset, rights]) => ({ asset, rights })), expires: this.#now() + CODE_MINUTES * 60_000 });
         return { code, minutes: CODE_MINUTES };
     }
 
+    /* The devices that may use this conversation, each with all it was given. */
     of(conversation) {
-        return this.#store.all().filter((d) => d.conversation === conversation)
-            .map(({ name, label, createdAt, seenAt }) => ({ id: name, label, createdAt, seenAt: seenAt ?? null }));
+        return this.#store.all().filter((d) => this.#grants.can(pairingSubject(d.name), `conversation:${conversation}`, 'x')).map((d) => this.#shown(d));
+    }
+    /* Every device, each with all it was given. */
+    all() { return this.#store.all().map((d) => this.#shown(d)); }
+
+    /* One thing is taken back from one device; a device left with nothing is removed. */
+    take(id, asset) {
+        if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');
+        this.#grants.take(pairingSubject(id), String(asset));
+        if (this.grantsOf(id).length === 0) this.revoke(id);
     }
 
     revoke(id) {
         if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');
         this.#store.remove(id);
+        this.#grants.forgetSubject(pairingSubject(id));
         this.#challenges.delete(id);
         for (const [key, s] of this.#sessions) if (s.device === id) this.#sessions.delete(key);
     }
 
-    /* The conversation is archived: its devices go with it. */
-    forget(conversation) {
-        for (const d of this.#store.all()) if (d.conversation === conversation) this.revoke(d.name);
+    /* Something is gone (a conversation archived, a folder removed): nobody
+       has a right on it any more, and a device left with nothing goes too. */
+    forget(conversation) { this.forgetAsset(`conversation:${conversation}`); }
+    forgetAsset(asset) {
+        this.#grants.forgetAsset(asset);
+        for (const d of this.#store.all()) if (this.grantsOf(d.name).length === 0) this.revoke(d.name);
     }
 
     /* ---- device side ---- */
@@ -88,9 +133,10 @@ export class Devices {
         if (typeof code === 'string') this.#codes.delete(digest(code).toString('hex'));
         if (!entry || entry.expires < this.#now()) throw new Refusal(403, 'This code is not valid any more. Ask for a new one.');
         const publicKey = readPublicKey(key);
-        const device = { name: randomUUID(), conversation: entry.conversation, key: publicKey,
+        const device = { name: randomUUID(), key: publicKey,
             label: oneLine(label) ? label.trim() : 'A device', createdAt: new Date(this.#now()).toISOString() };
         this.#store.put(device);
+        for (const g of entry.grants) this.#grants.give(pairingSubject(device.name), g.asset, g.rights);
         return { device: device.name };
     }
 
@@ -119,19 +165,27 @@ export class Devices {
         return { session, hours: SESSION_HOURS };
     }
 
-    /* The conversation a session may see, or undefined. `pairing`, when
-       given, must be the one this session was opened for: a device that
-       holds several cannot use the session of one to speak for another. */
-    conversationOf(session, pairing) {
+    /* The pairing a session was opened for, or undefined. `pairing`, when
+       given, must be that one: a device that holds several cannot use the
+       session of one to speak for another. */
+    pairingOf(session, pairing) {
         if (typeof session !== 'string' || session === '') return undefined;
         const key = digest(session);
         for (const [stored, s] of this.#sessions) {
             if (!timingSafeEqual(Buffer.from(stored, 'hex'), key)) continue;
             if (s.expires < this.#now()) { this.#sessions.delete(stored); return undefined; }
             if (pairing !== undefined && s.device !== pairing) return undefined;
-            return this.#store.get(s.device)?.conversation;
+            return this.#store.get(s.device) ? s.device : undefined;
         }
         return undefined;
+    }
+    /* The conversation a session speaks for: the one it names if it may use
+       it, otherwise the first it was given -- never one it was not given. */
+    conversationOf(session, pairing, wanted) {
+        const id = this.pairingOf(session, pairing);
+        if (id === undefined) return undefined;
+        const mine = this.conversationsOf(id);
+        return mine.includes(wanted) ? wanted : mine[0];
     }
 }
 

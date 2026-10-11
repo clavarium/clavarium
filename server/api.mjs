@@ -114,6 +114,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
+            /* Every device, each with all it was given. */
+            if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
                 const conversation = decodeURIComponent(watched[1]);
@@ -134,7 +136,13 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         if (pathname === '/api/resources' && resources) return send(201, await resources.create(body)), true;
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
-        if (unlisted && resources) { await resources.remove(unlisted[1]); mailboxes?.forget(unlisted[1]); return send(200, { ok: true }), true; }
+        if (unlisted && resources) {
+            const gone = resources.get(unlisted[1]);
+            await resources.remove(unlisted[1]); mailboxes?.forget(unlisted[1]);
+            /* A device that had been given it loses it. */
+            if (gone) sharing?.devices.forgetAsset(resources.assetOf(gone));
+            return send(200, { ok: true }), true;
+        }
         if (pathname === '/api/mailboxes' && mailboxes) return send(201, await mailboxes.add(body)), true;
         const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
@@ -171,6 +179,20 @@ export async function handleApi(request, response, conversations, headers, resou
             const url = `${sharing.origin(request.headers)}/c/#${code}`;
             return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
         }
+        /* A share made of a chosen list: conversations, folders, mailboxes, repositories. */
+        if (pathname === '/api/shares' && sharing) {
+            const asked = Array.isArray(body.grants) ? body.grants : [];
+            for (const g of asked) {
+                const [type, name] = String(g?.asset ?? '').split(':');
+                const exists = type === 'conversation' ? conversations.list().some((c) => c.name === name) : resources?.list().some((r) => resources.assetOf(r) === g.asset);
+                if (!exists) throw new Refusal(404, `There is no such thing to share: ${String(g?.asset ?? '')}.`);
+            }
+            const { code, minutes } = sharing.devices.share(asked);
+            const url = `${sharing.origin(request.headers)}/c/#${code}`;
+            return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
+        }
+        const taken = /^\/api\/devices\/([0-9a-f-]{36})\/take$/.exec(pathname);
+        if (taken && sharing) { sharing.devices.take(taken[1], body.asset); return send(200, { ok: true }), true; }
         const revoked = /^\/api\/devices\/([0-9a-f-]{36})\/revoke$/.exec(pathname);
         if (revoked && sharing) { sharing.devices.revoke(revoked[1]); return send(200, { ok: true }), true; }
         const unwanted = /^\/api\/shortcuts\/([0-9a-f-]{36})\/remove$/.exec(pathname);

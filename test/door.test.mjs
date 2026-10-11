@@ -25,8 +25,9 @@ async function bench(t) {
     /* A device never carries the operator's header: the edge strips it under /c/. */
     const device = (path, { body, cookie, method } = {}) => fetch(base + path, { method: method ?? (body === undefined ? 'GET' : 'POST'),
         headers: { origin, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
-    async function pairPhone(conversation) {
-        const shared = await (await operator(`/api/conversations/${conversation}/share`, {})).json();
+    /* `what`: the name of a conversation, or a chosen list [{ asset, rights }]. */
+    async function pairPhone(what) {
+        const shared = await (await (typeof what === 'string' ? operator(`/api/conversations/${what}/share`, {}) : operator('/api/shares', { grants: what }))).json();
         const code = new URL(shared.url).hash.slice(1);
         const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
         const { device: id } = await (await device('/c/api/pair', { body: { code, key: publicKey.export({ format: 'jwk' }), label: 'Phone' } })).json();
@@ -114,4 +115,39 @@ test('one device, two conversations: each pairing has its session, and neither s
     assert.equal((await b.device(`/c/api/${work.id}/me`, { cookie })).status, 401);
     assert.equal(await name(family.id), 'family');
     assert.deepEqual(await (await b.operator('/api/conversations/work/devices')).json(), []);
+});
+
+test('a composed share: two conversations and a folder of its own, each with its rights -- and nothing more', async (t) => {
+    const b = await bench(t);
+    const tablet = await b.pairPhone([{ asset: 'conversation:family', rights: 'x' }, { asset: 'conversation:work', rights: 'x' }, { asset: 'folder:accounts', rights: 'r' }]);
+    const get = (path) => b.device(`/c/api/${tablet.id}${path}`, { cookie: tablet.cookie });
+    const me = await (await get('/me?c=work')).json();
+    assert.deepEqual([me.name, me.conversations, me.shared], ['work', ['family', 'work'], [{ name: 'accounts', type: 'folder', access: 'read' }]]);
+    assert.equal((await (await get('/me?c=family')).json()).name, 'family');
+    assert.equal((await (await get('/me?c=someone-elses')).json()).name, 'family', 'a conversation it was not given falls back on its own');
+    /* The folder given to the device itself: read, from any of its conversations; never written. */
+    assert.deepEqual((await (await get('/files?c=family&r=accounts&p=')).json()).entries.map((e) => e.name), ['bank.txt']);
+    const write = await fetch(`${b.base}/c/api/${tablet.id}/files/import?c=family&r=accounts&p=&name=x.txt`, { method: 'POST', headers: { origin: b.origin, 'content-type': 'application/octet-stream', cookie: tablet.cookie }, body: 'x' });
+    assert.equal(write.status, 403);
+    /* The owner sees who has what, takes one thing back, and the rest stays. */
+    const seen = (await (await b.operator('/api/devices')).json()).find((d) => d.id === tablet.id);
+    assert.deepEqual(seen.grants.map((g) => `${g.asset} ${g.rights}`), ['conversation:family x', 'conversation:work x', 'folder:accounts r']);
+    assert.equal((await b.operator(`/api/devices/${tablet.id}/take`, { asset: 'conversation:work' })).status, 200);
+    assert.deepEqual((await (await get('/me?c=work')).json()).conversations, ['family']);
+    /* What cannot be shared is refused when the share is made. */
+    assert.equal((await b.operator('/api/shares', { grants: [{ asset: 'folder:nowhere', rights: 'r' }] })).status, 404);
+    assert.equal((await b.operator('/api/shares', { grants: [{ asset: 'folder:accounts', rights: 'x' }] })).status, 400);
+    assert.equal((await b.operator('/api/shares', { grants: [] })).status, 400);
+});
+
+test('a device given only a folder, and no conversation: it reads the folder, and has no terminal', async (t) => {
+    const b = await bench(t);
+    const reader = await b.pairPhone([{ asset: 'folder:photos', rights: 'rw' }]);
+    const me = await (await b.device(`/c/api/${reader.id}/me`, { cookie: reader.cookie })).json();
+    assert.deepEqual([me.name, me.conversations, me.shared], [null, [], [{ name: 'photos', type: 'folder', access: 'write' }]]);
+    assert.deepEqual((await (await b.device(`/c/api/${reader.id}/files?r=photos&p=`, { cookie: reader.cookie })).json()).entries.map((e) => e.name), ['beach.txt']);
+    assert.equal((await b.device(`/c/api/${reader.id}/files?r=accounts&p=`, { cookie: reader.cookie })).status, 404);
+    assert.equal((await b.device(`/c/api/${reader.id}/shortcuts`, { cookie: reader.cookie })).status, 404);
+    const refused = await new Promise((done) => { const ws = new WebSocket(`${b.base.replace('http', 'ws')}/c/terminal?d=${reader.id}`, { headers: { origin: b.origin, cookie: reader.cookie } }); ws.on('open', () => { ws.close(); done('opened'); }); ws.on('error', () => done('refused')); });
+    assert.equal(refused, 'refused');
 });

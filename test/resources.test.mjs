@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Vms } from '../server/vm.mjs';
+import { Grants } from '../server/grants.mjs';
 
 function bench(t, { failView = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-res-'));
@@ -140,4 +141,17 @@ test('a machine built again gets its folders back: the view for reading, the fol
     assert.deepEqual(b.vm, ['mount clv-alpha view notes 1001 1002', 'mount clv-alpha folder reports 1001 1002']);
     assert.deepEqual(b.host, ['view make notes']);
     assert.deepEqual(await b.resources.remount('nobody'), []);
+});
+
+test('attachments kept by an earlier version are taken over into the table of rights', async (t) => {
+    const b = bench(t);
+    const store = new Store(join(b.dir, 'old.json'));
+    store.put({ name: 'reports', type: 'folder', attachments: { alpha: 'write', beta: 'read' }, createdAt: 'x' });
+    const grants = new Grants();
+    const upgraded = new Resources({ store, vms: new Vms(async () => ({ code: 0, stdout: '', stderr: '' }), ['x']), host: async () => ({ code: 0, stdout: '', stderr: '' }), dataDir: b.dir, grants });
+    assert.deepEqual(upgraded.of('alpha'), [{ name: 'reports', access: 'write' }]);
+    assert.deepEqual(upgraded.of('beta'), [{ name: 'reports', access: 'read' }]);
+    assert.equal(grants.rightsOf('conversation:alpha', 'folder:reports'), 'rw');
+    assert.deepEqual(upgraded.list()[0].attachments, { alpha: 'write', beta: 'read' });
+    assert.equal(store.get('reports').attachments, undefined);
 });

@@ -75,14 +75,18 @@
         const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, privateKey, new TextEncoder().encode(nonce));
         await post('/session', { device: id, signature: b64url(signature) });
     }
-    const nameOf = async (id) => {
+    /* What one pairing was given: { conversations: [names], shared: [things of its own] }. */
+    const givenTo = async (id) => {
         const r = await fetch(`${API}/${id}/me`);
-        return r.ok ? (await r.json()).name : undefined;
+        if (!r.ok) return undefined;
+        const me = await r.json();
+        return { conversations: me.conversations ?? (me.name ? [me.name] : []), shared: me.shared ?? [] };
     };
 
-    /* Resolves with { ok: true, pairing, others: [{ pairing, name }] }, or
-       { ok: false, message } to show. `others`: the other conversations this
-       device holds, for the page to offer. */
+    /* Resolves with { ok: true, pairing, conversation, others: [{ pairing, name }] },
+       or { ok: false, message } to show. `conversation` is null for a pairing
+       that was given folders and no conversation. `others`: everything else
+       this device holds, for the page to offer. */
     window.clavariumDoor = async () => {
         try {
             const code = location.hash.slice(1);
@@ -96,27 +100,37 @@
             }
             let list = await all();
             if (list.length === 0) return { ok: false, message: 'This device is not connected to a conversation. Ask the person who invited you for a new code to scan.' };
-            /* Every pairing signs in; one that the owner removed, or whose
-               conversation is gone, is dropped from this device quietly. */
-            const held = [];
+            /* Every pairing signs in; one that the owner removed, or that has
+               nothing left, is dropped from this device quietly. */
+            const pairings = [];
             for (const id of list) {
-                try { await session(id); const name = await nameOf(id); if (name) held.push({ pairing: id, name }); else list = await forget(id); }
-                catch (error) { if (/not paired|removed/.test(error.message)) list = await forget(id); else if (id === fresh) throw error; }
+                try {
+                    await session(id);
+                    const given = await givenTo(id);
+                    if (given && (given.conversations.length > 0 || given.shared.length > 0)) pairings.push({ id, ...given }); else list = await forget(id);
+                } catch (error) { if (/not paired|removed/.test(error.message)) list = await forget(id); else if (id === fresh) throw error; }
             }
-            /* The same conversation shared twice with this device: the newest
-               pairing stays, the older one is given back. */
-            for (const h of [...held]) {
-                const newer = held.filter((x) => x.name === h.name).pop();
-                if (newer !== h) {
-                    await fetch(`${API}/${h.pairing}/leave`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => {});
-                    await forget(h.pairing); held.splice(held.indexOf(h), 1);
+            /* One entry per conversation, the newest pairing first: the same
+               conversation given twice shows once. An older pairing that then
+               shows nothing at all is given back. */
+            const held = []; const seen = new Set();
+            for (const p of [...pairings].reverse()) {
+                let shows = p.shared.length > 0;
+                for (const name of p.conversations) { if (!seen.has(name)) { seen.add(name); held.unshift({ pairing: p.id, name }); shows = true; } }
+                if (p.conversations.length === 0) held.unshift({ pairing: p.id, name: null });
+                if (!shows) {
+                    await fetch(`${API}/${p.id}/leave`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }).catch(() => {});
+                    await forget(p.id);
                 }
             }
             if (held.length === 0) return { ok: false, message: 'This conversation was closed, or this device was removed from it. Ask the person who invited you for a new code to scan.' };
-            const wanted = fresh ?? await stored('readonly', (keys) => keys.get('current'));
-            const current = held.find((h) => h.pairing === wanted) ?? held[held.length - 1];
-            await stored('readwrite', (keys) => keys.put(current.pairing, 'current'));
-            return { ok: true, pairing: current.pairing, others: held.filter((h) => h !== current) };
+            const wanted = await stored('readonly', (keys) => keys.get('current'));
+            const [wantedPairing, wantedName] = String(wanted ?? '').split('|');
+            const current = (fresh ? held.find((h) => h.pairing === fresh) : undefined)
+                ?? held.find((h) => h.pairing === wantedPairing && (h.name ?? '') === (wantedName ?? ''))
+                ?? held.find((h) => h.pairing === wantedPairing) ?? held[held.length - 1];
+            await stored('readwrite', (keys) => keys.put(`${current.pairing}|${current.name ?? ''}`, 'current'));
+            return { ok: true, pairing: current.pairing, conversation: current.name, others: held.filter((h) => h !== current) };
         } catch (error) {
             /* Said for the person, with what to do next. */
             const known = /not paired|removed/.test(error.message) ? 'This conversation was closed, or this device was removed from it. Ask the person who invited you for a new code to scan.'
@@ -125,7 +139,7 @@
         }
     };
     /* Shows another of this device's conversations: remembered, then the page starts over. */
-    window.clavariumShowPairing = async (id) => { await stored('readwrite', (keys) => keys.put(id, 'current')); location.reload(); };
+    window.clavariumShowPairing = async (id, name) => { await stored('readwrite', (keys) => keys.put(`${id}|${name ?? ''}`, 'current')); location.reload(); };
     /* Takes one conversation off this device: its key is destroyed here, and
        the server forgets the pairing. */
     window.clavariumLeave = async (id) => {
@@ -133,6 +147,6 @@
         await forget(id);
     };
     /* The owner removed the pairing shown: forget its key, so that a new code can pair again. */
-    window.clavariumForgetDevice = async () => { const id = await stored('readonly', (keys) => keys.get('current')); if (id) await forget(id); };
+    window.clavariumForgetDevice = async () => { const id = String(await stored('readonly', (keys) => keys.get('current')) ?? '').split('|')[0]; if (id) await forget(id); };
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 })();
