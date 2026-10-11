@@ -50,6 +50,7 @@
     </div>
     <main>
       <div id="terminal"></div>
+      <p id="flash" role="status" hidden></p>
       <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b>Folders</b><button type="button" id="panel-close">Close</button></div>
         <p class="hint">A folder attached here appears in this conversation's machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
@@ -175,7 +176,7 @@
       </form>
     </div>
     <!-- The keys a phone keyboard does not have. -->
-    <footer id="keys" title="To select text with the mouse, hold Shift while dragging: the tool otherwise takes the mouse for itself.">
+    <footer id="keys" title="To select text with the mouse, hold Shift while dragging: what is selected is copied. With a finger, press and hold.">
       <button type="button" data-keys="esc">Esc</button>
       <button type="button" data-keys="tab">Tab</button>
       <button type="button" data-keys="left" aria-label="Left">&larr;</button>

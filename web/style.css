@@ -169,3 +169,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 
 #others-add { display: grid; gap: 6px; margin-top: 12px; }
 #others-add input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+
+/* A word said for a moment (text copied). */
+#flash { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 7; margin: 0; padding: 8px 14px; border-radius: 999px; background: var(--brass); color: var(--on-brass); font-weight: 600; font-size: 13px; pointer-events: none; }

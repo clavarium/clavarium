@@ -124,3 +124,65 @@ test('with a mouse and a real keyboard nothing changes: no button, no hint', { s
     assert.equal(await me.page.locator('#kbd').isVisible(), false);
     assert.equal(await me.page.evaluate(() => window.clavariumTerminal.textarea.getAttribute('inputmode')), null);
 });
+
+/* Where on the page a piece of text of the terminal starts and ends. */
+async function spanOf(page, text) {
+    return page.evaluate((wanted) => {
+        const t = window.clavariumTerminal; const buffer = t.buffer.active;
+        for (let row = t.rows - 1; row >= 0; row--) {
+            const line = buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '';
+            const col = line.lastIndexOf(wanted);
+            if (col < 0) continue;
+            const box = document.querySelector('.xterm-screen').getBoundingClientRect();
+            const x = (c) => box.left + ((c + 0.5) * box.width) / t.cols;
+            return { from: x(col), to: x(col + wanted.length - 1), y: box.top + ((row + 0.5) * box.height) / t.rows };
+        }
+        return null;
+    }, text);
+}
+/* A finger: down, held, moved, lifted -- as the browser tells a page. */
+async function finger(page, steps) {
+    const client = await page.context().newCDPSession(page);
+    for (const [type, x, y, waitMs] of steps) {
+        await client.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
+        if (waitMs) await new Promise((r) => setTimeout(r, waitMs));
+    }
+}
+
+test('a long press selects, the finger stretches the selection, lifting it copies', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('select');
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await me.type('clear; echo "token: abc-123-def and more"');
+    await me.sees('token: abc-123-def and more');
+    const at = await spanOf(me.page, 'abc-123-def and');
+    /* Held on the first word, then dragged to the end of "and". */
+    await finger(me.page, [['touchStart', at.from + 2, at.y, 700], ['touchMove', (at.from + at.to) / 2, at.y, 60], ['touchMove', at.to, at.y, 60], ['touchEnd', 0, 0, 300]]);
+    assert.equal(await me.page.evaluate(() => window.clavariumTerminal.getSelection()), 'abc-123-def and');
+    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def and');
+    assert.match(await me.page.locator('#flash').innerText(), /Copied: 15 characters/);
+    /* A long press alone takes the word under the finger. */
+    const word = await spanOf(me.page, 'abc-123-def');
+    await finger(me.page, [['touchStart', word.from + 30, word.y, 700], ['touchEnd', 0, 0, 300]]);
+    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def');
+    /* A short drag is still a scroll, not a selection; a tap clears what was selected. */
+    await finger(me.page, [['touchStart', word.from, word.y, 40], ['touchMove', word.from, word.y - 60, 40], ['touchEnd', 0, 0, 200]]);
+    assert.equal(await me.page.evaluate(() => window.clavariumTerminal.hasSelection()), false);
+    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def', 'nothing new was copied');
+});
+
+test('with a mouse, text selected with Shift held is copied when the button is released', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('desk-select');
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await me.type('clear; echo "order 7741-B is ready"');
+    await me.sees('order 7741-B is ready');
+    const at = await spanOf(me.page, '7741-B');
+    await me.page.keyboard.down('Shift');
+    await me.page.mouse.move(at.from - 3, at.y); await me.page.mouse.down(); await me.page.mouse.move(at.to + 3, at.y, { steps: 6 }); await me.page.mouse.up();
+    await me.page.keyboard.up('Shift');
+    await me.until('it is copied', async () => (await me.page.evaluate(() => navigator.clipboard.readText())) === '7741-B');
+    assert.match(await me.page.locator('#flash').innerText(), /Copied: 6 characters/);
+});

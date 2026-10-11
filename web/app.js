@@ -665,9 +665,88 @@
     const STEP_PX = 18;                      /* one wheel notch per this much finger travel */
     let touchY = null; let carried = 0;
     const area = $('terminal');
+
+    /* ---------- selecting text: what is selected is copied ---------- */
+    /* As in a terminal on a desktop: text selected is text copied, with a word
+       to say so.
+         - with a finger: a LONG PRESS starts the selection where it is, the
+           finger then stretches it, lifting it copies (a short drag still
+           scrolls, a tap is still a tap);
+         - with a mouse: hold Shift and drag (the tool otherwise takes the
+           mouse for itself); releasing copies.
+       The terminal draws its text itself: this is its own selection, made
+       from where the finger is. */
+    const PRESS_MS = 450; const SLOP_PX = 9;
+    let pressTimer = null; let pressAt = null; let selecting = false; let anchor = null;
+    let flashTimer = null;
+    const flash = (text) => { $('flash').textContent = text; $('flash').hidden = false; clearTimeout(flashTimer); flashTimer = setTimeout(() => { $('flash').hidden = true; }, 1800); };
+    const cellAt = (x, y) => {
+        const box = (area.querySelector('.xterm-screen') ?? area).getBoundingClientRect();
+        const col = Math.max(0, Math.min(terminal.cols - 1, Math.floor(((x - box.left) * terminal.cols) / box.width)));
+        const row = Math.max(0, Math.min(terminal.rows - 1, Math.floor(((y - box.top) * terminal.rows) / box.height)));
+        return { col, row: row + terminal.buffer.active.viewportY };
+    };
+    const stretch = (to) => {
+        const [a, b] = (to.row < anchor.row || (to.row === anchor.row && to.col < anchor.col)) ? [to, anchor] : [anchor, to];
+        terminal.select(a.col, a.row, (b.row - a.row) * terminal.cols + (b.col - a.col) + 1);
+    };
+    async function copySelection() {
+        const text = terminal.getSelection();
+        if (!text.trim()) return;
+        try { await navigator.clipboard.writeText(text); flash(`Copied: ${text.length} character${text.length > 1 ? 's' : ''}`); }
+        catch {
+            /* The browser did not let the page write: the same text, as ordinary text, to copy by hand. */
+            $('copy-text').value = text; $('copy').hidden = false; $('copy-text').focus(); $('copy-text').select();
+        }
+    }
+    area.addEventListener('touchstart', (event) => {
+        clearTimeout(pressTimer);
+        if (event.touches.length !== 1) return;
+        if (terminal.hasSelection()) terminal.clearSelection();
+        const touch = event.touches[0];
+        pressAt = { x: touch.clientX, y: touch.clientY };
+        pressTimer = setTimeout(() => {
+            selecting = true; anchor = cellAt(pressAt.x, pressAt.y);
+            /* The word under the finger, to begin with: a visible start. */
+            const line = terminal.buffer.active.getLine(anchor.row)?.translateToString(true) ?? '';
+            let from = anchor.col; let to = anchor.col;
+            while (from > 0 && /\S/.test(line[from - 1] ?? '')) from--;
+            while (to < line.length - 1 && /\S/.test(line[to + 1] ?? '')) to++;
+            if (/\S/.test(line[anchor.col] ?? '')) { anchor = { col: from, row: anchor.row }; stretch({ col: to, row: anchor.row }); }
+            else stretch(anchor);
+            navigator.vibrate?.(12);
+        }, PRESS_MS);
+    }, { passive: true });
+    area.addEventListener('touchmove', (event) => {
+        if (event.touches.length !== 1) return;
+        const touch = event.touches[0];
+        if (selecting) { stretch(cellAt(touch.clientX, touch.clientY)); event.preventDefault(); event.stopImmediatePropagation(); return; }
+        if (pressAt && Math.hypot(touch.clientX - pressAt.x, touch.clientY - pressAt.y) > SLOP_PX) clearTimeout(pressTimer);
+    }, { passive: false });
+    const endPress = (event) => {
+        clearTimeout(pressTimer); pressAt = null;
+        if (!selecting) return;
+        selecting = false;
+        event.preventDefault();            /* not a tap: no click, no link, no keyboard */
+        void copySelection();
+    };
+    area.addEventListener('touchend', endPress, { passive: false });
+    area.addEventListener('touchcancel', () => { clearTimeout(pressTimer); selecting = false; pressAt = null; });
+    area.addEventListener('contextmenu', (event) => { if (touchScreen) event.preventDefault(); });
+    /* With a mouse: the selection made with Shift held is copied once it is made. */
+    /* The terminal keeps its mouse events to itself, so the end of a
+       selection is not seen as a click: it is seen as a selection that has
+       stopped changing for a moment. */
+    let settle = null;
+    terminal.onSelectionChange(() => {
+        clearTimeout(settle);
+        if (touchScreen || !terminal.hasSelection()) return;
+        settle = setTimeout(() => { if (terminal.hasSelection()) void copySelection(); }, 350);
+    });
+
     area.addEventListener('touchstart', (event) => { if (event.touches.length === 1) { touchY = event.touches[0].clientY; carried = 0; } }, { passive: true });
     area.addEventListener('touchmove', (event) => {
-        if (touchY === null || event.touches.length !== 1) return;
+        if (selecting || touchY === null || event.touches.length !== 1) return;
         const touch = event.touches[0];
         carried += touchY - touch.clientY;           /* finger up: the text moves up, as on any touch screen */
         touchY = touch.clientY;
