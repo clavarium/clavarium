@@ -165,3 +165,29 @@ test('several conversations on the same device: each code adds one, the device p
     await phone.page.reload();
     await phone.until('the device says it was removed', async () => /removed from it|not connected/.test(await phone.page.locator('#notice-text').innerText().catch(() => '')));
 });
+
+test('a device paired before several conversations were possible keeps its conversation, without a new code', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('family');
+    const url = (await owner.api('/api/conversations/family/share', {})).body.url.replace(/^https?:\/\/[^/]+/, '');
+    const phone = await b.person({ phone: true, at: url });
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('live', async () => (await phone.state()) === 'live');
+    /* What that earlier version had written on the device: one key, one name. */
+    await phone.page.evaluate(() => new Promise((done, failed) => {
+        const open = indexedDB.open('clavarium-device', 1);
+        open.onerror = () => failed(open.error);
+        open.onsuccess = () => {
+            const tx = open.result.transaction('keys', 'readwrite'); const keys = tx.objectStore('keys');
+            const id = document.documentElement.dataset.pairing;
+            const read = keys.get(`key:${id}`);
+            read.onsuccess = () => { keys.put(read.result, 'private'); keys.put(id, 'device'); keys.delete(`key:${id}`); keys.delete('pairings'); keys.delete('current'); };
+            tx.oncomplete = done; tx.onerror = () => failed(tx.error);
+        };
+    }));
+    await phone.context.clearCookies();
+    await phone.page.reload();
+    await phone.until('it is in its conversation again', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'family', 30_000);
+    assert.equal((await owner.api('/api/conversations/family/devices')).body.length, 1, 'the same pairing, not a new one');
+});
