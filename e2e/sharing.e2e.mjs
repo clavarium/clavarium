@@ -220,6 +220,9 @@ test('a share is composed: two conversations and a folder to read, in one code; 
     assert.equal(await owner.page.locator('#sharing-what .folder', { hasText: 'garden - conversation' }).locator('button[aria-pressed=true]').innerText(), 'Use');
     await choose('family - conversation', 'Use');
     await choose('recipes - folder', 'Read');
+    /* Said in a sentence before the code is made, and the device gets a name the owner will recognise. */
+    assert.match(await owner.page.locator('#sharing-summary').innerText(), /the whole of family, garden - its terminal, as root in its machine; and recipes \(read\)/);
+    await owner.page.fill('#sharing-label', "Dad's tablet");
     await owner.page.locator('#sharing-new').click();
     await owner.until('the code is shown', async () => owner.page.locator('#sharing-link').isVisible());
     const url = (await owner.page.locator('#sharing-link').innerText()).replace(/^https?:\/\/[^/]+/, '');
@@ -237,9 +240,13 @@ test('a share is composed: two conversations and a folder to read, in one code; 
     /* The owner sees all of it on that device, and takes the folder back: the rest stays. */
     await owner.page.locator('#sharing-close').click();
     await owner.page.locator('#share').click();
-    const device = owner.page.locator('#sharing-devices .device').first();
+    const device = owner.page.locator('#sharing-devices .device', { hasText: "Dad's tablet" });
     await owner.until('what it was given is listed', async () => /family \(conversation\): use/.test(await device.innerText()) && /recipes \(folder\): read/.test(await device.innerText()));
-    await device.locator('.given .chip', { hasText: 'recipes' }).locator('button').click();
+    /* Taking a thing back asks once more, as revoking does. */
+    const chip = device.locator('.given .chip', { hasText: 'recipes' }).locator('button');
+    await chip.click();
+    assert.equal(await chip.innerText(), 'Take back?');
+    await chip.click();
     await owner.until('the folder is taken back', async () => !/recipes/.test(await owner.page.locator('#sharing-devices').innerText()));
     await tablet.page.reload();
     await tablet.until('live again', async () => (await tablet.state()) === 'live');

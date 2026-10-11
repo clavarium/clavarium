@@ -185,3 +185,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .device .given .chip { display: inline-flex; align-items: center; gap: 6px; }
 .device .given .chip button { min-height: 0; padding: 0 7px; border-radius: 999px; font-size: 12px; }
 #sharing-what { display: flex; flex-direction: column; }
+
+/* What can be unfolded looks like it can. */
+#panel details > summary { list-style: none; cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; }
+#panel details > summary::before { content: '+ '; }
+#panel details[open] > summary::before { content: '- '; }
+#sharing-label { min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#sharing label { font-size: 13px; }

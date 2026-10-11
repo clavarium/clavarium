@@ -76,7 +76,7 @@ export class Devices {
     /* A code for ONE device, giving it a chosen list: conversations to use,
        folders, mailboxes or repositories to read or to write. `what` is that
        list, [{ asset, rights }] -- or, for short, the name of a conversation. */
-    share(what) {
+    share(what, label) {
         const asked = typeof what === 'string' ? [{ asset: `conversation:${what}`, rights: 'x' }] : what;
         if (!Array.isArray(asked) || asked.length === 0) throw new Refusal(400, 'A share gives at least one thing.');
         if (asked.length > SHARE_MAX) throw new Refusal(400, `A share gives at most ${SHARE_MAX} things.`);
@@ -91,7 +91,7 @@ export class Devices {
         }
         const code = token();
         /* Only a digest is kept: a code read from memory or a dump opens nothing. */
-        this.#codes.set(digest(code).toString('hex'), { grants: [...given].map(([asset, rights]) => ({ asset, rights })), expires: this.#now() + CODE_MINUTES * 60_000 });
+        this.#codes.set(digest(code).toString('hex'), { grants: [...given].map(([asset, rights]) => ({ asset, rights })), label: oneLine(label) ? label.trim() : undefined, expires: this.#now() + CODE_MINUTES * 60_000 });
         return { code, minutes: CODE_MINUTES };
     }
 
@@ -134,7 +134,8 @@ export class Devices {
         if (!entry || entry.expires < this.#now()) throw new Refusal(403, 'This code is not valid any more. Ask for a new one.');
         const publicKey = readPublicKey(key);
         const device = { name: randomUUID(), key: publicKey,
-            label: oneLine(label) ? label.trim() : 'A device', createdAt: new Date(this.#now()).toISOString() };
+            /* The name the owner chose for whom the code was made, if any: every device otherwise looks the same in the list. */
+            label: entry.label ?? (oneLine(label) ? label.trim() : 'A device'), createdAt: new Date(this.#now()).toISOString() };
         this.#store.put(device);
         for (const g of entry.grants) this.#grants.give(pairingSubject(device.name), g.asset, g.rights);
         return { device: device.name };

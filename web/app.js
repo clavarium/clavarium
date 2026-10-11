@@ -880,6 +880,7 @@
         const writable = mine.find((r) => r.name === filesOf)?.access === 'write';
         $('files-actions').hidden = !filesOf || !writable;
         $('files-readonly').hidden = !filesOf || writable;
+        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Given to this device to read: nothing can be added here.' : 'Attached read-only: nothing can be imported here.';
         $('files-empty').hidden = true;
         if (!filesOf) return;
         let listing;
@@ -1146,7 +1147,7 @@
             for (const [rights, text] of [['', 'No'], ...levels]) {
                 const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = rights;
                 b.setAttribute('aria-pressed', String(rights === chosen));
-                b.addEventListener('click', () => { for (const other of group.children) other.setAttribute('aria-pressed', String(other === b)); });
+                b.addEventListener('click', () => { for (const other of group.children) other.setAttribute('aria-pressed', String(other === b)); sayChoice(); });
                 group.append(b);
             }
             line.append(name, group); box.append(line);
@@ -1156,6 +1157,15 @@
             const type = r.type === 'mailbox' || r.type === 'git' ? r.type : 'folder';
             row(`${type}:${r.name}`, `${r.name} - ${type}`, type === 'mailbox' ? [['r', 'Read']] : [['r', 'Read'], ['rw', 'Write']], '');
         }
+    }
+    /* Said in a sentence, before the code is made: what it gives. */
+    function sayChoice() {
+        const given = chosenGrants();
+        const whole = given.filter((g) => g.rights === 'x').map((g) => g.asset.split(':')[1]);
+        const rest = given.filter((g) => g.rights !== 'x').map((g) => `${g.asset.split(':')[1]} (${RIGHT_WORDS[g.rights]})`);
+        $('sharing-summary').textContent = given.length === 0 ? 'Nothing is chosen yet.'
+            : `The code will give: ${[whole.length ? `the whole of ${whole.join(', ')} - its terminal, as root in its machine` : '', rest.join(', ')].filter(Boolean).join('; and ')}.`;
+        $('sharing-new').disabled = given.length === 0;
     }
     const chosenGrants = () => [...$('sharing-what').children].map((line) => ({ asset: line.dataset.asset, rights: line.querySelector('button[aria-pressed=true]')?.dataset.rights ?? '' })).filter((g) => g.rights !== '');
 
@@ -1167,7 +1177,7 @@
             const row = document.createElement('div'); row.className = 'device';
             const label = document.createElement('b'); label.textContent = device.label;
             const seen = document.createElement('small');
-            seen.textContent = device.seenAt ? `last opened ${new Date(device.seenAt).toLocaleString()}` : 'never opened';
+            seen.textContent = `paired ${new Date(device.createdAt).toLocaleDateString()} - ${device.seenAt ? `last opened ${new Date(device.seenAt).toLocaleString()}` : 'never opened'}`;
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Revoke';
             /* Two clicks, and the second one is not where the first was. */
             remove.addEventListener('click', () => {
@@ -1184,7 +1194,10 @@
                 const item = document.createElement('span'); item.className = 'chip'; item.dataset.access = g.rights.includes('w') ? 'write' : 'read';
                 item.textContent = `${assetLabel(g.asset)}: ${RIGHT_WORDS[g.rights] ?? g.rights} `;
                 const take = document.createElement('button'); take.type = 'button'; take.textContent = 'x'; take.setAttribute('aria-label', `Take ${assetLabel(g.asset)} back from ${device.label}`);
-                take.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset: g.asset }).catch(() => {}); await paintDevices(); });
+                take.addEventListener('click', () => {
+                    if (take.dataset.sure !== 'yes') { take.dataset.sure = 'yes'; take.textContent = 'Take back?'; take.className = 'danger'; return; }
+                    void (async () => { await post(`${API}/devices/${device.id}/take`, { asset: g.asset }).catch(() => {}); await paintDevices(); })();
+                });
                 item.append(take); given.append(item);
             }
             row.append(given);
@@ -1197,6 +1210,7 @@
         $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy-row').hidden = true;
         $('sharing-status').textContent = '';
         await paintShareChoice();
+        sayChoice();
         await paintDevices();
         $('sharing').hidden = false;
     });
@@ -1204,7 +1218,7 @@
     $('sharing-new').addEventListener('click', async () => {
         $('sharing-error').hidden = true;
         try {
-            const shared = await post(`${API}/shares`, { grants: chosenGrants() });
+            const shared = await post(`${API}/shares`, { grants: chosenGrants(), label: $('sharing-label').value.trim() });
             $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
             $('sharing-qr').hidden = false;
             $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
@@ -1343,8 +1357,9 @@
                 /* Given folders and no conversation: this page is their files, and nothing else. */
                 for (const id of ['keys', 'shortcuts', 'copy-open', 'theme', 'files-close']) $(id).hidden = true;
                 $('name').textContent = 'Shared files'; document.title = 'Shared files - Clavarium';
-                say('', 'ended'); notice.hidden = true;
+                say('', 'ended'); $('state').hidden = true; notice.hidden = true;
                 await paintFiles(); $('files').hidden = false;
+                $('files-none').textContent = 'Nothing is shared with this device any more.';
                 return;
             }
             void offerVoice();          /* only now is there a session to ask with */

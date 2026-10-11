@@ -188,7 +188,7 @@ export async function handleApi(request, response, conversations, headers, resou
                 const exists = type === 'conversation' ? conversations.list().some((c) => c.name === name) : resources?.list().some((r) => resources.assetOf(r) === g.asset);
                 if (!exists) throw new Refusal(404, `There is no such thing to share: ${String(g?.asset ?? '')}.`);
             }
-            const { code, minutes } = sharing.devices.share(asked);
+            const { code, minutes } = sharing.devices.share(asked, body.label);
             const url = `${sharing.origin(request.headers)}/c/#${code}`;
             return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
         }
