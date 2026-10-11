@@ -17,6 +17,9 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('the report'));
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
     assert.equal(download.suggestedFilename(), 'report.txt');
+    /* Closing the window leaves the list as it was. */
+    await me.page.locator('#preview-close').click();
+    assert.equal(await me.page.locator('#files-rows').isVisible(), true);
     await me.page.locator('#files-close').click();
     /* Archived: its work is put aside on the server, not erased. */
     assert.equal((await me.api('/api/conversations/writer/archive', {})).status, 200);

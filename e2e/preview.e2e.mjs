@@ -58,17 +58,17 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
     assert.ok(inked > 50, `the text is really drawn (${inked} dark points)`);
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
     assert.equal(download.suggestedFilename(), 'summary.pdf');
-    await me.page.locator('#preview-back').click();
+    await me.page.locator('#preview-close').click();
     /* A picture. */
     await open('chart.png');
     await me.until('the picture is shown', async () => me.page.evaluate(() => document.querySelector('#preview-body img')?.naturalWidth === 2));
-    await me.page.locator('#preview-back').click();
+    await me.page.locator('#preview-close').click();
     /* A web page written by a tool is TEXT here: nothing of it runs or is built. */
     await open('page.html');
     await me.until('its source is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('<h1 id="planted">'));
     assert.equal(await me.page.locator('#planted').count(), 0);
     assert.notEqual(await me.page.title(), 'ran');
-    await me.page.locator('#preview-back').click();
+    await me.page.locator('#preview-close').click();
     /* Anything else: said, and offered for download. */
     await open('data.bin');
     assert.match(await me.page.locator('#preview-note').innerText(), /not shown here\. Download it/);
@@ -86,12 +86,22 @@ test('a path the tool printed is clicked in the terminal and opens in Files, sho
     await me.sees('Elsewhere: /etc/hostname');
     const click = async (text) => { const at = await whereIs(me.page, text); assert.ok(at, `${text} is on the screen`); await me.page.mouse.move(at.x, at.y); await me.page.mouse.click(at.x, at.y); };
     await click('/work/summary.pdf');
-    await me.until('the PDF is shown in Files', async () => (await me.page.locator('#files').isVisible()) && (await me.page.locator('#preview-name').innerText()) === 'summary.pdf' && (await me.page.locator('#preview-body canvas').count()) === 1, 30_000);
-    await me.page.locator('#files-close').click();
+    await me.until('the PDF is shown in a window over the terminal', async () => (await me.page.locator('#viewer').isVisible()) && (await me.page.locator('#preview-name').innerText()) === 'summary.pdf' && (await me.page.locator('#preview-body canvas').count()) === 1, 30_000);
+    assert.equal(await me.page.locator('#files').isVisible(), false, 'nobody was taken anywhere');
+    /* Closed: the terminal is as it was, and takes what is typed. */
+    await me.page.keyboard.press('Escape');
+    assert.equal(await me.page.locator('#viewer').isVisible(), false);
+    await me.page.keyboard.type('echo back-at-the-terminal');
+    await me.page.keyboard.press('Enter');
+    await me.sees('\nback-at-the-terminal');
     /* A file of an attached folder. */
     await click('/resources/reports/brief.txt');
     await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('for the phone'));
+    /* From the window, a way to the folder the file sits in. */
+    await me.page.locator('#preview-where').click();
+    await me.until('its folder is listed', async () => (await me.page.locator('#files').isVisible()) && (await me.page.locator('#files-rows').innerText()).includes('brief.txt'));
     assert.match(await me.page.locator('#files-tabs button[aria-selected=true]').innerText(), /reports/);
+    assert.equal(await me.page.locator('#viewer').isVisible(), false);
     await me.page.locator('#files-close').click();
     /* A folder is listed. */
     await click('/work/out');
@@ -118,7 +128,9 @@ test('on a tablet, a finger on the path opens it too -- even a file on the machi
     /* Its Download button saves the same bytes. */
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
     assert.equal(download.suggestedFilename(), 'summary.pdf');
-    await me.page.locator('#files-close').click();
+    /* A finger outside the window closes it. */
+    await me.page.touchscreen.tap(4, 200);
+    await me.until('the window is closed', async () => !(await me.page.locator('#viewer').isVisible()));
     /* A path that leads nowhere says so. */
     await tap('/work/never-made.txt');
     await me.until('it says the file is not there', async () => /not on the machine/.test(await me.page.locator('#preview-note').innerText()));

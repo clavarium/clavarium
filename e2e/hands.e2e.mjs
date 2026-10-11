@@ -97,7 +97,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await me.page.locator('#files-rows .file', { hasText: 'q3.txt' }).click();
     await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('q3 is fine'));
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
-    await me.page.locator('#preview-back').click();
+    await me.page.locator('#preview-close').click();
     assert.equal(download.suggestedFilename(), 'q3.txt');
     await me.page.locator('#files-rows .file', { hasText: 'out' }).click();
     await me.until('inside the sub-folder', async () => (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'reports/out');

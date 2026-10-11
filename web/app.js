@@ -653,7 +653,6 @@
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
     const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
     async function paintFiles() {
-        closePreview();
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...(here?.resources ?? [])];
@@ -706,7 +705,7 @@
             else {
                 /* A click shows the file here; the address stays a plain download for "open in a new tab". */
                 row.href = `${API}/files/download?${filesQuery({ p: inner })}`;
-                row.addEventListener('click', (event) => { event.preventDefault(); void preview(inner, entry.name, entry.size); });
+                row.addEventListener('click', (event) => { event.preventDefault(); void preview(filesOf, inner, entry.name, entry.size); });
             }
             rows.append(row);
         }
@@ -723,21 +722,29 @@
     const TEXTS = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
     const PDF_PAGES = 30;
     let shownUrl = null;
+    /* The file is shown in a WINDOW over the screen, wherever it was asked
+       from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
         $('preview-body').replaceChildren();
-        $('preview').hidden = true;
-        $('files-rows').hidden = false; $('files-path').hidden = false;
+        $('viewer').hidden = true;
+        if ($('files').hidden && $('panel').hidden) terminal.focus();
     }
-    /* `from`: an address to read the file at instead of its place in a folder
-       kept here (a file of the machine's own disk). */
-    async function preview(inner, name, size, from) {
+    /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
+       read it at instead (a file of the machine's own disk). */
+    async function preview(tab, inner, name, size, from) {
         closePreview();
-        const address = from ?? `${API}/files/download?${filesQuery({ p: inner })}`;
+        const address = from ?? `${API}/files/download?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
-        $('files-rows').hidden = true; $('files-path').hidden = true; $('files-empty').hidden = true;
-        $('preview').hidden = false;
+        /* From the terminal, a way to the folder it sits in. */
+        $('preview-where').hidden = Boolean(from) || !$('files').hidden;
+        $('preview-where').onclick = async () => {
+            closePreview();
+            filesOf = tab; filesAt = inner.split('/').slice(0, -1).join('/');
+            $('panel').hidden = true; await paintFiles(); $('files').hidden = false;
+        };
+        $('viewer').hidden = false;
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
@@ -752,7 +759,7 @@
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
             bytes = await r.arrayBuffer();
         } catch (error) { note(error.message); return; }
-        if ($('preview').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
+        if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
             shownUrl = URL.createObjectURL(new Blob([bytes], { type: PICTURES[kind] }));
@@ -777,7 +784,7 @@
                     canvas.setAttribute('aria-label', `Page ${n} of ${doc.numPages}`);
                     body.append(canvas);
                     await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-                    if ($('preview').hidden) return;
+                    if ($('viewer').hidden) return;
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
@@ -787,7 +794,10 @@
             body.append(pre); note('');
         }
     }
-    $('preview-back').addEventListener('click', closePreview);
+    $('preview-close').addEventListener('click', closePreview);
+    /* Outside the window, or Escape: closed too. */
+    $('viewer').addEventListener('click', (event) => { if (event.target === $('viewer')) closePreview(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('viewer').hidden) { event.preventDefault(); event.stopPropagation(); closePreview(); } }, true);
 
     /* ---------- a path the tool printed, opened here ---------- */
     /* THE PAGE reads its own screen for this, never the server: a path under
@@ -809,37 +819,31 @@
         /* What this page knows may be a few seconds old (a folder attached
            from another screen): it asks again before saying no. */
         if (!reachable()) await refresh();
+        const name = text.split('/').pop();
         if (!reachable() && !inResources) {
             /* On the disk of the machine, not kept here: it is fetched from
                the machine for this once, and shown all the same. */
-            $('panel').hidden = true; notice.hidden = true;
-            filesOf = ''; filesAt = '';
+            notice.hidden = true;
+            await preview('', '', name, 0, `${API}/files/machine?${new URLSearchParams({ c: current, p: text })}`);
+            return;
+        }
+        const back = () => { notice.hidden = true; terminal.focus(); };
+        if (!reachable()) { show(`"${tab}" is not a folder attached to this conversation.`, 'Back to the terminal', back); return; }
+        /* A folder is listed in Files; a file is shown in its window, over the terminal. */
+        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: inner })}`);
+        if (asFolder.ok) {
+            notice.hidden = true; $('panel').hidden = true;
+            filesOf = tab; filesAt = inner;
             await paintFiles();
             $('files').hidden = false;
-            $('files-none').hidden = true;
-            const name = text.split('/').pop();
-            await preview('', name, 0, `${API}/files/machine?${new URLSearchParams({ c: current, p: text })}`);
             return;
         }
-        if (!reachable()) {
-            show(inResources ? `"${tab}" is not a folder attached to this conversation.`
-                : 'This file is on the disk of the machine: it cannot be shown here. Ask the tool to copy it into an attached folder (/resources/...), or keep its work here ("Folders & secrets", "Where the tool works").',
-            'Back to the terminal', () => { notice.hidden = true; terminal.focus(); });
-            return;
-        }
-        $('panel').hidden = true; notice.hidden = true;
-        filesOf = tab;
-        /* A folder is listed; a file is shown, in the list of its folder. */
-        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: inner })}`);
-        filesAt = asFolder.ok ? inner : inner.split('/').slice(0, -1).join('/');
-        await paintFiles();
-        $('files').hidden = false;
-        if (asFolder.ok) return;
-        const name = inner.split('/').pop();
-        const listed = await (await fetch(`${API}/files?${filesQuery()}`)).json().catch(() => ({}));
+        const parent = inner.split('/').slice(0, -1).join('/');
+        const listed = await (await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: parent })}`)).json().catch(() => ({}));
         const entry = (listed.entries ?? []).find((e) => e.name === name && !e.folder);
-        if (entry) await preview(inner, name, entry.size);
-        else { $('files-error').textContent = `"${name}" is not in this folder (any more).`; $('files-error').hidden = false; }
+        if (!entry) { show(`"${name}" is not there (any more).`, 'Back to the terminal', back); return; }
+        notice.hidden = true;
+        await preview(tab, inner, name, entry.size);
     }
     terminal.registerLinkProvider({
         provideLinks(y, callback) {
@@ -856,7 +860,7 @@
     });
 
     $('files-open').addEventListener('click', async () => { $('panel').hidden = true; await paintFiles(); $('files').hidden = false; });
-    $('files-close').addEventListener('click', () => { closePreview(); $('files').hidden = true; terminal.focus(); });
+    $('files-close').addEventListener('click', () => { $('files').hidden = true; terminal.focus(); });
     $('files-import').addEventListener('click', () => $('files-pick').click());
     $('files-pick').addEventListener('change', async () => {
         const status = $('files-status');

@@ -127,11 +127,6 @@
         <p id="files-none" class="hint" hidden>This conversation works on the disk of its machine, and no folder is attached to it. Attach one with "Folders".</p>
         <div id="files-path" class="path"></div>
         <div id="files-rows"></div>
-        <div id="preview" hidden>
-          <div class="row"><button type="button" id="preview-back">&lsaquo; Back to the list</button><b id="preview-name"></b><span class="sp"></span><a id="preview-download" class="button">Download</a></div>
-          <p id="preview-note" class="hint" hidden></p>
-          <div id="preview-body"></div>
-        </div>
         <p id="files-empty" class="hint" hidden>This folder is empty.</p>
         <div class="row" id="files-actions" hidden>
           <button type="button" id="files-import" class="primary">Import a file or a photo</button>
@@ -151,6 +146,14 @@
         <b>Paired devices</b>
         <div id="sharing-devices"></div>
         <p id="sharing-none" class="hint" hidden>No device is paired with this conversation.</p>
+      </div>
+      <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
+      <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
+        <div id="viewer-card">
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <p id="preview-note" class="hint" hidden></p>
+          <div id="preview-body"></div>
+        </div>
       </div>
       <div id="notice" hidden>
         <p id="notice-text"></p>
