@@ -52,6 +52,9 @@ const FILES = {
     '/vendor/xterm.js': ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
     '/vendor/fit.js': ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
+    /* A PDF is drawn by the page itself, on a canvas: asked for only when one is previewed. */
+    '/vendor/pdf.mjs': ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'text/javascript; charset=utf-8'],
+    '/vendor/pdf.worker.mjs': ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'text/javascript; charset=utf-8'],
 };
 /* The device door serves the same files under /c/: that prefix is the only
    one the edge lets through without sign-on. Its page differs; nothing else. */
@@ -61,7 +64,7 @@ DEVICE_FILES['/c/device.js'] = ['web/device.js', 'text/javascript; charset=utf-8
 
 /* Nothing loads from anywhere else, and nothing may frame the page. */
 const HEADERS = {
-    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
+    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     'x-content-type-options': 'nosniff',
     'referrer-policy': 'no-referrer',
     'cache-control': 'no-store',

@@ -628,6 +628,7 @@
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
     const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
     async function paintFiles() {
+        closePreview();
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...(here?.resources ?? [])];
@@ -674,16 +675,144 @@
             kind.textContent = entry.folder ? 'DIR' : (entry.name.includes('.') ? entry.name.split('.').pop().slice(0, 4).toUpperCase() : 'FILE');
             const label = document.createElement('span'); label.className = 'label'; label.textContent = entry.name;
             const detail = document.createElement('small');
-            detail.textContent = entry.folder ? 'open' : `${sizeOf(entry.size)} - download`;
+            detail.textContent = entry.folder ? 'open' : `${sizeOf(entry.size)} - view`;
             row.append(kind, label, detail);
             if (entry.folder) { row.type = 'button'; row.addEventListener('click', () => { filesAt = inner; void paintFiles(); }); }
-            else { row.href = `${API}/files/download?${filesQuery({ p: inner })}`; row.setAttribute('download', entry.name); }
+            else {
+                /* A click shows the file here; the address stays a plain download for "open in a new tab". */
+                row.href = `${API}/files/download?${filesQuery({ p: inner })}`;
+                row.addEventListener('click', (event) => { event.preventDefault(); void preview(inner, entry.name, entry.size); });
+            }
             rows.append(row);
         }
         $('files-empty').hidden = listing.entries.length > 0;
     }
+    /* ---------- a file, shown here ---------- */
+    /* WHAT IS SHOWN MAY HAVE BEEN WRITTEN BY A TOOL. So a file is never
+       opened as a page of this site: a picture is drawn as a picture, text is
+       shown as text, a PDF is drawn on a canvas by this page. Anything else
+       is offered for download, and nothing is ever run. */
+    const PREVIEW_MAX = 25 * 1024 * 1024;
+    const TEXT_MAX = 1024 * 1024;
+    const PICTURES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+    const TEXTS = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
+    const PDF_PAGES = 30;
+    let shownUrl = null;
+    function closePreview() {
+        if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
+        $('preview-body').replaceChildren();
+        $('preview').hidden = true;
+        $('files-rows').hidden = false; $('files-path').hidden = false;
+    }
+    async function preview(inner, name, size) {
+        closePreview();
+        const address = `${API}/files/download?${filesQuery({ p: inner })}`;
+        $('preview-name').textContent = name;
+        $('preview-download').href = address; $('preview-download').setAttribute('download', name);
+        $('files-rows').hidden = true; $('files-path').hidden = true; $('files-empty').hidden = true;
+        $('preview').hidden = false;
+        const note = (text) => { $('preview-note').textContent = text; $('preview-note').hidden = !text; };
+        const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+        const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
+        if (!known) { note('This kind of file is not shown here. Download it to open it.'); return; }
+        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { note(`This file is too large to be shown here (${sizeOf(size)}). Download it to open it.`); return; }
+        note('Loading...');
+        let bytes;
+        try {
+            const r = await fetch(address);
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
+            bytes = await r.arrayBuffer();
+        } catch (error) { note(error.message); return; }
+        if ($('preview').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
+        const body = $('preview-body');
+        if (PICTURES[kind]) {
+            shownUrl = URL.createObjectURL(new Blob([bytes], { type: PICTURES[kind] }));
+            const img = document.createElement('img'); img.alt = name; img.src = shownUrl;
+            body.append(img); note('');
+        } else if (kind === 'pdf') {
+            try {
+                const base = DEVICE ? '/c/vendor' : '/vendor';
+                const pdfjs = await import(`${base}/pdf.mjs`);
+                pdfjs.GlobalWorkerOptions.workerSrc = `${base}/pdf.worker.mjs`;
+                const doc = await pdfjs.getDocument({ data: bytes, isEvalSupported: false, enableXfa: false }).promise;
+                const pages = Math.min(doc.numPages, PDF_PAGES);
+                const width = Math.max(320, body.clientWidth - 2);
+                for (let n = 1; n <= pages; n++) {
+                    const page = await doc.getPage(n);
+                    const fit = page.getViewport({ scale: 1 });
+                    const ratio = Math.min(2, window.devicePixelRatio || 1);
+                    const viewport = page.getViewport({ scale: (Math.min(width, 1100) / fit.width) * ratio });
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.floor(viewport.width); canvas.height = Math.floor(viewport.height);
+                    canvas.style.width = `${Math.floor(viewport.width / ratio)}px`;
+                    canvas.setAttribute('aria-label', `Page ${n} of ${doc.numPages}`);
+                    body.append(canvas);
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    if ($('preview').hidden) return;
+                }
+                note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
+            } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
+        } else {
+            const pre = document.createElement('pre');
+            pre.textContent = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+            body.append(pre); note('');
+        }
+    }
+    $('preview-back').addEventListener('click', closePreview);
+
+    /* ---------- a path the tool printed, opened here ---------- */
+    /* THE PAGE reads its own screen for this, never the server: a path under
+       /work/ or /resources/<folder>/ that is on the screen can be clicked or
+       tapped, and opens in Files. Only those two places exist here; anything
+       else on the machine's disk is said to be out of reach. */
+    const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
+    async function openPath(text) {
+        const inResources = /^\/resources\/([^/]+)\/(.*)$/.exec(text);
+        const tab = inResources ? inResources[1] : 'work';
+        const inner = inResources ? inResources[2] : text.slice('/work/'.length);
+        const reachable = () => {
+            const here = conversations.find((x) => x.name === current);
+            return inResources ? (here?.resources ?? []).some((r) => r.name === tab) : here?.work === 'kept';
+        };
+        /* What this page knows may be a few seconds old (a folder attached
+           from another screen): it asks again before saying no. */
+        if (!reachable()) await refresh();
+        if (!reachable()) {
+            show(inResources ? `"${tab}" is not a folder attached to this conversation.`
+                : 'This file is on the disk of the machine: it cannot be shown here. Ask the tool to copy it into an attached folder (/resources/...), or keep its work here ("Folders & secrets", "Where the tool works").',
+            'Back to the terminal', () => { notice.hidden = true; terminal.focus(); });
+            return;
+        }
+        $('panel').hidden = true; notice.hidden = true;
+        filesOf = tab;
+        /* A folder is listed; a file is shown, in the list of its folder. */
+        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: inner })}`);
+        filesAt = asFolder.ok ? inner : inner.split('/').slice(0, -1).join('/');
+        await paintFiles();
+        $('files').hidden = false;
+        if (asFolder.ok) return;
+        const name = inner.split('/').pop();
+        const listed = await (await fetch(`${API}/files?${filesQuery()}`)).json().catch(() => ({}));
+        const entry = (listed.entries ?? []).find((e) => e.name === name && !e.folder);
+        if (entry) await preview(inner, name, entry.size);
+        else { $('files-error').textContent = `"${name}" is not in this folder (any more).`; $('files-error').hidden = false; }
+    }
+    terminal.registerLinkProvider({
+        provideLinks(y, callback) {
+            const line = terminal.buffer.active.getLine(y - 1);
+            if (!line) { callback(undefined); return; }
+            const text = line.translateToString(true);
+            const links = [...text.matchAll(PATH)].map((m) => ({
+                text: m[0].replace(/[.,;:]+$/, ''),
+                range: { start: { x: m.index + 1, y }, end: { x: m.index + m[0].replace(/[.,;:]+$/, '').length, y } },
+                activate: (_event, found) => { void openPath(found); },
+            }));
+            callback(links.length ? links : undefined);
+        },
+    });
+
     $('files-open').addEventListener('click', async () => { $('panel').hidden = true; await paintFiles(); $('files').hidden = false; });
-    $('files-close').addEventListener('click', () => { $('files').hidden = true; terminal.focus(); });
+    $('files-close').addEventListener('click', () => { closePreview(); $('files').hidden = true; terminal.focus(); });
     $('files-import').addEventListener('click', () => $('files-pick').click());
     $('files-pick').addEventListener('change', async () => {
         const status = $('files-status');

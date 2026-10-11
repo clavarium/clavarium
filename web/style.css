@@ -147,3 +147,11 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #mailbox-new .row input { flex: 1; }
 #mailbox-new #mailbox-port { flex: 0 0 90px; }
 #mailbox-new label { font-size: 13px; color: var(--muted, inherit); margin-top: 4px; }
+
+/* A file shown in Files. */
+#preview .row { align-items: center; gap: 10px; margin: 8px 0; }
+#preview .sp { flex: 1; }
+#preview a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: var(--brass); color: #1a1408; font-weight: 600; text-decoration: none; }
+#preview-body { overflow: auto; }
+#preview-body img, #preview-body canvas { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; background: #fff; border-radius: 4px; }
+#preview-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 var(--mono, ui-monospace, monospace); color: var(--ink); margin: 0; }

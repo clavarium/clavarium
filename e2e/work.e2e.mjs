@@ -13,7 +13,9 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     assert.deepEqual(await me.page.locator('#files-tabs button').allInnerTexts(), ['work - where the tool works']);
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('report.txt'));
     assert.equal(await me.page.locator('#files-import').isVisible(), true, 'and a file can be handed to the tool the same way');
-    const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click()]);
+    await me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click();
+    await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('the report'));
+    const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
     assert.equal(download.suggestedFilename(), 'report.txt');
     await me.page.locator('#files-close').click();
     /* Archived: its work is put aside on the server, not erased. */
