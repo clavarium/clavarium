@@ -22,7 +22,7 @@ export class Refusal extends Error {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set();
+    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #uid; #gid;
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -33,8 +33,10 @@ export class Conversations {
     /* Set by the server: told when a conversation has just become usable. */
     ready = () => {};
 
-    constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS }) {
-        this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs;
+    /* `uid`/`gid`: the account this server runs as; files the tool writes in
+       its kept work folder belong to it on the host. */
+    constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS, uid = process.getuid(), gid = process.getgid() }) {
+        this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs; this.#uid = uid; this.#gid = gid;
         /* A build interrupted by a restart of this server cannot be resumed
            blindly: it is marked failed, and says so. */
         for (const c of store.all()) {
@@ -51,7 +53,10 @@ export class Conversations {
         return this.#store.all().map((c) => ({ ...c, toolLabel: this.#tools.find((t) => t.id === c.tool)?.label ?? c.tool }));
     }
 
-    create({ name, tool, memoryMb }) {
+    /* `workOnDisk`: the tool works on its machine's own disk instead of in a
+       folder kept by the server. Faster for a large code project; but what
+       it makes is then not seen from the page, and goes with the machine. */
+    create({ name, tool, memoryMb, workOnDisk }) {
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
         if (!chosen) throw new Refusal(400, 'Unknown tool.');
@@ -60,7 +65,7 @@ export class Conversations {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
-        const conversation = { name, tool, memoryMb: memory, phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
+        const conversation = { name, tool, memoryMb: memory, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
         this.#store.put(conversation);
         this.built = this.#build(name, chosen, memory);
         return conversation;
@@ -77,9 +82,19 @@ export class Conversations {
         this.#store.patch(name, { step: 'Preparing the machine' });
         const sharing = await this.#vms.exec(name, ['sudo', '-n', 'snap', 'install', 'multipass-sshfs'], { timeoutMs: STEP_MS });
         if (sharing.code !== 0) return fail('The machine could not be prepared for shared folders', sharing);
-        for (const argv of [['sudo', '-n', 'mkdir', '-p', WORK], ['sudo', '-n', 'chown', `${VM_USER}:${VM_USER}`, WORK]]) {
-            const made = await this.#vms.exec(name, argv);
-            if (made.code !== 0) return fail('The work folder could not be created', made);
+        if (this.#store.get(name)?.work === 'kept') {
+            /* Where the tool works is a folder kept by the server: what it
+               makes there is seen from the page (Files) and outlives the
+               machine. Asked for by the owner, who could not find a file his
+               tool had just made. */
+            const kept = await this.#vms.workMake(name);
+            const shown = kept.code === 0 ? await this.#vms.workMount(name, this.#uid, this.#gid) : kept;
+            if (shown.code !== 0) return fail('The work folder could not be shown in the machine', shown);
+        } else {
+            for (const argv of [['sudo', '-n', 'mkdir', '-p', WORK], ['sudo', '-n', 'chown', `${VM_USER}:${VM_USER}`, WORK]]) {
+                const made = await this.#vms.exec(name, argv);
+                if (made.code !== 0) return fail('The work folder could not be created', made);
+            }
         }
         for (const [i, step] of tool.steps.entries()) {
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
@@ -180,6 +195,17 @@ export class Conversations {
         return false;
     }
 
+    /* After a restart of the host, the disks the conversations work in are
+       not mounted any more: they are put back before any machine is started
+       or any terminal opened. One that cannot be is reported, not thrown. */
+    async ensureWork() {
+        const failed = [];
+        for (const c of this.#store.all()) {
+            if (c.work === 'kept' && c.phase === 'ready' && (await this.#vms.workMake(c.name)).code !== 0) failed.push(c.name);
+        }
+        return failed;
+    }
+
     /* The conversations whose machine should be running: built, not asleep. */
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
 
@@ -209,8 +235,11 @@ export class Conversations {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
         this.#cancelStop(name);
         this.drop(name);
+        const kept = this.#store.get(name).work === 'kept';
         this.#store.remove(name);
         if (await this.#vms.state(name) !== undefined) await this.#vms.remove(name);
+        /* Its work is moved aside on the server, not erased. */
+        if (kept) await this.#vms.workAside(name);
     }
 
     #cancelStop(name) {

@@ -31,6 +31,31 @@ if (area === 'folder' && verb === 'aside') {
     renameSync(folderOf(argv[0]), join(DATA, 'removed', `${argv[0]}-${Date.now()}`));
     process.exit(0);
 }
+/* A kept work folder. In a real VM it is mounted at /work, and "/work/.." is
+   the VM's root. Here a "mount" is a link, and ".." of a link's target is the
+   target's own parent: so the folder really lives in a directory of its own
+   that also holds a link to that VM's /resources, and tests can go from the
+   work folder to "../resources" as a tool would. */
+const workHome = (name) => join(DIR, 'kept-work', name);
+if (area === 'work' && verb === 'make') {
+    const [name] = argv;
+    if (!existsSync(join(workHome(name), 'work'))) {
+        mkdirSync(join(workHome(name), 'work'), { recursive: true });
+        symlinkSync(join(DIR, 'vms', `clv-${name}`, 'root', 'resources'), join(workHome(name), 'resources'));
+        mkdirSync(join(DATA, 'work'), { recursive: true });
+        symlinkSync(join(workHome(name), 'work'), join(DATA, 'work', name));
+    }
+    process.exit(0);
+}
+if (area === 'work' && verb === 'aside') {
+    const [name] = argv;
+    if (existsSync(workHome(name))) {
+        mkdirSync(join(DATA, 'removed'), { recursive: true });
+        renameSync(join(workHome(name), 'work'), join(DATA, 'removed', `${name}-work-${Date.now()}`));
+        rmSync(workHome(name), { recursive: true, force: true }); rmSync(join(DATA, 'work', name), { force: true });
+    }
+    process.exit(0);
+}
 if (area === 'view' && verb === 'make') {
     const [name] = argv;
     if (existsSync(marker(name))) process.exit(0);
@@ -90,8 +115,8 @@ if (verb === 'mount') {
     const [vm, kind, name] = argv;
     /* As the real program: a read attachment meets the view, or nothing. */
     if (kind === 'view' && !existsSync(marker(name))) { console.error(`REFUSED: the read-only view of ${name} is not in place`); process.exit(78); }
-    const source = kind === 'view' ? viewOf(name) : folderOf(name);
-    const path = `/resources/${name}`;
+    const source = kind === 'work' ? join(workHome(name), 'work') : kind === 'view' ? viewOf(name) : folderOf(name);
+    const path = kind === 'work' ? '/work' : `/resources/${name}`;
     const link = inVm(vm, path);
     if (existsSync(link) || lstatSync(link, { throwIfNoEntry: false })) fail(`mount failed: "${path}" is already mounted in '${vm}'`);
     mkdirSync(dirname(link), { recursive: true });

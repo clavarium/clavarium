@@ -89,6 +89,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await setAccess('reports', 'Read');
     assert.equal(mounted(), `${b.dir}/data/views/reports`);
     await me.page.locator('#files-open').click();
+    await me.page.locator('#files-tabs button', { hasText: 'reports' }).click();
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('q3.txt'));
     assert.equal(await me.page.locator('#files-readonly').isVisible(), true);
     assert.equal(await me.page.locator('#files-import').isVisible(), false);

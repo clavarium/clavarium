@@ -270,8 +270,8 @@
         event.preventDefault();
         const name = $('create-name').value.trim();
         try {
-            await post(`${API}/conversations`, { name, tool: chosenTool });
-            $('create').hidden = true; $('create-name').value = '';
+            await post(`${API}/conversations`, { name, tool: chosenTool, workOnDisk: $('create-disk').checked });
+            $('create').hidden = true; $('create-name').value = ''; $('create-disk').checked = false;
             await refresh();
             select(name);
         } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
@@ -608,13 +608,15 @@
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
     const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
     async function paintFiles() {
-        const mine = conversations.find((x) => x.name === current)?.resources ?? [];
+        /* First, where the tool works -- when that is kept here; then what is attached. */
+        const here = conversations.find((x) => x.name === current);
+        const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...(here?.resources ?? [])];
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
         for (const r of mine) {
             const b = document.createElement('button');
-            b.type = 'button'; b.textContent = `${r.name} - ${r.access}`; b.setAttribute('role', 'tab');
+            b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
             b.addEventListener('click', () => { filesOf = r.name; filesAt = ''; void paintFiles(); });
             tabs.append(b);
@@ -785,7 +787,7 @@
         const name = current;
         if (!confirmed) {
             const resume = socket ? () => { notice.hidden = true; terminal.focus(); } : enter;
-            show(`Archive "${name}"? Its machine is deleted, with everything on its disk. Attached folders are kept.`, 'Archive', () => archive(true), resume);
+            show(`Archive "${name}"? Its machine is deleted, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.`, 'Archive', () => archive(true), resume);
             return;
         }
         disconnect();

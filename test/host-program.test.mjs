@@ -26,6 +26,9 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['view', 'make', 'reports'], 'bindfs -r -o allow_other /var/lib/clavarium/resources/reports /var/lib/clavarium/views/reports'],
         [['view', 'close', 'reports'], 'umount /var/lib/clavarium/views/reports'],
         [['folder', 'make', 'reports'], 'install -d -o OWNER -g GROUP -m 0755 /var/lib/clavarium/resources/reports'],
+        [['work', 'make', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img 10240M mounted at /var/lib/clavarium/work/demo'],
+        [['work', 'aside', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img put aside in /var/lib/clavarium/removed'],
+        [['vm', 'mount', 'clv-demo', 'work', 'demo', '998', '997'], 'multipass mount -u 998:1000 -g 997:1000 /var/lib/clavarium/work/demo clv-demo:/work'],
         [['net', 'taps'], 'pgrep -a qemu-system'],
         [['net', 'bridge'], 'ip -4 -o addr show mpqemubr0'],
     ];
@@ -53,7 +56,9 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
         ['vm', 'exec', 'primary', '--', 'id'], ['vm', 'delete', 'someone-else'], ['vm', 'stop', 'clv-'], ['vm', 'start', 'clv-Bad'],
         ['vm', 'launch', 'clv-demo', '64'], ['vm', 'launch', 'clv-demo', '1024M'], ['vm', 'exec', 'clv-demo', 'id'],
         ['vm', 'shell', 'clv-demo'], ['vm', 'set', 'local.driver=lxd'], ['vm', 'transfer', '/etc/shadow', 'clv-demo:/tmp/x'],
-        ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['folder', 'aside', '/etc'], ['folder', 'erase', 'reports'],
+        ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['work', 'make', '../x'], ['work', 'aside', '/etc'], ['work', 'erase', 'demo'],
+        /* A work folder goes to its own conversation's machine, never to another. */
+        ['vm', 'mount', 'clv-other', 'work', 'demo', '0', '0'], ['vm', 'mount', 'clv-demo', 'work', '../demo', '0', '0'], ['folder', 'aside', '/etc'], ['folder', 'erase', 'reports'],
     ]) assert.equal(host(...args).code, 78, args.join(' '));
     assert.equal(host('vm').code, 64);
     const aside = host('folder', 'aside', 'reports');

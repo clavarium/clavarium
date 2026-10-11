@@ -17,6 +17,8 @@
       <input id="create-name" name="name" required maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
       <span class="legend">What runs in it</span>
       <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
+      <label class="check"><input type="checkbox" id="create-disk"> Work on the machine's own disk</label>
+      <p class="hint">Unticked, what the tool makes is kept here: you see it in Files, and it outlives the machine. Tick it for a large code project: it is faster, but those files are not shown here and go with the machine.</p>
       <p id="create-error" class="error" role="alert" hidden></p>
       <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
         <span class="hint">a new machine takes a few minutes</span></div>
@@ -115,7 +117,7 @@
       <div id="files" class="sheet" hidden>
         <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
         <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
-        <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
+        <p id="files-none" class="hint" hidden>This conversation works on the disk of its machine, and no folder is attached to it. Attach one with "Folders".</p>
         <div id="files-path" class="path"></div>
         <div id="files-rows"></div>
         <p id="files-empty" class="hint" hidden>This folder is empty.</p>

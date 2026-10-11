@@ -133,6 +133,7 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir });
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
+    await all.ensureWork?.();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     const voice = voiceConfig(env);
     const devices = new Devices(new Store(`${dataDir}/devices.json`));

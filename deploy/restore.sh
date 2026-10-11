@@ -80,7 +80,7 @@ for part in home/clavarium var/lib/clavarium-vault etc/clavarium etc/dex etc/oau
     [ -e "$ROOT/$part" ] && present+=("$part")
 done
 [ "${#services[@]}" -eq 0 ] || systemctl stop "${services[@]}"
-[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='home/clavarium/views' -C "$ROOT/" "${present[@]}"
+[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' -C "$ROOT/" "${present[@]}"
 echo "what was here is set aside: $aside/state.tgz"
 
 back() {
@@ -101,7 +101,7 @@ fi
 if [ "$REAL" = "yes" ]; then
     chown clavarium:clavarium /var/lib/clavarium-vault /var/lib/clavarium-vault/vault.key 2>/dev/null || true
     # What gets mounted into VMs is arranged by root only: see clavarium-host.
-    install -d -o root -g root -m 0755 /home/clavarium/resources /home/clavarium/views /home/clavarium/removed
+    install -d -o root -g root -m 0755 /home/clavarium/resources /home/clavarium/views /home/clavarium/removed /home/clavarium/work /home/clavarium/work-disks
     systemctl daemon-reload
     systemctl start "${services[@]}"
     # 4. Every service must come up (up to 30 s) AND HOLD: one that starts,

@@ -34,6 +34,7 @@
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
 import { list, download, importFile } from './files.mjs';
+import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
 const BODY_MAX = 16 * 1024;
@@ -62,6 +63,12 @@ export async function handleApi(request, response, conversations, headers, resou
        and writing only where the attachment says "write". */
     const query = new URL(request.url ?? '/', 'http://local').searchParams;
     const attached = (need) => {
+        /* The conversation's own work folder, when the server keeps it. */
+        if (query.get('r') === WORK_TAB && resources) {
+            const c = conversations.list().find((x) => x.name === query.get('c'));
+            if (c?.work !== 'kept') throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
+            return resources.workFolder(c.name);
+        }
         const found = resources?.of(query.get('c') ?? '').find((r) => r.name === query.get('r'));
         if (!found) throw new Refusal(404, 'This folder is not attached to this conversation.');
         if (need === 'write' && found.access !== 'write') throw new Refusal(403, 'This folder is attached read-only.');

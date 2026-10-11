@@ -25,6 +25,8 @@ import { isConversationName } from './names.mjs';
 import { Refusal } from './conversations.mjs';
 
 export const ACCESS = ['read', 'write'];
+/* How the page names a conversation's own work folder, next to its attached folders. */
+export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Resources {
@@ -37,6 +39,11 @@ export class Resources {
 
     folder(name) { return `${this.#root}/resources/${name}`; }
     view(name) { return `${this.#root}/views/${name}`; }
+    /* Where the tool of a conversation works, when that is kept here. */
+    workFolder(conversation) {
+        if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
+        return `${this.#root}/work/${conversation}`;
+    }
 
     list() { return this.#store.all(); }
 
@@ -51,6 +58,7 @@ export class Resources {
        to somewhere else, which is what would otherwise get mounted. */
     async create({ name, type = 'folder' }) {
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
+        if (name === WORK_TAB) throw new Refusal(409, 'This name is taken: "work" is where each conversation works.');
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         const made = await this.#host(['folder', 'make', name]);
         if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);

@@ -72,6 +72,14 @@ export class Vms {
         return this.run(['vm', 'mount', vmName(conversation), kind, name, String(uid), String(gid)], { timeoutMs: 600_000 });
     }
 
+    /* The work folder of a conversation: kept on the host, shown in its
+       machine at /work. Made (or found again) before it is mounted. */
+    workMake(conversation) { vmName(conversation); return this.run(['work', 'make', conversation]); }
+    workMount(conversation, uid, gid) {
+        return this.run(['vm', 'mount', vmName(conversation), 'work', conversation, String(uid), String(gid)], { timeoutMs: 600_000 });
+    }
+    workAside(conversation) { vmName(conversation); return this.run(['work', 'aside', conversation]); }
+
     umount(conversation, name) {
         return this.run(['vm', 'umount', vmName(conversation), name], { timeoutMs: 120_000 });
     }

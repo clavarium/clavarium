@@ -137,7 +137,7 @@ id "$ACCOUNT" >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --no-create
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0750 "$DATA"
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0700 "$VAULT"
 # What gets mounted into VMs is arranged by root only: see clavarium-host.
-install -d -o root -g root -m 0755 "$DATA/resources" "$DATA/views" "$DATA/removed"
+install -d -o root -g root -m 0755 "$DATA/resources" "$DATA/views" "$DATA/removed" "$DATA/work" "$DATA/work-disks"
 
 step "code"
 systemctl stop clavarium.service 2>/dev/null || true

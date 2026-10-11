@@ -45,6 +45,13 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
 
 Not yet: mailbox and git resources, delivery.
 
+Where the tool works (`/work`) is a folder kept by the server: what the tool
+makes is seen in Files and outlives its machine. It is a disk of a fixed size
+(10 GB; `WORK_MB=` in `/etc/clavarium/host.conf` changes it), so a tool that
+runs away fills its own disk and not the host's. A conversation can be created
+to work on its machine's own disk instead (faster for a large code project).
+Attached folders have no such limit yet.
+
 A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its
 recent messages become files that a conversation reads and never writes; the
 mailbox itself is never changed. For a mail server of your own whose

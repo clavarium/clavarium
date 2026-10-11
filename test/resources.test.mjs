@@ -85,6 +85,9 @@ test('bad names, unknown resources and unknown levels are refused; archiving for
     await assert.rejects(b.resources.create({ name: '../etc' }), /name/);
     await b.resources.create({ name: 'notes' });
     await assert.rejects(b.resources.create({ name: 'notes' }), /already/);
+    await assert.rejects(b.resources.create({ name: 'work' }), /where each conversation works/);
+    assert.equal(b.resources.workFolder('alpha'), `${b.dir}/work/alpha`);
+    assert.throws(() => b.resources.workFolder('../x'), /Not a conversation/);
     await assert.rejects(b.resources.attach('alpha', 'nope', 'read'), /No such resource/);
     await assert.rejects(b.resources.attach('alpha', 'notes', 'admin'), /Access is/);
     await assert.rejects(b.resources.attach('Bad Name', 'notes', 'read'), /Not a conversation/);

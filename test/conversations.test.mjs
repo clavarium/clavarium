@@ -20,8 +20,10 @@ function bench(t, answers = {}) {
     const states = new Map();
     const run = async (argv, options) => {
         /* Every call starts with the area, "vm": it is checked, then left out. */
-        assert.equal(argv[0], 'vm');
-        calls.push(argv.slice(1).join(' '));
+        /* The area is checked: "vm" is then left out, "work" is kept. */
+        assert.ok(argv[0] === 'vm' || argv[0] === 'work', argv.join(' '));
+        calls.push(argv[0] === 'vm' ? argv.slice(1).join(' ') : argv.join(' '));
+        if (argv[0] === 'work') return answers.work?.(argv, options) ?? { code: 0, stdout: '', stderr: '' };
         const verb = argv[1];
         const override = answers[verb]?.(argv, options);
         if (override) return override;
@@ -48,8 +50,8 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     assert.deepEqual(b.calls, [
         'launch clv-demo 1024',
         'exec clv-demo -- sudo -n snap install multipass-sshfs',
-        'exec clv-demo -- sudo -n mkdir -p /work',
-        'exec clv-demo -- sudo -n chown ubuntu:ubuntu /work',
+        'work make demo',
+        `mount clv-demo work demo ${process.getuid()} ${process.getgid()}`,
         'exec clv-demo -- sudo install-tool',
     ]);
     assert.equal(all.list()[0].phase, 'ready');
@@ -192,4 +194,31 @@ test('building again after a failed build clears away what the failure left', as
     assert.deepEqual(b.calls.slice(0, 2), ['info clv-demo', 'delete clv-demo']);
     assert.equal(all.list()[0].phase, 'ready');
     assert.equal(all.list()[0].error, undefined);
+});
+
+test('where the tool works: kept by the server unless asked otherwise; put aside, not erased, when archived', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'kept', tool: 'tool' });
+    await all.built;
+    assert.equal(all.list()[0].work, 'kept');
+    b.calls.length = 0;
+    all.create({ name: 'fast', tool: 'tool', workOnDisk: true });
+    await all.built;
+    assert.equal(all.list()[1].work, 'disk');
+    assert.ok(b.calls.includes('exec clv-fast -- sudo -n mkdir -p /work'));
+    assert.ok(!b.calls.some((c) => c.startsWith('work ') || c.includes(' work ')), 'nothing of it is kept here');
+    b.calls.length = 0;
+    await all.archive('fast');
+    assert.ok(!b.calls.some((c) => c.startsWith('work ')));
+    await all.archive('kept');
+    assert.equal(b.calls.at(-1), 'work aside kept');
+});
+
+test('a work folder that cannot be shown in the machine fails the build, and says so', async (t) => {
+    const b = bench(t, { mount: () => ({ code: 2, stdout: '', stderr: 'mount failed: no sshfs' }) });
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.match(all.list()[0].error, /work folder could not be shown.*no sshfs/);
 });

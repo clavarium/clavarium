@@ -42,10 +42,14 @@ LAUNCH_SECONDS="900"
 BRIDGE="mpqemubr0"
 TABLE="clavarium"
 VM_ID="1000"
+# The size of the disk a conversation works in, in megabytes: 10 GB unless
+# /etc/clavarium/host.conf says otherwise (WORK_MB=...). Room on the host is
+# taken only as the disk is filled, and given back when files are removed.
+WORK_MB="10240"
 CONF="/etc/clavarium/host.conf"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|folder|view|net> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|folder|work|view|net> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""
 while [ $# -gt 0 ]; do
@@ -59,6 +63,13 @@ if [ -z "$DATA" ]; then
     [ -r "$CONF" ] || refuse "$CONF is missing: the data directory is not declared"
     DATA="$(sed -n 's/^DATA=//p' "$CONF" | head -1)"
 fi
+if [ -r "$CONF" ]; then
+    asked="$(sed -n 's/^WORK_MB=//p' "$CONF" | head -1)"
+    if [ -n "$asked" ]; then
+        [[ "$asked" =~ ^[0-9]{2,7}$ ]] && [ "$asked" -ge 64 ] || refuse "WORK_MB in $CONF must be a number of megabytes, 64 at least"
+        WORK_MB="$asked"
+    fi
+fi
 case "$DATA" in /*) : ;; *) refuse "the data directory must be an absolute path" ;; esac
 case "$DATA" in *[!A-Za-z0-9/._-]*|*..*) refuse "the data directory has an unexpected character" ;; esac
 
@@ -71,7 +82,7 @@ vm_of() { is_name "${1#clv-}" && [ "$1" != "${1#clv-}" ] || refuse "not one of o
 number() { [[ "$1" =~ ^[0-9]{1,6}$ ]] || refuse "not a number: ${1:-<empty>}"; }
 
 # One of the directories of the data directory that only root may arrange
-# (resources, views, removed): made if missing, and refused if it is a link or
+# (resources, views, work, work-disks, removed): made if missing, and refused if it is a link or
 # belongs to anyone else -- then its entries cannot be trusted either.
 kept() {
     [ "$SAY" = "yes" ] && return 0
@@ -112,14 +123,22 @@ case "$AREA $VERB" in
     "vm mount")
         # <vm> <folder|view> <resource> <uid> <gid>
         [ $# -eq 5 ] || usage; vm_of "$1"; is_name "$3" || refuse "not a folder name: $3"; number "$4"; number "$5"
+        target="$1:/resources/$3"
         case "$2" in
             folder) folder_of "$3"; source="$DATA/resources/$3" ;;
             view)   kept views; source="$DATA/views/$3"
                     # A read attachment must meet the VIEW, never a bare directory.
                     [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the read-only view of $3 is not in place" ;;
-            *) refuse "a mount is of a folder or of a view" ;;
+            work)   # The work folder of a conversation goes to ITS machine, and to no other.
+                    [ "$1" = "clv-$3" ] || refuse "a work folder belongs to its own conversation"
+                    kept work; source="$DATA/work/$3"
+                    # Its DISK must be in place: a bare directory there would be the
+                    # host's own disk, with no limit.
+                    [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the work disk of $3 is not in place"
+                    target="$1:/work" ;;
+            *) refuse "a mount is of a folder, of a view or of a work folder" ;;
         esac
-        run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$1:/resources/$3" ;;
+        run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$target" ;;
     "vm umount")
         [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a folder name: $2"
         run "$MULTIPASS" umount "$1:/resources/$2" ;;
@@ -141,6 +160,54 @@ case "$AREA $VERB" in
             ! mountpoint -q "$DATA/views/$1" || refuse "the read-only view of $1 is still open"
         fi
         run mv -T -n "$DATA/resources/$1" "$DATA/removed/$1-$(date -u +%Y%m%dT%H%M%SZ)-$$" ;;
+    "work make")
+        # Where a conversation's tool works: kept by the server, so that what
+        # the tool makes is seen from the page and outlives its machine.
+        #
+        # IT IS A DISK OF ITS OWN, OF A FIXED SIZE: a file of this host,
+        # formatted and mounted. A shared folder has no limit by itself, and a
+        # tool that ran away would fill the host's disk and stop everything.
+        # Here it fills ITS disk, gets an error, and nobody else notices
+        # (tried on a real machine). The file takes room only as it is filled.
+        #
+        # Asked again at each start of the server and for a machine built
+        # again: what is already in place is left as it is.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
+        img="$DATA/work-disks/$1.img"; at="$DATA/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'disk %s %sM mounted at %s\n' "$img" "$WORK_MB" "$at"; exit 0; fi
+        kept work; kept work-disks
+        [ ! -L "$at" ] && [ ! -L "$img" ] || refuse "the work folder of $1 is not what it should be"
+        owner="$(stat -c %u:%g "$DATA")"
+        mkdir -p "$at"
+        if [ ! -e "$img" ]; then
+            truncate -s "${WORK_MB}M" "$img.new"
+            mkfs.ext4 -q -m 0 -E "root_owner=$owner" "$img.new"
+            # Files found in a plain directory (a backup just put back) go
+            # INTO the disk: mounting over them would hide them.
+            if ! mountpoint -q "$at" && [ -n "$(ls -A "$at")" ]; then
+                tmp="$(mktemp -d -p "$DATA/work-disks")"
+                mount -o loop,nosuid,nodev "$img.new" "$tmp"
+                cp -a "$at/." "$tmp/"; umount "$tmp"; rmdir "$tmp"
+                find "$at" -mindepth 1 -delete
+            fi
+            mv "$img.new" "$img"
+        fi
+        if ! mountpoint -q "$at"; then
+            mount -o loop,nosuid,nodev,discard "$img" "$at"
+            rmdir "$at/lost+found" 2>/dev/null || true
+        fi
+        exit 0 ;;
+    "work aside")
+        # The conversation is archived: its work is PUT ASIDE, never erased --
+        # as its disk, which root can mount again to read it.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
+        img="$DATA/work-disks/$1.img"; at="$DATA/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'disk %s put aside in %s\n' "$img" "$DATA/removed"; exit 0; fi
+        kept work; kept work-disks; kept removed
+        if mountpoint -q "$at"; then umount "$at"; fi
+        if [ -d "$at" ] && [ ! -L "$at" ]; then rmdir "$at" 2>/dev/null || true; fi
+        if [ -f "$img" ] && [ ! -L "$img" ]; then mv -n "$img" "$DATA/removed/$1-work-$(date -u +%Y%m%dT%H%M%SZ)-$$.img"; fi
+        exit 0 ;;
     "view make")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         folder_of "$1"; kept views

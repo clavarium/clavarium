@@ -401,13 +401,13 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <div class="zone vm"><h3>Middle · the tool's own interface</h3><div class="box k"><b>Terminal (xterm.js)</b><small>Claude Code, OpenCode, OpenHands… exactly as they draw themselves</small></div></div>
       <div class="zone" style="flex-direction:row;align-items:center;flex-wrap:wrap"><h3 style="margin:0 8px 0 0">Bottom · your hands</h3><span class="tag b">Shortcuts</span><span class="tag b">🎙 Voice</span><span class="tag">Keys: Esc Tab ↑ ↓ Enter</span></div>
     </div></div>
-    <p class="note" style="margin-top:8px"><b>Files</b> means the files held in Clavarium: the folders attached to this conversation. Not the device's own storage, not the rest of the VM disk. Two gestures cross the border: <b>import</b> a file or a photo from outside into a Clavarium folder, and <b>download</b> a copy.</p>
+    <p class="note" style="margin-top:8px"><b>Files</b> means the files held in Clavarium: the folder the tool works in (<span class="mono">/work</span>), then the folders attached to this conversation. Not the device's own storage, not the rest of the VM disk. The work folder is a disk of a fixed size (10 GB unless set otherwise): a tool that runs away fills its own disk, not the host's. Two gestures cross the border: <b>import</b> a file or a photo from outside into a Clavarium folder, and <b>download</b> a copy.</p>
     <div class="scroll"><div class="dia" style="min-width:760px">
       <div class="zone edge"><h3>Outside</h3><div class="box">a file or photo on the phone, tablet or computer</div></div>
       <div class="arrow"><i>→</i>Import<br><i>←</i>Download</div>
       <div class="zone host"><h3>Clavarium folders</h3><div class="box k"><b>Files</b> shows exactly these<small>the resources attached to the conversation</small></div><div class="box">import lands in a folder attached read-write</div></div>
       <div class="arrow"><i>⇄</i>mounted</div>
-      <div class="zone vm"><h3>VM</h3><div class="box mono">/resources/…</div><div class="box">the rest of the VM disk is the agent's own: not shown in Files</div></div>
+      <div class="zone vm"><h3>VM</h3><div class="box mono">/work</div><div class="box mono">/resources/…</div><div class="box">the rest of the VM disk is the agent's own: not shown in Files</div></div>
     </div></div>
 
     <h2>Sharing one conversation by QR code</h2>
@@ -611,6 +611,7 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <tr><td>A shared conversation (QR)</td><td>Full use: terminal, shortcuts, voice, files</td></tr>
       <tr><td>Sign-in strip</td><td>Shown to the operator only</td></tr>
       <tr><td>Files</td><td>Clavarium's folders only, plus import from outside</td></tr>
+      <tr><td>Where the tool works</td><td>A folder kept by Clavarium, shown in Files, of a fixed size; on the machine's own disk only if asked at creation (large code projects)</td></tr>
       <tr><td>Git push</td><td>Agent commits, operator reviews, host pushes (screen designed later)</td></tr>
       <tr><td>Folders</td><td>Shareable between VMs; read-only or read-write per attachment</td></tr>
       <tr><td>Edge</td><td>Blind relay + OIDC, as today</td></tr>
