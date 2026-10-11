@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, sign } from 'node:crypto';
-import { Devices, readCookie, sessionCookie, SESSION_COOKIE } from '../server/devices.mjs';
+import { Devices, readCookie, sessionCookie, cookieNameOf, SESSION_COOKIE } from '../server/devices.mjs';
 import { Store } from '../server/store.mjs';
 
 function bench(t) {
@@ -33,7 +33,13 @@ test('a scanned code binds a device to ONE conversation; its session opens that 
     const session = one.openSession();
     assert.equal(b.devices.conversationOf(session), 'family');
     assert.deepEqual(b.devices.of('family').map((d) => d.label), ['Phone']);
-    assert.deepEqual(b.devices.of('work'), []);
+    assert.equal(b.devices.conversationOf(session, one.device), 'family');
+    /* The same device given a second conversation holds a second pairing:
+       the session of one does not speak for the other. */
+    const two = paired(b, 'work');
+    assert.equal(b.devices.conversationOf(two.openSession(), two.device), 'work');
+    assert.equal(b.devices.conversationOf(session, two.device), undefined);
+    assert.equal(b.devices.conversationOf(session, one.device), 'family', 'and the first still works');
     assert.equal(b.devices.conversationOf('not-a-session'), undefined);
     assert.equal(b.devices.conversationOf(''), undefined);
 });
@@ -111,7 +117,12 @@ test('archiving a conversation removes its devices; the private half of a key is
 });
 
 test('the session cookie is for the device door only, and unreadable by scripts', () => {
-    const cookie = sessionCookie('abc', 12, true);
+    const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    const cookie = sessionCookie(id, 'abc', 12, true);
+    /* One cookie per pairing: two conversations on one device do not replace each other. */
+    assert.ok(cookie.startsWith(`${cookieNameOf(id)}=abc;`));
+    assert.equal(cookieNameOf(id), `${SESSION_COOKIE}_${id}`);
+    assert.throws(() => sessionCookie('x; Path=/', 'abc', 12, true), /Not a pairing/);
     for (const part of ['Path=/c/', 'HttpOnly', 'SameSite=Strict', 'Secure', 'Max-Age=43200']) assert.ok(cookie.includes(part), part);
     assert.equal(readCookie(`other=1; ${SESSION_COOKIE}=abc; x=y`, SESSION_COOKIE), 'abc');
     assert.equal(readCookie(undefined, SESSION_COOKIE), undefined);

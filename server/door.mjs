@@ -8,14 +8,20 @@
  *   GET  /c/                      the device page (and its files)
  *   POST /c/api/pair              {code, key, label}
  *   POST /c/api/challenge         {device}
- *   POST /c/api/session           {device, signature}   sets the session cookie
- *   GET  /c/api/me                the one conversation
- *   GET  /c/api/shortcuts
- *   GET  /c/api/voice   POST /c/api/voice
- *   GET  /c/api/files   GET /c/api/files/download   POST /c/api/files/import
+ *   POST /c/api/session           {device, signature}   sets that pairing's session cookie
+ *
+ * A device may hold several pairings (several conversations shared with it).
+ * Everything else names the pairing it speaks for, in its path:
+ *
+ *   GET  /c/api/<pairing>/me      the one conversation of that pairing
+ *   GET  /c/api/<pairing>/shortcuts
+ *   GET  /c/api/<pairing>/voice   POST .../voice
+ *   GET  /c/api/<pairing>/files   GET .../files/download   GET .../files/machine   POST .../files/import
+ *   POST /c/api/<pairing>/leave   the device removes this pairing itself
  */
 import { Refusal } from './conversations.mjs';
-import { SESSION_COOKIE, readCookie, sessionCookie } from './devices.mjs';
+import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
+import { WORK_TAB } from './resources.mjs';
 import { list, download, importFile } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
@@ -28,16 +34,20 @@ async function readJson(request) {
     catch { throw new Refusal(400, 'The request is not JSON.'); }
 }
 
-/* The conversation of the device asking, or undefined. */
-export function deviceConversation(devices, headers) {
-    return devices.conversationOf(readCookie(headers.cookie, SESSION_COOKIE));
+/* The conversation of the pairing asking, or undefined. */
+export function deviceConversation(devices, headers, pairing) {
+    if (!isPairingId(pairing)) return undefined;
+    return devices.conversationOf(readCookie(headers.cookie, cookieNameOf(pairing)), pairing);
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
 export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
-    const route = url.pathname.slice('/c/api'.length);
+    /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
+    const named = /^\/([0-9a-f-]{36})(\/.*)$/.exec(url.pathname.slice('/c/api'.length));
+    const pairing = named?.[1];
+    const route = named ? named[2] : url.pathname.slice('/c/api'.length);
     const send = (status, body, extra = {}) => {
         response.writeHead(status, { ...headers, ...extra, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
         return true;
@@ -51,14 +61,19 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'POST' && route === '/session') {
             const body = await readJson(request);
             const { session, hours } = devices.open(String(body.device ?? ''), body.signature);
-            return send(200, { ok: true }, { 'set-cookie': sessionCookie(session, hours, secure) });
+            return send(200, { ok: true }, { 'set-cookie': sessionCookie(String(body.device), session, hours, secure) });
         }
 
         /* ---- everything else: a device session, and its one conversation ---- */
-        const name = deviceConversation(devices, request.headers);
+        const name = deviceConversation(devices, request.headers, pairing);
         const mine = name === undefined ? undefined : conversations.list().find((c) => c.name === name);
         if (!mine) return send(401, { error: 'This device has no open session.' });
         const attached = (need) => {
+            /* Where the tool works, when that is kept here: as for the owner. */
+            if (url.searchParams.get('r') === WORK_TAB) {
+                if (mine.work !== 'kept') throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
+                return resources.workFolder(name);
+            }
             const found = resources.of(name).find((r) => r.name === url.searchParams.get('r'));
             if (!found) throw new Refusal(404, 'This folder is not attached to this conversation.');
             if (need === 'write' && found.access !== 'write') throw new Refusal(403, 'This folder is attached read-only.');
@@ -66,7 +81,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         };
 
         if (request.method === 'GET' && route === '/me') {
-            return send(200, { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, error: mine.error, resources: resources.of(name) });
+            return send(200, { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, error: mine.error, work: mine.work, resources: resources.of(name) });
         }
         if (request.method === 'GET' && route === '/shortcuts') return send(200, shortcuts.list());
         if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null });
@@ -75,6 +90,15 @@ export async function handleDoor(request, response, { devices, conversations, re
             const parts = []; let size = 0;
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
             return send(200, { text: await transcribe(voice, Buffer.concat(parts)) });
+        }
+        /* The device takes itself out: this pairing is removed, here and on the server. */
+        if (request.method === 'POST' && route === '/leave') { devices.revoke(pairing); return send(200, { ok: true }); }
+        if (request.method === 'GET' && route === '/files/machine') {
+            const file = await conversations.machineFile(name, url.searchParams.get('p') ?? '');
+            response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.bytes.length,
+                'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+            response.end(file.bytes);
+            return true;
         }
         if (request.method === 'GET' && route === '/files') return send(200, await list(attached(), url.searchParams.get('p') ?? ''));
         if (request.method === 'GET' && route === '/files/download') {

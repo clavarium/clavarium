@@ -44,8 +44,9 @@ test('a phone that scans the code is welcomed in plain words, then sees that con
     assert.equal(await phone.page.locator('#archive').count(), 0);
     /* (This bench has no sign-on in front, so the owner's side is not closed
        here: that it is closed to a device is proved in test/door.test.mjs.) */
-    assert.equal((await phone.api('/c/api/me')).body.name, 'family');
-    assert.equal((await phone.api('/c/api/files?c=private-work&r=anything&p=')).status, 404);
+    const id = await phone.page.evaluate(() => document.documentElement.dataset.pairing);
+    assert.equal((await phone.api(`/c/api/${id}/me`)).body.name, 'family');
+    assert.equal((await phone.api(`/c/api/${id}/files?c=private-work&r=anything&p=`)).status, 404);
     assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'nothing overflows a phone screen');
     assert.deepEqual(phone.errors, []);
 });
@@ -117,5 +118,50 @@ test('shared with a phone: files of the conversation, and only where the owner a
     await phone.page.locator('#files-open').click();
     await phone.page.locator('#files-tabs button', { hasText: 'papers' }).click();
     await phone.until('read-only is said', async () => phone.page.locator('#files-readonly').isVisible());
-    assert.equal(await phone.page.evaluate(async () => (await fetch('/c/api/files/import?r=papers&p=&name=x.txt', { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: 'x' })).status), 403);
+    assert.equal(await phone.page.evaluate(async () => (await fetch(`/c/api/${document.documentElement.dataset.pairing}/files/import?r=papers&p=&name=x.txt`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: 'x' })).status), 403);
+});
+
+test('several conversations on the same device: each code adds one, the device passes from one to the other, and can drop one', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('family');
+    await owner.create('garden');
+    const codeFor = async (name) => (await owner.api(`/api/conversations/${name}/share`, {})).body.url.replace(/^https?:\/\/[^/]+/, '');
+    const phone = await b.person({ phone: true, at: await codeFor('family') });
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('family is live', async () => (await phone.state()) === 'live');
+    assert.equal(await phone.page.locator('#others').innerText(), 'This device');
+    await phone.type('echo typed-in-family');
+    await phone.sees('typed-in-family');
+    /* A second code, scanned on the same device: ADDED, and shown. */
+    await phone.page.goto(b.origin + await codeFor('garden'));
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('garden is live', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'garden');
+    assert.equal(await phone.page.locator('#others').innerText(), 'Conversations (2)');
+    assert.deepEqual((await owner.api('/api/conversations/family/devices')).body.length, 1, 'the first pairing is still there');
+    /* Back to the first one: its terminal is as it was left. */
+    await phone.page.locator('#others').click();
+    assert.match(await phone.page.locator('#others-rows').innerText(), /garden \(shown now\)/);
+    await phone.page.locator('#others-rows .folder', { hasText: 'family' }).locator('button', { hasText: 'Open' }).click();
+    await phone.until('family is shown again', async () => (await phone.state()) === 'live' && (await phone.page.locator('#name').innerText()) === 'family');
+    await phone.sees('typed-in-family');
+    /* The same conversation shared again with this device: still two, not three. */
+    await phone.page.goto(b.origin + await codeFor('family'));
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('family again', async () => (await phone.state()) === 'live');
+    assert.equal(await phone.page.locator('#others').innerText(), 'Conversations (2)');
+    await owner.until('the older pairing was given back', async () => (await owner.api('/api/conversations/family/devices')).body.length === 1);
+    /* The device drops one itself: gone here, gone for the owner; the other stays. */
+    await phone.page.locator('#others').click();
+    const garden = phone.page.locator('#others-rows .folder', { hasText: 'garden' });
+    await garden.locator('button', { hasText: 'Remove from this device' }).click();
+    await garden.locator('button', { hasText: 'Yes, remove it' }).click();
+    await phone.until('one conversation is left', async () => (await phone.page.locator('#others').innerText().catch(() => '')) === 'This device' && (await phone.state()) === 'live');
+    assert.equal(await phone.page.locator('#name').innerText(), 'family');
+    assert.deepEqual((await owner.api('/api/conversations/garden/devices')).body, []);
+    /* The owner removes the last one: the device says so, and offers nothing that cannot work. */
+    const last = (await owner.api('/api/conversations/family/devices')).body[0].id;
+    await owner.api(`/api/devices/${last}/revoke`, {});
+    await phone.page.reload();
+    await phone.until('the device says it was removed', async () => /removed from it|not connected/.test(await phone.page.locator('#notice-text').innerText().catch(() => '')));
 });

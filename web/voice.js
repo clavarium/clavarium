@@ -3,8 +3,9 @@
    terminal. See voice-core.js for how a phrase is found. */
 import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, toWav } from './voice-core.js';
 
-/* The operator's pages ask /api, a paired device asks /c/api. */
-const API = document.documentElement.dataset.door === 'device' ? '/c/api' : '/api';
+/* The operator's pages ask /api; a paired device asks /c/api/<its pairing>,
+   known once it has signed in (the page writes it on the document). */
+const api = () => (document.documentElement.dataset.door === 'device' ? `/c/api/${document.documentElement.dataset.pairing ?? ''}` : '/api');
 
 /* Opens the microphone; resolves with a function that closes it.
    `on.phrase(text)`, `on.state(word)`: calibrating, listening, hearing,
@@ -23,7 +24,7 @@ async function listen(on) {
         onPhrase: async (blocks) => {
             pending++; tell();
             try {
-                const r = await fetch(`${API}/voice`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: toWav(blocks) });
+                const r = await fetch(`${api()}/voice`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: toWav(blocks) });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'The phrase could not be transcribed.');
                 if (!closed && j.text) on.phrase(j.text);
@@ -49,7 +50,7 @@ async function listen(on) {
 }
 
 window.clavariumVoice = {
-    available: async () => { try { const r = await fetch(`${API}/voice`); return r.ok && (await r.json()).available === true; } catch { return false; } },
+    available: async () => { try { const r = await fetch(`${api()}/voice`); return r.ok && (await r.json()).available === true; } catch { return false; } },
     listen,
 };
 window.dispatchEvent(new Event('clavarium-voice-ready'));

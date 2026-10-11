@@ -1,4 +1,11 @@
-/* THE DEVICE DOOR: a phone or a tablet that sees ONE conversation.
+/* THE DEVICE DOOR: a phone or a tablet that sees the conversations shared
+   with it -- each one by a pairing of its own.
+ *
+ * (It began as ONE conversation per device. The owner asked for several on
+ * the same device: a device now holds several PAIRINGS, each with its own
+ * key and its own session, and each still sees one conversation and nothing
+ * else. What follows describes one pairing.)
+ *
  *
  * The operator shares a conversation with a QR code. The device that scans it
  * makes its own key pair, keeps the private half where it cannot be read back
@@ -112,13 +119,16 @@ export class Devices {
         return { session, hours: SESSION_HOURS };
     }
 
-    /* The conversation a session may see, or undefined. */
-    conversationOf(session) {
+    /* The conversation a session may see, or undefined. `pairing`, when
+       given, must be the one this session was opened for: a device that
+       holds several cannot use the session of one to speak for another. */
+    conversationOf(session, pairing) {
         if (typeof session !== 'string' || session === '') return undefined;
         const key = digest(session);
         for (const [stored, s] of this.#sessions) {
             if (!timingSafeEqual(Buffer.from(stored, 'hex'), key)) continue;
             if (s.expires < this.#now()) { this.#sessions.delete(stored); return undefined; }
+            if (pairing !== undefined && s.device !== pairing) return undefined;
             return this.#store.get(s.device)?.conversation;
         }
         return undefined;
@@ -137,6 +147,11 @@ export function readCookie(header, name) {
 
 /* HttpOnly: the page's scripts cannot read it. Path=/c/: the operator's side
    never receives it. SameSite=Strict: another site cannot make it travel. */
-export function sessionCookie(session, hours, secure) {
-    return `${SESSION_COOKIE}=${session}; Path=/c/; Max-Age=${hours * 3600}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`;
+/* One cookie PER PAIRING, named after it: a device that holds several
+   conversations keeps a session for each, and they do not replace each other. */
+export const isPairingId = (id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id);
+export const cookieNameOf = (pairing) => `${SESSION_COOKIE}_${pairing}`;
+export function sessionCookie(pairing, session, hours, secure) {
+    if (!isPairingId(pairing)) throw new Refusal(400, 'Not a pairing.');
+    return `${cookieNameOf(pairing)}=${session}; Path=/c/; Max-Age=${hours * 3600}; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`;
 }

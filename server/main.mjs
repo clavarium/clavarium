@@ -196,7 +196,7 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
         onLeft: (name) => all.left(name),
         onEnded: (name) => all.ended(name),
         gate, originOk,
-        deviceName: (headers) => deviceConversation(devices, headers),
+        deviceName: (headers, pairing) => deviceConversation(devices, headers, pairing),
     });
     all.drop = (name) => bridge.drop(name);
     /* The terminal of a running machine is opened before anybody asks: a

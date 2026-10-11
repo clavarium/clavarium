@@ -13,7 +13,10 @@
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
     const DEVICE = document.documentElement.dataset.door === 'device';
-    const API = DEVICE ? '/c/api' : '/api';
+    /* On a paired device, every request names the pairing it speaks for:
+       the address is completed once the device has signed in. */
+    let API = DEVICE ? '/c/api' : '/api';
+    let pairing = '';
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
     const $ = (id) => document.getElementById(id) ?? document.createElement('div');
@@ -93,7 +96,7 @@
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-        const where = DEVICE ? `/c/terminal?cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
+        const where = DEVICE ? `/c/terminal?d=${pairing}&cols=${terminal.cols}&rows=${terminal.rows}` : `/terminal?c=${encodeURIComponent(name)}&cols=${terminal.cols}&rows=${terminal.rows}`;
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
@@ -249,6 +252,8 @@
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
                     if (!door.ok) { shut(door.message); return; }
+                    /* The conversation shown was taken away, another one remains: it is shown instead. */
+                    if (door.pairing !== pairing) { location.reload(); return; }
                     r = await fetch(`${API}/me`);
                 }
                 if (!r.ok) throw new Error('no api');
@@ -1039,6 +1044,35 @@
         'Back', back);
     });
 
+    /* ---------- the other conversations of this device ---------- */
+    /* A device may have been given several conversations, each by a code of
+       its own. One is shown at a time; the others are a tap away. */
+    function offerOthers(others) {
+        $('others').hidden = false;
+        $('others').textContent = others.length > 0 ? `Conversations (${others.length + 1})` : 'This device';
+        $('others').onclick = () => {
+            const rows = $('others-rows');
+            rows.replaceChildren();
+            const line = (label, id, isCurrent) => {
+                const row = document.createElement('div'); row.className = 'folder';
+                const name = document.createElement('b'); name.textContent = isCurrent ? `${label} (shown now)` : label;
+                const open = document.createElement('button'); open.type = 'button'; open.className = 'primary'; open.textContent = 'Open'; open.hidden = isCurrent;
+                open.addEventListener('click', () => { void window.clavariumShowPairing(id); });
+                const leave = document.createElement('button'); leave.type = 'button'; leave.textContent = 'Remove from this device';
+                leave.addEventListener('click', () => {
+                    leave.textContent = 'Yes, remove it'; leave.className = 'danger';
+                    leave.onclick = async () => { await window.clavariumLeave(id); location.reload(); };
+                });
+                row.append(name, open, leave); rows.append(row);
+            };
+            line(current, pairing, true);
+            for (const o of others) line(o.name, o.pairing, false);
+            $('files').hidden = true; $('copy').hidden = true;
+            $('others-sheet').hidden = false;
+        };
+    }
+    $('others-close').addEventListener('click', () => { $('others-sheet').hidden = true; terminal.focus(); });
+
     async function start() {
         if (DEVICE) {
             view('room');
@@ -1046,6 +1080,9 @@
             say(fresh ? 'pairing' : 'connecting', 'connecting');
             const door = await window.clavariumDoor();
             if (!door.ok) { shut(door.message); return; }
+            pairing = door.pairing; API = `/c/api/${pairing}`;
+            document.documentElement.dataset.pairing = pairing;      /* not a secret: a name, useless without the key */
+            offerOthers(door.others);
             welcoming = fresh;
             await refresh();
             void offerVoice();          /* only now is there a session to ask with */

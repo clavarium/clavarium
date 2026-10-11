@@ -16,6 +16,7 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
+      <button type="button" id="others" hidden>This device</button>
       <button type="button" id="install" class="primary" hidden>Install the app</button>
       <button type="button" id="theme" aria-label="Light or dark screen">Light</button>
       <button type="button" id="copy-open" hidden>Copy / paste</button>
@@ -33,6 +34,11 @@
         <p class="hint">Or put it here first (a long press offers "Paste"), then send it:</p>
         <textarea id="paste-text" spellcheck="false" aria-label="Text to send to the terminal" placeholder="Paste here"></textarea>
         <div class="row"><button type="button" id="paste-send">Send to the terminal</button></div>
+      </div>
+      <div id="others-sheet" class="sheet" hidden>
+        <div class="panel-top"><b>Conversations on this device</b><button type="button" id="others-close">Close</button></div>
+        <p class="hint">Each conversation was shared with this device by a code of its own. To add another, scan its code. Removing one here takes it off this device only.</p>
+        <div id="others-rows"></div>
       </div>
       <div id="files" class="sheet" hidden>
         <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
