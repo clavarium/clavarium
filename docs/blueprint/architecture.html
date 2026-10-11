@@ -447,8 +447,8 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
     <h2>Two doors, one house</h2>
     <div class="scroll"><table>
       <tr><th></th><th>Operator door</th><th>Device door (QR)</th></tr>
-      <tr><td>Proves</td><td>who you are: OIDC sign-on</td><td>only that it was paired: a key held by the device. No name, no email</td></tr>
-      <tr><td>Sees</td><td>all conversations, resources, secrets settings</td><td><b>one conversation</b>: its terminal, shortcuts, voice, files</td></tr>
+      <tr><td>Proves</td><td>who you are: OIDC sign-on</td><td>only that it was paired: a key held by the device, one per conversation shared with it. No name, no email</td></tr>
+      <tr><td>Sees</td><td>all conversations, resources, secrets settings</td><td>the conversations shared with it, <b>one at a time</b>, each by its own pairing: terminal, shortcuts, voice, files. It can drop one itself</td></tr>
       <tr><td>Can create, attach, delete</td><td>yes</td><td>no</td></tr>
       <tr><td>Ends when</td><td>sign-out</td><td>the operator revokes the device, or archives the conversation</td></tr>
     </table></div>
