@@ -6,7 +6,8 @@
  *                 attached to the conversation: a file, a mail, a commit. This is how tools work
  *                 TOGETHER: one leaves a request in a folder they share, the
  *                 other is told, and gets to it.
- *   THE CLOCK     every so many minutes, or every day at a given time.
+ *   THE CLOCK     every so many minutes, every day at a given time, or a
+ *                 cron line (minute hour day month weekday).
  *
  * What is then done is small: a MESSAGE THE OWNER WROTE is typed into the
  * tool's terminal, followed by Enter. Nothing is run, nothing is decided
@@ -48,7 +49,38 @@ export const SCAN_DEPTH = 5;
 /* A daily wake-up missed by more than this (the server was down, the
    conversation asleep) is not caught up: it waits for the next day. */
 export const LATE_MS = 15 * 60_000;
-const KINDS = ['arrival', 'every', 'daily'];
+const KINDS = ['arrival', 'every', 'daily', 'cron'];
+
+/* A CRON LINE, the five usual fields: minute hour day-of-month month
+   day-of-week. Numbers, "*", lists (1,15), ranges (1-5), steps (every 10
+   minutes is written with a slash: star slash 10). Sunday is 0 or 7. As
+   cron does: when both the day of the month and the day of the week are
+   given, either one is enough. Resolves with a function (date) -> boolean,
+   or undefined when the line cannot be read. */
+const FIELDS = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+export function cron(line) {
+    const parts = String(line ?? '').trim().split(/\s+/);
+    if (parts.length !== 5) return undefined;
+    const sets = [];
+    for (const [n, part] of parts.entries()) {
+        const [low, high] = FIELDS[n];
+        const set = new Set();
+        for (const piece of part.split(',')) {
+            const m = /^(\*|\d{1,2}(?:-\d{1,2})?)(?:\/(\d{1,2}))?$/.exec(piece);
+            if (!m) return undefined;
+            const step = m[2] === undefined ? 1 : Number(m[2]);
+            let [from, to] = m[1] === '*' ? [low, high] : m[1].split('-').map(Number);
+            if (to === undefined) to = m[2] === undefined ? from : high;
+            if (step < 1 || from < low || to > high || from > to) return undefined;
+            for (let v = from; v <= to; v += step) set.add(n === 4 && v === 7 ? 0 : v);
+        }
+        sets.push(set);
+    }
+    const [minute, hour, day, month, weekday] = sets;
+    const anyDay = parts[2] === '*'; const anyWeekday = parts[4] === '*';
+    return (date) => minute.has(date.getMinutes()) && hour.has(date.getHours()) && month.has(date.getMonth() + 1)
+        && (anyDay && anyWeekday ? true : anyDay ? weekday.has(date.getDay()) : anyWeekday ? day.has(date.getDate()) : day.has(date.getDate()) || weekday.has(date.getDay()));
+}
 const PANE = `=${SESSION}:`;
 /* How new commits are named among what arrived. */
 export const COMMITS = 'new commits';
@@ -107,11 +139,11 @@ export class Wakeups {
         return this.of(name);
     }
 
-    add(name, { kind, resource, onlyNew, minutes, at, message, quiet }) {
+    add(name, { kind, resource, onlyNew, minutes, at, message, quiet, line }) {
         this.#known(name);
         const r = this.#record(name);
         if (r.items.length >= ITEMS_MAX) throw new Refusal(400, `A conversation has at most ${ITEMS_MAX} wake-ups.`);
-        if (!KINDS.includes(kind)) throw new Refusal(400, 'A wake-up is an arrival, every so many minutes, or every day at a time.');
+        if (!KINDS.includes(kind)) throw new Refusal(400, 'A wake-up is an arrival, every so many minutes, every day at a time, or a cron line.');
         const text = cleanMessage(message);
         if (text === '') throw new Refusal(400, 'Write what is typed to the tool when it is woken.');
         const item = { id: randomUUID(), kind, on: true, message: text, made: this.#now().toISOString(), last: null };
@@ -124,6 +156,10 @@ export class Wakeups {
             const n = Number(minutes);
             if (!Number.isInteger(n) || n < 1 || n > 60 * 24 * 31) throw new Refusal(400, 'Every how many minutes? A whole number, 1 at least.');
             item.minutes = n; item.fired = item.made;
+        } else if (kind === 'cron') {
+            const written = String(line ?? '').trim().replace(/\s+/g, ' ');
+            if (!cron(written)) throw new Refusal(400, 'A cron line has five fields: minute hour day month weekday. For example: 30 7 * * 1-5');
+            item.line = written; item.fired = item.made;
         } else {
             if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(at))) throw new Refusal(400, 'At what time? Written like 07:30.');
             item.at = at; item.fired = item.made;
@@ -149,6 +185,11 @@ export class Wakeups {
     #due(name, item) {
         const now = this.#now();
         if (item.kind === 'every') return now.getTime() - new Date(item.fired).getTime() >= item.minutes * 60_000 ? item.message : undefined;
+        if (item.kind === 'cron') {
+            /* Once in the minute it names; a minute that was missed is not caught up. */
+            const minuteOf = (d) => Math.floor(d.getTime() / 60_000);
+            return cron(item.line)?.(now) && minuteOf(now) !== minuteOf(new Date(item.fired)) ? item.message : undefined;
+        }
         if (item.kind === 'daily') {
             const [h, m] = item.at.split(':').map(Number);
             const today = new Date(now); today.setHours(h, m, 0, 0);

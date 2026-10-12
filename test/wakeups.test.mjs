@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, appendFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
-import { Wakeups, look, withFiles, cleanMessage, plainName } from '../server/wakeups.mjs';
+import { Wakeups, look, withFiles, cleanMessage, plainName, cron } from '../server/wakeups.mjs';
 
 function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
@@ -47,6 +47,7 @@ test('a wake-up is refused unless it is whole', (t) => {
     assert.throws(() => b.wakeups.add('worker', { kind: 'every', minutes: 0, message: 'go' }), /whole number, 1 at least/);
     assert.throws(() => b.wakeups.add('worker', { kind: 'daily', at: '7h30', message: 'go' }), /Written like 07:30/);
     assert.throws(() => b.wakeups.add('worker', { kind: 'whenever', message: 'go' }), /an arrival, every so many minutes/);
+    assert.throws(() => b.wakeups.add('worker', { kind: 'cron', line: 'every morning', message: 'go' }), /five fields/);
     assert.throws(() => b.wakeups.add('nobody', { kind: 'every', minutes: 5, message: 'go' }), /No such conversation/);
     assert.throws(() => b.wakeups.setLimit('worker', -1), /whole number/);
     for (let i = 0; i < 8; i++) b.wakeups.add('worker', { kind: 'every', minutes: 5, message: 'go' });
@@ -162,4 +163,36 @@ test('a cap an hour, which the owner sets and may remove; asleep, detached or of
     assert.equal(b.typed.length, 14);
     b.wakeups.forget('worker');
     assert.deepEqual(b.wakeups.of('worker'), { perHour: 12, items: [], sentThisHour: 0 });
+});
+
+test('a cron line: five fields, lists, ranges and steps; what cannot be read is refused', () => {
+    const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi, 0);
+    const weekdays = cron('30 7 * * 1-5');
+    assert.equal(weekdays(at(2026, 1, 5, 7, 30)), true, 'a Monday');
+    assert.equal(weekdays(at(2026, 1, 4, 7, 30)), false, 'a Sunday');
+    assert.equal(weekdays(at(2026, 1, 5, 7, 31)), false);
+    const quarter = cron('*/15 9-17 * * *');
+    assert.equal(quarter(at(2026, 1, 5, 9, 45)), true); assert.equal(quarter(at(2026, 1, 5, 9, 50)), false); assert.equal(quarter(at(2026, 1, 5, 18, 0)), false);
+    assert.equal(cron('0 8 1,15 * *')(at(2026, 3, 15, 8, 0)), true); assert.equal(cron('0 8 1,15 * *')(at(2026, 3, 16, 8, 0)), false);
+    assert.equal(cron('0 0 * * 7')(at(2026, 1, 4, 0, 0)), true, 'Sunday is 7 as well as 0');
+    /* As cron does: a day of the month OR a day of the week. */
+    assert.equal(cron('0 6 13 * 5')(at(2026, 1, 13, 6, 0)), true, 'the 13th, a Tuesday'); assert.equal(cron('0 6 13 * 5')(at(2026, 1, 9, 6, 0)), true, 'a Friday');
+    assert.equal(cron('5-59/20 * * 6 *')(at(2026, 6, 1, 3, 25)), true);
+    for (const bad of ['', '* * * *', '* * * * * *', '60 * * * *', '* 24 * * *', '* * 0 * *', '* * * 13 *', '* * * * 8', '*/0 * * * *', '5-1 * * * *', 'a * * * *', '1,,2 * * * *', '@daily']) assert.equal(cron(bad), undefined, bad);
+});
+
+test('a cron wake-up is typed once in the minute it names, and a missed minute is not caught up', async (t) => {
+    const b = bench(t);                                   /* a Monday, 06:00 */
+    b.wakeups.add('worker', { kind: 'cron', line: '  30   7 * * 1-5 ', message: 'Morning report.' });
+    assert.equal(b.wakeups.of('worker').items[0].line, '30 7 * * 1-5');
+    b.later(89); await b.wakeups.tick();
+    assert.deepEqual(b.typed, []);
+    b.later(1); await b.wakeups.tick(); await b.wakeups.tick(); await b.wakeups.tick();
+    assert.deepEqual(b.typed, ['Morning report.', 'Enter'], 'once, though looked at three times in that minute');
+    b.later(24 * 60 + 2); await b.wakeups.tick();          /* Tuesday 07:32: missed */
+    assert.equal(b.typed.length, 2);
+    b.later(24 * 60 - 2); await b.wakeups.tick();          /* Wednesday 07:30 */
+    assert.equal(b.typed.length, 4);
+    b.later(3 * 24 * 60); await b.wakeups.tick();          /* Saturday 07:30 */
+    assert.equal(b.typed.length, 4, 'not on a Saturday');
 });
