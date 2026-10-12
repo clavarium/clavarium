@@ -63,7 +63,7 @@ svg .c { text-anchor: middle; }
 <body>
 <main>
 <h1>Clavarium in pictures</h1>
-<p class="lead">Five drawings. Blue is an agent, gold is yours, a thick line is a wall.</p>
+<p class="lead">Six drawings. Blue is an agent, gold is yours, a thick line is a wall.</p>
 
 <svg width="0" height="0" style="position:absolute;border:0" aria-hidden="true"><defs>
   <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
@@ -121,7 +121,7 @@ svg .c { text-anchor: middle; }
     <rect class="agent" x="520" y="120" width="170" height="110" rx="10"/>
     <text class="t c" x="605" y="170">the agent</text>
     <text class="s c" x="605" y="190">works here</text>
-    <path class="a ok" d="M220 66 H468"/><text class="s fo" x="300" y="58">write</text>
+    <path class="a ok" style="marker-start:url(#hok)" d="M222 66 H468"/><text class="s fo" x="300" y="58">read and write</text>
     <path class="a ok" d="M220 116 H468"/><text class="s fo" x="300" y="108">read</text>
     <path class="a ok" d="M220 166 H468"/><text class="s fo" x="300" y="158">use, never read</text>
     <path class="a no" d="M220 236 H440"/><path class="a no" d="M220 286 H440"/>
@@ -155,7 +155,7 @@ svg .c { text-anchor: middle; }
 </figure>
 
 <figure id="answerer">
-  <figcaption><b>4. It keeps working without you</b><span class="tag">being built</span><span><br>When the agent asks a simple question, several models of different makers answer in your place, under your objectives and your charter. They must all agree. Otherwise it is you who are asked.</span></figcaption>
+  <figcaption><b>4. It keeps working without you</b><span>When the agent asks a simple question, several models of different makers answer in your place, under your objectives and your charter. They must all agree. Otherwise it is you who are asked.</span></figcaption>
   <svg viewBox="0 0 760 430" role="img" aria-label="The agent asks a question. Three models of different makers read it, with your objectives and your charter. If all three give the same answer, it is typed to the agent. If one doubts or they disagree, you are called. A limit you set, a log of everything, and nothing leaves without you.">
     <rect class="yours" x="270" y="20" width="220" height="56" rx="10"/>
     <text class="t c" x="380" y="44">Your objectives</text><text class="t c" x="380" y="64">Your charter</text>
@@ -191,8 +191,23 @@ svg .c { text-anchor: middle; }
   </svg>
 </figure>
 
+<figure id="wakes">
+  <figcaption><b>5. It gets to work by itself</b><span>Something arrives in what it has, or the clock strikes: a line you wrote is typed to the agent.</span></figcaption>
+  <svg viewBox="0 0 760 260" role="img" aria-label="Three things can wake an agent: a file that arrives in a folder, a mail or a commit, and the clock. Each sends a line the owner wrote to the agent in its machine. A cap an hour, and a wait until things are still.">
+    <rect class="yours" x="20" y="24" width="220" height="50" rx="8"/><text class="t" x="34" y="46">a file arrives</text><text class="s" x="34" y="64">in a folder it has</text>
+    <rect class="yours" x="20" y="88" width="220" height="50" rx="8"/><text class="t" x="34" y="110">a mail, a commit</text><text class="s" x="34" y="128">in a mailbox, a repository</text>
+    <rect class="box" x="20" y="152" width="220" height="50" rx="8"/><text class="t" x="34" y="174">the clock</text><text class="s" x="34" y="192">every 30 minutes, every day at 07:30</text>
+    <rect class="yours" x="320" y="84" width="170" height="58" rx="10"/><text class="t c" x="405" y="108">your line</text><text class="s c" x="405" y="126">“Read them and do it.”</text>
+    <path class="a" d="M240 49 C290 49 280 100 318 104"/><path class="a" d="M240 113 H318"/><path class="a" d="M240 177 C290 177 280 126 318 122"/>
+    <rect class="wall" x="560" y="40" width="180" height="146" rx="14"/><text class="s" x="576" y="64">its machine</text>
+    <rect class="agent" x="578" y="80" width="144" height="80" rx="10"/><text class="t c" x="650" y="116">the agent</text><text class="s c" x="650" y="136">gets to work</text>
+    <path class="a ok" d="M490 113 H576"/><text class="s c fo" x="526" y="104">typed</text>
+    <rect class="box" x="20" y="216" width="720" height="32" rx="8"/><text class="s c" x="380" y="237">told once things are still · a cap an hour · asleep, it is not woken</text>
+  </svg>
+</figure>
+
 <figure id="leaves">
-  <figcaption><b>5. Nothing leaves without you</b><span>The agent commits in its machine. The key that lets code out is kept outside it. You see, then you send.</span></figcaption>
+  <figcaption><b>6. Nothing leaves without you</b><span>The agent commits in its machine. The key that lets code out is kept outside it. You see, then you send.</span></figcaption>
   <svg viewBox="0 0 760 230" role="img" aria-label="The agent commits inside its machine. Outside the wall, you are shown what would go, you press send, and the server sends it with your key, which the agent never holds.">
     <rect class="wall" x="20" y="36" width="210" height="158" rx="14"/>
     <text class="s" x="36" y="60">its machine</text>

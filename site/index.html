@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium</title>
-<meta name="description" content="Run AI agents at home. Any agent, working together, under your rules.">
+<meta name="description" content="Automate your AI agents, at home, safely. Each works in its own walled machine, and nothing leaves without you.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -19,7 +19,7 @@
 :root {
   --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
   --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
-  --t-ground: #0f141a; --t-text: #e7edf4; --t-dim: #8a97a8; --t-brass: #d2a94e; --t-ok: #5fc39d; --t-line: #2b3745;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours-bg: #fbf3df; --ok: #17794f; --stop: #b3401f; --wall: #16181d;
   --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
@@ -29,20 +29,21 @@
   :root:not([data-theme="light"]) {
     --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
     --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
     --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
   }
 }
 :root[data-theme="dark"] {
   --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
   --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
   --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
 a { color: var(--accent); }
-.wrap { width: 100%; max-width: 68rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
-
+.wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
 header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
 header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
 .mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
@@ -51,55 +52,41 @@ nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
 nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
 nav a:hover, nav a[aria-current] { color: var(--text); }
 
-.hero { padding: clamp(2rem, 6vw, 3.6rem) 0 clamp(2rem, 5vw, 3rem); }
-h1 { margin: 0; font-size: clamp(1.9rem, 6vw, 3.1rem); line-height: 1.12; letter-spacing: -.02em; font-weight: 680; max-width: 17em; text-wrap: balance; }
-.lead { margin: 1rem 0 0; font-size: clamp(1.02rem, 2.6vw, 1.2rem); color: var(--dim); max-width: 36em; }
-.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.4rem 0 0; padding: 0; list-style: none; }
-.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
-.go { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; align-items: center; margin-top: 1.6rem; }
-.button { display: inline-block; background: var(--accent); color: var(--on-accent); font-weight: 650; text-decoration: none; border-radius: 8px; padding: .6rem 1.1rem; }
-.go a:not(.button) { font-weight: 600; text-decoration: none; }
+.hero { padding: clamp(2.4rem, 8vw, 5rem) 0 clamp(1.6rem, 4vw, 2.6rem); }
+h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 15em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 32em; }
+section { padding: clamp(2rem, 5vw, 3.2rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
+.three { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
+.three > li { min-width: 0; }
+@media (max-width: 800px) { .three { grid-template-columns: 1fr; } }
+.cap { margin: .8rem 0 0; font-weight: 650; }
+.cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
+.say { margin: .15rem 0 0; color: var(--dim); font-size: .97rem; }
+.pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
+@media (max-width: 800px) { .pair { grid-template-columns: 1fr; } }
+.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+.lines .cap { margin: 0; }
+.more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
 
-section { padding: clamp(2.4rem, 6vw, 4rem) 0; border-top: 1px solid var(--line-soft); }
-h2 { margin: 0 0 .5rem; font-size: clamp(1.4rem, 4.4vw, 1.9rem); font-weight: 650; letter-spacing: -.01em; text-wrap: balance; }
-.say { margin: 0; color: var(--dim); max-width: 30em; }
-.more { display: inline-block; margin-top: 1rem; font-weight: 600; text-decoration: none; }
+/* The drawings: blue is an agent, gold is yours, a thick line is a wall. */
+svg.d { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft); }
+svg.d text { font-family: var(--sans); fill: var(--text); font-size: 13px; }
+svg.d .t { font-weight: 650; } svg.d .s { fill: var(--dim); font-size: 11.5px; } svg.d .c { text-anchor: middle; }
+.box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+.agent { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.yours { fill: var(--yours-bg); stroke: var(--brass); stroke-width: 1.5; }
+.wall { fill: none; stroke: var(--wall); stroke-width: 2.5; }
+.a { fill: none; stroke: var(--dim); stroke-width: 1.8; marker-end: url(#h); }
+.a.ok { stroke: var(--ok); marker-end: url(#hok); }
+.a.both { marker-start: url(#hokr); }
+.a.stop { stroke: var(--stop); marker-end: url(#hstop); }
+.x { stroke: var(--stop); stroke-width: 2.5; fill: none; }
+.fo { fill: var(--ok) !important; } .fs { fill: var(--stop) !important; }
 
-/* The pictures are the product itself, on a test bench, with a staged session. */
 .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
-.hero .shot { margin-top: clamp(1.6rem, 5vw, 2.6rem); }
-.show { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
-.show.tall { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
-.show.tall .shot { max-width: 24rem; justify-self: center; }
-.stack .shot { margin-top: 1.4rem; max-width: 56rem; }
-.stack .say { max-width: 40em; }
-.under { margin: .7rem 0 0; color: var(--dim); font-size: .92rem; }
-.show > *, .two > div { min-width: 0; }
-@media (max-width: 860px) { .show, .show.tall { grid-template-columns: 1fr; } }
-.num { font: 600 .8rem var(--mono); color: var(--brass); margin: 0 0 .3rem; }
-
-.versus { list-style: none; margin: 1.4rem 0 0; padding: 0; border-top: 1px solid var(--line-soft); }
-.versus li { display: grid; grid-template-columns: minmax(0, 14rem) minmax(0, 1fr) minmax(0, 1fr); gap: .2rem 1.4rem; padding: .8rem 0; border-bottom: 1px solid var(--line-soft); }
-.versus b { font-weight: 650; }
-.versus span { color: var(--dim); }
-.versus em { font-style: normal; }
-@media (max-width: 860px) { .versus li { grid-template-columns: 1fr; } }
-
-.also { list-style: none; margin: 1.4rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.2rem 1.6rem; }
-@media (max-width: 860px) { .also { grid-template-columns: 1fr; } }
-.also b { display: block; font-weight: 650; }
-.also span { color: var(--dim); font-size: .95rem; }
-
-.cap { margin: 0; font-weight: 650; }
-#install h2 { margin-bottom: 1.4rem; }
-#install .say { margin: .2rem 0 .8rem; font-size: .95rem; }
-.snip { margin: 1rem 0 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; }
+.snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
 .snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
-.snip .c { color: var(--dim); }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
-@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
-.route { margin: 0; color: var(--dim); max-width: 38em; }
-
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 footer a { color: var(--dim); }
@@ -119,110 +106,100 @@ footer a { color: var(--dim); }
   </div>
 </header>
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
+  <marker id="hok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--ok)"/></marker>
+  <marker id="hokr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--ok)"/></marker>
+  <marker id="hstop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--stop)"/></marker>
+</defs></svg>
+
 <main>
-<section class="hero" id="top" style="border-top:0">
+<section class="hero" style="border-top:0">
   <div class="wrap">
-    <h1>Run AI agents at home. Any agent, working together, under your rules.</h1>
-    <p class="lead">Claude Code, OpenCode and others, each in its own virtual machine. Each sees only what you attach. They pass work to one another. You send what leaves.</p>
-    <ul class="claims">
-      <li>At home</li>
-      <li>Any command-line agent</li>
-      <li>Agents work together</li>
-      <li>A wall around each</li>
-    </ul>
-    <div class="go">
-      <a class="button" href="#install">Install it</a>
-      <a href="#why">Why not tmux, a container, a cloud agent? →</a>
-    </div>
-    <img class="shot" src="shots/conversations.png" width="2400" height="1480" alt="The page: four conversations on the left, each with its tool; on the right the terminal of one of them, with the folders it was given shown above it.">
+    <h1>Automate your AI agents, at home, safely.</h1>
+    <p class="lead">Each agent works in its own walled machine, and nothing leaves without you.</p>
   </div>
 </section>
 
-<section id="use">
-  <div class="wrap stack">
-    <div>
-      <p class="num">01</p>
-      <h2>It sees only what you attach</h2>
-      <p class="say">A folder, a repository, a mailbox: to read, or to write. A key: to use, never to read. One client's work never meets another's.</p>
-    </div>
-    <img class="shot" loading="lazy" src="shots/attached.png" width="2020" height="1122" alt="What one conversation has: a repository and a folder to write, a folder to read, one key to use, and its network, online or offline.">
-    <p class="under">client-a writes to site-a, reads brand-guide, and can use DEPLOY_TOKEN without ever reading it.</p>
-  </div>
-</section>
-
-<section>
-  <div class="wrap stack">
-    <div>
-      <p class="num">02</p>
-      <h2>They work together</h2>
-      <p class="say">Give two agents the same folder. One asks there, the other answers, whatever tool each one is.</p>
-    </div>
-    <img class="shot" loading="lazy" src="shots/handoff.png" width="2020" height="962" alt="A folder two conversations share: a request written by one agent, then the picture and the answer left by the other.">
-    <p class="under">client-a asked for a banner. pictures, another tool in another machine, made it.</p>
-  </div>
-</section>
-
-<section>
-  <div class="wrap stack">
-    <div>
-      <p class="num">03</p>
-      <h2>It commits. You send.</h2>
-      <p class="say">The agent never holds the key that lets code out. You are shown what would go, then you send exactly that.</p>
-    </div>
-    <img class="shot" loading="lazy" src="shots/review.png" width="2020" height="1122" alt="Two commits made by the agent, with their changes, and one button: send 2 commits to main.">
-    <p class="under">Two commits wait. Nothing leaves until you press the button.</p>
-  </div>
-</section>
-
-<section>
-  <div class="wrap show tall">
-    <div>
-      <p class="num">04</p>
-      <h2>Read the report, not the terminal</h2>
-      <p class="say">A report the agent wrote opens as a page, on a tablet. Share it with a code, no account. Take it back anytime.</p>
-      <a class="more" href="how-to-use-it.html">See a whole session →</a>
-    </div>
-    <img class="shot" loading="lazy" src="shots/result.png" width="1640" height="2000" alt="On a tablet: a price comparison written by the agent, shown as a page with a table and a recommendation.">
-  </div>
-</section>
-
-<section id="why">
+<section id="use" style="border-top:0; padding-top:0">
   <div class="wrap">
-    <h2>Why not just…</h2>
-    <ul class="versus">
-      <li><b>tmux over ssh</b><span>A terminal, and your whole computer behind it.</span><em>A page made for the phone, and a wall around each job.</em></li>
-      <li><b>a container</b><span>The host's kernel, and the rest to build yourself.</span><em>A virtual machine each, with rights, keys and the send button already there.</em></li>
-      <li><b>the tool's own remote control</b><span>One tool, on your computer, with all of it in reach.</span><em>Any tool, several at once, each in its own virtual machine with only what you attached.</em></li>
-      <li><b>a cloud agent</b><span>Your code and your keys on someone else's servers.</span><em>They stay at home. The optional relay cannot read what passes.</em></li>
-    </ul>
-    <ul class="also">
-      <li><b>From phone or tablet</b><span>The same page everywhere, with voice dictation.</span></li>
-      <li><b>Sleep, wake, rebuild</b><span>A machine costs nothing asleep, and its work folder outlives it.</span></li>
-      <li><b>Cut its network</b><span>Per conversation, from outside the machine.</span></li>
-    </ul>
+    <ol class="three">
+      <li>
+        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="Three of your things are attached to one agent's machine: one it reads and writes, one it reads, one it uses. A fourth is not attached and stops at the wall.">
+          <rect class="yours" x="14" y="20" width="104" height="30" rx="7"/><text class="t" x="24" y="40">repository</text>
+          <rect class="yours" x="14" y="60" width="104" height="30" rx="7"/><text class="t" x="24" y="80">folder</text>
+          <rect class="yours" x="14" y="100" width="104" height="30" rx="7"/><text class="t" x="24" y="120">key</text>
+          <rect class="box" x="14" y="146" width="104" height="30" rx="7"/><text class="t" x="24" y="166">your mail</text>
+          <rect class="wall" x="196" y="14" width="110" height="162" rx="12"/>
+          <rect class="agent" x="210" y="66" width="82" height="58" rx="8"/><text class="t c" x="251" y="100">agent</text>
+          <path class="a ok both" d="M120 35 H194"/><text class="s fo" x="134" y="29">write</text>
+          <path class="a ok" d="M118 75 H194"/><text class="s fo" x="134" y="69">read</text>
+          <path class="a ok" d="M118 115 H194"/><text class="s fo" x="134" y="109">use</text>
+          <path d="M118 161 H170" stroke="var(--stop)" stroke-width="1.8" stroke-dasharray="5 4" fill="none"/><path class="x" d="M168 153 l14 16 m0 -16 l-14 16"/>
+        </svg>
+        <p class="cap"><span>01</span>Attach what it needs</p>
+        <p class="say">Pick the folders, mail and keys each agent may use.</p>
+      </li>
+      <li>
+        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="A file arrives in a folder, or the clock strikes, and the agent in its machine is woken.">
+          <rect class="yours" x="14" y="22" width="120" height="62" rx="8"/><text class="t" x="26" y="44">folder</text><text class="s" x="26" y="66">+ request.md</text>
+          <circle class="box" cx="74" cy="138" r="30"/><path d="M74 120 V138 L88 146" stroke="var(--text)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+          <rect class="wall" x="196" y="14" width="110" height="162" rx="12"/>
+          <rect class="agent" x="210" y="66" width="82" height="58" rx="8"/><text class="t c" x="251" y="92">agent</text><text class="s c" x="251" y="110">gets to work</text>
+          <path class="a ok" d="M134 53 C170 53 164 84 194 88"/>
+          <path class="a ok" d="M104 138 C160 138 164 108 194 104"/>
+          <text class="s fo" x="140" y="42">arrives</text><text class="s fo" x="126" y="158">07:30</text>
+        </svg>
+        <p class="cap"><span>02</span>Say when it wakes</p>
+        <p class="say">A new file, a mail, a commit, or every morning.</p>
+      </li>
+      <li>
+        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="The agent commits inside its machine. You see what would go, and you send it with your key.">
+          <rect class="wall" x="14" y="14" width="104" height="162" rx="12"/>
+          <rect class="agent" x="25" y="66" width="82" height="58" rx="8"/><text class="t c" x="66" y="92">agent</text><text class="s c" x="66" y="110">commits</text>
+          <rect class="box" x="146" y="66" width="74" height="58" rx="8"/><text class="t c" x="183" y="92">shown</text><text class="s c" x="183" y="110">to you</text>
+          <rect class="yours" x="246" y="66" width="60" height="58" rx="8"/><text class="t c" x="276" y="92">You</text><text class="s c" x="276" y="110">send</text>
+          <path class="a" d="M118 95 H144"/><path class="a" d="M220 95 H244"/>
+          <path class="a ok" d="M276 66 V26"/><text class="t fo" x="286" y="36">out</text>
+        </svg>
+        <p class="cap"><span>03</span>Check, then send</p>
+        <p class="say">Review what would go out; send it with your key.</p>
+      </li>
+    </ol>
+    <a class="more" href="how-to-use-it.html">See it on real screens →</a>
+  </div>
+</section>
+
+<section id="yours">
+  <div class="wrap">
+    <h2>What stays yours</h2>
+    <div class="pair">
+      <svg class="d" viewBox="0 0 320 120" role="img" aria-label="Three models read the agent's question. If all agree, the answer is typed. Otherwise you are asked.">
+          <rect class="box" x="14" y="12" width="92" height="26" rx="13"/><text class="s c" x="60" y="29">model A</text>
+          <rect class="box" x="14" y="47" width="92" height="26" rx="13"/><text class="s c" x="60" y="64">model B</text>
+          <rect class="box" x="14" y="82" width="92" height="26" rx="13"/><text class="s c" x="60" y="99">model C</text>
+          <path d="M150 60 l34 -30 l34 30 l-34 30z" class="box"/><text class="s c" x="184" y="64">same?</text>
+          <path class="a" d="M106 25 C130 25 130 52 152 56"/><path class="a" d="M106 60 H148"/><path class="a" d="M106 95 C130 95 130 68 152 64"/>
+          <path class="a ok" d="M218 60 C244 60 244 92 262 92"/><text class="s fo" x="266" y="96">typed</text>
+          <path class="a stop" d="M218 60 C244 60 244 28 262 28"/><text class="s fs" x="266" y="32">you</text>
+        </svg>
+      <ul class="lines">
+        <li><p class="cap">Your say</p><p class="say">Away, several models must agree, or you are asked.</p></li>
+        <li><p class="cap">Your keys</p><p class="say">Agents use them, never read them.</p></li>
+        <li><p class="cap">Your machine</p><p class="say">Installed once, at home, on Ubuntu.</p></li>
+      </ul>
+    </div>
     <a class="more" href="how-it-is-kept-safe.html">How it is kept safe →</a>
   </div>
 </section>
 
 <section id="install">
   <div class="wrap">
-    <h2>How you install it</h2>
-    <div class="two">
-      <div>
-        <p class="cap">On a machine at home</p>
-        <p class="say">A fresh Ubuntu Server, one command. It sets up everything, the virtual machines included.</p>
-        <div class="snip"><pre>sudo deploy/install.sh \
+    <h2>Install it</h2>
+    <div class="snip"><pre>sudo deploy/install.sh \
   --domain clav.example.com \
   --operator you@example.com</pre></div>
-      </div>
-      <div>
-        <p class="cap">No public address at home?</p>
-        <p class="say">One more command, on any small server. It relays, and cannot read what passes.</p>
-        <div class="snip"><pre>sudo deploy/relay.sh --key "ssh-ed25519 AAAA…"</pre></div>
-      </div>
-    </div>
-    <p class="under">Set up once. After that, you only open a page.</p>
-    <a class="more" href="how-to-install-it.html">Other ways in: a ready-made machine, backup, restore →</a>
+    <a class="more" href="how-to-install-it.html">No public address at home, backup, a ready-made machine →</a>
   </div>
 </section>
 </main>
