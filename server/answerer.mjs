@@ -28,6 +28,7 @@
  *                    owner sets it, and may set none.
  *   A LOG            what was on the screen, what each model said, what was
  *                    typed. Kept here, read from the page.
+ *   THE OWNER TOLD   when it stops, the owner's devices are alerted (alerts.mjs).
  *   THE OWNER FIRST  one key typed by a person and the count starts again.
  *
  * WHAT IT DOES NOT CLOSE: every model reads the same screen. A text planted
@@ -178,10 +179,12 @@ const PANE = `=${SESSION}:`;
 const fingerprint = (screen) => createHash('sha256').update(screen).digest('hex');
 
 export class Answerer {
-    #store; #vms; #config; #fetcher; #dir; #conversations; #seen = new Map(); #busy = new Set(); #turn = 0; #now;
+    #store; #vms; #config; #fetcher; #dir; #conversations; #seen = new Map(); #busy = new Set(); #turn = 0; #now; #onNeeds;
 
     /* `conversations`: asked which conversations exist and are awake. */
-    constructor({ store, vms, config, conversations, dataDir, fetcher = fetch, now = () => new Date() }) {
+    /* `onNeeds(name, why)`: it stopped and waits for its owner, who must be told. */
+    constructor({ store, vms, config, conversations, dataDir, fetcher = fetch, now = () => new Date(), onNeeds = () => {} }) {
+        this.#onNeeds = onNeeds;
         this.#store = store; this.#vms = vms; this.#config = config; this.#conversations = conversations; this.#fetcher = fetcher; this.#now = now;
         this.#dir = `${dataDir}/answerer`;
         mkdirSync(this.#dir, { recursive: true, mode: 0o700 });
@@ -278,6 +281,7 @@ export class Answerer {
             if (s.limit > 0 && s.row >= s.limit) {
                 const why = `It answered ${s.row} time(s) in a row: that is the limit you set.`;
                 this.#store.patch(name, { needs: { at: this.#now().toISOString(), why } });
+                this.#onNeeds(name, why);
                 this.#note(name, { outcome: 'human', why, said: [], screen: tail(screen) });
                 return;
             }
@@ -288,6 +292,7 @@ export class Answerer {
             if (verdict.outcome === 'none') return;
             if (verdict.outcome === 'human') {
                 this.#store.patch(name, { needs: { at: this.#now().toISOString(), why: verdict.why } });
+                this.#onNeeds(name, verdict.why);
                 this.#note(name, { outcome: 'human', why: verdict.why, said: verdict.said, screen: tail(screen) });
                 return;
             }

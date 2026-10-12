@@ -616,6 +616,43 @@
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
+    /* ---------- alerts: this device is told when a tool waits ---------- */
+    const pushKey = (text) => { const b = atob((text + '='.repeat((4 - (text.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+    const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+    async function paintAlerts(said) {
+        const state = $('alerts-state');
+        if (!pushable()) {
+            $('alerts-on').hidden = true;
+            state.textContent = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'On an iPhone or an iPad, alerts come once the page is installed as an app (Share, then "Add to Home Screen").' : 'This browser cannot be alerted.';
+            return;
+        }
+        const registration = await navigator.serviceWorker.ready;
+        const mine = await registration.pushManager.getSubscription();
+        const about = await fetch(`${API}/alerts`).then((r) => r.json()).catch(() => ({ devices: [] }));
+        $('alerts-on').hidden = Boolean(mine); $('alerts-off').hidden = $('alerts-test').hidden = !mine;
+        state.textContent = said ?? (mine ? `This device is told when a tool stops and waits for you. ${about.devices.length} device(s) in all.` : `When a tool stops and waits for you, this device can be told.${about.devices.length > 0 ? ` ${about.devices.length} other device(s) already are.` : ''}`);
+    }
+    $('alerts-on').addEventListener('click', async () => {
+        try {
+            if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Alerts are refused for this site in the settings of this browser.'); return; }
+            const { key } = await fetch(`${API}/alerts`).then((r) => r.json());
+            const registration = await navigator.serviceWorker.ready;
+            const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKey(key) });
+            await post(`${API}/alerts`, { subscription: subscription.toJSON(), label: /Android/.test(navigator.userAgent) ? 'Android' : /iPad|iPhone/.test(navigator.userAgent) ? 'iPhone or iPad' : 'Computer' });
+            await paintAlerts();
+        } catch (error) { await paintAlerts(`This device could not be set up for alerts: ${error.message}`); }
+    });
+    $('alerts-off').addEventListener('click', async () => {
+        const registration = await navigator.serviceWorker.ready;
+        const mine = await registration.pushManager.getSubscription();
+        if (mine) { await post(`${API}/alerts/remove`, { endpoint: mine.endpoint }).catch(() => {}); await mine.unsubscribe().catch(() => {}); }
+        await paintAlerts();
+    });
+    $('alerts-test').addEventListener('click', async () => {
+        const r = await post(`${API}/alerts/test`, {}).catch(() => ({ reached: 0 }));
+        await paintAlerts(r.reached > 0 ? `Sent to ${r.reached} device(s). It should show in a moment.` : 'No device could be reached.');
+    });
+
     /* ---------- wake-ups: an arrival, or the clock ---------- */
     const wakeupSays = (w) => (w.kind === 'arrival' ? `When something ${w.onlyNew ? 'new arrives' : 'arrives or changes'} in ${w.resource}${w.quiet > 0 ? `, still for ${w.quiet} s` : ''}` : w.kind === 'every' ? `Every ${w.minutes} minute${w.minutes > 1 ? 's' : ''}` : w.kind === 'cron' ? `By the clock: ${w.line}` : `Every day at ${w.at}`);
     function paintWakeups() {
@@ -883,6 +920,7 @@
 
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings() {
+        void paintAlerts().catch(() => {});
         $('panel').hidden = $('files').hidden = $('sharing').hidden = $('assets').hidden = true;
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();

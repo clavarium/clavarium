@@ -62,6 +62,11 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   woken. A cap of wake-ups an hour (0: none); a conversation asleep is not
   woken.
 
+- **10 - alerts**: when a tool stops and waits for its owner, the owner's
+  devices are told, through the browser's own push service: nothing of ours
+  runs outside the house and no port is opened. Asked for on each device, in
+  Settings; the message is encrypted for that device alone.
+
 Not yet: mailbox and git resources, delivery.
 
 Where the tool works (`/work`) is a folder kept by the server: what the tool

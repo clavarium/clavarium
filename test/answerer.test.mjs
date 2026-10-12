@@ -80,9 +80,10 @@ function bench(t, say, { limit } = {}) {
         return { code: 1, stdout: '', stderr: '' };
     } };
     const conversations = { list: () => [{ name: 'job' }], awake: () => ['job'] };
-    const answerer = new Answerer({ store: new Store(join(dir, 'answerer.json')), vms, config: CONFIG, conversations, dataDir: dir, fetcher: models((m, asked) => { machine.asked++; return say(m, asked); }) });
+    const told = [];
+    const answerer = new Answerer({ store: new Store(join(dir, 'answerer.json')), vms, config: CONFIG, conversations, dataDir: dir, onNeeds: (name, why) => told.push({ name, why }), fetcher: models((m, asked) => { machine.asked++; return say(m, asked); }) });
     if (limit !== undefined) answerer.set('job', { ...MANDATE, limit, on: true });
-    return { answerer, machine, dir };
+    return { answerer, machine, dir, told };
 }
 
 test('it is off until the owner turns it on, and never on without a mandate', (t) => {
@@ -128,6 +129,7 @@ test('a doubt stops it until the owner is back; so does the limit; a typed key s
     await show('And again? 1');
     assert.equal(b.machine.typed.length, 2, 'the limit: nothing more is typed');
     assert.match(b.answerer.of('job').needs.why, /2 time\(s\) in a row: that is the limit you set/);
+    assert.equal(b.told.length, 1, 'its owner is told, once'); assert.equal(b.told[0].name, 'job'); assert.match(b.told[0].why, /the limit you set/);
     await show('Something else? 1');
     assert.equal(b.machine.typed.length, 2, 'and nothing is judged while it waits for the owner');
     /* The screen's own chatter is not the owner; a key is. */
@@ -135,6 +137,7 @@ test('a doubt stops it until the owner is back; so does the limit; a typed key s
     b.answerer.typed('job', 'y'); assert.equal(b.answerer.of('job').needs, null); assert.equal(b.answerer.of('job').row, 0);
     await show('Delete the folder? 1');
     assert.equal(b.machine.typed.length, 2); assert.match(b.answerer.of('job').needs.why, /two: it deletes/);
+    assert.equal(b.told.length, 2); assert.match(b.told[1].why, /two: it deletes/);
     assert.equal(b.answerer.log('job')[0].outcome, 'human');
     b.answerer.resume('job');
     await show('Go on then? 1');

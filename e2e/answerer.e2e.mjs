@@ -15,9 +15,16 @@ const readers = async (url, init) => {
 };
 
 test('away from the screen: the question of the tool is answered when all agree, and left to the owner when one doubts', { skip: SKIP }, async (t) => {
-    const b = await bench(t, { answerFetcher: readers });
+    const alerted = [];
+    const b = await bench(t, { answerFetcher: readers, alertSend: async (subscription, payload) => { alerted.push(JSON.parse(payload)); } });
     const me = await b.person();
     await me.create('worker');
+    /* A device asked to be told (a browser under test has no push service: the server is told as a browser would). */
+    assert.equal((await me.api('/api/alerts', { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/a-device', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } }, label: 'Tablet' })).status, 201);
+    assert.equal((await me.api('/api/alerts', { subscription: { endpoint: 'https://example.com/hook', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } } })).status, 400);
+    await me.page.locator('#settings-open').click();
+    await me.until('Settings has its alerts', async () => (await me.page.locator('#alerts-state').innerText()).length > 0);
+    await me.page.locator('#settings-close').click();
     /* Its place is in "This conversation"; off, and it says what turning it on means. */
     await me.page.locator('#folders').click();
     await me.until('it says what it is', async () => /3 models answer.*THE SCREEN OF THIS CONVERSATION IS SENT to: reader-one, reader-two, reader-three/.test(await me.page.locator('#answerer-about').innerText()));
@@ -39,6 +46,8 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.type('read -p "Delete everything? (y/n) " a; echo "it got: $a"');
     await me.until('the list says it waits for its owner', async () => /asks for you/.test(await me.page.locator('#items .item[aria-current=true]').innerText()), 30_000);
     assert.equal((await me.screen()).includes('it got: y\nready> read -p "Delete') && /it got: [yn]\s*$/.test((await me.screen()).trim().split('Delete everything?').at(-1)), false, 'nothing was answered');
+    /* And the owner's phone is told, with where to go. */
+    assert.deepEqual(alerted, [{ title: 'worker waits for you', body: 'reader-two: the charter does not allow deleting', url: '/?c=worker' }]);
     await me.page.locator('#folders').click();
     await me.until('it says why', async () => /It stopped and waits for you\. reader-two: the charter does not allow deleting/.test(await me.page.locator('#answerer-state').innerText()));
     /* What it did is written down: who said what, on which screen. */

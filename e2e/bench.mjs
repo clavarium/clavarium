@@ -44,7 +44,7 @@ export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 /* `tools`: other tools than the two plain shells (the pictures of the site are
    taken on this bench, with the names a reader knows). */
-export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher } = {}) {
+export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
     const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
@@ -55,7 +55,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true,
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
-        wakeEveryMs: 300,
+        wakeEveryMs: 300, alertSend,
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });
