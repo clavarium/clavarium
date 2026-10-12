@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium</title>
-<meta name="description" content="Automate your AI agents, at home, safely. Each works in its own walled machine, and nothing leaves without you.">
+<meta name="description" content="Your agents work all night, on a machine you own. Nothing leaves without you.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -52,41 +52,46 @@ nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
 nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
 nav a:hover, nav a[aria-current] { color: var(--text); }
 
-.hero { padding: clamp(2.4rem, 8vw, 5rem) 0 clamp(1.6rem, 4vw, 2.6rem); }
-h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 15em; text-wrap: balance; }
-.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 32em; }
+.hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
+h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 34em; }
+.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
 section { padding: clamp(2rem, 5vw, 3.2rem) 0; border-top: 1px solid var(--line-soft); }
 h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
 .three { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
-.three > li { min-width: 0; }
-@media (max-width: 800px) { .three { grid-template-columns: 1fr; } }
-.cap { margin: .8rem 0 0; font-weight: 650; }
+.three > li { min-width: 0; display: flex; flex-direction: column; }
+@media (max-width: 860px) { .three { grid-template-columns: 1fr; } }
+.cap { margin: 0; font-weight: 650; }
 .cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
-.say { margin: .15rem 0 0; color: var(--dim); font-size: .97rem; }
-.pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
-@media (max-width: 800px) { .pair { grid-template-columns: 1fr; } }
-.lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
-.lines .cap { margin: 0; }
+.say { margin: .2rem 0 .9rem; color: var(--dim); font-size: .97rem; }
 .more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
 
-/* The drawings: blue is an agent, gold is yours, a thick line is a wall. */
-svg.d { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-soft); }
-svg.d text { font-family: var(--sans); fill: var(--text); font-size: 13px; }
-svg.d .t { font-weight: 650; } svg.d .s { fill: var(--dim); font-size: 11.5px; } svg.d .c { text-anchor: middle; }
-.box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
-.agent { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
-.yours { fill: var(--yours-bg); stroke: var(--brass); stroke-width: 1.5; }
-.wall { fill: none; stroke: var(--wall); stroke-width: 2.5; }
-.a { fill: none; stroke: var(--dim); stroke-width: 1.8; marker-end: url(#h); }
-.a.ok { stroke: var(--ok); marker-end: url(#hok); }
-.a.both { marker-start: url(#hokr); }
-.a.stop { stroke: var(--stop); marker-end: url(#hstop); }
-.x { stroke: var(--stop); stroke-width: 2.5; fill: none; }
-.fo { fill: var(--ok) !important; } .fs { fill: var(--stop) !important; }
+/* The scenes: small drawings made of the pieces the product itself shows. */
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
+.scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
+.scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
+.scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
+.scene .tag { margin-left: auto; font-weight: 600; font-size: 10.5px; color: #d2a94e; border: 1px solid #d2a94e; border-radius: 1rem; padding: 0 .45rem; }
+.scene .dim { color: #8a97a8; }
+.scene .gold { color: #d2a94e; }
+.scene .ok { color: #5fc39d; }
+.scene .term { font-family: var(--mono); font-size: 11.5px; }
+.scene .via { text-align: center; color: #8a97a8; font-family: var(--mono); font-size: 11px; }
+.scene .row { display: flex; gap: .35rem; flex-wrap: wrap; }
+.scene .pill { border: 1px solid #2b3745; border-radius: 1rem; padding: .05rem .5rem; font-size: 11px; }
+.scene .pill b { color: #5fc39d; }
+.scene .pill b.no { color: #f08a6b; }
+.scene .paper { background: #fff; color: #16181d; border-radius: 8px; padding: .55rem .65rem; }
+.scene .paper b { display: block; font-size: 13px; }
+.scene .bars { display: flex; align-items: flex-end; gap: .3rem; height: 2.4rem; margin-top: .4rem; }
+.scene .bars i { flex: 1; background: #0b53c0; border-radius: 3px 3px 0 0; }
+.scene .send { margin-left: auto; background: #d2a94e; color: #1b1405; font-weight: 700; border-radius: 6px; padding: .15rem .7rem; }
+.scene .end { margin-top: auto; }
 
-.shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
 .snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
 footer a { color: var(--dim); }
@@ -106,96 +111,81 @@ footer a { color: var(--dim); }
   </div>
 </header>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
-  <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
-  <marker id="hok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--ok)"/></marker>
-  <marker id="hokr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--ok)"/></marker>
-  <marker id="hstop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--stop)"/></marker>
-</defs></svg>
-
 <main>
 <section class="hero" style="border-top:0">
   <div class="wrap">
-    <h1>Automate your AI agents, at home, safely.</h1>
-    <p class="lead">Each agent works in its own walled machine, and nothing leaves without you.</p>
+    <h1>Your agents work all night. Nothing leaves without you.</h1>
+    <p class="lead">Each sees only what you attach and uses keys it cannot read. In the morning, the report is on your tablet.</p>
+    <ul class="claims">
+      <li>On a machine you own</li>
+      <li>Claude Code, OpenCode, any other</li>
+      <li>Each client kept apart</li>
+      <li>Agents wake each other</li>
+      <li>Network can be cut</li>
+    </ul>
   </div>
 </section>
 
-<section id="use" style="border-top:0; padding-top:0">
+<section id="use">
   <div class="wrap">
+    <h2>How you use it</h2>
     <ol class="three">
       <li>
-        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="Three of your things are attached to one agent's machine: one it reads and writes, one it reads, one it uses. A fourth is not attached and stops at the wall.">
-          <rect class="yours" x="14" y="20" width="104" height="30" rx="7"/><text class="t" x="24" y="40">repository</text>
-          <rect class="yours" x="14" y="60" width="104" height="30" rx="7"/><text class="t" x="24" y="80">folder</text>
-          <rect class="yours" x="14" y="100" width="104" height="30" rx="7"/><text class="t" x="24" y="120">key</text>
-          <rect class="box" x="14" y="146" width="104" height="30" rx="7"/><text class="t" x="24" y="166">your mail</text>
-          <rect class="wall" x="196" y="14" width="110" height="162" rx="12"/>
-          <rect class="agent" x="210" y="66" width="82" height="58" rx="8"/><text class="t c" x="251" y="100">agent</text>
-          <path class="a ok both" d="M120 35 H194"/><text class="s fo" x="134" y="29">write</text>
-          <path class="a ok" d="M118 75 H194"/><text class="s fo" x="134" y="69">read</text>
-          <path class="a ok" d="M118 115 H194"/><text class="s fo" x="134" y="109">use</text>
-          <path d="M118 161 H170" stroke="var(--stop)" stroke-width="1.8" stroke-dasharray="5 4" fill="none"/><path class="x" d="M168 153 l14 16 m0 -16 l-14 16"/>
-        </svg>
-        <p class="cap"><span>01</span>Attach what it needs</p>
-        <p class="say">Pick the folders, mail and keys each agent may use.</p>
+        <p class="cap"><span>01</span>You tell each agent its job</p>
+        <p class="say">You attach one client's orders and write one plain line each. One wakes at 2:00, the other when a request arrives.</p>
+        <div class="scene" aria-hidden="true">
+          <div class="dim">Client: <b style="color:#e7edf4">Bakery</b></div>
+          <div class="card">
+            <div class="who"><span class="dot"></span>report <span class="tag">Claude Code</span></div>
+            <div class="dim">orders <span class="gold">read</span> · shared <span class="gold">write</span> · shop key <span class="gold">use</span></div>
+            <div><span class="gold">Every night at 2:00</span> · read the day's orders, write the report, ask for the chart</div>
+          </div>
+          <div class="via">↓ shared / request.md ↓</div>
+          <div class="card">
+            <div class="who"><span class="dot"></span>charts <span class="tag">OpenCode</span></div>
+            <div class="dim">shared <span class="gold">write</span></div>
+            <div><span class="gold">When a file arrives in shared</span> · do the request</div>
+          </div>
+          <div class="dim end">Client: Garage · its own agent, its own key, not seen from here</div>
+        </div>
       </li>
       <li>
-        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="A file arrives in a folder, or the clock strikes, and the agent in its machine is woken.">
-          <rect class="yours" x="14" y="22" width="120" height="62" rx="8"/><text class="t" x="26" y="44">folder</text><text class="s" x="26" y="66">+ request.md</text>
-          <circle class="box" cx="74" cy="138" r="30"/><path d="M74 120 V138 L88 146" stroke="var(--text)" stroke-width="2.2" fill="none" stroke-linecap="round"/>
-          <rect class="wall" x="196" y="14" width="110" height="162" rx="12"/>
-          <rect class="agent" x="210" y="66" width="82" height="58" rx="8"/><text class="t c" x="251" y="92">agent</text><text class="s c" x="251" y="110">gets to work</text>
-          <path class="a ok" d="M134 53 C170 53 164 84 194 88"/>
-          <path class="a ok" d="M104 138 C160 138 164 108 194 104"/>
-          <text class="s fo" x="140" y="42">arrives</text><text class="s fo" x="126" y="158">07:30</text>
-        </svg>
-        <p class="cap"><span>02</span>Say when it wakes</p>
-        <p class="say">A new file, a mail, a commit, or every morning.</p>
+        <p class="cap"><span>02</span>They answer only if all agree</p>
+        <p class="say">Models from different makers read its question. All agree: it goes on. One doubts: it stops, touches nothing, and waits for you.</p>
+        <div class="scene" aria-hidden="true">
+          <div class="who"><span class="dot"></span>report <span class="tag">Claude Code</span><span class="dim" style="font-weight:400">03:12</span></div>
+          <div class="card term">38 orders read. The report is half written.<br>Shall I go on? (y/n) <span class="ok">y</span></div>
+          <div class="row"><span class="pill">model A <b>yes</b></span><span class="pill">model B <b>yes</b></span><span class="pill">model C <b>yes</b></span></div>
+          <div class="card term">03:40 Delete last week's reports? (y/n)</div>
+          <div class="row"><span class="pill">A <b>yes</b></span><span class="pill">B <b class="no">no</b></span><span class="pill">C <b>yes</b></span><span class="gold" style="font-weight:700">waiting for you</span></div>
+          <div class="dim end">Tonight: answered 4, waited on 1. Limit: 5 in a row. All in the log.</div>
+        </div>
       </li>
       <li>
-        <svg class="d" viewBox="0 0 320 190" role="img" aria-label="The agent commits inside its machine. You see what would go, and you send it with your key.">
-          <rect class="wall" x="14" y="14" width="104" height="162" rx="12"/>
-          <rect class="agent" x="25" y="66" width="82" height="58" rx="8"/><text class="t c" x="66" y="92">agent</text><text class="s c" x="66" y="110">commits</text>
-          <rect class="box" x="146" y="66" width="74" height="58" rx="8"/><text class="t c" x="183" y="92">shown</text><text class="s c" x="183" y="110">to you</text>
-          <rect class="yours" x="246" y="66" width="60" height="58" rx="8"/><text class="t c" x="276" y="92">You</text><text class="s c" x="276" y="110">send</text>
-          <path class="a" d="M118 95 H144"/><path class="a" d="M220 95 H244"/>
-          <path class="a ok" d="M276 66 V26"/><text class="t fo" x="286" y="36">out</text>
-        </svg>
-        <p class="cap"><span>03</span>Check, then send</p>
-        <p class="say">Review what would go out; send it with your key.</p>
+        <p class="cap"><span>03</span>You read it on a tablet, then send</p>
+        <p class="say">The report opens as a plain page. Nothing goes out until you press Send, with a key the agent never holds.</p>
+        <div class="scene" aria-hidden="true">
+          <div class="paper"><b>Bakery report, Monday</b>38 orders, 3 late.<div class="bars"><i style="height:45%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:100%"></i><i style="height:80%"></i></div></div>
+          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>2 commits to <b>shop</b><br><span class="dim">nothing sent yet</span></span><span class="send">Send</span></div>
+        </div>
       </li>
     </ol>
     <a class="more" href="how-to-use-it.html">See it on real screens →</a>
   </div>
 </section>
 
-<section id="yours">
+<section id="instead">
   <div class="wrap">
-    <h2>What stays yours</h2>
-    <div class="pair">
-      <svg class="d" viewBox="0 0 320 120" role="img" aria-label="Three models read the agent's question. If all agree, the answer is typed. Otherwise you are asked.">
-          <rect class="box" x="14" y="12" width="92" height="26" rx="13"/><text class="s c" x="60" y="29">model A</text>
-          <rect class="box" x="14" y="47" width="92" height="26" rx="13"/><text class="s c" x="60" y="64">model B</text>
-          <rect class="box" x="14" y="82" width="92" height="26" rx="13"/><text class="s c" x="60" y="99">model C</text>
-          <path d="M150 60 l34 -30 l34 30 l-34 30z" class="box"/><text class="s c" x="184" y="64">same?</text>
-          <path class="a" d="M106 25 C130 25 130 52 152 56"/><path class="a" d="M106 60 H148"/><path class="a" d="M106 95 C130 95 130 68 152 64"/>
-          <path class="a ok" d="M218 60 C244 60 244 92 262 92"/><text class="s fo" x="266" y="96">typed</text>
-          <path class="a stop" d="M218 60 C244 60 244 28 262 28"/><text class="s fs" x="266" y="32">you</text>
-        </svg>
-      <ul class="lines">
-        <li><p class="cap">Your say</p><p class="say">Away, several models must agree, or you are asked.</p></li>
-        <li><p class="cap">Your keys</p><p class="say">Agents use them, never read them.</p></li>
-        <li><p class="cap">Your machine</p><p class="say">Installed once, at home, on Ubuntu.</p></li>
-      </ul>
-    </div>
-    <a class="more" href="how-it-is-kept-safe.html">How it is kept safe →</a>
+    <h2>Instead of cron, tmux and glue</h2>
+    <p class="note" style="max-width:40em">A cron job runs a script. This wakes an agent that can ask, be answered, hand work to another, and still cannot send anything without you.</p>
+    <a class="more" style="margin-top:0" href="how-it-is-kept-safe.html">How it is kept safe →</a>
   </div>
 </section>
 
 <section id="install">
   <div class="wrap">
-    <h2>Install it</h2>
+    <h2>How you install it</h2>
+    <p class="note">One command, once, on an Ubuntu machine you own. After that, you only open a page.</p>
     <div class="snip"><pre>sudo deploy/install.sh \
   --domain clav.example.com \
   --operator you@example.com</pre></div>
