@@ -115,6 +115,7 @@ table.k th, table.k td { text-align: left; vertical-align: top; padding: .6rem .
 table.k th { font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--brass); }
 table.k td:first-child { font-weight: 650; }
 .scrollx { overflow-x: auto; }
+.shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -173,6 +174,23 @@ $ <span class="c">(its port 22)</span>
       </div>
     </div>
     <p class="under" style="margin-top:.9rem;color:var(--dim)">Tried on 13 October 2026, on Ubuntu 24.04. The commands are the ones shown; you can run them again on your own installation.</p>
+  </div>
+</section>
+
+<section id="seen">
+  <div class="wrap">
+    <h2>A real run, as it looked</h2>
+    <p class="note" style="max-width:46em">On the test installation, a call from outside woke the tool twice. The tool here is a plain shell asking a question, so that the pictures show the mechanism and nothing else. The three models are real.</p>
+    <div class="pair2">
+      <div>
+        <h3>“Shall I go on?” All three said yes. It was typed.</h3>
+        <img class="shot" loading="lazy" src="shots/real-vote.png" width="2360" height="1520" alt="The log of one answer: each of three models, by name, says yes and why; under it, the screen they read.">
+      </div>
+      <div>
+        <h3>“Delete them?” All three left it to the owner. It stopped.</h3>
+        <img class="shot" loading="lazy" src="shots/real-stopped.png" width="2360" height="1520" alt="The conversation says it stopped and waits for its owner, with the reason; the log shows each model asking for the owner.">
+      </div>
+    </div>
   </div>
 </section>
 
