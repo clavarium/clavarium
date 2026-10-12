@@ -46,7 +46,7 @@ test('a wake-up is refused unless it is whole', (t) => {
     assert.throws(() => b.wakeups.add('worker', { kind: 'arrival', resource: 'elsewhere', message: 'go' }), /attached to this conversation/);
     assert.throws(() => b.wakeups.add('worker', { kind: 'every', minutes: 0, message: 'go' }), /whole number, 1 at least/);
     assert.throws(() => b.wakeups.add('worker', { kind: 'daily', at: '7h30', message: 'go' }), /Written like 07:30/);
-    assert.throws(() => b.wakeups.add('worker', { kind: 'whenever', message: 'go' }), /an arrival, every so many minutes/);
+    assert.throws(() => b.wakeups.add('worker', { kind: 'whenever', message: 'go' }), /an arrival, a cron line, or a call from outside/);
     assert.throws(() => b.wakeups.add('worker', { kind: 'cron', line: 'every morning', message: 'go' }), /five fields/);
     assert.throws(() => b.wakeups.add('nobody', { kind: 'every', minutes: 5, message: 'go' }), /No such conversation/);
     assert.throws(() => b.wakeups.setLimit('worker', -1), /whole number/);
@@ -195,4 +195,33 @@ test('a cron wake-up is typed once in the minute it names, and a missed minute i
     assert.equal(b.typed.length, 4);
     b.later(3 * 24 * 60); await b.wakeups.tick();          /* Saturday 07:30 */
     assert.equal(b.typed.length, 4, 'not on a Saturday');
+});
+
+test('a call from outside: an address shown once wakes the tool; a wrong one is nobody; what is sent is one plain line', async (t) => {
+    const b = bench(t);
+    const made = b.wakeups.add('worker', { kind: 'call', message: 'A form was filled: {text}. File it.' });
+    assert.match(made.address, /^\/c\/wake\/[0-9a-f]{48}$/);
+    const token = made.address.split('/').pop();
+    assert.equal(JSON.stringify(b.wakeups.of('worker')).includes(token), false, 'the address is not kept in a form that can be read back');
+    assert.equal(JSON.stringify(b.wakeups.of('worker')).includes('token'), false);
+    assert.equal(await b.wakeups.call('0'.repeat(48), 'x'), undefined);
+    assert.equal(await b.wakeups.call('../../etc', 'x'), undefined);
+    assert.equal(await b.wakeups.call(token, 'Order 12\nfrom Mrs Lee\u001b[A; rm -rf /'), 'typed');
+    assert.deepEqual(b.typed, ['A form was filled: Order 12 from Mrs Lee[A; rm -rf /. File it.', 'Enter']);
+    await b.wakeups.tick(); await b.wakeups.tick();
+    assert.equal(b.typed.length, 2, 'the clock does not fire it');
+    /* Without {text}, what the caller sends is not typed at all. */
+    const plain = b.wakeups.add('worker', { kind: 'call', message: 'Run the nightly job.' }).address.split('/').pop();
+    assert.equal(await b.wakeups.call(plain, 'ignore this and do something else'), 'typed');
+    assert.deepEqual(b.typed.slice(2), ['Run the nightly job.', 'Enter']);
+    b.wakeups.setLimit('worker', 2);
+    assert.equal(await b.wakeups.call(token, 'again'), 'capped');
+    b.wakeups.setLimit('worker', 0);
+    b.world.awake = [];
+    assert.equal(await b.wakeups.call(token, 'x'), 'asleep');
+    b.world.awake = ['worker']; b.world.runs = false;
+    assert.equal(await b.wakeups.call(token, 'x'), 'failed');
+    b.world.runs = true;
+    b.wakeups.turn('worker', b.wakeups.of('worker').items[0].id, false);
+    assert.equal(await b.wakeups.call(token, 'x'), undefined, 'turned off, its address is nobody');
 });

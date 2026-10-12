@@ -57,7 +57,8 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
 - **9 - wake-ups**: a tool is told to get to work without its owner: when
   something arrives in a folder, a repository or a mailbox attached to its
   conversation (a file, a mail, a commit), every so many minutes, every day
-  at a time, or on a cron line. A line the owner wrote is typed to it. This is how two tools
+  at a time, on a cron line, or when an address of its own is called from
+  outside (a scheduler, a workflow tool, a script). A line the owner wrote is typed to it. This is how two tools
   work together: one leaves a request in a folder they share, the other is
   woken. A cap of wake-ups an hour (0: none); a conversation asleep is not
   woken.

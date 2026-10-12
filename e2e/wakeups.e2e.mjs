@@ -51,6 +51,24 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.page.locator('#wakeups-new button[type=submit]').click();
     await me.until('it is listed', async () => /By the clock: 0 8 1 \* \*/.test(await me.page.locator('#wakeups-rows').innerText()));
     await me.page.locator('#panel-close').click();
+    /* A call from outside: its address is shown once, and calling it wakes the tool. No account is needed: the address is the right. */
+    await me.page.locator('#folders').click();
+    await me.page.locator('#wakeups-new-box summary').click();
+    await me.page.selectOption('#wakeup-kind', 'call');
+    await me.page.fill('#wakeup-message', 'echo "called with: {text}"');
+    await me.page.locator('#wakeups-new button[type=submit]').click();
+    await me.until('its address is shown', async () => /\/c\/wake\/[0-9a-f]{48}$/.test(await me.page.inputValue('#wakeup-address')));
+    const address = await me.page.inputValue('#wakeup-address');
+    await me.page.locator('#wakeup-address-done').click();
+    assert.equal(await me.page.inputValue('#wakeup-address'), '');
+    await me.page.locator('#panel-close').click();
+    const outside = await b.browser.newContext();
+    const called = await outside.request.post(address, { data: 'order 12' });
+    assert.equal(called.status(), 202); assert.deepEqual(await called.json(), { woken: true, why: 'typed' });
+    assert.equal((await outside.request.post(address.replace(/.$/, (c) => (c === '0' ? '1' : '0')), { data: 'x' })).status(), 404);
+    assert.equal((await outside.request.get(address)).status(), 405);
+    await outside.close();
+    await me.sees('\ncalled with: order 12', 30_000);
     /* Turned off: the next arrival wakes nobody. */
     await me.page.locator('#folders').click();
     await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));

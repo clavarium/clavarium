@@ -35,7 +35,7 @@ import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
-import { Wakeups } from './wakeups.mjs';
+import { Wakeups, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
@@ -92,6 +92,20 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
     const server = createServer(async (request, response) => {
         const { pathname } = new URL(request.url ?? '/', 'http://local');
         /* The device door first, and apart: it never consults the gate. */
+        /* An address that wakes a tool, called from outside by what its owner
+           runs elsewhere: the address is the right. Nothing else is looked at,
+           and nothing is said back but what happened. See wakeups.mjs. */
+        if (wakeups && pathname.startsWith(CALL_PATH)) {
+            const say = (status, body) => response.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+            if (request.method !== 'POST') { say(405, { error: 'Call this address with POST.' }); return; }
+            let text = ''; let over = false;
+            for await (const piece of request) { text += piece; if (text.length > 4096) { over = true; break; } }
+            if (over) { say(413, { error: 'Too long.' }); return; }
+            const happened = await wakeups.call(pathname.slice(CALL_PATH.length), text);
+            if (happened === undefined) { say(404, { error: 'Not found.' }); return; }
+            say(happened === 'typed' ? 202 : happened === 'capped' ? 429 : 409, { woken: happened === 'typed', why: happened });
+            return;
+        }
         if (door && pathname.startsWith('/c/')) {
             if (await handleDoor(request, response, door)) return;
             const file = DEVICE_FILES[pathname];

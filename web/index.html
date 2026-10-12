@@ -98,6 +98,12 @@
           <div class="panel-top"><b>Wake it by itself</b></div>
           <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken.</p>
           <div id="wakeups-rows"></div>
+          <div id="wakeup-address-box" class="notice-box" hidden>
+            <b>Its address, shown this once</b>
+            <input id="wakeup-address" readonly spellcheck="false" aria-label="The address that wakes it">
+            <p class="hint">Whoever has this address can wake the tool. Copy it now: it is not kept in a form that can be shown again.</p>
+            <div class="row"><button type="button" id="wakeup-address-copy" class="primary">Copy</button><button type="button" id="wakeup-address-done">I have it</button></div>
+          </div>
           <details id="wakeups-new-box">
             <summary>Add a wake-up</summary>
             <form id="wakeups-new" autocomplete="off">
@@ -105,6 +111,7 @@
               <select id="wakeup-kind">
                 <option value="arrival">Something arrives in...</option>
                 <option value="cron">By the clock</option>
+                <option value="call">A call from outside (a scheduler, a script)</option>
               </select>
               <div data-for="arrival">
                 <label for="wakeup-resource">Where</label>
@@ -127,6 +134,7 @@
                 <label for="wakeup-line">The cron line this sets: minute hour day month weekday</label>
                 <input id="wakeup-line" spellcheck="false" autocapitalize="off" value="0 * * * *">
               </div>
+              <div data-for="call" hidden><p class="hint">It gets an address of its own. Whatever calls that address with POST wakes the tool. What the caller sends replaces {text} in your line, as one plain line.</p></div>
               <label for="wakeup-message">What is typed to the tool</label>
               <textarea id="wakeup-message" rows="3" maxlength="1000" placeholder="New requests arrived in /resources/handoff: {files}. Read them and do what they ask."></textarea>
               <p class="hint">{files} is replaced by the names of what arrived.</p>

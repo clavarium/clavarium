@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium: examples</title>
-<meta name="description" content="What people hand to their agents: 14 examples, each with what is attached, what wakes the agent, and what you find.">
+<meta name="description" content="What people hand to their agents: 15 examples, each with what is attached, what wakes the agent, and what you find.">
 <!--
   EXAMPLES. Each one is a recipe that can be copied as it is: what is
   attached, what wakes the agent, the line typed to it, what the owner finds.
@@ -104,7 +104,7 @@ footer a { color: var(--dim); }
 <section class="hero" style="border-top:0">
   <div class="wrap">
     <h1>What people hand to their agents</h1>
-    <p class="lead">14 examples. Each is a recipe: what you attach, what wakes the agent, the line typed to it, what you find.</p>
+    <p class="lead">15 examples. Each is a recipe: what you attach, what wakes the agent, the line typed to it, what you find.</p>
     <div class="jump"><a href="#dev">For developers</a><a href="#office">For an office or a shop</a><a href="#home">At home</a></div>
     <div class="always">
       <p><b>In every one of them:</b> the agent prepares, you read, and nothing leaves without you.</p>
@@ -165,6 +165,16 @@ footer a { color: var(--dim); }
           <div><dt>Woken by</dt><dd class="m">30 7 * * 1</dd></div>
           <div><dt>Typed to it</dt><dd class="q">Update the dependencies that are safe to update, run the tests, commit, and say what you left alone and why.</dd></div>
           <div><dt>You find</dt><dd>one commit per update, and the list of what needs you</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Started by what you already run</h3>
+        <p class="say">A scheduler, a workflow tool or a script calls an address; the agent gets to work.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder inbox (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">POST to its own address</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">A form was filled: {text}. File it in /resources/inbox and say what is missing.</dd></div>
+          <div><dt>You find</dt><dd>its answer as a file, where your other tools can read it</dd></div>
         </dl>
       </li>
     </ul>

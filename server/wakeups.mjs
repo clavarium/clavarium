@@ -6,6 +6,8 @@
  *                 attached to the conversation: a file, a mail, a commit. This is how tools work
  *                 TOGETHER: one leaves a request in a folder they share, the
  *                 other is told, and gets to it.
+ *   A CALL        an address of its own, called by what the owner already
+ *                 runs elsewhere: a scheduler, a workflow tool, a script.
  *   THE CLOCK     every so many minutes, every day at a given time, or a
  *                 cron line (minute hour day month weekday).
  *
@@ -30,7 +32,7 @@
  * it starts again, and wakes nobody.
  */
 import { lstatSync, readdirSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes, createHash } from 'node:crypto';
 import { Refusal, SESSION } from './conversations.mjs';
 import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
@@ -49,7 +51,17 @@ export const SCAN_DEPTH = 5;
 /* A daily wake-up missed by more than this (the server was down, the
    conversation asleep) is not caught up: it waits for the next day. */
 export const LATE_MS = 15 * 60_000;
-const KINDS = ['arrival', 'every', 'daily', 'cron'];
+const KINDS = ['arrival', 'every', 'daily', 'cron', 'call'];
+/* A CALL FROM OUTSIDE: an address that, when called, wakes the tool. That is
+   how what the owner already runs (a scheduler, a workflow tool, a script)
+   starts an agent here. The address IS the right to wake it: long, random,
+   shown once when it is made, kept here only as its fingerprint. What the
+   caller sends is typed only where the owner wrote "{text}", and only as
+   one plain line. */
+export const CALL_PATH = '/c/wake/';
+export const CALL_TEXT_MAX = 500;
+const TOKEN = /^[0-9a-f]{48}$/;
+const fingerprintOf = (token) => createHash('sha256').update(token).digest('hex');
 
 /* A CRON LINE, the five usual fields: minute hour day-of-month month
    day-of-week. Numbers, "*", lists (1,15), ranges (1-5), steps (every 10
@@ -125,7 +137,7 @@ export class Wakeups {
     }
 
     #record(name) { return this.#store.get(name) ?? { name, perHour: DEFAULT_PER_HOUR, sent: [], items: [] }; }
-    of(name) { const r = this.#record(name); return { perHour: r.perHour, items: r.items.map((i) => ({ ...i })), sentThisHour: this.#recent(r).length }; }
+    of(name) { const r = this.#record(name); return { perHour: r.perHour, items: r.items.map(({ token, ...i }) => ({ ...i })), sentThisHour: this.#recent(r).length }; }
     #recent(r) { const hourAgo = this.#now().getTime() - 3_600_000; return (r.sent ?? []).filter((at) => new Date(at).getTime() > hourAgo); }
 
     #known(name) { if (!isConversationName(name) || !this.#conversations.list().some((c) => c.name === name)) throw new Refusal(404, 'No such conversation.'); }
@@ -143,9 +155,10 @@ export class Wakeups {
         this.#known(name);
         const r = this.#record(name);
         if (r.items.length >= ITEMS_MAX) throw new Refusal(400, `A conversation has at most ${ITEMS_MAX} wake-ups.`);
-        if (!KINDS.includes(kind)) throw new Refusal(400, 'A wake-up is an arrival, every so many minutes, every day at a time, or a cron line.');
+        if (!KINDS.includes(kind)) throw new Refusal(400, 'A wake-up is an arrival, a cron line, or a call from outside.');
         const text = cleanMessage(message);
         if (text === '') throw new Refusal(400, 'Write what is typed to the tool when it is woken.');
+        let once;
         const item = { id: randomUUID(), kind, on: true, message: text, made: this.#now().toISOString(), last: null };
         if (kind === 'arrival') {
             if (!this.#resources.of(name).some((x) => x.name === resource)) throw new Refusal(400, 'Choose a folder, a repository or a mailbox attached to this conversation.');
@@ -156,6 +169,9 @@ export class Wakeups {
             const n = Number(minutes);
             if (!Number.isInteger(n) || n < 1 || n > 60 * 24 * 31) throw new Refusal(400, 'Every how many minutes? A whole number, 1 at least.');
             item.minutes = n; item.fired = item.made;
+        } else if (kind === 'call') {
+            once = randomBytes(24).toString('hex');
+            item.token = fingerprintOf(once);
         } else if (kind === 'cron') {
             const written = String(line ?? '').trim().replace(/\s+/g, ' ');
             if (!cron(written)) throw new Refusal(400, 'A cron line has five fields: minute hour day month weekday. For example: 30 7 * * 1-5');
@@ -165,7 +181,8 @@ export class Wakeups {
             item.at = at; item.fired = item.made;
         }
         this.#store.put({ ...r, items: [...r.items, item] });
-        return this.of(name);
+        /* `address`: said once, now, and never again. */
+        return once ? { ...this.of(name), address: `${CALL_PATH}${once}` } : this.of(name);
     }
 
     #change(name, id, change) {
@@ -184,6 +201,7 @@ export class Wakeups {
     /* Is it time? Resolves with the message to type, or undefined. */
     #due(name, item) {
         const now = this.#now();
+        if (item.kind === 'call') return undefined;
         if (item.kind === 'every') return now.getTime() - new Date(item.fired).getTime() >= item.minutes * 60_000 ? item.message : undefined;
         if (item.kind === 'cron') {
             /* Once in the minute it names; a minute that was missed is not caught up. */
@@ -226,6 +244,30 @@ export class Wakeups {
         const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE];
         if ((await this.#vms.exec(name, [...tmux, '-l', '--', text], { timeoutMs: 30_000 })).code !== 0) return false;
         return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
+    }
+
+    /* The address was called. Resolves with 'typed', 'capped', 'asleep',
+       'failed', or undefined when the address is nobody's (said as 404, the
+       same as any address that does not exist). */
+    async call(token, text) {
+        if (!TOKEN.test(String(token))) return undefined;
+        const print = fingerprintOf(token);
+        for (const record of this.#store.all()) {
+            const item = record.items.find((i) => i.kind === 'call' && i.on && i.token === print);
+            if (!item) continue;
+            if (!this.#conversations.awake().includes(record.name)) return 'asleep';
+            const said = cleanMessage(text).slice(0, CALL_TEXT_MAX);
+            const line = item.message.includes('{text}') ? item.message.replaceAll('{text}', said) : item.message;
+            const at = this.#now().toISOString();
+            const r = this.#record(record.name);
+            const capped = r.perHour > 0 && this.#recent(r).length >= r.perHour;
+            const typed = capped ? false : await this.#type(record.name, line).catch(() => false);
+            const what = capped ? `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` : typed ? `Typed: ${line}` : 'Could not be typed: is its tool running?';
+            const again = this.#record(record.name);
+            this.#store.put({ ...again, sent: typed ? [...this.#recent(again), at] : this.#recent(again), items: again.items.map((i) => (i.id === item.id ? { ...i, last: { at, what: what.slice(0, 300), ok: typed } } : i)) });
+            return capped ? 'capped' : typed ? 'typed' : 'failed';
+        }
+        return undefined;
     }
 
     async tick() {

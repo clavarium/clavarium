@@ -285,3 +285,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #wakeups-new textarea { width: 100%; min-height: 4.5rem; resize: vertical; font: inherit; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
 #wakeups-new label.check { display: flex; gap: .5rem; align-items: center; }
 #wakeups-limit { width: 8rem; }
+
+.notice-box { border: 1px solid var(--brass); border-radius: 10px; padding: .7rem .8rem; margin: .6rem 0; }
+.notice-box input { width: 100%; font-family: ui-monospace, monospace; font-size: .82rem; margin: .4rem 0; }
