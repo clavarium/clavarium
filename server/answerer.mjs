@@ -43,6 +43,7 @@ import { isConversationName } from './names.mjs';
 
 export const TICK_MS = 8000;
 export const MODEL_TIMEOUT_MS = 45_000;
+export const ANSWER_TOKENS = 2000;
 export const SCREEN_LINES = 80;
 export const SCREEN_MAX = 8000;
 export const TEXT_MAX = 300;
@@ -126,7 +127,10 @@ async function ask(config, model, messages, fetcher) {
         const response = await fetcher(config.url, {
             method: 'POST',
             headers: { 'content-type': 'application/json', ...(config.key ? { authorization: `Bearer ${config.key}` } : {}) },
-            body: JSON.stringify({ model, messages, temperature: 0, max_tokens: 400 }),
+            /* Room to think: a model that reasons first spends its tokens there, and
+               with too few gives an empty answer (seen on the first real trial). Only
+               its answer is read, never its reasoning. */
+            body: JSON.stringify({ model, messages, temperature: 0, max_tokens: ANSWER_TOKENS }),
             signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
         });
         if (!response.ok) return undefined;
