@@ -297,6 +297,8 @@
             sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : `${c.toolLabel} - failed`;
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
+            /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
+            if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
             /* Seen at a glance: this conversation is in other hands too. */
             const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
             if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
@@ -344,6 +346,8 @@
             paintActions();
             if (before !== now || now.startsWith('building')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
+        /* The panel is open: what the answerer did meanwhile is said there. */
+        if (!DEVICE && !$('panel').hidden) void paintAnswerer();
         if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving') ? 2500 : 10000);
     }
 
@@ -605,10 +609,66 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; terminal.focus(); });
         };
+        void paintAnswerer();
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
+    /* ---------- answers in the owner's place ---------- */
+    let platformSaid;
+    async function paintAnswerer() {
+        if (DEVICE) { $('answerer-box').hidden = true; return; }
+        platformSaid ??= await fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({}));
+        const about = platformSaid.answerer;
+        const mine = conversations.find((x) => x.name === current)?.answerer;
+        $('answerer-fields').hidden = !about || !mine;
+        if (!about || !mine) { $('answerer-about').textContent = 'While you are away, several models can answer the simple questions of the tool. None is set on this installation (CLAVARIUM_ANSWERER_URL, CLAVARIUM_ANSWERER_MODELS).'; return; }
+        $('answerer-about').textContent = `While you are away, ${about.models.length > 1 ? `${about.models.length} models answer the simple questions of the tool, when they ALL give the same answer` : 'one model answers the simple questions of the tool'}; otherwise you are asked. Turned on, THE SCREEN OF THIS CONVERSATION IS SENT to: ${about.models.join(', ')}.`;
+        /* What is being written is not painted over by a refresh. */
+        const editing = ['answerer-objectives', 'answerer-charter', 'answerer-limit'].includes(document.activeElement?.id);
+        if (!editing && $('answerer-box').dataset.of !== `${current}/${mine.objectives}/${mine.charter}/${mine.limit}`) {
+            $('answerer-objectives').value = mine.objectives; $('answerer-charter').value = mine.charter; $('answerer-limit').value = String(mine.limit);
+            $('answerer-box').dataset.of = `${current}/${mine.objectives}/${mine.charter}/${mine.limit}`;
+        }
+        for (const b of $('answerer-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === mine.on));
+        $('answerer-on').children[0].textContent = mine.on ? 'On (save)' : 'On';
+        $('answerer-resume').hidden = !mine.needs;
+        $('answerer-state').textContent = !mine.on ? 'Off: nobody answers but you.'
+            : mine.needs ? `It stopped and waits for you. ${mine.needs.why}`
+                : `${mine.row} answer(s) in a row${mine.limit > 0 ? ` of ${mine.limit}` : ', no limit'}.${mine.last ? ` Last: ${mine.last.answer}, ${new Date(mine.last.at).toLocaleString()}.` : ''}`;
+        if ($('answerer-log-box').open) void paintAnswererLog();
+    }
+    async function paintAnswererLog() {
+        const box = $('answerer-log');
+        const entries = await fetch(`${API}/conversations/${encodeURIComponent(current)}/answerer/log`).then((r) => r.json()).catch(() => []);
+        box.replaceChildren();
+        if (!Array.isArray(entries) || entries.length === 0) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Nothing yet.'; box.append(p); return; }
+        for (const e of entries) {
+            const item = document.createElement('details'); item.className = 'answered'; item.dataset.outcome = e.outcome;
+            const head = document.createElement('summary');
+            head.textContent = `${new Date(e.at).toLocaleString()} - ${e.outcome === 'answered' ? `answered ${e.answer}` : e.outcome === 'human' ? 'left to you' : 'failed'}${e.why ? `: ${e.why}` : ''}`;
+            item.append(head);
+            for (const s of e.said ?? []) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = `${s.model}: ${s.says}${s.why ? ` (${s.why})` : ''}`; item.append(p); }
+            /* What the tool had printed: text, never built. */
+            const pre = document.createElement('pre'); pre.textContent = e.screen ?? ''; item.append(pre);
+            box.append(item);
+        }
+    }
+    $('answerer-log-box').addEventListener('toggle', () => { if ($('answerer-log-box').open) void paintAnswererLog(); });
+    for (const b of $('answerer-on').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try {
+                await post(`${API}/conversations/${encodeURIComponent(current)}/answerer`, { on: b.dataset.on === 'true', objectives: $('answerer-objectives').value, charter: $('answerer-charter').value, limit: Number($('answerer-limit').value || 0) });
+                $('answerer-box').dataset.of = '';
+                await refresh(); await paintAnswerer();
+            } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
+    }
+    $('answerer-resume').addEventListener('click', async () => {
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/answerer/resume`, {}); await refresh(); await paintAnswerer(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
     const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = 'Use'; return s; };
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {

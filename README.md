@@ -43,6 +43,17 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   host; a mailbox dedicated to a tool's account is watched, read-only, and
   its sign-in link shown to the operator next to the terminal.
 
+- **8 - the answerer**: while the owner is away, several models read a
+  question the tool asks and answer in the owner's place, only when they all
+  give the same answer; one doubt and the owner is asked. Off by default,
+  per conversation, and never on without objectives and a charter. A limit of
+  answers in a row (0: none), and a log of everything. It is the one place
+  where the server reads what a tool prints, and the screen of that
+  conversation is sent to the models. Needs `CLAVARIUM_ANSWERER_URL` (a
+  "chat completions" address), `CLAVARIUM_ANSWERER_MODELS` (names, separated
+  by commas; three of different makers is the idea) and `_KEY` in the
+  environment.
+
 Not yet: mailbox and git resources, delivery.
 
 Where the tool works (`/work`) is a folder kept by the server: what the tool

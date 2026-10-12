@@ -73,6 +73,27 @@
         <div class="levels" id="network" role="group" aria-label="Network of this conversation">
           <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
         </div>
+        <div id="answerer-box">
+          <div class="panel-top"><b>Answers in your place</b></div>
+          <p class="hint" id="answerer-about"></p>
+          <div id="answerer-fields" hidden>
+            <label for="answerer-objectives">Objectives: what you want done</label>
+            <textarea id="answerer-objectives" rows="3" maxlength="4000" spellcheck="true"></textarea>
+            <label for="answerer-charter">Charter: what it may answer, and what it must leave to you</label>
+            <textarea id="answerer-charter" rows="4" maxlength="4000" spellcheck="true"></textarea>
+            <label for="answerer-limit">Answers in a row before you are asked (0: no limit)</label>
+            <input id="answerer-limit" type="number" min="0" max="100000" step="1" inputmode="numeric">
+            <div class="row">
+              <div class="levels" id="answerer-on" role="group" aria-label="Answers in your place"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div>
+              <button type="button" id="answerer-resume" hidden>I am here: carry on</button>
+            </div>
+            <p id="answerer-state" role="status"></p>
+            <details id="answerer-log-box">
+              <summary>What it answered</summary>
+              <div id="answerer-log"></div>
+            </details>
+          </div>
+        </div>
         <details id="access-advanced">
           <summary>Its machine</summary>
         <div id="work-box">

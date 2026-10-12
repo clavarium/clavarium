@@ -267,3 +267,13 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 /* A page written by the tool: a frame with a visible edge, so it never passes for this site. */
 #preview-body iframe { display: block; width: 100%; height: min(70vh, 900px); border: 2px solid var(--brass); border-radius: 8px; background: #fff; }
 #preview-body > button { margin-bottom: 8px; min-height: 40px; }
+
+/* Answers in the owner's place. */
+#answerer-fields textarea { width: 100%; min-height: 4.5rem; resize: vertical; font: inherit; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+#answerer-fields label { display: block; margin: .7rem 0 .25rem; }
+#answerer-limit { width: 8rem; }
+#answerer-fields .row { margin-top: .8rem; }
+.needs-mark { display: block; color: var(--brass); font-weight: 700; }
+.answered { border-top: 1px solid var(--line); padding: .4rem 0; }
+.answered[data-outcome="human"] > summary { color: var(--brass); }
+.answered pre { max-height: 14rem; overflow: auto; font-size: .78rem; }

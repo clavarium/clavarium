@@ -1,7 +1,8 @@
 /* THE TERMINAL BRIDGE: browser <-> WebSocket <-> PTY <-> tmux <-> the tool.
  *
  * It carries bytes and reads none of them. What the tool prints is never
- * parsed here: that is the rule the whole product stands on.
+ * parsed here: that is the rule the whole product stands on. (The one
+ * exception is not here: see answerer.mjs, which the owner turns on.)
  *
  * On the wire:
  *   browser -> server   binary frame   keystrokes
@@ -48,7 +49,7 @@ export const sameOrigin = makeOriginCheck();
    still running, in which case only the channel dropped; `onRejoin(name)`
    when a screen takes a terminal that was already open. `originOk` and
    `gate` decide who may attach at all: see gate.mjs. */
-export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {} }) {
+export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {} }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
 
@@ -176,7 +177,8 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const mine = kept;
         viewer.on('message', (data, binary) => {
             if (mine.sink !== viewer) return;
-            if (binary) { mine.terminal.write(data.toString()); return; }
+            /* `onTyped`: told THAT something came from a screen (the owner is there), which is not reading what the tool prints. */
+            if (binary) { const typed = data.toString(); mine.terminal.write(typed); onTyped(name, typed); return; }
             let message;
             try { message = JSON.parse(data.toString()); } catch { return; }
             if (message?.type === 'resize' && within(message.cols, COLS) && within(message.rows, ROWS)) {
