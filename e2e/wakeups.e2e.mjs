@@ -37,10 +37,24 @@ test('two tools work together: one leaves a request in a folder they share, the 
     assert.equal((await woken()).what, 'Typed: echo "told of: need-a-banner.md"');
     await me.page.goto(`${b.origin}/?c=painter`);
     await me.sees('\ntold of: need-a-banner.md', 30_000);
+    /* By the clock is always a cron line: the usual choices write it, in sight. */
+    await me.page.locator('#folders').click();
+    await me.page.locator('#wakeups-new-box summary').click();
+    await me.page.selectOption('#wakeup-kind', 'cron');
+    assert.equal(await me.page.inputValue('#wakeup-line'), '0 * * * *');
+    await me.page.selectOption('#wakeup-often', 'weekdays');
+    await me.page.fill('#wakeup-at', '06:45');
+    assert.equal(await me.page.inputValue('#wakeup-line'), '45 6 * * 1-5');
+    await me.page.fill('#wakeup-line', '0 8 1 * *');
+    assert.equal(await me.page.inputValue('#wakeup-often'), 'custom', 'written by hand: it says so');
+    await me.page.fill('#wakeup-message', 'echo monthly');
+    await me.page.locator('#wakeups-new button[type=submit]').click();
+    await me.until('it is listed', async () => /By the clock: 0 8 1 \* \*/.test(await me.page.locator('#wakeups-rows').innerText()));
+    await me.page.locator('#panel-close').click();
     /* Turned off: the next arrival wakes nobody. */
     await me.page.locator('#folders').click();
-    await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').innerText()));
-    await me.page.locator('#wakeups-rows .wakeup .levels button', { hasText: 'Off' }).click();
+    await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));
+    await me.page.locator('#wakeups-rows .wakeup .levels button', { hasText: 'Off' }).first().click();
     await me.until('it is off', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'painter').wakeups.items[0].on === false);
     await me.page.locator('#panel-close').click();
     await me.type('echo "another" > ../resources/handoff/second.md; sleep 3; echo quiet');

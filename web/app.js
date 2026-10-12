@@ -617,7 +617,7 @@
         await paintSignIn();
     }
     /* ---------- wake-ups: an arrival, or the clock ---------- */
-    const wakeupSays = (w) => (w.kind === 'arrival' ? `When something ${w.onlyNew ? 'new arrives' : 'arrives or changes'} in ${w.resource}${w.quiet > 0 ? `, still for ${w.quiet} s` : ''}` : w.kind === 'every' ? `Every ${w.minutes} minute${w.minutes > 1 ? 's' : ''}` : w.kind === 'cron' ? `Cron: ${w.line}` : `Every day at ${w.at}`);
+    const wakeupSays = (w) => (w.kind === 'arrival' ? `When something ${w.onlyNew ? 'new arrives' : 'arrives or changes'} in ${w.resource}${w.quiet > 0 ? `, still for ${w.quiet} s` : ''}` : w.kind === 'every' ? `Every ${w.minutes} minute${w.minutes > 1 ? 's' : ''}` : w.kind === 'cron' ? `By the clock: ${w.line}` : `Every day at ${w.at}`);
     function paintWakeups() {
         if (DEVICE) { $('wakeups-box').hidden = true; return; }
         const here = conversations.find((x) => x.name === current);
@@ -649,12 +649,25 @@
         if (document.activeElement?.id !== 'wakeups-limit') $('wakeups-limit').value = String(mine.perHour);
         $('wakeups-sent').textContent = `${mine.sentThisHour} this hour.`;
     }
+    /* BY THE CLOCK IS ALWAYS A CRON LINE. The few usual choices write it, and
+       it stays in sight: what is set is what is shown, and it can be changed. */
+    const clockLine = () => {
+        const often = $('wakeup-often').value;
+        const timed = often === 'daily' || often === 'weekdays';
+        $('wakeup-at-box').hidden = !timed;
+        if (often === 'custom') { $('wakeup-line').focus(); return; }
+        const [h, m] = ($('wakeup-at').value || '07:30').split(':').map(Number);
+        $('wakeup-line').value = timed ? `${m} ${h} * * ${often === 'weekdays' ? '1-5' : '*'}` : often;
+    };
+    $('wakeup-often').addEventListener('change', clockLine);
+    $('wakeup-at').addEventListener('input', clockLine);
+    $('wakeup-line').addEventListener('input', () => { $('wakeup-often').value = 'custom'; $('wakeup-at-box').hidden = true; });
     $('wakeup-kind').addEventListener('change', () => { for (const part of $('wakeups-new').querySelectorAll('[data-for]')) part.hidden = part.dataset.for !== $('wakeup-kind').value; });
     $('wakeups-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
         try {
-            await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups`, { kind: $('wakeup-kind').value, resource: $('wakeup-resource').value, onlyNew: !$('wakeup-changed').checked, quiet: Number($('wakeup-quiet').value || 0), minutes: Number($('wakeup-minutes').value), at: $('wakeup-at').value, line: $('wakeup-line').value, message: $('wakeup-message').value });
+            await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups`, { kind: $('wakeup-kind').value, resource: $('wakeup-resource').value, onlyNew: !$('wakeup-changed').checked, quiet: Number($('wakeup-quiet').value || 0), line: $('wakeup-line').value, message: $('wakeup-message').value });
             $('wakeup-message').value = ''; $('wakeups-new-box').open = false;
             await refresh(); paintWakeups();
         } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; $('panel-error').scrollIntoView({ block: 'nearest' }); }
