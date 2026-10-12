@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: how you install it</title>
+<meta name="description" content="One command on an Ubuntu machine you own; a relay if home has no public address; backup, restore, and what was really tried.">
+<!--
+  THE HOME PAGE. Written by hand, no build step: the file you read is the file
+  that is served.
+
+  THE RULE OF THIS PAGE: it is looked at, not read. A sentence under a picture
+  is one line and stays one line. Whatever needs a paragraph belongs on another
+  page, and gets a link from here.
+
+  Every colour is defined on bare :root; the dark block only redefines.
+-->
+<style>
+:root {
+  --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
+  --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours-bg: #fbf3df; --ok: #17794f; --stop: #b3401f; --wall: #16181d;
+  --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+    --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+  --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+
+.hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
+h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 34em; }
+.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
+section { padding: clamp(2rem, 5vw, 3.2rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
+.three { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
+.three > li { min-width: 0; display: flex; flex-direction: column; }
+@media (max-width: 860px) { .three { grid-template-columns: 1fr; } }
+.cap { margin: 0; font-weight: 650; }
+.cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
+.say { margin: .2rem 0 .9rem; color: var(--dim); font-size: .97rem; }
+.more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
+
+/* The scenes: small drawings made of the pieces the product itself shows. */
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
+.scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
+.scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
+.scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
+.scene .tag { margin-left: auto; font-weight: 600; font-size: 10.5px; color: #d2a94e; border: 1px solid #d2a94e; border-radius: 1rem; padding: 0 .45rem; }
+.scene .dim { color: #8a97a8; }
+.scene .gold { color: #d2a94e; }
+.scene .ok { color: #5fc39d; }
+.scene .term { font-family: var(--mono); font-size: 11.5px; }
+.scene .via { text-align: center; color: #8a97a8; font-family: var(--mono); font-size: 11px; }
+.scene .row { display: flex; gap: .35rem; flex-wrap: wrap; }
+.scene .pill { border: 1px solid #2b3745; border-radius: 1rem; padding: .05rem .5rem; font-size: 11px; }
+.scene .pill b { color: #5fc39d; }
+.scene .pill b.no { color: #f08a6b; }
+.scene .paper { background: #fff; color: #16181d; border-radius: 8px; padding: .55rem .65rem; }
+.scene .paper b { display: block; font-size: 13px; }
+.scene .bars { display: flex; align-items: flex-end; gap: .3rem; height: 2.4rem; margin-top: .4rem; }
+.scene .bars i { flex: 1; background: #0b53c0; border-radius: 3px 3px 0 0; }
+.scene .send { margin-left: auto; background: #d2a94e; color: #1b1405; font-weight: 700; border-radius: 6px; padding: .15rem .7rem; }
+.scene .end { margin-top: auto; }
+
+.snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
+.snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem 1.6rem; }
+@media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
+.needs b { display: block; font-weight: 650; }
+.needs span { color: var(--dim); font-size: .95rem; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; max-width: 44em; }
+.rows li { color: var(--dim); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.4rem; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.two h2 { margin-bottom: .8rem; }
+.other { margin: 1.6rem 0 0; }
+.other a { font-weight: 600; text-decoration: none; }
+.qa { max-width: 46em; margin: 0; }
+.qa dt { font-weight: 650; margin-top: 1.3rem; }
+.qa dd { margin: .25rem 0 0; color: var(--dim); }
+.snip + .note, .rows + .snip { margin-top: .9rem; }
+h2 + .note { margin-top: -0.6rem; }
+.wide { max-width: 46rem; }
+.note { margin: 0 0 .9rem; color: var(--dim); }
+footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
+footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="./">Home</a>
+      <a href="examples.html">Examples</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-to-install-it.html" aria-current="page">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="border-top:0">
+  <div class="wrap">
+    <h1>How you install it</h1>
+    <p class="lead">One command, parameters only. It asks nothing, and can be run again to upgrade.</p>
+  </div>
+</section>
+
+<section id="needs">
+  <div class="wrap">
+    <h2>What it needs</h2>
+    <ul class="needs" style="margin-top:0">
+      <li><b>A small machine</b><span>Ubuntu Server 24.04 or 26.04, on a processor that can run virtual machines. A mini PC does.</span></li>
+      <li><b>1 to 2 GB of memory per agent at work</b><span>and a few GB of disk each. An agent asleep costs no memory. Tried on 4 cores, 6 GB, 40 GB.</span></li>
+      <li><b>A name for it</b><span>A domain or a sub-domain of yours, pointing to the machine, or to its relay.</span></li>
+    </ul>
+  </div>
+</section>
+
+<section id="machine">
+  <div class="wrap">
+    <h2>On the machine</h2>
+    <p class="note">From the folder of the source:</p>
+    <div class="snip wide"><pre>sudo deploy/install.sh \
+  --domain clav.example.com \
+  --operator you@example.com</pre></div>
+    <ul class="rows" style="margin-top:1rem">
+      <li>An account that owns its data and nothing else, and the one program it may run with more rights.</li>
+      <li>The address in https, a sign-in in front of everything, and a password for each operator, shown once.</li>
+      <li>The key that opens the sealed secrets, kept apart from the data.</li>
+      <li>Each piece it downloads is a named release, checked against a checksum written in the script.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="relay">
+  <div class="wrap">
+    <h2>No public address at home?</h2>
+    <p class="note">The machine at home dials out to a small machine that has one. Home opens no port.</p>
+    <div class="snip wide"><pre># at home
+sudo deploy/install.sh --domain clav.example.com \
+  --operator you@example.com --relay relay.example.net
+
+# on the relay, with the line the first command printed
+sudo deploy/relay.sh --key "ssh-ed25519 AAAA…"</pre></div>
+    <ul class="rows" style="margin-top:1rem">
+      <li>The relay carries bytes. Encryption starts in your browser and ends at home.</li>
+      <li>It holds no certificate and no secret of yours.</li>
+      <li>One record in your domain keeps whoever runs the relay from obtaining a certificate for your name; the script says which.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="agents">
+  <div class="wrap two">
+    <div>
+      <h2>Then, your agents</h2>
+      <ul class="rows">
+        <li>Claude Code: you sign in once in its terminal, with your own subscription.</li>
+        <li>OpenCode: with the key of a service that hosts models; tried with open models hosted in Europe.</li>
+        <li>Another agent that runs in a terminal: one entry in config/tools.json (its name, its command, how to install it).</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Two things that need a key of yours</h2>
+      <ul class="rows">
+        <li>Dictation: a service that turns speech into text.</li>
+        <li>Answers while you are away: a service that hosts several models.</li>
+        <li>Both are optional, set on the machine, and can be the same key.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="keep">
+  <div class="wrap">
+    <h2>Keeping it</h2>
+    <div class="snip wide"><pre>sudo deploy/backup.sh --to /path/to/a/folder
+sudo deploy/restore.sh ARCHIVE.tgz --check     # reads, changes nothing
+sudo deploy/restore.sh ARCHIVE.tgz --vault-key FILE</pre></div>
+    <ul class="rows" style="margin-top:1rem">
+      <li>Two files, to keep in two places: the archive, and the key that opens its secrets.</li>
+      <li>A restore that does not come back up puts back what was there.</li>
+      <li>Not in a backup: the machines of the agents. What must outlive one belongs in an attached folder.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="tried">
+  <div class="wrap two">
+    <div>
+      <h2>What was really tried</h2>
+      <ul class="rows">
+        <li>The installer, on a fresh Ubuntu 24.04 and a fresh 26.04.</li>
+        <li>The relay, on a real one, with a machine at home behind it.</li>
+        <li>A backup, a restore, and a restore that fails and puts things back.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>What was not, yet</h2>
+      <ul class="rows">
+        <li>A certificate obtained by the installer on a machine with its own public address.</li>
+        <li>A mailbox at one of the large mail providers.</li>
+        <li>Trying it on a laptop without a domain: there is no such mode yet.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="examples.html">Examples</a>
+    <a href="how-to-use-it.html">Use</a>
+    <a href="how-to-install-it.html">Install</a>
+    <a href="how-it-is-kept-safe.html">Security</a>
+    <a href="questions.html">FAQ</a>
+  </div>
+</footer>
+</body>
+</html>

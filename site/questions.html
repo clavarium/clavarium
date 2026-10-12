@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: questions</title>
+<meta name="description" content="The questions people ask first, answered plainly: agents, keys, mail, cost, and what is not there yet.">
+<!--
+  THE HOME PAGE. Written by hand, no build step: the file you read is the file
+  that is served.
+
+  THE RULE OF THIS PAGE: it is looked at, not read. A sentence under a picture
+  is one line and stays one line. Whatever needs a paragraph belongs on another
+  page, and gets a link from here.
+
+  Every colour is defined on bare :root; the dark block only redefines.
+-->
+<style>
+:root {
+  --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
+  --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours-bg: #fbf3df; --ok: #17794f; --stop: #b3401f; --wall: #16181d;
+  --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+    --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+  --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+
+.hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
+h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 34em; }
+.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
+section { padding: clamp(2rem, 5vw, 3.2rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
+.three { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
+.three > li { min-width: 0; display: flex; flex-direction: column; }
+@media (max-width: 860px) { .three { grid-template-columns: 1fr; } }
+.cap { margin: 0; font-weight: 650; }
+.cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
+.say { margin: .2rem 0 .9rem; color: var(--dim); font-size: .97rem; }
+.more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
+
+/* The scenes: small drawings made of the pieces the product itself shows. */
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
+.scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
+.scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
+.scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
+.scene .tag { margin-left: auto; font-weight: 600; font-size: 10.5px; color: #d2a94e; border: 1px solid #d2a94e; border-radius: 1rem; padding: 0 .45rem; }
+.scene .dim { color: #8a97a8; }
+.scene .gold { color: #d2a94e; }
+.scene .ok { color: #5fc39d; }
+.scene .term { font-family: var(--mono); font-size: 11.5px; }
+.scene .via { text-align: center; color: #8a97a8; font-family: var(--mono); font-size: 11px; }
+.scene .row { display: flex; gap: .35rem; flex-wrap: wrap; }
+.scene .pill { border: 1px solid #2b3745; border-radius: 1rem; padding: .05rem .5rem; font-size: 11px; }
+.scene .pill b { color: #5fc39d; }
+.scene .pill b.no { color: #f08a6b; }
+.scene .paper { background: #fff; color: #16181d; border-radius: 8px; padding: .55rem .65rem; }
+.scene .paper b { display: block; font-size: 13px; }
+.scene .bars { display: flex; align-items: flex-end; gap: .3rem; height: 2.4rem; margin-top: .4rem; }
+.scene .bars i { flex: 1; background: #0b53c0; border-radius: 3px 3px 0 0; }
+.scene .send { margin-left: auto; background: #d2a94e; color: #1b1405; font-weight: 700; border-radius: 6px; padding: .15rem .7rem; }
+.scene .end { margin-top: auto; }
+
+.snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
+.snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem 1.6rem; }
+@media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
+.needs b { display: block; font-weight: 650; }
+.needs span { color: var(--dim); font-size: .95rem; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; max-width: 44em; }
+.rows li { color: var(--dim); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.4rem; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.two h2 { margin-bottom: .8rem; }
+.other { margin: 1.6rem 0 0; }
+.other a { font-weight: 600; text-decoration: none; }
+.qa { max-width: 46em; margin: 0; }
+.qa dt { font-weight: 650; margin-top: 1.3rem; }
+.qa dd { margin: .25rem 0 0; color: var(--dim); }
+.snip + .note, .rows + .snip { margin-top: .9rem; }
+h2 + .note { margin-top: -0.6rem; }
+.wide { max-width: 46rem; }
+.note { margin: 0 0 .9rem; color: var(--dim); }
+footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
+footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="./">Home</a>
+      <a href="examples.html">Examples</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html" aria-current="page">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="border-top:0">
+  <div class="wrap">
+    <h1>Questions</h1>
+    <p class="lead">The ones people ask first. Answered plainly, including what is not there yet.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <dl class="qa">
+      <dt>Which agents does it run?</dt>
+      <dd>Claude Code and OpenCode were tried for real. Any agent that runs in a terminal can be added with one entry in a file: its name, its command, how to install it.</dd>
+      <dt>Does my code or my mail leave the machine?</dt>
+      <dd>They stay on it. What an agent reads is sent to the AI model that agent uses, as it would be on your own computer. If you turn on answers in your place, the screen of that conversation is sent to the models named in your settings.</dd>
+      <dt>Can an agent read the keys I give it?</dt>
+      <dd>A key you hand to an agent is in its machine: that agent can read it, and no other. The key that sends code out and the password of a mailbox never enter any machine.</dd>
+      <dt>What stops an agent that goes wrong at night?</dt>
+      <dd>It can only touch what you attached to write. Nothing leaves without you. When it asks, several models must all agree, under a charter you wrote; otherwise it stops, and your phone is told. A limit of answers in a row, and a log of each.</dd>
+      <dt>Does it send mail?</dt>
+      <dd>No. A mailbox is read, never written. An agent drafts a reply as a file; you send it from your own mail.</dd>
+      <dt>Which mailboxes work?</dt>
+      <dd>Those that speak IMAP with a password. It was tried against a mail server of ours, not yet against one of the large providers.</dd>
+      <dt>How do agents work together?</dt>
+      <dd>Through a folder you gave to both. One leaves a request there; the other is woken by its arrival and does it. They need not be the same tool.</dd>
+      <dt>Can something I already run start an agent?</dt>
+      <dd>Yes. A wake-up can have an address of its own: a scheduler, a workflow tool or a script calls it, and the line you wrote is typed to the agent. The address is shown once.</dd>
+      <dt>Does it work on a phone?</dt>
+      <dd>The page is the same on a computer, a tablet and a phone, and installs as an app. On an iPhone or iPad, alerts come once it is installed that way.</dd>
+      <dt>What does it cost?</dt>
+      <dd>Nothing: it is open source, under the MIT licence. You pay what you already pay for your agents and models.</dd>
+      <dt>Can several people use it?</dt>
+      <dd>Several operators can sign in. A conversation can also be handed to someone with a code, without an account, and taken back.</dd>
+      <dt>How is it different from tmux, a container, or the tool&#x27;s own remote control?</dt>
+      <dd>A machine of its own for each agent, with only what you attached; keys that send things out kept outside; wake-ups, answers by agreement and the send step already there. The security page shows a real trial.</dd>
+      <dt>What is not there yet?</dt>
+      <dd>A screen without a terminal for people who are not developers. Models running on the machine itself. A voice box. A way to try it on a laptop without a domain.</dd>
+    </dl>
+    <a class="more" href="how-it-is-kept-safe.html">How it is kept safe, with a real trial →</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="examples.html">Examples</a>
+    <a href="how-to-use-it.html">Use</a>
+    <a href="how-to-install-it.html">Install</a>
+    <a href="how-it-is-kept-safe.html">Security</a>
+    <a href="questions.html">FAQ</a>
+  </div>
+</footer>
+</body>
+</html>
