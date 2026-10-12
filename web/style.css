@@ -229,5 +229,11 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .thing > summary { cursor: pointer; font-weight: 600; min-height: 40px; display: flex; align-items: center; }
 #list .sp { flex: 1; }
 .item .shared-mark { display: block; color: var(--brass); }
-/* A sheet is open: the keys of the terminal are not for it, and would hide half of it on a phone. */
-#room:has(.sheet:not([hidden])) #keys, #room:has(.sheet:not([hidden])) #shortcuts { display: none; }
+/* A sheet is open on a small screen: the keys of the terminal are not for it, and would take half the
+   screen from it. On a wide screen they stay: taking them away would resize the terminal under the
+   sheet each time, and the tool would redraw for nothing (a test caught the screen moving). */
+@media (max-width: 900px) { #room:has(.sheet:not([hidden])) #keys, #room:has(.sheet:not([hidden])) #shortcuts { display: none; } }
+/* A device's card: one full-width line per thing it has. */
+.device .given { display: block; flex-basis: auto; }
+.device > button { align-self: flex-start; }
+.given-row > .hint, .given-row > .levels { flex: 0 0 auto; }
