@@ -68,3 +68,25 @@ test('an import is refused for a bad name, a path outside, or a declared size ov
     await assert.rejects(importFile(root, '', 'big.bin', body('x', { 'content-length': String(51 * 1024 * 1024) })), /at most 50 MB/);
     assert.deepEqual(readdirSync(root).filter((n) => n.includes('importing') || n === 'evil.txt'), []);
 });
+
+test('a page written by a tool is answered with rules of its own: nobody, no network, only inside this site', async (t) => {
+    const { page, PAGE_HEADERS, PAGE_MAX } = await import('../server/files.mjs');
+    const csp = PAGE_HEADERS['content-security-policy'];
+    assert.match(csp, /^sandbox allow-scripts;/, 'a sandbox, and not the same origin');
+    assert.ok(!csp.includes('allow-same-origin') && !csp.includes('allow-top-navigation') && !csp.includes('allow-forms') && !csp.includes('allow-popups'));
+    assert.match(csp, /default-src 'none'/);
+    assert.ok(!/https?:|\*/.test(csp), 'nothing from anywhere');
+    assert.match(csp, /form-action 'none'/); assert.match(csp, /frame-ancestors 'self'/);
+    assert.equal(PAGE_HEADERS['x-content-type-options'], 'nosniff');
+    const b = folder(t);
+    writeFileSync(join(b.root, 'report.html'), '<h1>done</h1>');
+    writeFileSync(join(b.root, 'notes.txt'), 'x');
+    const file = await page(b.root, 'report.html');
+    assert.equal(file.name, 'report.html');
+    let text = ''; for await (const piece of file.stream) text += piece;
+    assert.equal(text, '<h1>done</h1>');
+    await assert.rejects(page(b.root, 'notes.txt'), /Only an HTML file/);
+    await assert.rejects(page(b.root, '../outside.html'), /leaves the folder|No such/);
+    writeFileSync(join(b.root, 'huge.html'), Buffer.alloc(PAGE_MAX + 1, 32));
+    await assert.rejects(page(b.root, 'huge.html'), /too large/);
+});

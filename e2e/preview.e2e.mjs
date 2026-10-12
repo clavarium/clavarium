@@ -47,7 +47,13 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
     const work = join(b.dir, 'kept-work', 'viewer', 'work');
     writeFileSync(join(work, 'summary.pdf'), smallPdf());
     writeFileSync(join(work, 'chart.png'), PNG);
-    writeFileSync(join(work, 'page.html'), '<script>document.title = "ran"</script><h1 id="planted">not a page of this site</h1>');
+    writeFileSync(join(work, 'page.html'), `<h1 id="planted">not a page of this site</h1><p id="asked"></p><p id="cookie"></p><p id="parent"></p><script>
+        try { top.document.title = 'ran'; } catch { }
+        document.getElementById('planted').textContent = 'ran inside';
+        let c = 'none'; try { c = document.cookie || 'none'; } catch { } document.getElementById('cookie').textContent = c;
+        let p = 'closed'; try { p = parent.document.title ? 'open' : 'open'; } catch { } document.getElementById('parent').textContent = p;
+        fetch('/api/conversations').then((r) => { document.getElementById('asked').textContent = 'answered ' + r.status; }, () => { document.getElementById('asked').textContent = 'refused'; });
+    </script>`);
     writeFileSync(join(work, 'data.bin'), Buffer.from([0, 1, 2, 3]));
     await me.page.locator('#files-open').click();
     const open = async (name) => { await me.page.locator('#files-rows .file', { hasText: name }).click(); };
@@ -63,11 +69,37 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
     await open('chart.png');
     await me.until('the picture is shown', async () => me.page.evaluate(() => document.querySelector('#preview-body img')?.naturalWidth === 2));
     await me.page.locator('#preview-close').click();
-    /* A web page written by a tool is TEXT here: nothing of it runs or is built. */
+    /* A web page written by a tool is SHOWN AS A PAGE, in a frame that is
+       nobody: it runs, but it is not this site, has no session, and reaches
+       nothing outside itself. */
     await open('page.html');
-    await me.until('its source is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('<h1 id="planted">'));
-    assert.equal(await me.page.locator('#planted').count(), 0);
+    const frame = me.page.frameLocator('#preview-body iframe');
+    await me.until('the page is shown, and its own script ran', async () => (await frame.locator('#planted').innerText().catch(() => '')) === 'ran inside');
+    assert.equal(await me.page.locator('#planted').count(), 0, 'nothing of it is built in this site\'s page');
     assert.notEqual(await me.page.title(), 'ran');
+    assert.equal(await me.page.locator('#preview-body iframe').getAttribute('sandbox'), 'allow-scripts');
+    const told = async (id) => frame.locator(id).innerText();
+    await me.until('it tried what it could', async () => (await told('#asked').catch(() => '')) !== '' && (await told('#cookie').catch(() => '')) !== '');
+    assert.equal(await told('#asked'), 'refused', 'it cannot ask this server for anything');
+    assert.equal(await told('#cookie'), 'none', 'it has no cookie of the owner');
+    assert.equal(await told('#parent'), 'closed', 'it cannot read the page around it');
+    assert.match(await me.page.locator('#preview-note').innerText(), /closed frame/);
+    /* Its source is one tap away. */
+    await me.page.locator('#preview-body > button').click();
+    await me.until('its source is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('<h1 id="planted">'));
+    await me.page.locator('#preview-close').click();
+    /* The answer itself carries the rules, whoever frames it. */
+    const answer = await me.page.request.get(`${b.origin}/api/files/page?c=viewer&r=work&p=page.html`);
+    assert.match(answer.headers()['content-security-policy'], /^sandbox allow-scripts; default-src 'none'/);
+    assert.equal((await me.page.request.get(`${b.origin}/api/files/page?c=viewer&r=work&p=chart.png`)).status(), 400);
+    /* A conversation whose network was cut: its page stays text, and the server refuses to serve it as a page. */
+    await me.api('/api/conversations/viewer/network', { online: false });
+    await me.page.reload(); await me.page.locator('#files-open').click();
+    await open('page.html');
+    await me.until('offline: its source is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('<h1 id="planted">'));
+    assert.equal(await me.page.locator('#preview-body iframe').count(), 0);
+    assert.match(await me.page.locator('#preview-note').innerText(), /offline/);
+    assert.equal((await me.page.request.get(`${b.origin}/api/files/page?c=viewer&r=work&p=page.html`)).status(), 403);
     await me.page.locator('#preview-close').click();
     /* Anything else: said, and offered for download. */
     await open('data.bin');

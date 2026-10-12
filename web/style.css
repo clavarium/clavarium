@@ -263,3 +263,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #conversation-actions { align-items: center; gap: 8px; }
 #conversation-actions .sp { flex: 1; }
 #conversation-actions button { min-height: 40px; }
+
+/* A page written by the tool: a frame with a visible edge, so it never passes for this site. */
+#preview-body iframe { display: block; width: 100%; height: min(70vh, 900px); border: 2px solid var(--brass); border-radius: 8px; background: #fff; }
+#preview-body > button { margin-bottom: 8px; min-height: 40px; }

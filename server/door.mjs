@@ -22,7 +22,7 @@
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
 import { WORK_TAB } from './resources.mjs';
-import { list, download, importFile } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
 const BODY_MAX = 16 * 1024;
@@ -103,7 +103,7 @@ export async function handleDoor(request, response, { devices, conversations, re
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
-        const forFiles = route === '/files' || route === '/files/download' || route === '/files/import' || route === '/leave';
+        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || route === '/leave';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
         if (request.method === 'GET' && route === '/shortcuts') return send(200, shortcuts.list());
         if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null });
@@ -123,6 +123,13 @@ export async function handleDoor(request, response, { devices, conversations, re
             return true;
         }
         if (request.method === 'GET' && route === '/files') return send(200, await list(attached(), url.searchParams.get('p') ?? ''));
+        if (request.method === 'GET' && route === '/files/page') {
+            if (mine?.offline === true) throw new Refusal(403, 'This conversation is offline: its pages are shown as text, not run.');
+            const file = await page(attached(), url.searchParams.get('p') ?? '');
+            response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
+            file.stream.pipe(response);
+            return true;
+        }
         if (request.method === 'GET' && route === '/files/download') {
             const file = await download(attached(), url.searchParams.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,

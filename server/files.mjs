@@ -65,6 +65,46 @@ export async function download(root, relative) {
     return { name: real.split(sep).pop(), size: info.size, stream: createReadStream(real) };
 }
 
+/* A PAGE WRITTEN BY A TOOL, SHOWN AS A PAGE -- in a box it cannot leave.
+ *
+ * A tool can hand over its work as an HTML page: that is how somebody who
+ * does not read a terminal sees a result. But such a page is written by the
+ * tool, perhaps from what strangers wrote. So it is never a page OF THIS
+ * SITE. The answer carries its own rules, which the browser enforces:
+ *
+ *   - "sandbox" without same-origin: the page is nobody. It has no cookie,
+ *     no storage, no session of the owner, and cannot ask this server for
+ *     anything in the owner's name;
+ *   - no network at all: it can load nothing and send nothing -- no script,
+ *     style, picture or font from anywhere but itself (written in the page,
+ *     or as data:);
+ *   - no form goes anywhere; it can only be shown inside this site's own
+ *     window.
+ *
+ * So only a self-contained page works, and that is the point.
+ * WHAT THIS DOES NOT CLOSE: a page can still send the reader's browser to
+ * another address (a link, a redirect), and an address can carry data out.
+ * A tool with a network can do that by itself anyway; one whose network was
+ * cut could use this as a way out. So a conversation that is OFFLINE has its
+ * pages shown as text, never run: see the routes.
+ */
+export const PAGE_MAX = 5 * 1024 * 1024;
+export const PAGE_HEADERS = Object.freeze({
+    'content-type': 'text/html; charset=utf-8',
+    'content-security-policy': "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'cache-control': 'no-store',
+    'cross-origin-resource-policy': 'same-origin',
+});
+export async function page(root, relative) {
+    const file = await download(root, relative);
+    file.stream.on('error', () => {});
+    if (!/\.html?$/i.test(file.name)) { file.stream.destroy(); throw new Refusal(400, 'Only an HTML file is shown as a page.'); }
+    if (file.size > PAGE_MAX) { file.stream.destroy(); throw new Refusal(413, 'This page is too large to be shown here. Download it.'); }
+    return file;
+}
+
 /* Writes an imported file under `relative` (a folder). Never overwrites: a
    taken name becomes "name (2).ext". Returns the name it was given. */
 export async function importFile(root, relative, name, request) {

@@ -33,7 +33,7 @@
  * another site cannot send. */
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
-import { list, download, importFile } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
@@ -94,6 +94,14 @@ export async function handleApi(request, response, conversations, headers, resou
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.bytes.length,
                 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
             response.end(file.bytes);
+            return true;
+        }
+        if (request.method === 'GET' && pathname === '/api/files/page') {
+            /* A conversation whose network was cut does not get a way out through the reader's browser. */
+            if (conversations.list().find((x) => x.name === query.get('c'))?.offline === true) throw new Refusal(403, 'This conversation is offline: its pages are shown as text, not run.');
+            const file = await page(attached(), query.get('p') ?? '');
+            response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
+            file.stream.pipe(response);
             return true;
         }
         if (request.method === 'GET' && pathname === '/api/files/download') {

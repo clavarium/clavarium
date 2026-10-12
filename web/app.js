@@ -1230,9 +1230,29 @@
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
         } else {
-            const pre = document.createElement('pre');
-            pre.textContent = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-            body.append(pre); note('');
+            const source = () => { const pre = document.createElement('pre'); pre.textContent = new TextDecoder('utf-8', { fatal: false }).decode(bytes); return pre; };
+            /* A page written by the tool is SHOWN AS A PAGE -- in a frame that is
+               nobody: no session, no network, nothing of this site (the server
+               answers it with those rules; see files.mjs). Its source is one
+               tap away. A file of the machine's disk, or of a conversation that
+               is offline, stays text. */
+            const offline = conversations.find((x) => x.name === current)?.offline === true;
+            if ((kind === 'html' || kind === 'htm') && !from && !offline) {
+                const frame = document.createElement('iframe');
+                frame.setAttribute('sandbox', 'allow-scripts');
+                frame.setAttribute('referrerpolicy', 'no-referrer');
+                frame.title = `${name}, a page written by the tool`;
+                frame.src = `${API}/files/page?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+                const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = 'Show its source';
+                let shown = 'page';
+                toggle.addEventListener('click', () => {
+                    shown = shown === 'page' ? 'source' : 'page';
+                    body.replaceChildren(toggle, shown === 'page' ? frame : source());
+                    toggle.textContent = shown === 'page' ? 'Show its source' : 'Show it as a page';
+                });
+                body.append(toggle, frame);
+                note('A page written by the tool, shown in a closed frame: it reaches nothing outside itself. Never type a password into it.');
+            } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
     }
     $('preview-close').addEventListener('click', closePreview);
