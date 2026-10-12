@@ -155,8 +155,8 @@ test('on a tablet, a finger on the path opens it too -- even a file on the machi
     await me.sees('Gone: /work/never-made.txt');
     const tap = async (text) => { const at = await whereIs(me.page, text); await me.page.touchscreen.tap(at.x, at.y); };
     await tap('/work/summary.pdf');
-    await me.until('the PDF is drawn', async () => (await me.page.locator('#preview-body canvas').count()) === 1, 30_000);
-    assert.match(await me.page.locator('#preview-note').innerText(), /1 page\. Read from the disk of the machine: this file is not kept here/);
+    /* The canvas is there before its page is drawn and counted: wait for what is said, as the first test does. */
+    await me.until('the PDF is drawn, and said to come from the machine', async () => (await me.page.locator('#preview-body canvas').count()) === 1 && /1 page\. Read from the disk of the machine: this file is not kept here/.test(await me.page.locator('#preview-note').innerText()), 30_000);
     /* Its Download button saves the same bytes. */
     const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#preview-download').click()]);
     assert.equal(download.suggestedFilename(), 'summary.pdf');
