@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium in pictures</title>
+<!--
+  THE PRODUCT IN FIVE DRAWINGS. Each one says one thing and can be lifted out
+  as it is (the home page, the documentation, a talk): a drawing is one <svg>
+  that takes its colours from the page.
+
+  What is not built yet says so, on the drawing itself.
+-->
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f6f8; --text: #16181d; --dim: #5a5f69; --line: #c9ced6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours: #9a6c12; --yours-bg: #fbf3df;
+  --ok: #17794f; --ok-bg: #e4f5ec; --stop: #b3401f; --stop-bg: #fdebe5; --wall: #16181d;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours: #d2a94e; --yours-bg: #2e2612;
+    --ok: #5fc39d; --ok-bg: #12301f; --stop: #f08a6b; --stop-bg: #3a1c13; --wall: #e6e8ec;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours: #d2a94e; --yours-bg: #2e2612;
+  --ok: #5fc39d; --ok-bg: #12301f; --stop: #f08a6b; --stop-bg: #3a1c13; --wall: #e6e8ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+main { max-width: 54rem; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+h1 { font-size: clamp(1.6rem, 5vw, 2.2rem); margin: 1rem 0 .3rem; letter-spacing: -.02em; }
+.lead { color: var(--dim); margin: 0 0 1rem; }
+figure { margin: 2.6rem 0 0; }
+figcaption b { display: block; font-size: 1.25rem; letter-spacing: -.01em; }
+figcaption span { color: var(--dim); }
+.tag { display: inline-block; font: 600 .72rem var(--sans); letter-spacing: .04em; text-transform: uppercase; border: 1px solid var(--yours); color: var(--yours); border-radius: 1rem; padding: 0 .55rem; margin-left: .5rem; vertical-align: middle; }
+svg { display: block; width: 100%; height: auto; margin-top: .9rem; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+svg text { font-family: var(--sans); fill: var(--text); font-size: 14px; }
+svg .t { font-weight: 650; font-size: 15px; }
+svg .s { fill: var(--dim); font-size: 12.5px; }
+svg .m { font-family: var(--mono); font-size: 12px; }
+svg .c { text-anchor: middle; }
+.box { fill: var(--bg); stroke: var(--line); stroke-width: 1.5; }
+.agent { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.yours { fill: var(--yours-bg); stroke: var(--yours); stroke-width: 1.5; }
+.okb { fill: var(--ok-bg); stroke: var(--ok); stroke-width: 1.5; }
+.stopb { fill: var(--stop-bg); stroke: var(--stop); stroke-width: 1.5; }
+.wall { fill: none; stroke: var(--wall); stroke-width: 2.5; }
+.home { fill: none; stroke: var(--line); stroke-width: 1.5; stroke-dasharray: 6 5; }
+.a { fill: none; stroke: var(--dim); stroke-width: 1.8; marker-end: url(#h); }
+.a.ok { stroke: var(--ok); marker-end: url(#hok); }
+.a.stop { stroke: var(--stop); marker-end: url(#hstop); }
+.a.no { stroke: var(--stop); stroke-dasharray: 5 4; marker-end: none; }
+.fa { fill: var(--agent); } .fy { fill: var(--yours); } .fo { fill: var(--ok); } .fs { fill: var(--stop); }
+</style>
+</head>
+<body>
+<main>
+<h1>Clavarium in pictures</h1>
+<p class="lead">Five drawings. Blue is an agent, gold is yours, a thick line is a wall.</p>
+
+<svg width="0" height="0" style="position:absolute;border:0" aria-hidden="true"><defs>
+  <marker id="h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
+  <marker id="hok" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--ok)"/></marker>
+  <marker id="hstop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="var(--stop)"/></marker>
+</defs></svg>
+
+<figure id="walls">
+  <figcaption><b>1. One agent, one machine, at home</b><span>Whatever the agent is, it lives behind its own wall. You reach all of them from one page.</span></figcaption>
+  <svg viewBox="0 0 760 330" role="img" aria-label="At home, three machines side by side, each holding one agent of a different kind, each behind its own wall. One page, on a phone, a tablet or a computer, reaches all three.">
+    <rect class="home" x="150" y="24" width="590" height="282" rx="16"/>
+    <text class="s" x="168" y="48">your machine, at home</text>
+    <rect class="yours" x="20" y="110" width="96" height="120" rx="12"/>
+    <text class="t c" x="68" y="160">You</text>
+    <text class="s c" x="68" y="180">phone, tablet,</text>
+    <text class="s c" x="68" y="196">computer</text>
+    <path class="a" d="M116 170 H186"/>
+    <rect class="box" x="188" y="92" width="110" height="156" rx="10"/>
+    <text class="t c" x="243" y="160">One page</text>
+    <text class="s c" x="243" y="180">every terminal,</text>
+    <text class="s c" x="243" y="196">every file</text>
+    <g>
+      <rect class="wall" x="340" y="64" width="380" height="64" rx="10"/>
+      <rect class="agent" x="352" y="76" width="150" height="40" rx="8"/>
+      <text class="t c" x="427" y="101">Claude Code</text>
+      <text class="s" x="518" y="101">machine “client-a”</text>
+      <rect class="wall" x="340" y="138" width="380" height="64" rx="10"/>
+      <rect class="agent" x="352" y="150" width="150" height="40" rx="8"/>
+      <text class="t c" x="427" y="175">OpenCode</text>
+      <text class="s" x="518" y="175">machine “client-b”</text>
+      <rect class="wall" x="340" y="212" width="380" height="64" rx="10"/>
+      <rect class="agent" x="352" y="224" width="150" height="40" rx="8"/>
+      <text class="t c" x="427" y="249">any other agent</text>
+      <text class="s" x="518" y="249">machine “pictures”</text>
+    </g>
+    <path class="a" d="M298 150 C318 150 318 96 338 96"/>
+    <path class="a" d="M298 170 H338"/>
+    <path class="a" d="M298 190 C318 190 318 244 338 244"/>
+  </svg>
+</figure>
+
+<figure id="attach">
+  <figcaption><b>2. It sees only what you attach</b><span>Each thing has its own right. What is not attached does not exist for that agent.</span></figcaption>
+  <svg viewBox="0 0 760 330" role="img" aria-label="Your things on the left: a repository, two folders, a mailbox, a key. Three are attached to one agent's machine, each with a right: write, read, use. The mailbox and the other client's folder are not attached and stop at the wall.">
+    <text class="s" x="24" y="34">yours</text>
+    <g>
+      <rect class="yours" x="20" y="46" width="200" height="40" rx="8"/><text class="t" x="34" y="71">repository site-a</text>
+      <rect class="yours" x="20" y="96" width="200" height="40" rx="8"/><text class="t" x="34" y="121">folder brand-guide</text>
+      <rect class="yours" x="20" y="146" width="200" height="40" rx="8"/><text class="t" x="34" y="171">key DEPLOY_TOKEN</text>
+      <rect class="box" x="20" y="216" width="200" height="40" rx="8"/><text class="t" x="34" y="241">your mailbox</text>
+      <rect class="box" x="20" y="266" width="200" height="40" rx="8"/><text class="t" x="34" y="291">folder client-b</text>
+    </g>
+    <rect class="wall" x="470" y="40" width="270" height="270" rx="14"/>
+    <text class="s" x="488" y="64">machine “client-a”</text>
+    <rect class="agent" x="520" y="120" width="170" height="110" rx="10"/>
+    <text class="t c" x="605" y="170">the agent</text>
+    <text class="s c" x="605" y="190">works here</text>
+    <path class="a ok" d="M220 66 H468"/><text class="s fo" x="300" y="58">write</text>
+    <path class="a ok" d="M220 116 H468"/><text class="s fo" x="300" y="108">read</text>
+    <path class="a ok" d="M220 166 H468"/><text class="s fo" x="300" y="158">use, never read</text>
+    <path class="a no" d="M220 236 H440"/><path class="a no" d="M220 286 H440"/>
+    <path d="M434 226 l14 20 m0 -20 l-14 20" stroke="var(--stop)" stroke-width="2.5" fill="none"/>
+    <path d="M434 276 l14 20 m0 -20 l-14 20" stroke="var(--stop)" stroke-width="2.5" fill="none"/>
+    <text class="s fs" x="286" y="228">not attached</text>
+    <text class="s fs" x="286" y="278">not attached</text>
+  </svg>
+</figure>
+
+<figure id="together">
+  <figcaption><b>3. They work together</b><span>Two agents of different kinds, each behind its wall, pass work through a folder you gave to both.</span></figcaption>
+  <svg viewBox="0 0 760 270" role="img" aria-label="Two machines, each with a different agent. Between them, a shared folder. The first agent leaves a request there, the second one answers with a picture.">
+    <rect class="wall" x="20" y="40" width="200" height="190" rx="14"/>
+    <text class="s" x="36" y="64">machine “client-a”</text>
+    <rect class="agent" x="36" y="100" width="168" height="80" rx="10"/>
+    <text class="t c" x="120" y="136">Claude Code</text><text class="s c" x="120" y="156">writes the site</text>
+    <rect class="wall" x="540" y="40" width="200" height="190" rx="14"/>
+    <text class="s" x="556" y="64">machine “pictures”</text>
+    <rect class="agent" x="556" y="100" width="168" height="80" rx="10"/>
+    <text class="t c" x="640" y="136">another agent</text><text class="s c" x="640" y="156">makes pictures</text>
+    <rect class="yours" x="300" y="70" width="160" height="140" rx="10"/>
+    <text class="t c" x="380" y="96">folder handoff</text>
+    <text class="m c" x="380" y="130">need-a-banner.md</text>
+    <text class="m c" x="380" y="176">banner.png</text>
+    <path class="a" d="M204 126 H298"/><text class="s c" x="260" y="116">1 asks</text>
+    <path class="a" d="M460 126 H554"/><text class="s c" x="500" y="116">2 reads</text>
+    <path class="a ok" d="M556 172 H462"/><text class="s c fo" x="500" y="192">3 answers</text>
+    <path class="a ok" d="M300 172 H206"/><text class="s c fo" x="260" y="192">4 takes it</text>
+  </svg>
+</figure>
+
+<figure id="answerer">
+  <figcaption><b>4. It keeps working without you</b><span class="tag">being built</span><span><br>When the agent asks a simple question, several models of different makers answer in your place, under your objectives and your charter. They must all agree. Otherwise it is you who are asked.</span></figcaption>
+  <svg viewBox="0 0 760 430" role="img" aria-label="The agent asks a question. Three models of different makers read it, with your objectives and your charter. If all three give the same answer, it is typed to the agent. If one doubts or they disagree, you are called. A limit you set, a log of everything, and nothing leaves without you.">
+    <rect class="yours" x="270" y="20" width="220" height="56" rx="10"/>
+    <text class="t c" x="380" y="44">Your objectives</text><text class="t c" x="380" y="64">Your charter</text>
+    <rect class="wall" x="20" y="130" width="190" height="150" rx="14"/>
+    <text class="s" x="36" y="154">its machine</text>
+    <rect class="agent" x="38" y="166" width="154" height="96" rx="10"/>
+    <text class="t c" x="115" y="192">the agent</text>
+    <text class="m c" x="115" y="216">Shall I go on?</text>
+    <text class="m c" x="115" y="234">1 Yes   2 No</text>
+    <g>
+      <rect class="box" x="290" y="112" width="180" height="48" rx="24"/><text class="t c" x="380" y="134">model A</text><text class="s c" x="380" y="150">one maker</text>
+      <rect class="box" x="290" y="181" width="180" height="48" rx="24"/><text class="t c" x="380" y="203">model B</text><text class="s c" x="380" y="219">another country</text>
+      <rect class="box" x="290" y="250" width="180" height="48" rx="24"/><text class="t c" x="380" y="272">model C</text><text class="s c" x="380" y="288">another kind</text>
+    </g>
+    <path class="a" d="M380 76 V110"/>
+    <path class="a" d="M210 190 C250 190 250 136 288 136"/>
+    <path class="a" d="M210 205 H288"/>
+    <path class="a" d="M210 220 C250 220 250 274 288 274"/>
+    <text class="s" x="216" y="262">is read</text>
+    <path d="M580 205 l60 -50 l60 50 l-60 50z" class="box"/>
+    <text class="t c" x="640" y="202">all the</text><text class="t c" x="640" y="220">same?</text>
+    <path class="a" d="M470 136 C530 136 530 190 584 198"/>
+    <path class="a" d="M470 205 H578"/>
+    <path class="a" d="M470 274 C530 274 530 220 584 212"/>
+    <path class="a ok" d="M640 255 V340 H115 V282"/>
+    <text class="s fo" x="330" y="332">yes: the answer is typed</text>
+    <rect class="yours" x="590" y="20" width="100" height="56" rx="10"/>
+    <text class="t c" x="640" y="44">You</text><text class="s c" x="640" y="62">are asked</text>
+    <path class="a stop" d="M640 155 V78"/>
+    <text class="s fs" x="650" y="112">no, or one</text><text class="s fs" x="650" y="128">doubts</text>
+    <rect class="box" x="20" y="372" width="720" height="40" rx="8"/>
+    <text class="s c" x="380" y="397">a limit you set · every answer logged · nothing leaves the house without you</text>
+  </svg>
+</figure>
+
+<figure id="leaves">
+  <figcaption><b>5. Nothing leaves without you</b><span>The agent commits in its machine. The key that lets code out is kept outside it. You see, then you send.</span></figcaption>
+  <svg viewBox="0 0 760 230" role="img" aria-label="The agent commits inside its machine. Outside the wall, you are shown what would go, you press send, and the server sends it with your key, which the agent never holds.">
+    <rect class="wall" x="20" y="36" width="210" height="158" rx="14"/>
+    <text class="s" x="36" y="60">its machine</text>
+    <rect class="agent" x="40" y="80" width="170" height="80" rx="10"/>
+    <text class="t c" x="125" y="116">the agent</text><text class="s c" x="125" y="136">commits</text>
+    <rect class="box" x="290" y="80" width="170" height="80" rx="10"/>
+    <text class="t c" x="375" y="116">What would go</text><text class="s c" x="375" y="136">shown to you</text>
+    <rect class="yours" x="520" y="80" width="100" height="80" rx="10"/>
+    <text class="t c" x="570" y="116">You send</text><text class="s c" x="570" y="136">your key</text>
+    <path class="a" d="M230 120 H288"/>
+    <path class="a" d="M460 120 H518"/>
+    <path class="a ok" d="M620 120 H700"/>
+    <text class="t fo" x="672" y="100">out</text>
+    <text class="s c" x="375" y="200">the key stays on this side of the wall</text>
+  </svg>
+</figure>
+</main>
+</body>
+</html>
