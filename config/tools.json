@@ -49,7 +49,7 @@
     "command": [
       "opencode"
     ],
-    "memoryMb": 1024,
+    "memoryMb": 2048,
     "install": [
       "node",
       [
