@@ -20,9 +20,10 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.until('it is refused', async () => /Write what is typed/.test(await me.page.locator('#panel-error').innerText().catch(() => '')));
     await me.page.selectOption('#wakeup-resource', 'handoff');
     /* The tool here is a shell: what is typed to it is run, which shows it arrived. */
+    await me.page.fill('#wakeup-quiet', '1');
     await me.page.fill('#wakeup-message', 'echo "told of: {files}"');
     await me.page.locator('#wakeups-new button[type=submit]').click();
-    await me.until('it is listed', async () => /When something new arrives in handoff/.test(await me.page.locator('#wakeups-rows').innerText()));
+    await me.until('it is listed', async () => /When something new arrives in handoff, still for 1 s/.test(await me.page.locator('#wakeups-rows').innerText()));
     assert.match(await me.page.locator('#wakeups-rows .wakeup-last').innerText(), /Not yet/);
     await me.page.locator('#panel-close').click();
     assert.match(await me.page.locator('#items .item[aria-current=true]').innerText(), /1 wake-up/);

@@ -38,6 +38,10 @@ export const TICK_MS = 5000;
 export const MESSAGE_MAX = 1000;
 export const ITEMS_MAX = 8;
 export const DEFAULT_PER_HOUR = 12;
+/* An arrival is told once NOTHING HAS MOVED for this long: a file written in
+   ten goes is one arrival, not ten. The one setting of an arrival. */
+export const DEFAULT_QUIET_SECONDS = 10;
+export const QUIET_MAX_SECONDS = 3600;
 export const FILES_NAMED = 5;
 export const SCAN_MAX = 5000;
 export const SCAN_DEPTH = 5;
@@ -103,7 +107,7 @@ export class Wakeups {
         return this.of(name);
     }
 
-    add(name, { kind, resource, onlyNew, minutes, at, message }) {
+    add(name, { kind, resource, onlyNew, minutes, at, message, quiet }) {
         this.#known(name);
         const r = this.#record(name);
         if (r.items.length >= ITEMS_MAX) throw new Refusal(400, `A conversation has at most ${ITEMS_MAX} wake-ups.`);
@@ -113,7 +117,9 @@ export class Wakeups {
         const item = { id: randomUUID(), kind, on: true, message: text, made: this.#now().toISOString(), last: null };
         if (kind === 'arrival') {
             if (!this.#resources.of(name).some((x) => x.name === resource)) throw new Refusal(400, 'Choose a folder, a repository or a mailbox attached to this conversation.');
-            item.resource = resource; item.onlyNew = onlyNew !== false;
+            const calm = quiet === undefined || quiet === '' ? DEFAULT_QUIET_SECONDS : Number(quiet);
+            if (!Number.isInteger(calm) || calm < 0 || calm > QUIET_MAX_SECONDS) throw new Refusal(400, 'How many seconds must it stay still? A whole number, an hour at most.');
+            item.resource = resource; item.onlyNew = onlyNew !== false; item.quiet = calm;
         } else if (kind === 'every') {
             const n = Number(minutes);
             if (!Number.isInteger(n) || n < 1 || n > 60 * 24 * 31) throw new Refusal(400, 'Every how many minutes? A whole number, 1 at least.');
@@ -160,13 +166,16 @@ export class Wakeups {
             try { const j = lstatSync(`${this.#resources.folder(item.resource)}/.git/logs/HEAD`); if (j.isFile()) seen.set(COMMITS, `${j.size}:${Math.floor(j.mtimeMs)}`); } catch { /* no commit yet */ }
         }
         const held = this.#held.get(key);
-        if (!held) { this.#held.set(key, { base: seen, last: seen, arrived: [] }); return undefined; }
+        const when = this.#now().getTime();
+        if (!held) { this.#held.set(key, { base: seen, last: seen, moved: when }); return undefined; }
         const arrived = [...seen.keys()].filter((path) => !held.base.has(path) || ((!item.onlyNew || path === COMMITS) && held.base.get(path) !== seen.get(path)));
-        /* Still being written: wait until two looks in a row find the same thing. */
+        /* Still being written: wait until two looks in a row find the same
+           thing, and until nothing has moved for as long as the owner said. */
         const still = seen.size === held.last.size && [...seen].every(([path, mark]) => held.last.get(path) === mark);
         held.last = seen;
+        if (!still) held.moved = when;
         if (arrived.length === 0) { held.base = seen; return undefined; }
-        if (!still) return undefined;
+        if (!still || when - held.moved < (item.quiet ?? DEFAULT_QUIET_SECONDS) * 1000) return undefined;
         held.base = seen;
         return withFiles(item.message, arrived);
     }

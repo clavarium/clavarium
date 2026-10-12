@@ -56,7 +56,7 @@ test('a wake-up is refused unless it is whole', (t) => {
 test('an arrival: what was there wakes nobody; a new file does, once it has stopped being written', async (t) => {
     const b = bench(t);
     writeFileSync(join(b.dir, 'handoff', 'old.md'), 'there before');
-    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'Arrived: {files}. Do them.' });
+    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', quiet: 0, message: 'Arrived: {files}. Do them.' });
     await b.wakeups.tick(); await b.wakeups.tick();
     assert.deepEqual(b.typed, []);
     writeFileSync(join(b.dir, 'handoff', 'need-a-banner.md'), 'a ban');
@@ -76,18 +76,34 @@ test('an arrival: what was there wakes nobody; a new file does, once it has stop
     assert.equal(b.typed.length, 2);
     const [first] = b.wakeups.of('worker').items;
     assert.match(first.last.what, /^Typed: Arrived: need-a-banner\.md/); assert.equal(first.last.ok, true);
-    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', onlyNew: false, message: 'Something changed.' });
+    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', onlyNew: false, quiet: 0, message: 'Something changed.' });
     await b.wakeups.tick();
     appendFileSync(join(b.dir, 'handoff', 'old.md'), ' and more again');
     await b.wakeups.tick(); await b.wakeups.tick();
     assert.deepEqual(b.typed.slice(2), ['Something changed.', 'Enter']);
 });
 
+test('a file rewritten ten times is one arrival: it is told once nothing has moved for as long as the owner said', async (t) => {
+    const b = bench(t);
+    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', quiet: 30, message: 'Arrived: {files}.' });
+    assert.equal(b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'x' }).items[1].quiet, 10, 'ten seconds unless said otherwise');
+    b.wakeups.remove('worker', b.wakeups.of('worker').items[1].id);
+    assert.throws(() => b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', quiet: 4000, message: 'x' }), /an hour at most/);
+    await b.wakeups.tick();
+    const second = (n) => { b.world.now = new Date(b.world.now.getTime() + n * 1000); };
+    for (let i = 0; i < 10; i++) { appendFileSync(join(b.dir, 'handoff', 'report.md'), `part ${i}\n`); second(5); await b.wakeups.tick(); }
+    assert.deepEqual(b.typed, [], 'it keeps moving');
+    second(5); await b.wakeups.tick(); second(20); await b.wakeups.tick();
+    assert.deepEqual(b.typed, [], 'still for 25 seconds: not yet');
+    second(5); await b.wakeups.tick();
+    assert.deepEqual(b.typed, ['Arrived: report.md.', 'Enter'], 'still for 30 seconds: told, once');
+});
+
 test('a commit in a repository is an arrival, told from the date of its journal alone', async (t) => {
     const b = bench(t);
     mkdirSync(join(b.dir, 'site', '.git', 'logs'), { recursive: true });
     writeFileSync(join(b.dir, 'site', '.git', 'logs', 'HEAD'), 'one\n');
-    b.wakeups.add('worker', { kind: 'arrival', resource: 'site', message: 'Arrived: {files}.' });
+    b.wakeups.add('worker', { kind: 'arrival', resource: 'site', quiet: 0, message: 'Arrived: {files}.' });
     await b.wakeups.tick(); await b.wakeups.tick();
     appendFileSync(join(b.dir, 'site', '.git', 'logs', 'HEAD'), 'two\n');
     await b.wakeups.tick(); await b.wakeups.tick();
@@ -138,7 +154,7 @@ test('a cap an hour, which the owner sets and may remove; asleep, detached or of
     b.wakeups.remove('worker', id);
     assert.deepEqual(b.wakeups.of('worker').items, []);
     /* A folder taken back wakes nobody. */
-    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', message: 'Arrived.' });
+    b.wakeups.add('worker', { kind: 'arrival', resource: 'handoff', quiet: 0, message: 'Arrived.' });
     await b.wakeups.tick();
     b.world.attached = ['site'];
     writeFileSync(join(b.dir, 'handoff', 'late.md'), 'x');

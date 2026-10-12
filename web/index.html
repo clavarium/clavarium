@@ -111,6 +111,8 @@
                 <label for="wakeup-resource">Where</label>
                 <select id="wakeup-resource"></select>
                 <label class="check"><input type="checkbox" id="wakeup-changed"> Also when a file that was there changes</label>
+                <label for="wakeup-quiet">Seconds it must stay still first</label>
+                <input id="wakeup-quiet" type="number" min="0" max="3600" step="1" value="10" inputmode="numeric">
               </div>
               <div data-for="every" hidden><label for="wakeup-minutes">Minutes</label><input id="wakeup-minutes" type="number" min="1" step="1" value="60" inputmode="numeric"></div>
               <div data-for="daily" hidden><label for="wakeup-at">Time (the server's clock)</label><input id="wakeup-at" type="time" value="07:30"></div>
