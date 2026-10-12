@@ -298,6 +298,8 @@
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
             /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
+            const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
+            if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
             if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
             /* Seen at a glance: this conversation is in other hands too. */
             const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
@@ -347,7 +349,7 @@
             if (before !== now || now.startsWith('building')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
-        if (!DEVICE && !$('panel').hidden) void paintAnswerer();
+        if (!DEVICE && !$('panel').hidden) { void paintAnswerer(); paintWakeups(); }
         if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving') ? 2500 : 10000);
     }
 
@@ -609,11 +611,59 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; terminal.focus(); });
         };
-        void paintAnswerer();
+        void paintAnswerer(); paintWakeups();
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
+    /* ---------- wake-ups: an arrival, or the clock ---------- */
+    const wakeupSays = (w) => (w.kind === 'arrival' ? `When something ${w.onlyNew ? 'new arrives' : 'arrives or changes'} in ${w.resource}` : w.kind === 'every' ? `Every ${w.minutes} minute${w.minutes > 1 ? 's' : ''}` : `Every day at ${w.at}`);
+    function paintWakeups() {
+        if (DEVICE) { $('wakeups-box').hidden = true; return; }
+        const here = conversations.find((x) => x.name === current);
+        const mine = here?.wakeups;
+        $('wakeups-box').hidden = !mine;
+        if (!mine) return;
+        const rows = $('wakeups-rows');
+        rows.replaceChildren();
+        for (const w of mine.items) {
+            const row = document.createElement('div'); row.className = 'wakeup'; row.dataset.kind = w.kind;
+            const what = document.createElement('b'); what.textContent = wakeupSays(w);
+            const said = document.createElement('p'); said.className = 'hint'; said.textContent = `Typed: ${w.message}`;
+            const last = document.createElement('p'); last.className = 'hint wakeup-last'; last.textContent = w.last ? `Last, ${new Date(w.last.at).toLocaleString()}: ${w.last.what}` : 'Not yet.';
+            const acts = document.createElement('div'); acts.className = 'row';
+            acts.append(modes([['on', 'On'], ['off', 'Off']], w.on ? 'on' : 'off', async (value) => { await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups/${w.id}`, { on: value === 'on' }); await refresh(); paintWakeups(); }, `This wake-up: ${wakeupSays(w)}`));
+            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+            remove.addEventListener('click', async () => { await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups/${w.id}/remove`, {}); await refresh(); paintWakeups(); });
+            acts.append(remove);
+            row.append(what, said, last, acts);
+            rows.append(row);
+        }
+        /* The form is not painted over while somebody fills it. */
+        const select = $('wakeup-resource');
+        const wanted = (here?.resources ?? []).map((r) => r.name).join('/');
+        if (select.dataset.of !== `${current}:${wanted}`) {
+            select.replaceChildren(...(here?.resources ?? []).map((r) => { const o = document.createElement('option'); o.value = r.name; o.textContent = r.name; return o; }));
+            select.dataset.of = `${current}:${wanted}`;
+        }
+        if (document.activeElement?.id !== 'wakeups-limit') $('wakeups-limit').value = String(mine.perHour);
+        $('wakeups-sent').textContent = `${mine.sentThisHour} this hour.`;
+    }
+    $('wakeup-kind').addEventListener('change', () => { for (const part of $('wakeups-new').querySelectorAll('[data-for]')) part.hidden = part.dataset.for !== $('wakeup-kind').value; });
+    $('wakeups-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        try {
+            await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups`, { kind: $('wakeup-kind').value, resource: $('wakeup-resource').value, onlyNew: !$('wakeup-changed').checked, minutes: Number($('wakeup-minutes').value), at: $('wakeup-at').value, message: $('wakeup-message').value });
+            $('wakeup-message').value = ''; $('wakeups-new-box').open = false;
+            await refresh(); paintWakeups();
+        } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; $('panel-error').scrollIntoView({ block: 'nearest' }); }
+    });
+    $('wakeups-limit-save').addEventListener('click', async () => {
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups`, { perHour: Number($('wakeups-limit').value || 0) }); await refresh(); paintWakeups(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+
     /* ---------- answers in the owner's place ---------- */
     let platformSaid;
     async function paintAnswerer() {

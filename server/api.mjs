@@ -53,7 +53,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -120,7 +120,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
-                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
@@ -169,6 +169,14 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
+        const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
+        if (woken && wakeups) {
+            const conversation = decodeURIComponent(woken[1]);
+            if (woken[3]) return send(200, wakeups.remove(conversation, woken[2])), true;
+            if (woken[2]) return send(200, wakeups.turn(conversation, woken[2], body.on === true)), true;
+            if (body.kind === undefined) return send(200, wakeups.setLimit(conversation, body.perHour)), true;
+            return send(201, wakeups.add(conversation, body)), true;
+        }
         const mandate = /^\/api\/conversations\/([^/]+)\/answerer(\/resume)?$/.exec(pathname);
         if (mandate && answerer) {
             const conversation = decodeURIComponent(mandate[1]);
@@ -253,6 +261,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') secrets?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') signin?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') answerer?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') wakeups?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;

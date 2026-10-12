@@ -55,6 +55,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true,
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
+        wakeEveryMs: 300,
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });

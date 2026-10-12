@@ -277,3 +277,11 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .answered { border-top: 1px solid var(--line); padding: .4rem 0; }
 .answered[data-outcome="human"] > summary { color: var(--brass); }
 .answered pre { max-height: 14rem; overflow: auto; font-size: .78rem; }
+
+/* Wake-ups. */
+.wakeup { border-top: 1px solid var(--line); padding: .6rem 0; }
+.wakeup .hint { margin: .15rem 0; }
+#wakeups-new label, #wakeups-box > label { display: block; margin: .7rem 0 .25rem; }
+#wakeups-new textarea { width: 100%; min-height: 4.5rem; resize: vertical; font: inherit; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+#wakeups-new label.check { display: flex; gap: .5rem; align-items: center; }
+#wakeups-limit { width: 8rem; }

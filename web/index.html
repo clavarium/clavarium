@@ -94,6 +94,35 @@
             </details>
           </div>
         </div>
+        <div id="wakeups-box">
+          <div class="panel-top"><b>Wake it by itself</b></div>
+          <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken.</p>
+          <div id="wakeups-rows"></div>
+          <details id="wakeups-new-box">
+            <summary>Add a wake-up</summary>
+            <form id="wakeups-new" autocomplete="off">
+              <label for="wakeup-kind">When</label>
+              <select id="wakeup-kind">
+                <option value="arrival">Something arrives in...</option>
+                <option value="every">Every so many minutes</option>
+                <option value="daily">Every day at...</option>
+              </select>
+              <div data-for="arrival">
+                <label for="wakeup-resource">Where</label>
+                <select id="wakeup-resource"></select>
+                <label class="check"><input type="checkbox" id="wakeup-changed"> Also when a file that was there changes</label>
+              </div>
+              <div data-for="every" hidden><label for="wakeup-minutes">Minutes</label><input id="wakeup-minutes" type="number" min="1" step="1" value="60" inputmode="numeric"></div>
+              <div data-for="daily" hidden><label for="wakeup-at">Time (the server's clock)</label><input id="wakeup-at" type="time" value="07:30"></div>
+              <label for="wakeup-message">What is typed to the tool</label>
+              <textarea id="wakeup-message" rows="3" maxlength="1000" placeholder="New requests arrived in /resources/handoff: {files}. Read them and do what they ask."></textarea>
+              <p class="hint">{files} is replaced by the names of what arrived.</p>
+              <button type="submit" class="primary">Add</button>
+            </form>
+          </details>
+          <label for="wakeups-limit">Wake-ups an hour at most (0: no cap)</label>
+          <div class="row"><input id="wakeups-limit" type="number" min="0" step="1" inputmode="numeric"><button type="button" id="wakeups-limit-save">Set</button><span class="hint" id="wakeups-sent"></span></div>
+        </div>
         <details id="access-advanced">
           <summary>Its machine</summary>
         <div id="work-box">
