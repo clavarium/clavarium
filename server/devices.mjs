@@ -102,6 +102,24 @@ export class Devices {
     /* Every device, each with all it was given. */
     all() { return this.#store.all().map((d) => this.#shown(d)); }
 
+    /* One more thing is given to a device that is already paired -- or the
+       right it has on it is changed. No new code: the owner decides, the
+       device finds it next time it asks. */
+    give(id, asset, rights) {
+        if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');
+        const clean = readRights(asset, rights);
+        if (typeOf(asset) === 'secret') throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
+        this.#grants.give(pairingSubject(id), asset, clean);
+    }
+    /* A name the owner will recognise. */
+    rename(id, label) {
+        if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');
+        if (!oneLine(label)) throw new Refusal(400, `A name is one line, ${LABEL_MAX} characters at most.`);
+        this.#store.patch(id, { label: label.trim() });
+    }
+    /* A code that was shown and is not wanted any more: it stops working at once. */
+    cancel(code) { if (typeof code === 'string') this.#codes.delete(digest(code).toString('hex')); }
+
     /* One thing is taken back from one device; a device left with nothing is removed. */
     take(id, asset) {
         if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');

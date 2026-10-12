@@ -139,8 +139,12 @@ test('a git repository is added from the page, attached like a folder, and is a 
     await me.page.locator('#files-close').click();
     /* And it can be given in a share, to read or to write, as any other thing. */
     await me.page.locator('#share').click();
-    await me.until('the choice is shown', async () => (await me.page.locator('#sharing-what .folder', { hasText: 'site - git' }).count()) === 1);
-    assert.deepEqual(await me.page.locator('#sharing-what .folder', { hasText: 'site - git' }).locator('.levels button').allInnerTexts(), ['No', 'Read', 'Write']);
+    const offered = me.page.locator('#share-add .folder', { hasText: 'site' });
+    await me.until('the repository is offered', async () => (await offered.count()) === 1);
+    assert.match(await offered.innerText(), /site repository, attached here/);
+    await offered.locator('button').click();
+    assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.levels button').allInnerTexts(), ['Read', 'Write']);
+    await me.page.locator('#sharing-close').click();
     /* An address that is not https is refused before git is run. */
     assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'ssh://git@example.com/x.git' })).body.error, /https address/);
 });

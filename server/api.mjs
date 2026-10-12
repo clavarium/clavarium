@@ -201,6 +201,16 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const pushed = /^\/api\/git\/([a-z0-9-]{1,32})\/(remote|push)$/.exec(pathname);
         if (pushed && gitReview) return send(200, pushed[2] === 'remote' ? gitReview.setRemote(pushed[1], body) : await gitReview.push(pushed[1], body)), true;
+        if (pathname === '/api/shares/cancel' && sharing) { sharing.devices.cancel(body.code); return send(200, { ok: true }), true; }
+        const more = /^\/api\/devices\/([0-9a-f-]{36})\/(give|rename)$/.exec(pathname);
+        if (more && sharing) {
+            if (more[2] === 'rename') { sharing.devices.rename(more[1], body.label); return send(200, { ok: true }), true; }
+            const [type, name] = String(body.asset ?? '').split(':');
+            const exists = type === 'conversation' ? conversations.list().some((c) => c.name === name) : resources?.list().some((r) => resources.assetOf(r) === body.asset);
+            if (!exists) throw new Refusal(404, `There is no such thing to share: ${String(body.asset ?? '')}.`);
+            sharing.devices.give(more[1], body.asset, body.rights);
+            return send(200, { ok: true }), true;
+        }
         const taken = /^\/api\/devices\/([0-9a-f-]{36})\/take$/.exec(pathname);
         if (taken && sharing) { sharing.devices.take(taken[1], body.asset); return send(200, { ok: true }), true; }
         const revoked = /^\/api\/devices\/([0-9a-f-]{36})\/revoke$/.exec(pathname);

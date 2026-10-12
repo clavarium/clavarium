@@ -25,6 +25,8 @@
     </form>
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
+    <span class="sp"></span>
+    <button type="button" id="sharing-open" hidden>Devices &amp; sharing</button>
   </aside>
   <section id="room">
     <header>
@@ -174,20 +176,52 @@
         </details>
       </div>
       <div id="sharing" class="sheet" hidden>
-        <div class="panel-top"><b>Share</b><button type="button" id="sharing-close">Close</button></div>
-        <p class="hint">Choose what the code gives. A conversation is given whole: its terminal, its shortcuts, dictation, and the files of that conversation. Whoever has it is root in its machine, like the tool. Anything else is given by itself, to read or to write.</p>
-        <div id="sharing-what"></div>
-        <label for="sharing-label">For whom? A name you will recognise in the list below</label>
-        <input id="sharing-label" maxlength="40" placeholder="Dad's tablet" autocomplete="off">
-        <p id="sharing-summary" class="hint"></p>
-        <div class="row"><button type="button" id="sharing-new" class="primary">Show a code</button><span id="sharing-status" class="hint" role="status"></span></div>
-        <img id="sharing-qr" alt="Pairing code to scan" hidden>
-        <p id="sharing-link" class="hint link" hidden></p>
-        <div class="row" id="sharing-copy-row" hidden><button type="button" id="sharing-copy">Copy the link</button><span class="hint">to send it instead of showing the code: it works once, for ten minutes.</span></div>
-        <p id="sharing-error" class="error" role="alert" hidden></p>
-        <b>Devices, and what each was given</b>
-        <div id="sharing-devices"></div>
-        <p id="sharing-none" class="hint" hidden>No device was given anything.</p>
+        <div class="panel-top"><b id="sharing-title">Share</b><button type="button" id="sharing-close">Close</button></div>
+        <!-- Choosing what a device gets: a basket you add to. -->
+        <div id="share-compose">
+          <b>Who is it for?</b>
+          <div id="share-who" class="choices" role="radiogroup" aria-label="Who is it for"></div>
+          <div id="share-name-row">
+            <input id="sharing-label" maxlength="40" placeholder="A name you will recognise: Dad's tablet" autocomplete="off" aria-label="Name of the new device">
+            <div id="share-suggest" class="choices"></div>
+          </div>
+          <div class="share-cols">
+            <div class="share-col">
+              <b id="share-basket-title">It will get</b>
+              <div id="share-basket"></div>
+              <p id="share-basket-empty" class="hint">Nothing yet. Add something.</p>
+            </div>
+            <div class="share-col">
+              <b>Add something</b>
+              <input id="share-search" placeholder="Search" autocomplete="off" aria-label="Search what can be added" hidden>
+              <div id="share-filters" class="choices" role="group" aria-label="Kind of thing"></div>
+              <div id="share-add"></div>
+            </div>
+          </div>
+          <div class="share-foot">
+            <p id="sharing-summary"></p>
+            <button type="button" id="sharing-new" class="primary">Show a code</button>
+          </div>
+          <p id="sharing-error" class="error" role="alert" hidden></p>
+        </div>
+        <!-- The code, and whether it was used. -->
+        <div id="share-code" hidden>
+          <img id="sharing-qr" alt="Pairing code to scan">
+          <p id="sharing-link" class="hint link"></p>
+          <div class="row"><button type="button" id="sharing-copy">Copy the link</button><span id="sharing-status" class="hint" role="status"></span></div>
+          <p id="share-waiting" role="status"></p>
+          <div class="row"><button type="button" id="share-done" class="primary" hidden>Done</button><button type="button" id="share-cancel">Cancel this code</button></div>
+        </div>
+        <!-- Who has what. -->
+        <div id="share-manage" hidden>
+          <div class="row">
+            <div class="choices" role="group" aria-label="How it is listed"><button type="button" id="share-by-device" aria-pressed="true">By device</button><button type="button" id="share-by-thing" aria-pressed="false">By thing</button></div>
+            <span class="sp"></span><button type="button" id="share-new-device" class="primary">+ New device</button>
+          </div>
+          <div id="sharing-devices"></div>
+          <p id="sharing-none" class="hint" hidden>Nothing is shared with any device.</p>
+          <div id="share-things" hidden></div>
+        </div>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>

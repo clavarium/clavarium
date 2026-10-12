@@ -287,10 +287,15 @@
             sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : `${c.toolLabel} - failed`;
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
+            /* Seen at a glance: this conversation is in other hands too. */
+            const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
+            if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
             b.addEventListener('click', () => select(c.name));
             items.append(b);
         }
         $('empty').hidden = conversations.length > 0;
+        $('sharing-open').hidden = DEVICE;
+        $('sharing-open').textContent = sharedDevices.length > 0 ? `Devices & sharing (${sharedDevices.length})` : 'Devices & sharing';
     }
     async function refresh() {
         clearTimeout(pollTimer);
@@ -319,6 +324,7 @@
                 const r = await fetch(`${API}/conversations`);
                 if (!r.ok) throw new Error('no api');
                 conversations = await r.json();
+                await readDevices();
                 $('list').hidden = false; $('back').hidden = false;
             }
             home = true;
@@ -530,6 +536,14 @@
                 row.append(label, levels, remove);
             } else row.append(label, levels);
             if (review) row.append(review);
+            if (!DEVICE) {
+                const asset = `${resource.type === 'mailbox' || resource.type === 'git' ? resource.type : 'folder'}:${resource.name}`;
+                const give = document.createElement('button'); give.type = 'button';
+                const n = sharedDevices.filter((d) => d.grants.some((g) => g.asset === asset)).length;
+                give.textContent = n > 0 ? `Shared with ${n} - Share...` : 'Share...';
+                give.addEventListener('click', () => { void openCompose([[asset, 'r']]); });
+                row.append(give);
+            }
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;
@@ -1193,102 +1207,275 @@
     $('signin-remove').addEventListener('click', async () => { await post(`${API}/conversations/${encodeURIComponent(current)}/signin`, { host: '' }).catch(() => {}); await paintSignIn(); void watchSignIn(); });
 
     /* ---------- sharing ---------- */
-    /* A share is a chosen list: conversations to use, and other things --
-       folders, mailboxes, repositories -- each to read or to write. One code
-       gives the whole list to one device. */
-    const RIGHT_WORDS = { r: 'read', rw: 'read and write', x: 'use' };
-    const assetLabel = (asset) => { const [type, name] = asset.split(':'); return `${name} (${type})`; };
-    async function paintShareChoice() {
-        const box = $('sharing-what');
-        box.replaceChildren();
-        const things = await (await fetch(`${API}/resources`)).json();
-        const row = (asset, label, levels, chosen) => {
-            const line = document.createElement('div'); line.className = 'folder'; line.dataset.asset = asset;
-            const name = document.createElement('b'); name.textContent = label;
-            const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What the code gives on ${label}`);
-            for (const [rights, text] of [['', 'No'], ...levels]) {
-                const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = rights;
-                b.setAttribute('aria-pressed', String(rights === chosen));
-                b.addEventListener('click', () => { for (const other of group.children) other.setAttribute('aria-pressed', String(other === b)); sayChoice(); });
-                group.append(b);
-            }
-            line.append(name, group); box.append(line);
-        };
-        for (const c of conversations.filter((x) => x.phase === 'ready')) row(`conversation:${c.name}`, `${c.name} - conversation`, [['x', 'Use']], c.name === current ? 'x' : '');
-        for (const r of things) {
-            const type = r.type === 'mailbox' || r.type === 'git' ? r.type : 'folder';
-            row(`${type}:${r.name}`, `${r.name} - ${type}`, type === 'mailbox' ? [['r', 'Read']] : [['r', 'Read'], ['rw', 'Write']], '');
-        }
-    }
-    /* Said in a sentence, before the code is made: what it gives. */
-    function sayChoice() {
-        const given = chosenGrants();
-        const whole = given.filter((g) => g.rights === 'x').map((g) => g.asset.split(':')[1]);
-        const rest = given.filter((g) => g.rights !== 'x').map((g) => `${g.asset.split(':')[1]} (${RIGHT_WORDS[g.rights]})`);
-        $('sharing-summary').textContent = given.length === 0 ? 'Nothing is chosen yet.'
-            : `The code will give: ${[whole.length ? `the whole of ${whole.join(', ')} - its terminal, as root in its machine` : '', rest.join(', ')].filter(Boolean).join('; and ')}.`;
-        $('sharing-new').disabled = given.length === 0;
-    }
-    const chosenGrants = () => [...$('sharing-what').children].map((line) => ({ asset: line.dataset.asset, rights: line.querySelector('button[aria-pressed=true]')?.dataset.rights ?? '' })).filter((g) => g.rights !== '');
+    /* SHARING, in one sheet with three faces:
+         compose  what a device gets -- a BASKET you add to, not a grid to fill
+                  in. For a new device it ends on a code; for a device already
+                  paired it just saves.
+         code     the code, and whether it was used.
+         manage   who has what: by device, and by thing.
+       Opened from a conversation (that conversation in the basket), from a
+       folder (that folder, to read), or from "Devices & sharing" (who has
+       what). Nothing is ever chosen for the owner but the thing they came
+       from; writing is never chosen for them. */
+    const KINDS = [['', 'All'], ['conversation', 'Conversations'], ['folder', 'Folders'], ['git', 'Repositories'], ['mailbox', 'Mailboxes']];
+    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox' };
+    const ago = (date) => {
+        if (!date) return 'never opened';
+        const minutes = Math.max(0, Math.round((Date.now() - Date.parse(date)) / 60000));
+        return minutes < 1 ? 'opened just now' : minutes < 60 ? `opened ${minutes} min ago` : minutes < 1440 ? `opened ${Math.round(minutes / 60)} h ago` : `opened ${Math.round(minutes / 1440)} d ago`;
+    };
+    let sharedDevices = [];          /* every device with what it was given, as last read */
+    let basket = new Map();          /* asset -> rights */
+    let shareTarget = '';            /* '' : a new device; otherwise the device being changed */
+    let shareKind = ''; let catalog = []; let codeTimers = [];
+    const readDevices = async () => { sharedDevices = DEVICE ? [] : await (await fetch(`${API}/devices`)).json().catch(() => []); return sharedDevices; };
+    const devicesWith = (asset) => sharedDevices.filter((d) => d.grants.some((g) => g.asset === asset));
+    const face = (which) => { for (const id of ['share-compose', 'share-code', 'share-manage']) $(id).hidden = id !== `share-${which}`; for (const timer of codeTimers) clearInterval(timer); codeTimers = []; };
 
-    async function paintDevices() {
-        const list = await (await fetch(`${API}/devices`)).json();
-        const rows = $('sharing-devices');
-        rows.replaceChildren();
-        for (const device of list) {
-            const row = document.createElement('div'); row.className = 'device';
-            const label = document.createElement('b'); label.textContent = device.label;
-            const seen = document.createElement('small');
-            seen.textContent = `paired ${new Date(device.createdAt).toLocaleDateString()} - ${device.seenAt ? `last opened ${new Date(device.seenAt).toLocaleString()}` : 'never opened'}`;
-            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Revoke';
-            /* Two clicks, and the second one is not where the first was. */
-            remove.addEventListener('click', () => {
-                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = 'Yes, remove this device';
-                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
-                keep.addEventListener('click', () => { void paintDevices(); });
-                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/revoke`).catch(() => {}); await paintDevices(); });
-                remove.replaceWith(keep, sure);
-            });
-            row.append(label, seen, remove);
-            /* What it was given, each thing with its own way back. */
-            const given = document.createElement('div'); given.className = 'given';
-            for (const g of device.grants) {
-                const item = document.createElement('span'); item.className = 'chip'; item.dataset.access = g.rights.includes('w') ? 'write' : 'read';
-                item.textContent = `${assetLabel(g.asset)}: ${RIGHT_WORDS[g.rights] ?? g.rights} `;
-                const take = document.createElement('button'); take.type = 'button'; take.textContent = 'x'; take.setAttribute('aria-label', `Take ${assetLabel(g.asset)} back from ${device.label}`);
-                take.addEventListener('click', () => {
-                    if (take.dataset.sure !== 'yes') { take.dataset.sure = 'yes'; take.textContent = 'Take back?'; take.className = 'danger'; return; }
-                    void (async () => { await post(`${API}/devices/${device.id}/take`, { asset: g.asset }).catch(() => {}); await paintDevices(); })();
-                });
-                item.append(take); given.append(item);
-            }
-            row.append(given);
-            rows.append(row);
+    /* A two-way control: Read | Write. `onChange(rights)`. */
+    function levelControl(rights, onChange, label) {
+        const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
+        for (const [value, text] of [['r', 'Read'], ['rw', 'Write']]) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = value;
+            b.setAttribute('aria-pressed', String(value === rights));
+            b.addEventListener('click', () => { if (value !== rights) onChange(value); });
+            group.append(b);
         }
-        $('sharing-none').hidden = list.length > 0;
+        return group;
     }
-    $('share').addEventListener('click', async () => {
-        $('panel').hidden = $('files').hidden = true;
-        $('sharing-qr').hidden = $('sharing-link').hidden = $('sharing-error').hidden = true; $('sharing-copy-row').hidden = true;
-        $('sharing-status').textContent = '';
-        await paintShareChoice();
+    const fixedRight = (type) => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = type === 'conversation' ? 'Use - the whole terminal' : 'Read only'; return s; };
+
+    async function loadCatalog() {
+        const things = await (await fetch(`${API}/resources`)).json().catch(() => []);
+        const attached = new Set((conversations.find((x) => x.name === current)?.resources ?? []).map((r) => r.name));
+        catalog = [
+            ...conversations.filter((c) => c.phase === 'ready').map((c) => ({ asset: `conversation:${c.name}`, type: 'conversation', name: c.name, near: c.name === current })),
+            ...things.map((r) => { const type = r.type === 'mailbox' || r.type === 'git' ? r.type : 'folder'; return { asset: `${type}:${r.name}`, type, name: r.name, near: attached.has(r.name) }; }),
+        ];
+    }
+    function sayChoice() {
+        const who = shareTarget ? (sharedDevices.find((d) => d.id === shareTarget)?.label ?? 'This device') : ($('sharing-label').value.trim() || 'The new device');
+        const whole = [...basket].filter(([, r]) => r === 'x').map(([a]) => a.split(':')[1]);
+        const rest = [...basket].filter(([, r]) => r !== 'x').map(([a, r]) => `${r === 'rw' ? 'change' : 'read'} ${a.split(':')[1]}`);
+        const parts = [whole.length ? `use ${whole.join(', ')} - the whole terminal, as root in its machine, with the files of that conversation` : '', rest.join(', ')].filter(Boolean);
+        $('sharing-summary').textContent = basket.size === 0 ? 'Nothing is chosen yet.' : `${who} will be able to ${parts.join('; and ')}.`;
+        const named = shareTarget !== '' || $('sharing-label').value.trim() !== '';
+        $('sharing-new').disabled = basket.size === 0 || !named;
+        $('sharing-new').textContent = shareTarget ? 'Save changes' : `Show a code${$('sharing-label').value.trim() ? ` for ${$('sharing-label').value.trim()}` : ''}`;
+    }
+    function paintCompose() {
+        /* Who: a new device, or one that is already paired. */
+        const who = $('share-who'); who.replaceChildren();
+        const chip = (id, text) => {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.setAttribute('role', 'radio'); b.setAttribute('aria-checked', String(shareTarget === id));
+            b.addEventListener('click', () => {
+                shareTarget = id;
+                if (id) basket = new Map(sharedDevices.find((d) => d.id === id).grants.map((g) => [g.asset, g.rights]));
+                paintCompose();
+            });
+            who.append(b);
+        };
+        chip('', '+ New device');
+        for (const d of sharedDevices) chip(d.id, d.label);
+        $('share-name-row').hidden = shareTarget !== '';
+        const suggest = $('share-suggest'); suggest.replaceChildren();
+        for (const text of ['My phone', 'My tablet', "Dad's tablet"]) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text;
+            b.addEventListener('click', () => { $('sharing-label').value = text; sayChoice(); });
+            suggest.append(b);
+        }
+        /* The basket: only what is given carries a control. */
+        const box = $('share-basket'); box.replaceChildren();
+        for (const [asset, rights] of basket) {
+            const [type, name] = asset.split(':');
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = asset;
+            const label = document.createElement('b'); label.textContent = name;
+            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
+            const right = type === 'folder' || type === 'git' ? levelControl(rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`) : fixedRight(type);
+            const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Remove'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
+            out.addEventListener('click', () => { basket.delete(asset); paintCompose(); });
+            row.append(label, right, out); box.append(row);
+        }
+        $('share-basket-title').textContent = `It will get (${basket.size})`;
+        $('share-basket-empty').hidden = basket.size > 0;
+        /* What can be added: near things first, then by kind and name. */
+        const filters = $('share-filters'); filters.replaceChildren();
+        for (const [kind, text] of KINDS) {
+            if (kind && !catalog.some((c) => c.type === kind)) continue;
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(shareKind === kind));
+            b.addEventListener('click', () => { shareKind = kind; paintCompose(); });
+            filters.append(b);
+        }
+        $('share-search').hidden = catalog.length <= 8;
+        const wanted = $('share-search').hidden ? '' : $('share-search').value.trim().toLowerCase();
+        const add = $('share-add'); add.replaceChildren();
+        const order = (c) => `${c.near ? 0 : 1}${KINDS.findIndex(([k]) => k === c.type)}${c.name}`;
+        for (const c of [...catalog].sort((a, b2) => order(a).localeCompare(order(b2)))) {
+            if ((shareKind && c.type !== shareKind) || (wanted && !c.name.includes(wanted))) continue;
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = c.asset;
+            const label = document.createElement('b'); label.textContent = c.name;
+            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`; label.append(kind);
+            const plus = document.createElement('button'); plus.type = 'button';
+            if (basket.has(c.asset)) { plus.textContent = 'Added'; plus.disabled = true; }
+            else {
+                plus.textContent = '+ Add'; plus.setAttribute('aria-label', `Add ${c.name}`);
+                /* A conversation is given whole; anything else to read -- writing is asked for, never assumed. */
+                plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? 'x' : 'r'); paintCompose(); });
+            }
+            row.append(label, plus); add.append(row);
+        }
         sayChoice();
-        await paintDevices();
+    }
+    /* `start`: [[asset, rights], ...] put in the basket; `target`: a paired device to change instead of a new one. */
+    async function openCompose(start = [], target = '') {
+        await Promise.all([loadCatalog(), readDevices()]);
+        shareTarget = target; shareKind = '';
+        basket = new Map(target ? sharedDevices.find((d) => d.id === target)?.grants.map((g) => [g.asset, g.rights]) ?? [] : []);
+        for (const [asset, rights] of start) basket.set(asset, rights);
+        $('sharing-label').value = ''; $('share-search').value = ''; $('sharing-error').hidden = true;
+        $('sharing-title').textContent = 'Share';
+        $('panel').hidden = $('files').hidden = true;
+        paintCompose(); face('compose');
         $('sharing').hidden = false;
-    });
-    $('sharing-close').addEventListener('click', () => { $('sharing').hidden = true; terminal.focus(); });
+    }
+    $('sharing-label').addEventListener('input', sayChoice);
+    $('share-search').addEventListener('input', paintCompose);
+
+    /* Who has what. */
+    function takeBack(button, question, run) {
+        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = question;
+        const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
+        keep.addEventListener('click', () => { void paintManage(); });
+        sure.addEventListener('click', async () => { await run().catch(() => {}); await paintManage(); void refresh(); });
+        button.replaceWith(sure, keep);
+    }
+    function grantRow(device, g) {
+        const [type, name] = g.asset.split(':');
+        const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
+        const label = document.createElement('span'); label.textContent = name;
+        const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
+        const right = type === 'folder' || type === 'git'
+            ? levelControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await paintManage(); }, `What ${device.label} may do with ${name}`)
+            : fixedRight(type);
+        const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
+        take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
+        row.append(label, right, take);
+        return row;
+    }
+    let manageBy = 'device';
+    async function paintManage() {
+        await readDevices();
+        $('share-by-device').setAttribute('aria-pressed', String(manageBy === 'device')); $('share-by-thing').setAttribute('aria-pressed', String(manageBy === 'thing'));
+        const rows = $('sharing-devices'); rows.replaceChildren(); rows.hidden = manageBy !== 'device';
+        const things = $('share-things'); things.replaceChildren(); things.hidden = manageBy !== 'thing';
+        $('sharing-none').hidden = sharedDevices.length > 0;
+        if (manageBy === 'device') {
+            for (const device of [...sharedDevices].sort((a, b2) => String(b2.seenAt ?? '').localeCompare(String(a.seenAt ?? '')))) {
+                const card = document.createElement('div'); card.className = 'device'; card.dataset.device = device.id;
+                const name = document.createElement('b'); name.textContent = device.label;
+                const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
+                rename.addEventListener('click', () => {
+                    const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
+                    const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
+                    const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await paintManage(); };
+                    save.addEventListener('click', () => { void done(); });
+                    field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+                    name.replaceWith(field); rename.replaceWith(save); field.focus(); field.select();
+                });
+                const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)}, paired ${new Date(device.createdAt).toLocaleDateString()}`;
+                if (!device.seenAt) seen.className = 'warn';
+                const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
+                revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
+                const head = document.createElement('div'); head.className = 'device-head'; head.append(name, rename, seen, revoke);
+                const given = document.createElement('div'); given.className = 'given';
+                for (const g of device.grants) given.append(grantRow(device, g));
+                const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
+                more.addEventListener('click', () => { void openCompose([], device.id); });
+                card.append(head, given, more); rows.append(card);
+            }
+            return;
+        }
+        /* By thing: who can see this folder? What nobody has is folded away. */
+        await loadCatalog();
+        const alone = [];
+        for (const c of catalog) {
+            const holders = devicesWith(c.asset);
+            if (holders.length === 0) { alone.push(c); continue; }
+            const block = document.createElement('details'); block.className = 'thing'; block.dataset.asset = c.asset; block.open = true;
+            const top = document.createElement('summary'); top.textContent = `${c.name} - ${KIND_WORD[c.type]} - ${holders.length} device${holders.length > 1 ? 's' : ''}`;
+            block.append(top);
+            for (const device of holders) {
+                const row = grantRow(device, device.grants.find((g) => g.asset === c.asset));
+                row.firstChild.textContent = device.label;
+                block.append(row);
+            }
+            things.append(block);
+        }
+        const rest = document.createElement('details'); rest.className = 'thing';
+        const top = document.createElement('summary'); top.textContent = `Not shared (${alone.length})`; rest.append(top);
+        for (const c of alone) {
+            const row = document.createElement('div'); row.className = 'given-row';
+            const label = document.createElement('span'); label.textContent = `${c.name} - ${KIND_WORD[c.type]}`;
+            const give = document.createElement('button'); give.type = 'button'; give.textContent = 'Share...';
+            give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? 'x' : 'r']]); });
+            row.append(label, give); rest.append(row);
+        }
+        things.append(rest);
+    }
+    async function openManage() {
+        $('panel').hidden = $('files').hidden = true;
+        $('sharing-title').textContent = 'Devices & sharing';
+        face('manage'); await paintManage();
+        $('sharing').hidden = false;
+    }
+    $('share-by-device').addEventListener('click', () => { manageBy = 'device'; void paintManage(); });
+    $('share-by-thing').addEventListener('click', () => { manageBy = 'thing'; void paintManage(); });
+    $('share-new-device').addEventListener('click', () => { void openCompose(); });
+    $('sharing-open').addEventListener('click', () => { void openManage(); });
+    /* From a conversation: that conversation, and nothing else, is in the basket. */
+    $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, 'x']]); });
+    $('sharing-close').addEventListener('click', () => { face('compose'); $('sharing').hidden = true; terminal.focus(); void refresh(); });
+
     $('sharing-new').addEventListener('click', async () => {
         $('sharing-error').hidden = true;
         try {
-            const shared = await post(`${API}/shares`, { grants: chosenGrants(), label: $('sharing-label').value.trim() });
+            if (shareTarget) {
+                /* A device already paired: what changed is given or taken, and that is all. */
+                const before = new Map(sharedDevices.find((d) => d.id === shareTarget).grants.map((g) => [g.asset, g.rights]));
+                for (const [asset, rights] of basket) if (before.get(asset) !== rights) await post(`${API}/devices/${shareTarget}/give`, { asset, rights });
+                for (const asset of before.keys()) if (!basket.has(asset)) await post(`${API}/devices/${shareTarget}/take`, { asset });
+                await openManage(); void refresh();
+                return;
+            }
+            const label = $('sharing-label').value.trim();
+            const known = new Set((await readDevices()).map((d) => d.id));
+            const shared = await post(`${API}/shares`, { grants: [...basket].map(([asset, rights]) => ({ asset, rights })), label });
+            face('code');
             $('sharing-qr').src = `data:image/svg+xml;base64,${btoa(shared.qr)}`;
-            $('sharing-qr').hidden = false;
-            $('sharing-link').textContent = shared.url; $('sharing-link').hidden = false;
-            $('sharing-copy-row').hidden = false; $('sharing-copy').textContent = 'Copy the link';
+            $('sharing-link').textContent = shared.url;
+            $('sharing-copy').textContent = 'Copy the link';
             $('sharing-copy').onclick = async () => { try { await navigator.clipboard.writeText(shared.url); $('sharing-copy').textContent = 'Copied'; } catch { $('sharing-copy').textContent = 'Select the link above and copy it'; } };
-            $('sharing-status').textContent = `Works once, for ${shared.minutes} minutes.`;
+            $('share-done').hidden = true; $('share-cancel').hidden = false;
+            $('share-waiting').textContent = `Waiting for ${label}...`;
+            /* How long it works, counted down; and whether it was used, looked for. */
+            const until = Date.now() + shared.minutes * 60_000;
+            const count = () => {
+                const left = Math.max(0, Math.round((until - Date.now()) / 1000));
+                $('sharing-status').textContent = left > 0 ? `Works once, for ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}.` : 'This code is too old now. Make another.';
+            };
+            count();
+            const arrived = async () => {
+                const now = (await readDevices()).find((d) => !known.has(d.id));
+                if (!now) return;
+                for (const timer of codeTimers) clearInterval(timer); codeTimers = [];
+                $('share-waiting').textContent = `${now.label} is connected.`; $('sharing-status').textContent = '';
+                $('share-done').hidden = false; $('share-cancel').hidden = true;
+            };
+            codeTimers = [setInterval(count, 1000), setInterval(() => { void arrived(); }, 2500)];
+            $('share-cancel').onclick = async () => { await post(`${API}/shares/cancel`, { code: new URL(shared.url).hash.slice(1) }).catch(() => {}); await openCompose([...basket]); $('sharing-label').value = label; sayChoice(); };
         } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
     });
+    $('share-done').addEventListener('click', () => { void openManage(); void refresh(); });
 
     /* ---------- resting and archiving ---------- */
     $('sleep').addEventListener('click', async () => {

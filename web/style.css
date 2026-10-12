@@ -202,3 +202,32 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #gitview-remote { display: grid; gap: 6px; margin-top: 8px; }
 #gitview-remote input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #gitview details > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; }
+
+/* Sharing: a basket, the code, and who has what. */
+#sharing { gap: 12px; }
+#share-compose, #share-code, #share-manage { display: flex; flex-direction: column; gap: 10px; }
+#share-name-row { display: flex; flex-direction: column; gap: 6px; }
+#sharing-label, #share-search, .device input { min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+.share-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.share-col { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+@media (max-width: 900px) { .share-cols { grid-template-columns: 1fr; } }
+#share-basket .folder, #share-add .folder { align-items: center; }
+#share-add button, #share-basket button, .given-row button, .device button { min-height: 40px; }
+.share-foot { position: sticky; bottom: -14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; background: var(--panel); border-top: 1px solid var(--line); }
+.share-foot p { flex: 1 1 260px; margin: 0; }
+#share-who button[aria-checked="true"], #share-filters button[aria-pressed="true"], #share-manage .choices button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass); }
+#sharing .levels button[data-rights="rw"][aria-pressed="true"] { border-color: var(--warn); color: var(--warn); }
+#sharing-qr { width: min(280px, 70vw); background: #fff; padding: 10px; border-radius: 8px; }
+#share-waiting { font-size: 16px; font-weight: 600; margin: 0; }
+.device { flex-direction: column; align-items: stretch; }
+.device-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.device-head small { flex: 1; color: var(--ink2); }
+.device-head small.warn { color: var(--warn); }
+.given-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 0 6px 12px; border-top: 1px dashed var(--line); }
+.given-row > span:first-child { flex: 1 1 160px; min-width: 0; }
+.thing { border-top: 1px solid var(--line); padding: 6px 0; }
+.thing > summary { cursor: pointer; font-weight: 600; min-height: 40px; display: flex; align-items: center; }
+#list .sp { flex: 1; }
+.item .shared-mark { display: block; color: var(--brass); }
+/* A sheet is open: the keys of the terminal are not for it, and would hide half of it on a phone. */
+#room:has(.sheet:not([hidden])) #keys, #room:has(.sheet:not([hidden])) #shortcuts { display: none; }

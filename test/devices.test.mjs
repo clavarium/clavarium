@@ -165,3 +165,21 @@ test('a pairing made before the table of rights existed keeps its conversation',
     assert.deepEqual(upgraded.conversationsOf('0f8fad5b-d9cb-469f-a165-70867728950e'), ['family']);
     assert.equal(new Store(b.path).get('0f8fad5b-d9cb-469f-a165-70867728950e').conversation, undefined);
 });
+
+test('a paired device is given more, has a right changed, and is renamed -- without a new code; a code can be cancelled', (t) => {
+    const b = bench(t);
+    const { device } = b.devices.pair({ code: b.devices.share('family', 'Dad').code, key: phone().jwk, label: 'Tablet or computer' });
+    assert.equal(b.devices.all()[0].label, 'Dad', 'the name the owner chose wins over what the device says of itself');
+    b.devices.give(device, 'folder:photos', 'r');
+    b.devices.give(device, 'folder:photos', 'rw');
+    b.devices.give(device, 'conversation:garden', 'x');
+    assert.deepEqual(b.devices.grantsOf(device).map((g) => `${g.asset} ${g.rights}`), ['conversation:family x', 'folder:photos rw', 'conversation:garden x']);
+    assert.throws(() => b.devices.give(device, 'secret:MODEL_KEY', 'x'), /never shared with a device/);
+    assert.throws(() => b.devices.give('0f8fad5b-d9cb-469f-a165-70867728950e', 'folder:photos', 'r'), /No such device/);
+    b.devices.rename(device, "Dad's tablet");
+    assert.equal(b.devices.all()[0].label, "Dad's tablet");
+    assert.throws(() => b.devices.rename(device, 'two\nlines'), /one line/);
+    const { code } = b.devices.share('family');
+    b.devices.cancel(code);
+    assert.throws(() => b.devices.pair({ code, key: phone().jwk }), /not valid any more/);
+});
