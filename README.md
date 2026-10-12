@@ -160,3 +160,7 @@ hooks find it there by themselves; `hooks/guard.sh` lists the other ways.
 Without a guard, nothing commits. That is on purpose.
 
     npm run check    # what a push runs
+
+## Licence
+
+MIT. See `LICENSE`.
