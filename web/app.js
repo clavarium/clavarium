@@ -234,6 +234,7 @@
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         $('sleep').hidden = $('archive').hidden = !c;
         $('folders').hidden = $('files-open').hidden = $('share').hidden = !c || c.phase !== 'ready';
+        $('attach-top').hidden = DEVICE || !c || c.phase !== 'ready';
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
         $('panel').hidden = $('files').hidden = $('sharing').hidden = $('copy').hidden = true;
         paintChips();
@@ -294,7 +295,7 @@
             items.append(b);
         }
         $('empty').hidden = conversations.length > 0;
-        $('sharing-open').hidden = DEVICE;
+        $('sharing-open').hidden = $('assets-open').hidden = $('settings-open').hidden = DEVICE;
         $('sharing-open').textContent = sharedDevices.length > 0 ? `Devices & sharing (${sharedDevices.length})` : 'Devices & sharing';
     }
     async function refresh() {
@@ -479,76 +480,104 @@
             chips.append(chip);
         }
     }
+    /* THREE PLACES, ONE RULE: the left column is the platform, the bar is this
+       conversation.
+         Access    what THIS conversation has: attached folders, repositories
+                   and mailboxes, secrets handed to its tool, its network.
+                   Nothing is created there.
+         Assets    everything kept here, whatever the conversation: made
+                   there, and attached to any conversation from there.
+         Settings  this device, and the platform.
+       (They used to be one sheet, "Folders & secrets", where what belonged to
+       the platform and what belonged to one conversation were interleaved:
+       the owner said he got lost in it.) */
+    const kindOf = (resource) => (resource.type === 'mailbox' || resource.type === 'git' ? resource.type : 'folder');
+    const attachTo = async (conversation, name, access, errorId = 'panel-error') => {
+        $(errorId).hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(conversation)}/resources`, { resource: name, access }); }
+        catch (error) { $(errorId).textContent = error.message; $(errorId).hidden = false; }
+        await refresh();
+    };
+    const handTo = async (conversation, secret, attached, errorId = 'panel-error') => {
+        $(errorId).hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(conversation)}/secrets`, { secret, attached }); }
+        catch (error) { $(errorId).textContent = error.message; $(errorId).hidden = false; }
+        await refresh();
+    };
+    /* A row of mode buttons; `chosen` is pressed; `pick(value)` on another. */
+    function modes(options, chosen, pick, label) {
+        const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
+        for (const [value, text] of options) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.value = value;
+            b.setAttribute('aria-pressed', String(value === chosen));
+            b.addEventListener('click', async () => { if (value === chosen) return; for (const other of group.children) other.disabled = true; b.textContent = '...'; await pick(value); });
+            group.append(b);
+        }
+        return group;
+    }
+
+    /* ---------- Access: this conversation ---------- */
     async function paintPanel() {
+        const here = conversations.find((x) => x.name === current);
+        $('panel-title').textContent = `Access - ${current}`;
         const all = await (await fetch(`${API}/resources`)).json();
-        const boxes = DEVICE ? [] : await (await fetch(`${API}/mailboxes`)).json().catch(() => []);
-        const mine = new Map((conversations.find((x) => x.name === current)?.resources ?? []).map((r) => [r.name, r.access]));
+        const mine = new Map((here?.resources ?? []).map((r) => [r.name, r.access]));
         const rows = $('panel-rows');
         rows.replaceChildren();
-        for (const resource of all) {
-            const row = document.createElement('div'); row.className = 'folder';
+        for (const resource of all.filter((r) => mine.has(r.name))) {
+            const kind = kindOf(resource);
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = resource.name;
             const label = document.createElement('b'); label.textContent = resource.name;
-            const box = resource.type === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
-            let review;
-            if (resource.type === 'git') {
-                const about = document.createElement('small'); about.className = 'hint';
-                about.textContent = resource.from ? ` git repository, from ${new URL(resource.from).hostname}` : ' git repository';
-                label.append(about);
-                review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
+            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${KIND_WORD[kind]}`; label.append(about);
+            const levels = kind === 'mailbox' ? fixedRight('mailbox')
+                : modes([['read', 'Read'], ['write', 'Write']], mine.get(resource.name), async (access) => { await attachTo(current, resource.name, access); await paintPanel(); }, `Access of this conversation to ${resource.name}`);
+            row.append(label, levels);
+            if (kind === 'git') {
+                const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
                 review.addEventListener('click', () => { void openGit(resource.name); });
+                row.append(review);
             }
-            if (resource.type === 'mailbox') {
-                const about = document.createElement('small'); about.className = 'hint';
-                about.textContent = box ? ` mailbox of ${box.user} - ${box.failure ? box.failure : `${box.messages} message(s)`}` : ' mailbox';
-                label.append(about);
-            }
-            const levels = document.createElement('div'); levels.className = 'levels';
-            levels.setAttribute('role', 'group'); levels.setAttribute('aria-label', `Access of this conversation to ${resource.name}`);
-            for (const [access, text] of LEVELS) {
-                /* Somebody's mail is read, never written. */
-                if (resource.type === 'mailbox' && access === 'write') continue;
-                const b = document.createElement('button');
-                b.type = 'button'; b.textContent = text;
-                b.setAttribute('aria-pressed', (mine.get(resource.name) ?? 'none') === access ? 'true' : 'false');
-                b.addEventListener('click', async () => {
-                    for (const other of levels.children) other.disabled = true;
-                    $('panel-error').hidden = true;
-                    b.textContent = access === 'none' ? 'Detaching...' : 'Attaching...';
-                    try { await post(`${API}/conversations/${encodeURIComponent(current)}/resources`, { resource: resource.name, access }); }
-                    catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
-                    await refresh();
-                    await paintPanel();
-                });
-                levels.append(b);
-            }
-            /* Offered only where it can work: a folder attached nowhere. */
-            if (Object.keys(resource.attachments ?? {}).length === 0) {
-                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
-                remove.addEventListener('click', () => {
-                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove ${resource.name} (its files are kept aside on the server)`;
-                    sure.addEventListener('click', async () => {
-                        try { await post(`${API}/resources/${resource.name}/remove`); }
-                        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
-                        await paintPanel();
-                    });
-                    remove.replaceWith(sure);
-                });
-                row.append(label, levels, remove);
-            } else row.append(label, levels);
-            if (review) row.append(review);
-            if (!DEVICE) {
-                const asset = `${resource.type === 'mailbox' || resource.type === 'git' ? resource.type : 'folder'}:${resource.name}`;
-                const give = document.createElement('button'); give.type = 'button';
-                const n = sharedDevices.filter((d) => d.grants.some((g) => g.asset === asset)).length;
-                give.textContent = n > 0 ? `Shared with ${n} - Share...` : 'Share...';
-                give.addEventListener('click', () => { void openCompose([[asset, 'r']]); });
-                row.append(give);
-            }
+            /* Detached, not removed: it stays in Assets. */
+            const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = 'Detach'; detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
+            detach.addEventListener('click', async () => { detach.disabled = true; detach.textContent = 'Detaching...'; await attachTo(current, resource.name, 'none'); await paintPanel(); });
+            row.append(detach);
             rows.append(row);
         }
-        $('panel-empty').hidden = all.length > 0;
+        $('panel-empty').hidden = mine.size > 0;
+        /* The secrets its tool is handed. */
+        const secrets = DEVICE ? [] : await (await fetch(`${API}/secrets`)).json().catch(() => []);
+        const handed = $('access-secrets'); handed.replaceChildren();
+        for (const secret of secrets.filter((x) => x.conversations.includes(current))) {
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = secret.name;
+            const label = document.createElement('b'); label.textContent = secret.name;
+            const off = document.createElement('button'); off.type = 'button'; off.textContent = 'Detach'; off.setAttribute('aria-label', `Stop handing ${secret.name} to this conversation`);
+            off.addEventListener('click', async () => {
+                await handTo(current, secret.name, false); await paintPanel();
+                $('secret-note').textContent = `${secret.name} will no longer be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
+            });
+            row.append(label, fixedUse(), off); handed.append(row);
+        }
+        $('access-secrets-empty').hidden = handed.children.length > 0;
+        /* What can still be attached, for the picker. */
+        const picker = $('attach-rows'); picker.replaceChildren();
+        $('attach-title').textContent = `Attach to "${current}"`;
+        const offer = (name, kind, buttons) => {
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = name;
+            const label = document.createElement('b'); label.textContent = name;
+            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${kind}`; label.append(about);
+            row.append(label, ...buttons); picker.append(row);
+        };
+        const act = (text, run) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.addEventListener('click', async () => { b.disabled = true; b.textContent = '...'; await run(); await paintPanel(); }); return b; };
+        for (const resource of all.filter((r) => !mine.has(r.name))) {
+            const kind = kindOf(resource);
+            offer(resource.name, KIND_WORD[kind], kind === 'mailbox' ? [act('Read', () => attachTo(current, resource.name, 'read'))]
+                : [act('Read', () => attachTo(current, resource.name, 'read')), act('Write', () => attachTo(current, resource.name, 'write'))]);
+        }
+        for (const secret of secrets.filter((x) => !x.conversations.includes(current))) {
+            offer(secret.name, 'secret', [act('Use', async () => { await handTo(current, secret.name, true); $('secret-note').textContent = `${secret.name} will be handed to the tool the next time it starts (leave the tool, then "Start it again").`; })]);
+        }
+        $('attach-empty').hidden = picker.children.length > 0;
         /* Where the tool works, and the way to the other place. */
-        const here = conversations.find((x) => x.name === current);
         const kept = here?.work === 'kept';
         $('work-box').hidden = DEVICE || !here;
         $('work-now').textContent = kept
@@ -566,11 +595,11 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; terminal.focus(); });
         };
-        const offline = conversations.find((x) => x.name === current)?.offline === true;
+        const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
-        await paintSecrets();
         await paintSignIn();
     }
+    const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = 'Use'; return s; };
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
@@ -580,49 +609,168 @@
             await paintPanel();
         });
     }
-    /* Secrets: a name and a switch. A value goes in and never comes back. */
-    async function paintSecrets() {
-        const all = await (await fetch(`${API}/secrets`)).json();
+    /* `picking`: open on what can be attached (the "+ Attach" of the bar). */
+    async function openAccess(picking = false) {
+        $('files').hidden = $('sharing').hidden = $('assets').hidden = $('settings').hidden = true;
+        /* What is attached may have changed from another screen: asked again before it is shown. */
+        await refresh();
+        await paintPanel();
+        $('attach-picker').hidden = !picking;
+        $('panel').hidden = false;
+        if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
+    }
+    $('folders').addEventListener('click', () => { void openAccess(false); });
+    $('attach-top').addEventListener('click', () => { void openAccess(true); });
+    $('attach-open').addEventListener('click', () => { $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
+    $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
+    $('attach-manage').addEventListener('click', () => { void openAssets(); });
+    $('chips').addEventListener('click', () => { if (!DEVICE && current) void openAccess(false); });
+    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+
+    /* ---------- Assets: everything kept here ---------- */
+    let assetsKind = ''; let assetOpen = '';
+    async function paintAssets() {
+        const [all, boxes, secrets] = await Promise.all([
+            fetch(`${API}/resources`).then((r) => r.json()), fetch(`${API}/mailboxes`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => []), readDevices()]);
+        const ready = conversations.filter((c) => c.phase === 'ready');
+        const count = { folder: 0, git: 0, mailbox: 0, secret: secrets.length };
+        for (const r of all) count[kindOf(r)] += 1;
+        /* The kinds, as chips with how many there are. */
+        const filters = $('assets-filters'); filters.replaceChildren();
+        for (const [kind, text] of [['', `All ${all.length + secrets.length}`], ['folder', `Folders ${count.folder}`], ['git', `Repositories ${count.git}`], ['mailbox', `Mailboxes ${count.mailbox}`], ['secret', `Secrets ${count.secret}`]]) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(assetsKind === kind));
+            b.addEventListener('click', () => { assetsKind = kind; void paintAssets(); });
+            filters.append(b);
+        }
+        for (const section of $('assets').querySelectorAll('section')) section.hidden = assetsKind !== '' && section.dataset.kind !== assetsKind;
+        for (const kind of ['folder', 'git', 'mailbox']) $(`assets-${kind}`).replaceChildren();
+        for (const resource of all) {
+            const kind = kindOf(resource); const asset = `${kind}:${resource.name}`;
+            const users = Object.entries(resource.attachments ?? {});
+            const holders = devicesWith(asset);
+            const row = document.createElement('div'); row.className = 'asset'; row.dataset.name = resource.name;
+            const head = document.createElement('button'); head.type = 'button'; head.className = 'asset-head'; head.setAttribute('aria-expanded', String(assetOpen === asset));
+            const name = document.createElement('b'); name.textContent = resource.name;
+            const used = document.createElement('span'); used.className = users.length ? '' : 'hint';
+            used.textContent = users.length ? users.map(([c, access]) => `${c} (${access})`).join(', ') : 'not used';
+            const given = document.createElement('span'); given.className = 'hint';
+            const box = kind === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
+            given.textContent = [holders.length ? `on ${holders.map((d) => d.label).join(', ')}` : '', box ? (box.failure ? box.failure : `${box.messages} message(s)`) : '', kind === 'git' && resource.from ? `from ${new URL(resource.from).hostname}` : ''].filter(Boolean).join(' - ');
+            head.append(name, used, given);
+            head.addEventListener('click', () => { assetOpen = assetOpen === asset ? '' : asset; void paintAssets(); });
+            row.append(head);
+            if (kind === 'git') {
+                const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
+                review.addEventListener('click', () => { void openGit(resource.name); });
+                row.append(review);
+            }
+            if (assetOpen === asset) {
+                /* Opened: every conversation, with what it may do with this. */
+                const inside = document.createElement('div'); inside.className = 'asset-inside';
+                for (const c of ready) {
+                    const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
+                    const who = document.createElement('span'); who.textContent = c.name;
+                    const options = kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
+                    line.append(who, modes(options, resource.attachments?.[c.name] ?? 'none', async (access) => { await attachTo(c.name, resource.name, access, 'assets-error'); await paintAssets(); }, `What ${c.name} may do with ${resource.name}`));
+                    inside.append(line);
+                }
+                if (ready.length === 0) { const none = document.createElement('p'); none.className = 'hint'; none.textContent = 'No conversation is ready to attach it to.'; inside.append(none); }
+                const actions = document.createElement('div'); actions.className = 'row';
+                const give = document.createElement('button'); give.type = 'button'; give.textContent = holders.length ? `Shared with ${holders.length} - Share...` : 'Share...';
+                give.addEventListener('click', () => { void openCompose([[asset, 'r']]); });
+                /* Always shown; when it cannot be done, it says why. */
+                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+                const why = document.createElement('span'); why.className = 'hint';
+                if (users.length > 0) { remove.disabled = true; why.textContent = `attached to ${users.length} conversation${users.length > 1 ? 's' : ''}: set ${users.length > 1 ? 'them' : 'it'} to Off first`; }
+                remove.addEventListener('click', () => {
+                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove ${resource.name} (its files are kept aside on the server)`;
+                    sure.addEventListener('click', async () => {
+                        try { await post(`${API}/resources/${resource.name}/remove`); assetOpen = ''; }
+                        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                        await paintAssets();
+                    });
+                    remove.replaceWith(sure);
+                });
+                actions.append(give, remove, why); inside.append(actions); row.append(inside);
+            }
+            $(`assets-${kind}`).append(row);
+        }
+        for (const kind of ['folder', 'git', 'mailbox']) $(`assets-${kind}-title`).textContent = `${{ folder: 'Folders', git: 'Repositories', mailbox: 'Mailboxes' }[kind]} (${count[kind]})`;
+        $('assets-secret-title').textContent = `Secrets (${count.secret})`;
+        paintSecrets(secrets, ready);
+    }
+    /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
+    function paintSecrets(all, ready) {
         const rows = $('secret-rows');
         rows.replaceChildren();
         for (const secret of all) {
-            const row = document.createElement('div'); row.className = 'folder';
-            const label = document.createElement('b'); label.textContent = secret.name;
-            const levels = document.createElement('div'); levels.className = 'levels';
-            levels.setAttribute('role', 'group'); levels.setAttribute('aria-label', `Hand ${secret.name} to this conversation`);
-            const on = secret.conversations.includes(current);
-            for (const [attached, text] of [[false, 'Off'], [true, 'Handed to the tool']]) {
-                const b = document.createElement('button');
-                b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(on === attached));
-                b.addEventListener('click', async () => {
-                    $('panel-error').hidden = true;
-                    try { await post(`${API}/conversations/${encodeURIComponent(current)}/secrets`, { secret: secret.name, attached }); }
-                    catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
-                    await paintSecrets();
-                    $('secret-note').textContent = `${secret.name}: ${attached ? 'will be handed' : 'will no longer be handed'} to the tool the next time it starts (leave the tool, then "Start it again").`;
+            const asset = `secret:${secret.name}`;
+            const row = document.createElement('div'); row.className = 'asset'; row.dataset.name = secret.name;
+            const head = document.createElement('button'); head.type = 'button'; head.className = 'asset-head'; head.setAttribute('aria-expanded', String(assetOpen === asset));
+            const name = document.createElement('b'); name.textContent = secret.name;
+            const used = document.createElement('span'); used.className = secret.conversations.length ? '' : 'hint'; used.textContent = secret.conversations.length ? secret.conversations.join(', ') : 'not used';
+            head.append(name, used);
+            head.addEventListener('click', () => { assetOpen = assetOpen === asset ? '' : asset; void paintAssets(); });
+            row.append(head);
+            if (assetOpen === asset) {
+                const inside = document.createElement('div'); inside.className = 'asset-inside';
+                for (const c of ready) {
+                    const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
+                    const who = document.createElement('span'); who.textContent = c.name;
+                    line.append(who, modes([['off', 'Off'], ['use', 'Use']], secret.conversations.includes(c.name) ? 'use' : 'off', async (value) => { await handTo(c.name, secret.name, value === 'use', 'assets-error'); await paintAssets(); }, `Whether the tool of ${c.name} is handed ${secret.name}`));
+                    inside.append(line);
+                }
+                const note = document.createElement('p'); note.className = 'hint'; note.textContent = 'A change takes effect the next time the tool starts (leave the tool, then "Start it again").'; inside.append(note);
+                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
+                remove.addEventListener('click', () => {
+                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, delete ${secret.name}`;
+                    sure.addEventListener('click', async () => { await post(`${API}/secrets/${secret.name}/remove`).catch(() => {}); assetOpen = ''; await paintAssets(); });
+                    remove.replaceWith(sure);
                 });
-                levels.append(b);
+                inside.append(remove); row.append(inside);
             }
-            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
-            remove.addEventListener('click', () => {
-                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, delete ${secret.name}`;
-                sure.addEventListener('click', async () => { await post(`${API}/secrets/${secret.name}/remove`).catch(() => {}); await paintSecrets(); });
-                remove.replaceWith(sure);
-            });
-            row.append(label, levels, remove);
             rows.append(row);
         }
         $('secret-empty').hidden = all.length > 0;
     }
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('panel-error').hidden = true;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); $('secret-name').value = ''; $('secret-value').value = ''; }
-        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
-        await paintSecrets();
+        $('assets-error').hidden = true;
+        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); $('secret-name').value = ''; $('secret-value').value = ''; $('secret-box').open = false; }
+        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        await paintAssets();
     });
-    $('folders').addEventListener('click', async () => { $('files').hidden = true; await paintPanel(); $('panel').hidden = false; });
-    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+    async function openAssets() {
+        $('panel').hidden = $('files').hidden = $('sharing').hidden = $('settings').hidden = true;
+        $('assets-error').hidden = true;
+        await paintAssets();
+        $('assets').hidden = false;
+    }
+    $('assets-open').addEventListener('click', () => { void openAssets(); });
+    $('assets-close').addEventListener('click', () => { $('assets').hidden = true; terminal.focus(); });
+
+    /* ---------- Settings: this device, and the platform ---------- */
+    async function openSettings() {
+        $('panel').hidden = $('files').hidden = $('sharing').hidden = $('assets').hidden = true;
+        const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
+        const list = $('settings-shortcuts'); list.replaceChildren();
+        for (const shortcut of saved) {
+            const row = document.createElement('div'); row.className = 'folder';
+            const label = document.createElement('b'); label.textContent = shortcut.label;
+            const what = document.createElement('small'); what.className = 'hint'; what.textContent = ` ${shortcut.enter ? 'sent with Enter' : 'typed, left to be completed'}`; label.append(what);
+            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+            remove.addEventListener('click', async () => { await post(`${API}/shortcuts/${shortcut.id}/remove`).catch(() => {}); await openSettings(); void paintShortcuts(); });
+            row.append(label, remove); list.append(row);
+        }
+        $('settings-dictation').textContent = platform.dictation ? `Speech is turned into text by "${platform.dictation}". It is set on the server (CLAVARIUM_TRANSCRIPTION_URL).` : 'No speech-to-text engine is set on the server: Dictate is not offered.';
+        $('settings-people').textContent = (platform.operators ?? []).length
+            ? `Who may sign in: ${platform.operators.join(', ')}. Address: ${platform.address ?? 'not declared'}. Both were set when this was installed.`
+            : 'Development mode: anyone on this machine is the operator.';
+        $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
+        $('settings').hidden = false;
+    }
+    $('settings-open').addEventListener('click', () => { void openSettings(); });
+    $('settings-close').addEventListener('click', () => { $('settings').hidden = true; terminal.focus(); });
     $('git-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('git-error').hidden = true;
@@ -633,7 +781,7 @@
             $('git-new').reset(); $('git-box').open = false;
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
-        await paintPanel();
+        await paintAssets();
     });
     /* ---------- a repository: what would go out, then send it ---------- */
     let gitShown = ''; let gitHead = null;
@@ -669,7 +817,7 @@
         $('gitview-push').textContent = `Send ${out.commits.length} commit${out.commits.length > 1 ? 's' : ''} to ${out.branch}`;
         $('gitview-push').dataset.sure = '';
     }
-    async function openGit(name) { gitShown = name; $('panel').hidden = true; $('gitview').hidden = false; await paintGit(); }
+    async function openGit(name) { gitShown = name; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
     $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; terminal.focus(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-push').addEventListener('click', async () => {
@@ -698,14 +846,14 @@
             $('mailbox-new').reset(); $('mailbox-box').open = false;
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
-        await paintPanel();
+        await paintAssets();
     });
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('panel-error').hidden = true;
-        try { await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; }
-        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
-        await paintPanel();
+        $('assets-error').hidden = true;
+        try { await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; $('folder-box').open = false; }
+        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        await paintAssets();
     });
 
     /* ---------- copying text ---------- */
@@ -1144,7 +1292,7 @@
         },
     });
 
-    $('files-open').addEventListener('click', async () => { $('panel').hidden = true; await paintFiles(); $('files').hidden = false; });
+    $('files-open').addEventListener('click', async () => { for (const id of ['panel', 'assets', 'settings', 'sharing', 'gitview']) $(id).hidden = true; await paintFiles(); $('files').hidden = false; });
     $('files-close').addEventListener('click', () => { $('files').hidden = true; terminal.focus(); });
     $('files-import').addEventListener('click', () => $('files-pick').click());
     $('files-pick').addEventListener('change', async () => {
@@ -1334,7 +1482,7 @@
         for (const [asset, rights] of start) basket.set(asset, rights);
         $('sharing-label').value = ''; $('share-search').value = ''; $('sharing-error').hidden = true;
         $('sharing-title').textContent = 'Share';
-        $('panel').hidden = $('files').hidden = true;
+        for (const id of ['panel', 'files', 'assets', 'settings', 'gitview']) $(id).hidden = true;
         paintCompose(); face('compose');
         $('sharing').hidden = false;
     }
@@ -1423,7 +1571,7 @@
         things.append(rest);
     }
     async function openManage() {
-        $('panel').hidden = $('files').hidden = true;
+        for (const id of ['panel', 'files', 'assets', 'settings', 'gitview']) $(id).hidden = true;
         $('sharing-title').textContent = 'Devices & sharing';
         face('manage'); await paintManage();
         $('sharing').hidden = false;

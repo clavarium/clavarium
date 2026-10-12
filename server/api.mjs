@@ -53,7 +53,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -120,6 +120,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
+            if (pathname === '/api/platform' && platform) return send(200, platform), true;
             /* A repository: where its commits go, and what would go now. */
             const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing)?$/.exec(pathname);
             if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1]) : gitReview.settings(repo[1])), true;

@@ -237,3 +237,24 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .device .given { display: block; flex-basis: auto; }
 .device > button { align-self: flex-start; }
 .given-row > .hint, .given-row > .levels { flex: 0 0 auto; }
+
+/* The left column: conversations, then the platform's three entries, always in sight. */
+#list #items { flex: 1 1 auto; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+#list .sp { flex: 0 0 0; }
+#assets-open, #sharing-open, #settings-open { text-align: left; min-height: 40px; }
+/* Assets: one row per thing; opened, it says who may do what with it. */
+#assets section { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+#assets section .panel-top small { margin-left: 8px; }
+.asset { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding: 4px 0; }
+.asset-head { flex: 1 1 320px; display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.4fr) minmax(120px, 1.4fr); gap: 10px; align-items: center; text-align: left; background: transparent; border: 0; padding: 8px 4px; min-height: 44px; font-weight: 400; }
+.asset-head b { overflow-wrap: anywhere; }
+.asset-head[aria-expanded="true"] b { color: var(--brass); }
+.asset-inside { flex-basis: 100%; padding: 0 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 700px) { .asset-head { grid-template-columns: 1fr; gap: 2px; } }
+#assets details > summary, #access-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
+#assets details > summary::before, #access-advanced > summary::before { content: '+ '; }
+#assets details[open] > summary::before, #access-advanced[open] > summary::before { content: '- '; }
+#assets details form, #access-advanced > div { margin-top: 8px; }
+#attach-picker { border: 1px solid var(--brass); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+#chips { cursor: pointer; }
+#settings .row { align-items: center; gap: 10px; }

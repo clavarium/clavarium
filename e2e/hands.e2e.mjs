@@ -67,17 +67,8 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     const b = await bench(t);
     const me = await b.person();
     await me.create('with-folders');
-    const setAccess = async (folder, access) => {
-        await me.page.locator('#folders').click();
-        if ((await me.page.locator('.folder', { hasText: folder }).count()) === 0) {
-            await me.page.fill('#folder-name', folder);
-            await me.page.locator('#folder-new button[type=submit]').click();
-            await me.until(`${folder} is listed`, async () => (await me.page.locator('.folder', { hasText: folder }).count()) > 0);
-        }
-        await me.page.locator('.folder', { hasText: folder }).locator('.levels button', { hasText: access }).click();
-        await me.until(`${folder} is ${access}`, async () => (await me.page.locator('.folder', { hasText: folder }).locator('.levels button[aria-pressed=true]').innerText()) === access);
-        await me.page.locator('#panel-close').click();
-    };
+    await me.newFolder('reports');
+    const setAccess = (folder, access) => me.access(folder, access);
     await setAccess('reports', 'Write');
     assert.match(await me.page.locator('#chips').innerText(), /reports - write/);
     await me.type('echo "q3 is fine" > ../resources/reports/q3.txt; mkdir -p ../resources/reports/out; echo ok');
@@ -102,15 +93,20 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await me.page.locator('#files-rows .file', { hasText: 'out' }).click();
     await me.until('inside the sub-folder', async () => (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'reports/out');
     await me.page.locator('#files-close').click();
-    /* Off, then removed: only a folder attached nowhere can go, and its files are kept aside. */
-    await me.page.locator('#folders').click();
-    assert.equal(await me.page.locator('.folder', { hasText: 'reports' }).locator('button', { hasText: 'Remove' }).count(), 0, 'not offered while attached');
-    await me.page.locator('#panel-close').click();
-    await setAccess('reports', 'Off');
-    await me.page.locator('#folders').click();
-    await me.page.locator('.folder', { hasText: 'reports' }).locator('button', { hasText: 'Remove' }).click();
-    await me.page.locator('.folder button.danger').click();
-    await me.until('the folder is gone from the list', async () => (await me.page.locator('.folder', { hasText: 'reports' }).count()) === 0);
+    /* Removed from Assets: only a folder attached nowhere can go -- the button is there, greyed, and says why. */
+    await me.page.locator('#assets-open').click();
+    const asset = me.page.locator('#assets-folder .asset[data-name="reports"]');
+    await asset.locator('.asset-head').click();
+    assert.match(await asset.locator('.asset-head').innerText(), /with-folders \(read\)/, 'it says which conversation uses it');
+    assert.equal(await asset.locator('button', { hasText: 'Remove' }).isDisabled(), true);
+    assert.match(await asset.innerText(), /attached to 1 conversation: set it to Off first/);
+    /* Set to Off from there, for that conversation: no need to go and open it. */
+    await asset.locator('.given-row[data-conversation="with-folders"] .levels button', { hasText: 'Off' }).click();
+    await me.until('it is not used any more', async () => /not used/.test(await asset.locator('.asset-head').innerText().catch(() => '')));
+    await asset.locator('button', { hasText: 'Remove' }).click();
+    await me.page.locator('#assets button.danger').click();
+    await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-folder .asset').count()) === 0);
+    await me.page.locator('#assets-close').click();
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
@@ -118,16 +114,15 @@ test('a git repository is added from the page, attached like a folder, and is a 
     const b = await bench(t);
     const me = await b.person();
     await me.create('coder');
-    await me.page.locator('#folders').click();
+    await me.page.locator('#assets-open').click();
     await me.page.locator('#git-box summary').click();
     await me.page.fill('#git-name', 'site');
     await me.page.locator('#git-new button[type=submit]').click();
-    await me.until('the repository is listed', async () => (await me.page.locator('.folder', { hasText: 'site' }).count()) > 0);
-    const row = me.page.locator('#panel-rows .folder', { hasText: 'site' });
-    assert.match(await row.innerText(), /git repository/);
-    await row.locator('.levels button', { hasText: 'Write' }).click();
-    await me.until('attached', async () => (await me.page.locator('#chips').innerText()).includes('site - write'));
-    await me.page.locator('#panel-close').click();
+    await me.until('the repository is listed', async () => (await me.page.locator('#assets-git .asset[data-name="site"]').count()) === 1);
+    assert.match(await me.page.locator('#assets-git-title').innerText(), /Repositories \(1\)/);
+    await me.page.locator('#assets-close').click();
+    await me.access('site', 'Write');
+    assert.match(await me.page.locator('#chips').innerText(), /site - write/);
     await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
     await me.sees('## No commits yet on main');
     await me.sees('\n1\n');
@@ -162,7 +157,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     await me.type('cd ../resources/site && echo "<h1>hello</h1>" > index.html && git add index.html && git -c user.name=Tool -c user.email=tool@example.com commit -q -m "Add the home page" && echo committed; cd - >/dev/null');
     await me.sees('\ncommitted');
     await me.page.locator('#folders').click();
-    await me.page.locator('#panel-rows .folder', { hasText: 'site' }).locator('button', { hasText: 'Review & send' }).click();
+    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
     /* No address yet: said, and the form is open. */
     await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));
     assert.equal(await me.page.locator('#gitview-push').isVisible(), false);

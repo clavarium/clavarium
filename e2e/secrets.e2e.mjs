@@ -6,15 +6,21 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     const b = await bench(t);
     const me = await b.person();
     await me.create('with-key');
-    await me.page.locator('#folders').click();
+    /* Made in Assets; a value goes in and is nowhere afterwards. */
+    await me.page.locator('#assets-open').click();
+    await me.page.locator('#secret-box summary').click();
     await me.page.fill('#secret-name', 'MODEL_KEY');
     await me.page.fill('#secret-value', 'sk-not-shown-again');
     await me.page.locator('#secret-new button[type=submit]').click();
-    await me.until('the secret is listed', async () => (await me.page.locator('#secret-rows .folder').count()) === 1);
+    await me.until('the secret is listed', async () => (await me.page.locator('#secret-rows .asset[data-name="MODEL_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('sk-not-shown-again'), false, 'the value is nowhere in the page');
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
-    await me.page.locator('#secret-rows .folder button', { hasText: 'Handed to the tool' }).click();
+    await me.page.locator('#assets-close').click();
+    /* Handed to this conversation's tool from Access, in two taps. */
+    await me.page.locator('#attach-top').click();
+    await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
     await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
+    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').count()) === 1);
     await me.page.locator('#panel-close').click();
 
     const restart = async () => {
@@ -30,7 +36,8 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.sees('after=[sk-not-shown-again]');
 
     await me.page.locator('#folders').click();
-    await me.page.locator('#secret-rows .folder button', { hasText: 'Off' }).click();
+    await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Detach' }).click();
+    await me.until('it is no longer handed', async () => (await me.page.locator('#access-secrets .folder').count()) === 0);
     await me.page.locator('#panel-close').click();
     await restart();
     await me.type('echo "off=[$MODEL_KEY]"');

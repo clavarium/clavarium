@@ -91,13 +91,9 @@ test('shared with a phone: files of the conversation, and only where the owner a
     const owner = await b.person();
     await owner.create('family');
     for (const [folder, access] of [['photos', 'Write'], ['papers', 'Read']]) {
-        await owner.page.locator('#folders').click();
-        await owner.page.fill('#folder-name', folder);
-        await owner.page.locator('#folder-new button[type=submit]').click();
-        await owner.until(`${folder} is listed`, async () => (await owner.page.locator('.folder', { hasText: folder }).count()) > 0);
-        await owner.page.locator('.folder', { hasText: folder }).locator('button', { hasText: access }).click();
+        await owner.newFolder(folder);
+        await owner.access(folder, access);
         await owner.until(`${folder} is attached`, async () => (await owner.page.locator('#chips').innerText()).includes(`${folder} - ${access.toLowerCase()}`));
-        await owner.page.locator('#panel-close').click();
     }
     const url = await share(owner);
     const phone = await b.person({ phone: true, at: url.replace(/^https?:\/\/[^/]+/, '') });
@@ -292,8 +288,10 @@ test('a folder is shared from its own row, alone and to read; a code not wanted 
     const owner = await b.person();
     await owner.create('private');
     await owner.api('/api/resources', { name: 'album' });
-    await owner.page.locator('#folders').click();
-    await owner.page.locator('#panel-rows .folder', { hasText: 'album' }).locator('button', { hasText: 'Share...' }).click();
+    await owner.page.locator('#assets-open').click();
+    const album = owner.page.locator('#assets-folder .asset[data-name="album"]');
+    await album.locator('.asset-head').click();
+    await album.locator('button', { hasText: 'Share...' }).click();
     /* The folder, to read, and NOT the conversation behind the panel. */
     await owner.until('the basket holds the folder only', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
     assert.match(await owner.page.locator('#share-basket').innerText(), /album folder/);

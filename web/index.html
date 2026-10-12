@@ -26,7 +26,9 @@
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
     <span class="sp"></span>
+    <button type="button" id="assets-open" hidden>Assets</button>
     <button type="button" id="sharing-open" hidden>Devices &amp; sharing</button>
+    <button type="button" id="settings-open" hidden>Settings</button>
   </aside>
   <section id="room">
     <header>
@@ -36,11 +38,9 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
-      <button type="button" id="install" class="primary" hidden>Install the app</button>
-      <button type="button" id="theme" aria-label="Light or dark screen">Light</button>
-      <button type="button" id="copy-open" hidden>Copy / paste</button>
+      <button type="button" id="attach-top" hidden>+ Attach</button>
       <button type="button" id="files-open" hidden>Files</button>
-      <button type="button" id="folders" hidden>Folders &amp; secrets</button>
+      <button type="button" id="folders" hidden>Access</button>
       <button type="button" id="share" hidden>Share</button>
       <button type="button" id="sleep" hidden>Sleep</button>
       <button type="button" id="archive" hidden>Archive</button>
@@ -54,25 +54,72 @@
     <main>
       <div id="terminal"></div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
+      <!-- ACCESS: what THIS conversation has. Nothing is created here. -->
       <div id="panel" class="sheet" hidden>
-        <div class="panel-top"><b>Folders</b><button type="button" id="panel-close">Close</button></div>
-        <p class="hint">A folder attached here appears in this conversation's machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
-        <div id="panel-rows"></div>
-        <p id="panel-empty" class="hint" hidden>No folder yet.</p>
+        <div class="panel-top"><b id="panel-title">Access</b><button type="button" id="panel-close">Close</button></div>
+        <p class="hint">What this conversation has: it appears in its machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
         <p id="panel-error" class="error" role="alert" hidden></p>
-        <form id="folder-new" autocomplete="off">
-          <label for="folder-name">New folder</label>
-          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
-            <button type="submit" class="primary">Create</button></div>
-        </form>
+        <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
+        <div id="panel-rows"></div>
+        <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
+        <div class="panel-top"><b>Secrets handed to its tool</b></div>
+        <div id="access-secrets"></div>
+        <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
+        <p id="secret-note" class="hint" role="status"></p>
+        <div id="attach-picker" hidden>
+          <div class="panel-top"><b id="attach-title">Attach</b><button type="button" id="attach-close">Done</button></div>
+          <div id="attach-rows"></div>
+          <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p>
+          <button type="button" id="attach-manage">Manage all assets</button>
+        </div>
+        <div class="panel-top"><b>Network</b></div>
+        <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
+        <div class="levels" id="network" role="group" aria-label="Network of this conversation">
+          <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
+        </div>
+        <details id="access-advanced">
+          <summary>Advanced</summary>
         <div id="work-box">
           <div class="panel-top"><b>Where the tool works</b></div>
           <p id="work-now" class="hint"></p>
           <p id="work-moved" class="hint" hidden></p>
           <button type="button" id="work-move"></button>
         </div>
+        <div id="signin-setup" hidden>
+          <div class="panel-top"><b>Sign-in mailbox</b></div>
+          <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
+          <p id="signin-state" class="hint"></p>
+          <form id="signin-form" autocomplete="off">
+            <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
+              <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
+              <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">
+              <button type="submit" class="primary">Save</button><button type="button" id="signin-remove">Remove</button></div>
+          </form>
+        </div>
+        </details>
+      </div>
+      <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
+      <div id="assets" class="sheet" hidden>
+        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
+        <p class="hint">Folders, repositories, mailboxes, secrets: what is kept here, which conversations use it, which devices were given it.</p>
+        <div id="assets-filters" class="choices" role="group" aria-label="Kind of asset"></div>
+        <p id="assets-error" class="error" role="alert" hidden></p>
+        <section data-kind="folder">
+          <div class="panel-top"><b id="assets-folder-title">Folders</b></div>
+          <div id="assets-folder"></div>
+          <details id="folder-box"><summary>New folder</summary>
+        <form id="folder-new" autocomplete="off">
+          <label for="folder-name">New folder</label>
+          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
+            <button type="submit" class="primary">Create</button></div>
+        </form>
+          </details>
+        </section>
+        <section data-kind="git">
+          <div class="panel-top"><b id="assets-git-title">Repositories</b></div>
+          <div id="assets-git"></div>
         <details id="git-box">
-          <summary>Add a git repository</summary>
+          <summary>Add a repository</summary>
           <p class="hint">A folder that starts as a repository: empty, or cloned from an https address. It is attached and shared like a folder, to read or to write. What the tool commits stays in it; pushing elsewhere is the tool's business, with what you hand it.</p>
           <form id="git-new" autocomplete="off">
             <label for="git-name">Name</label>
@@ -83,8 +130,12 @@
             <p id="git-error" class="error" role="alert" hidden></p>
           </form>
         </details>
+        </section>
+        <section data-kind="mailbox">
+          <div class="panel-top"><b id="assets-mailbox-title">Mailboxes</b><small class="hint">read-only copies</small></div>
+          <div id="assets-mailbox"></div>
         <details id="mailbox-box">
-          <summary>Add a mailbox as a folder</summary>
+          <summary>Add a mailbox</summary>
           <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
           <form id="mailbox-new" autocomplete="off">
             <label for="mailbox-name">Folder name</label>
@@ -99,33 +150,37 @@
             <p id="mailbox-error" class="error" role="alert" hidden></p>
           </form>
         </details>
-        <div class="panel-top"><b>Network</b></div>
-        <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
-        <div class="levels" id="network" role="group" aria-label="Network of this conversation">
-          <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
-        </div>
-        <div id="signin-setup" hidden>
-          <div class="panel-top"><b>Sign-in mailbox</b></div>
-          <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
-          <p id="signin-state" class="hint"></p>
-          <form id="signin-form" autocomplete="off">
-            <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
-              <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
-              <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">
-              <button type="submit" class="primary">Save</button><button type="button" id="signin-remove">Remove</button></div>
-          </form>
-        </div>
-        <div class="panel-top"><b>Secrets</b></div>
-        <p class="hint">A secret switched on here is handed to the tool of this conversation, as a file under <code>/run/secrets/</code> and as a variable of the same name. The tool can read it and send it anywhere: give narrow keys you can revoke. It takes effect the next time the tool starts.</p>
-        <div id="secret-rows"></div>
-        <p id="secret-empty" class="hint" hidden>No secret yet.</p>
-        <p id="secret-note" class="hint" role="status"></p>
+        </section>
+        <section data-kind="secret">
+          <div class="panel-top"><b id="assets-secret-title">Secrets</b><small class="hint">a value goes in and is never shown again</small></div>
+          <div id="secret-rows"></div>
+          <p id="secret-empty" class="hint" hidden>No secret yet.</p>
+          <details id="secret-box"><summary>Add a secret</summary>
         <form id="secret-new" autocomplete="off">
           <label for="secret-name">New secret, or a new value for an existing one</label>
           <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
             <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
             <button type="submit" class="primary">Save</button></div>
         </form>
+          </details>
+        </section>
+      </div>
+      <!-- SETTINGS: the platform, and this device. -->
+      <div id="settings" class="sheet" hidden>
+        <div class="panel-top"><b>Settings</b><button type="button" id="settings-close">Close</button></div>
+        <div class="panel-top"><b>This device</b></div>
+        <div class="row"><span>Screen</span><button type="button" id="theme" aria-label="Light or dark screen">Light</button><button type="button" id="install" class="primary" hidden>Install the app</button></div>
+        <div class="panel-top"><b>Shortcuts</b></div>
+        <p class="hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
+        <div id="settings-shortcuts"></div>
+        <div class="panel-top"><b>Dictation</b></div>
+        <p id="settings-dictation" class="hint"></p>
+        <div class="panel-top"><b>People &amp; address</b></div>
+        <p id="settings-people" class="hint"></p>
+        <div class="panel-top"><b>Storage &amp; backup</b></div>
+        <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
+        <div class="panel-top"><b>About</b></div>
+        <p id="settings-about" class="hint"></p>
       </div>
       <div id="copy" class="sheet" hidden>
         <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close">Close</button></div>
@@ -258,6 +313,7 @@
       <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
       <button type="button" data-keys="enter" class="wide">Enter</button>
       <button type="button" data-keys="stop" class="careful" title="Ctrl+C: interrupts what is running">Ctrl+C</button>
+      <button type="button" id="copy-open" hidden title="Copy text of the screen, or paste">Copy / paste</button>
       <button type="button" id="kbd" aria-pressed="false" hidden title="Show or hide the on-screen keyboard">Keyboard</button>
       <button type="button" id="mic" aria-pressed="false" hidden>Dictate</button>
       <button type="button" id="auto" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>

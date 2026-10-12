@@ -144,15 +144,20 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     await me.create('daylight');
     const look = () => me.page.evaluate(() => ({ theme: document.documentElement.dataset.theme, page: getComputedStyle(document.body).backgroundColor, terminal: window.clavariumTerminal.options.theme.background, button: document.getElementById('theme').textContent }));
     assert.deepEqual(await look(), { theme: 'dark', page: 'rgb(15, 20, 26)', terminal: '#0f141a', button: 'Light' });
+    await me.page.locator('#settings-open').click();
     await me.page.locator('#theme').click();
+    await me.page.locator('#settings-close').click();
     assert.deepEqual(await look(), { theme: 'light', page: 'rgb(251, 251, 250)', terminal: '#fbfbfa', button: 'Dark' });
     /* Still typing in the same terminal. */
+    await me.page.locator('#terminal').click();
     await me.type('echo still-here');
     await me.sees('\nstill-here');
     await me.page.reload();
     await me.until('the page is back', async () => (await me.state()) === 'live');
     assert.equal((await look()).theme, 'light', 'kept across a reload');
+    await me.page.locator('#settings-open').click();
     await me.page.locator('#theme').click();
+    await me.page.locator('#settings-close').click();
     assert.equal((await look()).theme, 'dark');
 });
 

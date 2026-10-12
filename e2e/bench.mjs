@@ -94,7 +94,34 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
         }
-        return { page, context, errors, screen, until, state, sees, type, api, create };
+        /* A folder is made in Assets. */
+        async function newFolder(name) {
+            await page.locator('#assets-open').click();
+            await page.locator('#folder-box summary').click();
+            await page.fill('#folder-name', name);
+            await page.locator('#folder-new button[type=submit]').click();
+            await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-folder .asset[data-name="${name}"]`).count()) === 1);
+            await page.locator('#assets-close').click();
+        }
+        /* What the conversation shown may do with it, set in Access: 'Read', 'Write', or 'Off' (detached). */
+        async function access(name, level) {
+            await page.locator('#folders').click();
+            const row = page.locator(`#panel-rows .folder[data-name="${name}"]`);
+            await until('Access is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('Access - '));
+            if (level === 'Off') {
+                await row.locator('button', { hasText: 'Detach' }).click();
+                await until(`${name} is detached`, async () => (await row.count()) === 0);
+            } else if ((await row.count()) > 0) {
+                await row.locator('.levels button', { hasText: level }).click();
+                await until(`${name} is ${level}`, async () => (await row.locator('.levels button[aria-pressed=true]').innerText().catch(() => '')) === level);
+            } else {
+                await page.locator('#attach-open').click();
+                await page.locator(`#attach-rows .folder[data-name="${name}"]`).locator('button', { hasText: level }).click();
+                await until(`${name} is attached`, async () => (await row.count()) === 1);
+            }
+            await page.locator('#panel-close').click();
+        }
+        return { page, context, errors, screen, until, state, sees, type, api, create, newFolder, access };
     }
     return { origin, dir, person };
 }
