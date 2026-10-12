@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: how it is kept safe</title>
+<meta name="description" content="What one agent can reach of another, tried for real; what it can do in its own room; and what the product does not protect you from.">
+<!--
+  THE HOME PAGE. Written by hand, no build step: the file you read is the file
+  that is served.
+
+  THE RULE OF THIS PAGE: it is looked at, not read. A sentence under a picture
+  is one line and stays one line. Whatever needs a paragraph belongs on another
+  page, and gets a link from here.
+
+  Every colour is defined on bare :root; the dark block only redefines.
+-->
+<style>
+:root {
+  --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
+  --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours-bg: #fbf3df; --ok: #17794f; --stop: #b3401f; --wall: #16181d;
+  --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+    --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+  --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+
+.hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
+h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.05rem, 2.6vw, 1.25rem); color: var(--dim); max-width: 34em; }
+.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
+section { padding: clamp(2rem, 5vw, 3.2rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
+.three { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
+.three > li { min-width: 0; display: flex; flex-direction: column; }
+@media (max-width: 860px) { .three { grid-template-columns: 1fr; } }
+.cap { margin: 0; font-weight: 650; }
+.cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
+.say { margin: .2rem 0 .9rem; color: var(--dim); font-size: .97rem; }
+.more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
+
+/* The scenes: small drawings made of the pieces the product itself shows. */
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
+.scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
+.scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
+.scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
+.scene .tag { margin-left: auto; font-weight: 600; font-size: 10.5px; color: #d2a94e; border: 1px solid #d2a94e; border-radius: 1rem; padding: 0 .45rem; }
+.scene .dim { color: #8a97a8; }
+.scene .gold { color: #d2a94e; }
+.scene .ok { color: #5fc39d; }
+.scene .term { font-family: var(--mono); font-size: 11.5px; }
+.scene .via { text-align: center; color: #8a97a8; font-family: var(--mono); font-size: 11px; }
+.scene .row { display: flex; gap: .35rem; flex-wrap: wrap; }
+.scene .pill { border: 1px solid #2b3745; border-radius: 1rem; padding: .05rem .5rem; font-size: 11px; }
+.scene .pill b { color: #5fc39d; }
+.scene .pill b.no { color: #f08a6b; }
+.scene .paper { background: #fff; color: #16181d; border-radius: 8px; padding: .55rem .65rem; }
+.scene .paper b { display: block; font-size: 13px; }
+.scene .bars { display: flex; align-items: flex-end; gap: .3rem; height: 2.4rem; margin-top: .4rem; }
+.scene .bars i { flex: 1; background: #0b53c0; border-radius: 3px 3px 0 0; }
+.scene .send { margin-left: auto; background: #d2a94e; color: #1b1405; font-weight: 700; border-radius: 6px; padding: .15rem .7rem; }
+.scene .end { margin-top: auto; }
+
+.snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
+.snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem 1.6rem; }
+@media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
+.needs b { display: block; font-weight: 650; }
+.needs span { color: var(--dim); font-size: .95rem; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; max-width: 44em; }
+.rows li { color: var(--dim); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.4rem; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.two h2 { margin-bottom: .8rem; }
+.other { margin: 1.6rem 0 0; }
+.other a { font-weight: 600; text-decoration: none; }
+.tried { margin: 0; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; padding: .8rem .9rem; font: 12.5px/1.55 var(--mono); overflow-x: auto; white-space: pre; box-shadow: var(--shadow); }
+.tried .c { color: #8a97a8; }
+.tried .r { color: #5fc39d; }
+.tried .w { color: #d2a94e; }
+.pair2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+@media (max-width: 860px) { .pair2 { grid-template-columns: 1fr; } }
+.pair2 > div { min-width: 0; }
+.pair2 h3 { margin: 0 0 .5rem; font-size: 1rem; }
+table.k { border-collapse: collapse; width: 100%; max-width: 52rem; }
+table.k th, table.k td { text-align: left; vertical-align: top; padding: .6rem .8rem .6rem 0; border-bottom: 1px solid var(--line-soft); }
+table.k th { font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; color: var(--brass); }
+table.k td:first-child { font-weight: 650; }
+.scrollx { overflow-x: auto; }
+.note { margin: 0 0 .9rem; color: var(--dim); }
+footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
+footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="./">Home</a>
+      <a href="examples.html">Examples</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html" aria-current="page">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="border-top:0">
+  <div class="wrap">
+    <h1>How it is kept safe. And where it is not.</h1>
+    <p class="lead">What follows was tried on a real installation, as an agent would: with every right inside its own machine.</p>
+  </div>
+</section>
+
+<section id="walls">
+  <div class="wrap">
+    <h2>What one agent can reach of another</h2>
+    <p class="note" style="max-width:44em">Two agents, two machines. The first was given a folder and a key. The second was given nothing, and looked for both.</p>
+    <div class="pair2">
+      <div>
+        <h3>The first agent, in its room</h3>
+<pre class="tried">$ ls /resources/client-a
+<span class="r">contract.txt</span>
+$ echo "my key: ${CLIENT_A_KEY:+it is here, and I can read it}"
+<span class="w">my key: it is here, and I can read it</span>
+$ sudo ls /run/secrets
+CLIENT_A_KEY</pre>
+      </div>
+      <div>
+        <h3>The second agent, looking for them</h3>
+<pre class="tried">$ ls -A /resources
+<span class="r">ls: cannot access '/resources': No such file or directory</span>
+$ echo "its key: ${CLIENT_A_KEY:-none}"
+<span class="r">its key: none</span>
+$ sudo find / -xdev -name contract.txt | wc -l
+<span class="r">0</span>
+$ ping -c 1 -W 3 <span class="c">(the first machine)</span>
+<span class="r">1 packets transmitted, 0 received, 100% packet loss</span>
+$ <span class="c">(its port 22)</span>
+<span class="r">closed</span></pre>
+      </div>
+    </div>
+    <p class="under" style="margin-top:.9rem;color:var(--dim)">Tried on 13 October 2026, on Ubuntu 24.04. The commands are the ones shown; you can run them again on your own installation.</p>
+  </div>
+</section>
+
+<section id="keys">
+  <div class="wrap">
+    <h2>Three kinds of keys</h2>
+    <div class="scrollx">
+    <table class="k">
+      <tr><th>The key</th><th>Where it is</th><th>Can the agent read it?</th></tr>
+      <tr><td>A key you hand to one agent</td><td>In that agent's machine, in memory, gone when the machine stops.</td><td><b>Yes.</b> That agent only. No other agent, and the page never shows it back.</td></tr>
+      <tr><td>The key that sends code out</td><td>On the host, sealed. Used when you press Send.</td><td><b>No.</b> It never enters any machine.</td></tr>
+      <tr><td>The password of a mailbox</td><td>On the host, sealed. The mail is copied into a folder.</td><td><b>No.</b> The agent reads the copies and cannot write to the mailbox.</td></tr>
+    </table>
+    </div>
+  </div>
+</section>
+
+<section id="away">
+  <div class="wrap two">
+    <div>
+      <h2>When it answers in your place</h2>
+      <ul class="rows">
+        <li>Off unless you turn it on, agent by agent, with objectives and a charter you write.</li>
+        <li>Several models of different makers must all give the same answer.</li>
+        <li>First real trial, “Delete this folder?”: one said yes, one refused. Nothing was typed.</li>
+        <li>A limit of answers in a row, a log of every one, and your phone told when it stops.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>What it does not protect you from</h2>
+      <ul class="rows">
+        <li>An agent can do anything inside its own machine, and with what you attached to write.</li>
+        <li>It has the network unless you cut it, and what it reads is sent to the AI model it uses.</li>
+        <li>A text planted on its screen can mislead every model that votes, at once.</li>
+        <li>From its machine it can knock at your host's own doors, like anything on your network. Keep them locked.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="instead">
+  <div class="wrap">
+    <h2>Compared with what you may already have</h2>
+    <div class="scrollx">
+    <table class="k">
+      <tr><th></th><th>What it leaves to you</th><th>Here</th></tr>
+      <tr><td>tmux over ssh</td><td>The agent has your whole computer and every key on it.</td><td>A machine of its own, with only what you attached.</td></tr>
+      <tr><td>A container</td><td>The host's kernel is shared; rights, keys, wake-ups and the send step are yours to build.</td><td>A virtual machine each, and those four are there.</td></tr>
+      <tr><td>The tool's own remote control</td><td>One tool, on your computer, with all of it in reach.</td><td>Any command-line agent, several at once, each apart.</td></tr>
+    </table>
+    </div>
+    <a class="more" href="./">Back to the home page →</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="examples.html">Examples</a>
+    <a href="how-to-use-it.html">Use</a>
+    <a href="how-to-install-it.html">Install</a>
+    <a href="how-it-is-kept-safe.html">Security</a>
+    <a href="questions.html">FAQ</a>
+  </div>
+</footer>
+</body>
+</html>
