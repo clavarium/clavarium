@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium</title>
-<meta name="description" content="Your agents work all night, on a machine you own. Nothing leaves without you.">
+<meta name="description" content="clavarium is a home for your agents: each in its own room, talking to one another, reached from any device.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -95,6 +95,13 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 @media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
 .needs b { display: block; font-weight: 650; }
 .needs span { color: var(--dim); font-size: .95rem; }
+.rows { list-style: none; margin: 0; padding: 0; display: grid; gap: .45rem; max-width: 44em; }
+.rows li { color: var(--dim); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem 2.4rem; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.two h2 { margin-bottom: .8rem; }
+.other { margin: 1.6rem 0 0; }
+.other a { font-weight: 600; text-decoration: none; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -119,16 +126,17 @@ footer a { color: var(--dim); }
 <main>
 <section class="hero" style="border-top:0">
   <div class="wrap">
-    <h1>Your agents work all night. Nothing leaves without you.</h1>
-    <p class="lead">Each sees only what you attach and uses keys it cannot read. In the morning, the report is on your tablet.</p>
+    <h1>clavarium is a home for your agents. Each one gets its own room.</h1>
+    <p class="lead">Each agent runs in its own virtual machine, talks to the others through shared folders, and you reach it from any device.</p>
     <ul class="claims">
-      <li>Free · MIT</li>
-      <li>Open source</li>
-      <li>On a machine you own</li>
-      <li>Claude Code, OpenCode, any other</li>
-      <li>Each client kept apart</li>
-      <li>Agents wake each other</li>
+      <li>Free · MIT · self-hosted</li>
+      <li>Runs on a mini PC</li>
+      <li>One virtual machine per agent</li>
+      <li>Claude Code or OpenCode</li>
+      <li>Keys usable, never readable</li>
+      <li>Phone, tablet, computer</li>
     </ul>
+    <p class="other"><a href="for-you.html">Somebody else installs it for you? See what you would do with it →</a></p>
   </div>
 </section>
 
@@ -137,54 +145,65 @@ footer a { color: var(--dim); }
     <h2>How you use it</h2>
     <ol class="three">
       <li>
-        <p class="cap"><span>01</span>You tell each agent its job</p>
-        <p class="say">You attach one client's orders and write one plain line each. One wakes at 2:00, the other when a request arrives.</p>
+        <p class="cap"><span>01</span>Put each agent in its own room</p>
+        <p class="say">Claude Code runs in one virtual machine, OpenCode in another. Each sees only the folders, repositories and keys you attach.</p>
         <div class="scene" aria-hidden="true">
-          <div class="dim">Client: <b style="color:#e7edf4">Bakery</b></div>
           <div class="card">
-            <div class="who"><span class="dot"></span>report <span class="tag">Claude Code</span></div>
-            <div class="dim">orders <span class="gold">read</span> · shared <span class="gold">write</span> · shop key <span class="gold">use</span></div>
-            <div><span class="gold">Every night at 2:00</span> · read the day's orders, write the report, ask for the chart</div>
+            <div class="who"><span class="dot"></span>writer <span class="tag">Claude Code</span></div>
+            <div class="dim">repository <span class="gold">write</span> · shared <span class="gold">write</span> · deploy key <span class="gold">use</span></div>
           </div>
-          <div class="via">↓ shared / request.md ↓</div>
           <div class="card">
-            <div class="who"><span class="dot"></span>charts <span class="tag">OpenCode</span></div>
-            <div class="dim">shared <span class="gold">write</span></div>
-            <div><span class="gold">When a file arrives in shared</span> · do the request</div>
+            <div class="who"><span class="dot"></span>reviewer <span class="tag">OpenCode</span></div>
+            <div class="dim">repository <span class="gold">read</span> · shared <span class="gold">write</span></div>
           </div>
-          <div class="dim end">Client: Garage · its own agent, its own key, not seen from here</div>
+          <div class="dim end">Each in its own virtual machine. Another client's room is not seen from here.</div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>02</span>They answer only if all agree</p>
-        <p class="say">Models from different makers read its question. All agree: it goes on. One doubts: it stops, touches nothing, and waits for you.</p>
+        <p class="cap"><span>02</span>One leaves a request, the other wakes</p>
+        <p class="say">The first writes a file in the folder they share. The line you wrote is typed to the second, and it does the work.</p>
         <div class="scene" aria-hidden="true">
-          <div class="who"><span class="dot"></span>report <span class="tag">Claude Code</span><span class="dim" style="font-weight:400">03:12</span></div>
-          <div class="card term">38 orders read. The report is half written.<br>Shall I go on? (y/n) <span class="ok">y</span></div>
-          <div class="row"><span class="pill">model A <b>yes</b></span><span class="pill">model B <b>yes</b></span><span class="pill">model C <b>yes</b></span></div>
-          <div class="card term">03:40 Delete last week's reports? (y/n)</div>
-          <div class="row"><span class="pill">A <b>yes</b></span><span class="pill">B <b class="no">no</b></span><span class="pill">C <b>yes</b></span><span class="gold" style="font-weight:700">waiting for you</span></div>
-          <div class="dim end">Tonight: answered 4, waited on 1. Limit: 5 in a row. All in the log.</div>
+          <div class="card"><div class="who">shared /</div><div class="term">request.md <span class="ok">new</span></div></div>
+          <div class="via">↓ a file arrived ↓</div>
+          <div class="card">
+            <div class="who"><span class="dot"></span>reviewer <span class="tag">OpenCode</span></div>
+            <div class="term">Read request.md and do it.</div>
+          </div>
+          <div class="dim end">Also by the clock: any cron line. Capped per hour.</div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>03</span>You read it on a tablet, then send</p>
-        <p class="say">The report opens as a plain page. Nothing goes out until you press Send, with a key the agent never holds.</p>
+        <p class="cap"><span>03</span>It stops, your phone tells you</p>
+        <p class="say">Touch the notification and its real terminal opens. You see what would go out and send it with a key the agent never holds.</p>
         <div class="scene" aria-hidden="true">
-          <div class="paper"><b>Bakery report, Monday</b>38 orders, 3 late.<div class="bars"><i style="height:45%"></i><i style="height:70%"></i><i style="height:55%"></i><i style="height:100%"></i><i style="height:80%"></i></div></div>
-          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>2 commits to <b>shop</b><br><span class="dim">nothing sent yet</span></span><span class="send">Send</span></div>
+          <div class="paper"><b>reviewer waits for you</b>model B: the charter does not allow deleting</div>
+          <div class="card term">Delete the old branch? (y/n)</div>
+          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>1 commit to <b>shop</b><br><span class="dim">nothing sent yet</span></span><span class="send">Send</span></div>
         </div>
       </li>
     </ol>
-    <a class="more" href="examples.html">See what people hand to it →</a>
+    <a class="more" href="examples.html">14 examples, ready to copy →</a>
   </div>
 </section>
 
-<section id="instead">
-  <div class="wrap">
-    <h2>Instead of cron, tmux and glue</h2>
-    <p class="note" style="max-width:40em">A cron job runs a script. This wakes an agent that can ask, be answered, hand work to another, and still cannot send anything without you.</p>
-    <a class="more" style="margin-top:0" href="how-it-is-kept-safe.html">How it is kept safe →</a>
+<section id="proof">
+  <div class="wrap two">
+    <div>
+      <h2>While you are away</h2>
+      <ul class="rows">
+        <li>Several models from different makers read the agent's question.</li>
+        <li>All agree: the answer is typed. Otherwise the agent stops and waits.</li>
+        <li>First real trial: one said yes to deleting a folder, one refused. Nothing was typed.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Two ways in, both tried</h2>
+      <ul class="rows">
+        <li>Claude Code, with your own subscription.</li>
+        <li>All open: OpenCode on open models hosted in Europe.</li>
+        <li>There, one key serves the agent, the dictation and the answers. The agent uses it and cannot read it.</li>
+      </ul>
+    </div>
   </div>
 </section>
 
