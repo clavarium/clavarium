@@ -345,8 +345,8 @@ th{font:600 11px var(--sans);text-transform:uppercase;letter-spacing:.07em;color
       <div class="card"><h3>Two writers, one folder</h3><p>Allowed. Files are shared live; two agents editing the same file at once will overwrite each other, as two people would. For code, a git resource gives each conversation its own branch instead.</p></div>
     </div>
 
-    <h2>Git only: who lets a push out <span class="tag w">NOT BUILT: a design, parked</span></h2>
-    <p class="note"><b>What exists today:</b> a git repository is a folder that starts as one (empty, or cloned from an https address), attached and shared like a folder. The tool commits in it, in its machine. Nothing here pushes: no key is kept for it, no review screen exists. A tool can push by itself only if it is handed a secret for it.</p>
+    <h2>Git only: who lets a push out <span class="tag ok">built</span></h2>
+    <p class="note"><b>What exists:</b> a git repository is a folder that starts as one (empty, or cloned from an https address), attached and shared like a folder. The tool commits in it, in its machine, and holds no key. The owner opens "Review &amp; send": the server fetches a fresh copy of the commits into a place of its own (git is never run in the tool's repository), shows the commits, the files and the changes, and sends exactly what was shown, with a key kept sealed here. A remote that moved on is said, never forced. Not built: commenting on a change, a history browser, pulling.</p>
     <div class="scroll"><div class="dia" style="min-width:820px">
       <div class="zone vm"><h3>Agent, in its VM</h3><div class="box">commits freely on its own branch</div><div class="box">has no push key</div></div>
       <div class="arrow"><i>→</i>asks</div>

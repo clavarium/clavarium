@@ -50,7 +50,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     process.env.FAKE_VM_DIR = dir;
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
     const server = await startHome({
-        port: 0, dataDir: join(dir, 'data'), tools: TOOLS, stopDelayMs, mailReader,
+        port: 0, dataDir: join(dir, 'data'), tools: TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true,
         env: { ...process.env, CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });

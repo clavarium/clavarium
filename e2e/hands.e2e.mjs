@@ -144,3 +144,45 @@ test('a git repository is added from the page, attached like a folder, and is a 
     /* An address that is not https is refused before git is run. */
     assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'ssh://git@example.com/x.git' })).body.error, /https address/);
 });
+
+test('what a tool committed is shown to the owner, then sent -- by the server, with a key the tool never sees', { skip: SKIP }, async (t) => {
+    const { execFileSync } = await import('node:child_process');
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('pusher');
+    /* A remote, as a hosting service would be (the bench allows a directory for it). */
+    const remote = `${b.dir}/remote.git`;
+    execFileSync('git', ['init', '--quiet', '--bare', '--initial-branch=main', remote]);
+    await me.api('/api/resources', { name: 'site', type: 'git' });
+    await me.api('/api/conversations/pusher/resources', { resource: 'site', access: 'write' });
+    await me.type('cd ../resources/site && echo "<h1>hello</h1>" > index.html && git add index.html && git -c user.name=Tool -c user.email=tool@example.com commit -q -m "Add the home page" && echo committed; cd - >/dev/null');
+    await me.sees('\ncommitted');
+    await me.page.locator('#folders').click();
+    await me.page.locator('#panel-rows .folder', { hasText: 'site' }).locator('button', { hasText: 'Review & send' }).click();
+    /* No address yet: said, and the form is open. */
+    await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.equal(await me.page.locator('#gitview-push').isVisible(), false);
+    await me.page.fill('#gitview-url', remote);
+    await me.page.fill('#gitview-key', 'a-token-the-tool-never-sees');
+    await me.page.locator('#gitview-remote button[type=submit]').click();
+    /* What would go: the commit, the file, the change. */
+    await me.until('the commit is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.match(await me.page.locator('#gitview-commits').innerText(), /Add the home page/);
+    assert.match(await me.page.locator('#gitview-stat').innerText(), /index\.html/);
+    assert.match(await me.page.locator('#gitview-diff').innerText(), /\+<h1>hello<\/h1>/);
+    assert.equal(await me.page.locator('#gitview h1').count(), 0, 'what the tool wrote is shown as text, never built');
+    /* Two clicks to send; then the remote has it, and nothing is left to send. */
+    await me.page.locator('#gitview-push').click();
+    assert.match(await me.page.locator('#gitview-push').innerText(), /cannot be undone/);
+    assert.equal(execFileSync('git', ['-C', remote, 'for-each-ref'], { encoding: 'utf8' }), '', 'nothing left yet');
+    await me.page.locator('#gitview-push').click();
+    await me.until('it says it was sent', async () => /Sent: 1 commit to main/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.match(execFileSync('git', ['-C', remote, 'log', '--format=%s', 'main'], { encoding: 'utf8' }), /Add the home page/);
+    assert.equal(await me.page.locator('#gitview-push').isVisible(), false);
+    /* The key: kept, sealed, and in nothing the tool can read. */
+    assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true });
+    await me.page.locator('#gitview-close').click();
+    await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');
+    await me.sees('\n0\n');
+    assert.deepEqual(me.errors, []);
+});

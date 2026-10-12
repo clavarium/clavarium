@@ -192,3 +192,13 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #panel details[open] > summary::before { content: '- '; }
 #sharing-label { min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #sharing label { font-size: 13px; }
+
+/* A repository: what would go out. */
+#gitview pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+#gitview pre:empty { display: none; }
+#gitview .commit { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
+#gitview .commit code { color: var(--ink2); }
+#gitview .commit small { color: var(--ink2); }
+#gitview-remote { display: grid; gap: 6px; margin-top: 8px; }
+#gitview-remote input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#gitview details > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; }

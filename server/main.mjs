@@ -37,6 +37,7 @@ import { Network } from './network.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
+import { GitReview } from './gitpush.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -81,7 +82,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -100,7 +101,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -128,7 +129,7 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader }) {
+export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -188,7 +189,9 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const mailboxes = new Mailboxes({ store: new Store(`${dataDir}/mailboxes.json`), vault, resources: folders, reader });
     const mailTimer = setInterval(() => { void mailboxes.syncAll(); }, MAIL_EVERY_MS);
     mailTimer.unref();
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes });
+    /* What would go out of a repository, shown before it is sent: see gitpush.mjs. */
+    const gitReview = new GitReview({ store: new Store(`${dataDir}/git.json`), vault, resources: folders, dataDir, localRemotes: gitLocalRemotes });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview });
     server.on('close', () => clearInterval(mailTimer));
     const bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

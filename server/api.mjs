@@ -53,7 +53,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -120,6 +120,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
+            /* A repository: where its commits go, and what would go now. */
+            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing)?$/.exec(pathname);
+            if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1]) : gitReview.settings(repo[1])), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
                 const conversation = decodeURIComponent(watched[1]);
@@ -143,7 +146,7 @@ export async function handleApi(request, response, conversations, headers, resou
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unlisted && resources) {
             const gone = resources.get(unlisted[1]);
-            await resources.remove(unlisted[1]); mailboxes?.forget(unlisted[1]);
+            await resources.remove(unlisted[1]); mailboxes?.forget(unlisted[1]); gitReview?.forget(unlisted[1]);
             /* A device that had been given it loses it. */
             if (gone) sharing?.devices.forgetAsset(resources.assetOf(gone));
             return send(200, { ok: true }), true;
@@ -196,6 +199,8 @@ export async function handleApi(request, response, conversations, headers, resou
             const url = `${sharing.origin(request.headers)}/c/#${code}`;
             return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
         }
+        const pushed = /^\/api\/git\/([a-z0-9-]{1,32})\/(remote|push)$/.exec(pathname);
+        if (pushed && gitReview) return send(200, pushed[2] === 'remote' ? gitReview.setRemote(pushed[1], body) : await gitReview.push(pushed[1], body)), true;
         const taken = /^\/api\/devices\/([0-9a-f-]{36})\/take$/.exec(pathname);
         if (taken && sharing) { sharing.devices.take(taken[1], body.asset); return send(200, { ok: true }), true; }
         const revoked = /^\/api\/devices\/([0-9a-f-]{36})\/revoke$/.exec(pathname);

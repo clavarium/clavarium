@@ -64,6 +64,10 @@ is a chosen list in one code; a secret is never shared with a device.
 A git repository can be added (Folders, "Add a git repository"): empty, or
 cloned from an https address. It is then a folder like any other. Git is run
 by the server once, at creation, and never in a repository a tool has written.
+What the tool committed is shown to the owner before it is sent ("Review &
+send"): the server fetches the commits into a copy of its own, shows them, and
+pushes exactly what was shown with a key it keeps sealed (`server/gitpush.mjs`).
+The tool never holds that key.
 
 A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its
 recent messages become files that a conversation reads and never writes; the

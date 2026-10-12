@@ -483,10 +483,13 @@
             const row = document.createElement('div'); row.className = 'folder';
             const label = document.createElement('b'); label.textContent = resource.name;
             const box = resource.type === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
+            let review;
             if (resource.type === 'git') {
                 const about = document.createElement('small'); about.className = 'hint';
                 about.textContent = resource.from ? ` git repository, from ${new URL(resource.from).hostname}` : ' git repository';
                 label.append(about);
+                review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
+                review.addEventListener('click', () => { void openGit(resource.name); });
             }
             if (resource.type === 'mailbox') {
                 const about = document.createElement('small'); about.className = 'hint';
@@ -526,6 +529,7 @@
                 });
                 row.append(label, levels, remove);
             } else row.append(label, levels);
+            if (review) row.append(review);
             rows.append(row);
         }
         $('panel-empty').hidden = all.length > 0;
@@ -617,6 +621,59 @@
         button.disabled = false; button.textContent = 'Add';
         await paintPanel();
     });
+    /* ---------- a repository: what would go out, then send it ---------- */
+    let gitShown = ''; let gitHead = null;
+    async function paintGit() {
+        const name = gitShown;
+        $('gitview-name').textContent = `${name} - git repository`;
+        $('gitview-error').hidden = true; $('gitview-push').hidden = true;
+        $('gitview-state').textContent = 'Looking at what was committed...';
+        $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').textContent = '';
+        const settings = await (await fetch(`${API}/git/${name}`)).json().catch(() => ({}));
+        $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? '';
+        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.' : 'No key is kept: a remote that asks for one will refuse.';
+        let out;
+        try {
+            const r = await fetch(`${API}/git/${name}/outgoing`);
+            out = await r.json();
+            if (!r.ok) throw new Error(out.error || 'The repository could not be read.');
+        } catch (error) { $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; return; }
+        if (gitShown !== name) return;
+        gitHead = out.head;
+        $('gitview-state').textContent = out.message;
+        $('gitview-remote-box').open = out.state === 'no-remote' || out.state === 'unreachable';
+        for (const c of out.commits) {
+            const line = document.createElement('div'); line.className = 'commit';
+            const id = document.createElement('code'); id.textContent = c.id.slice(0, 8);
+            const what = document.createElement('b'); what.textContent = c.subject;
+            const who = document.createElement('small'); who.textContent = `${c.author}, ${new Date(c.date).toLocaleString()}`;
+            line.append(id, what, who); $('gitview-commits').append(line);
+        }
+        $('gitview-stat').textContent = out.stat;
+        $('gitview-diff').textContent = out.diff + (out.cut ? '\n... (the rest is not shown here: too long)' : '');
+        $('gitview-push').hidden = out.state !== 'ahead';
+        $('gitview-push').textContent = `Send ${out.commits.length} commit${out.commits.length > 1 ? 's' : ''} to ${out.branch}`;
+        $('gitview-push').dataset.sure = '';
+    }
+    async function openGit(name) { gitShown = name; $('panel').hidden = true; $('gitview').hidden = false; await paintGit(); }
+    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; terminal.focus(); });
+    $('gitview-again').addEventListener('click', () => { void paintGit(); });
+    $('gitview-push').addEventListener('click', async () => {
+        const button = $('gitview-push');
+        /* Two clicks: what leaves cannot be called back. */
+        if (button.dataset.sure !== 'yes') { button.dataset.sure = 'yes'; button.textContent = 'Yes, send them: this cannot be undone'; return; }
+        button.disabled = true; $('gitview-error').hidden = true;
+        try { const sent = await post(`${API}/git/${gitShown}/push`, { head: gitHead }); await paintGit(); $('gitview-state').textContent = `Sent: ${sent.commits} commit${sent.commits > 1 ? 's' : ''} to ${sent.branch}. ${$('gitview-state').textContent}`; }
+        catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
+        button.disabled = false;
+    });
+    $('gitview-remote').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('gitview-error').hidden = true;
+        try { await post(`${API}/git/${gitShown}/remote`, { url: $('gitview-url').value.trim(), user: $('gitview-user').value.trim(), key: $('gitview-key').value }); $('gitview-key').value = ''; await paintGit(); }
+        catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
+    });
+
     $('mailbox-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('mailbox-error').hidden = true;

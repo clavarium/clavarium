@@ -151,6 +151,28 @@
         <p id="files-readonly" class="hint" hidden>Attached read-only: nothing can be imported here.</p>
         <p id="files-error" class="error" role="alert" hidden></p>
       </div>
+      <div id="gitview" class="sheet" hidden>
+        <div class="panel-top"><b id="gitview-name">Repository</b><button type="button" id="gitview-close">Close</button></div>
+        <p class="hint">The tool commits in its machine and never holds the key that lets commits out: it is kept here. You see what would go, then you send it. What is sent is exactly what you were shown.</p>
+        <p id="gitview-state" role="status"></p>
+        <div class="row"><button type="button" id="gitview-push" class="primary" hidden>Send these commits</button><button type="button" id="gitview-again">Look again</button></div>
+        <p id="gitview-error" class="error" role="alert" hidden></p>
+        <div id="gitview-commits"></div>
+        <pre id="gitview-stat"></pre>
+        <pre id="gitview-diff"></pre>
+        <details id="gitview-remote-box">
+          <summary>Where the commits are sent</summary>
+          <form id="gitview-remote" autocomplete="off">
+            <label for="gitview-url">Address (https)</label>
+            <input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required>
+            <label for="gitview-user">User name of the key (optional)</label>
+            <input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
+            <label for="gitview-key">Key or token that may push (kept sealed here; leave empty to keep the one there is)</label>
+            <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>
+            <p id="gitview-key-state" class="hint"></p>
+          </form>
+        </details>
+      </div>
       <div id="sharing" class="sheet" hidden>
         <div class="panel-top"><b>Share</b><button type="button" id="sharing-close">Close</button></div>
         <p class="hint">Choose what the code gives. A conversation is given whole: its terminal, its shortcuts, dictation, and the files of that conversation. Whoever has it is root in its machine, like the tool. Anything else is given by itself, to read or to write.</p>
