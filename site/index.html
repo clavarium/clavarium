@@ -91,6 +91,10 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 
 .snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
 .snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem 1.6rem; }
+@media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
+.needs b { display: block; font-weight: 650; }
+.needs span { color: var(--dim); font-size: .95rem; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -103,6 +107,7 @@ footer a { color: var(--dim); }
     <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
     <nav aria-label="Pages">
       <a href="./" aria-current="page">Home</a>
+      <a href="examples.html">Examples</a>
       <a href="how-to-use-it.html">Use</a>
       <a href="how-to-install-it.html">Install</a>
       <a href="how-it-is-kept-safe.html">Security</a>
@@ -171,7 +176,7 @@ footer a { color: var(--dim); }
         </div>
       </li>
     </ol>
-    <a class="more" href="how-to-use-it.html">See it on real screens →</a>
+    <a class="more" href="examples.html">See what people hand to it →</a>
   </div>
 </section>
 
@@ -185,11 +190,17 @@ footer a { color: var(--dim); }
 
 <section id="install">
   <div class="wrap">
-    <h2>How you install it</h2>
+    <h2>How you install it, and what it needs</h2>
     <p class="note">One command, once, on an Ubuntu machine you own. After that, you only open a page.</p>
     <div class="snip"><pre>sudo deploy/install.sh \
   --domain clav.example.com \
   --operator you@example.com</pre></div>
+    <ul class="needs">
+      <li><b>A small machine</b><span>Ubuntu Server 24.04 or 26.04, on a processor that can run virtual machines. A mini PC does.</span></li>
+      <li><b>1 GB of memory per agent at work</b><span>and a few GB of disk each. An agent asleep costs no memory.</span></li>
+      <li><b>The agents you already use</b><span>with your own subscription. Nothing to pay here.</span></li>
+    </ul>
+    <p class="note" style="margin-top:.9rem">Where it was built and tried: 4 cores, 6 GB of memory, 40 GB of disk.</p>
     <a class="more" href="how-to-install-it.html">No public address at home, backup, a ready-made machine →</a>
   </div>
 </section>
@@ -198,6 +209,7 @@ footer a { color: var(--dim); }
 <footer>
   <div class="wrap">
     <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="examples.html">Examples</a>
     <a href="how-to-use-it.html">Use</a>
     <a href="how-to-install-it.html">Install</a>
     <a href="how-it-is-kept-safe.html">Security</a>

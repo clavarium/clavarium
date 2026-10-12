@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: examples</title>
+<meta name="description" content="What people hand to their agents: 14 examples, each with what is attached, what wakes the agent, and what you find.">
+<!--
+  EXAMPLES. Each one is a recipe that can be copied as it is: what is
+  attached, what wakes the agent, the line typed to it, what the owner finds.
+
+  THE RULE OF THIS PAGE: an example claims nothing the product does not do.
+  A mailbox is read, never written, so a reply is a draft the owner sends
+  from their own mail. Only a repository is sent from here, by the owner.
+-->
+<style>
+:root {
+  --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
+  --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --yours-bg: #fbf3df; --ok: #17794f; --stop: #b3401f; --wall: #16181d;
+  --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+    --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+  --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --agent: #8ab4ff; --agent-bg: #172742; --yours-bg: #2e2612; --ok: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 68rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+.hero { padding: clamp(2rem, 6vw, 3.4rem) 0 clamp(1.4rem, 4vw, 2rem); }
+h1 { margin: 0; font-size: clamp(1.9rem, 6vw, 2.9rem); line-height: 1.12; letter-spacing: -.02em; font-weight: 680; text-wrap: balance; }
+.lead { margin: .8rem 0 0; font-size: clamp(1.02rem, 2.6vw, 1.2rem); color: var(--dim); max-width: 36em; }
+.jump { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.3rem 0 0; }
+.jump a { font-size: .86rem; font-weight: 600; text-decoration: none; color: var(--text); border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .8rem; background: var(--bg-soft); }
+.always { margin: 1.4rem 0 0; padding: .8rem 1rem; border: 1px solid var(--line); border-left: 4px solid var(--brass); border-radius: var(--radius); background: var(--bg-soft); max-width: 46em; }
+.always p { margin: 0; } .always p + p { margin-top: .35rem; color: var(--dim); font-size: .95rem; }
+section { padding: clamp(1.8rem, 5vw, 2.8rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.2rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650; letter-spacing: -.01em; }
+.cases { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 19rem), 1fr)); gap: 1.1rem; }
+.case { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.05rem; background: var(--bg); box-shadow: var(--shadow); }
+h3 { margin: 0; font-size: 1.05rem; font-weight: 650; }
+.say { margin: .2rem 0 .8rem; color: var(--dim); font-size: .95rem; }
+dl { margin: 0; display: grid; gap: .5rem; font-size: .9rem; }
+dt { font-size: .72rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--brass); }
+dd { margin: 0; overflow-wrap: anywhere; }
+dd.m { font-family: var(--mono); font-size: .86rem; }
+dd.q { font-family: var(--mono); font-size: .82rem; background: var(--bg-code); border: 1px solid var(--line-soft); border-radius: 7px; padding: .4rem .55rem; }
+footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
+footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="./">Home</a>
+      <a href="examples.html" aria-current="page">Examples</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" style="border-top:0">
+  <div class="wrap">
+    <h1>What people hand to their agents</h1>
+    <p class="lead">14 examples. Each is a recipe: what you attach, what wakes the agent, the line typed to it, what you find.</p>
+    <div class="jump"><a href="#dev">For developers</a><a href="#office">For an office or a shop</a><a href="#home">At home</a></div>
+    <div class="always">
+      <p><b>In every one of them:</b> the agent prepares, you read, and nothing leaves without you.</p>
+      <p>A mailbox is read, never written: a reply is a draft you send from your own mail. What an agent reads is sent to the AI model that agent uses.</p>
+    </div>
+  </div>
+</section>
+
+<section id="dev">
+  <div class="wrap">
+    <h2>For developers</h2>
+    <ul class="cases">
+      <li class="case">
+        <h3>One agent per client</h3>
+        <p class="say">Each client&#x27;s code and key in a machine of its own. The other clients do not exist for it.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>repository client-a (write) · key CLIENT_A_DEPLOY (use)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">you, when you talk to it</dd></div>
+          
+          <div><dt>You find</dt><dd>commits to read, then send with your key</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>The night shift</h3>
+        <p class="say">The tests are fixed while you sleep. A doubt stops it; it does not guess.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>repository shop (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">0 2 * * *</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Run the tests. Fix what fails, one commit per fix. Write /work/report.html.</dd></div>
+          <div><dt>You find</dt><dd>a report on your tablet, commits waiting for your Send</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>A second pair of eyes</h3>
+        <p class="say">One agent writes, another reviews each commit, whatever tool each one is.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>repository shop (read) · folder handoff (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a commit arrives in shop</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">New commits arrived. Review them. Write your remarks in /resources/handoff/review.md.</dd></div>
+          <div><dt>You find</dt><dd>a review the first agent is woken to answer</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Two tools, one job</h3>
+        <p class="say">The one that writes the site asks the one that makes pictures.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder handoff (write), on both</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a file arrives in handoff</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">A request arrived: {files}. Do it and leave the result beside it.</dd></div>
+          <div><dt>You find</dt><dd>the banner, next to the request</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Dependencies, every Monday</h3>
+        <p class="say">The dull upkeep, done before you are at your desk.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>repository shop (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">30 7 * * 1</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Update the dependencies that are safe to update, run the tests, commit, and say what you left alone and why.</dd></div>
+          <div><dt>You find</dt><dd>one commit per update, and the list of what needs you</dd></div>
+        </dl>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section id="office">
+  <div class="wrap">
+    <h2>For an office or a shop</h2>
+    <ul class="cases">
+      <li class="case">
+        <h3>The mail, sorted before you arrive</h3>
+        <p class="say">It reads; it does not answer for you.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>your mailbox (read)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">30 7 * * 1-5</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Read the mail that arrived since yesterday. Write /work/today.html: what is urgent, who waits for an answer, what can wait.</dd></div>
+          <div><dt>You find</dt><dd>one page to read with your coffee</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>A quote drafted when it is asked for</h3>
+        <p class="say">The reply is written and its prices checked. You send it yourself.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>your mailbox (read) · folder price-list (read) · folder drafts (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a mail arrives</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">New mail: {files}. If one asks for a quote, write the reply in /resources/drafts, with prices from the price list.</dd></div>
+          <div><dt>You find</dt><dd>a draft to copy into your mail</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Unpaid invoices, every Friday</h3>
+        <p class="say">Nobody likes writing reminders.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder invoices (read) · folder drafts (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">0 16 * * 5</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">List the invoices unpaid for more than 30 days. Write one reminder per client in /resources/drafts and a summary in reminders.html.</dd></div>
+          <div><dt>You find</dt><dd>the list, and the reminders ready to send</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Notes into who does what</h3>
+        <p class="say">Drop the notes of a meeting; get the decisions.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder notes (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a file arrives in notes</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">New notes: {files}. Write a summary beside each: what was decided, who does what, by when.</dd></div>
+          <div><dt>You find</dt><dd>a summary next to each set of notes</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>Tomorrow&#x27;s order</h3>
+        <p class="say">Yesterday&#x27;s sales in, tomorrow&#x27;s order proposed.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder sales (read) · folder orders (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a file arrives in sales</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Yesterday&#x27;s sales arrived: {files}. Propose tomorrow&#x27;s order for each supplier in /resources/orders/order.html.</dd></div>
+          <div><dt>You find</dt><dd>a proposal to check before you call the supplier</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>One sheet per client, every month</h3>
+        <p class="say">The same preparation, sixty times, without mixing two clients.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>one conversation per client: its folder (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">0 6 1 * *</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Sort what arrived this month, list what is missing, flag what looks wrong, and write sheet.html.</dd></div>
+          <div><dt>You find</dt><dd>what is missing and what to look at, client by client</dd></div>
+        </dl>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section id="home">
+  <div class="wrap">
+    <h2>At home</h2>
+    <ul class="cases">
+      <li class="case">
+        <h3>Paperwork, filed</h3>
+        <p class="say">Photograph a letter with your phone; it is named, filed and indexed.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder papers (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a file arrives in papers</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">New papers: {files}. Name each by date and subject, file it in the right folder, update index.html.</dd></div>
+          <div><dt>You find</dt><dd>an index you can read on a tablet</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>What is new in what you follow</h3>
+        <p class="say">A reading list every morning, on the subjects you chose.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder reading (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">0 7 * * *</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">Look for what was published since yesterday on my subjects (see subjects.md). Write today.html, the five that matter first.</dd></div>
+          <div><dt>You find</dt><dd>five things worth reading, and why</dd></div>
+        </dl>
+      </li>
+      <li class="case">
+        <h3>The association&#x27;s minutes</h3>
+        <p class="say">From rough notes to minutes the members can read.</p>
+        <dl>
+          <div><dt>Attached</dt><dd>folder association (write)</dd></div>
+          <div><dt>Woken by</dt><dd class="m">a file arrives in association</dd></div>
+          <div><dt>Typed to it</dt><dd class="q">New notes: {files}. Write clean minutes beside them, and the list of what was voted.</dd></div>
+          <div><dt>You find</dt><dd>minutes to read over and hand out</dd></div>
+        </dl>
+      </li>
+    </ul>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="examples.html">Examples</a>
+    <a href="how-to-use-it.html">Use</a>
+    <a href="how-to-install-it.html">Install</a>
+    <a href="how-it-is-kept-safe.html">Security</a>
+    <a href="questions.html">FAQ</a>
+  </div>
+</footer>
+</body>
+</html>
