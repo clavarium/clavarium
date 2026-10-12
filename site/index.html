@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium</title>
+<meta name="description" content="Give every AI agent its own machine, at home, under your rules.">
+<!--
+  THE HOME PAGE. Written by hand, no build step: the file you read is the file
+  that is served.
+
+  THE RULE OF THIS PAGE: it is looked at, not read. A sentence under a picture
+  is one line and stays one line. Whatever needs a paragraph belongs on another
+  page, and gets a link from here.
+
+  Every colour is defined on bare :root; the dark block only redefines.
+-->
+<style>
+:root {
+  --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
+  --line: #d3d7de; --line-soft: #e2e5ea; --accent: #0b53c0; --on-accent: #ffffff; --brass: #9a6c12;
+  --t-ground: #0f141a; --t-text: #e7edf4; --t-dim: #8a97a8; --t-brass: #d2a94e; --t-ok: #5fc39d; --t-line: #2b3745;
+  --shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .07);
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+    --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --bg-soft: #171a20; --bg-code: #13161b; --text: #e6e8ec; --dim: #a3a9b4;
+  --line: #38404c; --line-soft: #262c35; --accent: #8ab4ff; --on-accent: #0f1115; --brass: #d2a94e;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+a { color: var(--accent); }
+.wrap { width: 100%; max-width: 68rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
+
+header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
+header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
+.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
+.mark b { color: var(--brass); font-weight: 600; }
+nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
+nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
+nav a:hover, nav a[aria-current] { color: var(--text); }
+
+.hero { padding: clamp(2.2rem, 7vw, 4.6rem) 0 clamp(2rem, 5vw, 3.4rem); }
+h1 { margin: 0; font-size: clamp(1.9rem, 6vw, 3.1rem); line-height: 1.12; letter-spacing: -.02em; font-weight: 680; max-width: 18em; text-wrap: balance; }
+.lead { margin: 1rem 0 0; font-size: clamp(1.02rem, 2.6vw, 1.2rem); color: var(--dim); max-width: 34em; }
+.claims { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1.6rem 0 0; padding: 0; list-style: none; }
+.claims + .claims { margin-top: .5rem; }
+.claims li { font-size: .82rem; font-weight: 600; letter-spacing: .01em; border: 1px solid var(--line); border-radius: 1.2rem; padding: .3rem .78rem; background: var(--bg-soft); }
+
+section { padding: clamp(2.6rem, 7vw, 4.6rem) 0; border-top: 1px solid var(--line-soft); }
+h2 { margin: 0 0 1.6rem; font-size: clamp(1.4rem, 4.4vw, 1.9rem); font-weight: 650; letter-spacing: -.01em; }
+.steps > li, .two > div { min-width: 0; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.4rem; }
+@media (max-width: 860px) { .steps { grid-template-columns: 1fr; } }
+.cap { margin: 0; font-weight: 650; }
+.cap span { font-family: var(--mono); font-size: .8rem; color: var(--brass); margin-right: .5rem; }
+.say { margin: .2rem 0 .8rem; color: var(--dim); font-size: .95rem; }
+.more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
+
+/* The frames: small drawings made of the pieces the product itself draws. */
+.frame { border: 1px solid var(--t-line); border-radius: 10px; background: var(--t-ground); color: var(--t-text); overflow: hidden; box-shadow: var(--shadow); font: 11.5px/1.5 var(--mono); min-height: 11.5rem; display: flex; flex-direction: column; }
+.frame .bar { display: flex; align-items: center; gap: .4rem; padding: .35rem .55rem; border-bottom: 1px solid var(--t-line); font-family: var(--sans); font-size: 11px; font-weight: 600; }
+.frame .dot { width: .45rem; height: .45rem; border-radius: 50%; background: var(--t-ok); }
+.frame .tag { border: 1px solid var(--t-brass); color: var(--t-brass); border-radius: 1rem; padding: 0 .45rem; font-weight: 600; }
+.frame .body { padding: .55rem .65rem; flex: 1; }
+.frame .dim { color: var(--t-dim); }
+.frame .gold { color: var(--t-brass); }
+.frame .ok { color: var(--t-ok); }
+.frame .keys { display: flex; gap: .3rem; padding: .4rem .55rem; border-top: 1px solid var(--t-line); }
+.frame .keys i { font-style: normal; font-family: var(--sans); font-size: 10px; border: 1px solid var(--t-line); border-radius: 5px; padding: .1rem .4rem; }
+.frame .keys i.go { flex: 1; text-align: center; background: var(--t-brass); border-color: var(--t-brass); color: #1b1405; font-weight: 700; }
+.pick { display: flex; flex-wrap: wrap; gap: .3rem; margin-top: .35rem; font-family: var(--sans); }
+.pick i { font-style: normal; border: 1px solid var(--t-line); border-radius: 6px; padding: .12rem .5rem; }
+.pick i.on { border-color: var(--t-brass); color: var(--t-brass); }
+.file { display: flex; gap: .5rem; align-items: baseline; padding: .28rem 0; border-top: 1px solid var(--t-line); font-family: var(--sans); }
+.file:first-child { border-top: 0; }
+.file b { font: 600 9px var(--mono); border: 1px solid var(--t-line); border-radius: 4px; padding: 0 .3rem; color: var(--t-dim); }
+.file span:last-child { margin-left: auto; color: var(--t-dim); }
+
+.snip { margin: 1rem 0 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; }
+.snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
+.snip .c { color: var(--dim); }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 1.6rem; }
+@media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
+.route { margin: 0; color: var(--dim); max-width: 38em; }
+
+footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
+footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
+footer a { color: var(--dim); }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="./" aria-current="page">Home</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<section class="hero" id="top" style="border-top:0">
+  <div class="wrap">
+    <h1>Give every AI agent its own machine. At home, under your rules.</h1>
+    <p class="lead">Several agents, several tools, each in its place. They share only what you attach.</p>
+    <ul class="claims">
+      <li>One agent, one machine</li>
+      <li>Any command-line agent</li>
+    </ul>
+    <ul class="claims">
+      <li>It commits. You push.</li>
+      <li>Agents pass work through folders</li>
+    </ul>
+    <ul class="claims">
+      <li>From any screen</li>
+      <li>Self-hosted</li>
+    </ul>
+  </div>
+</section>
+
+<section id="use">
+  <div class="wrap">
+    <h2>How you use it</h2>
+    <ol class="steps">
+      <li>
+        <p class="cap"><span>01</span>One machine per job</p>
+        <p class="say">A name, a tool. Each one works apart from the others.</p>
+        <div class="frame" aria-hidden="true">
+          <div class="bar">Conversations</div>
+          <div class="body">
+            <div class="file"><span class="dot"></span><span>client-a</span><span>Claude Code</span></div>
+            <div class="file"><span class="dot"></span><span>client-b</span><span>OpenCode</span></div>
+            <div class="file"><span class="dot"></span><span>pictures</span><span>another tool</span></div>
+            <div class="file"><span class="dot" style="background:var(--t-dim)"></span><span>accounts</span><span>asleep</span></div>
+          </div>
+        </div>
+      </li>
+      <li>
+        <p class="cap"><span>02</span>Each sees only what you attach</p>
+        <p class="say">A folder, a repository, a mailbox, a key. To read, or to write.</p>
+        <div class="frame" aria-hidden="true">
+          <div class="bar"><span class="dot"></span>client-a <span class="tag">Claude Code</span></div>
+          <div class="body">
+            <div class="file"><b>GIT</b><span>site-a</span><span class="gold">write</span></div>
+            <div class="file"><b>DIR</b><span>handoff</span><span class="gold">write</span></div>
+            <div class="file"><b>DIR</b><span>brand-guide</span><span>read</span></div>
+            <div class="file"><b>KEY</b><span>DEPLOY_TOKEN</span><span>use</span></div>
+          </div>
+        </div>
+      </li>
+      <li>
+        <p class="cap"><span>03</span>They hand work on, and to you</p>
+        <p class="say">One asks in a folder, another answers there. You see what leaves.</p>
+        <div class="frame" aria-hidden="true">
+          <div class="bar">Files · handoff</div>
+          <div class="body">
+            <div class="file"><b>MD</b><span>need-a-banner.md</span><span>client-a</span></div>
+            <div class="file"><b>PNG</b><span>banner.png</span><span>pictures</span></div>
+            <div class="file"><b>PDF</b><span>report.pdf</span><span>view</span></div>
+            <div class="file"><b>GIT</b><span>3 commits to send</span><span class="gold">review</span></div>
+          </div>
+        </div>
+      </li>
+    </ol>
+    <a class="more" href="how-to-use-it.html">See a whole session →</a>
+  </div>
+</section>
+
+<section id="safe">
+  <div class="wrap">
+    <h2>What stays yours</h2>
+    <ol class="steps">
+      <li><p class="cap">Your computer</p><p class="say">Each agent works in a machine apart, with the folders you attach.</p></li>
+      <li><p class="cap">Your keys</p><p class="say">It commits. You see what would go out, then you send it.</p></li>
+      <li><p class="cap">Your words</p><p class="say">Encrypted from your browser to your home. The relay is blind.</p></li>
+    </ol>
+    <a class="more" href="how-it-is-kept-safe.html">How it is kept safe →</a>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>How you install it</h2>
+    <div class="two">
+      <div>
+        <p class="cap">On a machine at home</p>
+        <p class="say">A fresh Ubuntu Server. One line, no question asked.</p>
+        <div class="snip"><pre>sudo deploy/install.sh \
+  --domain clav.example.com \
+  --operator you@example.com</pre></div>
+      </div>
+      <div>
+        <p class="cap">No public address at home?</p>
+        <p class="say">One more line, on any small server. It sees nothing.</p>
+        <div class="snip"><pre>sudo deploy/relay.sh --key "ssh-ed25519 AAAA…"</pre></div>
+      </div>
+    </div>
+    <a class="more" href="how-to-install-it.html">Other ways in: a ready-made machine, backup, restore →</a>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
+    <a href="how-to-use-it.html">Use</a>
+    <a href="how-to-install-it.html">Install</a>
+    <a href="how-it-is-kept-safe.html">Security</a>
+    <a href="questions.html">FAQ</a>
+  </div>
+</footer>
+</body>
+</html>

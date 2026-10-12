@@ -106,6 +106,7 @@ test('a sleep that was asked for holds through a reload, shows in the list, and 
     await me.create('sleeper');
     await me.type('KEPT=through-sleep; echo ok');
     await me.sees('ok');
+    await me.page.locator('#folders').click();
     await me.page.locator('#sleep').click();
     await me.until('asleep', async () => (await me.state()) === 'asleep');
     assert.equal(require_state(b, 'sleeper'), 'Suspended');
@@ -124,10 +125,12 @@ test('archiving asks first, then removes the conversation and its machine', { sk
     const b = await bench(t);
     const me = await b.person();
     await me.create('short-lived');
+    await me.page.locator('#folders').click();
     await me.page.locator('#archive').click();
     assert.match(await me.page.locator('#notice-text').innerText(), /Its machine is deleted/);
     await me.page.locator('#notice-cancel').click();
     assert.equal(await me.state(), 'live', 'Cancel changes nothing');
+    await me.page.locator('#folders').click();
     await me.page.locator('#archive').click();
     await me.page.locator('#notice-action', { hasText: 'Archive' }).click();
     await me.until('gone from the list', async () => (await me.page.locator('#items .item').count()) === 0);

@@ -226,17 +226,27 @@
        (seen on the live site: the "Start" button vanished before it could be
        pressed). */
     let welcoming = false;
-    function enter() {
+    /* What can be done to the conversation shown, from what is known of it now. */
+    function paintActions() {
+        const c = conversations.find((x) => x.name === current);
+        const usable = Boolean(c) && c.phase === 'ready';
+        $('archive').hidden = !c;
+        $('files-open').hidden = $('share').hidden = !usable;
+        $('sleep').hidden = !usable || c.asleep === true;
+        /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
+        $('folders').hidden = DEVICE || !c;
+    }
+    /* `keepSheets`: the same conversation, looked at again (its state changed):
+       a sheet the owner has open is not shut under their fingers. */
+    function enter(keepSheets = false) {
         if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
         $('name').textContent = current || 'No conversation';
         document.title = current ? `${current} - Clavarium` : 'Clavarium';
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
-        $('sleep').hidden = $('archive').hidden = !c;
-        $('folders').hidden = $('files-open').hidden = $('share').hidden = !c || c.phase !== 'ready';
-        $('attach-top').hidden = DEVICE || !c || c.phase !== 'ready';
+        paintActions();
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
-        $('panel').hidden = $('files').hidden = $('sharing').hidden = $('copy').hidden = true;
+        if (!keepSheets) $('panel').hidden = $('files').hidden = $('sharing').hidden = $('copy').hidden = true;
         paintChips();
         $('keys').hidden = !current;
         if (home && current) void paintShortcuts();
@@ -244,7 +254,6 @@
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         const usable = Boolean(c) && c.phase === 'ready';
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
-        $('sleep').hidden = !usable || c.asleep === true;
         if (c && c.phase === 'building') {
             disconnect(); say('building', 'connecting');
             const minutes = c.buildingSince ? Math.floor((Date.now() - Date.parse(c.buildingSince)) / 60000) : 0;
@@ -332,7 +341,8 @@
             paint();
             paintChips();
             const now = mark(conversations.find((x) => x.name === current));
-            if (before !== now || now.startsWith('building')) enter();
+            paintActions();
+            if (before !== now || now.startsWith('building')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving') ? 2500 : 10000);
     }
@@ -519,7 +529,7 @@
     /* ---------- Access: this conversation ---------- */
     async function paintPanel() {
         const here = conversations.find((x) => x.name === current);
-        $('panel-title').textContent = `Access - ${current}`;
+        $('panel-title').textContent = `This conversation - ${current}`;
         const all = await (await fetch(`${API}/resources`)).json();
         const mine = new Map((here?.resources ?? []).map((r) => [r.name, r.access]));
         const rows = $('panel-rows');
@@ -620,7 +630,6 @@
         if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
-    $('attach-top').addEventListener('click', () => { void openAccess(true); });
     $('attach-open').addEventListener('click', () => { $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
     $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
     $('attach-manage').addEventListener('click', () => { void openAssets(); });
@@ -1628,6 +1637,7 @@
     /* ---------- resting and archiving ---------- */
     $('sleep').addEventListener('click', async () => {
         const name = current;
+        $('panel').hidden = true;
         disconnect();
         say('going to sleep', 'connecting');
         show('Going to sleep...');
@@ -1643,6 +1653,7 @@
     }
     async function archive(confirmed) {
         const name = current;
+        $('panel').hidden = true;
         if (!confirmed) {
             const resume = socket ? () => { notice.hidden = true; terminal.focus(); } : enter;
             show(`Archive "${name}"? Its machine is deleted, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.`, 'Archive', () => archive(true), resume);

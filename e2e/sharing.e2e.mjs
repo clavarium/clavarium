@@ -8,6 +8,8 @@ import { bench, SKIP, wait } from './bench.mjs';
 /* The owner shares a conversation and gives back the address a QR code carries. */
 /* From a conversation: it is in the basket already; a name, and the code. */
 async function share(owner, label = 'A phone') {
+    await owner.page.locator('#folders').click();
+    await owner.until('its sheet is shown', async () => owner.page.locator('#share').isVisible());
     await owner.page.locator('#share').click();
     await owner.until('the basket holds the conversation', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
     await owner.page.fill('#sharing-label', label);
@@ -212,6 +214,8 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.create('garden');
     await owner.api('/api/resources', { name: 'recipes' });
     await owner.api('/api/resources', { name: 'accounts' });
+    await owner.page.locator('#folders').click();
+    await owner.until('its sheet is shown', async () => owner.page.locator('#share').isVisible());
     await owner.page.locator('#share').click();
     /* Only the conversation the owner came from is in the basket; nothing else was chosen for them. */
     await owner.until('the basket is shown', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);

@@ -17,7 +17,8 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
     await me.page.locator('#assets-close').click();
     /* Handed to this conversation's tool from Access, in two taps. */
-    await me.page.locator('#attach-top').click();
+    await me.page.locator('#folders').click();
+    await me.page.locator('#attach-open').click();
     await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
     await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
     await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').count()) === 1);

@@ -8,6 +8,7 @@ test('where the browser lets a page ask, "Install the app" appears and asks; onc
     await me.create('at-hand');
     /* For the owner, it is in Settings, under "This device". */
     await me.page.locator('#settings-open').click();
+    await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
     assert.equal(await me.page.locator('#install').isVisible(), false, 'nothing is offered that cannot be done');
     /* What a browser does when the page can be installed. */
     await me.page.evaluate(() => {

@@ -38,12 +38,8 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
-      <button type="button" id="attach-top" hidden>+ Attach</button>
       <button type="button" id="files-open" hidden>Files</button>
-      <button type="button" id="folders" hidden>Access</button>
-      <button type="button" id="share" hidden>Share</button>
-      <button type="button" id="sleep" hidden>Sleep</button>
-      <button type="button" id="archive" hidden>Archive</button>
+      <button type="button" id="folders" hidden>This conversation</button>
     </header>
     <div id="signin-strip" hidden>
       <span class="tag">sign-in</span>
@@ -56,7 +52,7 @@
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <!-- ACCESS: what THIS conversation has. Nothing is created here. -->
       <div id="panel" class="sheet" hidden>
-        <div class="panel-top"><b id="panel-title">Access</b><button type="button" id="panel-close">Close</button></div>
+        <div class="panel-top"><b id="panel-title">This conversation</b><button type="button" id="panel-close">Close</button></div>
         <p class="hint">What this conversation has: it appears in its machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
         <p id="panel-error" class="error" role="alert" hidden></p>
         <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
@@ -78,7 +74,7 @@
           <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
         </div>
         <details id="access-advanced">
-          <summary>Advanced</summary>
+          <summary>Its machine</summary>
         <div id="work-box">
           <div class="panel-top"><b>Where the tool works</b></div>
           <p id="work-now" class="hint"></p>
@@ -97,6 +93,14 @@
           </form>
         </div>
         </details>
+        <!-- What is done to the conversation itself: not every day, so not in the bar. -->
+        <div class="panel-top"><b>Actions</b></div>
+        <div class="row" id="conversation-actions">
+          <button type="button" id="share" hidden>Share...</button>
+          <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+          <span class="sp"></span>
+          <button type="button" id="archive" hidden>Archive...</button>
+        </div>
       </div>
       <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
       <div id="assets" class="sheet" hidden>

@@ -133,6 +133,8 @@ test('a git repository is added from the page, attached like a folder, and is a 
     assert.equal((await me.page.locator('#files-rows').innerText()).includes('.git'), false);
     await me.page.locator('#files-close').click();
     /* And it can be given in a share, to read or to write, as any other thing. */
+    await me.page.locator('#folders').click();
+    await me.until('its sheet is shown', async () => me.page.locator('#share').isVisible());
     await me.page.locator('#share').click();
     const offered = me.page.locator('#share-add .folder', { hasText: 'site' });
     await me.until('the repository is offered', async () => (await offered.count()) === 1);

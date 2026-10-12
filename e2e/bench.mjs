@@ -107,7 +107,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         async function access(name, level) {
             await page.locator('#folders').click();
             const row = page.locator(`#panel-rows .folder[data-name="${name}"]`);
-            await until('Access is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('Access - '));
+            await until('its sheet is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('This conversation - '));
             if (level === 'Off') {
                 await row.locator('button', { hasText: 'Detach' }).click();
                 await until(`${name} is detached`, async () => (await row.count()) === 0);
