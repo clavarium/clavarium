@@ -47,7 +47,8 @@ button[aria-pressed="true"] { border-color: var(--pick); box-shadow: inset 0 0 0
 .stage { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; min-height: 30rem; }
 @media (max-width: 900px) {
   .stage { grid-template-columns: 1fr; }
-  .canvas { border-right: 0; max-height: 62vh; }
+  /* One thing scrolls, the page: a drawing that scrolled inside it fought with the finger. */
+  .canvas { border-right: 0; overflow-x: auto; overflow-y: visible; }
   /* On a small screen the panel is a sheet at the bottom, there only when something is chosen. */
   aside { position: sticky; bottom: 0; z-index: 3; max-height: 46vh; overflow: auto; border-top: 2px solid var(--pick); box-shadow: 0 -8px 24px rgba(0, 0, 0, .18); }
   aside[data-empty="true"] { display: none; }
@@ -242,24 +243,32 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
       const port = el('circle', { class: 'port', cx: pcx, cy: pcy, r: 9, 'data-armed': String(armed === x.id) });
       const reach = el('circle', { class: 'port-hit', cx: pcx + (upright ? 0 : 9), cy: pcy + (upright ? 9 : 0), r: 17 });
       reach.append(el('title', {}, 'Pull from here to another box to link them'));
+      reach.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
       reach.addEventListener('pointerdown', (e) => {
         e.stopPropagation(); e.preventDefault();
         const at = (ev) => { const r = board.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
         const wire = el('path', { class: 'wire' }); board.append(wire);
+        const hold = (ev) => ev.preventDefault();      /* while a wire is pulled, the page stays still */
+        window.addEventListener('touchmove', hold, { passive: false });
         let pulled = false;
         const move = (ev) => { const [mx, my] = at(ev); pulled = pulled || Math.hypot(mx - (x.x + pcx), my - (x.y + pcy)) > 10; wire.setAttribute('d', `M${x.x + pcx} ${x.y + pcy} L${mx} ${my}`); };
         const up = (ev) => {
-          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', up); window.removeEventListener('touchmove', hold);
           const [mx, my] = at(ev);
           const target = pulled ? flow.nodes.find((o) => o.id !== x.id && mx >= o.x && mx <= o.x + SIZE[o.kind][0] && my >= o.y && my <= o.y + SIZE[o.kind][1]) : null;
           if (target) { link(x, target); armed = null; } else if (!pulled) { armed = armed === x.id ? null : x.id; picked = null; } else armed = null;
           draw();
         };
-        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('pointercancel', up);
       });
       g.append(port, reach);
       let start = null;
+      /* A FINGER ON A BOX MOVES THE BOX; a finger beside it scrolls the page.
+         Said to the browser at the first touch, before it decides to scroll:
+         a style alone is not always obeyed inside a drawing. */
+      g.addEventListener('touchstart', (e) => { e.preventDefault(); }, { passive: false });
       g.addEventListener('pointerdown', (e) => { start = { px: e.clientX, py: e.clientY, x: x.x, y: x.y, moved: false }; g.setPointerCapture(e.pointerId); });
+      g.addEventListener('pointercancel', () => { start = null; draw(); });
       g.addEventListener('pointermove', (e) => {
         if (!start) return;
         const dx = e.clientX - start.px; const dy = e.clientY - start.py;
