@@ -105,6 +105,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 <header>
   <h1>Set it up by drawing it</h1>
   <p>A mock-up. Boxes are agents, folders and people; a link says who reads and who writes.</p>
+  <p><b>The example:</b> Jeanne records her memories on her phone. Paul, her grandson, asks for the family's story. Between them, four workers, none of which can change what Jeanne said.</p>
   <details><summary>How to use it</summary>
     <p>A link from an agent to a folder: it writes there. From a folder to an agent: it reads. An arrow at both ends: both. Drag a box to move it. To link two boxes, pull a wire from the small circle of one and drop it on the other, or touch the circle, then the other box. Touch a box or a link to change it.</p>
   </details>
@@ -133,7 +134,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
   const SVG = 'http://www.w3.org/2000/svg';
   const $ = (id) => document.getElementById(id);
   const el = (tag, attrs = {}, text) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); if (text !== undefined) e.textContent = text; return e; };
-  const SIZE = { agent: [164, 62], script: [164, 62], asset: [140, 46], person: [130, 46] };
+  const SIZE = { agent: [164, 62], script: [164, 62], asset: [178, 46], person: [150, 46] };
   const TOOLS = ['Claude Code', 'OpenCode', 'Codex CLI', 'Gemini CLI'];
   const WAKES = ['Nothing but its links', 'Every hour', 'Monday to Friday at 7:30', 'A call from outside'];
   const TOP = 60, LOW = 250, STEP = 142, X0 = 14, DOWN = 86;
@@ -162,17 +163,17 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
   /* The example: recordings become a story, and nobody can change what was said. */
   const example = () => ({
     nodes: [
-      { id: 'p1', kind: 'person', name: 'The person', r: 0 },
-      { id: 'a1', kind: 'asset', name: 'sounds', r: 1 },
-      { id: 's1', kind: 'script', name: 'transcriber', r: 2, does: 'Turns each recording into text, word for word.', key: 'a transcription key', wake: WAKES[0] },
-      { id: 'a2', kind: 'asset', name: 'transcripts', r: 3 },
-      { id: 'g1', kind: 'agent', name: 'extractor', r: 4, tool: 'Claude Code', mode: 'terminal', wake: WAKES[0], does: 'Lists what was said: who, when, where, and the exact words.' },
-      { id: 'a3', kind: 'asset', name: 'proposed', r: 5 },
-      { id: 's2', kind: 'script', name: 'checker', r: 6, does: 'Keeps an item only if its exact words are in the transcript.', key: '', wake: WAKES[0] },
-      { id: 'a4', kind: 'asset', name: 'items', r: 7 },
-      { id: 'g2', kind: 'agent', name: 'storyteller', r: 8, tool: 'OpenCode', mode: 'conversation', wake: WAKES[0], does: 'Tells the story from the items; each line points to its items.' },
-      { id: 'a5', kind: 'asset', name: 'story', r: 9 },
-      { id: 'p2', kind: 'person', name: 'The person', r: 10 },
+      { id: 'p1', kind: 'person', name: 'Jeanne, 82', r: 0 },
+      { id: 'a1', kind: 'asset', name: "Jeanne's recordings", r: 1 },
+      { id: 's1', kind: 'script', name: 'transcriber', r: 2, does: "Turns each of Jeanne's recordings into text, word for word.", key: 'a transcription key', wake: WAKES[0] },
+      { id: 'a2', kind: 'asset', name: 'what she said', r: 3 },
+      { id: 'g1', kind: 'agent', name: 'extractor', r: 4, tool: 'Claude Code', mode: 'terminal', wake: WAKES[0], does: 'Lists what Jeanne said: who, when, where, and her exact words.' },
+      { id: 'a3', kind: 'asset', name: 'memories to check', r: 5 },
+      { id: 's2', kind: 'script', name: 'checker', r: 6, does: "Keeps a memory only if its exact words are in what Jeanne said.", key: '', wake: WAKES[0] },
+      { id: 'a4', kind: 'asset', name: 'her memories', r: 7 },
+      { id: 'g2', kind: 'agent', name: 'storyteller', r: 8, tool: 'OpenCode', mode: 'conversation', wake: WAKES[0], does: "Tells the family's story from Jeanne's memories; each line points to the memory it comes from." },
+      { id: 'a5', kind: 'asset', name: 'the family story', r: 9 },
+      { id: 'p2', kind: 'person', name: 'Paul, her grandson', r: 10 },
     ],
     links: [
       { id: 'l1', from: 'p1', to: 'a1', kind: 'write' }, { id: 'l2', from: 'a1', to: 's1', kind: 'read', wakes: true }, { id: 'l3', from: 's1', to: 'a2', kind: 'write' },
@@ -245,7 +246,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
       const [w, h] = SIZE[x.kind];
       const g = el('g', { class: 'node', 'data-kind': x.kind, 'data-picked': String(picked?.type === 'node' && picked.id === x.id), transform: `translate(${x.x} ${x.y})` });
       g.append(el('rect', { width: w, height: h, rx: x.kind === 'asset' ? 6 : x.kind === 'person' ? 23 : 10 }));
-      g.append(el('text', { class: 'n', x: 12, y: isWorker(x) ? 25 : h / 2 + 5 }, x.name.length > 18 ? `${x.name.slice(0, 17)}...` : x.name));
+      g.append(el('text', { class: 'n', x: 12, y: isWorker(x) ? 25 : h / 2 + 5 }, x.name.length > 21 ? `${x.name.slice(0, 20)}...` : x.name));
       if (isWorker(x)) g.append(el('text', { class: 's', x: 12, y: 44 }, x.kind === 'script' ? 'a script, not an AI' : `${x.tool} - ${x.mode}`));
       /* THE SMALL CIRCLE IS WHERE A LINK STARTS: pulled from it, a wire follows
          the finger and is dropped on another box. Pressed without pulling, it
