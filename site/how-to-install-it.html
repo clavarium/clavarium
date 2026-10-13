@@ -91,7 +91,7 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 
 .snip { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-code); overflow-x: auto; max-width: 34rem; }
 .snip pre { margin: 0; padding: .9rem 1rem; font: 13px/1.55 var(--mono); white-space: pre; }
-.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem 1.6rem; }
+.needs { list-style: none; margin: 1.3rem 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1rem 1.6rem; }
 @media (max-width: 860px) { .needs { grid-template-columns: 1fr; } }
 .needs b { display: block; font-weight: 650; }
 .needs span { color: var(--dim); font-size: .95rem; }
@@ -144,6 +144,7 @@ footer a { color: var(--dim); }
       <li><b>A small machine</b><span>Ubuntu Server 24.04 or 26.04, on a processor that can run virtual machines. A mini PC does.</span></li>
       <li><b>1 to 2 GB of memory per agent at work</b><span>and a few GB of disk each. An agent asleep costs no memory. Tried on 4 cores, 6 GB, 40 GB.</span></li>
       <li><b>A name for it</b><span>A domain or a sub-domain of yours, pointing to the machine, or to its relay.</span></li>
+      <li><b>An AI of yours</b><span>A subscription (Claude, ChatGPT), or a key from a service that hosts models. clavarium brings none and charges nothing.</span></li>
     </ul>
   </div>
 </section>
