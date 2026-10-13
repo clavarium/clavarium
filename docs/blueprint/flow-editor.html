@@ -393,8 +393,15 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
   for (const b of document.querySelectorAll('[data-add]')) {
     b.addEventListener('click', () => {
       const kind = b.dataset.add; const id = `${kind[0]}${++n}`;
+      /* A new box lands where there is room for it, near what is being looked at: never on top of another. */
+      const [w, h] = SIZE[kind];
       const view = document.querySelector('.canvas');
-      const base = { id, kind, x: Math.max(8, Math.min(BW - 180, view.scrollLeft + (upright ? BW / 2 - 82 : 190) + (n % 4) * 14)), y: Math.min(BH - 70, view.scrollTop + (upright ? 110 : 150) + (n % 4) * 14) };
+      const top = Math.max(0, -$('board').getBoundingClientRect().top);
+      const clear = (px, py) => flow.nodes.every((o) => px + w + 10 < o.x || px > o.x + SIZE[o.kind][0] + 10 || py + h + 10 < o.y || py > o.y + SIZE[o.kind][1] + 10);
+      let spot = null;
+      for (let py = top + 12; py < BH - h - 4 && !spot; py += 22) for (let px = view.scrollLeft + 10; px < Math.min(BW, view.scrollLeft + view.clientWidth) - w - 6; px += 22) if (clear(px, py)) { spot = [px, py]; break; }
+      if (!spot) { BH += h + 30; spot = [10, BH - h - 14]; }      /* no room left: the drawing grows */
+      const base = { id, kind, x: spot[0], y: spot[1] };
       flow.nodes.push(kind === 'agent' ? { ...base, name: 'new agent', tool: TOOLS[0], mode: 'terminal', wake: WAKES[0], does: '' } : kind === 'script' ? { ...base, name: 'new script', does: '', key: '', wake: WAKES[0] } : kind === 'asset' ? { ...base, name: 'new folder' } : { ...base, name: 'Somebody' });
       picked = { type: 'node', id }; armed = null; draw();
     });
