@@ -103,6 +103,9 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 .other { margin: 1.6rem 0 0; }
 .other { color: var(--dim); }
 .other a { font-weight: 600; text-decoration: none; white-space: nowrap; }
+.pair { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
+@media (max-width: 800px) { .pair { grid-template-columns: 1fr; } }
+.shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -211,6 +214,22 @@ footer a { color: var(--dim); }
         <li>Another agent that runs in a terminal? One entry in a file adds it.</li>
       </ul>
     </div>
+  </div>
+</section>
+
+<section id="talk">
+  <div class="wrap pair">
+    <div>
+      <h2>Its terminal, or a conversation</h2>
+      <ul class="rows">
+        <li>The terminal is the default, and stays whole.</li>
+        <li>An agent can also be given five verbs of its own, through MCP: tell, ask, show, read, status.</li>
+        <li>The same work then reads as a conversation, with buttons for its questions, and your phone told when it asks.</li>
+        <li>Tried for real with OpenCode on open models. It is a project of its own, usable without this one.</li>
+      </ul>
+      <a class="more" style="margin-top:.8rem" href="for-you.html">See it as someone who only uses it →</a>
+    </div>
+    <img class="shot" style="max-width:24rem;justify-self:center" loading="lazy" src="shots/talk.png" width="1800" height="2000" alt="A real exchange shown as a conversation: the agent asks 'Should the cover be blue or red?' with two buttons; under it, the file it made and what its terminal says now.">
   </div>
 </section>
 
