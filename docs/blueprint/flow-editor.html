@@ -96,6 +96,14 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
 .link[data-wakes="true"] { stroke-dasharray: 10 6; animation: flow 1.1s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -16; } }
 @media (prefers-reduced-motion: reduce) { .link[data-wakes="true"] { animation: none; } }
+.node .badge { fill: var(--panel); stroke: var(--dim); stroke-width: 1.4; stroke-dasharray: none; }
+.node .badge-n { font-size: 11.5px; font-weight: 650; text-anchor: middle; fill: var(--text); }
+.node .alert { fill: var(--stop); stroke: var(--soft); stroke-width: 2; stroke-dasharray: none; }
+.node .alert-n { font-size: 13px; font-weight: 800; text-anchor: middle; fill: #fff; }
+.node[data-picked="true"] .badge, .node[data-picked="true"] .alert { stroke-width: 1.4; }
+.legend .n::before { content: "7"; border: 1.4px solid currentColor; border-radius: 9px; width: auto; height: auto; padding: 0 6px; font-size: .75rem; font-weight: 650; }
+.legend .a::before { content: "!"; border: 0; border-radius: 50%; width: 16px; height: 16px; line-height: 16px; text-align: center; background: var(--stop); color: #fff; font-size: .75rem; font-weight: 800; }
+aside .trouble { color: var(--stop); font-weight: 650; margin: .2rem 0 .4rem; }
 /* the drawing */
 .node rect { stroke-width: 1.6; }
 .node[data-kind="agent"] rect { fill: var(--agent-bg); stroke: var(--agent); }
@@ -143,7 +151,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
   <button type="button" id="import">Import</button>
   <span class="say" id="count"></span>
 </div>
-<div class="legend"><span class="k w">writes</span><span class="k r">reads</span><span class="k m">moving: an arrival wakes the reader</span>
+<div class="legend"><span class="k w">writes</span><span class="k r">reads</span><span class="k m">moving: an arrival wakes the reader</span><span class="k n">items held, or times woken</span><span class="k a">needs you</span>
 </div>
 <div class="stage">
   <div class="canvas"><svg id="board" role="img" aria-label="The flow being drawn"></svg></div>
@@ -201,16 +209,16 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
   const example = () => ({
     nodes: [
       { id: 'p1', kind: 'person', name: 'Marcel, 82', r: 0 },
-      { id: 'a1', kind: 'asset', name: 'what Marcel brings', r: 1 },
-      { id: 'a6', kind: 'asset', name: 'known faces', r: 1 },
-      { id: 's1', kind: 'script', name: 'transcriber', source: 'https://example.com/voices/transcriber.git', r: 2, does: "Turns each of Marcel's recordings into text, word for word.", key: 'a transcription key', wake: WAKES[0] },
-      { id: 's2', kind: 'script', name: 'paper reader', source: 'https://example.com/voices/paper-reader.git', r: 2, does: 'Reads a certificate, a letter, a family record book: the text, the names, the dates, the places.', key: 'a model key', wake: WAKES[0] },
-      { id: 's3', kind: 'script', name: 'photo reader', source: 'https://example.com/voices/photo-reader.git', r: 2, does: 'Says who is on a photo, from the known faces, and where and when if it shows. A face it is not sure of stays unnamed, and is listed for Marcel to name. Nothing leaves this machine.', key: '', wake: WAKES[0] },
-      { id: 'a2', kind: 'asset', name: 'what was understood', r: 3 },
-      { id: 's4', kind: 'script', name: 'extractor', source: 'https://example.com/voices/extractor.git', r: 4, does: 'Cuts it into chapters. Draws the facts from each chapter, each tied to where it comes from: a passage, a paper, a photo. Checks each fact against its source, asks again when one fails, and says when two sources disagree.', key: 'a model key', wake: WAKES[0] },
-      { id: 'a4', kind: 'asset', name: 'his memories', r: 5 },
-      { id: 'g2', kind: 'agent', name: 'storyteller', r: 6, tool: 'OpenCode', mode: 'conversation', key: 'a model key', wake: WAKES[0], does: "Tells the family's story from Marcel's memories; each line points to the memory it comes from." },
-      { id: 'a5', kind: 'asset', name: 'the family story', r: 7 },
+      { id: 'a1', kind: 'asset', name: 'what Marcel brings', count: 12, r: 1 },
+      { id: 'a6', kind: 'asset', name: 'known faces', count: 6, r: 1 },
+      { id: 's1', kind: 'script', name: 'transcriber', count: 7, alert: '2 recordings could not be read.', source: 'https://example.com/voices/transcriber.git', pin: '4c1e9a7', r: 2, does: "Turns each of Marcel's recordings into text, word for word.", key: 'a transcription key', wake: WAKES[0] },
+      { id: 's2', kind: 'script', name: 'paper reader', count: 2, source: 'https://example.com/voices/paper-reader.git', pin: 'b72d03f', r: 2, does: 'Reads a certificate, a letter, a family record book: the text, the names, the dates, the places.', key: 'a model key', wake: WAKES[0] },
+      { id: 's3', kind: 'script', name: 'photo reader', count: 3, source: 'https://example.com/voices/photo-reader.git', pin: '9e05c41', r: 2, does: 'Says who is on a photo, from the known faces, and where and when if it shows. A face it is not sure of stays unnamed, and is listed for Marcel to name. Nothing leaves this machine.', key: '', wake: WAKES[0] },
+      { id: 'a2', kind: 'asset', name: 'what was understood', count: 10, r: 3 },
+      { id: 's4', kind: 'script', name: 'extractor', count: 10, source: 'https://example.com/voices/extractor.git', pin: 'd18a6b2', r: 4, does: 'Cuts it into chapters. Draws the facts from each chapter, each tied to where it comes from: a passage, a paper, a photo. Checks each fact against its source, asks again when one fails, and says when two sources disagree.', key: 'a model key', wake: WAKES[0] },
+      { id: 'a4', kind: 'asset', name: 'his memories', count: 47, r: 5 },
+      { id: 'g2', kind: 'agent', name: 'storyteller', count: 4, r: 6, tool: 'OpenCode', mode: 'conversation', key: 'a model key', wake: WAKES[0], does: "Tells the family's story from Marcel's memories; each line points to the memory it comes from." },
+      { id: 'a5', kind: 'asset', name: 'the family story', count: 1, r: 7 },
       { id: 'p2', kind: 'person', name: 'Léa, granddaughter', r: 7 },
     ],
     links: [
@@ -295,14 +303,23 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
       const g = el('g', { class: 'node', 'data-kind': x.kind, 'data-picked': String(picked?.type === 'node' && picked.id === x.id), transform: `translate(${x.x} ${x.y})` });
       g.append(el('rect', { width: w, height: h, rx: x.kind === 'asset' ? 6 : x.kind === 'person' ? 23 : 10 }));
       g.append(el('text', { class: 'n', x: 12, y: isWorker(x) ? 25 : h / 2 + 5 }, x.name.length > Math.floor((w - 22) / 7.4) ? `${x.name.slice(0, Math.max(3, Math.floor((w - 22) / 7.4) - 2))}...` : x.name));
-      if (isWorker(x)) g.append(el('text', { class: 's', x: 12, y: 44 }, w < 150 ? (x.kind === 'script' ? 'script' : x.tool) : x.kind === 'script' ? (x.key ? 'a script, calls a model' : 'a script, stays here') : `${x.tool} - ${x.mode}`));
+      if (isWorker(x)) g.append(el('text', { class: 's', x: 12, y: 44 }, x.kind === 'script' ? `script @ ${x.pin || 'latest'}` : w < 150 ? x.tool : `${x.tool} - ${x.mode}`));
+      /* WHAT HAS HAPPENED, ON THE BOX ITSELF: in one corner a number (what a folder
+         holds, or how many times a worker was woken), in the other a mark when it needs somebody. */
+      if (Number.isFinite(x.count)) {
+        const t = String(x.count); const bw = 14 + t.length * 7.5;
+        g.append(el('rect', { class: 'badge', x: w - bw + 7, y: -10, width: bw, height: 20, rx: 10 }));
+        const n2 = el('text', { class: 'badge-n', x: w - bw / 2 + 7, y: 4.5 }, t);
+        n2.append(el('title', {}, x.kind === 'asset' ? `${t} item(s) in this folder` : `woken ${t} time(s)`)); g.append(n2);
+      }
+      if (x.alert) { g.append(el('circle', { class: 'alert', cx: 0, cy: 0, r: 10 })); g.append(el('text', { class: 'alert-n', x: 0, y: 4.5 }, '!')); }
       /* THE SMALL CIRCLE IS WHERE A LINK STARTS: pulled from it, a wire follows
          the finger and is dropped on another box. Pressed without pulling, it
          waits for the next box touched. */
       /* Where the circle sits: on the side the flow leaves by. A larger, unseen one lies over it, for a finger. */
       const [pcx, pcy] = [w / 2, h];
       const port = el('circle', { class: 'port', cx: pcx, cy: pcy, r: 9, 'data-armed': String(armed === x.id) });
-      const reach = el('circle', { class: 'port-hit', cx: pcx, cy: pcy + 9, r: 17 });
+      const reach = el('circle', { class: 'port-hit', cx: pcx, cy: pcy + 13, r: 17 });
       reach.append(el('title', {}, 'Pull from here to another box to link them'));
       reach.addEventListener('touchstart', (e) => { e.preventDefault(); e.stopPropagation(); }, { passive: false });
       reach.addEventListener('pointerdown', (e) => {
@@ -398,6 +415,8 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
     }
     const x = node(picked.id);
     h.textContent = x.kind === 'asset' ? 'This folder' : x.kind === 'person' ? 'This person' : x.kind === 'script' ? 'This script' : 'This AI agent';
+    if (x.alert) { const t = document.createElement('p'); t.className = 'trouble'; t.textContent = x.alert; const r = document.createElement('div'); r.className = 'row'; r.append(button('Try again', () => { delete x.alert; draw(); }), button('Seen', () => { delete x.alert; draw(); })); box.append(t, r); }
+    if (Number.isFinite(x.count)) { const c = document.createElement('p'); c.className = 'hint'; c.textContent = x.kind === 'asset' ? `${x.count} item(s) in it.` : `Woken ${x.count} time(s).`; box.append(c); }
     box.append(field('Name', input(x.name, (v) => { x.name = v; })));
     if (x.kind === 'agent') {
       box.append(field('Its tool', select(TOOLS, x.tool, (v) => { x.tool = v; })));
@@ -406,7 +425,12 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
     if (isWorker(x)) {
       box.append(field('Also woken by', select(WAKES, x.wake, (v) => { x.wake = v; })));
       box.append(field(x.kind === 'script' ? 'What the script does' : 'What it is asked to do', input(x.does, (v) => { x.does = v; }, 'textarea')));
-      if (x.kind === 'script') box.append(field('Where its script comes from (a public git address)', input(x.source, (v) => { x.source = v.trim(); })));
+      if (x.kind === 'script') {
+        box.append(field('Where its script comes from (a public git address)', input(x.source, (v) => { x.source = v.trim(); })));
+        /* PINNED: this exact version runs, whatever is published later. Empty: always the latest, which can change under you. */
+        box.append(field('Its version (empty: always the latest)', input(x.pin, (v) => { x.pin = v.trim().toLowerCase().slice(0, 40); })));
+        if (!x.pin) { const p = document.createElement('p'); p.className = 'trouble'; p.textContent = 'Not pinned: what runs can change without you.'; box.append(p); }
+      }
       box.append(field(x.kind === 'script' ? 'A key it needs to call a model (optional)' : 'A key it needs (none with a subscription)', input(x.key, (v) => { x.key = v; })));
     }
     if (x.kind === 'person') { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'A person drops files in a folder, reads one, or talks with an agent. Whoever it is gets a code, and only what is linked here.'; box.append(p); }
@@ -449,7 +473,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
       const by = mine.filter((l) => l.wakes && (l.kind === 'read' || l.kind === 'both')).map((l) => `${l.only ? `one of the ${l.only} arriving` : 'an arrival'} in ${node(l.from === x.id ? l.to : l.from)?.name}`);
       if (x.wake !== WAKES[0]) by.push(x.wake.toLowerCase());
       if (talks.length) by.push(`${talks.join(', ')} talking to it`);
-      if (x.kind === 'script') { const from = document.createElement('span'); from.textContent = x.source ? `its script: ${x.source}` : 'its script: not said yet'; from.append(document.createElement('br')); card.append(from); }
+      if (x.kind === 'script') { const from = document.createElement('span'); from.textContent = x.source ? `its script: ${x.source} @ ${x.pin || 'latest (not pinned)'}` : 'its script: not said yet'; from.append(document.createElement('br')); card.append(from); }
       const last = document.createElement('span'); last.textContent = `woken by: ${by.join('; ') || 'nothing yet'}${x.key ? `. Needs ${x.key}` : ''}`; card.append(last);
       box.append(card);
     }
@@ -468,7 +492,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
       for (let py = top + 12; py < BH - h - 4 && !spot; py += 22) for (let px = view.scrollLeft + 10; px < Math.min(BW, view.scrollLeft + view.clientWidth) - w - 6; px += 22) if (clear(px, py)) { spot = [px, py]; break; }
       if (!spot) { BH += h + 30; spot = [10, BH - h - 14]; }      /* no room left: the drawing grows */
       const base = { id, kind, x: spot[0], y: spot[1] };
-      flow.nodes.push(kind === 'agent' ? { ...base, name: 'new agent', tool: TOOLS[0], mode: 'terminal', key: '', wake: WAKES[0], does: '' } : kind === 'script' ? { ...base, name: 'new script', source: '', does: '', key: '', wake: WAKES[0] } : kind === 'asset' ? { ...base, name: 'new folder' } : { ...base, name: 'Somebody' });
+      flow.nodes.push(kind === 'agent' ? { ...base, name: 'new agent', tool: TOOLS[0], mode: 'terminal', key: '', wake: WAKES[0], does: '' } : kind === 'script' ? { ...base, name: 'new script', source: '', pin: '', does: '', key: '', wake: WAKES[0] } : kind === 'asset' ? { ...base, name: 'new folder' } : { ...base, name: 'Somebody' });
       picked = { type: 'node', id }; armed = null; draw();
     });
   }
@@ -493,7 +517,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
   const KINDS = ['agent', 'script', 'asset', 'person'];
   const pack = () => JSON.stringify({
     clavarium: 'flow', version: 1,
-    nodes: flow.nodes.map((x) => ({ id: x.id, kind: x.kind, name: x.name, x: Math.round(x.x), y: Math.round(x.y), ...(x.kind === 'agent' ? { tool: x.tool, mode: x.mode } : {}), ...(isWorker(x) ? { wake: x.wake, does: x.does } : {}), ...(isWorker(x) && x.key ? { key: x.key } : {}), ...(x.kind === 'script' && x.source ? { source: x.source } : {}) })),
+    nodes: flow.nodes.map((x) => ({ id: x.id, kind: x.kind, name: x.name, x: Math.round(x.x), y: Math.round(x.y), ...(x.kind === 'agent' ? { tool: x.tool, mode: x.mode } : {}), ...(isWorker(x) ? { wake: x.wake, does: x.does } : {}), ...(isWorker(x) && x.key ? { key: x.key } : {}), ...(x.kind === 'script' && x.source ? { source: x.source } : {}), ...(x.kind === 'script' && x.pin ? { pin: x.pin } : {}) })),
     links: flow.links.map((l) => ({ from: l.from, to: l.to, kind: l.kind, ...(l.wakes ? { wakes: true } : {}), ...(l.only ? { only: l.only } : {}) })),
   }, null, 1);
   /* Reads a drawing somebody hands over. Nothing in it is trusted: what is not
@@ -514,7 +538,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
       if (x.kind === 'agent') { box.tool = TOOLS.includes(x.tool) ? x.tool : TOOLS[0]; box.mode = x.mode === 'conversation' ? 'conversation' : 'terminal'; }
       if (isWorker(x)) { box.wake = WAKES.includes(x.wake) ? x.wake : WAKES[0]; box.does = words(x.does, 600); }
       if (isWorker(x)) box.key = words(x.key, 60);
-      if (x.kind === 'script') box.source = address(x.source);
+      if (x.kind === 'script') { box.source = address(x.source); box.pin = /^[0-9a-f]{7,40}$/.test(x.pin ?? '') ? x.pin : ''; }
       nodes.push(box);
     }
     const kindOf = new Map(nodes.map((x) => [x.id, x.kind])); const links = []; const pairs = new Set();
@@ -533,7 +557,7 @@ section.out summary { cursor: pointer; color: var(--dim); min-height: 36px; marg
     row.replaceChildren(); wrong.textContent = '';
     if (mode === 'export') {
       $('sheet-title').textContent = 'Export this drawing';
-      $('sheet-says').textContent = 'Everything but the keys: only their names go.';
+      $('sheet-says').textContent = 'Everything but the keys: only their names go. Each script goes with its version.';
       text.value = pack(); text.readOnly = true;
       row.append(button('Save as a file', () => {
         const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text.value], { type: 'application/json' })); a.download = 'flow.clavarium.json';
