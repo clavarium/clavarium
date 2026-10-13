@@ -105,7 +105,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 <header>
   <h1>Set it up by drawing it</h1>
   <p>A mock-up. Boxes are agents, folders and people; a link says who reads and who writes.</p>
-  <p><b>The example:</b> Jeanne records her memories on her phone. Paul, her grandson, asks for the family's story. Between them, four workers, none of which can change what Jeanne said.</p>
+  <p><b>The example:</b> Marcel, 82, records his memories on his phone. Léa, his granddaughter, asks for the family's story. Between them, four workers, none of which can change what Marcel said.</p>
   <details><summary>How to use it</summary>
     <p>A link from an agent to a folder: it writes there. From a folder to an agent: it reads. An arrow at both ends: both. Drag a box to move it. To link two boxes, pull a wire from the small circle of one and drop it on the other, or touch the circle, then the other box. Touch a box or a link to change it.</p>
   </details>
@@ -163,17 +163,17 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
   /* The example: recordings become a story, and nobody can change what was said. */
   const example = () => ({
     nodes: [
-      { id: 'p1', kind: 'person', name: 'Jeanne, 82', r: 0 },
-      { id: 'a1', kind: 'asset', name: "Jeanne's recordings", r: 1 },
-      { id: 's1', kind: 'script', name: 'transcriber', r: 2, does: "Turns each of Jeanne's recordings into text, word for word.", key: 'a transcription key', wake: WAKES[0] },
-      { id: 'a2', kind: 'asset', name: 'what she said', r: 3 },
-      { id: 'g1', kind: 'agent', name: 'extractor', r: 4, tool: 'Claude Code', mode: 'terminal', wake: WAKES[0], does: 'Lists what Jeanne said: who, when, where, and her exact words.' },
+      { id: 'p1', kind: 'person', name: 'Marcel, 82', r: 0 },
+      { id: 'a1', kind: 'asset', name: "Marcel's recordings", r: 1 },
+      { id: 's1', kind: 'script', name: 'transcriber', r: 2, does: "Turns each of Marcel's recordings into text, word for word.", key: 'a transcription key', wake: WAKES[0] },
+      { id: 'a2', kind: 'asset', name: 'what he said', r: 3 },
+      { id: 'g1', kind: 'agent', name: 'extractor', r: 4, tool: 'Claude Code', mode: 'terminal', wake: WAKES[0], does: 'Lists what Marcel said: who, when, where, and his exact words.' },
       { id: 'a3', kind: 'asset', name: 'memories to check', r: 5 },
-      { id: 's2', kind: 'script', name: 'checker', r: 6, does: "Keeps a memory only if its exact words are in what Jeanne said.", key: '', wake: WAKES[0] },
-      { id: 'a4', kind: 'asset', name: 'her memories', r: 7 },
-      { id: 'g2', kind: 'agent', name: 'storyteller', r: 8, tool: 'OpenCode', mode: 'conversation', wake: WAKES[0], does: "Tells the family's story from Jeanne's memories; each line points to the memory it comes from." },
+      { id: 's2', kind: 'script', name: 'checker', r: 6, does: "Keeps a memory only if its exact words are in what Marcel said.", key: '', wake: WAKES[0] },
+      { id: 'a4', kind: 'asset', name: 'his memories', r: 7 },
+      { id: 'g2', kind: 'agent', name: 'storyteller', r: 8, tool: 'OpenCode', mode: 'conversation', wake: WAKES[0], does: "Tells the family's story from Marcel's memories; each line points to the memory it comes from." },
       { id: 'a5', kind: 'asset', name: 'the family story', r: 9 },
-      { id: 'p2', kind: 'person', name: 'Paul, her grandson', r: 10 },
+      { id: 'p2', kind: 'person', name: 'Léa, granddaughter', r: 10 },
     ],
     links: [
       { id: 'l1', from: 'p1', to: 'a1', kind: 'write' }, { id: 'l2', from: 'a1', to: 's1', kind: 'read', wakes: true }, { id: 'l3', from: 's1', to: 'a2', kind: 'write' },
