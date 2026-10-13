@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium</title>
-<meta name="description" content="Automate your agents, safely. They work together, whatever the vendor. Self-hosted, free, MIT.">
+<meta name="description" content="Your AI assistants work while you are away. Safely, on your machine.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -68,7 +68,7 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 .more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
 
 /* The scenes: small drawings made of the pieces the product itself shows. */
-.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 9.5rem; }
 .scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
 .scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
 .scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
@@ -130,21 +130,15 @@ footer a { color: var(--dim); }
 <main>
 <section class="hero" style="border-top:0">
   <div class="wrap">
-    <h1>Automate your agents, safely. They work together, whatever the vendor.</h1>
-    <p class="lead">clavarium wakes them, answers their simple questions while you are away, and lets them hand work to one another, so each does what it does best. Nothing leaves without you.</p>
+    <h1>Your AI assistants work while you are away. Safely, on your machine.</h1>
+    <p class="lead">Each one sees only what you give it, stops when in doubt, and sends nothing without you.</p>
     <ul class="claims">
-      <li>Free · MIT · self-hosted</li>
-      <li>Woken by a file, the clock, a call</li>
-      <li>Answered only if models agree</li>
-      <li>One virtual machine per agent</li>
-      <li>Claude Code, OpenCode, any other</li>
-      <li>The send key stays outside</li>
+      <li>Free · MIT</li>
+      <li>Open source</li>
+      <li>On a machine you own</li>
+      <li>Claude Code · OpenCode · Codex · Gemini</li>
+      <li>Terminal or chat · phone too</li>
     </ul>
-    <p class="other">What it is used for:
-      <a href="examples.html#dev">by developers</a> ·
-      <a href="examples.html#office">in an office or a shop</a> ·
-      <a href="examples.html#home">at home</a>.
-      <a href="for-you.html">Somebody else installs it for you? →</a></p>
   </div>
 </section>
 
@@ -153,100 +147,45 @@ footer a { color: var(--dim); }
     <h2>How you use it</h2>
     <ol class="three">
       <li>
-        <p class="cap"><span>01</span>Put each agent in its own room</p>
-        <p class="say">Claude Code runs in one virtual machine, OpenCode in another. Each sees only the folders, repositories and keys you attach.</p>
+        <p class="cap"><span>01</span>You give an assistant one folder</p>
+        <p class="say">It runs in a machine of its own and sees that folder, nothing else.</p>
         <div class="scene" aria-hidden="true">
           <div class="card">
-            <div class="who"><span class="dot"></span>writer <span class="tag">Claude Code</span></div>
-            <div class="dim">repository <span class="gold">write</span> · shared <span class="gold">write</span> · deploy key <span class="gold">use</span></div>
+            <div class="who"><span class="dot"></span>client-a <span class="tag">attached</span></div>
+            <div class="dim">folder client-a <span class="gold">write</span></div>
           </div>
-          <div class="card">
-            <div class="who"><span class="dot"></span>reviewer <span class="tag">OpenCode</span></div>
-            <div class="dim">repository <span class="gold">read</span> · shared <span class="gold">write</span></div>
-          </div>
-          <div class="dim end">Each in its own virtual machine. Another client's room is not seen from here.</div>
+          <div class="dim end">A second agent looked for it: found none.</div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>02</span>One leaves a request, the other wakes</p>
-        <p class="say">The first writes a file in the folder they share. The line you wrote is typed to the second, and it does the work.</p>
+        <p class="cap"><span>02</span>It works while you are away</p>
+        <p class="say">A file wakes it; several AI models read its question, and one doubt stops it and tells your phone.</p>
         <div class="scene" aria-hidden="true">
-          <div class="card"><div class="who">shared /</div><div class="term">request.md <span class="ok">new</span></div></div>
-          <div class="via">↓ a file arrived ↓</div>
-          <div class="card">
-            <div class="who"><span class="dot"></span>reviewer <span class="tag">OpenCode</span></div>
-            <div class="term">Read request.md and do it.</div>
-          </div>
-          <div class="dim end">Also by the clock, or by a call from your own scripts.</div>
+          <div class="card term">Delete this folder? (y/n)</div>
+          <div class="row"><span class="pill">model 1 <b>yes</b></span><span class="pill">model 2 <b class="no">no</b></span></div>
+          <div class="gold end" style="font-weight:700">Nothing typed · phone told</div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>03</span>It stops, your phone tells you</p>
-        <p class="say">Touch the notification and its real terminal opens. You see what would go out and send it with a key the agent never holds.</p>
+        <p class="cap"><span>03</span>You send what it made</p>
+        <p class="say">You are shown what would go out and send it with a key that never enters a machine.</p>
         <div class="scene" aria-hidden="true">
-          <div class="paper"><b>reviewer waits for you</b>model B: the charter does not allow deleting</div>
-          <div class="card term">Delete the old branch? (y/n)</div>
-          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>1 commit to <b>shop</b><br><span class="dim">nothing sent yet</span></span><span class="send">Send</span></div>
+          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>1 commit waiting<br><span class="dim">nothing sent yet</span></span><span class="pill" style="margin-left:auto">Show</span><span class="send" style="margin-left:0">Send</span></div>
         </div>
       </li>
     </ol>
-    <a class="more" href="examples.html">15 examples, ready to copy →</a>
-  </div>
-</section>
-
-<section id="proof">
-  <div class="wrap two">
-    <div>
-      <h2>While you are away</h2>
-      <ul class="rows">
-        <li>Several models from different makers read the agent's question.</li>
-        <li>All agree: the answer is typed. Otherwise the agent stops and waits.</li>
-        <li>First real trial: one said yes to deleting a folder, one refused. Nothing was typed.</li>
-      </ul>
-      <a class="more" style="margin-top:.8rem" href="how-it-is-kept-safe.html#seen">See a real run, and what one agent can reach of another →</a>
-    </div>
-    <div>
-      <h2>Two ways in, both tried</h2>
-      <ul class="rows">
-        <li>Claude Code, with your own subscription.</li>
-        <li>All open: OpenCode on open models hosted in Europe.</li>
-        <li>There, one key serves the agent, the dictation and the answers.</li>
-        <li>Another agent that runs in a terminal? One entry in a file adds it.</li>
-      </ul>
-    </div>
-  </div>
-</section>
-
-<section id="talk">
-  <div class="wrap pair">
-    <div>
-      <h2>Its terminal, or a conversation</h2>
-      <ul class="rows">
-        <li>The terminal is the default, and stays whole.</li>
-        <li>An agent can also be given five verbs of its own, through MCP: tell, ask, show, read, status.</li>
-        <li>The same work then reads as a conversation, with buttons for its questions, and your phone told when it asks.</li>
-        <li>Tried for real with OpenCode on open models. It is a project of its own, usable without this one.</li>
-      </ul>
-      <a class="more" style="margin-top:.8rem" href="for-you.html">See it as someone who only uses it →</a>
-    </div>
-    <img class="shot" style="max-width:24rem;justify-self:center" loading="lazy" src="shots/talk.png" width="1800" height="2000" alt="A real exchange shown as a conversation: the agent asks 'Should the cover be blue or red?' with two buttons; under it, the file it made and what its terminal says now.">
+    <a class="more" href="examples.html">See the 15 examples →</a>
   </div>
 </section>
 
 <section id="install">
   <div class="wrap">
-    <h2>How you install it, and what it needs</h2>
-    <p class="note">One command, once, on an Ubuntu machine you own. After that, you only open a page.</p>
+    <h2>How you install it</h2>
+    <p class="note">One command on an Ubuntu Server 24.04 or 26.04 machine you own.</p>
     <div class="snip"><pre>sudo deploy/install.sh \
   --domain clav.example.com \
   --operator you@example.com</pre></div>
-    <ul class="needs">
-      <li><b>A small machine</b><span>Ubuntu Server 24.04 or 26.04, on a processor that can run virtual machines. A mini PC does.</span></li>
-      <li><b>1 to 2 GB of memory per agent at work</b><span>and a few GB of disk each. An agent asleep costs no memory.</span></li>
-      <li><b>The agents you already use</b><span>with your own subscription. Nothing to pay here.</span></li>
-    </ul>
-    <p class="note" style="margin-top:.9rem">Where it was built and tried: 4 cores, 6 GB of memory, 40 GB of disk.</p>
-    <a class="more" href="how-to-install-it.html">No public address at home, backup, a ready-made machine →</a>
+    <a class="more" href="how-to-install-it.html">Every way to install it, and what it needs →</a>
   </div>
 </section>
 </main>
