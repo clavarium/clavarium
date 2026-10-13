@@ -65,6 +65,91 @@
     ]
   },
   {
+    "id": "codex",
+    "label": "Codex CLI",
+    "command": [
+      "codex"
+    ],
+    "memoryMb": 2048,
+    "install": [
+      "node",
+      [
+        "sudo",
+        "-n",
+        "npm",
+        "install",
+        "-g",
+        "--no-fund",
+        "--no-audit",
+        "@openai/codex"
+      ]
+    ]
+  },
+  {
+    "id": "gemini",
+    "label": "Gemini CLI",
+    "command": [
+      "gemini"
+    ],
+    "memoryMb": 2048,
+    "install": [
+      "node",
+      [
+        "sudo",
+        "-n",
+        "npm",
+        "install",
+        "-g",
+        "--no-fund",
+        "--no-audit",
+        "@google/gemini-cli"
+      ]
+    ]
+  },
+  {
+    "id": "aider",
+    "label": "Aider",
+    "command": [
+      "aider"
+    ],
+    "memoryMb": 2048,
+    "install": [
+      [
+        "sudo",
+        "-n",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "update",
+        "-q"
+      ],
+      [
+        "sudo",
+        "-n",
+        "env",
+        "DEBIAN_FRONTEND=noninteractive",
+        "apt-get",
+        "install",
+        "-y",
+        "-q",
+        "--no-install-recommends",
+        "pipx",
+        "git",
+        "ca-certificates"
+      ],
+      [
+        "sudo",
+        "-n",
+        "env",
+        "PIPX_HOME=/opt/pipx",
+        "PIPX_BIN_DIR=/usr/local/bin",
+        "pipx",
+        "install",
+        "aider-chat"
+      ]
+    ]
+  },
+  {
     "id": "shell",
     "label": "Shell",
     "command": [

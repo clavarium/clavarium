@@ -10,7 +10,8 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.sees('\nok');
     await me.page.locator('#files-open').click();
     /* Nothing was attached, nothing was asked of the tool: its work is there. */
-    assert.deepEqual(await me.page.locator('#files-tabs button').allInnerTexts(), ['work - where the tool works']);
+    /* The tabs are painted a moment after the sheet opens: waited for, not read at once. */
+    await me.until('its work folder is the one tab', async () => JSON.stringify(await me.page.locator('#files-tabs button').allInnerTexts()) === JSON.stringify(['work - where the tool works']));
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('report.txt'));
     assert.equal(await me.page.locator('#files-import').isVisible(), true, 'and a file can be handed to the tool the same way');
     await me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click();
