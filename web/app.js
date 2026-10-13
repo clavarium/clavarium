@@ -668,48 +668,42 @@
         simple = !simple;
         try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ }
         simpleFilesAt = 0; paintSimple();
+        if (simple) void readTalk().then(paintThread);
         if (!simple) terminal.focus();
     });
-    /* ---------- talk: a conversation with the tool, through tools of its own ---------- */
+    /* ---------- talk: a conversation with the tool, shown by Parley ---------- */
+    /* The exchange is drawn by Parley's own library (a project of its own,
+       served from /vendor): this page only tells it where to load from, how
+       to send, and how a file is opened here. */
     let talk = { on: false, messages: [] };
     let talkOf = '';
+    let thread = null;          /* what Parley mounted, and for which conversation */
+    let threadOf = '';
     async function readTalk() {
         if (DEVICE || !current) { talk = { on: false, messages: [] }; return talk; }
         talk = await fetch(`${API}/conversations/${encodeURIComponent(current)}/talk`).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
         talkOf = current;
         return talk;
     }
-    async function sayThroughTalk(text, answers) {
-        await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { text, answers });
-        await readTalk(); paintThread();
-    }
-    function paintThread() {
+    async function paintThread() {
         const box = $('simple-thread');
-        box.hidden = !talk.on;
-        if (!talk.on) return;
-        const mark = `${talkOf}/${talk.messages.length}/${talk.messages.at(-1)?.id ?? ''}`;
-        if (box.dataset.of === mark) return;
-        box.dataset.of = mark;
-        const answered = new Set(talk.messages.map((m) => m.answers).filter(Boolean));
-        box.replaceChildren(...talk.messages.map((m) => {
-            const item = document.createElement('div'); item.className = 'said'; item.dataset.from = m.from; item.dataset.kind = m.kind;
-            /* What the tool wrote: text, never built. */
-            const text = document.createElement('p'); text.textContent = m.kind === 'show' ? `${m.text ? `${m.text} ` : ''}${m.path}` : m.text;
-            item.append(text);
-            if (m.kind === 'show' && /^\/work\/[^.]/.test(m.path ?? '')) {
-                const open = document.createElement('button'); open.type = 'button'; open.textContent = 'Open it';
-                open.addEventListener('click', () => { const inner = m.path.slice('/work/'.length); void preview('work', inner, inner.split('/').pop(), 0); });
-                item.append(open);
-            }
-            if (m.kind === 'ask' && !answered.has(m.id) && m.choices.length > 0) {
-                const row = document.createElement('div'); row.className = 'row';
-                for (const choice of m.choices) { const b = document.createElement('button'); b.type = 'button'; b.textContent = choice; b.addEventListener('click', () => { b.disabled = true; void sayThroughTalk(choice, m.id); }); row.append(b); }
-                item.append(row);
-            }
-            return item;
-        }));
-        if (talk.messages.length === 0) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Nothing yet. Write below, or wait for the tool to post.'; box.append(p); }
-        box.scrollTop = box.scrollHeight;
+        const wanted = talk.on && talkOf === current;
+        box.hidden = !wanted;
+        /* Where the tool talks through the app, the box of the app is the one to write in. */
+        $('simple-say').hidden = wanted;
+        if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
+        if (thread && threadOf === current) { void thread.refresh(); return; }
+        thread?.destroy();
+        const { mount, PROFILES } = await import('/vendor/parley-ui.js');
+        const name = current;
+        threadOf = name;
+        thread = mount(box, {
+            profile: PROFILES.everyday,
+            load: () => fetch(`${API}/conversations/${encodeURIComponent(name)}/talk`).then((r) => r.json()),
+            send: (text, answers) => post(`${API}/conversations/${encodeURIComponent(name)}/talk`, { text, answers }),
+            /* A file the tool pointed to is opened in the window, when it is in its work folder. */
+            open: (path) => { if (/^\/work\/[^.]/.test(path)) { const inner = path.slice('/work/'.length); void preview('work', inner, inner.split('/').pop(), 0); } },
+        });
     }
     async function paintTalkBox() {
         if (DEVICE) { $('talk-box').hidden = true; return; }
@@ -723,7 +717,7 @@
     for (const b of $('talk-on').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
-            try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); paintThread(); }
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); void paintThread(); }
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
@@ -731,7 +725,7 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/invite`, {}); $('talk-invite').textContent = 'Asked'; setTimeout(() => { $('talk-invite').textContent = 'Ask the tool to use it'; }, 2500); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
     });
-    setInterval(() => { if (simple && !document.hidden && !DEVICE) void readTalk().then(paintThread); }, 3000);
+    setInterval(() => { if (simple && !document.hidden && !DEVICE) void readTalk().then(paintThread); }, 5000);
 
     $('simple-say').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -739,14 +733,13 @@
         // eslint-disable-next-line no-control-regex
         const text = $('simple-text').value.replace(/[\r\n\t]+/g, ' ').replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
         if (!text) return;
-        /* Where the tool talks through the app, so does its owner; elsewhere, it is typed. */
-        if (talk.on && talkOf === current) { void sayThroughTalk(text).catch(() => {}); $('simple-text').value = ''; return; }
         send(text); setTimeout(() => send('\r'), 120);
         $('simple-text').value = '';
         $('simple-sent').textContent = 'Sent.'; setTimeout(() => { $('simple-sent').textContent = ''; }, 2500);
     });
     setInterval(() => { if (simple && !document.hidden) paintSimple(); }, 1500);
     paintSimple();
+    if (simple) void readTalk().then(paintThread);
 
     /* ---------- alerts: this device is told when a tool waits ---------- */
     const pushKey = (text) => { const b = atob((text + '='.repeat((4 - (text.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };

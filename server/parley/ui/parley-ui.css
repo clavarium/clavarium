@@ -1,0 +1,29 @@
+/* How the exchange looks. Every colour is a variable: a page sets them, or keeps these. */
+.parley {
+  --parley-bg: #ffffff; --parley-text: #16181d; --parley-dim: #5a5f69; --parley-line: #d3d7de;
+  --parley-agent: #f5f6f8; --parley-person: #e8f0fd; --parley-ask: #9a6c12; --parley-action: #0b53c0; --parley-on-action: #ffffff;
+  --parley-font: 16px; --parley-gap: 10px;
+  display: flex; flex-direction: column; gap: var(--parley-gap); color: var(--parley-text); background: var(--parley-bg); font-size: var(--parley-font); line-height: 1.5; min-height: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .parley:not([data-theme="light"]) { --parley-bg: #0f1115; --parley-text: #e6e8ec; --parley-dim: #a3a9b4; --parley-line: #38404c; --parley-agent: #171a20; --parley-person: #172742; --parley-ask: #d2a94e; --parley-action: #8ab4ff; --parley-on-action: #0f1115; }
+}
+.parley[data-theme="dark"] { --parley-bg: #0f1115; --parley-text: #e6e8ec; --parley-dim: #a3a9b4; --parley-line: #38404c; --parley-agent: #171a20; --parley-person: #172742; --parley-ask: #d2a94e; --parley-action: #8ab4ff; --parley-on-action: #0f1115; }
+.parley[data-size="large"] { --parley-font: 19px; --parley-gap: 14px; }
+.parley[data-size="compact"] { --parley-font: 14px; --parley-gap: 6px; }
+.parley-status { margin: 0; font-weight: 600; color: var(--parley-dim); }
+.parley-status[data-state="waiting"] { color: var(--parley-ask); }
+.parley-thread { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--parley-gap); }
+.parley-said { max-width: 46em; border: 1px solid var(--parley-line); border-radius: 12px; padding: .55em .75em; background: var(--parley-agent); }
+.parley-said p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.parley-said[data-from="person"] { align-self: flex-end; background: var(--parley-person); }
+.parley-said[data-open="true"] { border-color: var(--parley-ask); border-width: 2px; }
+.parley-choices, .parley-quick { display: flex; flex-wrap: wrap; gap: .4em; }
+.parley-choices, .parley-open { margin-top: .5em; }
+.parley button { font: inherit; min-height: 2.6em; padding: 0 .9em; border-radius: 8px; border: 1px solid var(--parley-line); background: var(--parley-bg); color: var(--parley-text); cursor: pointer; }
+.parley button:disabled { opacity: .5; cursor: default; }
+.parley-form { display: flex; gap: .5em; align-items: flex-end; }
+.parley-box { flex: 1; min-width: 0; font: inherit; padding: .55em .7em; border-radius: 10px; border: 1px solid var(--parley-line); background: var(--parley-bg); color: var(--parley-text); resize: vertical; }
+.parley .parley-send { background: var(--parley-action); border-color: var(--parley-action); color: var(--parley-on-action); font-weight: 650; }
+.parley-empty, .parley-problem { margin: 0; color: var(--parley-dim); }
+.parley-problem { color: var(--parley-ask); }

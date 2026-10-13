@@ -59,6 +59,8 @@ const FILES = {
     '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
     '/vendor/fit.js': ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
     /* A PDF is drawn by the page itself, on a canvas: asked for only when one is previewed. */
+    '/vendor/parley-ui.js': ['server/parley/ui/parley-ui.js', 'text/javascript; charset=utf-8'],
+    '/vendor/parley-ui.css': ['server/parley/ui/parley-ui.css', 'text/css; charset=utf-8'],
     '/vendor/pdf.mjs': ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'text/javascript; charset=utf-8'],
     '/vendor/pdf.worker.mjs': ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'text/javascript; charset=utf-8'],
 };
@@ -147,7 +149,7 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, answerFetcher, answerEveryMs, wakeEveryMs, alertSend }) {
+export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -221,10 +223,11 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
-    const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name) });
+    const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+        alert: (name, message) => { void alerts.tell({ title: message.kind === 'ask' ? `${name} asks you something` : `${name} waits for you`, body: message.text ?? '', url: `/?c=${name}` }); } });
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk });
-    server.on('close', () => { clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); });
+    server.on('close', () => { clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => answerer.typed(name, data),

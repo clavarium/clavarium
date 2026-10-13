@@ -304,10 +304,5 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 /* Without its terminal, the keys of a terminal are of no use; ready answers and the voice stay. */
 #room[data-simple] #keys > button:not(#mic):not(#auto) { display: none; }
 
-/* The conversation with the tool, on the simple screen. */
-#simple-thread { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; margin-bottom: 14px; }
-.said { max-width: 46rem; border: 1px solid var(--line); border-radius: 12px; padding: .55rem .75rem; background: var(--panel); }
-.said p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.said[data-from="owner"] { align-self: flex-end; background: var(--bar); }
-.said[data-kind="ask"] { border-color: var(--brass); }
-.said .row, .said > button { margin-top: .5rem; }
+/* The conversation with the tool is drawn by Parley; here, only where it sits and this page's colours. */
+#simple-thread { max-height: 62vh; margin-bottom: 14px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }

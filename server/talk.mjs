@@ -1,65 +1,40 @@
 /* TALK: a conversation with a tool, on a screen that is not its terminal.
  *
- * The tool is given a small MCP server (owner-mcp.mjs, beside this file) through which it
- * tells its owner something, asks something, shows a file, and reads what was
- * written back. This file is the other side of that bridge: it shows what the
- * tool posted, takes what the owner writes, and TELLS THE TOOL, in its
- * terminal, in one line, that a message arrived. The terminal stays what it
- * is: the default, and the way everything else is done.
+ * THIS IS A BRANCHING ON PARLEY (server/parley, a project of its own, copied
+ * here unchanged). Parley gives the tool five verbs through MCP -- tell, ask,
+ * show, read, status -- and gives this server the other side: what the tool
+ * posted, a way to write back, and two hooks. All that is of this product is
+ * here, and it is little:
  *
- * HOW THE TWO SIDES MEET: two files in a folder of the conversation's own
- * work folder, /work/.owner in its machine. No address, no port. The bridge
- * itself is put there by this server, so the machine needs nothing new.
+ *   WHERE THE BRIDGE LIVES   in the conversation's own work folder, kept by
+ *                            this server: /work/.parley in its machine. No
+ *                            address, no port, nothing new in the machine.
+ *   THE HOOK TO THE TOOL     the one line "a message arrived" is typed in
+ *                            its terminal, which stays what it is: the
+ *                            default, and the way everything else is done.
+ *   THE HOOK TO THE OWNER    when the tool asks, or says it waits, the
+ *                            owner's devices are alerted.
  *
- * WHAT IS READ HERE IS WRITTEN BY THE TOOL, so it is treated as what it is:
- * text chosen by a program. It is bounded, cleaned of what a screen obeys
- * rather than shows, and shown as text, never built. And it is read only
- * where the owner turned this on, conversation by conversation: like the
- * answerer, it is a place where the server reads what a tool wrote.
- *
- * IT DEPENDS ON THE TOOL'S GOOD WILL. The tool uses the bridge because it was
- * asked to; it may forget. What it asks in its terminal is not seen here.
- *
- * A MIRROR is possible and not built: the "owner" of one tool's bridge could
- * be another tool's bridge, and two tools would talk, whatever each one is.
+ * Off by default, per conversation. Like the answerer, it is a place where
+ * this server reads what a tool wrote: only where the owner turned it on.
+ * And it works as far as the tool agrees to use it.
  */
-import { appendFileSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, existsSync, statSync, lstatSync } from 'node:fs';
-import { randomUUID } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { install, Parley } from './parley/host/parley-host.mjs';
 import { Refusal, SESSION } from './conversations.mjs';
 import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';
 
-export const FOLDER = '.owner';
-export const IN_MACHINE = `/work/${FOLDER}/server.mjs`;
-export const TEXT_MAX = 4000;
-export const SHOWN_MAX = 200;
-export const FILE_MAX = 2 * 1024 * 1024;
-const SCRIPT = fileURLToPath(new URL('./owner-mcp.mjs', import.meta.url));
+export const FOLDER = '.parley';
+const IN_MACHINE = `/work/${FOLDER}`;
 const PANE = `=${SESSION}:`;
-/* Typed to the tool once, when this is turned on: what it is asked to do. */
-export const ASKED = 'From now on, use the tools of the MCP server named "owner" to talk with me: tell_owner to tell me something, ask_owner to ask me a question (do not ask it here), show_owner to point me to a file. When I tell you a message arrived, call read_messages. Start now: tell me in one line, with tell_owner, that you are ready.';
-export const ARRIVED = 'A message from your owner arrived: call the read_messages tool of the "owner" server and act on it.';
-
-// eslint-disable-next-line no-control-regex
-const NOT_SHOWN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu;
-const clean = (text, max = TEXT_MAX) => String(text ?? '').replace(/\r/g, '').replace(NOT_SHOWN, '').slice(0, max);
-const oneLine = (text, max) => clean(text, max).replace(/\s+/g, ' ').trim();
-
-/* The last lines of a file that only grows, without reading more than is wanted. */
-function lines(file) {
-    try {
-        if (lstatSync(file).isSymbolicLink() || statSync(file).size > 16 * FILE_MAX) return [];
-        const text = readFileSync(file, 'utf8');
-        return (text.length > FILE_MAX ? text.slice(-FILE_MAX) : text).split('\n').filter(Boolean).flatMap((l) => { try { const j = JSON.parse(l); return j && typeof j === 'object' ? [j] : []; } catch { return []; } });
-    } catch { return []; }
-}
 
 export class Talk {
-    #store; #vms; #conversations; #resources; #warm; #now;
+    #store; #vms; #conversations; #resources; #warm; #alert; #listening = new Map(); #every;
 
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date() }) {
-        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now;
+    /* `alert(name, message)`: told when the tool asks or waits. */
+    constructor({ store, vms, conversations, resources, warm = async () => {}, alert = () => {}, listenEveryMs = 2000 }) {
+        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs;
+        for (const s of store.all()) if (s.on === true) this.#listen(s.name);
     }
 
     #known(name) {
@@ -69,65 +44,57 @@ export class Talk {
     }
     #dir(name) { return `${this.#resources.workFolder(name)}/${FOLDER}`; }
 
-    /* What the page shows: both sides, in the order they were written. */
-    of(name) {
-        const c = this.#known(name);
-        const on = this.#store.get(name)?.on === true;
-        const possible = c.work === 'kept';
-        if (!on || !possible) return { on: false, possible, messages: [], waiting: 0 };
-        const dir = this.#dir(name);
-        const fromTool = lines(`${dir}/to-owner.jsonl`).map((m) => ({ from: 'tool', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: ['say', 'ask', 'show'].includes(m.kind) ? m.kind : 'say',
-            text: clean(m.text), choices: Array.isArray(m.choices) ? m.choices.slice(0, 8).map((x) => oneLine(x, 200)).filter(Boolean) : [], path: m.kind === 'show' ? oneLine(m.path, 1000) : undefined }));
-        const fromOwner = lines(`${dir}/to-agent.jsonl`).map((m) => ({ from: 'owner', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), answers: m.answers ? String(m.answers) : undefined }));
-        const answered = new Set(fromOwner.map((m) => m.answers).filter(Boolean));
-        const all = [...fromTool, ...fromOwner].sort((a, b) => a.at.localeCompare(b.at)).slice(-SHOWN_MAX);
-        return { on: true, possible, messages: all, waiting: fromTool.filter((m) => m.kind === 'ask' && !answered.has(m.id)).length, declare: { command: ['node', IN_MACHINE], name: 'owner' } };
-    }
-
-    async #type(name, text) {
+    async #type(name, line) {
         await this.#warm(name);
         const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE];
-        if ((await this.#vms.exec(name, [...tmux, '-l', '--', text], { timeoutMs: 30_000 })).code !== 0) return false;
+        if ((await this.#vms.exec(name, [...tmux, '-l', '--', line], { timeoutMs: 30_000 })).code !== 0) return false;
         return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
     }
 
-    /* Turned on: the bridge is put in the tool's work folder, and the tool is asked to use it. */
+    #parley(name) {
+        return new Parley(this.#dir(name), {
+            toAgent: (line) => this.#type(name, line),
+            toPerson: (message) => { if (message.kind === 'ask' || (message.kind === 'status' && message.state === 'waiting')) this.#alert(name, message); },
+        });
+    }
+    #listen(name) { if (!this.#listening.has(name)) { try { this.#listening.set(name, this.#parley(name).listen({ every: this.#every })); } catch { /* its folder is not there yet */ } } }
+    #deaf(name) { this.#listening.get(name)?.(); this.#listening.delete(name); }
+
+    of(name) {
+        const c = this.#known(name);
+        const possible = c.work === 'kept';
+        if (this.#store.get(name)?.on !== true || !possible) return { on: false, possible, messages: [], waiting: 0, status: null };
+        return { on: true, possible, ...this.#parley(name).read(), declare: { name: 'parley', command: ['node', `${IN_MACHINE}/server.mjs`] } };
+    }
+
     async set(name, on) {
         const c = this.#known(name);
         if (on === true) {
             if (c.work !== 'kept') throw new Refusal(409, 'This conversation works on the disk of its machine: its work folder is not kept here, so the bridge has nowhere to live.');
-            const dir = this.#dir(name);
-            mkdirSync(dir, { recursive: true });
-            copyFileSync(SCRIPT, `${dir}/server.mjs`);
-            for (const file of ['to-owner.jsonl', 'to-agent.jsonl']) if (!existsSync(`${dir}/${file}`)) writeFileSync(`${dir}/${file}`, '');
+            install(this.#dir(name), { as: IN_MACHINE });
             this.#store.put({ name, on: true });
+            this.#listen(name);
         } else {
             this.#store.put({ name, on: false });
+            this.#deaf(name);
         }
         return this.of(name);
     }
 
-    /* The tool is asked, in its terminal, to use the bridge: once it has been declared to it. */
+    /* The tool is asked, in its terminal, to use the five verbs: once the server was declared to it. */
     async invite(name) {
         if (!this.of(name).on) throw new Refusal(409, 'Turn it on first.');
-        if (!(await this.#type(name, ASKED))) throw new Refusal(502, 'The line could not be typed: is its tool running?');
+        if (!(await this.#parley(name).invite())) throw new Refusal(502, 'The line could not be typed: is its tool running?');
         return this.of(name);
     }
 
-    /* The owner writes; the tool is told, in its terminal, that a message arrived. */
     async say(name, text, answers) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
-        const said = clean(text).trim();
-        if (!said) throw new Refusal(400, 'Write something.');
-        const entry = { id: randomUUID(), at: this.#now().toISOString(), text: said };
-        if (typeof answers === 'string' && answers) {
-            const asked = this.of(name).messages.find((m) => m.from === 'tool' && m.kind === 'ask' && m.id === answers);
-            if (asked) { entry.answers = asked.id; entry.question = oneLine(asked.text, 300); }
-        }
-        appendFileSync(`${this.#dir(name)}/to-agent.jsonl`, `${JSON.stringify(entry)}\n`);
-        const told = await this.#type(name, ARRIVED).catch(() => false);
-        return { ...this.of(name), told };
+        let said;
+        try { said = await this.#parley(name).say(text, answers); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        return { on: true, possible: true, ...said };
     }
 
-    forget(name) { this.#store.remove(name); }
+    forget(name) { this.#deaf(name); this.#store.remove(name); }
+    stop() { for (const name of [...this.#listening.keys()]) this.#deaf(name); }
 }
