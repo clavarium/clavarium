@@ -328,3 +328,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #map-legend .key[data-access="use"]::before { border-top: 3px dashed var(--brass); }
 #map-legend .key[data-access="none"]::before { border-top: 2px dashed #f08a6b; }
 #map-said { font-size: 1rem; color: var(--ink); }
+
+.map-no path { fill: none; stroke: #f08a6b; stroke-width: 1.8; stroke-dasharray: 5 5; opacity: .75; pointer-events: none; }
+.map-no .map-cross { stroke-dasharray: none; stroke-width: 3; opacity: 1; }
+.map-box[data-focus="true"] rect { stroke: var(--brass); stroke-width: 2.5; }
