@@ -101,7 +101,8 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
 .two h2 { margin-bottom: .8rem; }
 .other { margin: 1.6rem 0 0; }
-.other a { font-weight: 600; text-decoration: none; }
+.other { color: var(--dim); }
+.other a { font-weight: 600; text-decoration: none; white-space: nowrap; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -136,7 +137,11 @@ footer a { color: var(--dim); }
       <li>Claude Code, OpenCode, any other</li>
       <li>The send key stays outside</li>
     </ul>
-    <p class="other"><a href="for-you.html">Somebody else installs it for you? See what you would do with it →</a></p>
+    <p class="other">What it is used for:
+      <a href="examples.html#dev">by developers</a> ·
+      <a href="examples.html#office">in an office or a shop</a> ·
+      <a href="examples.html#home">at home</a>.
+      <a href="for-you.html">Somebody else installs it for you? →</a></p>
   </div>
 </section>
 
