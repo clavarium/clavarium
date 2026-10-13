@@ -164,6 +164,22 @@ footer a { color: var(--dim); }
   </div>
 </section>
 
+<section id="try">
+  <div class="wrap">
+    <h2>To try it first, with no domain</h2>
+    <p class="note">On an Ubuntu machine of your own. No name, no sign-in: the page answers on that machine only.</p>
+    <div class="snip wide"><pre>sudo deploy/install.sh --local
+
+# from another computer of yours
+ssh -L 7717:127.0.0.1:7717 you@that-machine     # then http://127.0.0.1:7717</pre></div>
+    <ul class="rows" style="margin-top:1rem">
+      <li>Whoever can open a page on that machine is its operator: not for a machine other people use.</li>
+      <li>For real use, run the installer again with a domain and an operator.</li>
+      <li>Not yet run on a fresh machine: see the end of this page.</li>
+    </ul>
+  </div>
+</section>
+
 <section id="relay">
   <div class="wrap">
     <h2>No public address at home?</h2>
@@ -232,7 +248,7 @@ sudo deploy/restore.sh ARCHIVE.tgz --vault-key FILE</pre></div>
       <ul class="rows">
         <li>A certificate obtained by the installer on a machine with its own public address.</li>
         <li>A mailbox at one of the large mail providers.</li>
-        <li>Trying it on a laptop without a domain: there is no such mode yet.</li>
+        <li>The mode to try it without a domain (below): written and tested as far as tests go, not yet run on a fresh machine.</li>
       </ul>
     </div>
   </div>

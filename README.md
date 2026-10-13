@@ -123,6 +123,9 @@ The host needs `tmux` and `bindfs` (the read-only views).
     # It prints each operator's password once. --core-only leaves the front out.
     sudo deploy/install.sh --domain clav.example.com --operator you@example.com
 
+    # to try it on a machine of your own, with no domain: this machine only, no sign-in
+    sudo deploy/install.sh --local
+
     # or all of it as one VM on any computer that has Multipass (the computer is left alone)
     deploy/appliance.sh --domain clav.example.com --operator you@example.com --relay relay.example.net
 

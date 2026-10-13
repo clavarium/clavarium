@@ -72,3 +72,24 @@ test('behind a relay it says so; a relay without the edge, or a relay that is no
         assert.equal(install(...base, ...extra).code, 64, extra.join(' '));
     }
 });
+
+test('to try it: --local needs no domain and no operator, sets up nothing of the outside, and says who may come in', () => {
+    const r = install('--local', '--dry-run');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /address\s+http:\/\/127\.0\.0\.1:7717, from this machine only \(--local\)/);
+    assert.match(r.out, /operators\s+whoever can open a page on this machine: no sign-in/);
+    assert.match(r.out, /edge\s+none \(--local\)/);
+    assert.match(r.out, /reached\s+from this machine only/);
+    assert.ok(!/caddy|443/.test(r.out), 'nothing listens to the outside');
+    assert.equal(install('--local', '--port', '8123', '--dry-run').out.includes('127.0.0.1:8123'), true);
+    /* It is one or the other: a name and people, or this machine alone. */
+    for (const extra of [['--domain', 'clav.example.com'], ['--operator', 'owner@example.com'], ['--relay', 'relay.example.net']]) {
+        const mixed = install('--local', ...extra, '--dry-run');
+        assert.equal(mixed.code, 64, extra.join(' ')); assert.match(mixed.err, /--local is this machine only/);
+    }
+    /* The service it writes is started without operators and without a public address. */
+    const text = readFileSync(SCRIPT, 'utf8');
+    assert.match(text, /--port \$PORT\$\(\[ "\$LOCAL" = "yes" \] \|\| echo " --operators \$OPERATORS --public-origin https:\/\/\$DOMAIN"\)/);
+    /* Without --local, a domain and an operator are still required. */
+    assert.equal(install('--dry-run').code, 64);
+});

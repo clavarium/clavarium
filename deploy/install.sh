@@ -14,6 +14,12 @@
 #   --relay-port N     the SSH port of the relay (default 22)
 #   --core-only        the server only: no edge in front. For a machine that
 #                      has its own authenticating proxy.
+#   --local            TO TRY IT, on a machine of your own, with no domain: no
+#                      edge, no sign-in, no name. The page answers on this
+#                      machine only (http://127.0.0.1:PORT), and whoever can
+#                      open a page on this machine is its operator. Not for a
+#                      machine other people use. Takes no --domain, --operator
+#                      or --relay.
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # WHAT IT SETS UP, and why it is safe to leave running:
@@ -61,11 +67,11 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--dry-run]" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"
+DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
@@ -74,18 +80,25 @@ while [ $# -gt 0 ]; do
         --relay) RELAY="${2:-}"; [ -n "$RELAY" ] || bad "--relay needs a value"; shift 2 ;;
         --relay-port) RELAY_PORT="${2:-}"; shift 2 || bad "--relay-port needs a value" ;;
         --core-only) CORE_ONLY="yes"; shift ;;
+        --local) LOCAL="yes"; shift ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
 done
 
 # Every value ends up in a unit file and on a command line: checked here.
+if [ "$LOCAL" = "yes" ]; then
+    # To try it: nothing of the outside is set up, so nothing of it is asked.
+    [ -z "$DOMAIN" ] && [ -z "$OPERATORS" ] && [ -z "$RELAY" ] || bad "--local is this machine only: it takes no --domain, --operator or --relay"
+    CORE_ONLY="yes"
+else
 [[ "$DOMAIN" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$ ]] || bad "--domain is a host name, lower case, like clav.example.com"
 [ -n "$OPERATORS" ] || bad "at least one --operator is needed: without one, nobody could come in"
 IFS=',' read -r -a each <<< "$OPERATORS"
 for operator in "${each[@]}"; do
     [[ "$operator" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || bad "--operator is an e-mail address, lower case: $operator"
 done
+fi
 [[ "$PORT" =~ ^[0-9]{4,5}$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65535 ] || bad "--port is a number from 1024 to 65535"
 if [ -n "$RELAY" ]; then
     [[ "$RELAY" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$|^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || bad "--relay is the name or the address of the relay machine"
@@ -102,13 +115,13 @@ NODE_SHA256="$(sed -n "s/^export const NODE_SHA256 = '\([0-9a-f]\{64\}\)';$/\1/p
 if [ "$DRY" = "yes" ]; then
     cat <<PLAN
 would install Clavarium:
-  address     https://$DOMAIN
-  operators   $OPERATORS
+  address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
+  operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
   code        $CODE (root)      data  $DATA      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
-  edge        $([ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
-  reached     $([ -n "$RELAY" ] && echo "through the relay $RELAY (this machine dials out; nothing here listens to the outside)" || echo "directly: ports 443 and 80 of this machine")
+  edge        $([ "$LOCAL" = "yes" ] && echo "none (--local): no address in https, no sign-in" || [ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
+  reached     $([ "$LOCAL" = "yes" ] && echo "from this machine only; from another one of yours, through ssh -L" || [ -n "$RELAY" ] && echo "through the relay $RELAY (this machine dials out; nothing here listens to the outside)" || echo "directly: ports 443 and 80 of this machine")
 PLAN
     exit 0
 fi
@@ -182,7 +195,7 @@ User=$ACCOUNT
 Group=$ACCOUNT
 WorkingDirectory=$CODE
 EnvironmentFile=$ETC/server.env
-ExecStart=$CODE/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT --operators $OPERATORS --public-origin https://$DOMAIN
+ExecStart=$CODE/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT$([ "$LOCAL" = "yes" ] || echo " --operators $OPERATORS --public-origin https://$DOMAIN")
 Restart=on-failure
 RestartSec=3
 
@@ -203,6 +216,13 @@ curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$PORT/" || refuse "the serve
 sudo -u "$ACCOUNT" sudo -n -l "$HOST_PROGRAM" >/dev/null || refuse "the account cannot reach its one program"
 if sudo -u "$ACCOUNT" sudo -n -l /bin/sh >/dev/null 2>&1; then refuse "the account can run more than its one program as root"; fi
 
+if [ "$LOCAL" = "yes" ]; then
+    echo "Clavarium is installed, to try it:   http://127.0.0.1:$PORT   (from this machine only)"
+    echo "From another computer of yours:      ssh -L $PORT:127.0.0.1:$PORT <you>@<this machine>, then the same address there."
+    echo "There is no sign-in: whoever can open a page on this machine is its operator."
+    echo "For real use, run it again with --domain and --operator."
+    exit 0
+fi
 if [ "$CORE_ONLY" = "yes" ]; then
     echo "Clavarium is installed: 127.0.0.1:$PORT, for $OPERATORS."
     echo "It answers nobody yet: put an authenticating proxy in front, for https://$DOMAIN."
