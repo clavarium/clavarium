@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From voices to a story</title>
+<!--
+  A CASE, DRAWN BEFORE IT IS BUILT: recordings go in, a story comes out, and
+  at no point can an AI change what was said because it suits the story.
+
+  It is here to be agreed on first. What exists today and what does not is
+  said at the end.
+-->
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f6f8; --text: #16181d; --dim: #5a5f69; --line: #c9ced6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #5a5f69; --script-bg: #eef0f3; --yours: #9a6c12; --yours-bg: #fbf3df;
+  --read: #0b53c0; --write: #17794f; --stop: #b3401f; --wall: #16181d;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --yours: #d2a94e; --yours-bg: #2e2612;
+    --read: #8ab4ff; --write: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --yours: #d2a94e; --yours-bg: #2e2612;
+  --read: #8ab4ff; --write: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+main { max-width: 56rem; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+h1 { font-size: clamp(1.6rem, 5vw, 2.2rem); margin: 1rem 0 .3rem; letter-spacing: -.02em; text-wrap: balance; }
+h2 { font-size: 1.25rem; margin: 2.6rem 0 .3rem; }
+.lead, .say { color: var(--dim); margin: 0 0 1rem; max-width: 44em; }
+svg { display: block; width: 100%; height: auto; margin-top: .9rem; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+svg text { font-family: var(--sans); fill: var(--text); font-size: 14px; }
+svg .t { font-weight: 650; font-size: 15px; } svg .s { fill: var(--dim); font-size: 12.5px; } svg .m { font-family: var(--mono); font-size: 12px; } svg .c { text-anchor: middle; } svg .e { text-anchor: end; }
+.ai { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.sc { fill: var(--script-bg); stroke: var(--script); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.fo { fill: var(--yours-bg); stroke: var(--yours); stroke-width: 1.5; }
+.you { fill: var(--bg); stroke: var(--wall); stroke-width: 2; }
+.r { fill: none; stroke: var(--read); stroke-width: 2.2; marker-end: url(#hr); }
+.w { fill: none; stroke: var(--write); stroke-width: 3.2; marker-end: url(#hw); }
+.p { fill: none; stroke: var(--dim); stroke-width: 1.8; stroke-dasharray: 2 5; marker-end: url(#hp); }
+.no { fill: none; stroke: var(--stop); stroke-width: 1.8; stroke-dasharray: 5 5; }
+.x { fill: none; stroke: var(--stop); stroke-width: 3; }
+.fr { fill: var(--read) !important; } .fw { fill: var(--write) !important; } .fs { fill: var(--stop) !important; } .fy { fill: var(--yours) !important; }
+.keys { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin: .8rem 0 0; padding: 0; list-style: none; color: var(--dim); font-size: .92rem; }
+.keys i { display: inline-block; width: 1.8rem; vertical-align: middle; margin-right: .4rem; border-top: 3px solid var(--read); }
+.keys .kw i { border-top: 4px solid var(--write); } .keys .kn i { border-top: 2px dashed var(--stop); } .keys .kp i { border-top: 2px dotted var(--dim); }
+table { border-collapse: collapse; width: 100%; margin-top: .8rem; }
+th, td { text-align: left; vertical-align: top; padding: .55rem .8rem .55rem 0; border-bottom: 1px solid var(--line); }
+th { font-size: .76rem; letter-spacing: .04em; text-transform: uppercase; color: var(--yours); }
+td:first-child { font-weight: 650; white-space: nowrap; }
+.scroll { overflow-x: auto; }
+ul.plain { margin: .6rem 0 0; padding-left: 1.2rem; color: var(--dim); max-width: 46em; }
+ul.plain b { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+<h1>From voices to a story, and nobody rewrites what was said</h1>
+<p class="lead">Somebody records memories. Each recording becomes text, then a list of things that were said, then a story. Four workers do it, each in a machine of its own. None of them can change what came before it.</p>
+
+<svg width="0" height="0" style="position:absolute;border:0" aria-hidden="true"><defs>
+  <marker id="hr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--read)"/></marker>
+  <marker id="hw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--write)"/></marker>
+  <marker id="hp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
+</defs></svg>
+
+<h2>1. What happens, in order</h2>
+<p class="say">For the person there are two gestures: drop a recording, and talk with the last worker. Everything between is woken by what arrives.</p>
+<svg viewBox="0 0 760 640" role="img" aria-label="The person drops a recording in the folder sounds. A script, not an AI, turns it into text in the folder transcripts. A first AI agent reads the text and writes a list of items, each with an identifier, who it is about, and the exact words it comes from. A second script checks that those exact words are in the transcript, and only then copies the items into the folder items. A second AI agent reads the items, never writes them, and writes a story in the folder story. The person talks with that last agent.">
+  <rect class="you" x="20" y="16" width="150" height="48" rx="10"/><text class="t c" x="95" y="45">The person</text>
+  <path class="p" d="M170 40 H548"/><text class="s" x="300" y="32">drops a recording</text>
+
+  <rect class="fo" x="550" y="16" width="190" height="48" rx="8"/><text class="t" x="564" y="38">sounds</text><text class="m" x="564" y="56">aunt-2026-10-13.wav</text>
+
+  <rect class="sc" x="20" y="116" width="250" height="64" rx="10"/><text class="t" x="34" y="141">1 · transcriber</text><text class="s" x="34" y="161">a script, not an AI · one key</text>
+  <path class="r" d="M645 64 C645 100 400 120 272 136"/><text class="s fr" x="430" y="100">reads</text>
+  <rect class="fo" x="550" y="124" width="190" height="48" rx="8"/><text class="t" x="564" y="146">transcripts</text><text class="m" x="564" y="164">aunt-2026-10-13.txt</text>
+  <path class="w" d="M270 160 C380 160 440 148 548 148"/><text class="s fw" x="380" y="176">writes the text, word for word</text>
+
+  <rect class="ai" x="20" y="232" width="250" height="64" rx="10"/><text class="t" x="34" y="257">2 · extractor</text><text class="s" x="34" y="277">an AI agent</text>
+  <path class="r" d="M645 172 C645 210 400 236 272 252"/><text class="s fr" x="430" y="214">reads</text>
+  <rect class="fo" x="550" y="240" width="190" height="48" rx="8"/><text class="t" x="564" y="262">proposed</text><text class="m" x="564" y="280">items, not yet trusted</text>
+  <path class="w" d="M270 276 C380 276 440 264 548 264"/><text class="s fw" x="330" y="292">writes items: id, who, when, exact words</text>
+
+  <rect class="sc" x="20" y="348" width="250" height="64" rx="10"/><text class="t" x="34" y="373">3 · checker</text><text class="s" x="34" y="393">a script, not an AI</text>
+  <path class="r" d="M645 288 C645 326 400 352 272 366"/><text class="s fr" x="430" y="330">reads both</text>
+  <rect class="fo" x="550" y="356" width="190" height="48" rx="8"/><text class="t" x="564" y="378">items</text><text class="m" x="564" y="396">only what was really said</text>
+  <path class="w" d="M270 392 C380 392 440 380 548 380"/><text class="s fw" x="300" y="408">keeps an item only if its words are in the text</text>
+
+  <rect class="ai" x="20" y="464" width="250" height="64" rx="10"/><text class="t" x="34" y="489">4 · storyteller</text><text class="s" x="34" y="509">an AI agent, any maker</text>
+  <path class="r" d="M645 404 C645 442 400 468 272 482"/><text class="s fr" x="430" y="446">reads, never writes</text>
+  <rect class="fo" x="550" y="472" width="190" height="48" rx="8"/><text class="t" x="564" y="494">story</text><text class="m" x="564" y="512">text · timeline · map</text>
+  <path class="w" d="M270 508 C380 508 440 496 548 496"/><text class="s fw" x="330" y="524">writes, each line pointing to its items</text>
+
+  <rect class="you" x="20" y="576" width="150" height="48" rx="10"/><text class="t c" x="95" y="605">The person</text>
+  <path class="p" d="M95 576 V530"/><text class="s" x="106" y="558">talks with it: “tell me about the summer of 1962”</text>
+  <path class="p" d="M645 520 C645 580 400 600 172 600"/><text class="s" x="420" y="614">reads the story</text>
+</svg>
+<ul class="keys"><li><i></i>reads</li><li class="kw"><i></i>writes</li><li class="kp"><i></i>the person</li><li>dashed box: a script, not an AI</li></ul>
+
+<h2>2. Who sees what</h2>
+<p class="say">Each worker reads what came before it and writes one folder, its own. The storyteller cannot touch an item. The extractor cannot touch a transcript. That is what keeps a fact a fact.</p>
+<svg viewBox="0 0 760 330" role="img" aria-label="Four workers on the left, five folders on the right. The transcriber reads sounds and writes transcripts. The extractor reads transcripts and writes proposed. The checker reads transcripts and proposed and writes items. The storyteller reads items and writes story. Crossed lines show what is refused: the storyteller cannot write items nor see the sounds; the extractor cannot write transcripts nor items.">
+  <rect class="sc" x="20" y="24" width="210" height="40" rx="8"/><text class="t" x="34" y="49">transcriber</text><text class="s e" x="218" y="49">script</text>
+  <rect class="ai" x="20" y="96" width="210" height="40" rx="8"/><text class="t" x="34" y="121">extractor</text><text class="s e" x="218" y="121">AI</text>
+  <rect class="sc" x="20" y="168" width="210" height="40" rx="8"/><text class="t" x="34" y="193">checker</text><text class="s e" x="218" y="193">script</text>
+  <rect class="ai" x="20" y="240" width="210" height="40" rx="8"/><text class="t" x="34" y="265">storyteller</text><text class="s e" x="218" y="265">AI</text>
+
+  <rect class="fo" x="560" y="14" width="180" height="36" rx="8"/><text class="t" x="574" y="37">sounds</text>
+  <rect class="fo" x="560" y="74" width="180" height="36" rx="8"/><text class="t" x="574" y="97">transcripts</text>
+  <rect class="fo" x="560" y="134" width="180" height="36" rx="8"/><text class="t" x="574" y="157">proposed</text>
+  <rect class="fo" x="560" y="194" width="180" height="36" rx="8"/><text class="t" x="574" y="217">items</text>
+  <rect class="fo" x="560" y="254" width="180" height="36" rx="8"/><text class="t" x="574" y="277">story</text>
+
+  <path class="r" d="M558 32 C430 32 360 38 232 38"/>
+  <path class="w" d="M230 50 C360 50 430 92 558 92"/>
+  <path class="r" d="M558 92 C430 92 360 110 232 110"/>
+  <path class="w" d="M230 122 C360 122 430 152 558 152"/>
+  <path class="r" d="M558 96 C430 96 360 180 232 180"/>
+  <path class="r" d="M558 152 C430 152 360 188 232 188"/>
+  <path class="w" d="M230 198 C360 198 430 212 558 212"/>
+  <path class="r" d="M558 212 C430 212 360 254 232 254"/>
+  <path class="w" d="M230 268 C360 268 430 272 558 272"/>
+
+  <path class="no" d="M230 246 C330 246 400 224 470 216"/><path class="x" d="M462 208 l14 14 m0 -14 l-14 14"/>
+  <text class="s fs" x="250" y="306">the storyteller cannot write an item, nor see a sound</text>
+  <path class="no" d="M230 102 C320 102 380 96 440 94"/><path class="x" d="M432 86 l14 14 m0 -14 l-14 14"/>
+  <text class="s fs" x="250" y="322">the extractor cannot write a transcript, nor an item</text>
+</svg>
+
+<h2>3. What one item looks like</h2>
+<p class="say">It carries its own identifier, who and when it is about, and the exact words it comes from. The checker looks for those words in the transcript. Not found: the item is not kept, and the person is told.</p>
+<div class="scroll">
+<table>
+  <tr><th>Field</th><th>Example</th><th>Why</th></tr>
+  <tr><td>id</td><td class="m">2026-10-13-aunt-017</td><td>so that a line of the story can point to it</td></tr>
+  <tr><td>who</td><td>Jeanne Martin (aunt), Paul Martin</td><td>first name, last name, their tie to the teller</td></tr>
+  <tr><td>when, where</td><td>summer 1962, the farm at Saint-Aubin</td><td>for a timeline and a map</td></tr>
+  <tr><td>what</td><td>Paul drove the tractor for the first time</td><td>one thing, in a few words</td></tr>
+  <tr><td>exact words</td><td>“that summer Paul took the tractor out on his own”</td><td>copied from the transcript, never rephrased</td></tr>
+  <tr><td>source</td><td class="m">aunt-2026-10-13.txt, 14:32</td><td>to hear it again</td></tr>
+</table>
+</div>
+
+<h2>4. Why one agent alone cannot do this</h2>
+<ul class="plain">
+  <li><b>It can write everywhere it can read.</b> Asked for a better story, it may tidy an item, or the transcript. Here the storyteller has no right to write them, and that is enforced outside its machine.</li>
+  <li><b>It checks its own work.</b> Here the check is a script: either the words are in the transcript, or they are not.</li>
+  <li><b>One maker, one model.</b> Here the transcription, the extraction and the story can each use another service, and one can be replaced without touching the others.</li>
+  <li><b>It needs you at each step.</b> Here each worker is woken by what arrives in its folder.</li>
+</ul>
+
+<h2>5. What exists today, and what does not</h2>
+<div class="scroll">
+<table>
+  <tr><th>Needed</th><th>Today</th></tr>
+  <tr><td>One machine per worker</td><td>Yes.</td></tr>
+  <tr><td>A folder read by one, written by another</td><td>Yes: read or write, per folder and per worker, enforced outside the machine.</td></tr>
+  <tr><td>Woken when a file arrives</td><td>Yes, once nothing has moved for a few seconds.</td></tr>
+  <tr><td>A worker that is a script</td><td>Yes in practice: a conversation whose tool is a plain shell, and whose wake-up line runs the script. Not yet a thing with a name of its own.</td></tr>
+  <tr><td>The key for transcription</td><td>Yes: a key handed to that one worker.</td></tr>
+  <tr><td>Dropping a recording from a phone</td><td>Yes: a file is imported into a folder from the page.</td></tr>
+  <tr><td>Talking with the storyteller</td><td>Yes: as a conversation, tried with one agent so far.</td></tr>
+  <tr><td>The story read as a page</td><td>Yes.</td></tr>
+  <tr><td>The two scripts, and the wording of each wake-up</td><td>To write.</td></tr>
+  <tr><td>Setting all of it up in one gesture</td><td>No: today it is four conversations, five folders and their rights, set by hand.</td></tr>
+  <tr><td>A timeline, a map</td><td>The storyteller can write them as pages; nothing here draws them for it.</td></tr>
+</table>
+</div>
+</main>
+</body>
+</html>
