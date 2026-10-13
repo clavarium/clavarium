@@ -1,0 +1,314 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flow editor mock-up</title>
+<!--
+  A MOCK-UP, TO BE AGREED ON BEFORE ANYTHING IS BUILT: setting up agents, what
+  they keep, and who reads or writes what, by drawing it.
+
+  Boxes are agents (an AI, or a script), folders, and people. A link from an
+  agent to a folder means it WRITES there; from a folder to an agent, it READS;
+  with an arrow at both ends, it does both. Nothing here talks to a server:
+  what is drawn stays in this page.
+-->
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f6f8; --panel: #ffffff; --text: #16181d; --dim: #5a5f69; --line: #c9ced6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #5a5f69; --script-bg: #eef0f3; --asset: #9a6c12; --asset-bg: #fbf3df;
+  --person: #16181d; --read: #0b53c0; --write: #17794f; --both: #7a3fb8; --talk: #5a5f69; --pick: #d2a94e; --stop: #b3401f;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --soft: #171a20; --panel: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --asset: #d2a94e; --asset-bg: #2e2612;
+    --person: #e6e8ec; --read: #8ab4ff; --write: #5fc39d; --both: #c39bf0; --talk: #a3a9b4; --stop: #f08a6b;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --soft: #171a20; --panel: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --asset: #d2a94e; --asset-bg: #2e2612;
+  --person: #e6e8ec; --read: #8ab4ff; --write: #5fc39d; --both: #c39bf0; --talk: #a3a9b4; --stop: #f08a6b;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 var(--sans); }
+header { padding: 14px 16px 8px; }
+h1 { margin: 0; font-size: 1.3rem; letter-spacing: -.01em; }
+header p { margin: .2rem 0 0; color: var(--dim); max-width: 60em; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--soft); position: sticky; top: 0; z-index: 2; }
+button { font: inherit; min-height: 38px; padding: 0 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+button[aria-pressed="true"] { border-color: var(--pick); box-shadow: inset 0 0 0 1px var(--pick); }
+.bar .sep { width: 1px; height: 24px; background: var(--line); }
+.bar .say { color: var(--dim); margin-left: auto; font-size: .9rem; }
+.stage { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; min-height: 30rem; }
+@media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+.canvas { overflow: auto; background: var(--soft); border-right: 1px solid var(--line); }
+#board { display: block; min-width: 1500px; height: 430px; touch-action: none; }
+aside { padding: 14px 16px; background: var(--panel); }
+aside h2 { margin: 0 0 .5rem; font-size: 1rem; }
+aside label { display: block; margin: .7rem 0 .2rem; font-size: .82rem; color: var(--dim); }
+aside input, aside select, aside textarea { width: 100%; font: inherit; padding: .45rem .55rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+aside .row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: .6rem; }
+aside .hint { color: var(--dim); font-size: .88rem; margin: .5rem 0 0; }
+.danger { color: var(--stop); border-color: var(--stop); }
+section.out { padding: 14px 16px 40px; border-top: 1px solid var(--line); }
+section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr)); gap: 10px; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .8rem; background: var(--panel); }
+.card b { display: block; }
+.card span { color: var(--dim); font-size: .9rem; }
+.card em { font-style: normal; }
+.w { color: var(--write); } .r { color: var(--read); } .no { color: var(--stop); }
+/* the drawing */
+.node rect { stroke-width: 1.6; }
+.node[data-kind="agent"] rect { fill: var(--agent-bg); stroke: var(--agent); }
+.node[data-kind="script"] rect { fill: var(--script-bg); stroke: var(--script); stroke-dasharray: 5 4; }
+.node[data-kind="asset"] rect { fill: var(--asset-bg); stroke: var(--asset); }
+.node[data-kind="person"] rect { fill: var(--panel); stroke: var(--person); stroke-width: 2; }
+.node[data-picked="true"] rect { stroke: var(--pick); stroke-width: 3; stroke-dasharray: none; }
+.node { cursor: grab; }
+.node text { font-family: var(--sans); fill: var(--text); pointer-events: none; }
+.node .n { font-weight: 650; font-size: 14px; }
+.node .s { fill: var(--dim); font-size: 11.5px; }
+.port { fill: var(--panel); stroke: var(--dim); stroke-width: 1.5; cursor: crosshair; }
+.port:hover, .port[data-armed="true"] { fill: var(--pick); stroke: var(--pick); }
+.link { fill: none; stroke-width: 3; cursor: pointer; }
+.link[data-kind="write"] { stroke: var(--write); }
+.link[data-kind="read"] { stroke: var(--read); }
+.link[data-kind="both"] { stroke: var(--both); }
+.link[data-kind="talk"] { stroke: var(--talk); stroke-dasharray: 2 6; }
+.link[data-picked="true"] { stroke-width: 5.5; }
+.hit { fill: none; stroke: transparent; stroke-width: 18; cursor: pointer; }
+.tag { font: 11.5px var(--sans); fill: var(--dim); pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Set it up by drawing it</h1>
+  <p>A mock-up. Boxes are agents, folders and people. A link from an agent to a folder: it writes there. From a folder to an agent: it reads. An arrow at both ends: both. Drag a box to move it; press the small circle on a box, then another box, to link them; touch a box or a link to change it.</p>
+</header>
+<div class="bar">
+  <button type="button" data-add="agent">+ AI agent</button>
+  <button type="button" data-add="script">+ Script</button>
+  <button type="button" data-add="asset">+ Folder</button>
+  <button type="button" data-add="person">+ Person</button>
+  <span class="sep"></span>
+  <button type="button" id="tidy">Tidy</button>
+  <button type="button" id="again">Start again from the example</button>
+  <span class="say" id="count"></span>
+</div>
+<div class="stage">
+  <div class="canvas"><svg id="board" role="img" aria-label="The flow being drawn"></svg></div>
+  <aside id="side"></aside>
+</div>
+<section class="out">
+  <h2>What this drawing sets up</h2>
+  <div class="grid" id="sets"></div>
+</section>
+
+<script>
+(() => {
+  const SVG = 'http://www.w3.org/2000/svg';
+  const $ = (id) => document.getElementById(id);
+  const el = (tag, attrs = {}, text) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); if (text !== undefined) e.textContent = text; return e; };
+  const SIZE = { agent: [164, 62], script: [164, 62], asset: [140, 46], person: [130, 46] };
+  const TOOLS = ['Claude Code', 'OpenCode', 'Codex CLI', 'Gemini CLI'];
+  const WAKES = ['When something arrives in what it reads', 'Every hour', 'Monday to Friday at 7:30', 'A call from outside', 'Only when somebody talks to it'];
+  const TOP = 60, LOW = 250, STEP = 142, X0 = 14;
+  const col = (i) => X0 + i * STEP;
+
+  /* The example: recordings become a story, and nobody can change what was said. */
+  const example = () => ({
+    nodes: [
+      { id: 'p1', kind: 'person', name: 'The person', x: col(0), y: TOP + 8 },
+      { id: 'a1', kind: 'asset', name: 'sounds', x: col(1), y: LOW },
+      { id: 's1', kind: 'script', name: 'transcriber', x: col(2), y: TOP, does: 'Turns each recording into text, word for word.', key: 'a transcription key', wake: WAKES[0] },
+      { id: 'a2', kind: 'asset', name: 'transcripts', x: col(3) + 10, y: LOW },
+      { id: 'g1', kind: 'agent', name: 'extractor', x: col(4), y: TOP, tool: 'Claude Code', mode: 'terminal', wake: WAKES[0], does: 'Lists what was said: who, when, where, and the exact words.' },
+      { id: 'a3', kind: 'asset', name: 'proposed', x: col(5) + 10, y: LOW },
+      { id: 's2', kind: 'script', name: 'checker', x: col(6), y: TOP, does: 'Keeps an item only if its exact words are in the transcript.', key: '', wake: WAKES[0] },
+      { id: 'a4', kind: 'asset', name: 'items', x: col(7) + 10, y: LOW },
+      { id: 'g2', kind: 'agent', name: 'storyteller', x: col(8), y: TOP, tool: 'OpenCode', mode: 'conversation', wake: WAKES[4], does: 'Tells the story from the items; each line points to its items.' },
+      { id: 'a5', kind: 'asset', name: 'story', x: col(9) + 10, y: LOW },
+      { id: 'p2', kind: 'person', name: 'The person', x: col(9) + 14, y: TOP + 8 },
+    ],
+    links: [
+      { id: 'l1', from: 'p1', to: 'a1', kind: 'write' }, { id: 'l2', from: 'a1', to: 's1', kind: 'read' }, { id: 'l3', from: 's1', to: 'a2', kind: 'write' },
+      { id: 'l4', from: 'a2', to: 'g1', kind: 'read' }, { id: 'l5', from: 'g1', to: 'a3', kind: 'write' }, { id: 'l6', from: 'a3', to: 's2', kind: 'read' },
+      { id: 'l7', from: 'a2', to: 's2', kind: 'read' }, { id: 'l8', from: 's2', to: 'a4', kind: 'write' }, { id: 'l9', from: 'a4', to: 'g2', kind: 'read' },
+      { id: 'l10', from: 'g2', to: 'a5', kind: 'write' }, { id: 'l11', from: 'g2', to: 'p2', kind: 'talk' }, { id: 'l12', from: 'a5', to: 'p2', kind: 'read' },
+    ],
+  });
+  let flow = example();
+  let picked = null;      /* { type: 'node' | 'link', id } */
+  let armed = null;       /* the box a link is being drawn from */
+  let n = 100;
+
+  const node = (id) => flow.nodes.find((x) => x.id === id);
+  const isWorker = (x) => x.kind === 'agent' || x.kind === 'script';
+  const centre = (x) => [x.x + SIZE[x.kind][0] / 2, x.y + SIZE[x.kind][1] / 2];
+  /* Where a link leaves or reaches a box: the side that faces the other one. */
+  const edge = (a, b) => {
+    const [w, h] = SIZE[a.kind]; const [ax, ay] = centre(a); const [bx, by] = centre(b);
+    if (Math.abs(bx - ax) * h > Math.abs(by - ay) * w) return [bx > ax ? a.x + w : a.x, ay, bx > ax ? 1 : -1, 0];
+    return [ax, by > ay ? a.y + h : a.y, 0, by > ay ? 1 : -1];
+  };
+  /* What a link between two boxes can mean. */
+  const kindFor = (a, b) => (a.kind === 'asset' && b.kind !== 'asset' ? 'read' : b.kind === 'asset' && a.kind !== 'asset' ? 'write' : a.kind !== 'asset' && b.kind !== 'asset' ? 'talk' : null);
+  const WORDS = { write: 'writes', read: 'reads', both: 'reads and writes', talk: 'talks' };
+
+  function draw() {
+    const board = $('board');
+    board.replaceChildren();
+    const defs = el('defs');
+    for (const k of ['write', 'read', 'both', 'talk']) {
+      const m = el('marker', { id: `h-${k}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 5, markerHeight: 5, orient: 'auto-start-reverse' });
+      m.append(el('path', { d: 'M0 0 10 5 0 10z', fill: `var(--${k})` })); defs.append(m);
+    }
+    board.append(defs);
+    for (const l of flow.links) {
+      const a = node(l.from); const b = node(l.to); if (!a || !b) continue;
+      const [x1, y1, dx1, dy1] = edge(a, b); const [x2, y2, dx2, dy2] = edge(b, a);
+      const reach = Math.max(40, Math.hypot(x2 - x1, y2 - y1) / 2.4);
+      const d = `M${x1} ${y1} C${x1 + dx1 * reach} ${y1 + dy1 * reach} ${x2 + dx2 * reach} ${y2 + dy2 * reach} ${x2} ${y2}`;
+      const attrs = { class: 'link', d, 'data-kind': l.kind, 'data-picked': String(picked?.type === 'link' && picked.id === l.id), 'marker-end': `url(#h-${l.kind})` };
+      if (l.kind === 'both' || l.kind === 'talk') attrs['marker-start'] = `url(#h-${l.kind})`;
+      const hit = el('path', { class: 'hit', d });
+      hit.addEventListener('click', () => { picked = { type: 'link', id: l.id }; armed = null; draw(); });
+      board.append(el('path', attrs), hit);
+      board.append(el('text', { class: 'tag', x: (x1 + x2) / 2 + 6, y: (y1 + y2) / 2 - 6 }, WORDS[l.kind]));
+    }
+    for (const x of flow.nodes) {
+      const [w, h] = SIZE[x.kind];
+      const g = el('g', { class: 'node', 'data-kind': x.kind, 'data-picked': String(picked?.type === 'node' && picked.id === x.id), transform: `translate(${x.x} ${x.y})` });
+      g.append(el('rect', { width: w, height: h, rx: x.kind === 'asset' ? 6 : x.kind === 'person' ? 23 : 10 }));
+      g.append(el('text', { class: 'n', x: 12, y: isWorker(x) ? 25 : h / 2 + 5 }, x.name.length > 18 ? `${x.name.slice(0, 17)}...` : x.name));
+      if (isWorker(x)) g.append(el('text', { class: 's', x: 12, y: 44 }, x.kind === 'script' ? 'a script, not an AI' : `${x.tool} - ${x.mode}`));
+      const port = el('circle', { class: 'port', cx: w, cy: h / 2, r: 7, 'data-armed': String(armed === x.id) });
+      port.addEventListener('pointerdown', (e) => { e.stopPropagation(); armed = armed === x.id ? null : x.id; picked = null; draw(); });
+      g.append(port);
+      let start = null;
+      g.addEventListener('pointerdown', (e) => { start = { px: e.clientX, py: e.clientY, x: x.x, y: x.y, moved: false }; g.setPointerCapture(e.pointerId); });
+      g.addEventListener('pointermove', (e) => {
+        if (!start) return;
+        const dx = e.clientX - start.px; const dy = e.clientY - start.py;
+        if (Math.abs(dx) + Math.abs(dy) > 4) start.moved = true;
+        if (start.moved) { x.x = Math.max(4, start.x + dx); x.y = Math.max(4, Math.min(430 - h - 4, start.y + dy)); g.setAttribute('transform', `translate(${x.x} ${x.y})`); }
+      });
+      g.addEventListener('pointerup', () => {
+        const was = start; start = null;
+        if (was?.moved) { draw(); return; }
+        if (armed && armed !== x.id) {                         /* a link is being drawn: this box ends it */
+          const from = node(armed); const kind = kindFor(from, x);
+          if (kind && !flow.links.some((l) => (l.from === from.id && l.to === x.id) || (l.from === x.id && l.to === from.id))) { const id = `l${++n}`; flow.links.push({ id, from: from.id, to: x.id, kind }); picked = { type: 'link', id }; } else picked = { type: 'node', id: x.id };
+          armed = null;
+        } else { picked = { type: 'node', id: x.id }; armed = null; }
+        draw();
+      });
+      board.append(g);
+    }
+    side(); sets();
+    $('count').textContent = armed ? 'Now touch the box to link it to.' : `${flow.nodes.filter(isWorker).length} worker(s), ${flow.nodes.filter((x) => x.kind === 'asset').length} folder(s), ${flow.links.length} link(s)`;
+  }
+
+  const field = (label, control) => { const l = document.createElement('label'); l.textContent = label; const w = document.createElement('div'); w.append(l, control); return w; };
+  const input = (value, on, tag = 'input') => { const i = document.createElement(tag); i.value = value ?? ''; i.addEventListener('input', () => { on(i.value); drawQuiet(); }); return i; };
+  const select = (options, value, on) => { const s = document.createElement('select'); for (const o of options) { const op = document.createElement('option'); op.value = op.textContent = o; s.append(op); } s.value = value; s.addEventListener('change', () => { on(s.value); draw(); }); return s; };
+  const button = (text, on, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; if (cls) b.className = cls; b.addEventListener('click', on); return b; };
+  /* While somebody types, the drawing follows without the panel being rebuilt under their fingers. */
+  let quiet = false;
+  function drawQuiet() { quiet = true; draw(); quiet = false; }
+
+  function side() {
+    if (quiet) return;
+    const box = $('side'); box.replaceChildren();
+    const h = document.createElement('h2'); box.append(h);
+    if (!picked) { h.textContent = 'Nothing is chosen'; const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Touch a box to set it up, or a link to change what it means.'; box.append(p); return; }
+    if (picked.type === 'link') {
+      const l = flow.links.find((x) => x.id === picked.id); const a = node(l.from); const b = node(l.to);
+      h.textContent = 'This link';
+      const says = document.createElement('p'); says.className = 'hint';
+      const worker = a.kind === 'asset' ? b : a; const asset = a.kind === 'asset' ? a : b.kind === 'asset' ? b : null;
+      says.textContent = asset ? `${worker.name} ${WORDS[l.kind]} ${asset.name}.` : `${a.name} and ${b.name} talk, as in a conversation.`;
+      box.append(says);
+      if (asset) {
+        const row = document.createElement('div'); row.className = 'row';
+        const set = (kind) => { /* the arrow points the way things go: towards the folder when it is written, away from it when it is read */
+          if (kind === 'write') { l.from = worker.id; l.to = asset.id; } else { l.from = asset.id; l.to = worker.id; }
+          l.kind = kind; draw();
+        };
+        for (const [kind, text] of [['read', 'Reads'], ['write', 'Writes'], ['both', 'Reads and writes']]) { const b2 = button(text, () => set(kind)); b2.setAttribute('aria-pressed', String(l.kind === kind)); row.append(b2); }
+        box.append(row);
+        const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Read only is enforced outside the machine of the agent: it cannot lift it.'; box.append(p);
+      }
+      const del = document.createElement('div'); del.className = 'row'; del.append(button('Remove this link', () => { flow.links = flow.links.filter((x) => x.id !== l.id); picked = null; draw(); }, 'danger')); box.append(del);
+      return;
+    }
+    const x = node(picked.id);
+    h.textContent = x.kind === 'asset' ? 'This folder' : x.kind === 'person' ? 'This person' : x.kind === 'script' ? 'This script' : 'This AI agent';
+    box.append(field('Name', input(x.name, (v) => { x.name = v; })));
+    if (x.kind === 'agent') {
+      box.append(field('Its tool', select(TOOLS, x.tool, (v) => { x.tool = v; })));
+      box.append(field('How you are with it', select(['terminal', 'conversation'], x.mode, (v) => { x.mode = v; })));
+    }
+    if (isWorker(x)) {
+      box.append(field('What wakes it', select(WAKES, x.wake, (v) => { x.wake = v; })));
+      box.append(field(x.kind === 'script' ? 'What the script does' : 'What it is asked to do', input(x.does, (v) => { x.does = v; }, 'textarea')));
+      if (x.kind === 'script') box.append(field('A key it needs (optional)', input(x.key, (v) => { x.key = v; })));
+    }
+    if (x.kind === 'person') { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'A person drops files in a folder, reads one, or talks with an agent. Whoever it is gets a code, and only what is linked here.'; box.append(p); }
+    const row = document.createElement('div'); row.className = 'row';
+    row.append(button('Link it to...', () => { armed = x.id; picked = null; draw(); }));
+    row.append(button('Remove', () => { flow.nodes = flow.nodes.filter((y) => y.id !== x.id); flow.links = flow.links.filter((l) => l.from !== x.id && l.to !== x.id); picked = null; draw(); }, 'danger'));
+    box.append(row);
+  }
+
+  /* What the drawing means, said in words: one card per worker. */
+  function sets() {
+    const box = $('sets'); box.replaceChildren();
+    const assets = flow.nodes.filter((x) => x.kind === 'asset');
+    for (const x of flow.nodes.filter(isWorker)) {
+      const mine = flow.links.filter((l) => l.from === x.id || l.to === x.id);
+      const of = (kinds) => mine.filter((l) => kinds.includes(l.kind)).map((l) => node(l.from === x.id ? l.to : l.from)).filter((o) => o?.kind === 'asset').map((o) => o.name);
+      const reads = of(['read', 'both']); const writes = of(['write', 'both']);
+      const unseen = assets.filter((a) => !reads.includes(a.name) && !writes.includes(a.name)).map((a) => a.name);
+      const talks = mine.filter((l) => l.kind === 'talk').map((l) => node(l.from === x.id ? l.to : l.from)?.name);
+      const card = document.createElement('div'); card.className = 'card';
+      const b = document.createElement('b'); b.textContent = `${x.name} - ${x.kind === 'script' ? 'a script' : x.tool}, in a machine of its own`;
+      const line = (cls, text) => { const s = document.createElement('span'); const e = document.createElement('em'); e.className = cls; e.textContent = text; s.append(e); s.append(document.createElement('br')); return s; };
+      card.append(b);
+      card.append(line('r', `reads: ${reads.join(', ') || 'nothing'}`), line('w', `writes: ${writes.join(', ') || 'nothing'}`), line('no', `does not see: ${unseen.join(', ') || 'nothing is hidden from it'}`));
+      const last = document.createElement('span'); last.textContent = `woken: ${x.wake.toLowerCase()}${talks.length ? `; talks with ${talks.join(', ')}` : ''}${x.key ? `; is handed ${x.key}` : ''}`; card.append(last);
+      box.append(card);
+    }
+    if (box.children.length === 0) { const p = document.createElement('p'); p.textContent = 'No worker yet: add an AI agent or a script.'; box.append(p); }
+  }
+
+  for (const b of document.querySelectorAll('[data-add]')) {
+    b.addEventListener('click', () => {
+      const kind = b.dataset.add; const id = `${kind[0]}${++n}`;
+      const base = { id, kind, x: 40 + (flow.nodes.length % 9) * 60, y: kind === 'asset' ? LOW + 60 : 150 };
+      flow.nodes.push(kind === 'agent' ? { ...base, name: 'new agent', tool: TOOLS[0], mode: 'terminal', wake: WAKES[0], does: '' } : kind === 'script' ? { ...base, name: 'new script', does: '', key: '', wake: WAKES[0] } : kind === 'asset' ? { ...base, name: 'new folder' } : { ...base, name: 'Somebody' });
+      picked = { type: 'node', id }; armed = null; draw();
+    });
+  }
+  /* Tidy: workers and people above, folders below, left to right in the order things flow. */
+  $('tidy').addEventListener('click', () => {
+    const rank = new Map(flow.nodes.map((x) => [x.id, 0]));
+    for (let pass = 0; pass < flow.nodes.length; pass++) for (const l of flow.links) if (l.kind !== 'talk' && rank.get(l.to) <= rank.get(l.from)) rank.set(l.to, rank.get(l.from) + 1);
+    for (const l of flow.links) if (l.kind === 'talk') rank.set(l.to, Math.max(rank.get(l.to), rank.get(l.from) + 1));
+    const seen = new Map();
+    for (const x of [...flow.nodes].sort((a, b) => rank.get(a.id) - rank.get(b.id))) {
+      const r = rank.get(x.id); const lane = x.kind === 'asset' ? 'low' : 'top'; const k = `${r}/${lane}`; const nth = seen.get(k) ?? 0; seen.set(k, nth + 1);
+      x.x = col(r) + (x.kind === 'asset' ? 10 : 0); x.y = (lane === 'low' ? LOW : TOP + (x.kind === 'person' ? 8 : 0)) + nth * 74;
+    }
+    draw();
+  });
+  $('again').addEventListener('click', () => { flow = example(); picked = null; armed = null; draw(); });
+  draw();
+})();
+</script>
+</body>
+</html>
