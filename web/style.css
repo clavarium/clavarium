@@ -288,3 +288,18 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 
 .notice-box { border: 1px solid var(--brass); border-radius: 10px; padding: .7rem .8rem; margin: .6rem 0; }
 .notice-box input { width: 100%; font-family: ui-monospace, monospace; font-size: .82rem; margin: .4rem 0; }
+
+/* The simple screen lies over the terminal, which stays laid out underneath. */
+#simple { position: absolute; inset: 0; z-index: 1; overflow: auto; background: var(--bg); padding: 14px 16px 24px; }
+#simple-state { margin: 0 0 12px; font-size: 1.05rem; font-weight: 600; }
+#simple-state[data-needs="true"] { color: var(--brass); }
+#simple-say label { display: block; font-weight: 700; margin-bottom: 6px; }
+#simple-text { width: 100%; min-height: 4.2rem; resize: vertical; font: inherit; font-size: 1.05rem; padding: .6rem .7rem; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); }
+#simple-say .row { margin-top: 8px; }
+#simple-say button.primary { min-height: 46px; padding: 0 1.6rem; font-size: 1.05rem; }
+#simple-files { display: grid; gap: 6px; }
+#simple-files .file { display: flex; justify-content: space-between; gap: 1rem; align-items: baseline; width: 100%; text-align: left; min-height: 46px; padding: .5rem .8rem; }
+#simple-says { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .86rem; line-height: 1.45; border: 1px solid var(--line); border-radius: 10px; padding: .6rem .7rem; background: var(--panel); color: var(--ink2); max-height: 22rem; overflow: auto; }
+#simple .panel-top { margin-top: 16px; }
+/* Without its terminal, the keys of a terminal are of no use; ready answers and the voice stay. */
+#room[data-simple] #keys > button:not(#mic):not(#auto) { display: none; }

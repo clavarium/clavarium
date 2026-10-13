@@ -102,6 +102,9 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 .two h2 { margin-bottom: .8rem; }
 .other { margin: 1.6rem 0 0; }
 .other a { font-weight: 600; text-decoration: none; }
+.pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
+@media (max-width: 800px) { .pair { grid-template-columns: 1fr; } }
+.shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
 footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
 footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
@@ -139,6 +142,20 @@ footer a { color: var(--dim); }
   </div>
 </section>
 
+<section id="screen">
+  <div class="wrap pair">
+    <img class="shot" style="max-width:24rem;justify-self:center" loading="lazy" src="shots/simple.png" width="1640" height="2000" alt="The simple screen on a tablet: a box to say what you want, three documents ready to read, and what the assistant says now.">
+    <div>
+      <h2>The whole screen</h2>
+      <ul class="rows">
+        <li>A box to say what you want, and a button to speak.</li>
+        <li>What is ready to read: touch one, it opens.</li>
+        <li>What your assistant says now, in plain text.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
 <section id="jobs">
   <div class="wrap">
     <h2>What people hand to it</h2>
@@ -157,7 +174,7 @@ footer a { color: var(--dim); }
     <ol class="three">
       <li>
         <p class="cap"><span>01</span>Say it aloud, or type it</p>
-        <p class="say">Open the app on your tablet and talk to your assistant on its text screen.</p>
+        <p class="say">Open the app on your tablet. One box to write in, or one button to speak.</p>
         <div class="scene" aria-hidden="true">
           <div class="card term">Read this week's customer mail.<br>Draft my replies.</div>
           <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span class="dim">speak, or type</span><span class="send">Dictate</span></div>

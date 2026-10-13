@@ -68,6 +68,12 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   runs outside the house and no port is opened. Asked for on each device, in
   Settings; the message is encrypted for that device alone.
 
+- **11 - the simple screen**: each conversation can be shown without its
+  terminal, for whoever does not read one: a box to say what is wanted,
+  what is ready to read, and what the tool says now as plain text, read by
+  the page from its own screen. What is written is typed into the same
+  terminal; the server reads nothing more.
+
 Not yet: mailbox and git resources, delivery.
 
 Where the tool works (`/work`) is a folder kept by the server: what the tool

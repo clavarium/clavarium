@@ -38,6 +38,7 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
+      <button type="button" id="simple-toggle" aria-pressed="false" title="A plain screen: what it says, what is ready, a box to say what you want">Simple</button>
       <button type="button" id="files-open" hidden>Files</button>
       <button type="button" id="folders" hidden>This conversation</button>
     </header>
@@ -49,6 +50,23 @@
     </div>
     <main>
       <div id="terminal"></div>
+      <!-- THE SAME CONVERSATION WITHOUT ITS TERMINAL, for whoever does not read
+           one: what it says now (read by this page from its own screen), what
+           is ready to read, and a box to say what is wanted. Nothing here is
+           another way in: what is sent is typed into the same terminal. -->
+      <div id="simple" hidden>
+        <p id="simple-state" role="status"></p>
+        <form id="simple-say" autocomplete="off">
+          <label for="simple-text">Say what you want</label>
+          <textarea id="simple-text" rows="2" maxlength="2000" placeholder="Write it here, or use Dictate below"></textarea>
+          <div class="row"><button type="submit" class="primary">Send</button><span class="hint" id="simple-sent" role="status"></span></div>
+        </form>
+        <div class="panel-top"><b>Ready to read</b></div>
+        <div id="simple-files"></div>
+        <p id="simple-files-empty" class="hint" hidden>Nothing yet.</p>
+        <div class="panel-top"><b>What it says now</b></div>
+        <pre id="simple-says" aria-live="off"></pre>
+      </div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <!-- ACCESS: what THIS conversation has. Nothing is created here. -->
       <div id="panel" class="sheet" hidden>

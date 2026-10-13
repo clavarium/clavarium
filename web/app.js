@@ -616,6 +616,73 @@
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
+    /* ---------- the simple screen: the same conversation, without its terminal ---------- */
+    /* For whoever does not read a terminal. The terminal stays where it is,
+       underneath, attached as always: what is written in the box is typed
+       into it, and what it shows is read here BY THIS PAGE, from its own
+       screen, as plain text. The server reads nothing more than before. */
+    let simple = false;
+    try { const kept = localStorage.getItem('clavarium-simple'); if (kept !== null) simple = kept === '1'; } catch { /* a private window */ }
+    const saysNow = () => {
+        const b = terminal.buffer.active; const lines = [];
+        for (let i = Math.max(0, b.length - 200); i < b.length; i++) { const l = b.getLine(i)?.translateToString(true) ?? ''; if (l.trim()) lines.push(l); }
+        return lines.slice(-16).join('\n');
+    };
+    let simpleFilesAt = 0;
+    async function paintSimpleFiles() {
+        simpleFilesAt = Date.now();
+        const box = $('simple-files');
+        const c = conversations.find((x) => x.name === current);
+        let entries = [];
+        if (c?.work === 'kept' || DEVICE) {
+            const listing = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: 'work', p: '' })}`).then((r) => (r.ok ? r.json() : { entries: [] })).catch(() => ({ entries: [] }));
+            entries = (listing.entries ?? []).filter((e) => !e.folder).sort((a, b) => String(b.modified).localeCompare(String(a.modified))).slice(0, 8);
+        }
+        if (!simple) return;
+        box.replaceChildren(...entries.map((e) => {
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'file';
+            const name = document.createElement('span'); name.textContent = e.name;
+            const when = document.createElement('span'); when.className = 'hint'; when.textContent = new Date(e.modified).toLocaleString();
+            b.append(name, when);
+            b.addEventListener('click', () => { void preview('work', e.name, e.name, e.size); });
+            return b;
+        }));
+        $('simple-files-empty').hidden = entries.length > 0;
+    }
+    function paintSimple() {
+        $('simple').hidden = !simple;
+        $('room').toggleAttribute('data-simple', simple);
+        $('simple-toggle').setAttribute('aria-pressed', String(simple));
+        $('simple-toggle').textContent = simple ? 'Its screen' : 'Simple';
+        if (!simple) return;
+        const c = conversations.find((x) => x.name === current);
+        const state = $('state').textContent;
+        $('simple-state').textContent = c?.answerer?.needs ? `It stopped and waits for you. ${c.answerer.needs.why}`
+            : c?.asleep ? 'It is asleep.'
+                : state === 'live' ? 'It is there. Below: what is ready, and what it says now.' : `Its screen: ${state}.`;
+        $('simple-state').dataset.needs = String(Boolean(c?.answerer?.needs));
+        $('simple-says').textContent = saysNow() || 'Nothing on its screen yet.';
+        if (Date.now() - simpleFilesAt > 8000) void paintSimpleFiles();
+    }
+    $('simple-toggle').addEventListener('click', () => {
+        simple = !simple;
+        try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ }
+        simpleFilesAt = 0; paintSimple();
+        if (!simple) terminal.focus();
+    });
+    $('simple-say').addEventListener('submit', (event) => {
+        event.preventDefault();
+        /* One plain line, then Enter: what a person would have typed. */
+        // eslint-disable-next-line no-control-regex
+        const text = $('simple-text').value.replace(/[\r\n\t]+/g, ' ').replace(/[\u0000-\u001F\u007F-\u009F]/g, '').trim();
+        if (!text) return;
+        send(text); setTimeout(() => send('\r'), 120);
+        $('simple-text').value = '';
+        $('simple-sent').textContent = 'Sent.'; setTimeout(() => { $('simple-sent').textContent = ''; }, 2500);
+    });
+    setInterval(() => { if (simple && !document.hidden) paintSimple(); }, 1500);
+    paintSimple();
+
     /* ---------- alerts: this device is told when a tool waits ---------- */
     const pushKey = (text) => { const b = atob((text + '='.repeat((4 - (text.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
     const pushable = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
