@@ -74,6 +74,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 .node .s { fill: var(--dim); font-size: 11.5px; }
 .port { fill: var(--panel); stroke: var(--dim); stroke-width: 1.5; cursor: crosshair; }
 .port:hover, .port[data-armed="true"] { fill: var(--pick); stroke: var(--pick); }
+.wire { fill: none; stroke: var(--pick); stroke-width: 3; stroke-dasharray: 6 5; pointer-events: none; }
 .link { fill: none; stroke-width: 3; cursor: pointer; }
 .link[data-kind="write"] { stroke: var(--write); }
 .link[data-kind="read"] { stroke: var(--read); }
@@ -87,7 +88,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 <body>
 <header>
   <h1>Set it up by drawing it</h1>
-  <p>A mock-up. Boxes are agents, folders and people. A link from an agent to a folder: it writes there. From a folder to an agent: it reads. An arrow at both ends: both. Drag a box to move it; press the small circle on a box, then another box, to link them; touch a box or a link to change it.</p>
+  <p>A mock-up. Boxes are agents, folders and people. A link from an agent to a folder: it writes there. From a folder to an agent: it reads. An arrow at both ends: both. Drag a box to move it. To link two boxes, pull a wire from the small circle of one and drop it on the other. Touch a box or a link to change it.</p>
 </header>
 <div class="bar">
   <button type="button" data-add="agent">+ AI agent</button>
@@ -159,6 +160,13 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
   const kindFor = (a, b) => (a.kind === 'asset' && b.kind !== 'asset' ? 'read' : b.kind === 'asset' && a.kind !== 'asset' ? 'write' : a.kind !== 'asset' && b.kind !== 'asset' ? 'talk' : null);
   const WORDS = { write: 'writes', read: 'reads', both: 'reads and writes', talk: 'talks' };
 
+  /* Links two boxes, the way that makes sense for what they are; the link is then chosen, to be changed at once. */
+  function link(from, to) {
+    const kind = kindFor(from, to);
+    if (!kind || flow.links.some((l) => (l.from === from.id && l.to === to.id) || (l.from === to.id && l.to === from.id))) { picked = { type: 'node', id: to.id }; return; }
+    const id = `l${++n}`; flow.links.push({ id, from: from.id, to: to.id, kind }); picked = { type: 'link', id };
+  }
+
   function draw() {
     const board = $('board');
     board.replaceChildren();
@@ -186,8 +194,26 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
       g.append(el('rect', { width: w, height: h, rx: x.kind === 'asset' ? 6 : x.kind === 'person' ? 23 : 10 }));
       g.append(el('text', { class: 'n', x: 12, y: isWorker(x) ? 25 : h / 2 + 5 }, x.name.length > 18 ? `${x.name.slice(0, 17)}...` : x.name));
       if (isWorker(x)) g.append(el('text', { class: 's', x: 12, y: 44 }, x.kind === 'script' ? 'a script, not an AI' : `${x.tool} - ${x.mode}`));
-      const port = el('circle', { class: 'port', cx: w, cy: h / 2, r: 7, 'data-armed': String(armed === x.id) });
-      port.addEventListener('pointerdown', (e) => { e.stopPropagation(); armed = armed === x.id ? null : x.id; picked = null; draw(); });
+      /* THE SMALL CIRCLE IS WHERE A LINK STARTS: pulled from it, a wire follows
+         the finger and is dropped on another box. Pressed without pulling, it
+         waits for the next box touched. */
+      const port = el('circle', { class: 'port', cx: w, cy: h / 2, r: 8, 'data-armed': String(armed === x.id) });
+      port.append(el('title', {}, 'Pull from here to another box to link them'));
+      port.addEventListener('pointerdown', (e) => {
+        e.stopPropagation(); e.preventDefault();
+        const at = (ev) => { const r = board.getBoundingClientRect(); return [ev.clientX - r.left, ev.clientY - r.top]; };
+        const wire = el('path', { class: 'wire' }); board.append(wire);
+        let pulled = false;
+        const move = (ev) => { const [mx, my] = at(ev); pulled = pulled || Math.hypot(mx - (x.x + w), my - (x.y + h / 2)) > 8; wire.setAttribute('d', `M${x.x + w} ${x.y + h / 2} L${mx} ${my}`); };
+        const up = (ev) => {
+          window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+          const [mx, my] = at(ev);
+          const target = pulled ? flow.nodes.find((o) => o.id !== x.id && mx >= o.x && mx <= o.x + SIZE[o.kind][0] && my >= o.y && my <= o.y + SIZE[o.kind][1]) : null;
+          if (target) { link(x, target); armed = null; } else if (!pulled) { armed = armed === x.id ? null : x.id; picked = null; } else armed = null;
+          draw();
+        };
+        window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+      });
       g.append(port);
       let start = null;
       g.addEventListener('pointerdown', (e) => { start = { px: e.clientX, py: e.clientY, x: x.x, y: x.y, moved: false }; g.setPointerCapture(e.pointerId); });
@@ -201,8 +227,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
         const was = start; start = null;
         if (was?.moved) { draw(); return; }
         if (armed && armed !== x.id) {                         /* a link is being drawn: this box ends it */
-          const from = node(armed); const kind = kindFor(from, x);
-          if (kind && !flow.links.some((l) => (l.from === from.id && l.to === x.id) || (l.from === x.id && l.to === from.id))) { const id = `l${++n}`; flow.links.push({ id, from: from.id, to: x.id, kind }); picked = { type: 'link', id }; } else picked = { type: 'node', id: x.id };
+          link(node(armed), x);
           armed = null;
         } else { picked = { type: 'node', id: x.id }; armed = null; }
         draw();
