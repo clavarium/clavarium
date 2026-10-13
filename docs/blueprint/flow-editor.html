@@ -95,9 +95,10 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
 .link[data-kind="both"] { stroke: var(--both); }
 .link[data-kind="talk"] { stroke: var(--talk); stroke-dasharray: 2 6; }
 .link[data-picked="true"] { stroke-width: 5.5; }
-.hit { fill: none; stroke: transparent; stroke-width: 18; cursor: pointer; }
-.tag { font: 11.5px var(--sans); fill: var(--dim); pointer-events: none; }
+.hit { fill: none; stroke: transparent; stroke-width: 28; cursor: pointer; }
+.tag { font: 12.5px var(--sans); fill: var(--dim); cursor: pointer; paint-order: stroke; stroke: var(--soft); stroke-width: 5px; }
 .tag.wakes { fill: var(--asset); font-weight: 650; }
+.link:hover, .hit:hover + .tag { filter: brightness(1.15); }
 </style>
 </head>
 <body>
@@ -216,18 +217,29 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
       m.append(el('path', { d: 'M0 0 10 5 0 10z', fill: `var(--${k})` })); defs.append(m);
     }
     board.append(defs);
-    for (const l of flow.links) {
-      const a = node(l.from); const b = node(l.to); if (!a || !b) continue;
+    /* Where a link runs, from where its two boxes are now: worked out again each time one of them moves. */
+    const route = (l) => {
+      const a = node(l.from); const b = node(l.to);
       const [x1, y1, dx1, dy1] = edge(a, b); const [x2, y2, dx2, dy2] = edge(b, a);
       const reach = Math.max(40, Math.hypot(x2 - x1, y2 - y1) / 2.4);
-      const d = `M${x1} ${y1} C${x1 + dx1 * reach} ${y1 + dy1 * reach} ${x2 + dx2 * reach} ${y2 + dy2 * reach} ${x2} ${y2}`;
-      const attrs = { class: 'link', d, 'data-kind': l.kind, 'data-picked': String(picked?.type === 'link' && picked.id === l.id), 'marker-end': `url(#h-${l.kind})` };
+      return { d: `M${x1} ${y1} C${x1 + dx1 * reach} ${y1 + dy1 * reach} ${x2 + dx2 * reach} ${y2 + dy2 * reach} ${x2} ${y2}`, tx: (x1 + x2) / 2 + 6, ty: (y1 + y2) / 2 - 6 };
+    };
+    const drawn = new Map();        /* link id -> its line, the wider line a finger finds, and its word */
+    const follow = (id) => { for (const l of flow.links) { if (l.from !== id && l.to !== id) continue; const parts = drawn.get(l.id); if (!parts) continue; const r = route(l); parts.line.setAttribute('d', r.d); parts.hit.setAttribute('d', r.d); parts.tag.setAttribute('x', r.tx); parts.tag.setAttribute('y', r.ty); } };
+    for (const l of flow.links) {
+      if (!node(l.from) || !node(l.to)) continue;
+      const r = route(l);
+      const attrs = { class: 'link', d: r.d, 'data-kind': l.kind, 'data-picked': String(picked?.type === 'link' && picked.id === l.id), 'marker-end': `url(#h-${l.kind})` };
       if (l.kind === 'both' || l.kind === 'talk') attrs['marker-start'] = `url(#h-${l.kind})`;
-      const hit = el('path', { class: 'hit', d });
-      hit.addEventListener('click', () => { picked = { type: 'link', id: l.id }; armed = null; draw(); });
-      board.append(el('path', attrs), hit);
+      const line = el('path', attrs);
+      const hit = el('path', { class: 'hit', d: r.d });
       const waking = l.wakes && (l.kind === 'read' || l.kind === 'both');
-      board.append(el('text', { class: waking ? 'tag wakes' : 'tag', x: (x1 + x2) / 2 + 6, y: (y1 + y2) / 2 - 6 }, waking ? `${WORDS[l.kind]} · wakes it` : WORDS[l.kind]));
+      const tag = el('text', { class: waking ? 'tag wakes' : 'tag', x: r.tx, y: r.ty }, waking ? `${WORDS[l.kind]} · wakes it` : WORDS[l.kind]);
+      /* A link is chosen by touching it, or its word: its panel then says what it means, and changes it. */
+      const choose = () => { picked = { type: 'link', id: l.id }; armed = null; draw(); };
+      hit.addEventListener('click', choose); tag.addEventListener('click', choose);
+      board.append(line, hit, tag);
+      drawn.set(l.id, { line, hit, tag });
     }
     for (const x of flow.nodes) {
       const [w, h] = SIZE[x.kind];
@@ -273,7 +285,7 @@ section.out h2 { font-size: 1.05rem; margin: 0 0 .5rem; }
         if (!start) return;
         const dx = e.clientX - start.px; const dy = e.clientY - start.py;
         if (Math.abs(dx) + Math.abs(dy) > 4) start.moved = true;
-        if (start.moved) { x.x = Math.max(4, start.x + dx); x.y = Math.max(4, Math.min(BH - h - 4, start.y + dy)); g.setAttribute('transform', `translate(${x.x} ${x.y})`); }
+        if (start.moved) { x.x = Math.max(4, start.x + dx); x.y = Math.max(4, Math.min(BH - h - 4, start.y + dy)); g.setAttribute('transform', `translate(${x.x} ${x.y})`); follow(x.id); }
       });
       g.addEventListener('pointerup', () => {
         const was = start; start = null;
