@@ -53,7 +53,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -130,6 +130,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
+            const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
+            if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
             if (answered && answerer) return send(200, answerer.log(decodeURIComponent(answered[1]))), true;
             /* A repository: where its commits go, and what would go now. */
@@ -173,6 +175,13 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
         if (pathname === '/api/alerts/remove' && alerts) return send(200, alerts.remove(String(body.endpoint ?? ''))), true;
         if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
+        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite)?$/.exec(pathname);
+        if (talking && talk) {
+            const conversation = decodeURIComponent(talking[1]);
+            if (talking[2]) return send(200, await talk.invite(conversation)), true;
+            if (typeof body.on === 'boolean') return send(200, await talk.set(conversation, body.on)), true;
+            return send(201, await talk.say(conversation, body.text, body.answers)), true;
+        }
         const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
         if (woken && wakeups) {
             const conversation = decodeURIComponent(woken[1]);
@@ -266,6 +275,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') signin?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') answerer?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') wakeups?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') talk?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         if (error instanceof Refusal) return send(error.status, { error: error.message }), true;

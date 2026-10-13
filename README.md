@@ -74,6 +74,13 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   the page from its own screen. What is written is typed into the same
   terminal; the server reads nothing more.
 
+- **12 - talk through the app**: the tool is given a small MCP server of
+  its own (one file, no dependency) with four tools: tell its owner
+  something, ask something, show a file, read what was answered. Nothing
+  waits: the tool posts, and is told in its terminal, in one line, when a
+  message arrived. The simple screen shows it as a conversation. Off by
+  default, per conversation; the terminal stays the default way.
+
 Not yet: mailbox and git resources, delivery.
 
 Where the tool works (`/work`) is a folder kept by the server: what the tool

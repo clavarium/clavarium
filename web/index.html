@@ -56,6 +56,7 @@
            another way in: what is sent is typed into the same terminal. -->
       <div id="simple" hidden>
         <p id="simple-state" role="status"></p>
+        <div id="simple-thread" hidden aria-live="polite"></div>
         <form id="simple-say" autocomplete="off">
           <label for="simple-text">Say what you want</label>
           <textarea id="simple-text" rows="2" maxlength="2000" placeholder="Write it here, or use Dictate below"></textarea>
@@ -111,6 +112,12 @@
               <div id="answerer-log"></div>
             </details>
           </div>
+        </div>
+        <div id="talk-box">
+          <div class="panel-top"><b>Talk through the app</b></div>
+          <p class="hint" id="talk-about">The tool is given a few tools of its own to tell you something, ask you something, show you a file, and read what you answer: a conversation on the simple screen instead of in its terminal. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER. It works as far as the tool agrees to use it.</p>
+          <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
+          <p class="hint" id="talk-declare" hidden></p>
         </div>
         <div id="wakeups-box">
           <div class="panel-top"><b>Wake it by itself</b></div>

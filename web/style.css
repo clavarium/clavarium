@@ -303,3 +303,11 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #simple .panel-top { margin-top: 16px; }
 /* Without its terminal, the keys of a terminal are of no use; ready answers and the voice stay. */
 #room[data-simple] #keys > button:not(#mic):not(#auto) { display: none; }
+
+/* The conversation with the tool, on the simple screen. */
+#simple-thread { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow: auto; margin-bottom: 14px; }
+.said { max-width: 46rem; border: 1px solid var(--line); border-radius: 12px; padding: .55rem .75rem; background: var(--panel); }
+.said p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.said[data-from="owner"] { align-self: flex-end; background: var(--bar); }
+.said[data-kind="ask"] { border-color: var(--brass); }
+.said .row, .said > button { margin-top: .5rem; }
