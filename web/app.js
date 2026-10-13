@@ -1046,6 +1046,52 @@
     $('assets-open').addEventListener('click', () => { void openAssets(); });
     $('assets-close').addEventListener('click', () => { $('assets').hidden = true; terminal.focus(); });
 
+    /* ---------- who sees what: every agent, every thing, and the lines between ---------- */
+    /* The table of rights, drawn. Nothing here is a setting: it shows what was
+       given, so that it can be answered at a glance, and shown to somebody. */
+    const SVG = 'http://www.w3.org/2000/svg';
+    const svg = (tag, attrs = {}, text) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); if (text !== undefined) e.textContent = text; return e; };
+    let mapFocus = null;        /* { side: 'agent' | 'thing', name } */
+    async function paintMap() {
+        const [things, keys] = await Promise.all([fetch(`${API}/resources`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => [])]);
+        const agents = conversations.map((c) => ({ name: c.name, label: c.toolLabel ?? c.tool, asleep: c.asleep === true }));
+        const right = [...things.map((r) => ({ name: r.name, kind: kindOf(r) === 'git' ? 'repository' : kindOf(r) })), ...keys.map((k) => ({ name: k.name ?? k, kind: 'key' }))];
+        const links = [];
+        for (const c of conversations) {
+            for (const r of c.resources ?? []) links.push({ agent: c.name, thing: r.name, access: r.access === 'write' ? 'write' : 'read' });
+            for (const k of c.secrets ?? []) links.push({ agent: c.name, thing: k.name ?? k, access: 'use' });
+        }
+        const ROW = 46; const W = 760; const LEFT = 250; const RIGHT = 510;
+        const height = Math.max(agents.length, right.length, 1) * ROW + 16;
+        const y = (i) => 8 + i * ROW + ROW / 2;
+        const drawing = svg('svg', { viewBox: `0 0 ${W} ${height}`, role: 'img', 'aria-label': `${agents.length} agent(s), ${right.length} thing(s), ${links.length} right(s) given` });
+        const lit = (link) => !mapFocus || (mapFocus.side === 'agent' ? link.agent === mapFocus.name : link.thing === mapFocus.name);
+        for (const link of links) {
+            const a = agents.findIndex((x) => x.name === link.agent); const t = right.findIndex((x) => x.name === link.thing);
+            if (a < 0 || t < 0) continue;
+            drawing.append(svg('path', { class: 'map-line', 'data-access': link.access, 'data-dim': String(!lit(link)), d: `M${LEFT} ${y(a)} C${LEFT + 110} ${y(a)} ${RIGHT - 110} ${y(t)} ${RIGHT} ${y(t)}` }));
+        }
+        const box = (side, i, name, sub, seen) => {
+            const g = svg('g', { class: 'map-box', 'data-side': side, 'data-name': name, 'data-seen': String(seen), tabindex: 0, role: 'button' });
+            const x = side === 'agent' ? 8 : RIGHT;
+            g.append(svg('rect', { x, y: y(i) - 17, width: side === 'agent' ? LEFT - 8 : W - RIGHT - 8, height: 34, rx: 8 }));
+            g.append(svg('text', { x: x + 12, y: y(i) + 5, class: 'map-name' }, name.length > 22 ? `${name.slice(0, 21)}...` : name));
+            g.append(svg('text', { x: side === 'agent' ? LEFT - 12 : W - 20, y: y(i) + 5, class: 'map-sub', 'text-anchor': 'end' }, seen ? sub : 'does not see'));
+            const pick = () => { mapFocus = mapFocus?.side === side && mapFocus.name === name ? null : { side, name }; void paintMap(); };
+            g.addEventListener('click', pick); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
+            return g;
+        };
+        agents.forEach((a, i) => drawing.append(box('agent', i, a.name, a.asleep ? `${a.label} - asleep` : a.label, !mapFocus || mapFocus.side === 'agent' || links.some((l) => l.agent === a.name && l.thing === mapFocus.name))));
+        right.forEach((t, i) => drawing.append(box('thing', i, t.name, t.kind, !mapFocus || mapFocus.side === 'thing' || links.some((l) => l.thing === t.name && l.agent === mapFocus.name))));
+        $('map-drawing').replaceChildren(drawing);
+        const mine = mapFocus ? links.filter(lit) : links;
+        $('map-said').textContent = !mapFocus ? `${agents.length} agent(s), ${right.length} thing(s) kept here, ${links.length} right(s) given.`
+            : mapFocus.side === 'agent' ? `${mapFocus.name} sees ${mine.length} of ${right.length}: ${mine.map((l) => `${l.thing} (${l.access === 'use' ? 'handed' : l.access})`).join(', ') || 'nothing'}. The rest does not exist for it.`
+                : `${mapFocus.name} is seen by ${mine.length} of ${agents.length} agent(s): ${mine.map((l) => `${l.agent} (${l.access === 'use' ? 'handed' : l.access})`).join(', ') || 'none'}.`;
+    }
+    $('map-open').addEventListener('click', async () => { mapFocus = null; $('assets').hidden = true; $('map').hidden = false; await refresh(); await paintMap(); });
+    $('map-close').addEventListener('click', () => { $('map').hidden = true; terminal.focus(); });
+
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings() {
         void paintAlerts().catch(() => {});

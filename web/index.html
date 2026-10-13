@@ -200,9 +200,17 @@
         </div>
       </div>
       <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
+      <div id="map" class="sheet" hidden>
+        <div class="panel-top"><b>Who sees what</b><button type="button" id="map-close">Close</button></div>
+        <p class="hint">Every agent on the left, everything kept here on the right. A line is a right you gave. No line: for that agent, it does not exist. Touch an agent or a thing to see it alone.</p>
+        <div id="map-legend" class="row"><span class="key" data-access="write">reads and writes</span><span class="key" data-access="read">reads</span><span class="key" data-access="use">is handed (a key)</span><span class="key" data-access="none">does not see</span></div>
+        <div id="map-drawing"></div>
+        <p id="map-said" class="hint" role="status"></p>
+      </div>
       <div id="assets" class="sheet" hidden>
         <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
         <p class="hint">Folders, repositories, mailboxes, secrets: what is kept here, which conversations use it, which devices were given it.</p>
+        <div class="row"><button type="button" id="map-open" class="primary">Who sees what</button></div>
         <div id="assets-filters" class="choices" role="group" aria-label="Kind of asset"></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <section data-kind="folder">

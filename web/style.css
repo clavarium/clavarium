@@ -306,3 +306,25 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 
 /* The conversation with the tool is drawn by Parley; here, only where it sits and this page's colours. */
 #simple-thread { max-height: 62vh; margin-bottom: 14px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }
+
+/* Who sees what: the table of rights, drawn. */
+#map-drawing svg { display: block; width: 100%; height: auto; max-width: 60rem; }
+.map-box rect { fill: var(--bar); stroke: var(--line); stroke-width: 1.5; pointer-events: all; }
+.map-line { pointer-events: none; }
+.map-box { cursor: pointer; }
+.map-box[data-seen="false"] rect { fill: none; stroke-dasharray: 4 4; }
+.map-box[data-seen="false"] .map-name { fill: var(--ink2); text-decoration: line-through; }
+.map-box[data-seen="false"] .map-sub { fill: #f08a6b; }
+.map-name { fill: var(--ink); font: 600 14px system-ui, sans-serif; }
+.map-sub { fill: var(--ink2); font: 12px system-ui, sans-serif; }
+.map-line { fill: none; stroke-width: 2.5; }
+.map-line[data-access="write"] { stroke: #5fc39d; stroke-width: 3.5; }
+.map-line[data-access="read"] { stroke: #8ab4ff; }
+.map-line[data-access="use"] { stroke: var(--brass); stroke-dasharray: 7 5; }
+.map-line[data-dim="true"] { opacity: .08; }
+#map-legend .key { display: inline-flex; align-items: center; gap: .4rem; font-size: .85rem; color: var(--ink2); }
+#map-legend .key::before { content: ""; width: 1.6rem; border-top: 3px solid #8ab4ff; }
+#map-legend .key[data-access="write"]::before { border-top: 4px solid #5fc39d; }
+#map-legend .key[data-access="use"]::before { border-top: 3px dashed var(--brass); }
+#map-legend .key[data-access="none"]::before { border-top: 2px dashed #f08a6b; }
+#map-said { font-size: 1rem; color: var(--ink); }

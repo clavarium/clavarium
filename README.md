@@ -72,7 +72,9 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   terminal, for whoever does not read one: a box to say what is wanted,
   what is ready to read, and what the tool says now as plain text, read by
   the page from its own screen. What is written is typed into the same
-  terminal; the server reads nothing more.
+  terminal; the server reads nothing more. In Assets, "Who sees what" draws
+  the table of rights: every agent, every thing kept here, a line for each
+  right given, and what an agent does not see.
 
 - **12 - talk through the app**: a branching on Clavarium Parley, a project
   of its own (copied unchanged in `server/parley`). The tool is given five
