@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, chmodSync, r
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitReview } from '../server/gitpush.mjs';
+import { GitReview, branchProblem } from '../server/gitpush.mjs';
 import { Store } from '../server/store.mjs';
 import { Vault } from '../server/vault.mjs';
 
@@ -41,7 +41,7 @@ test('what would go out is shown -- commits, files, changes -- and exactly that 
     await assert.rejects(b.review.push('site', { head: first }), /changed since you looked/);
     const again = await b.review.outgoing('site');
     assert.equal(again.commits.length, 2);
-    assert.deepEqual(await b.review.push('site', { head: second }), { ok: true, branch: 'main', head: second, commits: 2 });
+    assert.deepEqual(await b.review.push('site', { head: second }), { ok: true, branch: 'main', from: 'main', head: second, commits: 2, made: true });
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), second, 'the remote has exactly that commit');
     assert.equal((await b.review.outgoing('site')).state, 'up-to-date');
     await assert.rejects(b.review.push('site', { head: second }), /already there/);
@@ -106,4 +106,53 @@ test('the key is sealed and never said back; only a git repository has a push, a
     /* Outside tests, a directory of this machine is not a remote. */
     const strict = new GitReview({ store: new Store(join(b.dir, 'g2.json')), vault: new Vault(join(b.dir, 'vault.key')), resources: { get: () => ({ name: 'site', type: 'git' }), folder: () => b.work }, dataDir: b.dir });
     assert.throws(() => strict.setRemote('site', { url: b.remote }), /repository address is https/);
+});
+
+test('the branch to send to: the remote\'s branches are listed, the same name is the default, another or a new one can be chosen -- and what goes is exactly what was shown', async (t) => {
+    const b = bench(t);
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.push('site', { head: first });
+    /* The remote gets a second branch from somebody else. */
+    git(b.remote, 'branch', 'staging', first);
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    const seen = await b.review.outgoing('site');
+    assert.deepEqual([seen.target, seen.branches, seen.targetExists, seen.remoteTip], ['main', ['main', 'staging'], true, first]);
+    /* Another existing branch. */
+    const staging = await b.review.outgoing('site', { target: 'staging' });
+    assert.deepEqual([staging.state, staging.target, staging.commits.map((c) => c.subject)], ['ahead', 'staging', ['two']]);
+    assert.match(staging.message, /1 commit\(s\) would be sent to staging/);
+    assert.deepEqual(await b.review.push('site', { head: mine, target: 'staging' }), { ok: true, branch: 'staging', from: 'main', head: mine, commits: 1, made: false });
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/staging'), mine);
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first, 'only the branch that was shown');
+    /* A new branch: only what the remote does not have travels; the changes are shown from where it left main. */
+    const third = b.commit('c.txt', 'c\n', 'three');
+    const fresh = await b.review.outgoing('site', { target: 'try/new-idea' });
+    assert.deepEqual([fresh.state, fresh.targetExists, fresh.commits.map((c) => c.subject)], ['ahead', false, ['three']]);
+    assert.match(fresh.message, /would be sent to try\/new-idea, a new branch/);
+    assert.match(fresh.stat, /b\.txt/); assert.match(fresh.stat, /c\.txt/);
+    assert.doesNotMatch(fresh.stat, /a\.txt/);
+    /* What was shown for one branch is not sent to another: Send says where, and that is looked at again. */
+    await assert.rejects(b.review.push('site', { head: third, target: 'staging..x' }), /no "\.\."/);
+    await assert.rejects(b.review.push('site', { head: third, target: '-f' }), /does not start with "-"/);
+    assert.equal((await b.review.push('site', { head: third, target: 'try/new-idea' })).made, true);
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/try/new-idea'), third);
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first);
+    /* Sent: nothing is left for that branch. */
+    const behind = await b.review.outgoing('site', { target: 'try/new-idea' });
+    assert.equal(behind.state, 'up-to-date');
+    await assert.rejects(b.review.outgoing('site', { target: 'a b' }), /letters, digits/);
+});
+
+test('branch names follow the rules of git check-ref-format, and ours: no leading "-", bounded', () => {
+    const names = ['main', 'try/one', 'release-1.2', 'a.b/c_d', 'feature/x.y', '-x', 'a..b', 'a/', '/a', 'a//b', 'a.lock', 'a/.b', '.a', 'a.', 'a b', 'a~1', 'a^', 'a:b', 'a?', 'a*', 'a[', 'a\\b', 'a@{1}', '@', 'HEAD', 'x'.repeat(201), ''];
+    for (const name of names) {
+        const ours = branchProblem(name) === '';
+        let gits = false;
+        try { execFileSync('git', ['check-ref-format', `refs/heads/${name}`], { stdio: 'ignore' }); gits = true; } catch { gits = false; }
+        /* Never more lenient than git; stricter only on purpose. */
+        if (ours) assert.equal(gits, true, `${name} is accepted here but not by git`);
+        if (gits && !ours) assert.ok(name.startsWith('-') || name.length > 200 || name === 'HEAD' || /[^A-Za-z0-9._/-]/.test(name), `${name} is refused here for no reason`);
+    }
+    assert.equal(branchProblem('try/one'), '');
 });

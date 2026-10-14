@@ -325,6 +325,16 @@
         <p id="settings-people" class="hint"></p>
         <div class="panel-top"><b>Storage &amp; backup</b></div>
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
+        <details id="settings-advanced">
+          <summary>Advanced</summary>
+          <div>
+            <b>Git servers whose key is recorded</b>
+            <p class="hint">The first time a git server is reached over ssh, the key it shows is recorded; a different key later is refused, because the server may not be who it says. If a hosting service really changed its key (it says so on its own site), forget it here: the next contact will trust whatever key the server shows.</p>
+            <p id="git-hosts-empty" class="hint">No key recorded yet.</p>
+            <div id="git-hosts"></div>
+            <p id="git-hosts-error" class="error" role="alert" hidden></p>
+          </div>
+        </details>
         <div class="panel-top"><b>About</b></div>
         <p id="settings-about" class="hint"></p>
       </div>
@@ -357,9 +367,25 @@
       <div id="gitview" class="sheet" hidden>
         <div class="panel-top"><b id="gitview-name">Repository</b><button type="button" id="gitview-close">Close</button></div>
         <p class="hint">The tool commits in its machine and never holds the key that lets commits out: it is kept here. You see what would go, then you send it. What is sent is exactly what you were shown.</p>
+        <div id="gitview-target-row" class="row" hidden>
+          <label for="gitview-target">Send to the branch</label>
+          <select id="gitview-target"></select>
+          <input id="gitview-newbranch" spellcheck="false" autocapitalize="off" autocomplete="off" maxlength="200" placeholder="new-branch-name" aria-label="Name of the new branch" hidden>
+          <button type="button" id="gitview-newbranch-go" hidden>Look</button>
+        </div>
         <p id="gitview-state" role="status"></p>
-        <div class="row"><button type="button" id="gitview-push" class="primary" hidden>Send these commits</button><button type="button" id="gitview-again">Look again</button></div>
+        <div id="gitview-checks" hidden>
+          <p class="hint">Checks run in the agent's machine (its pre-push hook, your check command): a safeguard, not a proof. The tool could make them pass.</p>
+          <p id="gitview-checks-state" role="status"></p>
+          <pre id="gitview-checks-output"></pre>
+        </div>
+        <div class="row"><button type="button" id="gitview-push" class="primary" hidden>Send these commits</button><button type="button" id="gitview-check" hidden>Run the checks again</button><button type="button" id="gitview-again">Look again</button></div>
         <p id="gitview-error" class="error" role="alert" hidden></p>
+        <div id="gitview-origin" hidden>
+          <p class="hint" id="gitview-origin-where"></p>
+          <div class="row"><code id="gitview-origin-fetch"></code></div>
+          <div class="row"><button type="button" id="gitview-refresh">Refresh now</button><span class="hint" id="gitview-origin-state" role="status"></span></div>
+        </div>
         <div id="gitview-commits"></div>
         <pre id="gitview-stat"></pre>
         <pre id="gitview-diff"></pre>
@@ -376,6 +402,31 @@
             <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>
             <p id="gitview-key-state" class="hint"></p>
           </form>
+        </details>
+        <details id="gitview-keep-box">
+          <summary>Checks, origin, automatic sending</summary>
+          <form id="gitview-keep" autocomplete="off">
+            <label class="check"><input type="checkbox" id="gitview-runhook"> Run the project's pre-push hook, if it has one</label>
+            <label for="gitview-checkcommand">Check command, run in the repository in the agent's machine (optional)</label>
+            <input id="gitview-checkcommand" spellcheck="false" autocapitalize="off" maxlength="500" placeholder="npm test">
+            <label for="gitview-checkseconds">Time limit of the checks, in seconds</label>
+            <input id="gitview-checkseconds" type="number" min="10" max="3600" step="1" inputmode="numeric">
+            <label class="check"><input type="checkbox" id="gitview-require"> Send only after the checks passed</label>
+            <label for="gitview-refreshminutes">Refresh the origin every (minutes; 0: only with "Refresh now")</label>
+            <input id="gitview-refreshminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
+            <label for="gitview-autobranches">Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.</label>
+            <textarea id="gitview-autobranches" rows="2" spellcheck="false" autocapitalize="off" placeholder="test, staging, try/*"></textarea>
+            <p class="hint">When the tool's branch has new commits, then nothing new for the quiet delay, and its name is in this list, the commit is sent to the branch of the same name, as Send would, never forced, and only after the checks passed.</p>
+            <label for="gitview-quietminutes">Quiet delay, in minutes</label>
+            <input id="gitview-quietminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
+            <label for="gitview-perhour">Automatic sendings an hour, at most</label>
+            <input id="gitview-perhour" type="number" min="1" max="60" step="1" inputmode="numeric">
+            <label class="check"><input type="checkbox" id="gitview-alert"> Tell my phone about automatic sendings</label>
+            <div class="row"><button type="submit" class="primary">Save</button><span class="hint" id="gitview-keep-said" role="status"></span></div>
+          </form>
+          <b>What was sent by itself</b>
+          <p id="gitview-log-empty" class="hint">Nothing yet.</p>
+          <div id="gitview-log"></div>
         </details>
       </div>
       <div id="sharing" class="sheet" hidden>

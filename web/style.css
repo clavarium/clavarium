@@ -210,7 +210,14 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #gitview .commit { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
 #gitview .commit code { color: var(--ink2); }
 #gitview .commit small { color: var(--ink2); }
-#gitview-remote { display: grid; gap: 6px; margin-top: 8px; }
+#gitview-remote, #gitview-keep { display: grid; gap: 6px; margin-top: 8px; }
+#gitview-keep input:not([type=checkbox]), #gitview-keep textarea, #gitview-target, #gitview-newbranch { min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#gitview-target { max-width: 100%; }
+#gitview-origin code { overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+#gitview-checks-state.passed { color: var(--ok); }
+#gitview-checks-state.failed { color: var(--danger); }
+#gitview-log .logline { padding: 4px 0; border-top: 1px solid var(--line); font-size: 13px; overflow-wrap: anywhere; }
+#gitview-log .logline.bad { color: var(--ink2); }
 #gitview-remote input { flex: 1; min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #gitview details > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; }
 
@@ -262,10 +269,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .asset-head[aria-expanded="true"] b { color: var(--brass); }
 .asset-inside { flex-basis: 100%; padding: 0 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 700px) { .asset-head { grid-template-columns: 1fr; gap: 2px; } }
-#assets details > summary, #access-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
-#assets details > summary::before, #access-advanced > summary::before { content: '+ '; }
-#assets details[open] > summary::before, #access-advanced[open] > summary::before { content: '- '; }
-#assets details form, #access-advanced > div { margin-top: 8px; }
+#assets details > summary, #access-advanced > summary, #settings-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
+#assets details > summary::before, #access-advanced > summary::before, #settings-advanced > summary::before { content: '+ '; }
+#assets details[open] > summary::before, #access-advanced[open] > summary::before, #settings-advanced[open] > summary::before { content: '- '; }
+#assets details form, #access-advanced > div, #settings-advanced > div { margin-top: 8px; }
 #attach-picker { border: 1px solid var(--brass); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 #chips { cursor: pointer; }
 #settings .row { align-items: center; gap: 10px; }
@@ -354,3 +361,6 @@ textarea.public-key { flex: 1 1 260px; min-width: 0; font: 12px ui-monospace, Me
 .git-key .row { flex-wrap: wrap; }
 #git-new input[type="radio"] { min-height: 0; padding: 0; margin: 0; }
 #git-new select, #gitview-sshkey { min-height: 40px; min-width: 10rem; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+
+#settings-advanced > div { display: grid; gap: 6px; }
+#git-hosts .folder code { overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }

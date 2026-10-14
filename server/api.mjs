@@ -10,6 +10,14 @@
  *   GET  /api/git-keys                      SSH keys made here: the public half only
  *   POST /api/git-keys                      {name} -> a new key; its private half never leaves the server
  *   POST /api/git-keys/<name>/remove        refused while a repository uses it
+ *   GET  /api/git-hosts                     host keys recorded at first contact: {host, type, fingerprint}
+ *   POST /api/git-hosts/forget              {host}: the next contact trusts the key it is shown
+ *   GET  /api/git/<name>/outgoing?target=<branch>   what would go, to that branch of the remote
+ *   POST /api/git/<name>/push               {head, target?}: exactly that commit, to exactly that branch
+ *   GET  /api/git/<name>/keep               origin kept up to date, checks, automatic sending, log
+ *   POST /api/git/<name>/keep               {refreshMinutes?, autoBranches?, quietMinutes?, perHour?, alert?, checkCommand?, checkSeconds?, runHook?, requireForSend?}
+ *   POST /api/git/<name>/refresh            fetch the origin into its mirror now
+ *   POST /api/git/<name>/check              {head, target?}: run the checks in the machine
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
  *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
@@ -56,7 +64,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -132,6 +140,7 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
+            if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
@@ -139,8 +148,9 @@ export async function handleApi(request, response, conversations, headers, resou
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
             if (answered && answerer) return send(200, answerer.log(decodeURIComponent(answered[1]))), true;
             /* A repository: where its commits go, and what would go now. */
-            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing)?$/.exec(pathname);
-            if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1]) : gitReview.settings(repo[1])), true;
+            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/keep)?$/.exec(pathname);
+            if (repo && repo[2] === '/keep' && gitKeeper) return send(200, gitKeeper.about(repo[1])), true;
+            if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1], { target: query.get('target') ?? undefined }) : gitReview.settings(repo[1])), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
                 const conversation = decodeURIComponent(watched[1]);
@@ -162,6 +172,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* A folder, or a git repository (empty, or cloned from `from`). A mailbox has its own way in. */
         if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from, via: body.via })), true;
         if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
+        if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unkeyed && gitAccess) { gitAccess.removeKey(unkeyed[1]); return send(200, { ok: true }), true; }
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
@@ -244,8 +255,14 @@ export async function handleApi(request, response, conversations, headers, resou
             const url = `${sharing.origin(request.headers)}/c/#${code}`;
             return send(201, { url, minutes, qr: await sharing.qr(url) }), true;
         }
+        const kept = /^\/api\/git\/([a-z0-9-]{1,32})\/(keep|refresh|check)$/.exec(pathname);
+        if (kept && gitKeeper) {
+            if (kept[2] === 'keep') return send(200, gitKeeper.set(kept[1], body)), true;
+            if (kept[2] === 'refresh') return send(200, await gitKeeper.refresh(kept[1])), true;
+            return send(200, await gitKeeper.check(kept[1], body)), true;
+        }
         const pushed = /^\/api\/git\/([a-z0-9-]{1,32})\/(remote|push)$/.exec(pathname);
-        if (pushed && gitReview) return send(200, pushed[2] === 'remote' ? gitReview.setRemote(pushed[1], body) : await gitReview.push(pushed[1], body)), true;
+        if (pushed && gitReview) return send(200, pushed[2] === 'remote' ? gitReview.setRemote(pushed[1], body) : gitKeeper ? await gitKeeper.send(pushed[1], body) : await gitReview.push(pushed[1], body)), true;
         if (pathname === '/api/shares/cancel' && sharing) { sharing.devices.cancel(body.code); return send(200, { ok: true }), true; }
         const more = /^\/api\/devices\/([0-9a-f-]{36})\/(give|rename)$/.exec(pathname);
         if (more && sharing) {

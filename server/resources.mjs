@@ -26,6 +26,8 @@ import { execFile } from 'node:child_process';
 import { Refusal } from './conversations.mjs';
 import { Grants, conversationSubject } from './grants.mjs';
 import { readAddress, explain } from './gitaccess.mjs';
+import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 export const ACCESS = ['read', 'write'];
 export const TYPES = ['folder', 'mailbox', 'git'];
@@ -36,6 +38,41 @@ const runGit = (argv, cwd, env = {}) => new Promise((resolve) => {
     execFile('git', argv, { cwd, timeout: 600_000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent', LC_ALL: 'C', ...env } },
         (error, _stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stderr: String(stderr ?? '') }));
 });
+/* THE ORIGIN OF A REPOSITORY, KEPT UP TO DATE, IN REACH OF THE TOOL.
+ *
+ * A tool works in its repository and would like to see what others pushed
+ * to its origin. It cannot fetch from the origin itself: what opens the
+ * origin (a key, a token) is kept on this server and never enters a machine.
+ * So the SERVER fetches the origin, with that key, into a bare repository of
+ * its own -- a mirror -- and the mirror is shown in the machine READ-ONLY,
+ * next to the repository: /resources/<name>-origin. The tool then runs, in
+ * its own repository, in its own machine:
+ *
+ *     git fetch /resources/<name>-origin '+refs/heads/*:refs/remotes/origin/*'
+ *
+ * and has the origin's branches, with no key and no network. Git is never
+ * run here in the tool's repository: only in the mirror, which nothing but
+ * this server writes.
+ *
+ * WHY THIS SHAPE: it is how every folder is already shown in a machine. The
+ * mirror is a folder of resources/, made by the host program like any other
+ * (so it cannot be swapped for a link), and it is mounted through its
+ * read-only view (bindfs -r), the one way a read-only folder is proven to
+ * hold against root in the machine. Nothing new is asked of the host
+ * program. The mirror is not a resource of the list: it cannot be attached
+ * on its own, written, shared or removed from the page; it follows its
+ * repository (shown wherever the repository is attached, put aside with it). */
+export const ORIGIN_SUFFIX = '-origin';
+/* The mirror's folder name: "<name>-origin" when that is a valid name (32
+   characters at most); a longer one is shortened, with a part of a hash so
+   that two long names do not meet. */
+export function originFolder(name) {
+    const plain = `${name}${ORIGIN_SUFFIX}`;
+    if (plain.length <= 32) return plain;
+    const hash = createHash('sha256').update(String(name)).digest('hex').slice(0, 6);
+    return `${String(name).slice(0, 18).replace(/-+$/, '')}-${hash}${ORIGIN_SUFFIX}`;
+}
+
 /* How the page names a conversation's own work folder, next to its attached folders. */
 export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
@@ -108,6 +145,7 @@ export class Resources {
         const origin = address?.url;
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         if (name === WORK_TAB) throw new Refusal(409, 'This name is taken: "work" is where each conversation works.');
+        if (name.endsWith(ORIGIN_SUFFIX)) throw new Refusal(409, `A name that ends with "${ORIGIN_SUFFIX}" is kept for the origin of a repository.`);
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         const made = await this.#host(['folder', 'make', name]);
         if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);
@@ -144,7 +182,37 @@ export class Resources {
     async ensureViews() {
         for (const r of this.#store.all()) {
             if (Object.values(this.#attachments(r)).includes('read')) await this.ensureView(r.name);
+            if (r.type === 'git' && Object.keys(this.#attachments(r)).length > 0 && this.hasOrigin(r.name)) await this.ensureView(originFolder(r.name)).catch(() => {});
         }
+    }
+
+    /* ---- the origin of a repository: see ORIGIN at the top of this file ---- */
+    originPath(name) { return this.folder(originFolder(name)); }
+    /* Is the mirror there yet (made, and git init done in it)? */
+    hasOrigin(name) { return existsSync(`${this.originPath(name)}/HEAD`); }
+    /* Its folder, made by the host program, empty. Refused when a resource
+       of the list (an earlier one) already has that name. */
+    async makeOrigin(name) {
+        const folder = originFolder(name);
+        if (this.#store.get(folder)) throw new Refusal(409, `A folder named ${folder} is in the way of this repository's origin.`);
+        if (existsSync(this.folder(folder))) return;
+        const made = await this.#host(['folder', 'make', folder]);
+        if (made.code !== 0) throw new Refusal(502, `The folder of the origin could not be made: ${firstLine(made.stderr)}`);
+    }
+    /* Shows the mirror, read-only, in one conversation's machine. A machine
+       that does not run just now gets it at its next start (remount). */
+    async #showOrigin(conversation, name) {
+        if (!this.hasOrigin(name)) return;
+        const folder = originFolder(name);
+        await this.ensureView(folder);
+        const r = await this.#vms.mount(conversation, 'view', folder, this.#uid, this.#gid);
+        if (r.code !== 0 && !/already mounted/i.test(`${r.stderr}${r.stdout}`)) throw new Refusal(502, `The origin could not be shown: ${firstLine(r.stderr)}`);
+    }
+    /* The mirror was just made: it is shown wherever its repository is attached. */
+    async shareOrigin(name) {
+        const resource = this.#store.get(name);
+        if (resource?.type !== 'git') return;
+        for (const conversation of Object.keys(this.#attachments(resource))) await this.#showOrigin(conversation, name).catch(() => {});
     }
 
     /* access: 'read', 'write', or 'none' to detach. */
@@ -164,7 +232,11 @@ export class Resources {
             if (r.code !== 0) throw new Refusal(502, `The folder could not be detached: ${firstLine(r.stderr)}`);
             this.#grants.take(subject, asset);
         }
-        if (access === 'none') return;
+        if (access === 'none') {
+            /* The origin goes with its repository. */
+            if (resource.type === 'git' && this.hasOrigin(name)) await this.#vms.umount(conversation, originFolder(name)).catch(() => {});
+            return;
+        }
         if (access === 'read') await this.ensureView(name);
         const kind = access === 'read' ? 'view' : 'folder';
         let r = await this.#vms.mount(conversation, kind, name, this.#uid, this.#gid);
@@ -177,6 +249,9 @@ export class Resources {
         }
         if (r.code !== 0) throw new Refusal(502, `The folder could not be attached: ${firstLine(r.stderr)}`);
         this.#grants.give(subject, asset, access === 'write' ? 'rw' : 'r');
+        /* A repository newly attached: its origin is shown next to it. Not
+           shown is not a failure of the attachment: it comes at the next start. */
+        if (resource.type === 'git' && before === undefined) await this.#showOrigin(conversation, name).catch(() => {});
     }
 
     /* The machine of a conversation was built again: what was attached to
@@ -190,6 +265,7 @@ export class Resources {
                 if (access === 'read') await this.ensureView(name);
                 const r = await this.#vms.mount(conversation, access === 'read' ? 'view' : 'folder', name, this.#uid, this.#gid);
                 if (r.code !== 0 && !/already mounted/i.test(`${r.stderr}${r.stdout}`)) failed.push(name);
+                if (this.#store.get(name)?.type === 'git') await this.#showOrigin(conversation, name).catch(() => failed.push(originFolder(name)));
             } catch { failed.push(name); }
         }
         return failed;
@@ -207,6 +283,11 @@ export class Resources {
         if (closed.code !== 0) throw new Refusal(502, `The read-only view could not be closed: ${firstLine(closed.stderr)}`);
         const aside = await this.#host(['folder', 'aside', name]);
         if (aside.code !== 0) throw new Refusal(502, `The folder could not be put aside: ${firstLine(aside.stderr)}`);
+        /* Its origin, if one was kept, is put aside with it. */
+        if (resource.type === 'git' && existsSync(this.originPath(name))) {
+            await this.#host(['view', 'close', originFolder(name)]);
+            await this.#host(['folder', 'aside', originFolder(name)]);
+        }
         this.#store.remove(name);
         /* Whoever else had a right on it (a device it was shared with) loses it. */
         this.#grants.forgetAsset(this.assetOf(resource));

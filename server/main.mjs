@@ -43,6 +43,8 @@ import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
 import { GitReview } from './gitpush.mjs';
 import { GitAccess } from './gitaccess.mjs';
+import { GitChecks } from './gitchecks.mjs';
+import { GitKeeper } from './gitkeeper.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -89,7 +91,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -122,7 +124,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -150,7 +152,7 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs }) {
+export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -226,12 +228,17 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     let bridge;
     const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name) });
     const wakeTimer = wakeups.start(wakeEveryMs);
+    /* A repository's origin kept up to date, checks run in the machine, and
+       automatic sending to the branches the owner listed: see gitkeeper.mjs. */
+    const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), review: gitReview, resources: folders, alerts,
+        checks: new GitChecks({ vms, conversations: all, resources: folders }) });
+    const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         alert: (name, message) => { void alerts.tell({ title: message.kind === 'ask' ? `${name} asks you something` : `${name} waits for you`, body: message.text ?? '', url: `/?c=${name}` }); } });
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess });
-    server.on('close', () => { clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); talk.stop(); });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper });
+    server.on('close', () => { clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => answerer.typed(name, data),

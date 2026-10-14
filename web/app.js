@@ -1276,6 +1276,28 @@
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         $('settings').hidden = false;
+        await paintHosts();
+    }
+    /* The git servers whose key was recorded at first contact: forgetting
+       one is rare and weighty (the next contact trusts any key), so it is
+       here, out of the way, and asks twice. */
+    async function paintHosts() {
+        const hosts = await fetch(`${API}/git-hosts`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+        const rows = $('git-hosts'); rows.replaceChildren();
+        $('git-hosts-empty').hidden = hosts.length > 0;
+        for (const h of hosts) {
+            const row = document.createElement('div'); row.className = 'folder'; row.dataset.host = h.host;
+            const label = document.createElement('b'); label.textContent = h.host;
+            const key = document.createElement('code'); key.textContent = `${h.type} ${h.fingerprint}`;
+            const forget = document.createElement('button'); forget.type = 'button'; forget.textContent = 'Forget';
+            forget.addEventListener('click', async () => {
+                if (forget.dataset.sure !== 'yes') { forget.dataset.sure = 'yes'; forget.textContent = 'Yes, forget it: the next contact will trust whatever key this server shows'; return; }
+                forget.disabled = true; $('git-hosts-error').hidden = true;
+                try { await post(`${API}/git-hosts/forget`, { host: h.host }); } catch (error) { $('git-hosts-error').textContent = error.message; $('git-hosts-error').hidden = false; }
+                await paintHosts();
+            });
+            row.append(label, key, forget); rows.append(row);
+        }
     }
     $('settings-open').addEventListener('click', () => { void openSettings(); });
     $('settings-close').addEventListener('click', () => { $('settings').hidden = true; terminal.focus(); });
@@ -1302,13 +1324,81 @@
         await paintAssets();
     });
     /* ---------- a repository: what would go out, then send it ---------- */
-    let gitShown = ''; let gitHead = null;
+    /* `gitTarget` is the branch the last look was made for: Send sends there
+       and nowhere else; choosing another branch looks again first. */
+    let gitShown = ''; let gitHead = null; let gitTarget = null; let gitAsked = ''; let gitState = ''; let gitRequire = false;
+    const NEW_BRANCH = '\u0000new';
+    function paintChecks(result) {
+        const state = $('gitview-checks-state'); state.className = '';
+        if (!result) { state.textContent = 'Running the checks in the agent\'s machine...'; $('gitview-checks-output').textContent = ''; return; }
+        const where = result.machine ? ` (machine of ${result.machine})` : '';
+        state.textContent = result.status === 'passed' ? `Checks passed in the agent's machine${where}.`
+            : result.status === 'failed' ? `Checks FAILED in the agent's machine${where}.`
+                : result.status === 'none' ? 'Nothing was checked: no pre-push hook, no check command.' : 'The checks could not run.';
+        if (result.status === 'passed' || result.status === 'failed') state.className = result.status;
+        $('gitview-checks-output').textContent = result.output ?? '';
+    }
+    function showSend(passed, commits) {
+        const button = $('gitview-push');
+        button.hidden = gitState !== 'ahead' || (gitRequire && !passed);
+        const n = commits;
+        button.textContent = n > 0 ? `Send ${n} commit${n > 1 ? 's' : ''} to ${gitTarget}` : `Make the branch ${gitTarget}`;
+        button.dataset.sure = '';
+        $('gitview-check').hidden = gitState !== 'ahead';
+    }
+    let gitCommits = 0;
+    async function runChecks() {
+        const name = gitShown; const head = gitHead; const target = gitTarget;
+        $('gitview-checks').hidden = false; paintChecks(null); $('gitview-check').disabled = true;
+        let result;
+        try { result = await post(`${API}/git/${name}/check`, { head, target }); }
+        catch (error) { result = { status: 'unavailable', output: error.message }; }
+        $('gitview-check').disabled = false;
+        if (gitShown !== name || gitHead !== head || gitTarget !== target) return;
+        paintChecks(result);
+        showSend(result.status === 'passed', gitCommits);
+    }
+    async function paintKeep() {
+        const name = gitShown;
+        let keep;
+        try { const r = await fetch(`${API}/git/${name}/keep`); keep = await r.json(); if (!r.ok) throw new Error(keep.error); } catch { return; }
+        if (gitShown !== name) return;
+        const s = keep.settings;
+        gitRequire = s.requireForSend;
+        $('gitview-runhook').checked = s.runHook; $('gitview-checkcommand').value = s.checkCommand; $('gitview-checkseconds').value = String(s.checkSeconds);
+        $('gitview-require').checked = s.requireForSend; $('gitview-refreshminutes').value = String(s.refreshMinutes);
+        $('gitview-autobranches').value = s.autoBranches.join('\n'); $('gitview-quietminutes').value = String(s.quietMinutes);
+        $('gitview-perhour').value = String(s.perHour); $('gitview-alert').checked = s.alert;
+        $('gitview-origin').hidden = !keep.origin;
+        if (keep.origin) {
+            $('gitview-origin-where').textContent = `Its origin, kept up to date by this server, is at ${keep.origin.path} in the agent's machine, read-only, next to the repository. The tool brings it in itself, with no key, by running there:`;
+            $('gitview-origin-fetch').textContent = `git fetch ${keep.origin.path} '+refs/heads/*:refs/remotes/origin/*'`;
+            $('gitview-origin-state').textContent = keep.origin.at ? `${keep.origin.ok ? 'Refreshed' : 'Not refreshed'} ${new Date(keep.origin.at).toLocaleString()}: ${keep.origin.message}` : 'Not fetched yet.';
+        }
+        const log = $('gitview-log'); log.replaceChildren();
+        $('gitview-log-empty').hidden = keep.log.length > 0;
+        for (const entry of keep.log) {
+            const line = document.createElement('div'); line.className = `logline${entry.ok ? '' : ' bad'}`;
+            line.textContent = `${new Date(entry.at).toLocaleString()} - ${entry.branch ?? ''} ${entry.head ? entry.head.slice(0, 8) : ''} - ${entry.what}`;
+            log.append(line);
+        }
+    }
+    function fillTargets(out) {
+        const select = $('gitview-target'); select.replaceChildren();
+        const names = [...(out.branches ?? [])];
+        if (out.target && !names.includes(out.target)) names.unshift(out.target);
+        for (const b of names) { const o = document.createElement('option'); o.value = b; o.textContent = b === out.target && !out.targetExists ? `${b} (new branch)` : b; select.append(o); }
+        const other = document.createElement('option'); other.value = NEW_BRANCH; other.textContent = 'A new branch...'; select.append(other);
+        select.value = out.target ?? NEW_BRANCH;
+        $('gitview-newbranch').hidden = true; $('gitview-newbranch-go').hidden = true;
+    }
     async function paintGit() {
         const name = gitShown;
         $('gitview-name').textContent = `${name} - git repository`;
-        $('gitview-error').hidden = true; $('gitview-push').hidden = true;
+        $('gitview-error').hidden = true; $('gitview-push').hidden = true; $('gitview-check').hidden = true; $('gitview-checks').hidden = true;
         $('gitview-state').textContent = 'Looking at what was committed...';
         $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').textContent = '';
+        gitHead = null; gitTarget = null; gitState = '';
         const settings = await (await fetch(`${API}/git/${name}`)).json().catch(() => ({}));
         $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? '';
         const keys = await fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []);
@@ -1317,14 +1407,17 @@
         pick.value = settings.sshKey ?? '';
         $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.'
             : settings.sshKey ? `Over ssh, the SSH key ${settings.sshKey} is used.` : 'No key is kept for sending: what the repository was cloned with is used, for the same server only; a remote that asks for more will refuse.';
+        await paintKeep();
         let out;
         try {
-            const r = await fetch(`${API}/git/${name}/outgoing`);
+            const r = await fetch(`${API}/git/${name}/outgoing${gitAsked ? `?target=${encodeURIComponent(gitAsked)}` : ''}`);
             out = await r.json();
             if (!r.ok) throw new Error(out.error || 'The repository could not be read.');
         } catch (error) { $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; return; }
         if (gitShown !== name) return;
-        gitHead = out.head;
+        gitHead = out.head; gitTarget = out.target; gitState = out.state; gitCommits = out.commits.length;
+        $('gitview-target-row').hidden = !['ahead', 'up-to-date', 'diverged'].includes(out.state);
+        fillTargets(out);
         $('gitview-state').textContent = out.message;
         $('gitview-remote-box').open = out.state === 'no-remote' || out.state === 'unreachable';
         for (const c of out.commits) {
@@ -1336,21 +1429,50 @@
         }
         $('gitview-stat').textContent = out.stat;
         $('gitview-diff').textContent = out.diff + (out.cut ? '\n... (the rest is not shown here: too long)' : '');
-        $('gitview-push').hidden = out.state !== 'ahead';
-        $('gitview-push').textContent = `Send ${out.commits.length} commit${out.commits.length > 1 ? 's' : ''} to ${out.branch}`;
-        $('gitview-push').dataset.sure = '';
+        /* Before Send is shown, the checks run in the machine: their result
+           is shown, and Send waits for them (it is refused without them only
+           if the owner asked for that). */
+        if (out.state === 'ahead') await runChecks();
     }
-    async function openGit(name) { gitShown = name; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
+    async function openGit(name) { gitShown = name; gitAsked = ''; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
     $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; terminal.focus(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
+    $('gitview-check').addEventListener('click', () => { void runChecks(); });
+    $('gitview-target').addEventListener('change', () => {
+        const value = $('gitview-target').value;
+        if (value === NEW_BRANCH) { $('gitview-push').hidden = true; $('gitview-newbranch').hidden = false; $('gitview-newbranch-go').hidden = false; $('gitview-newbranch').focus(); return; }
+        gitAsked = value; void paintGit();
+    });
+    const lookAtNew = () => { const wanted = $('gitview-newbranch').value.trim(); if (!wanted) return; gitAsked = wanted; void paintGit(); };
+    $('gitview-newbranch-go').addEventListener('click', lookAtNew);
+    $('gitview-newbranch').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); lookAtNew(); } });
     $('gitview-push').addEventListener('click', async () => {
         const button = $('gitview-push');
         /* Two clicks: what leaves cannot be called back. */
-        if (button.dataset.sure !== 'yes') { button.dataset.sure = 'yes'; button.textContent = 'Yes, send them: this cannot be undone'; return; }
+        if (button.dataset.sure !== 'yes') { button.dataset.sure = 'yes'; button.textContent = `Yes, send to ${gitTarget}: this cannot be undone`; return; }
         button.disabled = true; $('gitview-error').hidden = true;
-        try { const sent = await post(`${API}/git/${gitShown}/push`, { head: gitHead }); await paintGit(); $('gitview-state').textContent = `Sent: ${sent.commits} commit${sent.commits > 1 ? 's' : ''} to ${sent.branch}. ${$('gitview-state').textContent}`; }
+        try { const sent = await post(`${API}/git/${gitShown}/push`, { head: gitHead, target: gitTarget }); await paintGit(); $('gitview-state').textContent = `${sent.commits > 0 ? `Sent: ${sent.commits} commit${sent.commits > 1 ? 's' : ''} to ${sent.branch}${sent.made ? ' (a new branch)' : ''}.` : `Made the branch ${sent.branch} on the remote.`} ${$('gitview-state').textContent}`; }
         catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
         button.disabled = false;
+    });
+    $('gitview-refresh').addEventListener('click', async () => {
+        const button = $('gitview-refresh'); button.disabled = true; $('gitview-origin-state').textContent = 'Fetching the origin...';
+        try { await post(`${API}/git/${gitShown}/refresh`, {}); } catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
+        button.disabled = false; await paintKeep();
+    });
+    $('gitview-keep').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('gitview-error').hidden = true; $('gitview-keep-said').textContent = '';
+        try {
+            await post(`${API}/git/${gitShown}/keep`, {
+                runHook: $('gitview-runhook').checked, checkCommand: $('gitview-checkcommand').value, checkSeconds: Number($('gitview-checkseconds').value),
+                requireForSend: $('gitview-require').checked, refreshMinutes: Number($('gitview-refreshminutes').value), autoBranches: $('gitview-autobranches').value,
+                quietMinutes: Number($('gitview-quietminutes').value), perHour: Number($('gitview-perhour').value), alert: $('gitview-alert').checked,
+            });
+            $('gitview-keep-said').textContent = 'Saved.';
+            await paintKeep();
+            if (gitState === 'ahead') showSend($('gitview-checks-state').classList.contains('passed'), gitCommits);
+        } catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
     });
     $('gitview-remote').addEventListener('submit', async (event) => {
         event.preventDefault();

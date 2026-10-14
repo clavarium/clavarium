@@ -5,9 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
+import { FAKE_HOST_KEY } from './fake-ssh.mjs';
 
 const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Robin', GIT_AUTHOR_EMAIL: 'robin@example.com', GIT_COMMITTER_NAME: 'Robin', GIT_COMMITTER_EMAIL: 'robin@example.com' };
 const git = (cwd, ...argv) => execFileSync('git', argv, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -89,5 +90,30 @@ test('a private repository is added with a new key: its public half is shown and
     assert.equal((await me.page.content()).includes('PRIVATE KEY'), false);
     assert.ok(answers.length > 5);
     for (const body of answers) assert.equal(body.includes('PRIVATE KEY') || body.includes('"sealed"'), false, body.slice(0, 200));
+    assert.deepEqual(me.errors, []);
+});
+
+test('a git server\'s recorded key is forgotten from Settings, deep down, after asking twice', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    /* Two servers met before (as a first clone would have recorded them). */
+    const knownHosts = join(b.dir, 'data', 'git-ssh', 'known_hosts');
+    mkdirSync(join(b.dir, 'data', 'git-ssh'), { recursive: true });
+    writeFileSync(knownHosts, `example.com ssh-ed25519 ${FAKE_HOST_KEY}\ngit.example.org ssh-ed25519 ${FAKE_HOST_KEY}\n`);
+    const me = await b.person();
+    await me.create('settler');
+    await me.page.locator('#settings-open').click();
+    /* Out of the way: under Advanced, closed. */
+    assert.equal(await me.page.locator('#git-hosts').isVisible(), false);
+    await me.page.locator('#settings-advanced summary').click();
+    const row = me.page.locator('#git-hosts .folder[data-host="example.com"]');
+    await me.until('the hosts are listed', async () => (await row.count()) === 1);
+    assert.match(await row.innerText(), /ssh-ed25519 SHA256:[A-Za-z0-9+/]+/);
+    await row.locator('button').click();
+    assert.match(await row.locator('button').innerText(), /the next contact will trust whatever key this server shows/);
+    assert.match(readFileSync(knownHosts, 'utf8'), /^example\.com /m, 'not yet: one click only asks');
+    await row.locator('button').click();
+    await me.until('it is forgotten', async () => (await row.count()) === 0);
+    assert.equal(readFileSync(knownHosts, 'utf8'), `git.example.org ssh-ed25519 ${FAKE_HOST_KEY}\n`, 'the other host is kept');
+    assert.equal(await me.page.locator('#git-hosts .folder').count(), 1);
     assert.deepEqual(me.errors, []);
 });

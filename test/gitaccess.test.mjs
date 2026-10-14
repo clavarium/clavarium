@@ -257,3 +257,24 @@ test('data written before private repositories load unchanged: a public clone, a
     assert.deepEqual(review.settings('site'), { remote: 'https://example.com/team/site.git', user: 'me', hasKey: true, sshKey: null });
     assert.deepEqual(access.keys(), []);
 });
+
+test('a recorded host key can be forgotten, host by host, for the day a hosting service really changes it', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-hosts-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const access = new GitAccess({ vault: new Vault(join(dir, 'vault.key')), dataDir: dir });
+    assert.deepEqual(access.hosts(), []);
+    assert.throws(() => access.forgetHost('example.com'), /No key is recorded/);
+    mkdirSync(join(dir, 'git-ssh'), { recursive: true });
+    const other = 'AAAAC3NzaC1lZDI1NTE5AAAAIA' + 'b'.repeat(42) + '=';
+    writeFileSync(access.knownHosts, `example.com ssh-ed25519 ${FAKE_HOST_KEY}\n[git.example.org]:2222,git.example.net ssh-ed25519 ${other}\n`);
+    const fingerprint = `SHA256:${createHash('sha256').update(Buffer.from(FAKE_HOST_KEY, 'base64')).digest('base64').replace(/=+$/, '')}`;
+    assert.deepEqual(access.hosts().map((h) => h.host), ['[git.example.org]:2222', 'example.com', 'git.example.net']);
+    assert.deepEqual(access.hosts().find((h) => h.host === 'example.com'), { host: 'example.com', type: 'ssh-ed25519', fingerprint });
+    /* Forgotten: that host only; a line shared with another host keeps the other. */
+    assert.deepEqual(access.forgetHost('git.example.net').map((h) => h.host), ['[git.example.org]:2222', 'example.com']);
+    assert.equal(readFileSync(access.knownHosts, 'utf8'), `example.com ssh-ed25519 ${FAKE_HOST_KEY}\n[git.example.org]:2222 ssh-ed25519 ${other}\n`);
+    access.forgetHost('example.com');
+    assert.deepEqual(access.hosts().map((h) => h.host), ['[git.example.org]:2222']);
+    assert.throws(() => access.forgetHost('example.com'), /No key is recorded/);
+    assert.throws(() => access.forgetHost('../etc'), /No key is recorded/);
+});

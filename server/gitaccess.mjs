@@ -26,7 +26,7 @@
  * repository the tool can read) and never on a command line.
  */
 import { generateKeyPairSync, createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, writeFileSync, rmSync, readFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, readFileSync, chmodSync, renameSync } from 'node:fs';
 import { Refusal } from './conversations.mjs';
 import { isConversationName } from './names.mjs';
 import { Store } from './store.mjs';
@@ -209,6 +209,33 @@ export class GitAccess {
     hostKeyOf(address) {
         const names = new Set([address.host, `[${address.host}]:${address.port || 22}`]);
         return this.#hostLines().filter((l) => names.has(l.host)).map((l) => `${l.type} ${l.fingerprint}`).join(', ') || undefined;
+    }
+    /* Every host recorded, as the page may show it: { host, type, fingerprint }. */
+    hosts() {
+        return this.#hostLines().map(({ host, type, fingerprint }) => ({ host, type, fingerprint }))
+            .sort((a, b) => a.host.localeCompare(b.host) || a.type.localeCompare(b.type));
+    }
+
+    /* FORGETTING A HOST, for the rare day a hosting service really changes
+       its key. Until then a different key is refused, which is the point;
+       after this, the NEXT contact trusts whatever key the host shows, as
+       on the very first contact. So it is the owner's decision, made in
+       Settings, never automatic. The other hosts are kept as they were. */
+    forgetHost(host) {
+        const name = String(host ?? '');
+        if (!this.hosts().some((h) => h.host === name)) throw new Refusal(404, 'No key is recorded for this host.');
+        let text = ''; try { text = readFileSync(this.knownHosts, 'utf8'); } catch { /* nothing recorded */ }
+        const kept = text.split('\n').flatMap((line) => {
+            const parts = line.trim().split(/\s+/);
+            if (parts.length < 3 || parts[0].startsWith('#')) return line.trim() ? [line] : [];
+            const others = parts[0].split(',').filter((h) => h !== name);
+            return others.length === 0 ? [] : [[others.join(','), ...parts.slice(1)].join(' ')];
+        });
+        /* Written whole and then put in place: a stop halfway leaves the old file, never half of one. */
+        const next = `${this.knownHosts}.new`;
+        writeFileSync(next, kept.length ? `${kept.join('\n')}\n` : '', { mode: 0o600 });
+        renameSync(next, this.knownHosts);
+        return this.hosts();
     }
     #hostLines() {
         let text = ''; try { text = readFileSync(this.knownHosts, 'utf8'); } catch { return []; }

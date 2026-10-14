@@ -31,18 +31,38 @@ import { GitAccess, readAddress, explain, asEnv } from './gitaccess.mjs';
 
 export const DIFF_MAX = 200_000;
 export const COMMITS_MAX = 100;
+export const BRANCHES_MAX = 500;
+export const BRANCH_MAX = 200;
 const SEP = '\x1f';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 300) ?? '';
 
 /* `git(argv, { cwd, env })` -> { code, stdout, stderr }. No shell, a bounded time, a bounded answer. */
-const runGit = (argv, { cwd, env = {} } = {}) => new Promise((resolve) => {
+export const runGit = (argv, { cwd, env = {} } = {}) => new Promise((resolve) => {
     execFile('git', argv, { cwd, timeout: 300_000, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8',
         env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: '/nonexistent', GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', GIT_ASKPASS: '/bin/true', LC_ALL: 'C', ...env } },
         (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
 });
 
+/* Why a name cannot be a branch to send to, or '' when it can. These are the
+   rules of `git check-ref-format` for refs/heads/<name>, written out here so
+   that no git has to be run to know it, plus ours: a plain set of characters
+   (it goes on a command line and into a page), no leading "-" (an option),
+   a bounded length, and not "HEAD". */
+export function branchProblem(name) {
+    const text = String(name ?? '');
+    if (text === '') return 'A branch has a name.';
+    if (text.length > BRANCH_MAX) return `A branch name is at most ${BRANCH_MAX} characters.`;
+    if (!/^[A-Za-z0-9._\/-]+$/.test(text)) return 'A branch name is made of letters, digits, ".", "_", "-" and "/".';
+    if (text.startsWith('-')) return 'A branch name does not start with "-".';
+    if (text === 'HEAD' || text === '@') return 'This name is not a branch.';
+    if (text.includes('..') || text.includes('//') || text.startsWith('/') || text.endsWith('/') || text.endsWith('.')) return 'A branch name has no "..", no "//", and does not start or end with "/" or end with ".".';
+    if (text.split('/').some((part) => part.startsWith('.') || part.endsWith('.lock'))) return 'No part of a branch name starts with "." or ends with ".lock".';
+    return '';
+}
+const asBranch = (name) => { const why = branchProblem(name); if (why) throw new Refusal(400, why); return String(name); };
+
 export class GitReview {
-    #store; #vault; #resources; #root; #git; #local; #access;
+    #store; #vault; #resources; #root; #git; #local; #access; #queue = new Map();
 
     /* `localRemotes`: lets a remote be a directory of this machine. For tests only. */
     constructor({ store, vault, resources, dataDir, git = runGit, localRemotes = false, access = new GitAccess({ vault, dataDir }) }) {
@@ -55,6 +75,10 @@ export class GitReview {
         return r;
     }
     #remoteOf(r) { return this.#store.get(r.name)?.remote ?? r.from; }
+    /* Where the commits of a repository go (and where its origin is kept from), or undefined. */
+    remoteOf(name) { const r = this.#resources.get(String(name ?? '')); return r?.type === 'git' ? this.#remoteOf(r) : undefined; }
+    /* Lets the keeper of the origin (gitkeeper.mjs) fetch with the same way in as Send. */
+    reach(name, remote, work) { return this.#reach(name, remote, work); }
     /* Runs `work(env)` with what lets git into `remote`: see the top of this file. */
     async #reach(name, remote, work) {
         let address;
@@ -96,6 +120,17 @@ export class GitReview {
     /* The repository is gone: its key goes with it. */
     forget(name) { this.#store.remove(name); this.#access.forget(name); rmSync(`${this.#root}/${name}.git`, { recursive: true, force: true }); }
 
+    /* One look or one send at a time per repository: both use the same
+       copy, and a page and the automatic sending may ask at once. */
+    #locked(name, work) {
+        const before = this.#queue.get(name) ?? Promise.resolve();
+        const run = before.then(work, work);
+        const tail = run.catch(() => {});
+        this.#queue.set(name, tail);
+        void tail.then(() => { if (this.#queue.get(name) === tail) this.#queue.delete(name); });
+        return run;
+    }
+
     /* A fresh bare copy of what the tool committed. See the top of this file. */
     async #copy(r) {
         const from = this.#resources.folder(r.name);
@@ -108,56 +143,87 @@ export class GitReview {
         return copy;
     }
 
-    /* What would go out: { state, branch, head, remote, commits, stat, diff, cut, message }.
+    /* What would go out: { state, branch, target, branches, targetExists,
+       remoteTip, head, remote, commits, stat, diff, cut, message }.
+       `branch` is the tool's branch; `target` the branch of the remote it
+       would go to: the one asked for, else the branch of the same name.
        state: 'empty' (nothing committed), 'no-remote', 'unreachable', 'up-to-date',
        'ahead' (can be sent), 'diverged' (the remote has commits this has not). */
-    async outgoing(name) {
+    async outgoing(name, { target } = {}) {
         const r = this.#repository(name);
+        if (target !== undefined && target !== null && target !== '') asBranch(target);
+        return this.#locked(r.name, () => this.#outgoing(r, target || undefined));
+    }
+
+    async #outgoing(r, asked) {
         const copy = await this.#copy(r);
         const here = (argv, env) => this.#git(['-C', copy, '-c', 'core.hooksPath=/dev/null', ...argv], { env });
         const remote = this.#remoteOf(r) ?? null;
         const named = await here(['symbolic-ref', '--short', 'HEAD']);
         const branch = named.stdout.trim();
         const tip = branch ? await here(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]) : { code: 1, stdout: '' };
-        if (!branch || tip.code !== 0) return { state: 'empty', branch: branch || null, head: null, remote, commits: [], stat: '', diff: '', cut: false, message: 'Nothing has been committed in this repository yet.' };
-        if (!/^[A-Za-z0-9._\/-]{1,200}$/.test(branch) || branch.startsWith('-')) throw new Refusal(400, 'The name of the branch is not one that can be sent.');
+        const nothing = { branches: [], targetExists: false, remoteTip: null, stat: '', diff: '', cut: false };
+        if (!branch || tip.code !== 0) return { ...nothing, state: 'empty', branch: branch || null, target: asked ?? null, head: null, remote, commits: [], message: 'Nothing has been committed in this repository yet.' };
+        if (branchProblem(branch)) throw new Refusal(400, 'The name of the branch is not one that can be sent.');
+        const target = asked ?? branch;
         const head = tip.stdout.trim();
-        const list = async (range) => (await here(['log', `--max-count=${COMMITS_MAX}`, `--format=%H${SEP}%an${SEP}%aI${SEP}%s`, range])).stdout.split('\n').filter(Boolean)
+        const list = async (...range) => (await here(['log', `--max-count=${COMMITS_MAX}`, `--format=%H${SEP}%an${SEP}%aI${SEP}%s`, ...range])).stdout.split('\n').filter(Boolean)
             .map((line) => { const [id, author, date, ...subject] = line.split(SEP); return { id, author, date, subject: subject.join(SEP).slice(0, 300) }; });
-        if (!remote) return { state: 'no-remote', branch, head, remote, commits: await list(branch), stat: '', diff: '', cut: false, message: 'No address is set to send these commits to.' };
+        if (!remote) return { ...nothing, state: 'no-remote', branch, target, head, remote, commits: await list(branch), message: 'No address is set to send these commits to.' };
 
-        /* What the remote has of this branch, brought into the copy to compare with. */
-        const far = `refs/remotes/origin/${branch}`;
-        const fetched = await this.#reach(r.name, remote, (env) => here(['fetch', '--quiet', '--no-tags', '--', remote, `+refs/heads/${branch}:${far}`], env));
-        let base = far;
+        /* What the remote has -- every branch, so that the owner can choose
+           where to send, and so that a new branch is compared with what is
+           already there -- brought into the copy to compare with. */
+        const fetched = await this.#reach(r.name, remote, (env) => here(['fetch', '--quiet', '--no-tags', '--prune', '--', remote, '+refs/heads/*:refs/remotes/origin/*'], env));
         if (fetched.code !== 0) {
-            if (!/couldn't find remote ref|could not find remote ref/i.test(fetched.stderr)) {
-                return { state: 'unreachable', branch, head, remote, commits: [], stat: '', diff: '', cut: false, message: `The remote did not answer as expected: ${explain(fetched.stderr)}` };
-            }
-            /* The remote has no such branch yet: everything is new. Compared with nothing. */
-            base = (await here(['hash-object', '-t', 'tree', '/dev/null'])).stdout.trim();
+            return { ...nothing, state: 'unreachable', branch, target, head, remote, commits: [], message: `The remote did not answer as expected: ${explain(fetched.stderr)}` };
         }
-        const range = base === far ? `${far}..${branch}` : branch;
-        const commits = await list(range);
-        const behind = base === far ? Number((await here(['rev-list', '--count', `${branch}..${far}`])).stdout.trim()) : 0;
+        const branches = (await here(['for-each-ref', '--format=%(refname:strip=3)', 'refs/remotes/origin/'])).stdout.split('\n')
+            .filter((b) => b && !branchProblem(b)).sort().slice(0, BRANCHES_MAX);
+        const far = `refs/remotes/origin/${target}`;
+        const farTip = await here(['rev-parse', '--verify', '--quiet', far]);
+        const targetExists = farTip.code === 0;
+        const remoteTip = targetExists ? farTip.stdout.trim() : null;
+        let commits; let base; let behind = 0;
+        if (targetExists) {
+            commits = await list(`${far}..${branch}`);
+            behind = Number((await here(['rev-list', '--count', `${branch}..${far}`])).stdout.trim());
+            base = far;
+        } else {
+            /* A new branch: what would travel is what the remote has on no
+               branch at all; the changes are shown from where the tool's
+               branch left the remote's branch of the same name, if any. */
+            commits = await list(branch, '--not', '--remotes=origin');
+            const fork = (await here(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${branch}`])).code === 0
+                ? (await here(['merge-base', branch, `refs/remotes/origin/${branch}`])).stdout.trim() : '';
+            base = fork || (await here(['hash-object', '-t', 'tree', '/dev/null'])).stdout.trim();
+        }
         const compare = ['--no-ext-diff', '--no-textconv', '--no-color', base, branch];
         const stat = (await here(['diff', '--stat=100', ...compare])).stdout;
         const whole = (await here(['diff', ...compare])).stdout;
-        const state = commits.length === 0 ? 'up-to-date' : behind > 0 ? 'diverged' : 'ahead';
-        const message = state === 'up-to-date' ? 'Everything committed here is already there.'
-            : state === 'diverged' ? `The remote has ${behind} commit(s) that this repository does not have: the tool must bring them in first (pull), then this can be sent.`
-                : `${commits.length} commit(s) would be sent to ${branch}.`;
-        return { state, branch, head, remote, commits, stat, diff: whole.slice(0, DIFF_MAX), cut: whole.length > DIFF_MAX, message };
+        const state = !targetExists ? 'ahead' : commits.length === 0 ? 'up-to-date' : behind > 0 ? 'diverged' : 'ahead';
+        const message = state === 'up-to-date' ? `Everything committed here is already there, in ${target}.`
+            : state === 'diverged' ? `The remote's ${target} has ${behind} commit(s) that this repository does not have: the tool must bring them in first (pull), then this can be sent.`
+                : !targetExists ? (commits.length > 0 ? `${commits.length} commit(s) would be sent to ${target}, a new branch on the remote.` : `${target} would be made on the remote, at a commit it already has: no new commit.`)
+                    : `${commits.length} commit(s) would be sent to ${target}.`;
+        return { state, branch, target, branches, targetExists, remoteTip, head, remote, commits, stat, diff: whole.slice(0, DIFF_MAX), cut: whole.length > DIFF_MAX, message };
     }
 
-    /* Sends exactly the commit that was shown: `head` is what the owner looked at. */
+    /* Sends exactly the commit that was shown, to exactly the branch that
+       was shown: `head` is what the owner looked at, `target` where it was
+       said to go (the tool's own branch when not given). The remote is
+       looked at again just before: a branch that moved meanwhile is said,
+       never overwritten (no force, ever). */
     async push(name, body) {
         const r = this.#repository(name);
-        const now = await this.outgoing(r.name);
-        if (now.state !== 'ahead') throw new Refusal(409, now.message);
-        if (typeof body?.head !== 'string' || body.head !== now.head) throw new Refusal(409, 'The repository changed since you looked: look again at what would be sent.');
-        const sent = await this.#reach(r.name, now.remote, (env) => this.#git(['-C', `${this.#root}/${r.name}.git`, '-c', 'core.hooksPath=/dev/null', 'push', '--quiet', '--', now.remote, `${now.head}:refs/heads/${now.branch}`], { env }));
-        if (sent.code !== 0) throw new Refusal(502, `The remote refused: ${explain(sent.stderr)}`);
-        return { ok: true, branch: now.branch, head: now.head, commits: now.commits.length };
+        const target = body?.target === undefined || body?.target === null || body?.target === '' ? undefined : asBranch(body.target);
+        return this.#locked(r.name, async () => {
+            const now = await this.#outgoing(r, target);
+            if (now.state !== 'ahead') throw new Refusal(409, now.message);
+            if (typeof body?.head !== 'string' || body.head !== now.head) throw new Refusal(409, 'The repository changed since you looked: look again at what would be sent.');
+            const sent = await this.#reach(r.name, now.remote, (env) => this.#git(['-C', `${this.#root}/${r.name}.git`, '-c', 'core.hooksPath=/dev/null', 'push', '--quiet', '--', now.remote, `${now.head}:refs/heads/${now.target}`], { env }));
+            if (sent.code !== 0) throw new Refusal(502, `The remote refused: ${explain(sent.stderr)}`);
+            return { ok: true, branch: now.target, from: now.branch, head: now.head, commits: now.commits.length, made: !now.targetExists };
+        });
     }
 }
