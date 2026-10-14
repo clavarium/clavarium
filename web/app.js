@@ -165,7 +165,12 @@
             }
             let message;
             try { message = JSON.parse(event.data); } catch { return; }
-            if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; setTimeout(() => { fit.fit(); sendSize(); }, 300); }
+            /* The size is told at once too: the page may have changed size while
+               it was connecting (the key row appears, a notice goes), and what
+               it said then was lost -- nobody listened yet. The bridge listens
+               from "ready" on. Until it hears, the tool draws for the old size
+               and whatever is typed meanwhile lands in a garbled screen. */
+            if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
             if (message.type === 'status') {
                 say(String(message.text), 'connecting');
                 /* In the middle of the screen too: a small word in the header is
@@ -1276,8 +1281,37 @@
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         $('settings').hidden = false;
-        await paintHosts();
+        await Promise.all([paintHosts(), paintShelf()]);
     }
+    /* The ready-made machine: when it was made, how large, what it holds,
+       and a rebuild on demand. Why a rebuild was refused is said here. */
+    const day = (iso) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    let shelfTimer;
+    async function paintShelf() {
+        clearTimeout(shelfTimer);
+        const r = await fetch(`${API}/shelf`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        $('shelf').hidden = !r;
+        if (!r) return;
+        const lines = [];
+        if (r.current) {
+            lines.push(`Made ${day(r.current.builtAt)}${r.current.sizeMb ? `, ${(r.current.sizeMb / 1024).toFixed(1)} GB on disk` : ''}. Holds: ${r.current.tools.join(', ') || 'no tool'}.`);
+            lines.push(r.current.fresh ? `Next rebuild around ${day(r.current.refreshAt)}.` : `Older than ${r.maxAgeDays} days: new conversations are built the long way until it is rebuilt.`);
+        } else lines.push('None yet: new conversations are built the long way (several minutes).');
+        if (r.building) lines.push(`Being rebuilt since ${new Date(r.building.since).toLocaleTimeString()} (${r.building.step}). New conversations use ${r.current ? 'the current one' : 'the long way'} meanwhile.`);
+        if (r.error && !r.building) lines.push(`Last rebuild failed: ${r.error}`);
+        $('shelf-state').textContent = lines.join(' ');
+        $('shelf-error').hidden = !r.refused || Boolean(r.building);
+        $('shelf-error').textContent = r.refused?.text ?? '';
+        $('shelf-rebuild').disabled = Boolean(r.building);
+        if (r.building && !$('settings').hidden) shelfTimer = setTimeout(() => { void paintShelf(); }, 5000);
+    }
+    $('shelf-rebuild').addEventListener('click', async () => {
+        $('shelf-rebuild').disabled = true; $('shelf-error').hidden = true;
+        let refused;
+        try { await post(`${API}/shelf/rebuild`, {}); } catch (error) { refused = error.message; }
+        await paintShelf();
+        if (refused) { $('shelf-error').textContent = refused; $('shelf-error').hidden = false; }
+    });
     /* The git servers whose key was recorded at first contact: forgetting
        one is rare and weighty (the next contact trusts any key), so it is
        here, out of the way, and asks twice. */

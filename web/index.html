@@ -327,6 +327,13 @@
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
         <details id="settings-advanced">
           <summary>Advanced</summary>
+          <div id="shelf">
+            <b>Ready-made machine</b>
+            <p class="hint">New conversations start from a copy of a machine prepared in advance, with the tools already installed: a minute or two instead of several. It is rebuilt each month in the background; running conversations are not touched.</p>
+            <p id="shelf-state" role="status"></p>
+            <div class="row"><button type="button" id="shelf-rebuild">Rebuild it now</button></div>
+            <p id="shelf-error" class="error" role="alert" hidden></p>
+          </div>
           <div>
             <b>Git servers whose key is recorded</b>
             <p class="hint">The first time a git server is reached over ssh, the key it shows is recorded; a different key later is refused, because the server may not be who it says. If a hosting service really changed its key (it says so on its own site), forget it here: the next contact will trust whatever key the server shows.</p>
@@ -414,6 +421,7 @@
             <label class="check"><input type="checkbox" id="gitview-require"> Send only after the checks passed</label>
             <label for="gitview-refreshminutes">Refresh the origin every (minutes; 0: only with "Refresh now")</label>
             <input id="gitview-refreshminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
+            <p class="hint">Refreshing and automatic sending happen only while a running machine has this repository attached; "Refresh now" works any time.</p>
             <label for="gitview-autobranches">Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.</label>
             <textarea id="gitview-autobranches" rows="2" spellcheck="false" autocapitalize="off" placeholder="test, staging, try/*"></textarea>
             <p class="hint">When the tool's branch has new commits, then nothing new for the quiet delay, and its name is in this list, the commit is sent to the branch of the same name, as Send would, never forced, and only after the checks passed.</p>

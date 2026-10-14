@@ -33,6 +33,15 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['work', 'room', 'demo'], 'df /var/lib/clavarium/work/demo /var/lib/clavarium'],
         [['net', 'taps'], 'pgrep -a qemu-system'],
         [['net', 'bridge'], 'ip -4 -o addr show mpqemubr0'],
+        [['vm', 'clone', 'clvshelf-20261014-120000', 'clv-demo', '1024'], 'multipass clone clvshelf-20261014-120000 --name clv-demo\nmultipass set local.clv-demo.memory=1024M'],
+        [['shelf', 'launch', 'clvshelf-20261014-120000'], 'multipass launch 24.04 --name clvshelf-20261014-120000 --memory 1536M --disk 8G --cpus 1 --timeout 900'],
+        [['shelf', 'exec', 'clvshelf-20261014-120000', '--', 'sudo', '-n', 'snap', 'install', 'multipass-sshfs'], 'multipass exec clvshelf-20261014-120000 -- sudo -n snap install multipass-sshfs'],
+        [['shelf', 'seal', 'clvshelf-20261014-120000'], 'multipass exec clvshelf-20261014-120000 -- sudo -n cloud-init clean --logs --machine-id\nmultipass stop clvshelf-20261014-120000'],
+        [['shelf', 'info', 'clvshelf-20261014-120000'], 'multipass info clvshelf-20261014-120000 --format json'],
+        [['shelf', 'delete', 'clvshelf-20261014-120000'], 'multipass delete --purge clvshelf-20261014-120000'],
+        [['shelf', 'size', 'clvshelf-20261014-120000'], 'du -sm /var/snap/multipass/common/data/multipassd/vault/instances/clvshelf-20261014-120000'],
+        [['shelf', 'room'], 'df /var/snap/multipass/common'],
+        [['shelf', 'list'], 'multipass list --format csv (ready-made machines only)'],
     ];
     for (const [args, expected] of cases) assert.deepEqual(host(...args), { code: 0, out: expected, err: '' }, args.join(' '));
 });
@@ -79,5 +88,28 @@ test('the network rules the server writes are accepted whole; one foreign line r
         const r = host('net', 'apply', `${good}${extra}\n`);
         assert.equal(r.code, 78, extra);
         assert.equal(r.out, '');
+    }
+});
+
+test('the ready-made machine: its own names only, and a conversation is copied from it and from nothing else', () => {
+    const shelf = 'clvshelf-20261014-120000';
+    for (const args of [
+        /* A shelf verb never reaches a conversation's machine, nor any other. */
+        ['shelf', 'delete', 'clv-demo'], ['shelf', 'exec', 'clv-demo', '--', 'id'], ['shelf', 'launch', 'primary'], ['shelf', 'seal', 'clv-demo'],
+        ['shelf', 'info', 'clvshelf-1'], ['shelf', 'delete', 'clvshelf-20261014-120000x'], ['shelf', 'delete', 'clvshelf-20261014-12000a'],
+        ['shelf', 'size', '../../etc'], ['shelf', 'launch', 'clvshelf-20261014-120000;id'],
+        /* exec needs its separator; a shelf takes no memory or image of the caller's choosing. */
+        ['shelf', 'exec', shelf, 'id', 'x'], ['shelf', 'launch', shelf, '--image', 'file:///etc/shadow'],
+        ['shelf', 'erase', shelf], ['shelf', 'shell', shelf], ['shelf', 'room', 'extra'], ['shelf', 'list', 'all'],
+        /* A conversation's verb never reaches a shelf. */
+        ['vm', 'delete', shelf], ['vm', 'exec', shelf, '--', 'id'], ['vm', 'start', shelf],
+        /* A clone: from a shelf, to one of our machines, with memory in bounds. */
+        ['vm', 'clone', 'clv-other', 'clv-demo', '1024'], ['vm', 'clone', 'primary', 'clv-demo', '1024'], ['vm', 'clone', shelf, 'someone-else', '1024'],
+        ['vm', 'clone', shelf, shelf, '1024'], ['vm', 'clone', shelf, 'clv-demo', '64'], ['vm', 'clone', shelf, 'clv-demo', '1024M'], ['vm', 'clone', shelf, 'clv-demo', '99999'],
+        ['vm', 'clone', shelf, 'clv-demo'], ['vm', 'clone', shelf, 'clv-demo', '1024', '--extra'],
+    ]) {
+        const r = host(...args);
+        assert.ok(r.code === 78 || r.code === 64, `${args.join(' ')} -> ${r.code}`);
+        assert.equal(r.out, '', `nothing would run: ${args.join(' ')}`);
     }
 });

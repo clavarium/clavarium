@@ -12,6 +12,8 @@
  *   POST /api/git-keys/<name>/remove        refused while a repository uses it
  *   GET  /api/git-hosts                     host keys recorded at first contact: {host, type, fingerprint}
  *   POST /api/git-hosts/forget              {host}: the next contact trusts the key it is shown
+ *   GET  /api/shelf                         the ready-made machine: date, size, tools, rebuild in progress, last refusal
+ *   POST /api/shelf/rebuild                 rebuild it now, in the background (refused when the disk is short)
  *   GET  /api/git/<name>/outgoing?target=<branch>   what would go, to that branch of the remote
  *   POST /api/git/<name>/push               {head, target?}: exactly that commit, to exactly that branch
  *   GET  /api/git/<name>/keep               origin kept up to date, checks, automatic sending, log
@@ -64,7 +66,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -142,6 +144,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
+            if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
             if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
@@ -172,6 +175,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* A folder, or a git repository (empty, or cloned from `from`). A mailbox has its own way in. */
         if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from, via: body.via })), true;
         if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
+        if (pathname === '/api/shelf/rebuild' && shelf) return send(202, await shelf.rebuild()), true;
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unkeyed && gitAccess) { gitAccess.removeKey(unkeyed[1]); return send(200, { ok: true }), true; }

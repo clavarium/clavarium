@@ -29,6 +29,7 @@ function bench(t, answers = {}) {
         if (override) return override;
         const vm = argv[2];
         if (verb === 'launch') states.set(vm, 'Running');
+        if (verb === 'clone') states.set(argv[3], 'Stopped');
         if (verb === 'start') states.set(vm, 'Running');
         if (verb === 'stop') states.set(vm, 'Stopped');
         if (verb === 'suspend') states.set(vm, 'Suspended');
@@ -347,4 +348,68 @@ test('a file of the machine\'s own disk is read for whoever asked to see it: und
     kind = 'directory'; await assert.rejects(all.machineFile('demo', '/work/out'), /not a file/);
     kind = 'regular file'; size = 50 * 1024 * 1024; await assert.rejects(all.machineFile('demo', '/work/big.iso'), /too large .*50 MB/);
     await assert.rejects(all.machineFile('nope', '/work/x'), /No such conversation/);
+});
+
+/* THE READY-MADE MACHINE: copied when there is one for the tool, the long
+   way otherwise or when the copy goes wrong. */
+const SHELF = 'clvshelf-20261014-120000';
+test('with a ready-made machine, the build copies it, starts it, and passes the steps already done', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.shelf = { pick: (tool) => (tool.id === 'tool' ? SHELF : undefined) };
+    const steps = [];
+    const original = b.store.patch.bind(b.store);
+    b.store.patch = (name, changes) => { if (changes.step) steps.push(changes.step); return original(name, changes); };
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.deepEqual(b.calls, [
+        `clone ${SHELF} clv-demo 1024`,
+        'start clv-demo',
+        'exec clv-demo -- cloud-init status --wait',
+        'work make demo',
+        `mount clv-demo work demo ${process.getuid()} ${process.getgid()}`,
+        'exec clv-demo -- which tool',
+    ]);
+    assert.deepEqual(steps, ['Preparing the machine', 'Installing Tool (already on the machine)']);
+    const c = all.list()[0];
+    assert.equal(c.phase, 'ready');
+    assert.equal(c.readyMade, true);
+});
+
+test('a copy that cannot be made or started is removed, and the machine is built the long way', async (t) => {
+    for (const broken of ['clone', 'start']) {
+        const b = bench(t, { [broken]: () => ({ code: 1, stdout: '', stderr: 'unknown command' }) });
+        const all = b.make();
+        all.shelf = { pick: () => SHELF };
+        all.create({ name: 'demo', tool: 'tool' });
+        await all.built;
+        const launched = b.calls.indexOf('launch clv-demo 1024');
+        assert.ok(launched > 0, `${broken}: launched after the failed copy`);
+        if (broken === 'start') assert.ok(b.calls.slice(0, launched).includes('delete clv-demo'), 'the half-made copy is removed first');
+        assert.ok(b.calls.includes('exec clv-demo -- sudo -n snap install multipass-sshfs'));
+        assert.ok(b.calls.includes('exec clv-demo -- sudo install-tool'));
+        assert.equal(all.list()[0].phase, 'ready');
+        assert.equal(all.list()[0].readyMade, undefined);
+    }
+});
+
+test('a copy whose tool is missing after all installs it the usual way', async (t) => {
+    const b = bench(t, { exec: (argv) => (argv.includes('which') ? { code: 1, stdout: '', stderr: '' } : undefined) });
+    const all = b.make();
+    all.shelf = { pick: () => SHELF };
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.ok(b.calls.includes('exec clv-demo -- sudo install-tool'));
+    assert.ok(!b.calls.some((c) => c.startsWith('launch')));
+    assert.equal(all.list()[0].phase, 'ready');
+});
+
+test('without a ready-made machine, the build is exactly what it was', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.shelf = { pick: () => undefined };
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.equal(b.calls[0], 'launch clv-demo 1024');
+    assert.ok(!b.calls.some((c) => c.startsWith('clone') || c.includes('cloud-init') || c.includes('which')));
 });

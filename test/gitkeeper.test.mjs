@@ -14,11 +14,14 @@ import { Resources, originFolder } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 import { Vault } from '../server/vault.mjs';
 import { Vms } from '../server/vm.mjs';
+import { GitChecks } from '../server/gitchecks.mjs';
 
 const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Tool', GIT_AUTHOR_EMAIL: 'tool@example.com', GIT_COMMITTER_NAME: 'Tool', GIT_COMMITTER_EMAIL: 'tool@example.com' };
 const git = (cwd, ...argv) => execFileSync('git', argv, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 
-async function bench(t, { checks = 'passed' } = {}) {
+/* `machineFor`: which running, awake machine has the repository attached (none:
+   undefined). By default one does, so that the clock has a reason to act. */
+async function bench(t, { checks = 'passed', machineFor = async () => 'alpha' } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-keep-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     /* The origin, as a hosting service would hold it, with a main branch. */
@@ -48,7 +51,7 @@ async function bench(t, { checks = 'passed' } = {}) {
     git(work, 'reset', '--quiet', '--hard', 'origin/main');
     let clock = new Date('2026-03-02T10:00:00Z');
     const ran = []; const told = [];
-    const fakeChecks = { run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: 'stand-in', head: asked.head, target: asked.target, machine: 'alpha', at: clock.toISOString() }; } };
+    const fakeChecks = { machineFor: (name) => machineFor(name, resources), run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: 'stand-in', head: asked.head, target: asked.target, machine: 'alpha', at: clock.toISOString() }; } };
     const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now: () => clock });
     const commit = (file, text, subject) => { writeFileSync(join(work, file), text); git(work, 'add', file); git(work, 'commit', '--quiet', '-m', subject); return git(work, 'rev-parse', 'HEAD'); };
     const later = (minutes) => { clock = new Date(clock.getTime() + minutes * 60_000); };
@@ -222,6 +225,53 @@ test('Send from the page: checks are advice by default, required when the owner 
     assert.equal((await b.keeper.send('site', { head, target: 'main' })).branch, 'main');
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), head);
     await assert.rejects(b.keeper.check('site', { head: 'f'.repeat(40) }), /already there|changed since you looked/);
+});
+
+test('a repository no running machine uses does nothing by itself: no refresh, no automatic sending; "Refresh now" still works', async (t) => {
+    /* The real rule (GitChecks.machineFor) over stand-in conversations: which
+       are built and awake, and whose machine really runs. */
+    const phases = { alpha: { phase: 'ready', asleep: false }, beta: { phase: 'ready', asleep: false } };
+    const runs = new Set(['alpha', 'beta']);
+    const conversations = {
+        awake: () => Object.entries(phases).filter(([, c]) => c.phase === 'ready' && c.asleep !== true).map(([name]) => name),
+        running: async (name) => runs.has(name),
+    };
+    const b = await bench(t, { machineFor: (name, resources) => new GitChecks({ vms: null, conversations, resources }).machineFor(name) });
+    const theirs = git(b.remote, 'rev-parse', 'refs/heads/main');
+    const mirror = join(b.dir, 'resources', 'site-origin');
+    const mirrored = () => (existsSync(mirror) ? git(mirror, 'rev-parse', 'refs/heads/main') : '');
+    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 1, refreshMinutes: 5 });
+    const mine = b.commit('a.txt', 'a\n', 'mine');
+    const remoteMain = () => git(b.remote, 'rev-parse', 'refs/heads/main');
+    /* Attached to nothing: however long the wait, nothing. */
+    await b.keeper.tick(); b.later(30); await b.keeper.tick(); b.later(30); await b.keeper.tick();
+    assert.equal(mirrored(), '', 'the origin was not fetched');
+    assert.equal(b.keeper.about('site').origin.at, undefined);
+    assert.equal(remoteMain(), theirs, 'nothing was sent');
+    assert.deepEqual(b.ran, [], 'no checks were asked for');
+    /* Attached only to machines that are asleep, being built, failed, or not running: still nothing. */
+    await b.resources.attach('alpha', 'site', 'write');
+    await b.resources.attach('beta', 'site', 'read');
+    for (const [alpha, beta, alphaRuns] of [[{ asleep: true }, { phase: 'building' }, true], [{ phase: 'failed' }, { asleep: true }, true], [{}, { phase: 'failed' }, false]]) {
+        phases.alpha = { phase: 'ready', ...alpha }; phases.beta = { phase: 'ready', ...beta };
+        if (alphaRuns) runs.add('alpha'); else runs.delete('alpha');
+        b.later(30); await b.keeper.tick();
+        assert.equal(mirrored(), '', JSON.stringify({ alpha, beta, alphaRuns }));
+        assert.equal(remoteMain(), theirs);
+    }
+    /* "Refresh now" is the owner asking: it works whatever runs. */
+    assert.equal((await b.keeper.refresh('site')).origin.ok, true);
+    assert.equal(mirrored(), theirs);
+    /* A machine wakes: the clock acts again -- the origin when due, and the
+       commit once the quiet delay has passed, counted from the waking. */
+    git(b.seed, 'commit', '--quiet', '--allow-empty', '-m', 'theirs again'); git(b.seed, 'push', '--quiet', 'origin', 'HEAD:feature');
+    phases.beta = { phase: 'ready', asleep: false };
+    b.later(30); await b.keeper.tick();
+    assert.equal(git(mirror, 'rev-parse', 'refs/heads/feature'), git(b.seed, 'rev-parse', 'HEAD'), 'refreshed by the clock while a machine uses it');
+    assert.equal(remoteMain(), theirs, 'not yet: the quiet delay starts when it is first looked at');
+    b.later(2); await b.keeper.tick();
+    assert.equal(remoteMain(), mine, 'sent once a machine used it and it stayed quiet');
+    assert.equal(b.ran.length, 1);
 });
 
 test('a long repository name still gets a valid, distinct origin folder', () => {

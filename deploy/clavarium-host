@@ -19,7 +19,8 @@
 #     /etc and ask for it to be mounted. Hence: the directories whose entries
 #     get mounted (resources/, views/) BELONG TO ROOT, their entries are made
 #     and moved by this program only, and it checks both before each use;
-#   - touch a VM whose name is not one of ours ("clv-" + a conversation name);
+#   - touch a VM whose name is not one of ours ("clv-" + a conversation name,
+#     or "clvshelf-" + a date for a ready-made machine: see "shelf" below);
 #   - load a network rule that is not, line for line, one of the known shapes.
 #
 # Every name is checked HERE, even though the server checked it already: this
@@ -46,10 +47,21 @@ VM_ID="1000"
 # /etc/clavarium/host.conf says otherwise (WORK_MB=...). Room on the host is
 # taken only as the disk is filled, and given back when files are removed.
 WORK_MB="10240"
+# THE READY-MADE MACHINE ("shelf"): a machine prepared in advance -- system
+# updated, shared folders possible, Node.js and the tools installed -- then
+# stopped, and COPIED for each new conversation with `multipass clone`
+# (Multipass 1.15 and later). A copy boots in a minute or two instead of being
+# built for six. It is only ever a source: no conversation runs in it.
+SHELF_MEMORY="1536M"
+# Where the VM manager keeps its machines' disks: a rebuild is refused when
+# less than this is free there, so that a new copy cannot fill the host.
+SHELF_STORE="/var/snap/multipass/common"
+SHELF_INSTANCES="$SHELF_STORE/data/multipassd/vault/instances"
+SHELF_MIN_FREE_MB="6144"
 CONF="/etc/clavarium/host.conf"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|folder|work|view|net> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|shelf|folder|work|view|net> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""
 while [ $# -gt 0 ]; do
@@ -80,6 +92,13 @@ run() { if [ "$SAY" = "yes" ]; then printf '%s\n' "$*"; else exec "$@"; fi; }
 is_name() { [[ "$1" =~ ^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$ ]]; }
 vm_of() { is_name "${1#clv-}" && [ "$1" != "${1#clv-}" ] || refuse "not one of our VMs: ${1:-<empty>}"; }
 number() { [[ "$1" =~ ^[0-9]{1,6}$ ]] || refuse "not a number: ${1:-<empty>}"; }
+# A ready-made machine: "clvshelf-" and the moment it was started, in UTC.
+# Never "clv-...": no conversation verb can reach it, and no shelf verb can
+# reach a conversation.
+shelf_of() { [[ "${1:-}" =~ ^clvshelf-[0-9]{8}-[0-9]{6}$ ]] || refuse "not one of our ready-made machines: ${1:-<empty>}"; }
+memory_ok() { number "$1"; [ "$1" -ge 512 ] && [ "$1" -le 65536 ] || refuse "memory out of bounds: $1"; }
+# Megabytes free where the VM manager keeps its disks.
+store_free() { local at="$SHELF_STORE"; [ -d "$at" ] || at="/var"; df -m --output=avail "$at" | tail -1 | tr -d ' '; }
 
 # One of the directories of the data directory that only root may arrange
 # (resources, views, work, work-disks, removed): made if missing, and refused if it is a link or
@@ -103,9 +122,19 @@ AREA="$1"; VERB="$2"; shift 2
 
 case "$AREA $VERB" in
     "vm launch")
-        [ $# -eq 2 ] || usage; vm_of "$1"; number "$2"
-        [ "$2" -ge 512 ] && [ "$2" -le 65536 ] || refuse "memory out of bounds: $2"
+        [ $# -eq 2 ] || usage; vm_of "$1"; memory_ok "$2"
         run "$MULTIPASS" launch "$IMAGE" --name "$1" --memory "${2}M" --disk "$DISK" --cpus 1 --timeout "$LAUNCH_SECONDS" ;;
+    "vm clone")
+        # <shelf> <vm> <memory>: a conversation's machine, copied from the
+        # ready-made one (which must be stopped: Multipass refuses otherwise).
+        # A copy has the size of its source; its memory is set before its
+        # first start, while it is still stopped.
+        [ $# -eq 3 ] || usage; shelf_of "$1"; vm_of "$2"; memory_ok "$3"
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "$MULTIPASS clone $1 --name $2" "$MULTIPASS set local.$2.memory=${3}M"; exit 0
+        fi
+        "$MULTIPASS" clone "$1" --name "$2"
+        exec "$MULTIPASS" set "local.$2.memory=${3}M" ;;
     "vm exec")
         [ $# -ge 1 ] || usage; vm_of "$1"; [ "${2:-}" = "--" ] || refuse "exec takes: <vm> -- <command...>"
         [ $# -ge 3 ] || usage
@@ -147,6 +176,61 @@ case "$AREA $VERB" in
     "vm umount")
         [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a folder name: $2"
         run "$MULTIPASS" umount "$1:/resources/$2" ;;
+    "shelf launch")
+        # A new ready-made machine, from the stock image. Refused here too when
+        # the disk is short, whatever the server said: a copy of it is made for
+        # every new conversation.
+        [ $# -eq 1 ] || usage; shelf_of "$1"
+        if [ "$SAY" != "yes" ]; then
+            free="$(store_free)"
+            [ "$free" -ge "$SHELF_MIN_FREE_MB" ] || refuse "only ${free} MB free for machines; a ready-made machine needs ${SHELF_MIN_FREE_MB} MB"
+        fi
+        run "$MULTIPASS" launch "$IMAGE" --name "$1" --memory "$SHELF_MEMORY" --disk "$DISK" --cpus 1 --timeout "$LAUNCH_SECONDS" ;;
+    "shelf exec")
+        # The preparation steps (the same argument vectors as a conversation's
+        # build), run in the ready-made machine only.
+        [ $# -ge 3 ] || usage; shelf_of "$1"; [ "$2" = "--" ] || refuse "exec takes: <shelf> -- <command...>"
+        vm="$1"; shift 2
+        run "$MULTIPASS" exec "$vm" -- "$@" ;;
+    "shelf seal")
+        # Prepared: what makes a machine ITSELF is wiped, so that every copy
+        # makes its own at its first start instead of being a twin of the
+        # others. `cloud-init clean` forgets this instance (its next start is
+        # a first start: new SSH host keys, network set for the copy's own
+        # address) and empties /etc/machine-id (a new one is made at start;
+        # two machines with the same one ask for the same address). Then it
+        # is stopped: only a stopped machine can be copied.
+        [ $# -eq 1 ] || usage; shelf_of "$1"
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "$MULTIPASS exec $1 -- sudo -n cloud-init clean --logs --machine-id" "$MULTIPASS stop $1"; exit 0
+        fi
+        "$MULTIPASS" exec "$1" -- sudo -n cloud-init clean --logs --machine-id
+        exec "$MULTIPASS" stop "$1" ;;
+    "shelf info")
+        [ $# -eq 1 ] || usage; shelf_of "$1"
+        run "$MULTIPASS" info "$1" --format json ;;
+    "shelf delete")
+        [ $# -eq 1 ] || usage; shelf_of "$1"
+        run "$MULTIPASS" delete --purge "$1" ;;
+    "shelf size")
+        # Megabytes it takes on the host (shown in Settings).
+        [ $# -eq 1 ] || usage; shelf_of "$1"
+        if [ "$SAY" = "yes" ]; then printf 'du -sm %s\n' "$SHELF_INSTANCES/$1"; exit 0; fi
+        [ -d "$SHELF_INSTANCES/$1" ] || refuse "no such ready-made machine: $1"
+        printf 'size %s\n' "$(du -sm "$SHELF_INSTANCES/$1" | cut -f1)"
+        exit 0 ;;
+    "shelf room")
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then printf 'df %s\n' "$SHELF_STORE"; exit 0; fi
+        printf 'free %s\n' "$(store_free)"
+        exit 0 ;;
+    "shelf list")
+        # The names of the ready-made machines that exist, and of no other
+        # machine: a rebuild cut short by a restart is found and removed.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "$MULTIPASS list --format csv (ready-made machines only)"; exit 0; fi
+        "$MULTIPASS" list --format csv | cut -d, -f1 | grep -E '^clvshelf-[0-9]{8}-[0-9]{6}$' || true
+        exit 0 ;;
     "folder make")
         # The folder is made here, and given to the account that owns the data
         # directory: the server fills it, but cannot replace it.

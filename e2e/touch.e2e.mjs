@@ -24,17 +24,15 @@ test('a finger scrolls the terminal as a wheel does: down the screen to go back,
     await me.create('long-output');
     /* tmux keeps the history: the wheel is passed to it, which scrolls back. */
     await me.type('seq 1 300');
-    await me.sees('300');
-    const before = await me.screen();
-    assert.ok(!/^120$/m.test(visible(before, me)), 'line 120 is far above at first');
+    /* "300" is in the command itself: waited for as the last line printed. */
+    await me.printed('300');
+    assert.ok(!/^120$/m.test(await visibleNow(me)), 'line 120 is far above at first');
     await drag(me, 80, 380);                     /* the finger goes down: earlier lines come */
-    await wait(600);
-    const after = await visibleNow(me);
-    assert.ok(!/^300$/m.test(after), `the last line has left the screen: ${JSON.stringify(after.slice(-80))}`);
+    /* tmux scrolls back and redraws when it can: waited for, not timed. */
+    await me.until('the last line has left the screen', async () => !/^300$/m.test(await visibleNow(me)));
     await drag(me, 380, 80);                     /* and back */
     await drag(me, 380, 80);
-    await wait(600);
-    assert.match(await visibleNow(me), /^300$/m);
+    await me.until('the last line is back on the screen', async () => /^300$/m.test(await visibleNow(me)));
 });
 
 test('a tool that asked for the mouse receives the finger as its wheel', { skip: SKIP }, async (t) => {
@@ -42,8 +40,10 @@ test('a tool that asked for the mouse receives the finger as its wheel', { skip:
     const me = await b.person({ phone: true });
     await me.create('mouse-tool');
     /* The tool asks for mouse reports, then shows whatever arrives. */
-    await me.type("printf '\\033[?1000h\\033[?1006h'; cat -v");
-    await wait(500);
+    /* "listening" comes out after the request for the mouse, in order: once
+       it is on the screen, the request has reached tmux. */
+    await me.type("printf '\\033[?1000h\\033[?1006h'; echo listening; cat -v");
+    await me.sees('\nlistening');
     await drag(me, 100, 300);
     await me.sees('[<64;', 5000);                /* wheel up, as a terminal reports it */
     await drag(me, 300, 100);
@@ -89,7 +89,6 @@ test('an Enter pressed while the browser is still reading what was copied does n
 });
 
 /* The lines currently shown, top to bottom. */
-function visible(text) { return text; }
 async function visibleNow(person) {
     return person.page.evaluate(() => { const t = window.clavariumTerminal, buffer = t.buffer.active; let s = ''; for (let i = buffer.viewportY; i < buffer.viewportY + t.rows; i++) s += `${(buffer.getLine(i)?.translateToString(true) ?? '').trim()}\n`; return s; });
 }
@@ -140,30 +139,34 @@ async function spanOf(page, text) {
         return null;
     }, text);
 }
-/* Selects a text with the mouse, Shift held, until it is the selection and
-   it is copied. (A screen still being redrawn drops a selection in the
-   making: it is made again, as a person would.) */
+const clipboard = (page) => page.evaluate(() => navigator.clipboard.readText());
+/* Selects a text with the mouse, Shift held, once, and waits for it to be
+   copied. The screen must be still (see `printed` and `fullSize` in
+   bench.mjs): a selection made while the output still arrives, or while tmux
+   redraws the screen, is dropped. It used to be made again up to five times,
+   which hid the redraws (see answerForAbsentScreen in bridge.mjs). */
 async function mouseSelect(me, text) {
-    for (let attempt = 0; attempt < 5; attempt++) {
-        await new Promise((r) => setTimeout(r, 300));
-        const at = await spanOf(me.page, text);
-        assert.ok(at, `${text} is on the screen`);
-        await me.page.keyboard.down('Shift');
-        await me.page.mouse.move(at.from - 3, at.y); await me.page.mouse.down(); await me.page.mouse.move(at.to + 3, at.y, { steps: 6 }); await me.page.mouse.up();
-        await me.page.keyboard.up('Shift');
-        await new Promise((r) => setTimeout(r, 1500));
-        if ((await me.page.evaluate(() => navigator.clipboard.readText())) === text) return;
-    }
-    assert.fail(`${text} was never selected and copied: ${JSON.stringify(await me.page.evaluate(async () => ({ selected: window.clavariumTerminal.getSelection(), focus: document.hasFocus(), sheet: !document.getElementById('copy').hidden, viewer: !document.getElementById('viewer').hidden, notice: document.getElementById('notice').hidden ? '' : document.getElementById('notice-text').textContent, clip: await navigator.clipboard.readText().catch((e) => String(e)) })))}`);
+    const at = await spanOf(me.page, text);
+    assert.ok(at, `${text} is on the screen`);
+    await me.page.keyboard.down('Shift');
+    await me.page.mouse.move(at.from - 3, at.y); await me.page.mouse.down(); await me.page.mouse.move(at.to + 3, at.y, { steps: 6 }); await me.page.mouse.up();
+    await me.page.keyboard.up('Shift');
+    await me.until(`${text} is copied`, async () => (await clipboard(me.page)) === text, 5000).catch(async (e) => {
+        throw new Error(`${e.message}: ${JSON.stringify(await me.page.evaluate(async () => ({ selected: window.clavariumTerminal.getSelection(), focus: document.hasFocus(), sheet: !document.getElementById('copy').hidden, viewer: !document.getElementById('viewer').hidden, notice: document.getElementById('notice').hidden ? '' : document.getElementById('notice-text').textContent, clip: await navigator.clipboard.readText().catch((err) => String(err)) })))}`);
+    });
 }
 
-/* A finger: down, held, moved, lifted -- as the browser tells a page. */
-async function finger(page, steps) {
-    const client = await page.context().newCDPSession(page);
-    for (const [type, x, y, waitMs] of steps) {
-        await client.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-        if (waitMs) await new Promise((r) => setTimeout(r, waitMs));
-    }
+/* A finger put down and HELD, as the browser tells a page, until the page
+   shows it took it for a long press (something is selected) -- as a person
+   waits for the highlight before moving. A fixed hold (700 ms) assumed the
+   page's own timer had fired by then; on a busy machine it may not have,
+   and the move then cancels the press. Returns what moves and lifts that finger. */
+async function press(me, x, y) {
+    const client = await me.page.context().newCDPSession(me.page);
+    const send = (type, at) => client.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [at] });
+    await send('touchStart', { x, y });
+    await me.until('the long press is taken', () => me.page.evaluate(() => window.clavariumTerminal.hasSelection()), 5000);
+    return { move: (to) => send('touchMove', { x: to, y }), lift: () => send('touchEnd') };
 }
 
 test('a long press selects, the finger stretches the selection, lifting it copies', { skip: SKIP }, async (t) => {
@@ -172,21 +175,38 @@ test('a long press selects, the finger stretches the selection, lifting it copie
     await me.create('select');
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.type('clear; echo "token: abc-123-def and more"');
-    await me.sees('token: abc-123-def and more');
+    await me.printed('token: abc-123-def and more');
     const at = await spanOf(me.page, 'abc-123-def and');
     /* Held on the first word, then dragged to the end of "and". */
-    await finger(me.page, [['touchStart', at.from + 2, at.y, 700], ['touchMove', (at.from + at.to) / 2, at.y, 60], ['touchMove', at.to, at.y, 60], ['touchEnd', 0, 0, 300]]);
+    const held = await press(me, at.from + 2, at.y);
+    await held.move((at.from + at.to) / 2); await held.move(at.to);
+    await held.lift();
+    /* Copying goes through the clipboard, which answers when it answers: waited for. */
+    await me.until('the selection is copied', async () => (await clipboard(me.page)) === 'abc-123-def and', 5000);
     assert.equal(await me.page.evaluate(() => window.clavariumTerminal.getSelection()), 'abc-123-def and');
-    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def and');
     assert.match(await me.page.locator('#flash').innerText(), /Copied: 15 characters/);
     /* A long press alone takes the word under the finger. */
     const word = await spanOf(me.page, 'abc-123-def');
-    await finger(me.page, [['touchStart', word.from + 30, word.y, 700], ['touchEnd', 0, 0, 300]]);
-    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def');
-    /* A short drag is still a scroll, not a selection; a tap clears what was selected. */
-    await finger(me.page, [['touchStart', word.from, word.y, 40], ['touchMove', word.from, word.y - 60, 40], ['touchEnd', 0, 0, 200]]);
+    await (await press(me, word.from + 30, word.y)).lift();
+    await me.until('the word is copied', async () => (await clipboard(me.page)) === 'abc-123-def', 5000);
+    /* A short drag is still a scroll, not a selection; a tap clears what was
+       selected. The finger goes down and moves in one go, in the page: a
+       stalled browser cannot then let the long press fire between the two,
+       which a person's quick swipe never allows either. */
+    assert.equal(await me.page.evaluate(() => window.clavariumTerminal.hasSelection()), true);
+    await me.page.evaluate(([x, y]) => {
+        const area = document.getElementById('terminal');
+        const touch = (at) => new Touch({ identifier: 2, target: area, clientX: x, clientY: at });
+        const fire = (type, at, list) => area.dispatchEvent(new TouchEvent(type, { touches: list, changedTouches: [touch(at)], bubbles: true, cancelable: true }));
+        fire('touchstart', y, [touch(y)]);
+        fire('touchmove', y - 60, [touch(y - 60)]);
+        fire('touchend', y - 60, []);
+    }, [word.from, word.y]);
     assert.equal(await me.page.evaluate(() => window.clavariumTerminal.hasSelection()), false);
-    assert.equal(await me.page.evaluate(() => navigator.clipboard.readText()), 'abc-123-def', 'nothing new was copied');
+    /* Had the long press fired late after all, it would select and copy on its own: given the time to. */
+    await wait(800);
+    assert.equal(await me.page.evaluate(() => window.clavariumTerminal.hasSelection()), false);
+    assert.equal(await clipboard(me.page), 'abc-123-def', 'nothing new was copied');
 });
 
 test('with a mouse, text selected with Shift held is copied when the button is released', { skip: SKIP }, async (t) => {
@@ -195,7 +215,7 @@ test('with a mouse, text selected with Shift held is copied when the button is r
     await me.create('desk-select');
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.type('clear; echo "order 7741-B is ready"');
-    await me.sees('order 7741-B is ready');
+    await me.printed('order 7741-B is ready');
     await mouseSelect(me, '7741-B');
     assert.match(await me.page.locator('#flash').innerText(), /Copied: 6 characters/);
 });
@@ -206,7 +226,7 @@ test('what was selected is offered for what it is: a web address opens elsewhere
     await me.create('offers');
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.type('echo "the report" > report.txt; mkdir -p out; echo deep > out/q3.txt; clear; echo "See https://example.com/docs/page?x=1 for more."; echo "Wrote report.txt and out/q3.txt"; echo "bad: javascript:alert(1) and https://user:pw@example.org/x end"; echo "also ftp://example.net/f end"; echo "plain words here"');
-    await me.sees('plain words here');
+    await me.printed('plain words here');
     const select = async (text) => { await mouseSelect(me, text); return me.page.locator('#flash-act'); };
     /* A web address: the button names the site, and it opens in another tab. */
     const link = await select('https://example.com/docs/page?x=1');

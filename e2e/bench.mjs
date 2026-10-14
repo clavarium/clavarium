@@ -60,6 +60,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
         wakeEveryMs: 300, alertSend, talkEveryMs: 200, gitEveryMs: 300,
+        /* The ready-made machine is built only when a test asks for it. */
+        shelfEveryMs: 0,
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });
@@ -91,6 +93,19 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         };
         const state = () => page.locator('#state').innerText();
         const sees = (text, ms) => until(`the terminal shows ${JSON.stringify(text)}`, async () => (await screen()).includes(text), ms);
+        /* Waits until a command has PRINTED `line` as its last line and the
+           prompt is back under it. `sees` is not enough before measuring where
+           text sits on the screen: the command typed is echoed first, and it
+           holds its own output in quotes (echo "x" shows x at once), so `sees`
+           can return before the command even ran -- then a `clear` and the
+           real output move everything, and a click or a finger lands where
+           the text no longer is. Under the load of the whole suite that gap
+           is long enough to be hit. */
+        const printed = (line, ms) => until(`the terminal printed ${JSON.stringify(line)}, and the prompt is back`, async () => {
+            const rows = (await screen()).split('\n').map((row) => row.trimEnd());
+            while (rows.length > 0 && rows.at(-1) === '') rows.pop();
+            return rows.length >= 2 && rows.at(-2) === line && /^[a-z]+>$/.test(rows.at(-1));
+        }, ms);
         const type = async (text) => { await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
         const api = (path, body) => page.evaluate(async ([p, b]) => { const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, body: await r.json().catch(() => null) }; }, [path, body]);
         /* Creates a conversation from the page, as a person does, and waits for its terminal. */
@@ -102,6 +117,19 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await page.locator('#create button[type=submit]').click();
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
+            await fullSize(name);
+        }
+        /* Waits until the terminal in the machine has the page's size. A screen
+           that takes a terminal already open (bridge.mjs) sets it a line
+           short, then right a moment later, so that the tool redraws: until
+           the second size has arrived, the tool is still to be told of a
+           change of size, and the shell, told while it draws its prompt,
+           draws a second one -- after the output a test then reads (seen:
+           "ready>" twice at the end of the copied screen). Typed only once
+           the size is final, a test reads only what it typed. */
+        async function fullSize(name) {
+            const pane = () => spawnSync('tmux', ['-L', `e2e-clv-${name}`.slice(0, 40), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
+            await until(`the terminal of ${name} has the page's size`, async () => pane() === await page.evaluate(() => `${window.clavariumTerminal.cols}x${window.clavariumTerminal.rows}`));
         }
         /* A folder is made in Assets. */
         async function newFolder(name) {
@@ -130,7 +158,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             }
             await page.locator('#panel-close').click();
         }
-        return { page, context, errors, screen, until, state, sees, type, api, create, newFolder, access };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, newFolder, access };
     }
     return { origin, dir, person, browser, sshRoot };
 }

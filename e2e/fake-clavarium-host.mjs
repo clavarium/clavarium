@@ -12,14 +12,14 @@
  * State lives under FAKE_VM_DIR:  vms/<name>/{state, root/...}, data/...
  */
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdirSync, rmdirSync, renameSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync } from 'node:fs';
+import { mkdirSync, rmdirSync, renameSync, readFileSync, writeFileSync, existsSync, rmSync, symlinkSync, readdirSync, chmodSync, lstatSync, appendFileSync, cpSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const DIR = process.env.FAKE_VM_DIR;
 if (!DIR) { console.error('FAKE_VM_DIR is not set'); process.exit(64); }
 const [area, verb, ...argv] = process.argv.slice(2);
 /* For the tests that count what is sent into a machine. */
-if (process.env.FAKE_VM_LOG && area === 'vm') appendFileSync(process.env.FAKE_VM_LOG, `${verb} ${argv.slice(0, 5).join(' ')}\n`);
+if (process.env.FAKE_VM_LOG && (area === 'vm' || area === 'shelf')) appendFileSync(process.env.FAKE_VM_LOG, `${area === 'shelf' ? 'shelf ' : ''}${verb} ${argv.slice(0, 5).join(' ')}\n`);
 const DATA = join(DIR, 'data');
 const folderOf = (name) => join(DATA, 'resources', name);
 const viewOf = (name) => join(DATA, 'views', name);
@@ -72,6 +72,29 @@ if (area === 'net') {
     /* taps, bridge: no VM runs here, so there is nothing to list. */
     process.exit(verb === 'taps' ? 1 : 0);
 }
+/* THE READY-MADE MACHINE: a "VM" directory like the others, prepared and
+   then stopped. Its preparation steps are NOT run: here they would install
+   packages on the machine running the tests. They are only logged. */
+if (area === 'shelf') {
+    const shelfHome = (name) => join(DIR, 'vms', name);
+    const [name] = argv;
+    if (verb === 'room') { console.log(process.env.FAKE_SHELF_ROOM ?? 'free 50000'); process.exit(0); }
+    if (verb === 'list') { for (const n of existsSync(join(DIR, 'vms')) ? readdirSync(join(DIR, 'vms')) : []) if (n.startsWith('clvshelf-')) console.log(n); process.exit(0); }
+    if (!/^clvshelf-\d{8}-\d{6}$/.test(name ?? '')) { console.error(`REFUSED: not one of our ready-made machines: ${name}`); process.exit(78); }
+    if (verb === 'launch') {
+        if (existsSync(shelfHome(name))) { console.error(`launch failed: instance "${name}" already exists`); process.exit(2); }
+        mkdirSync(join(shelfHome(name), 'root', 'resources'), { recursive: true });
+        writeFileSync(join(shelfHome(name), 'state'), 'Running');
+        process.exit(0);
+    }
+    if (!existsSync(join(shelfHome(name), 'state'))) { console.error(`instance "${name}" does not exist`); process.exit(2); }
+    if (verb === 'exec') { appendFileSync(join(shelfHome(name), 'prepared'), `${argv.slice(2).join(' ')}\n`); process.exit(0); }
+    if (verb === 'seal') { writeFileSync(join(shelfHome(name), 'state'), 'Stopped'); process.exit(0); }
+    if (verb === 'info') { console.log(JSON.stringify({ info: { [name]: { state: readFileSync(join(shelfHome(name), 'state'), 'utf8') } } })); process.exit(0); }
+    if (verb === 'size') { console.log('size 4200'); process.exit(0); }
+    if (verb === 'delete') { rmSync(shelfHome(name), { recursive: true, force: true }); process.exit(0); }
+    console.error(`REFUSED: unknown verb: shelf ${verb}`); process.exit(78);
+}
 if (area !== 'vm') { console.error(`REFUSED: unknown verb: ${area} ${verb}`); process.exit(78); }
 const home = (vm) => join(DIR, 'vms', vm);
 const root = (vm) => join(home(vm), 'root');
@@ -92,6 +115,16 @@ if (verb === 'launch') {
     /* Building takes a moment in real life; a little of it is kept, so that
        the page's "building" state is really seen by the tests. */
     spawnSync('sleep', [process.env.FAKE_VM_LAUNCH_SECONDS ?? '1']);
+    process.exit(0);
+}
+/* A copy of a stopped ready-made machine, stopped too. */
+if (verb === 'clone') {
+    const [from, vm] = argv;
+    if (stateOf(from) !== 'Stopped') fail(`clone failed: "${from}" is not stopped`);
+    if (stateOf(vm)) fail(`clone failed: instance "${vm}" already exists`);
+    cpSync(root(from), root(vm), { recursive: true });
+    setState(vm, 'Stopped');
+    spawnSync('sleep', [process.env.FAKE_VM_STEP_SECONDS ?? '0']);
     process.exit(0);
 }
 if (verb === 'info') {
@@ -141,6 +174,12 @@ if (verb === 'exec') {
     const [program, ...rest] = command;
     const stdin = () => readFileSync(0);
     if (program === 'snap' || program === 'chown') process.exit(0);
+    /* A copy's first start, and the look that its tool is there: each given
+       a moment, so that a test sees every step of the build go by. */
+    if (program === 'cloud-init' || program === 'which') {
+        spawnSync('sleep', [process.env.FAKE_VM_STEP_SECONDS ?? '0']);
+        if (program === 'cloud-init') process.exit(0);
+    }
     if (program === 'mkdir') { mkdirSync(inVm(vm, rest.at(-1)), { recursive: true }); process.exit(0); }
     if (program === 'install') {
         const target = inVm(vm, rest.at(-1));
@@ -166,6 +205,6 @@ if (verb === 'exec') {
         child.on('error', () => process.exit(127));
         child.on('exit', (code) => process.exit(code ?? 1));
     }
-} else if (!['launch', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork'].includes(verb)) {
+} else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork'].includes(verb)) {
     fail(`unknown verb: ${verb}`, 64);
 }

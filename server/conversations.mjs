@@ -8,7 +8,7 @@
  */
 import { isConversationName } from './names.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
-import { WORK, VM_USER } from './vm.mjs';
+import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -38,6 +38,9 @@ export class Conversations {
     drop = () => {};
     /* Set by the server: told when a conversation has just become usable. */
     ready = () => {};
+    /* Set by the server: the ready-made machine to copy for a tool, or
+       undefined for the long way. See shelf.mjs. */
+    shelf = { pick: () => undefined };
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -82,15 +85,39 @@ export class Conversations {
 
     async #build(name, tool, memoryMb) {
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
-        const launched = await this.#vms.launch(name, memoryMb);
-        if (launched.code !== 0) return fail('The machine did not start', launched);
-        /* What sharing a folder needs inside the VM, put there NOW. Left to
-           the first attachment, it made that one take over a minute -- longer
-           than the edge waits for an answer, so the page said "failed" about
-           an attachment that then succeeded (seen by a tester). */
-        this.#store.patch(name, { step: 'Preparing the machine' });
-        const sharing = await this.#vms.exec(name, ['sudo', '-n', 'snap', 'install', 'multipass-sshfs'], { timeoutMs: STEP_MS });
-        if (sharing.code !== 0) return fail('The machine could not be prepared for shared folders', sharing);
+        /* A COPY OF THE READY-MADE MACHINE when there is one that holds this
+           tool (see shelf.mjs): it only has to boot. Anything wrong with the
+           copy -- an older VM manager without "clone", a copy that does not
+           start -- and it is removed and the machine is built the long way,
+           as if there were no shelf. */
+        const from = this.shelf.pick(tool);
+        let readyMade = false;
+        if (from) {
+            const cloned = await this.#vms.clone(name, from, memoryMb);
+            const started = cloned.code === 0 ? await this.#vms.start(name) : cloned;
+            readyMade = started.code === 0;
+            if (!readyMade && await this.#vms.state(name) !== undefined) await this.#vms.remove(name);
+            if (!this.#store.get(name)) return undefined; /* archived meanwhile */
+        }
+        if (!readyMade) {
+            const launched = await this.#vms.launch(name, memoryMb);
+            if (launched.code !== 0) return fail('The machine did not start', launched);
+        }
+        this.#store.patch(name, { step: 'Preparing the machine', readyMade: readyMade || undefined });
+        if (readyMade) {
+            /* A copy's first start is a first start: it makes its own identity
+               (host keys, network). Waited for, so that nothing below meets a
+               machine half set up. Its answer is not judged: "done with
+               warnings" is common and harmless. */
+            await this.#vms.exec(name, ['cloud-init', 'status', '--wait'], { timeoutMs: STEP_MS });
+        } else {
+            /* What sharing a folder needs inside the VM, put there NOW. Left to
+               the first attachment, it made that one take over a minute -- longer
+               than the edge waits for an answer, so the page said "failed" about
+               an attachment that then succeeded (seen by a tester). */
+            const sharing = await this.#vms.exec(name, [...SHARING_STEP], { timeoutMs: STEP_MS });
+            if (sharing.code !== 0) return fail('The machine could not be prepared for shared folders', sharing);
+        }
         if (this.#store.get(name)?.work === 'kept') {
             /* Where the tool works is a folder kept by the server: what it
                makes there is seen from the page (Files) and outlives the
@@ -105,7 +132,14 @@ export class Conversations {
                 if (made.code !== 0) return fail('The work folder could not be created', made);
             }
         }
-        for (const [i, step] of tool.steps.entries()) {
+        /* The tool came with the copy: one look that it is there, and the
+           step is passed. Not there after all: installed the usual way. */
+        let installed = false;
+        if (readyMade) {
+            this.#store.patch(name, { step: `Installing ${tool.label} (already on the machine)` });
+            installed = tool.steps.length === 0 || (await this.#vms.exec(name, ['which', tool.command[0]])).code === 0;
+        }
+        for (const [i, step] of (installed ? [] : tool.steps).entries()) {
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
             this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${tool.steps.length})` });
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });

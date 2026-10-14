@@ -115,7 +115,7 @@ test('a path the tool printed is clicked in the terminal and opens in Files, sho
     await me.api('/api/conversations/pointer/resources', { resource: 'reports', access: 'write' });
     writeFileSync(join(b.dir, 'kept-work', 'pointer', 'work', 'summary.pdf'), smallPdf());
     await me.type('mkdir -p out; echo "figures" > out/q3.txt; echo "for the phone" > ../resources/reports/brief.txt; clear; echo "The PDF is ready: /work/summary.pdf (1 page)."; echo "See also /resources/reports/brief.txt, and the folder /work/out."; echo "Elsewhere: /etc/hostname"');
-    await me.sees('Elsewhere: /etc/hostname');
+    await me.printed('Elsewhere: /etc/hostname');
     const click = async (text) => { const at = await whereIs(me.page, text); assert.ok(at, `${text} is on the screen`); await me.page.mouse.move(at.x, at.y); await me.page.mouse.click(at.x, at.y); };
     await click('/work/summary.pdf');
     await me.until('the PDF is shown in a window over the terminal', async () => (await me.page.locator('#viewer').isVisible()) && (await me.page.locator('#preview-name').innerText()) === 'summary.pdf' && (await me.page.locator('#preview-body canvas').count()) === 1, 30_000);
@@ -152,7 +152,7 @@ test('on a tablet, a finger on the path opens it too -- even a file on the machi
     await me.create('by-finger', 'Shell', { onDisk: true });
     writeFileSync(join(b.dir, 'vms', 'clv-by-finger', 'root', 'work', 'summary.pdf'), smallPdf());
     await me.type('clear; echo "Ready: /work/summary.pdf"; echo "Gone: /work/never-made.txt"');
-    await me.sees('Gone: /work/never-made.txt');
+    await me.printed('Gone: /work/never-made.txt');
     const tap = async (text) => { const at = await whereIs(me.page, text); await me.page.touchscreen.tap(at.x, at.y); };
     await tap('/work/summary.pdf');
     /* The canvas is there before its page is drawn and counted: wait for what is said, as the first test does. */

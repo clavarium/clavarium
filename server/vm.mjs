@@ -14,11 +14,15 @@ import { isConversationName } from './names.mjs';
    directory: the path then names nobody, and sits next to /resources. */
 export const WORK = '/work';
 export const VM_USER = 'ubuntu';
+/* What sharing a folder needs inside a machine (see conversations.mjs). */
+export const SHARING_STEP = Object.freeze(['sudo', '-n', 'snap', 'install', 'multipass-sshfs']);
 /* Attached folders appear in every VM under /resources/<name>: the host
    program decides that path. */
 /* The host program gives a launch this long; a little more is waited here. */
 const LAUNCH_SECONDS = 900;
 const PREFIX = 'clv-';
+/* Copying a ready-made disk of a few gigabytes: slow disks are given time. */
+const CLONE_MS = 15 * 60_000;
 
 export function vmName(conversation) {
     if (!isConversationName(conversation)) throw new Error('not a conversation name');
@@ -44,6 +48,12 @@ export class Vms {
 
     launch(conversation, memoryMb) {
         return this.run(['vm', 'launch', vmName(conversation), String(memoryMb)], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
+    }
+
+    /* The machine of a conversation as a COPY of the ready-made one (see
+       shelf.mjs), with its own memory. Left stopped: started by the caller. */
+    clone(conversation, shelf, memoryMb) {
+        return this.run(['vm', 'clone', shelf, vmName(conversation), String(memoryMb)], { timeoutMs: CLONE_MS });
     }
 
     exec(conversation, argv, options) {

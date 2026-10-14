@@ -35,6 +35,29 @@ const ROWS = [2, 300];
 
 const within = (n, [low, high]) => Number.isInteger(n) && n >= low && n <= high;
 
+/* A TERMINAL OPENED BEFORE ANY SCREEN (`warm`) IS ASKED WHAT IT IS, AND
+   SOMEBODY MUST ANSWER. When tmux starts, it asks the terminal who it is
+   (the "device attributes" questions) and waits for an answer. With no
+   screen nobody answers; tmux then waits five seconds and redraws the whole
+   screen -- in front of the person who has come meanwhile: a selection being
+   made is wiped, a long press on a tablet lost, at a moment that depends on
+   how fast the machine was (measured: the browser tests failed a different
+   one each run). So while no screen is there, the bridge answers as the
+   page's terminal (xterm.js) would; tmux settles at once, when nobody looks.
+   Only these two questions, only while there is no screen.
+   What tmux says back to a terminal at that moment is lost with nobody
+   there, and one thing of it matters: "report your focus" (tmux is told to
+   pass focus on: see tmux.mjs; a tool asked for it). A screen that takes a
+   terminal already open is therefore told it in tmux's place
+   (FOCUS_REPORTS), as tmux tells a terminal it starts with. */
+const ASKED_PRIMARY = /\x1b\[0?c/;
+const ASKED_SECONDARY = /\x1b\[>0?c/;
+export const FOCUS_REPORTS = '\x1b[?1004h';
+export function answerForAbsentScreen(output) {
+    const text = String(output);
+    return `${ASKED_PRIMARY.test(text) ? '\x1b[?1;2c' : ''}${ASKED_SECONDARY.test(text) ? '\x1b[>0;276;0c' : ''}`;
+}
+
 /* A page from another site, open in the same browser, must not be able to
    attach: a WebSocket is not covered by the same-origin policy, so the Origin
    header is compared by hand. Kept under this name for the callers that have
@@ -110,7 +133,10 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         if (live.has(name)) close(name);
         const kept = { terminal, sink, cols, rows };
         live.set(name, kept);
-        terminal.onData((bytes) => { if (kept.sink?.readyState === 1) kept.sink.send(bytes, { binary: true }); });
+        terminal.onData((bytes) => {
+            if (kept.sink?.readyState === 1) { kept.sink.send(bytes, { binary: true }); return; }
+            if (!kept.sink) { const answer = answerForAbsentScreen(bytes); if (answer) terminal.write(answer); }
+        });
         terminal.onExit(async () => {
             if (live.get(name) !== kept) return;              /* we closed it ourselves */
             live.delete(name);
@@ -154,6 +180,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
                makes the tool draw its whole screen for the newcomer. */
             kept.sink = viewer; kept.cols = cols; kept.rows = rows;
             onRejoin(name);
+            if (viewer.readyState === 1) viewer.send(Buffer.from(FOCUS_REPORTS), { binary: true });
             /* The two sizes are sent APART. Sent together, they reached the
                machine as one change to the size it already had: nothing was
                redrawn, and the page waited for an output that never came

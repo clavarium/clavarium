@@ -24,6 +24,16 @@
  *   shows; the owner's phone can be told; a cap per hour stops a tool that
  *   commits in a loop.
  *
+ * ONLY WHILE A MACHINE USES IT. A repository that no running machine has
+ * attached does nothing by nature: the clock neither refreshes its origin nor
+ * sends anything from it. "In use" means attached to at least one
+ * conversation whose machine is running and awake -- not asleep, not failed,
+ * not being built (GitChecks.machineFor says which). Nobody can be working
+ * in it otherwise, so there is nothing new to fetch for and nothing new to
+ * send; and an owner who put every machine to sleep expects the server to
+ * stop talking to the outside on their behalf. "Refresh now" still works on
+ * demand, for any repository: the owner asked.
+ *
  * HOW A NEW COMMIT IS NOTICED WITHOUT RUNNING GIT IN THE TOOL'S REPOSITORY:
  * the size and date of a few files git itself rewrites at each commit or
  * branch change are looked at (never read, links never followed), as the
@@ -209,6 +219,7 @@ export class GitKeeper {
         const folder = this.#resources.folder(name);
         return MARKS.map((m) => { try { const s = lstatSync(`${folder}/${m}`); return `${s.size}:${Math.floor(s.mtimeMs)}`; } catch { return '-'; } }).join('|');
     }
+    async #inUse(name) { try { return Boolean(await this.#checks.machineFor(name)); } catch { return false; } }
     #tell(title, body) { if (this.#alerts) void this.#alerts.tell({ title, body, url: '/' }).catch(() => {}); }
 
     async #autoSend(name, s, held) {
@@ -257,6 +268,11 @@ export class GitKeeper {
                 const s = this.settings(r.name);
                 const remote = this.#review.remoteOf(r.name);
                 if (!remote) continue;
+                /* Left alone while no machine uses it (see the top of this file).
+                   What was already held for automatic sending is kept as it is:
+                   a commit whose quiet delay ran out while its machine slept is
+                   looked at as soon as one wakes, not a whole delay later. */
+                if (!await this.#inUse(r.name)) continue;
                 /* The origin, when due. */
                 const last = this.#record(r.name).mirror?.at;
                 if (s.refreshMinutes > 0 && (!last || now - new Date(last).getTime() >= s.refreshMinutes * 60_000)) await this.refresh(r.name).catch(() => {});

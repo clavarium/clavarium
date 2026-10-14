@@ -61,13 +61,14 @@ test('the Esc key of the key row reaches the tool, alone', { skip: SKIP }, async
     const b = await bench(t);
     const me = await b.person();
     await me.create('keys');
-    await me.type('read -rsn1 k; printf "GOT-%q-END\\n" "$k"');
-    await wait(400);
+    /* "armed" is printed once the command runs: a key sent before that would go to the shell's line editor, not to read. */
+    await me.type('echo armed; read -rsn1 k; printf "GOT-%q-END\\n" "$k"');
+    await me.sees('\narmed');
     await me.page.locator('#keys button[data-keys="esc"]').click();
     await me.sees("GOT-$'\\E'-END", 5000);
     /* The arrows and Tab too, each as the sequence a terminal sends. */
-    await me.type('read -rsn3 k; printf "GOT-%q-END\\n" "$k"');
-    await wait(400);
+    await me.type('echo armed-again; read -rsn3 k; printf "GOT-%q-END\\n" "$k"');
+    await me.sees('\narmed-again');
     await me.page.locator('#keys button[data-keys="up"]').click();
     await me.sees("GOT-$'\\E[A'-END", 5000);
 });
@@ -78,7 +79,8 @@ test('what is on screen can be had as ordinary text, to select by touch or copy 
     const me = await b.person();
     await me.create('copyable');
     await me.type('echo first-line; echo "the address is https://example.com/a?b=1"');
-    await me.sees('https://example.com/a?b=1');
+    /* The whole output and the prompt after it: the sheet is a copy of the screen at the moment it opens. */
+    await me.printed('the address is https://example.com/a?b=1');
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.page.locator('#copy-open').click();
     const text = await me.page.locator('#copy-text').inputValue();

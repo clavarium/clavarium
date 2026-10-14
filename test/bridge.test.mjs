@@ -117,6 +117,31 @@ test('a machine known to run has its terminal opened before any screen asks; a d
     ws.close();
 });
 
+test('a terminal opened before any screen answers tmux\'s start-up questions itself, so tmux does not redraw later under the person; with a screen, the screen answers', async (t) => {
+    const b = await bench(t);
+    await b.bridge.warm('demo');
+    const made = b.terminals.made[0];
+    /* What tmux 3.4 asks a terminal when it starts. */
+    made.data('\x1b[c\x1b[>c\x1b[>q\x1b]10;?\x1b\\');
+    assert.deepEqual(made.written, ['\x1b[?1;2c\x1b[>0;276;0c'], 'answered as xterm.js answers');
+    made.data('plain output, no question');
+    assert.equal(made.written.length, 1);
+    /* A screen is there: it receives the questions and answers for itself.
+       Listened to from the very first frame. */
+    const ws = b.open('c=demo');
+    const got = [];
+    ws.on('message', (d, binary) => { if (binary) got.push(d.toString()); });
+    await once(ws, 'open');
+    await b.until(() => made.sizes.length === 2);
+    /* What tmux told the terminal at its start, lost with nobody there, is told to the screen: report your focus. */
+    assert.deepEqual(got, ['\x1b[?1004h']);
+    made.data('\x1b[c');
+    await b.until(() => got.length === 2);
+    assert.equal(got[1], '\x1b[c');
+    assert.equal(made.written.length, 1, 'the bridge did not answer in its place');
+    ws.close();
+});
+
 test('the newest screen takes over: the first is told, then closed with its own code, and the terminal passes to the newcomer', async (t) => {
     const b = await bench(t);
     const first = b.open('c=demo');
