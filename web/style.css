@@ -368,3 +368,6 @@ textarea.public-key { flex: 1 1 260px; min-width: 0; font: 12px ui-monospace, Me
 
 #settings-advanced > div { display: grid; gap: 6px; }
 #git-hosts .folder code { overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, Menlo, Consolas, monospace; }
+#gitview .commit pre { flex-basis: 100%; margin: 2px 0 0; white-space: pre-wrap; color: var(--ink2); font-size: 0.85em; }
+#gitview #gitview-guards ul { margin: 4px 0 8px; padding-left: 20px; }
+#gitview #gitview-guards li { overflow-wrap: anywhere; }

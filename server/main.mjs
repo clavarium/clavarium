@@ -45,6 +45,7 @@ import { GitReview } from './gitpush.mjs';
 import { GitAccess } from './gitaccess.mjs';
 import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
+import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -153,7 +154,7 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -165,7 +166,7 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     /* How private repositories are reached: keys and tokens kept and used here only (gitaccess.mjs).
        `gitSsh`: a stand-in for the ssh program, for tests. */
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
-    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, grants, access: gitAccess });
+    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess });
     /* The ready-made machine new conversations are copied from, kept fresh
        in the background: see shelf.mjs. Tidied up at start, without making
        the start wait on the VM manager. */
@@ -227,7 +228,9 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const mailTimer = setInterval(() => { void mailboxes.syncAll(); }, MAIL_EVERY_MS);
     mailTimer.unref();
     /* What would go out of a repository, shown before it is sent: see gitpush.mjs. */
-    const gitReview = new GitReview({ store: new Store(`${dataDir}/git.json`), vault, resources: folders, dataDir, localRemotes: gitLocalRemotes, access: gitAccess });
+    /* Every git of this server, and the one way an agent's commits come in: see gitrunner.mjs. */
+    const gitRunner = new GitRunner({ dataDir, host, ...(gitReserveBytes === undefined ? {} : { reserveBytes: gitReserveBytes }) });
+    const gitReview = new GitReview({ store: new Store(`${dataDir}/git.json`), vault, resources: folders, dataDir, localRemotes: gitLocalRemotes, access: gitAccess, runner: gitRunner });
     /* What the Settings screen says of this installation: set when it was installed, shown, not changed from the page. */
     /* Several models answer a tool's simple questions in the owner's place, where the owner asked: see answerer.mjs. */
     /* The owner's devices are told when something waits for them: see alerts.mjs. */
@@ -241,7 +244,15 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     const wakeTimer = wakeups.start(wakeEveryMs);
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
-    const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), review: gitReview, resources: folders, alerts,
+    /* What could not be read is told to the agents that write in the repository, where they can act. */
+    const tellAgent = async (repository, line) => {
+        const writers = Object.entries(folders.list().find((x) => x.name === repository)?.attachments ?? {}).filter(([, access]) => access === 'write').map(([conversation]) => conversation);
+        /* Told: at least one of them had the line typed (see GitKeeper #toAgent). */
+        let heard = false;
+        for (const conversation of writers) if (await wakeups.say(conversation, line) === true) heard = true;
+        return heard;
+    };
+    const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), review: gitReview, resources: folders, alerts, tellAgent,
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
@@ -273,6 +284,13 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
     return listening;
 }
 
+/* One line of the host program's settings (/etc/clavarium/host.conf), or ''. */
+function hostSetting(key) {
+    let text = '';
+    try { text = readFileSync('/etc/clavarium/host.conf', 'utf8'); } catch { return ''; }
+    return (text.split('\n').find((l) => l.startsWith(`${key}=`)) ?? '').slice(key.length + 1).trim();
+}
+
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
     const argv = process.argv.slice(2);
     const port = Number(option(argv, 'port', '7717'));
@@ -284,7 +302,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const publicOrigin = option(argv, 'public-origin', '') || undefined;
         if (operators.length === 0) console.log('No --operators: development mode, anyone on this machine is the operator.');
         const vaultKey = option(argv, 'vault-key', '') || undefined;
-        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, operators, publicOrigin, vaultKey });
+        /* Where the shared folders live: $MNT, declared to the host program in
+           its own settings, read here so that both agree (see clavarium-host). */
+        const mntDir = hostSetting('MNT') || dataDir;
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

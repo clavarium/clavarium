@@ -3,6 +3,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync, symlinkSync, lstatSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ruleset } from '../server/network.mjs';
 
@@ -30,7 +33,7 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['work', 'aside', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img put aside in /var/lib/clavarium/removed'],
         [['vm', 'mount', 'clv-demo', 'work', 'demo', '998', '997'], 'multipass mount -u 998:1000 -g 997:1000 /var/lib/clavarium/work/demo clv-demo:/work'],
         [['vm', 'unwork', 'clv-demo'], 'multipass umount clv-demo:/work'],
-        [['work', 'room', 'demo'], 'df /var/lib/clavarium/work/demo /var/lib/clavarium'],
+        [['work', 'room', 'demo'], 'df /var/lib/clavarium/work/demo /var/lib/clavarium/work-disks'],
         [['net', 'taps'], 'pgrep -a qemu-system'],
         [['net', 'bridge'], 'ip -4 -o addr show mpqemubr0'],
         [['vm', 'clone', 'clvshelf-20261014-120000', 'clv-demo', '1024'], 'multipass clone clvshelf-20261014-120000 --name clv-demo\nmultipass set local.clv-demo.memory=1024M'],
@@ -112,4 +115,219 @@ test('the ready-made machine: its own names only, and a conversation is copied f
         assert.ok(r.code === 78 || r.code === 64, `${args.join(' ')} -> ${r.code}`);
         assert.equal(r.out, '', `nothing would run: ${args.join(' ')}`);
     }
+});
+
+/* THE GIT READER (deploy/clavarium-host "git read", deploy/git-read).
+   What can be seen without root: the exact sandbox, the refusals, the
+   mapping of how a unit ended to the codes the server trusts. What the
+   sandbox really stops was tried as root: see the trial at the end of
+   docs/blueprint/git-runner-core.md. */
+const withMnt = (...args) => {
+    const r = spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', '--mnt', '/srv/clavarium-mnt', ...args], { encoding: 'utf8' });
+    return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
+};
+
+test('git read: one sandbox, exactly this one, around one fixed script', () => {
+    const r = withMnt('git', 'read', 'site');
+    assert.equal(r.code, 0, r.err);
+    const v = r.out.split('\n');
+    assert.deepEqual(v.slice(0, 6), ['systemd-run', '--quiet', '--wait', '--pipe', '--service-type=exec', '--unit=clvread-site_RANDOM16']);
+    assert.deepEqual(v.slice(-2), ['/usr/lib/clavarium/git-read', 'site']);
+    const props = v.filter((x, i) => v[i - 1] === '-p');
+    const envs = v.filter((x, i) => v[i - 1] === '-E');
+    assert.deepEqual(props, [
+        'DynamicUser=yes', 'RootDirectory=/var/lib/clavarium/runner-root', 'MountAPIVFS=no',
+        /* /resources:ro: the sandbox's root keeps a mount point for every
+           folder ever read; an empty /resources over it shows only this one. */
+        'TemporaryFileSystem=/dev:ro /tmp:ro /var/tmp:ro /resources:ro', 'BindPaths=/dev/null /dev/zero /dev/urandom',
+        'DevicePolicy=closed', 'DeviceAllow=/dev/null rw', 'DeviceAllow=/dev/zero r', 'DeviceAllow=/dev/urandom r',
+        'BindReadOnlyPaths=/usr /usr/bin:/bin /usr/lib:/lib /usr/lib64:/lib64 /srv/clavarium-mnt/resources/site:/resources/site',
+        'PrivateNetwork=yes', 'RestrictAddressFamilies=AF_UNIX', 'NoNewPrivileges=yes',
+        'CapabilityBoundingSet=', 'AmbientCapabilities=', 'RestrictNamespaces=yes', 'RestrictSUIDSGID=yes',
+        'RestrictRealtime=yes', 'LockPersonality=yes', 'MemoryDenyWriteExecute=yes',
+        'SystemCallArchitectures=native', 'SystemCallFilter=@system-service',
+        'SystemCallFilter=~@aio @keyring @setuid @chown @memlock @privileged @resources userfaultfd kcmp process_vm_readv process_vm_writev msgget msgsnd msgrcv msgctl semget semop semctl shmget shmat shmdt shmctl mq_open mq_unlink',
+        'SystemCallErrorNumber=EPERM',
+        'RuntimeMaxSec=300', 'MemoryMax=1G', 'MemorySwapMax=0', 'TasksMax=8', 'CPUQuota=100%',
+        'LimitFSIZE=0', 'LimitCORE=0', 'LimitNOFILE=256', 'WorkingDirectory=/resources/site',
+    ]);
+    assert.deepEqual(envs, ['PATH=/usr/bin', 'HOME=/nonexistent', 'XDG_CONFIG_HOME=/nonexistent', 'LC_ALL=C', 'GIT_CONFIG_NOSYSTEM=1',
+        'GIT_CONFIG_GLOBAL=/dev/null', 'GIT_CEILING_DIRECTORIES=/resources', 'GIT_NO_LAZY_FETCH=1', 'GIT_TERMINAL_PROMPT=0', 'GIT_OPTIONAL_LOCKS=0', 'GIT_NO_REPLACE_OBJECTS=1']);
+    /* Settings that were tried and bring back the host's /dev, /proc, IPC or root: never there. */
+    for (const never of ['ProtectKernelTunables', 'ProtectControlGroups', 'ProtectProc', 'PrivateDevices', 'PrivateIPC', 'ProtectHostname', 'TemporaryFileSystem=/:', '--collect', '-G']) {
+        assert.equal(r.out.includes(never), false, never);
+    }
+    /* Every line is one argument: none can be split into two. */
+    assert.equal(v.length, 6 + 2 * props.length + 2 * envs.length + 2);
+    assert.deepEqual(withMnt('git', 'stop', 'site').out.split('\n'), ['systemctl stop clvread-site_*.service', 'systemctl reset-failed clvread-site_*.service']);
+});
+
+test('everything root mounts, unmounts or moves is under MNT, never under the data directory the server owns', () => {
+    /* The server owns the data directory: it could swap any directory there
+       for a link between a check and a mount. So the folders, their views,
+       the work folders, their disks and what is put aside all live on MNT. */
+    const cases = [
+        [['vm', 'mount', 'clv-demo', 'folder', 'site', '1', '2'], 'multipass mount -u 1:1000 -g 2:1000 /srv/clavarium-mnt/resources/site clv-demo:/resources/site'],
+        [['vm', 'mount', 'clv-demo', 'view', 'site', '1', '2'], 'multipass mount -u 1:1000 -g 2:1000 /srv/clavarium-mnt/views/site clv-demo:/resources/site'],
+        [['vm', 'mount', 'clv-demo', 'work', 'demo', '1', '2'], 'multipass mount -u 1:1000 -g 2:1000 /srv/clavarium-mnt/work/demo clv-demo:/work'],
+        [['view', 'make', 'site'], 'bindfs -r -o allow_other /srv/clavarium-mnt/resources/site /srv/clavarium-mnt/views/site'],
+        [['view', 'close', 'site'], 'umount /srv/clavarium-mnt/views/site'],
+        [['folder', 'make', 'site'], 'install -d -o OWNER -g GROUP -m 0755 /srv/clavarium-mnt/resources/site'],
+        [['work', 'make', 'demo'], 'disk /srv/clavarium-mnt/work-disks/demo.img 10240M mounted at /srv/clavarium-mnt/work/demo'],
+        [['work', 'room', 'demo'], 'df /srv/clavarium-mnt/work/demo /srv/clavarium-mnt/work-disks'],
+        [['work', 'aside', 'demo'], 'disk /srv/clavarium-mnt/work-disks/demo.img put aside in /srv/clavarium-mnt/removed'],
+    ];
+    for (const [args, expected] of cases) assert.deepEqual(withMnt(...args), { code: 0, out: expected, err: '' }, args.join(' '));
+    assert.match(withMnt('folder', 'aside', 'site').out, /^mv -T -n \/srv\/clavarium-mnt\/resources\/site \/srv\/clavarium-mnt\/removed\/site-/);
+    /* Outside "say only", every one of these directories is checked by `held`, with the chain above it. */
+    const text = readFileSync(PROGRAM, 'utf8');
+    const body = text.slice(text.indexOf('kept() {'), text.indexOf('# A folder of ours'));
+    assert.match(body, /local d="\$MNT\/\$1"/);
+    assert.match(body, /\n {4}held "\$d"\n/, 'kept holds every directory, not only resources');
+    assert.doesNotMatch(text.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n'), /\$DATA\/(views|work|work-disks|removed|resources)/, 'no root path under the data directory');
+});
+
+test('held: the check before each use refuses a link, a component of another account, one others may write', { skip: process.getuid() === 0 ? 'run as root: the refusals tried here are of an ordinary account' : false }, () => {
+    const held = (path) => withMnt('path', 'held', path);
+    assert.deepEqual(held('/usr/share'), { code: 0, out: 'held: /usr/share', err: '' }, 'root\'s from / down');
+    /* /tmp may be written by anyone: nothing under it is held. */
+    const dir = mkdtempSync(join(tmpdir(), 'clv-held-'));
+    try {
+        mkdirSync(join(dir, 'views', 'site'), { recursive: true });
+        assert.equal(held(join(dir, 'views', 'site')).code, 78);
+        assert.match(held(join(dir, 'views', 'site')).err, /\/tmp may be written by others than root|does not belong to root/);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+    /* A component that belongs to this account (the checkout itself, under a home). */
+    const mine = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
+    assert.match(held(`${mine}/test`).err, /does not belong to root/);
+    /* A link anywhere on the way (merged /usr: /bin is one). */
+    let binIsLink = false; try { binIsLink = lstatSync('/bin').isSymbolicLink(); } catch { /* none */ }
+    if (binIsLink) assert.match(held('/bin/anything').err, /\/bin is not a plain directory/);
+    assert.match(held('/usr/share/no-such-entry-here').err, /not a plain directory/);
+    assert.equal(spawnSync('/bin/bash', [PROGRAM, 'path', 'held', '/usr/share']).status, 78, 'only in "say only"');
+});
+
+test('git read refuses any name but a folder\'s, never reads a reference, and takes nothing else', () => {
+    for (const args of [
+        ['git', 'read', '../etc'], ['git', 'read', '-f'], ['git', 'read', 'a_b'], ['git', 'read', 'Site'], ['git', 'read', 'site-origin'],
+        ['git', 'read', ''], ['git', 'read', 'a/b'], ['git', 'read', 'x'.repeat(33)], ['git', 'read', 'site;id'], ['git', 'stop', '../x'], ['git', 'stop', 'a_b'],
+        ['git', 'clone', 'site'], ['git', 'push', 'site'],
+    ]) {
+        const r = withMnt(...args);
+        assert.equal(r.code, 78, args.join(' '));
+        assert.equal(r.out, '', `nothing would run: ${args.join(' ')}`);
+    }
+    for (const args of [['git', 'read'], ['git', 'read', 'site', 'extra'], ['git', 'stop']]) assert.equal(withMnt(...args).code, 64, args.join(' '));
+    /* MNT is a path of plain characters, honoured only in "say only". */
+    for (const bad of ['relative', '/a b', '/a:b', '/a/../b']) assert.equal(spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/x', '--mnt', bad, 'net', 'taps']).status, 78, bad);
+    assert.equal(spawnSync('/bin/bash', [PROGRAM, '--mnt', '/tmp', 'net', 'taps']).status, 78);
+    /* "git code" exists only to be tested: it does nothing, and nothing outside "say only". */
+    assert.equal(spawnSync('/bin/bash', [PROGRAM, 'git', 'code', 'exit-code', '1', '0']).status, 78);
+});
+
+test('how a read ended is said from what systemd recorded: fixed codes only', () => {
+    const code = (...args) => withMnt('git', 'code', ...args).out;
+    assert.equal(code('exit-code', '1', '128'), '65');
+    assert.equal(code('exit-code', '1', '3'), '67');
+    for (const status of ['1', '2', '66', '78', '127', '199', '244', '255']) assert.equal(code('exit-code', '1', status), '66', status);
+    for (const status of ['200', '203', '226', '243']) assert.equal(code('exit-code', '1', status), '79', `systemd's own ${status}`);
+    assert.equal(code('timeout', '1', '0'), '80');
+    assert.equal(code('oom-kill', '2', '9'), '81');
+    assert.equal(code('signal', '2', '13'), '82');
+    assert.equal(code('core-dump', '3', '11'), '82');
+    for (const [result, how, status] of [['resources', '0', '0'], ['', '', ''], ['start-limit-hit', '0', '0'], ['exit-code', '2', '9'], ['exit-code', '1', 'x']]) assert.equal(code(result, how, status), '79', `${result}/${how}/${status}`);
+});
+
+test('the reader script: a plain .git only, readable refs only, every ref git skips refused, and git\'s own codes folded into the fixed ones', () => {
+    const READER = fileURLToPath(new URL('../deploy/git-read', import.meta.url));
+    const text = readFileSync(READER, 'utf8');
+    for (const setting of ['core.hooksPath=/dev/null', 'core.fsmonitor=false', 'core.pager=cat', 'core.alternateRefsCommand=', 'protocol.allow=never', 'pack.threads=1', 'pack.windowMemory=256m', 'pack.useBitmaps=false']) assert.ok(text.includes(`-c ${setting}`), setting);
+    /* The bundle is built from one listing, never by `git bundle create`, which resolves each name again and may leave one out. */
+    assert.match(text, /for-each-ref --format='%\(objectname\) %\(refname\)' refs\/heads\//);
+    assert.match(text, /pack-objects --stdout --revs/);
+    assert.doesNotMatch(text.split('\n').filter((l) => !l.startsWith('#')).join('\n'), /bundle create/);
+    const ID = 'a'.repeat(40);
+    /* A stand-in git: the object format, a listing, and a pack-objects that ends with `pack`. */
+    const standIn = (dir, { format = 'sha1', listing = `${ID} refs/heads/main`, pack = 'exit 0' } = {}) => {
+        writeFileSync(join(dir, 'git'), `#!/bin/sh\ncase "$*" in\n  *rev-parse*) echo ${format} ;;\n  *for-each-ref*) ${listing ? `echo "${listing}"` : 'true'} ;;\n  *pack-objects*) cat >/dev/null; printf PACK; ${pack} ;;\nesac\n`);
+        chmodSync(join(dir, 'git'), 0o755);
+        writeFileSync(join(dir, 'reader'), text.replace('/usr/bin/git', join(dir, 'git')));
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'clv-reader-'));
+    try {
+        mkdirSync(join(dir, 'repo', '.git', 'refs', 'heads'), { recursive: true });
+        writeFileSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main'), `${ID}\n`);
+        const run = () => spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'latin1' });
+        /* git's exit codes: only 0 passes; a signal stays a signal. */
+        for (const [exit, expected] of [['exit 0', 0], ['exit 3', 66], ['exit 128', 66], ['exit 78', 66], ['exit 200', 66], ['exit 1', 66], ['kill -s 9 $$', null]]) {
+            standIn(dir, { pack: exit });
+            const r = run();
+            assert.equal(r.status, expected, exit);
+            if (expected === null) assert.equal(r.signal, 'SIGKILL');
+            else assert.ok(r.stdout.startsWith(`# v2 git bundle\n${ID} refs/heads/main\n\nPACK`), r.stdout);
+        }
+        /* A ref on disk that the listing does not have (git skipped it): refused, never left out. */
+        writeFileSync(join(dir, 'repo', '.git', 'refs', 'heads', 'loop'), 'ref: refs/heads/loop\n');
+        standIn(dir);
+        let r = run();
+        assert.deepEqual([r.status, r.stderr.trim(), r.stdout], [66, 'BROKEN OR CHANGING REFS', '']);
+        rmSync(join(dir, 'repo', '.git', 'refs', 'heads', 'loop'));
+        /* A lock file is not a ref, for git either. */
+        writeFileSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main.lock'), `${ID}\n`);
+        assert.equal(run().status, 0);
+        rmSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main.lock'));
+        /* A packed branch counts as on disk. */
+        writeFileSync(join(dir, 'repo', '.git', 'packed-refs'), `# pack-refs with: peeled\n${ID} refs/heads/side\n`);
+        assert.equal(run().stderr.trim(), 'BROKEN OR CHANGING REFS');
+        standIn(dir, { listing: `${ID} refs/heads/main\n${ID} refs/heads/side` });
+        assert.equal(run().status, 0);
+        rmSync(join(dir, 'repo', '.git', 'packed-refs'));
+        /* No branch: exactly the 17 bytes of an empty bundle, and 128. */
+        rmSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main'));
+        standIn(dir, { listing: '' });
+        r = run();
+        assert.deepEqual([r.status, r.stdout], [128, '# v2 git bundle\n\n']);
+        writeFileSync(join(dir, 'repo', '.git', 'refs', 'heads', 'main'), `${ID}\n`);
+        /* Not SHA-1; shallow; grafts: said, nothing written. */
+        standIn(dir, { format: 'sha256' });
+        assert.deepEqual([run().status, run().stderr.trim(), run().stdout], [66, 'NOT SHA-1', '']);
+        standIn(dir);
+        for (const file of ['shallow', 'info/grafts']) {
+            mkdirSync(join(dir, 'repo', '.git', 'info'), { recursive: true });
+            writeFileSync(join(dir, 'repo', '.git', file), `${ID}\n`);
+            r = run();
+            assert.deepEqual([r.status, r.stderr.trim(), r.stdout], [66, 'SHALLOW REPOSITORY', ''], file);
+            rmSync(join(dir, 'repo', '.git', file));
+        }
+        /* A gitfile, a link, a commondir: refused before git runs. */
+        writeFileSync(join(dir, 'git'), '#!/bin/sh\necho RAN >&2\nexit 0\n');
+        writeFileSync(join(dir, 'reader'), text.replace('/usr/bin/git', join(dir, 'git')));
+        writeFileSync(join(dir, 'repo', '.git', 'commondir'), '../elsewhere');
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'utf8' });
+        assert.deepEqual([r.status, r.stderr.trim()], [66, 'NOT A PLAIN .git DIRECTORY']);
+        rmSync(join(dir, 'repo', '.git'), { recursive: true });
+        writeFileSync(join(dir, 'repo', '.git'), 'gitdir: /elsewhere\n');
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'utf8' });
+        assert.deepEqual([r.status, r.stderr.trim()], [66, 'NOT A PLAIN .git DIRECTORY']);
+        rmSync(join(dir, 'repo', '.git'));
+        mkdirSync(join(dir, 'real', 'refs', 'heads'), { recursive: true });
+        symlinkSync(join(dir, 'real'), join(dir, 'repo', '.git'));
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'utf8' });
+        assert.deepEqual([r.status, r.stderr.trim()], [66, 'NOT A PLAIN .git DIRECTORY']);
+        /* A ref directory that cannot be read: 3, said, never an empty repository. */
+        rmSync(join(dir, 'repo', '.git'));
+        mkdirSync(join(dir, 'repo', '.git', 'refs', 'heads', 'feat'), { recursive: true });
+        chmodSync(join(dir, 'repo', '.git', 'refs', 'heads', 'feat'), 0o000);
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'utf8' });
+        chmodSync(join(dir, 'repo', '.git', 'refs', 'heads', 'feat'), 0o755);
+        assert.deepEqual([r.status, r.stderr.trim()], [3, 'REFS UNREADABLE']);
+        /* A ref directory linked elsewhere is checked where git reads it. */
+        rmSync(join(dir, 'repo', '.git', 'refs'), { recursive: true });
+        mkdirSync(join(dir, 'other', 'heads', 'x'), { recursive: true });
+        symlinkSync(join(dir, 'other'), join(dir, 'repo', '.git', 'refs'));
+        chmodSync(join(dir, 'other', 'heads', 'x'), 0o000);
+        r = spawnSync('sh', [join(dir, 'reader'), 'repo'], { cwd: join(dir, 'repo'), encoding: 'utf8' });
+        chmodSync(join(dir, 'other', 'heads', 'x'), 0o755);
+        assert.equal(r.status, 3);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });

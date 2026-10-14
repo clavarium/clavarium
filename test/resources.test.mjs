@@ -188,3 +188,15 @@ test('a git repository is a folder that starts as one: made empty or cloned, by 
     assert.equal(b.host.at(-1), 'folder aside ghost');
     await assert.rejects(resources.create({ name: 'odd', type: 'shadow' }), /folder, a mailbox or a git repository/);
 });
+
+test('the folders, their views and the work folders are where the host program keeps them: under MNT, not in the data directory', (t) => {
+    /* The host program mounts them from $MNT, a chain root owns; the server
+       must look for them there too (the page's Files, the talk folder). */
+    const dir = mkdtempSync(join(tmpdir(), 'clv-res-mnt-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const data = join(dir, 'data'); const mnt = join(dir, 'mnt');
+    const resources = new Resources({ store: new Store(join(data, 'resources.json')), vms: new Vms(async () => ({ code: 0, stdout: '', stderr: '' }), ['vmm']), host: async () => ({ code: 0, stdout: '', stderr: '' }), dataDir: data, mntDir: mnt, uid: 1001, gid: 1002 });
+    assert.equal(resources.folder('notes'), join(mnt, 'resources', 'notes'));
+    assert.equal(resources.view('notes'), join(mnt, 'views', 'notes'));
+    assert.equal(resources.workFolder('alpha'), join(mnt, 'work', 'alpha'));
+});

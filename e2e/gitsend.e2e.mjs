@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
 
@@ -110,7 +110,61 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     const third = git(work, 'rev-parse', 'HEAD');
     await me.until('it was sent by itself', async () => { try { return git(remote, 'rev-parse', 'refs/heads/try/idea') === third; } catch { return false; } }, 20_000);
     assert.equal(git(remote, 'rev-parse', 'refs/heads/main'), start, 'never to a branch outside the list');
+    /* The server writes its log line after the refresh that follows the
+       push, so a moment after the remote has the commit: the page is asked
+       again once the server has written it. */
+    await me.until('the server logged it', async () => (await me.api('/api/git/site/keep')).body?.log?.some((e) => /Sent automatically/.test(e.what)));
     await me.page.locator('#gitview-again').click();
     await me.until('the log says it', async () => /Sent automatically: 2 commit\(s\) to try\/idea, checks passed/.test(await me.page.locator('#gitview-log').innerText()));
+    assert.deepEqual(me.errors, []);
+});
+
+test('the review shows the agent\'s branches, what the changes alone hide, asks once more when it cannot show it all, and says why a repository cannot be read', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const remote = join(b.dir, 'remote.git');
+    git(b.dir, 'init', '--quiet', '--bare', '--initial-branch=main', remote);
+    const me = await b.person();
+    await me.create('coder');
+    await me.api('/api/resources', { name: 'site', type: 'git' });
+    await me.api('/api/git/site/remote', { url: remote });
+    await me.api('/api/conversations/coder/resources', { resource: 'site', access: 'write' });
+    const work = join(b.dir, 'data', 'resources', 'site');
+    writeFileSync(join(work, 'a.txt'), 'a\n'); git(work, 'add', 'a.txt'); git(work, 'commit', '--quiet', '-m', 'one');
+    git(work, 'checkout', '--quiet', '-b', 'feature');
+    writeFileSync(join(work, 'secret.bin'), 'x'.repeat(5000)); git(work, 'add', 'secret.bin'); git(work, 'commit', '--quiet', '-m', 'add');
+    git(work, 'rm', '--quiet', 'secret.bin'); git(work, 'commit', '--quiet', '-m', 'Tidy up\n\nNothing to see here.');
+
+    await me.page.locator('#folders').click();
+    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.until('a review is shown', async () => /would be sent to/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.deepEqual(await me.page.locator('#gitview-branch option').allInnerTexts(), ['feature', 'main']);
+    await me.page.locator('#gitview-branch').selectOption('feature');
+    await me.until('feature is shown', async () => /3 commit\(s\) would be sent to feature/.test(await me.page.locator('#gitview-state').innerText()));
+    const guards = await me.page.locator('#gitview-guards').innerText();
+    assert.match(guards, /Changed and changed back, so not in the changes below: secret\.bin/);
+    assert.match(guards, /Largest new files: secret\.bin \(5 KB\)/);
+    assert.match(await me.page.locator('#gitview-commits').innerText(), /Nothing to see here\./, 'the whole message is shown');
+    await me.page.locator('#gitview-branch').selectOption('main');
+    await me.until('main is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
+
+    /* More than a page lists: a third click. */
+    git(work, 'checkout', '--quiet', 'main');
+    for (let i = 0; i < 101; i++) git(work, 'commit', '--quiet', '--allow-empty', '-m', `c${i}`);
+    await me.page.locator('#gitview-again').click();
+    await me.until('102 commits', async () => /102 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.match(await me.page.locator('#gitview-guards').innerText(), /102 commits in all: only the last 100 are listed below/);
+    await me.until('Send is offered', async () => await me.page.locator('#gitview-push').isVisible());
+    await me.page.locator('#gitview-push').click();
+    await me.page.locator('#gitview-push').click();
+    assert.match(await me.page.locator('#gitview-push').innerText(), /Not all of it could be shown here: send it all to main anyway/);
+    await me.page.locator('#gitview-push').click();
+    await me.until('it was sent', async () => /Sent: 102 commits to main/.test(await me.page.locator('#gitview-state').innerText()));
+    assert.equal(git(remote, 'rev-parse', 'refs/heads/main'), git(work, 'rev-parse', 'main'));
+
+    /* A repository the server will not read: why, said. */
+    rmSync(join(work, '.git'), { recursive: true, force: true });
+    writeFileSync(join(work, '.git'), 'gitdir: /somewhere/else\n');
+    await me.page.locator('#gitview-again').click();
+    await me.until('the reason is said', async () => /NOT A PLAIN \.git DIRECTORY/.test(await me.page.locator('#gitview-error').innerText()));
     assert.deepEqual(me.errors, []);
 });

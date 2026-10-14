@@ -1420,7 +1420,11 @@
     /* ---------- a repository: what would go out, then send it ---------- */
     /* `gitTarget` is the branch the last look was made for: Send sends there
        and nowhere else; choosing another branch looks again first. */
+    /* `gitBranch`: the agent's branch shown (the owner's pick in `gitAskedBranch`,
+       else the one that moved last). `gitConfirm`: more than the page could
+       show, so Send asks once more. `gitFsck`: the owner's fsck waivers. */
     let gitShown = ''; let gitHead = null; let gitTarget = null; let gitAsked = ''; let gitState = ''; let gitRequire = false;
+    let gitBranch = null; let gitAskedBranch = ''; let gitConfirm = false; let gitFsck = {};
     const NEW_BRANCH = '\u0000new';
     function paintChecks(result) {
         const state = $('gitview-checks-state'); state.className = '';
@@ -1436,8 +1440,10 @@
         const button = $('gitview-push');
         button.hidden = gitState !== 'ahead' || (gitRequire && !passed);
         const n = commits;
-        button.textContent = n > 0 ? `Send ${n} commit${n > 1 ? 's' : ''} to ${gitTarget}` : `Make the branch ${gitTarget}`;
+        /* null: the commits could not be counted, which is not "none". */
+        button.textContent = n === null ? `Send the commits to ${gitTarget}` : n > 0 ? `Send ${n} commit${n > 1 ? 's' : ''} to ${gitTarget}` : `Make the branch ${gitTarget}`;
         button.dataset.sure = '';
+        button.dataset.text = button.textContent;
         $('gitview-check').hidden = gitState !== 'ahead';
     }
     let gitCommits = 0;
@@ -1458,7 +1464,7 @@
         try { const r = await fetch(`${API}/git/${name}/keep`); keep = await r.json(); if (!r.ok) throw new Error(keep.error); } catch { return; }
         if (gitShown !== name) return;
         const s = keep.settings;
-        gitRequire = s.requireForSend;
+        gitRequire = s.requireForSend; gitFsck = s.fsck ?? {};
         $('gitview-runhook').checked = s.runHook; $('gitview-checkcommand').value = s.checkCommand; $('gitview-checkseconds').value = String(s.checkSeconds);
         $('gitview-require').checked = s.requireForSend; $('gitview-refreshminutes').value = String(s.refreshMinutes);
         $('gitview-autobranches').value = s.autoBranches.join('\n'); $('gitview-quietminutes').value = String(s.quietMinutes);
@@ -1469,6 +1475,12 @@
             $('gitview-origin-fetch').textContent = `git fetch ${keep.origin.path} '+refs/heads/*:refs/remotes/origin/*'`;
             $('gitview-origin-state').textContent = keep.origin.at ? `${keep.origin.ok ? 'Refreshed' : 'Not refreshed'} ${new Date(keep.origin.at).toLocaleString()}: ${keep.origin.message}` : 'Not fetched yet.';
         }
+        /* The last read of the agent's branches, when it failed; branches held after an unknown outcome. */
+        const read = keep.read;
+        const held = keep.blocked ?? [];
+        $('gitview-read').hidden = !(read && read.ok === false) && held.length === 0;
+        $('gitview-read').textContent = [read && read.ok === false ? `Last read of the agent's branches (${new Date(read.at).toLocaleString()}) failed: ${read.what}` : '',
+            held.length ? `Automatic sending waits for a refresh to settle an earlier sending to: ${held.join(', ')}.` : ''].filter(Boolean).join(' ');
         const log = $('gitview-log'); log.replaceChildren();
         $('gitview-log-empty').hidden = keep.log.length > 0;
         for (const entry of keep.log) {
@@ -1486,13 +1498,42 @@
         select.value = out.target ?? NEW_BRANCH;
         $('gitview-newbranch').hidden = true; $('gitview-newbranch-go').hidden = true;
     }
+    const sizeText = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+    /* What a review shows beyond the changes: the true count, the weight, the
+       largest new files, files changed and changed back, merges. */
+    function paintGuards(out) {
+        const list = $('gitview-guards-list'); list.replaceChildren();
+        const g = out.guards;
+        $('gitview-guards').hidden = !g || out.count === 0;
+        if (!g) return;
+        const item = (text) => { const li = document.createElement('li'); li.textContent = text; list.append(li); };
+        /* A number the server could not get is said so, never shown as 0. */
+        const counted = out.count === null || out.count === undefined ? 'The number of commits could not be counted' : `${out.count} commit${out.count === 1 ? '' : 's'} in all${out.count > out.commits.length ? `: only the last ${out.commits.length} are listed below` : ''}`;
+        item(`${counted}; ${g.newBytes === null || g.newBytes === undefined ? 'the size of the new data is unknown' : `${sizeText(g.newBytes)} of new data`}.`);
+        /* What the review could not show: each said, and Send asks to confirm. */
+        for (const line of g.incomplete ?? []) item(line);
+        if (g.largest?.length) item(`Largest new files: ${g.largest.slice(0, 5).map((b) => `${b.path || '(no path)'} (${sizeText(b.size)})`).join(', ')}.`);
+        if (g.unchanged?.length) item(`Changed and changed back, so not in the changes below: ${g.unchanged.join(', ')}${g.unchangedAll > g.unchanged.length ? `, and ${g.unchangedAll - g.unchanged.length} more` : ''}.`);
+        if (g.merges) item(`${g.merges} merge commit${g.merges === 1 ? '' : 's'}: what they bring from their other parents is in the count, not listed.`);
+        if (out.cut) item('The changes are too long to be shown whole here.');
+    }
+    function fillBranches(out) {
+        const select = $('gitview-branch'); select.replaceChildren();
+        for (const b of out.agentBranches ?? []) { const o = document.createElement('option'); o.value = b.name; o.textContent = b.name; select.append(o); }
+        select.value = out.branch ?? '';
+        $('gitview-branch-row').hidden = (out.agentBranches ?? []).length < 2;
+        const dropped = out.dropped ?? [];
+        $('gitview-dropped').hidden = dropped.length === 0;
+        $('gitview-dropped').textContent = dropped.length ? `Not taken, their names cannot be sent: ${dropped.map((d) => d.name).join(', ')}.` : '';
+    }
     async function paintGit() {
         const name = gitShown;
         $('gitview-name').textContent = `${name} - git repository`;
         $('gitview-error').hidden = true; $('gitview-push').hidden = true; $('gitview-check').hidden = true; $('gitview-checks').hidden = true;
+        $('gitview-offer-row').hidden = true; $('gitview-guards').hidden = true; $('gitview-dropped').hidden = true;
         $('gitview-state').textContent = 'Looking at what was committed...';
         $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').textContent = '';
-        gitHead = null; gitTarget = null; gitState = '';
+        gitHead = null; gitTarget = null; gitState = ''; gitConfirm = false;
         const settings = await (await fetch(`${API}/git/${name}`)).json().catch(() => ({}));
         $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? '';
         const keys = await fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []);
@@ -1504,12 +1545,22 @@
         await paintKeep();
         let out;
         try {
-            const r = await fetch(`${API}/git/${name}/outgoing${gitAsked ? `?target=${encodeURIComponent(gitAsked)}` : ''}`);
+            const query = new URLSearchParams();
+            if (gitAsked) query.set('target', gitAsked);
+            if (gitAskedBranch) query.set('branch', gitAskedBranch);
+            const r = await fetch(`${API}/git/${name}/outgoing${query.size ? `?${query}` : ''}`);
             out = await r.json();
-            if (!r.ok) throw new Error(out.error || 'The repository could not be read.');
-        } catch (error) { $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; return; }
+            if (!r.ok) throw Object.assign(new Error(out.error || 'The repository could not be read.'), { offer: out.offer });
+        } catch (error) {
+            $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false;
+            /* An fsck refusal the owner may waive (old histories only): offered, never done for them. */
+            if (error.offer && gitShown === name) { $('gitview-offer').textContent = `Accept "${error.offer}" in this repository`; $('gitview-offer').dataset.id = error.offer; $('gitview-offer-row').hidden = false; }
+            return;
+        }
         if (gitShown !== name) return;
-        gitHead = out.head; gitTarget = out.target; gitState = out.state; gitCommits = out.commits.length;
+        gitHead = out.head; gitTarget = out.target; gitState = out.state; gitCommits = out.count === undefined ? out.commits.length : out.count; gitBranch = out.branch; gitConfirm = Boolean(out.guards?.confirm);
+        fillBranches(out);
+        paintGuards(out);
         $('gitview-target-row').hidden = !['ahead', 'up-to-date', 'diverged'].includes(out.state);
         fillTargets(out);
         $('gitview-state').textContent = out.message;
@@ -1519,7 +1570,10 @@
             const id = document.createElement('code'); id.textContent = c.id.slice(0, 8);
             const what = document.createElement('b'); what.textContent = c.subject;
             const who = document.createElement('small'); who.textContent = `${c.author}, ${new Date(c.date).toLocaleString()}`;
-            line.append(id, what, who); $('gitview-commits').append(line);
+            line.append(id, what, who);
+            /* The whole message: what a subject line leaves out is part of what is sent. */
+            if (c.message && c.message !== c.subject) { const body = document.createElement('pre'); body.textContent = c.message.split('\n').slice(1).join('\n').trim(); if (body.textContent) line.append(body); }
+            $('gitview-commits').append(line);
         }
         $('gitview-stat').textContent = out.stat;
         $('gitview-diff').textContent = out.diff + (out.cut ? '\n... (the rest is not shown here: too long)' : '');
@@ -1528,10 +1582,16 @@
            if the owner asked for that). */
         if (out.state === 'ahead') await runChecks();
     }
-    async function openGit(name) { gitShown = name; gitAsked = ''; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
+    async function openGit(name) { gitShown = name; gitAsked = ''; gitAskedBranch = ''; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
     $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; focusTerminal(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-check').addEventListener('click', () => { void runChecks(); });
+    $('gitview-branch').addEventListener('change', () => { gitAskedBranch = $('gitview-branch').value; gitAsked = ''; void paintGit(); });
+    $('gitview-offer').addEventListener('click', async () => {
+        const id = $('gitview-offer').dataset.id;
+        try { await post(`${API}/git/${gitShown}/keep`, { fsck: { ...gitFsck, [id]: 'warn' } }); await paintGit(); }
+        catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
+    });
     $('gitview-target').addEventListener('change', () => {
         const value = $('gitview-target').value;
         if (value === NEW_BRANCH) { $('gitview-push').hidden = true; $('gitview-newbranch').hidden = false; $('gitview-newbranch-go').hidden = false; focusField($('gitview-newbranch')); return; }
@@ -1542,10 +1602,17 @@
     $('gitview-newbranch').addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); lookAtNew(); } });
     $('gitview-push').addEventListener('click', async () => {
         const button = $('gitview-push');
-        /* Two clicks: what leaves cannot be called back. */
-        if (button.dataset.sure !== 'yes') { button.dataset.sure = 'yes'; button.textContent = `Yes, send to ${gitTarget}: this cannot be undone`; return; }
+        /* Two clicks: what leaves cannot be called back. Three when the page
+           could not show it all (over 100 commits, or changes cut short). */
+        if (!button.dataset.sure) { button.dataset.sure = 'yes'; button.textContent = `Yes, send to ${gitTarget}: this cannot be undone`; return; }
+        if (gitConfirm && button.dataset.sure === 'yes') { button.dataset.sure = 'all'; button.textContent = `Not all of it could be shown here: send it all to ${gitTarget} anyway`; return; }
         button.disabled = true; $('gitview-error').hidden = true;
-        try { const sent = await post(`${API}/git/${gitShown}/push`, { head: gitHead, target: gitTarget }); await paintGit(); $('gitview-state').textContent = `${sent.commits > 0 ? `Sent: ${sent.commits} commit${sent.commits > 1 ? 's' : ''} to ${sent.branch}${sent.made ? ' (a new branch)' : ''}.` : `Made the branch ${sent.branch} on the remote.`} ${$('gitview-state').textContent}`; }
+        try {
+            const sent = await post(`${API}/git/${gitShown}/push`, { head: gitHead, target: gitTarget, ...(gitConfirm ? { sure: true } : {}) });
+            await paintGit();
+            const said = sent.already ? `Already on the remote: ${sent.branch} has this commit.` : sent.commits > 0 ? `Sent: ${sent.commits} commit${sent.commits > 1 ? 's' : ''} to ${sent.branch}${sent.made ? ' (a new branch)' : ''}.` : `Made the branch ${sent.branch} on the remote.`;
+            $('gitview-state').textContent = `${said}${sent.note ? ` ${sent.note}` : ''} ${$('gitview-state').textContent}`;
+        }
         catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
         button.disabled = false;
     });

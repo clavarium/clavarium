@@ -12,13 +12,15 @@
 # become one: each verb added here is a thing a compromised server can do.
 #
 # WHAT IT WILL NOT DO, whatever is asked:
-#   - mount anything but a folder of the data directory into a VM. A mount is
-#     served as root: any other path would be a way to read the host's files;
-#   - follow a path the server could have bent. The server owns the data
-#     directory, so a compromised server could replace a folder by a link to
-#     /etc and ask for it to be mounted. Hence: the directories whose entries
-#     get mounted (resources/, views/) BELONG TO ROOT, their entries are made
-#     and moved by this program only, and it checks both before each use;
+#   - mount anything but a shared folder, a view of one or a work folder
+#     into a VM. A mount is served as root: any other path would be a way to
+#     read the host's files;
+#   - follow a path the server could have bent. A compromised server could
+#     replace a folder by a link to /etc and ask for it to be mounted, or
+#     swap a directory between our check and the mount. Hence: everything
+#     this program mounts, unmounts or moves lives under $MNT (below), on a
+#     chain root owns; the entries are made and moved by this program only,
+#     and the chain is checked before each use;
 #   - touch a VM whose name is not one of ours ("clv-" + a conversation name,
 #     or "clvshelf-" + a date for a ready-made machine: see "shelf" below);
 #   - load a network rule that is not, line for line, one of the known shapes.
@@ -31,8 +33,22 @@
 #                variable that changes what runs is the hole being closed.
 #   --data DIR   the data directory; honoured ONLY with --say-only. Otherwise
 #                it is read from /etc/clavarium/host.conf, which root owns.
+#   --mnt DIR    where the shared folders live ($MNT, see below); the same
+#                rule: --say-only only, else MNT= in host.conf.
+#
+# WHY THE SHARED FOLDERS ARE NOT IN THE DATA DIRECTORY. The data directory
+# belongs to the server's account, so a compromised server could rename any
+# of its directories between our check and the moment mount or systemd walks
+# the path. So everything that gets mounted, unmounted or moved as root lives
+# under $MNT instead -- resources/ (the folders), views/ (their read-only
+# views), work/ and work-disks/ (the conversations' work disks), removed/
+# (what was put aside) -- a chain of directories that root owns from / down:
+# no component of it can be swapped by the server (renaming needs write
+# access to the parent). `held` checks that chain before each use. The data
+# directory keeps only the server's own files, which root never touches.
 #
 # Exit codes: the command's own; 64 usage; 78 refused, with the reason.
+# "git read" has its own fixed codes, listed at that verb.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
@@ -59,21 +75,34 @@ SHELF_STORE="/var/snap/multipass/common"
 SHELF_INSTANCES="$SHELF_STORE/data/multipassd/vault/instances"
 SHELF_MIN_FREE_MB="6144"
 CONF="/etc/clavarium/host.conf"
+# THE GIT READER (verb "git read"): an empty root-owned directory used as the
+# sandbox's root, and the fixed script run inside it. Both made by install.sh.
+RUNNER_ROOT="/var/lib/clavarium/runner-root"
+GIT_READ="/usr/lib/clavarium/git-read"
+LOCKS="/run/clavarium"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR]] <vm|shelf|folder|work|view|net> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|net|git> <verb> [arguments]" >&2; exit 64; }
 
-SAY="no"; DATA=""
+SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --say-only) SAY="yes"; shift ;;
         --data) [ "$SAY" = "yes" ] || refuse "--data is only for --say-only"; DATA="${2:-}"; shift 2 ;;
+        --mnt) [ "$SAY" = "yes" ] || refuse "--mnt is only for --say-only"; MNT="${2:-}"; shift 2 ;;
         *) break ;;
     esac
 done
 if [ -z "$DATA" ]; then
     [ -r "$CONF" ] || refuse "$CONF is missing: the data directory is not declared"
     DATA="$(sed -n 's/^DATA=//p' "$CONF" | head -1)"
+fi
+if [ -z "$MNT" ]; then
+    if [ "$SAY" = "yes" ]; then MNT="$DATA"
+    else
+        MNT="$(sed -n 's/^MNT=//p' "$CONF" | head -1)"
+        [ -n "$MNT" ] || refuse "MNT is not declared in $CONF: run install.sh again"
+    fi
 fi
 if [ -r "$CONF" ]; then
     asked="$(sed -n 's/^WORK_MB=//p' "$CONF" | head -1)"
@@ -84,6 +113,10 @@ if [ -r "$CONF" ]; then
 fi
 case "$DATA" in /*) : ;; *) refuse "the data directory must be an absolute path" ;; esac
 case "$DATA" in *[!A-Za-z0-9/._-]*|*..*) refuse "the data directory has an unexpected character" ;; esac
+# MNT goes into a systemd property list (git read): a space or a colon there
+# would split it. The same characters as DATA, nothing else.
+case "$MNT" in /*) : ;; *) refuse "MNT must be an absolute path" ;; esac
+case "$MNT" in *[!A-Za-z0-9/._-]*|*..*) refuse "MNT has an unexpected character" ;; esac
 
 run() { if [ "$SAY" = "yes" ]; then printf '%s\n' "$*"; else exec "$@"; fi; }
 
@@ -100,21 +133,78 @@ memory_ok() { number "$1"; [ "$1" -ge 512 ] && [ "$1" -le 65536 ] || refuse "mem
 # Megabytes free where the VM manager keeps its disks.
 store_free() { local at="$SHELF_STORE"; [ -d "$at" ] || at="/var"; df -m --output=avail "$at" | tail -1 | tr -d ' '; }
 
-# One of the directories of the data directory that only root may arrange
-# (resources, views, work, work-disks, removed): made if missing, and refused if it is a link or
-# belongs to anyone else -- then its entries cannot be trusted either.
+# HELD: the path cannot be bent by anyone but root. Every component from /
+# down to the entry's parent is a real directory (not a link), belongs to
+# root, and is writable by nobody else; the entry itself is a real directory.
+# Then what systemd or mount walks a moment later is the path checked here:
+# swapping a component (rename, RENAME_EXCHANGE) needs write access to its
+# parent, which only root has. The entry itself may be the server's (a
+# folder it fills); what is inside it is the agent's business, not a path.
+held() { [ "$SAY" = "yes" ] || held_check "$1"; }
+held_check() {
+    local path="$1" at="" part
+    case "$path" in /*) : ;; *) refuse "not an absolute path: $path" ;; esac
+    local parent="${path%/*}"
+    IFS='/' read -r -a parts <<< "${parent#/}"
+    [ -d / ] && [ "$(stat -c %u /)" = "0" ] || refuse "/ is not root's"
+    for part in "${parts[@]}"; do
+        [ -n "$part" ] || continue
+        at="$at/$part"
+        [ -d "$at" ] && [ ! -L "$at" ] || refuse "$at is not a plain directory"
+        [ "$(stat -c %u "$at")" = "0" ] || refuse "$at does not belong to root"
+        case "$(stat -c %A "$at")" in ?????w????|????????w?) refuse "$at may be written by others than root" ;; esac
+        # The mode bits are not the whole story: an access list can give
+        # another account write access while they still read 0755. ls marks
+        # such a directory with a '+' after the mode.
+        acl_free "$at" || refuse "$at has an access list (getfacl): only root may write it"
+    done
+    [ -d "$path" ] && [ ! -L "$path" ] || refuse "not a plain directory: $path"
+}
+acl_free() { local mode; mode="$(ls -ld -- "$1" | cut -d' ' -f1)"; [ "${#mode}" -eq 10 ]; }
+# One of the directories under $MNT that only root may arrange (resources,
+# views, work, work-disks, removed): made if missing, refused if it is a link
+# or belongs to anyone else -- then its entries cannot be trusted either --
+# and HELD (above), with the whole chain above it.
 kept() {
     [ "$SAY" = "yes" ] && return 0
-    local d="$DATA/$1"
+    case "$1" in resources|views|work|work-disks|removed) : ;; *) refuse "not one of root's directories: $1" ;; esac
+    local d="$MNT/$1"
     [ -e "$d" ] || [ -L "$d" ] || install -d -o root -g root -m 0755 "$d"
     [ -d "$d" ] && [ ! -L "$d" ] && [ "$(stat -c %u "$d")" = "0" ] \
         || refuse "$d must be a directory that belongs to root (chown root:root, once, by hand)"
+    held "$d"
+    # It is itself the parent of what gets mounted or moved: only root may
+    # write it, or an entry could be swapped there.
+    held "$d/."
 }
-# A folder of ours: a real directory, directly under resources/.
+# A folder of ours: a real directory, directly under resources/, on a held chain.
 folder_of() {
     kept resources
     [ "$SAY" = "yes" ] && return 0
-    [ -d "$DATA/resources/$1" ] && [ ! -L "$DATA/resources/$1" ] || refuse "no such folder: $1"
+    [ -d "$MNT/resources/$1" ] && [ ! -L "$MNT/resources/$1" ] || refuse "no such folder: $1"
+    held "$MNT/resources/$1"
+}
+
+# How a finished read unit is said to the server: from what systemd recorded,
+# never from what the code inside printed. See "git read".
+unit_code() {
+    local result="$1" how="$2" status="$3"
+    case "$result" in
+        timeout) echo 80 ;;
+        oom-kill) echo 81 ;;
+        signal|core-dump) echo 82 ;;
+        exit-code)
+            # 1: the process exited (2 killed, 3 dumped: told by Result above).
+            if [ "$how" != "1" ] || ! [[ "$status" =~ ^[0-9]{1,3}$ ]]; then echo 79
+            elif [ "$status" = "128" ]; then echo 65
+            elif [ "$status" = "3" ]; then echo 67
+            # 200-243: systemd could not start the process. The wrapper turns
+            # every other code of git into 66, so these are systemd's own.
+            elif [ "$status" -ge 200 ] && [ "$status" -le 243 ]; then echo 79
+            else echo 66
+            fi ;;
+        *) echo 79 ;;
+    esac
 }
 
 [ $# -ge 2 ] || usage
@@ -154,13 +244,13 @@ case "$AREA $VERB" in
         [ $# -eq 5 ] || usage; vm_of "$1"; is_name "$3" || refuse "not a folder name: $3"; number "$4"; number "$5"
         target="$1:/resources/$3"
         case "$2" in
-            folder) folder_of "$3"; source="$DATA/resources/$3" ;;
-            view)   kept views; source="$DATA/views/$3"
+            folder) folder_of "$3"; source="$MNT/resources/$3" ;;
+            view)   kept views; source="$MNT/views/$3"; held "$source"
                     # A read attachment must meet the VIEW, never a bare directory.
                     [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the read-only view of $3 is not in place" ;;
             work)   # The work folder of a conversation goes to ITS machine, and to no other.
                     [ "$1" = "clv-$3" ] || refuse "a work folder belongs to its own conversation"
-                    kept work; source="$DATA/work/$3"
+                    kept work; source="$MNT/work/$3"; held "$source"
                     # Its DISK must be in place: a bare directory there would be the
                     # host's own disk, with no limit.
                     [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the work disk of $3 is not in place"
@@ -237,18 +327,18 @@ case "$AREA $VERB" in
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         kept resources; owner="OWNER:GROUP"
         if [ "$SAY" != "yes" ]; then
-            [ ! -e "$DATA/resources/$1" ] && [ ! -L "$DATA/resources/$1" ] || refuse "this folder exists already: $1"
+            [ ! -e "$MNT/resources/$1" ] && [ ! -L "$MNT/resources/$1" ] || refuse "this folder exists already: $1"
             owner="$(stat -c %u:%g "$DATA")"
         fi
-        run install -d -o "${owner%:*}" -g "${owner#*:}" -m 0755 "$DATA/resources/$1" ;;
+        run install -d -o "${owner%:*}" -g "${owner#*:}" -m 0755 "$MNT/resources/$1" ;;
     "folder aside")
         # Taken off the list: MOVED ASIDE, never erased.
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         folder_of "$1"; kept removed
         if [ "$SAY" != "yes" ]; then
-            ! mountpoint -q "$DATA/views/$1" || refuse "the read-only view of $1 is still open"
+            ! mountpoint -q "$MNT/views/$1" || refuse "the read-only view of $1 is still open"
         fi
-        run mv -T -n "$DATA/resources/$1" "$DATA/removed/$1-$(date -u +%Y%m%dT%H%M%SZ)-$$" ;;
+        run mv -T -n "$MNT/resources/$1" "$MNT/removed/$1-$(date -u +%Y%m%dT%H%M%SZ)-$$" ;;
     "work make")
         # Where a conversation's tool works: kept by the server, so that what
         # the tool makes is seen from the page and outlives its machine.
@@ -262,19 +352,21 @@ case "$AREA $VERB" in
         # Asked again at each start of the server and for a machine built
         # again: what is already in place is left as it is.
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
-        img="$DATA/work-disks/$1.img"; at="$DATA/work/$1"
+        img="$MNT/work-disks/$1.img"; at="$MNT/work/$1"
         if [ "$SAY" = "yes" ]; then printf 'disk %s %sM mounted at %s\n' "$img" "$WORK_MB" "$at"; exit 0; fi
         kept work; kept work-disks
         [ ! -L "$at" ] && [ ! -L "$img" ] || refuse "the work folder of $1 is not what it should be"
+        [ ! -e "$img" ] || [ -f "$img" ] || refuse "the work disk of $1 is not a plain file"
         owner="$(stat -c %u:%g "$DATA")"
         mkdir -p "$at"
+        held "$at"
         if [ ! -e "$img" ]; then
             truncate -s "${WORK_MB}M" "$img.new"
             mkfs.ext4 -q -m 0 -E "root_owner=$owner" "$img.new"
             # Files found in a plain directory (a backup just put back) go
             # INTO the disk: mounting over them would hide them.
             if ! mountpoint -q "$at" && [ -n "$(ls -A "$at")" ]; then
-                tmp="$(mktemp -d -p "$DATA/work-disks")"
+                tmp="$(mktemp -d -p "$MNT/work-disks")"
                 mount -o loop,nosuid,nodev "$img.new" "$tmp"
                 cp -a "$at/." "$tmp/"; umount "$tmp"; rmdir "$tmp"
                 find "$at" -mindepth 1 -delete
@@ -291,36 +383,42 @@ case "$AREA $VERB" in
         # disk, and on the host that holds it. Asked before a move, so that
         # one is refused instead of filling either.
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
-        at="$DATA/work/$1"
-        if [ "$SAY" = "yes" ]; then printf 'df %s %s\n' "$at" "$DATA"; exit 0; fi
-        kept work
+        at="$MNT/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'df %s %s\n' "$at" "$MNT/work-disks"; exit 0; fi
+        kept work; kept work-disks
         mountpoint -q "$at" || refuse "the work disk of $1 is not in place"
-        printf 'disk %s host %s\n' "$(df -m --output=avail "$at" | tail -1 | tr -d ' ')" "$(df -m --output=avail "$DATA" | tail -1 | tr -d ' ')"
+        # "host": the room left where the disks' files grow.
+        printf 'disk %s host %s\n' "$(df -m --output=avail "$at" | tail -1 | tr -d ' ')" "$(df -m --output=avail "$MNT/work-disks" | tail -1 | tr -d ' ')"
         exit 0 ;;
     "work aside")
         # The conversation is archived: its work is PUT ASIDE, never erased --
         # as its disk, which root can mount again to read it.
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
-        img="$DATA/work-disks/$1.img"; at="$DATA/work/$1"
-        if [ "$SAY" = "yes" ]; then printf 'disk %s put aside in %s\n' "$img" "$DATA/removed"; exit 0; fi
+        img="$MNT/work-disks/$1.img"; at="$MNT/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'disk %s put aside in %s\n' "$img" "$MNT/removed"; exit 0; fi
         kept work; kept work-disks; kept removed
         if mountpoint -q "$at"; then umount "$at"; fi
         if [ -d "$at" ] && [ ! -L "$at" ]; then rmdir "$at" 2>/dev/null || true; fi
-        if [ -f "$img" ] && [ ! -L "$img" ]; then mv -n "$img" "$DATA/removed/$1-work-$(date -u +%Y%m%dT%H%M%SZ)-$$.img"; fi
+        if [ -f "$img" ] && [ ! -L "$img" ]; then mv -n "$img" "$MNT/removed/$1-work-$(date -u +%Y%m%dT%H%M%SZ)-$$.img"; fi
         exit 0 ;;
     "view make")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         folder_of "$1"; kept views
         if [ "$SAY" != "yes" ]; then
-            mkdir -p "$DATA/views/$1"
-            mountpoint -q "$DATA/views/$1" && exit 0
+            mkdir -p "$MNT/views/$1"
+            held "$MNT/views/$1"
+            mountpoint -q "$MNT/views/$1" && exit 0
         fi
-        run bindfs -r -o allow_other "$DATA/resources/$1" "$DATA/views/$1" ;;
+        run bindfs -r -o allow_other "$MNT/resources/$1" "$MNT/views/$1" ;;
     "view close")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         kept views
-        if [ "$SAY" != "yes" ]; then mountpoint -q "$DATA/views/$1" || exit 0; fi
-        run umount "$DATA/views/$1" ;;
+        if [ "$SAY" != "yes" ]; then
+            [ -e "$MNT/views/$1" ] || exit 0
+            held "$MNT/views/$1"
+            mountpoint -q "$MNT/views/$1" || exit 0
+        fi
+        run umount "$MNT/views/$1" ;;
     "net taps")
         [ $# -eq 0 ] || usage
         run pgrep -a qemu-system ;;
@@ -342,6 +440,101 @@ case "$AREA $VERB" in
             || "$line" =~ ^(\ \ )?\}$ ]] || refuse "a network rule of an unknown shape: $line"
         done <<< "$1"
         run nft "$1" ;;
+    "git read")
+        # <name>: the branches of the agent's repository, as ONE FULL BUNDLE
+        # on stdout. The server never runs git on a folder the agent writes
+        # (its config, hooks, gitfile, links could make git do anything as the
+        # server); this verb runs ONE fixed read of it in a throw-away
+        # sandbox -- a dynamic user, no network, nothing writable, only that
+        # folder, read-only -- and the server treats what comes out as hostile.
+        #
+        # Exit codes, FIXED HERE (the code inside chooses only among 0, 65,
+        # 66, 67): 0 read; 65 git said 128 (with exactly the 17 bytes of an
+        # empty bundle: no branches); 66 git or the wrapper failed; 67 refs
+        # unreadable; 78 refused before anything ran; 79 the unit did not
+        # start or its state is unknown; 80 time limit; 81 memory limit;
+        # 82 killed by a signal.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        case "$1" in *-origin) refuse "the reference of a repository is never read this way: $1" ;; esac
+        name="$1"
+        rand="RANDOM16"
+        [ "$SAY" = "yes" ] || rand="$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+        unit="clvread-${name}_${rand}"
+        vector=(systemd-run --quiet --wait --pipe --service-type=exec "--unit=$unit"
+            -p DynamicUser=yes -p "RootDirectory=$RUNNER_ROOT" -p MountAPIVFS=no
+            -p "TemporaryFileSystem=/dev:ro /tmp:ro /var/tmp:ro /resources:ro" -p "BindPaths=/dev/null /dev/zero /dev/urandom"
+            -p DevicePolicy=closed -p "DeviceAllow=/dev/null rw" -p "DeviceAllow=/dev/zero r" -p "DeviceAllow=/dev/urandom r"
+            -p "BindReadOnlyPaths=/usr /usr/bin:/bin /usr/lib:/lib /usr/lib64:/lib64 $MNT/resources/$name:/resources/$name"
+            -p PrivateNetwork=yes -p RestrictAddressFamilies=AF_UNIX -p NoNewPrivileges=yes
+            -p CapabilityBoundingSet= -p AmbientCapabilities= -p RestrictNamespaces=yes -p RestrictSUIDSGID=yes
+            -p RestrictRealtime=yes -p LockPersonality=yes -p MemoryDenyWriteExecute=yes
+            -p SystemCallArchitectures=native -p SystemCallFilter=@system-service
+            -p "SystemCallFilter=~@aio @keyring @setuid @chown @memlock @privileged @resources userfaultfd kcmp process_vm_readv process_vm_writev msgget msgsnd msgrcv msgctl semget semop semctl shmget shmat shmdt shmctl mq_open mq_unlink"
+            -p SystemCallErrorNumber=EPERM
+            -p RuntimeMaxSec=300 -p MemoryMax=1G -p MemorySwapMax=0 -p TasksMax=8 -p CPUQuota=100%
+            -p LimitFSIZE=0 -p LimitCORE=0 -p LimitNOFILE=256 -p "WorkingDirectory=/resources/$name"
+            -E PATH=/usr/bin -E HOME=/nonexistent -E XDG_CONFIG_HOME=/nonexistent -E LC_ALL=C -E GIT_CONFIG_NOSYSTEM=1
+            -E GIT_CONFIG_GLOBAL=/dev/null -E GIT_CEILING_DIRECTORIES=/resources -E GIT_NO_LAZY_FETCH=1
+            -E GIT_TERMINAL_PROMPT=0 -E GIT_OPTIONAL_LOCKS=0 -E GIT_NO_REPLACE_OBJECTS=1
+            "$GIT_READ" "$name")
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "${vector[@]}"; exit 0; fi
+        folder_of "$name"
+        [ -d "$RUNNER_ROOT" ] && [ ! -L "$RUNNER_ROOT" ] && [ -x "$GIT_READ" ] || refuse "the git reader is not installed (run install.sh again)"
+        # Nothing to read from us; and what comes out must go to the server
+        # as it is: a regular file would be killed by LimitFSIZE=0 (tried).
+        # A pipe, or a socket (what Node.js gives a child for "pipe").
+        exec 0</dev/null
+        { [ -p /dev/stdout ] || [ -S /dev/stdout ]; } && { [ -p /dev/stderr ] || [ -S /dev/stderr ]; } || refuse "stdout and stderr must be pipes"
+        install -d -o root -g root -m 0700 "$LOCKS"
+        exec 9>"$LOCKS/read-$name.lock"
+        flock -n 9 || refuse "busy: $name is being read already"
+        # Stopped whatever happens to us (the server gave up, a signal, an
+        # error here): a read never outlives the one who asked for it. The
+        # unit runs as a child we WAIT for: bash runs a trap only between
+        # commands, and `wait` is a command a signal cuts short, where a
+        # plain systemd-run in the foreground would hold the trap back
+        # until the read ended by itself.
+        child=""
+        stop_unit() { systemctl stop "$unit.service" >/dev/null 2>&1 || true; systemctl reset-failed "$unit.service" >/dev/null 2>&1 || true; }
+        gone() { stop_unit; [ -z "$child" ] || wait "$child" 2>/dev/null; exit 82; }
+        trap gone TERM INT HUP PIPE
+        trap stop_unit EXIT
+        set +e
+        "${vector[@]}" &
+        child=$!
+        wait "$child"
+        rc=$?
+        set -e
+        code=0
+        if [ "$rc" -ne 0 ]; then
+            props="$(systemctl show -p Result -p ExecMainCode -p ExecMainStatus "$unit.service" 2>/dev/null || true)"
+            code="$(unit_code "$(sed -n 's/^Result=//p' <<< "$props")" "$(sed -n 's/^ExecMainCode=//p' <<< "$props")" "$(sed -n 's/^ExecMainStatus=//p' <<< "$props")")"
+        fi
+        trap - TERM INT HUP PIPE EXIT
+        stop_unit
+        exit "$code" ;;
+    "git stop")
+        # <name>: every read of that repository is stopped, and forgotten
+        # (asked after the server gave up on a read, and at its start).
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "systemctl stop clvread-$1_*.service" "systemctl reset-failed clvread-$1_*.service"; exit 0; fi
+        systemctl stop "clvread-$1_*.service" >/dev/null 2>&1 || true
+        systemctl reset-failed "clvread-$1_*.service" >/dev/null 2>&1 || true
+        exit 0 ;;
+    "path held")
+        # <dir>: the check `held` makes, run for real on that path, as the
+        # caller (root not needed to refuse). --say-only only: it exists so
+        # that the check can be tested without root; it changes nothing.
+        [ "$SAY" = "yes" ] || refuse "unknown verb: path held"
+        [ $# -eq 1 ] || usage
+        held_check "$1"; echo "held: $1"; exit 0 ;;
+    "git code")
+        # <Result> <ExecMainCode> <ExecMainStatus>: the exit code "git read"
+        # gives for a unit that ended so. --say-only only: it exists so that
+        # the mapping can be tested without root; it does nothing.
+        [ "$SAY" = "yes" ] || refuse "unknown verb: git code"
+        [ $# -eq 3 ] || usage
+        unit_code "$1" "$2" "$3"; exit 0 ;;
     *)
         refuse "unknown verb: $AREA $VERB" ;;
 esac

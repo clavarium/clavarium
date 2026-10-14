@@ -45,10 +45,13 @@ fi
 KEY="$ROOT/var/lib/clavarium-vault/vault.key"
 
 # Everything that would be needed on a new machine, if it exists here.
-# (The read-only views are not content: they are mirrors, made again at start.
-# Work folders are copied as their files; the disks that hold them are made again.)
+# (home/clavarium-mnt holds what the machines are given, on a chain root owns:
+# see clavarium-host. The read-only views are not content: they are mirrors,
+# made again at start. Work folders are copied as their files; the disks that
+# hold them are made again. An older house kept all that under home/clavarium:
+# the same rule there.)
 parts=()
-for part in home/clavarium etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
+for part in home/clavarium home/clavarium-mnt etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
     [ -e "$ROOT/$part" ] && parts+=("$part")
 done
 
@@ -67,7 +70,7 @@ dex_was_up="no"
 if [ "$ROOT" = "/" ] && systemctl is-active --quiet dex.service 2>/dev/null; then dex_was_up="yes"; systemctl stop dex.service; fi
 umask 077
 status=0
-tar -czf "$archive" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' --exclude='*.tmp' -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
+tar -czf "$archive" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' --exclude='home/clavarium-mnt/views' --exclude='home/clavarium-mnt/work-disks' --exclude='*.tmp' -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
 [ "$dex_was_up" = "no" ] || systemctl start dex.service
 # (1: a file changed while it was read -- the copy is still whole.)
 [ "$status" -le 1 ] || { rm -f -- "$archive"; refuse "the archive could not be written"; }

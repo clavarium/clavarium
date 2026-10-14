@@ -15,6 +15,7 @@ import { Store } from '../server/store.mjs';
 import { Vault } from '../server/vault.mjs';
 import { Vms } from '../server/vm.mjs';
 import { installFakeSsh, FAKE_HOST_KEY } from '../e2e/fake-ssh.mjs';
+import { testRunner } from './git-stand-in.mjs';
 
 const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Tool', GIT_AUTHOR_EMAIL: 'tool@example.com', GIT_COMMITTER_NAME: 'Tool', GIT_COMMITTER_EMAIL: 'tool@example.com' };
 const git = (cwd, ...argv) => execFileSync('git', argv, { cwd, env: ENV, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -36,7 +37,10 @@ function bench(t, { git: fakeGit } = {}) {
         },
         dataDir: join(dir, 'data'), uid: 1, gid: 1, access, ...(fakeGit ? { git: fakeGit } : {}),
     });
-    const review = new GitReview({ store: new Store(join(dir, 'data', 'git.json')), vault, resources, dataDir: join(dir, 'data'), access, ...(fakeGit ? { git: (argv, o) => fakeGit(argv, o.cwd, o.env) } : {}) });
+    /* The agent's branches are read as the host program would (git-stand-in.mjs);
+       with a stand-in git, there is nothing to read. */
+    const runner = testRunner(join(dir, 'data'), (name) => resources.folder(name), fakeGit ? { code: 66, runner: { git: async (argv, o) => ({ stdout: Buffer.alloc(0), ...await fakeGit(argv, o.cwd, o.env) }) } } : {});
+    const review = new GitReview({ store: new Store(join(dir, 'data', 'git.json')), vault, resources, dataDir: join(dir, 'data'), access, runner });
     /* A bare repository "on the hosting service", reached as user@example.com:team/<name>.git */
     const remote = (name, withCommit = true) => {
         const bare = join(sshRoot, 'remotes', 'team', `${name}.git`);
@@ -226,18 +230,19 @@ test('a token or a password goes to git in its environment, never in argv, and o
     assert.equal(ran.at(-1).env.GIT_CONFIG_COUNT, undefined);
 
     /* Send: the same token by default, to the same origin only. */
+    /* (The read that follows the fetch has nothing to read here: only the fetch is looked at.) */
     const push = new GitReview({ store: new Store(join(b.dir, 'data', 'git.json')), vault: b.vault, resources: b.resources, dataDir: join(b.dir, 'data'), access: b.access,
-        git: async (argv, { env = {} } = {}) => { ran.push({ argv, env }); return argv.includes('symbolic-ref') ? { code: 0, stdout: 'main\n', stderr: '' } : argv.includes('rev-parse') ? { code: 0, stdout: 'a'.repeat(40), stderr: '' } : { code: 0, stdout: '', stderr: '' }; } });
-    await push.outgoing('site');
+        runner: testRunner(join(b.dir, 'data'), (name) => b.resources.folder(name), { code: 66, runner: { git: async (argv, { env = {} } = {}) => { ran.push({ argv, env }); return { code: 0, stdout: Buffer.alloc(0), stderr: '' }; } } }) });
+    await push.outgoing('site').catch(() => {});
     const fetchedWith = ran.filter((r) => r.argv.includes('fetch')).at(-1);
     assert.equal(fetchedWith.env.GIT_CONFIG_VALUE_0, header);
     assert.equal(JSON.stringify(fetchedWith.argv).includes('tok-very-secret'), false);
     push.setRemote('site', { url: 'https://elsewhere.example.com/team/site.git' });
-    await push.outgoing('site');
+    await push.outgoing('site').catch(() => {});
     assert.equal(ran.filter((r) => r.argv.includes('fetch')).at(-1).env.GIT_CONFIG_COUNT, undefined, 'never handed to another server');
     /* A key set for sending comes first, as it always did. */
     push.setRemote('site', { url: 'https://elsewhere.example.com/team/site.git', user: 'bot', key: 'push-key' });
-    await push.outgoing('site');
+    await push.outgoing('site').catch(() => {});
     assert.equal(ran.filter((r) => r.argv.includes('fetch')).at(-1).env.GIT_CONFIG_VALUE_0, `Authorization: Basic ${Buffer.from('bot:push-key').toString('base64')}`);
     /* The repository is gone: its way in with it. */
     push.forget('site');

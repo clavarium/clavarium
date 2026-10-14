@@ -44,7 +44,7 @@ listing="$(tar -tzf "$ARCHIVE" 2>/dev/null)" || refuse "this is not an archive t
 grep -qx 'BACKUP.txt' <<< "$listing" || refuse "this archive was not made by backup.sh"
 grep -q '^home/clavarium/' <<< "$listing" || refuse "this archive holds no Clavarium data"
 # Nothing in it may land outside the places a backup is made of.
-if grep -Ev '^(BACKUP\.txt|home/clavarium(/|$)|var/lib/(caddy|dex|clavarium-tunnel)(/|$)|etc/(clavarium|dex|oauth2-proxy|caddy)(/|$))' <<< "$listing" | grep -q .; then
+if grep -Ev '^(BACKUP\.txt|home/clavarium(-mnt)?(/|$)|var/lib/(caddy|dex|clavarium-tunnel)(/|$)|etc/(clavarium|dex|oauth2-proxy|caddy)(/|$))' <<< "$listing" | grep -q .; then
     refuse "this archive holds files that are not part of a backup"
 fi
 if grep -q '\.\.' <<< "$listing"; then refuse "this archive holds a path that climbs out"; fi
@@ -76,11 +76,11 @@ fi
 aside="$ROOT/var/backups/clavarium-before-restore-$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$aside"; chmod 700 "$aside"
 present=()
-for part in home/clavarium var/lib/clavarium-vault etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
+for part in home/clavarium home/clavarium-mnt var/lib/clavarium-vault etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
     [ -e "$ROOT/$part" ] && present+=("$part")
 done
 [ "${#services[@]}" -eq 0 ] || systemctl stop "${services[@]}"
-[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' -C "$ROOT/" "${present[@]}"
+[ "${#present[@]}" -eq 0 ] || tar -czpf "$aside/state.tgz" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' --exclude='home/clavarium-mnt/views' --exclude='home/clavarium-mnt/work-disks' -C "$ROOT/" "${present[@]}"
 echo "what was here is set aside: $aside/state.tgz"
 
 back() {
@@ -93,7 +93,16 @@ back() {
 trap back ERR
 
 # 3. Put the files back, with their owners (by name: numbers differ between machines).
-tar -xzpf "$ARCHIVE" -C "$ROOT/" --exclude='BACKUP.txt'
+# An archive made before the shared folders moved to root's chain holds them
+# under home/clavarium: they are put back where they live now, under
+# home/clavarium-mnt (the names only; the targets of links inside the folders
+# are the agent's, never rewritten: S).
+tar -xzpf "$ARCHIVE" -C "$ROOT/" --exclude='BACKUP.txt' \
+    --transform='s,^home/clavarium/\(resources\|views\|work\|work-disks\|removed\)\(/\|$\),home/clavarium-mnt/\1\2,S'
+# Its host settings may not say where that is: without MNT the host program
+# refuses every verb. Said here, as install.sh says it.
+conf="$ROOT/etc/clavarium/host.conf"
+if [ -f "$conf" ] && ! grep -q '^MNT=' "$conf"; then printf 'MNT=%s\n' /home/clavarium-mnt >> "$conf"; fi
 if [ -n "$VAULT_KEY" ]; then
     mkdir -p "$ROOT/var/lib/clavarium-vault"
     install -m 0600 "$VAULT_KEY" "$ROOT/var/lib/clavarium-vault/vault.key"
@@ -101,7 +110,13 @@ fi
 if [ "$REAL" = "yes" ]; then
     chown clavarium:clavarium /var/lib/clavarium-vault /var/lib/clavarium-vault/vault.key 2>/dev/null || true
     # What gets mounted into VMs is arranged by root only: see clavarium-host.
-    install -d -o root -g root -m 0755 /home/clavarium/resources /home/clavarium/views /home/clavarium/removed /home/clavarium/work /home/clavarium/work-disks
+    # The chain of what the machines are given (home/clavarium-mnt and its
+    # directories) is root's from / down, whatever the archive said; the
+    # folders inside keep the owners they had.
+    mnt="/home/clavarium-mnt"
+    install -d -o root -g root -m 0755 "$mnt" "$mnt/resources" "$mnt/views" "$mnt/removed" "$mnt/work" "$mnt/work-disks"
+    chown root:root "$mnt" "$mnt/resources" "$mnt/views" "$mnt/removed" "$mnt/work" "$mnt/work-disks"
+    chmod 0755 "$mnt" "$mnt/resources" "$mnt/views" "$mnt/removed" "$mnt/work" "$mnt/work-disks"
     systemctl daemon-reload
     systemctl start "${services[@]}"
     # 4. Every service must come up (up to 30 s) AND HOLD: one that starts,

@@ -374,6 +374,10 @@
       <div id="gitview" class="sheet" hidden>
         <div class="panel-top"><b id="gitview-name">Repository</b><button type="button" id="gitview-close">Close</button></div>
         <p class="hint">The tool commits in its machine and never holds the key that lets commits out: it is kept here. You see what would go, then you send it. What is sent is exactly what you were shown.</p>
+        <div id="gitview-branch-row" class="row" hidden>
+          <label for="gitview-branch">The agent's branch</label>
+          <select id="gitview-branch"></select>
+        </div>
         <div id="gitview-target-row" class="row" hidden>
           <label for="gitview-target">Send to the branch</label>
           <select id="gitview-target"></select>
@@ -388,6 +392,13 @@
         </div>
         <div class="row"><button type="button" id="gitview-push" class="primary" hidden>Send these commits</button><button type="button" id="gitview-check" hidden>Run the checks again</button><button type="button" id="gitview-again">Look again</button></div>
         <p id="gitview-error" class="error" role="alert" hidden></p>
+        <div class="row" id="gitview-offer-row" hidden><button type="button" id="gitview-offer"></button><span class="hint">Only for checks about old dates, modes and author lines, which old tools got wrong. Never for what protects a checkout.</span></div>
+        <p id="gitview-read" class="hint" role="status" hidden></p>
+        <p id="gitview-dropped" class="hint" hidden></p>
+        <div id="gitview-guards" hidden>
+          <b>What the changes alone do not show</b>
+          <ul id="gitview-guards-list"></ul>
+        </div>
         <div id="gitview-origin" hidden>
           <p class="hint" id="gitview-origin-where"></p>
           <div class="row"><code id="gitview-origin-fetch"></code></div>
@@ -424,7 +435,7 @@
             <p class="hint">Refreshing and automatic sending happen only while a running machine has this repository attached; "Refresh now" works any time.</p>
             <label for="gitview-autobranches">Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.</label>
             <textarea id="gitview-autobranches" rows="2" spellcheck="false" autocapitalize="off" placeholder="test, staging, try/*"></textarea>
-            <p class="hint">When the tool's branch has new commits, then nothing new for the quiet delay, and its name is in this list, the commit is sent to the branch of the same name, as Send would, never forced, and only after the checks passed.</p>
+            <p class="hint">When one of the tool's branches has commits the remote lacks, then nothing new for the quiet delay, and its name is in this list, it is sent to the branch of the same name, as Send would, never forced, and only after the checks passed.</p>
             <label for="gitview-quietminutes">Quiet delay, in minutes</label>
             <input id="gitview-quietminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
             <label for="gitview-perhour">Automatic sendings an hour, at most</label>
@@ -432,7 +443,7 @@
             <label class="check"><input type="checkbox" id="gitview-alert"> Tell my phone about automatic sendings</label>
             <div class="row"><button type="submit" class="primary">Save</button><span class="hint" id="gitview-keep-said" role="status"></span></div>
           </form>
-          <b>What was sent by itself</b>
+          <b>What was sent by itself, and what went wrong</b>
           <p id="gitview-log-empty" class="hint">Nothing yet.</p>
           <div id="gitview-log"></div>
         </details>

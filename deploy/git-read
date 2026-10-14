@@ -1,0 +1,85 @@
+#!/usr/bin/sh
+# THE ONE READ OF AN AGENT'S REPOSITORY, run by `clavarium-host git read`
+# inside its sandbox (installed as /usr/lib/clavarium/git-read, root, 0755).
+#
+# Fixed text: it takes the folder's name, reads only paths of the repository,
+# and never prints them. Its working directory is /resources/<name>, the only
+# folder there is.
+#
+# It refuses a .git that is not a plain directory (a gitfile, a link, a
+# commondir could send git to refs elsewhere that the check below never saw),
+# refs it cannot read in full (a branch git cannot read would be missing
+# without a word, and a missing branch must never look like a deleted one),
+# and a shallow or grafted repository (its pack would lack the parents it
+# hides, with nothing in the bundle to say so).
+#
+# Then it writes a version 2 bundle on stdout, BUILT HERE rather than by
+# `git bundle create`: the header is the list `git for-each-ref` gives, and
+# the pack holds the objects of exactly those ids. `git bundle create`
+# resolves every branch a second time by its short name and silently leaves
+# out one that moved meanwhile, or whose name is ambiguous (`a` beside `a/b`,
+# a branch named `refs/heads/main`): a branch would vanish from a read that
+# still succeeds. Here the list is taken once, and checked against the ref
+# files on disk: a ref git skips without a word (a symbolic ref pointing
+# nowhere or in a loop, a broken file, an invalid name), or a branch made or
+# deleted during the read, refuses the read instead of hiding a branch.
+#
+# Every setting the repository could use to run something is overridden on
+# every git command.
+#
+# Exit codes: 0; 3 (refs unreadable); 128 only with the 17 bytes of an
+# empty bundle (no branches); 66 for anything else, with one line on stderr
+# saying what. git's own codes become 66, so that a code systemd uses for
+# itself (200-243) can only come from systemd. A git killed by a signal is
+# killed again here by the same signal, so that the host still sees a signal.
+NAME="$1"
+[ -d .git ] && [ ! -L .git ] && [ ! -e .git/commondir ] && [ ! -L .git/commondir ] \
+  || { echo "NOT A PLAIN .git DIRECTORY" >&2; exit 66; }
+for p in .git/refs .git/packed-refs; do
+  [ -e "$p" ] || [ -L "$p" ] || continue
+  find -L "$p" >/dev/null 2>&1 && [ -z "$(find -L "$p" \( ! -readable -o -type d ! -executable \) -print -quit 2>/dev/null)" ] \
+    || { echo "REFS UNREADABLE" >&2; exit 3; }
+done
+for p in .git/shallow .git/info/grafts; do
+  if [ -e "$p" ] || [ -L "$p" ]; then echo "SHALLOW REPOSITORY" >&2; exit 66; fi
+done
+
+# git opens THE .git checked above, and nothing else. Left to discover the
+# repository, git that finds .git unusable tries the folder itself as a bare
+# repository (documented discovery), and would read objects and refs none of
+# the checks above looked at -- a read that succeeds where it must refuse.
+GIT_DIR=.git
+export GIT_DIR
+g() {
+  /usr/bin/git -c "safe.directory=/resources/$NAME" -c safe.bareRepository=explicit -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+    -c core.pager=cat -c core.alternateRefsCommand= -c protocol.allow=never -c pack.threads=1 \
+    -c pack.windowMemory=256m -c pack.useBitmaps=false "$@"
+}
+# git failed with code $1: a signal stays a signal, anything else is 66.
+failed() {
+  if [ "$1" -gt 128 ] && [ "$1" -lt 193 ]; then kill -s "$(($1 - 128))" $$; fi
+  echo "$2" >&2
+  exit 66
+}
+
+format=$(g rev-parse --show-object-format) || failed $? "GIT COULD NOT OPEN THE REPOSITORY"
+[ "$format" = "sha1" ] || { echo "NOT SHA-1" >&2; exit 66; }
+
+refs=$(g for-each-ref --format='%(objectname) %(refname)' refs/heads/) || failed $? "GIT COULD NOT LIST THE BRANCHES"
+listed=$(printf '%s\n' "$refs" | sed -n 's|^[0-9a-f]\{40\} ||p' | sort -u)
+on_disk=$( {
+  [ -d .git/refs/heads ] && find -L .git/refs/heads -type f ! -name '*.lock' -printf 'refs/heads/%P\n'
+  [ -f .git/packed-refs ] && sed -n 's|^[0-9a-f]\{40\} \(refs/heads/.*\)$|\1|p' .git/packed-refs
+} | sort -u)
+[ "$listed" = "$on_disk" ] || { echo "BROKEN OR CHANGING REFS" >&2; exit 66; }
+[ "$(printf '%s\n' "$refs" | grep -c .)" -le 1000 ] || { echo "MORE THAN 1000 BRANCHES" >&2; exit 66; }
+
+if [ -z "$refs" ]; then
+  printf '# v2 git bundle\n\n'
+  exit 128
+fi
+printf '# v2 git bundle\n%s\n\n' "$refs"
+printf '%s\n' "$refs" | cut -c1-40 | g pack-objects --stdout --revs --delta-base-offset -q
+rc=$?
+[ "$rc" -eq 0 ] && exit 0
+failed "$rc" "GIT COULD NOT PACK THE BRANCHES"

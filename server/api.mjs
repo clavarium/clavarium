@@ -14,10 +14,10 @@
  *   POST /api/git-hosts/forget              {host}: the next contact trusts the key it is shown
  *   GET  /api/shelf                         the ready-made machine: date, size, tools, rebuild in progress, last refusal
  *   POST /api/shelf/rebuild                 rebuild it now, in the background (refused when the disk is short)
- *   GET  /api/git/<name>/outgoing?target=<branch>   what would go, to that branch of the remote
- *   POST /api/git/<name>/push               {head, target?}: exactly that commit, to exactly that branch
+ *   GET  /api/git/<name>/outgoing?target=<branch>&branch=<branch>   what would go from the agent's branch, to that branch of the remote
+ *   POST /api/git/<name>/push               {head, target?, sure?}: exactly that reviewed commit, to exactly that branch
  *   GET  /api/git/<name>/keep               origin kept up to date, checks, automatic sending, log
- *   POST /api/git/<name>/keep               {refreshMinutes?, autoBranches?, quietMinutes?, perHour?, alert?, checkCommand?, checkSeconds?, runHook?, requireForSend?}
+ *   POST /api/git/<name>/keep               {refreshMinutes?, autoBranches?, quietMinutes?, perHour?, alert?, checkCommand?, checkSeconds?, runHook?, requireForSend?, fsck?}
  *   POST /api/git/<name>/refresh            fetch the origin into its mirror now
  *   POST /api/git/<name>/check              {head, target?}: run the checks in the machine
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
@@ -153,7 +153,7 @@ export async function handleApi(request, response, conversations, headers, resou
             /* A repository: where its commits go, and what would go now. */
             const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/keep)?$/.exec(pathname);
             if (repo && repo[2] === '/keep' && gitKeeper) return send(200, gitKeeper.about(repo[1])), true;
-            if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1], { target: query.get('target') ?? undefined }) : gitReview.settings(repo[1])), true;
+            if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1], { target: query.get('target') ?? undefined, branch: query.get('branch') ?? undefined }) : gitReview.settings(repo[1])), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {
                 const conversation = decodeURIComponent(watched[1]);
@@ -306,7 +306,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') talk?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
-        if (error instanceof Refusal) return send(error.status, { error: error.message }), true;
+        /* A git failure also says which (`kind`), and an fsck id the owner may waive (`offer`). */
+        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.offer ? { offer: error.offer } : {}) }), true;
         return send(500, { error: 'Something failed on the server.' }), true;
     }
 }

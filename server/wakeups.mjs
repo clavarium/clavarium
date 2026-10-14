@@ -246,6 +246,15 @@ export class Wakeups {
         return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
     }
 
+    /* A line from this server itself (a repository that could not be read,
+       see gitkeeper.mjs), typed as a wake-up is: only into a conversation
+       that is awake, cleaned the same way. Not counted in the owner's cap:
+       the server says each such line once. */
+    async say(name, text) {
+        if (!this.#conversations.awake().includes(name)) return false;
+        return this.#type(name, cleanMessage(text)).catch(() => false);
+    }
+
     /* The address was called. Resolves with 'typed', 'capped', 'asleep',
        'failed', or undefined when the address is nobody's (said as 404, the
        same as any address that does not exist). */

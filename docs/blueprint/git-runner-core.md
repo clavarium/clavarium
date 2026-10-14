@@ -95,24 +95,36 @@ header-only check reads and a cached R (optimizations).
 In `deploy/clavarium-host`, in its style (fixed argument count, `is_name`,
 paths built from the name, argv and properties fixed). Never a server path.
 
-**`$MNT` and `held`.** `resources/` moves from the server-owned `$DATA`
-(server account, 0750) to `$MNT/resources` (`$MNT` = `/home/clavarium-mnt`,
-in `host.conf`). `held <path>`: each component from `/` down to the entry's
-parent is a real directory (not a link), root's, not group- or
-world-writable; the entry is a real directory. The server then cannot swap
-any component (rename or `RENAME_EXCHANGE` needs write on a parent), so the
-path systemd or `mount` walks later is the one checked. `kept` and
-`folder_of` call `held`; so do `git read` and every existing `vm mount
-folder|view|work`. Never a `/proc/self/fd` staging path (`mount` walks the
-path again: `git-runner.md` R1). `install.sh` creates `$MNT` and
-`$MNT/resources` root:root 0755, moves `$DATA/resources` there once (server
-stopped, mounts closed), writes `MNT` to `host.conf`; the server reads `MNT`
-from there. `backup.sh`/`restore.sh` take `$MNT/resources`; `restore.sh`
-makes `$MNT` and `$MNT/resources` root:root 0755.
+**`$MNT` and `held`.** Everything root mounts, unmounts or moves --
+`resources/` (the folders), `views/` (their read-only views), `work/` and
+`work-disks/` (the work disks), `removed/` (what was put aside) -- moves
+from the server-owned `$DATA` (server account, 0750) to `$MNT/<dir>`
+(`$MNT` = `/home/clavarium-mnt`, in `host.conf`). `held <path>`: each
+component from `/` down to the entry's parent is a real directory (not a
+link), root's, not group- or world-writable, with no access list (`ls`
+'+'); the entry is a real directory. The server then cannot swap any
+component (rename or `RENAME_EXCHANGE` needs write on a parent), so the
+path systemd, `mount`, `bindfs`, `umount`, `mv` or multipassd walks later
+is the one checked. `kept <dir>` (any of the five) and `folder_of` call
+`held`; so do `git read`, `vm mount folder|view|work` (on the source
+itself), `view make|close` and `work make` (on the entry, after `mkdir`).
+`$DATA` keeps only the server's own files, which root never touches. Never
+a `/proc/self/fd` staging path (`mount` walks the path again:
+`git-runner.md` R1). `install.sh` creates `$MNT` and its five directories
+root:root 0755, writes `MNT` to `host.conf` (the server reads it from
+there), then runs `deploy/move-to-mnt.sh` once (server stopped): a name on
+both sides refuses the whole move; the machines' mounts from `$DATA` are
+noted and let go of, views closed, work disks unmounted; the entries are
+moved (never copied); each machine is given back what it had, through the
+host program, from the new places. `backup.sh`/`restore.sh` take `$MNT`;
+`restore.sh` makes `$MNT` and its directories root:root 0755, puts an
+older archive's `home/clavarium/{resources,work,removed}` under `$MNT`
+(tar `--transform`, link targets untouched), and adds `MNT=` to a restored
+`host.conf` that lacks it.
 
 | Verb | Checks, then action |
 |---|---|
-| `git read <name>` | `is_name`; refused if it ends in `-origin` (never the reference). Source `$MNT/resources/<name>` via `folder_of` (`held`). `exec 0</dev/null`; refused unless stdout **and** stderr are pipes (`LimitFSIZE=0` kills git writing to a regular file, trial). `flock -n /run/clavarium/read-<name>.lock`, else refused "busy". Unit `clvread-<name>_<16 hex from /dev/urandom>` (`_` never in a name). Runs section 3 as a child; a TERM/EXIT trap stops the unit, then `reset-failed`. Exits with a mapped code only. |
+| `git read <name>` | `is_name`; refused if it ends in `-origin` (never the reference). Source `$MNT/resources/<name>` via `folder_of` (`held`). `exec 0</dev/null`; refused unless stdout **and** stderr are pipes (`LimitFSIZE=0` kills git writing to a regular file, trial). `flock -n /run/clavarium/read-<name>.lock`, else refused "busy". Unit `clvread-<name>_<16 hex from /dev/urandom>` (`_` never in a name). Runs section 3 as a background child it `wait`s for (a signal cuts `wait` short; a foreground command would hold the trap back until the read ended); a TERM/INT/HUP/PIPE trap stops the unit and exits 82, an EXIT trap stops it on any other way out; then `reset-failed`. Exits with a mapped code only. |
 | `git stop <name>` | `is_name`; `systemctl stop 'clvread-<name>_*'`, `reset-failed` on them. After the server kills a read, and at server start for every git repository. |
 
 **Exit codes** (fixed by the host, `git-runner.md` section 4): **78**
@@ -133,7 +145,7 @@ unit never blocks the next read.
 ```
 systemd-run --quiet --wait --pipe --service-type=exec --unit="clvread-${N}_${RAND}" \
   -p DynamicUser=yes -p RootDirectory=/var/lib/clavarium/runner-root -p MountAPIVFS=no \
-  -p "TemporaryFileSystem=/dev:ro /tmp:ro /var/tmp:ro" -p "BindPaths=/dev/null /dev/zero /dev/urandom" \
+  -p "TemporaryFileSystem=/dev:ro /tmp:ro /var/tmp:ro /resources:ro" -p "BindPaths=/dev/null /dev/zero /dev/urandom" \
   -p DevicePolicy=closed -p "DeviceAllow=/dev/null rw" -p "DeviceAllow=/dev/zero r" -p "DeviceAllow=/dev/urandom r" \
   -p "BindReadOnlyPaths=/usr /usr/bin:/bin /usr/lib:/lib /usr/lib64:/lib64 $MNT/resources/$N:/resources/$N" \
   -p PrivateNetwork=yes -p RestrictAddressFamilies=AF_UNIX -p NoNewPrivileges=yes \
@@ -152,30 +164,55 @@ systemd-run --quiet --wait --pipe --service-type=exec --unit="clvread-${N}_${RAN
 
 `/usr/lib/clavarium/git-read` (root:root 0755, `install.sh`; inside via the
 `/usr` bind) is fixed sh; it reads only paths from the repository and never
-echoes them:
+echoes them (the full text is `deploy/git-read`; red team A3 changed it, see
+the review log at the end):
 
 ```
-#!/usr/bin/sh
 [ -d .git ] && [ ! -L .git ] && [ ! -e .git/commondir ] && [ ! -L .git/commondir ] \
   || { echo "NOT A PLAIN .git DIRECTORY" >&2; exit 66; }
-for p in .git/refs .git/packed-refs; do
-  [ -e "$p" ] || continue
-  find -L "$p" >/dev/null 2>&1 && [ -z "$(find -L "$p" \( ! -readable -o -type d ! -executable \) -print -quit 2>/dev/null)" ] \
-    || { echo "REFS UNREADABLE" >&2; exit 3; }
-done
-exec /usr/bin/git -c safe.directory=/resources/$1 -c core.hooksPath=/dev/null -c core.fsmonitor=false \
+for p in .git/refs .git/packed-refs; do ...find -L... || { echo "REFS UNREADABLE" >&2; exit 3; }; done
+.git/shallow or .git/info/grafts present -> "SHALLOW REPOSITORY", 66
+export GIT_DIR=.git     # never discovery: git would try the folder as a bare repository
+g() { /usr/bin/git -c safe.directory=/resources/$NAME -c safe.bareRepository=explicit -c core.hooksPath=/dev/null -c core.fsmonitor=false \
   -c core.pager=cat -c core.alternateRefsCommand= -c protocol.allow=never -c pack.threads=1 \
-  -c pack.windowMemory=256m bundle create - --branches
+  -c pack.windowMemory=256m -c pack.useBitmaps=false "$@"; }
+g rev-parse --show-object-format = sha1, else "NOT SHA-1", 66
+refs = g for-each-ref --format='%(objectname) %(refname)' refs/heads/
+names of refs == loose files under .git/refs/heads (not *.lock) + refs/heads lines of packed-refs,
+  else "BROKEN OR CHANGING REFS", 66;  more than 1000 -> "MORE THAN 1000 BRANCHES", 66
+no refs: print "# v2 git bundle\n\n", exit 128
+print "# v2 git bundle\n<refs>\n\n"; ids of refs | g pack-objects --stdout --revs --delta-base-offset -q
+git failing: 66 (a signal re-raised)
 ```
 
-Without it, a 000 `refs/heads/feat` gives exit 0 with `feat/*` silently
-missing, and a 000 `refs/heads` gives 128 + 17 bytes, as an empty repository
-(trial). git exiting 3 also maps to 67: only a wrong message, never content.
-The first line refuses a gitfile, a `.git` link or `commondir` (any of them
-could send git to refs elsewhere in the folder that the check never saw);
-`find -L` checks a linked ref directory where git reads it. A folder changed
-during the read gives at worst a bundle that fails section 4, reported.
-`systemd-run` passes no caller environment: only the `-E` list above.
+The bundle is **built by the script**, not by `git bundle create`: that
+command resolves every branch a second time by name and silently leaves out
+one that moved meanwhile or whose name is ambiguous (`a` beside `a/b`, a
+branch named `refs/heads/main`), and `for-each-ref` silently skips a symbolic
+ref pointing nowhere or in a loop (trials, A3). Here the list is taken once,
+the pack is made from its ids, and the list must name every ref file on
+disk: a ref git skips, or a branch made or deleted during the read, refuses
+the read instead of losing a branch.
+
+Without the readability check, a 000 `refs/heads/feat` gives exit 0 with
+`feat/*` silently missing, and a 000 `refs/heads` gives 128 + 17 bytes, as an
+empty repository (trial). The first line refuses a gitfile, a `.git` link or
+`commondir` (any of them could send git to refs elsewhere in the folder that
+the check never saw); `find -L` checks a linked ref directory where git
+reads it. A folder changed during the read gives at worst a refused read
+("BROKEN OR CHANGING REFS", or a pack whose objects were pruned meanwhile),
+reported. The server takes the last stderr line of a 66 to name the failure
+(`shallow`, `v3`, `many`, `refs`; section 8); the agent can forge that line,
+which only renames its own read's failure. `systemd-run` passes no caller
+environment: only the `-E` list above.
+
+`GIT_DIR=.git`: git opens the `.git` the checks looked at and nothing else.
+Left to discovery, git that finds `.git` unusable (a junk `HEAD`) tests the
+folder itself as a bare repository, and a read of objects and refs no check
+saw succeeds (audit, git 2.43: a shallow bare clone at the top passed every
+check). Now that is "GIT COULD NOT OPEN THE REPOSITORY" (66).
+`/resources:ro` in `TemporaryFileSystem`: the root keeps a mount point per
+folder ever read; an empty `/resources` over it shows only the one bound.
 
 `runner-root`: empty, root:root 0755 (`install.sh`). `$MNT` matches
 `[A-Za-z0-9/._-]`, `N` `is_name`: the bind list cannot be split. Inside
@@ -207,10 +244,17 @@ read-only host `/sys` (section 9).
    360 s over steps 2-5. Stderr: last 4 KB, printable ASCII, labelled "text
    from the agent's repository".
 3. **Header**, in Node, on Buffers, before any git: refused once a line passes
-   4 KiB or the header 128 KiB, or on any byte outside printable ASCII. Exactly `# v2 git bundle`; no `-<sha>`
+   4 KiB or the header 128 KiB (the agent is told: shorter names or fewer
+   branches; 1000 names of 200 characters do not fit, the header limit is
+   the binding one), or on a control byte (below 0x20, 0x7f). Bytes above
+   0x7f pass, so a name git allows (`café`) is dropped by `branchProblem`
+   and said, alone, instead of failing every read. Exactly `# v2 git bundle`; no `-<sha>`
    prerequisite; lines `^[0-9a-f]{40} refs/heads/(.+)$`; exact duplicates
-   dropped, one name with two shas refused; at most 1000; names failing
-   `branchProblem` dropped and reported; an empty line, then `PACK`.
+   dropped, one name with two shas refused; at most 1000 lines, dropped
+   names included (the reader lists at most 1000: more means some were left
+   out); names failing `branchProblem` dropped and reported; an empty line,
+   then `PACK`. A pack lacking objects ("did not receive expected object")
+   is `incomplete`, with the `--unshallow` advice.
 4. Pack bytes, still counted, into `git index-pack --stdin --strict[=<id>=<sev>,...]
    --threads=1 --max-input-size=<cap>`: in the empty workspace it checks
    every object and link. **fsck exceptions** (owner option, `ignore`/`warn`)
@@ -297,8 +341,17 @@ at `DIFF_MAX`, "cut" shown. Against hidden history: new-object size
 (`rev-list --objects --disk-usage base..head`), the 10 largest new blobs
 (`cat-file --batch-check`), paths changed with no net change (`log
 --name-only` minus `diff --name-only`), full messages and authors; control
-characters shown escaped; an extra confirmation above 100 commits or when
-the diff is cut. The server keeps `branch`, `head`, `remoteTip` (ids) and
+characters shown escaped (Cc, Cf, line and paragraph separators, every
+Default_Ignorable_Code_Point: zero-width, BOM, soft hyphen, fillers, tag
+characters); an extra confirmation above 100 commits or when
+the diff is cut. **What the review could not show is said, never read as
+nothing** (A3): the state rests on `merge-base --is-ancestor` both ways
+(a failure of it fails the review), never on a count; a count that failed
+is "could not be counted", not 0; the diff stopped by its deadline counts
+as cut; a log cut by its 8 MiB limit lists only whole commits; messages
+over 4000 characters say how much is not shown; more than 50
+changed-and-changed-back paths say how many more; any such gap is listed in
+`guards.incomplete` and asks for the extra confirmation. The server keeps `branch`, `head`, `remoteTip` (ids) and
 "branches as of <time>"; the workspace is deleted. Another pick is a new
 review. **No remote**: no refresh, no borrowing; state `no-remote`, commits
 against the empty tree; Send refused "no address".
@@ -346,7 +399,10 @@ it. The workspace is deleted in every case.
 Today's rules and options: off until the owner names branches (`allowed`),
 `quietMinutes`, `perHour` (default 4), checks required, log, alert.
 
-- **Trigger**: today's 30 s tick on the `lstat` marks; a change schedules a
+- **Trigger**: today's 30 s tick on the `lstat` marks, each repository on
+  its own (A3: one whose read takes its whole time limit no longer holds up
+  the others; a repository still busy from an earlier tick is skipped; the
+  two host read slots stay shared); a change schedules a
   read 5 s after the last one; a change during a read sets a dirty flag (one
   more read). A safety read every 10 minutes while in use; one at start.
   Each read is a check read: a fresh workspace (section 4, no borrowing),
@@ -355,9 +411,10 @@ Today's rules and options: off until the owner names branches (`allowed`),
   and `movedAt` = the read that first saw it; each new tip restarts the
   clock. Candidate: name allowed, tip has commits the remote lacks (under
   the mutex, read-only in the reference: `cat-file -e <tip>^{commit}` and
-  `merge-base --is-ancestor <tip> refs/heads/<b>` both succeeding means
-  not a candidate, nothing logged; no such branch, missing or not an
-  ancestor: a candidate), checked before the cap and the checks, now - `movedAt` >= `quietMinutes`, no read queued,
+  `merge-base --is-ancestor <tip> <exact id of refs/heads/<b>>` both
+  succeeding means not a candidate, nothing logged; no such branch: a
+  candidate unless the tip is on another remote branch (merged there,
+  then deleted); missing or not an ancestor: a candidate), checked before the cap and the checks, now - `movedAt` >= `quietMinutes`, no read queued,
   running or dirty. `perHour` cap with alert; checks in the machine against
   `refs/heads/<b>` = tip; Send as above with that tip as `head` and the
   reference's tip as `remoteTip`, in a fresh workspace, never forced;
@@ -370,28 +427,33 @@ Owner: every row (log; phone after 2 in a row). AI: one wake-up line, where it c
 | Failure | Owner sees | AI told |
 |---|---|---|
 | Host refused (78): busy, not a folder, a link, chain not root's | "could not read: <reason>" | no |
-| Unit did not start (79), sudo, other host code | "host program failed (<code>)" + alert to owner and operator | no |
+| Unit did not start (79), sudo, other host code | "host program failed (<code>)" + one alert while it lasts (not one per read) | no |
 | Time limit (80) | "reading stopped: time limit" | "your repository could not be read in 300 s; pack it (git gc)" |
 | Memory limit (81) | "reading stopped: memory limit (1 GB)" | "your repository needs too much memory to read; pack it (git gc)" |
 | Other kill (82) | "reading stopped: killed (<signal>)" + alert after 2 | no |
 | Unreadable refs (67) | "some branches are not readable" | "check permissions (chmod -R o+rX .git)" |
+| Shallow or grafts (66, "SHALLOW REPOSITORY"); pack lacking objects | "not read: shallow or grafts" | "git fetch --unshallow (and remove .git/info/grafts)" |
+| Ref git skips, or branches made/deleted during the read (66, "BROKEN OR CHANGING REFS") | "not read: a ref git skips, or branches changing" | after 2 in a row: "fix or delete it (compare ls -R .git/refs/heads with git branch)" |
+| Not SHA-1 (66, "NOT SHA-1"); over 1000 refs (66, "MORE THAN 1000 BRANCHES") | the reason | "use SHA-1"; "delete branches" |
 | Git failed (65 not empty, 66) | code + text from the agent's repository | after 2 in a row: "could not read your repository: a plain .git directory, check permissions (chmod -R o+rX .git), not shallow, SHA-1" |
 | Over the byte cap | "N MB, over the cap" | "your branches add up to more than N MB" |
-| Not enough free space | "not read: N MB free" + alert | no |
-| Bad header (v3, prerequisite, two shas, over 1000, too long, no `PACK`) | "could not be read safely: <reason>" | v3: "use SHA-1"; prerequisite: "git fetch --unshallow"; over 1000: "delete branches" |
+| Not enough free space | "not read: N MB free" + one alert while it lasts (same kind = same failure, whatever N says) | no |
+| Bad header (v3, prerequisite, two shas, over 1000, too long, no `PACK`) | "could not be read safely: <reason>" | v3: "use SHA-1"; prerequisite: "git fetch --unshallow"; over 1000: "delete branches"; over 4 KiB / 128 KiB: "rename / shorter names or fewer branches" |
+| A review command failed or was stopped | listed under the guards ("could not be counted", "not whole"...), extra confirmation; ancestry failing: the review fails | no |
 | Invalid branch name | listed, not offered | "branch <b> was not taken: <rule>" |
-| index-pack refused (fsck), tip not a commit | id, object, path; exception offered only for an allowlisted id, else "refused" | "fsck refused your commits: <id>" |
+| index-pack refused (fsck), tip not a commit | id, object, path; exception offered only for an allowlisted id, else "refused" -- said as soon as index-pack ends, even while the reader still writes (`--strict` stops at the first bad object: waiting for the reader on a full pipe made it a time limit) | "fsck refused your commits: <id>" |
 | No branches | "no branches"; nothing to review or send | "nothing committed on a branch (git switch -c <name>)" |
 | Two branches clash (`a` and `a/b`) | both named, read refused | "branch <b> clashes with <b2>; rename one" |
 | Reference busy / stale refresh lock removed | review: "busy, try again"; logged | no |
-| Refresh failed, remote unreachable | `explain()` text; alert after 3 | no |
+| Refresh failed, remote unreachable, or git could not even start (key gone, vault not opening) | `explain()` text, or the reason; alert after 3 | no |
 | Remote rewrite or delete | "<b> was rewritten on the remote" + alert | "origin/<b> was rewritten; fetch again" |
 | Read before Send failed / agent moved / remote moved / lease refused / no address | the reason (409) | automatic, remote moved: "pull origin/<b> first" |
-| Push outcome unknown | "outcome unknown, refreshed: <sent / not on the remote>"; refresh failed: "outcome unknown, remote unreachable", auto-send blocked for <b> | no |
+| Push outcome unknown (killed, or failed with no porcelain line for our ref) | "outcome unknown, refreshed: <sent / not on the remote>"; refresh failed: "outcome unknown, remote unreachable" + one alert, auto-send blocked for <b> until a refresh settles it -- "not arrived": sent again | no |
 | Push ok, refresh after it failed | "sent, reference not refreshed" (counted) | no |
 | Already on the remote | "already sent" (counted once) | no |
 | Push reported a forced update or another source | "push not as reviewed" + alert | no |
 | Not in list / diverged / cap / checks failed | as today, once per commit | diverged: "pull origin/<b> first"; checks: their output |
+| Automatic sending: remote unreachable, outcome not on the remote, workspace, other error | said once per commit; the same commit tried again after 5 minutes (only diverged, remote moved, refused, forced end it for that commit) | no |
 
 ## 9. Attacks stopped; what is not protected
 
@@ -407,7 +469,9 @@ Owner: every row (log; phone after 2 in a row). AI: one wake-up line, where it c
 | Credentials or a remote taken from the agent | Credentials only in the server's environment; remote and target from the server's records; push only from a server workspace the agent cannot reach. |
 | Agent data kept or planted in the reference; a workspace reused | Nothing from the agent is written there (only the refresh writes it); one fresh workspace per review, send and check read, deleted after, `git-work/` emptied at start; alternates read-only, added after the receive checks; group kill. |
 | `.gitattributes` hiding a change | `--text`, no textconv, attributes from the empty tree. |
-| History hidden from the review (add then delete, huge blobs, past 100 commits) | New-object size, largest blobs, no-net-change paths, full messages, escaped control characters, extra confirmation. |
+| History hidden from the review (add then delete, huge blobs, past 100 commits, a huge message, decoy paths, a command stopped by its limit) | New-object size, largest blobs, no-net-change paths, full messages, escaped control and invisible characters, every gap listed in `guards.incomplete`, extra confirmation. |
+| A branch silently left out of a read (moved during it, ambiguous name, `a` beside `a/b`, a symbolic ref pointing nowhere) | The bundle built from one `for-each-ref` list, checked against the ref files on disk; `a`/`a/b` refused by name. |
+| One repository's slow reads holding up the others | Each repository ticks on its own. |
 | Branch changed between review and Send | Send re-reads into a fresh workspace and pushes only the exact reviewed `head` id; lease on the shown `remoteTip`. |
 | Branch named after the reviewed id (push source or lease forcing another commit) | `branchProblem` refuses 40/64-hex components; agent refs deleted, push from `refs/clavarium/send` only; porcelain line checked (no `+`, no forced update). |
 | Commit loop | Debounce, read pacing, `perHour`, alert; cap from the remote's size only; workspaces deleted. |
@@ -526,3 +590,91 @@ sandboxed (threat model). "GitLab" now reads "the remote".
 | Sent push reported as "remote moved"; unknown outcome with a failed refresh undefined | confirmed (low) | "Already on the remote" after the Send refresh; "sent, reference not refreshed"; "outcome unknown, remote unreachable" blocks auto-send; section 8 rows; tests. |
 | A branch only behind the remote is an auto-send candidate (false "diverged") | confirmed (medium) | Candidate = tip has commits the remote lacks, checked first; test. |
 | Borrowing saves nothing; "copies nothing" test meaningless | confirmed (low, doc only) | Test reworded; section 5 sentence; header-only check reads and cached R deferred. |
+
+## Trial (A2, 14-10, this development box: git 2.43.0, systemd 255, sudo)
+
+Built as above, with three changes found while building, written back here:
+the host accepts a **socket** as well as a pipe for stdout/stderr (Node.js
+gives a child socketpairs: the pipe-only check refused every real read);
+`git-read` **does not `exec` git**: it folds git's codes other than 0, 3,
+128 into 66 and re-raises a signal, so 200-243 can only be systemd's (79)
+and "git exiting 78 or 200 -> 66" holds; `git code` (say-only) tests the
+mapping without root.
+
+Run with `sudo` on copies of `clavarium-host` whose fixed paths (host.conf,
+runner root, script, locks) point into a scratch folder; the script was
+bound at `/git-read` (the real one lives under the `/usr` bind). Vector
+otherwise unchanged. Results:
+
+| Case | Outcome |
+|---|---|
+| `$MNT` under `/tmp` | 78 "/tmp may be written by others than root" (`held`); `resources/` not root's: 78 |
+| Folder replaced by a link to `/etc`; `site-origin` | 78 "no such folder"; 78 "never read this way" |
+| stdout to a regular file | 78; to a pipe or a Node socket: 0 |
+| Plain repository, 2 branches | 0, 556 bytes; through `GitRunner`: both branches, 124 ms |
+| `gitdir:` gitfile (outside and inside the folder), `.git` link, `commondir` | 66 "NOT A PLAIN .git DIRECTORY" |
+| `alternates` absolute (a "vault" repository) | git cannot see the path in the sandbox: 65, "bad object", read refused |
+| `alternates` relative (`../../../../vault`) | path unresolvable inside: alternates ignored, 0 with the folder's own branch only |
+| Refs `--upload-pack=touch /tmp/x` and `-f` in `packed-refs` | git fails ("bad object --upload-pack=..."): 65, refused, nothing ran |
+| Branch named by a 40-hex id | git bundles it; the server drops it (`branchProblem`) and says so |
+| `refs/heads/feat` at 0700 (agent's own uid) | 67 "REFS UNREADABLE" |
+| Hostile config (`include.path=/etc/shadow`, fsmonitor, sshCommand, pager, `pager.bundle`, `alias.bundle`, credential helper, `insteadOf`, `alternateRefsCommand`, `packObjectsHook`, `hooksPath` + hook) | 0, normal bundle; no marker file written by anything |
+| FIFO `packed-refs`, `RuntimeMaxSec=5` (copy) | 80 after 5 s; unit gone; next read 0 |
+| Same FIFO, server deadline 3 s | `GitRunner` fails "time limit", `git stop` ends the unit, workspace gone, next read works |
+| Second read while one runs | 78 "busy" (flock) |
+| 1.5 GB blob of zeros (1.5 MB packed) | 0, 1.5 MB bundle; imported in 6.6 s; with `MemoryMax=6M` still 0 (git streams it): the OOM code (81) was not reproduced for real |
+| Inside the unit (probe in place of the script) | dynamic uid 64850; `/dev` = null, urandom, zero; `/proc` empty; `/tmp` read-only and empty; folder read-only; stdin EOF; `/proc/1/environ` and the vault path absent; TCP to 127.0.0.1:22 and :8770: EAFNOSUPPORT; `io_uring_setup`, `userfaultfd`, `shmget`, `mq_open`, `kcmp`, `process_vm_readv`, `keyctl`, `setuid`: EPERM; AF_UNIX socket allowed |
+| `find / -xdev -writable` inside | only `/usr/lib/systemd/system/*.service` that are links to `/dev/null` (masked units); securityfs/apparmor files are mode 666 but writes fail (I/O error) |
+| Units left after all of the above | none (`reset-failed`) |
+
+Found: a unit **stopped** (`git stop`), or ended by SIGTERM/SIGPIPE, counts
+as a clean exit for systemd: `git read` then exits **0 with no bytes**. Not a
+hole (the server only takes a complete bundle: "ended inside its header"),
+but 0 does not mean "read" on its own.
+
+Not tried for real: the `RENAME_EXCHANGE` loop on `$MNT`; install moving
+`resources/` (no run on the test server); backup/restore as root; a review
+against a 1 GB reference; a 1-2 GB real repository timed; the OOM code.
+
+## Review log (red team A3, 14-10)
+
+Attacks in `test/runner-attack.test.mjs` (21) and
+`e2e/runner-attack.e2e.mjs` (8, real unit). No execution and no read of
+another repository got through; these did, and were fixed at their cause:
+
+| Finding | Change |
+|---|---|
+| A failed `rev-list --count` read as 0, state "up-to-date" | State from `merge-base --is-ancestor` both ways (failure fails the review); a failed count is `null`, said, confirmation asked; Send counts again |
+| A diff stopped by its deadline shown as whole (medium) | Any stopped or failed diff is `cut`, said, confirmation |
+| A 9 MiB message hid the other commits; messages cut at 4000 silently | Only whole commits listed from a cut log; fewer listed than counted is said; cut messages say how much is missing; confirmation |
+| Add-then-delete path pushed out of the 50-path list by decoys | The total is kept and said; over 50: confirmation |
+| Invisible characters not escaped | `escaped()` covers Cc, Cf, Zl, Zp, Default_Ignorable_Code_Point |
+| A looping or dangling symbolic ref as the only branch read as "no branches" | Reader checks the listed refs against the files on disk ("BROKEN OR CHANGING REFS", kind `refs`) |
+| A branch missing from a read during commits/pack-refs/gc | `git bundle create` re-resolves names and skips moved ones: the reader now builds the bundle from one `for-each-ref` list and `pack-objects` on its ids (25/25 reads whole, 3 runs) |
+| `a` packed beside loose `a/b`: `a` silently dropped | Same: both are listed, the server refuses the clash by name |
+| One slow repository delays every other one's reads and sends | `GitKeeper.tick` runs each repository on its own; one run per repository at a time |
+| A non-ASCII branch (`café`) failed every read, agent not told | Bytes above 0x7f pass the header check; that branch dropped and said |
+| 1000 valid 150-character names over 128 KiB, agent not told | The limit stays; the agent is told (shorter names or fewer branches); same for a 4 KiB line |
+| Shallow or grafted repository refused as "pack refused", agent not told | Reader refuses "SHALLOW REPOSITORY" (kind `shallow`), and a pack lacking objects is `incomplete`; both tell `git fetch --unshallow` |
+
+Real sandbox after the change (this box, sudo, scratch under
+`/tmp/claude-1000`): the 8 attack tests pass, and a probe read `café`
+(dropped, said), 301 branches, `a` + `a/b` (refused `clash`), shallow
+(`shallow`), no branches (`empty`) within `TasksMax=8`; no unit left.
+Not changed: two repositories hanging at once still hold both host read
+slots for up to 360 s.
+
+## Review log (audit, 15-10)
+
+| Finding | Verdict | Change |
+|---|---|---|
+| `views/`, `work/`, `work-disks/`, `removed/` still on the server-owned `$DATA`, unchecked by `held` (root escalation by a swapped path) | confirmed (high) | All five on `$MNT`; `kept` holds every one; `held` on each source and entry before `mount`, `bindfs`, `umount`, `mv`; server reads views and work folders from `$MNT`; `deploy/move-to-mnt.sh` moves them once (install); backup/restore; tests: `host-program`, `move-to-mnt`, `resources`. |
+| Restoring an archive made before the change leaves the host refusing every verb (no `MNT`) | confirmed (medium) | `restore.sh` maps the old paths onto `$MNT` (tar `--transform`, link targets untouched) and adds `MNT=` to a restored `host.conf`; test. |
+| A pack index-pack refuses partway stalls the read until the time limit; no waiver offered | confirmed (medium/high, two findings) | The indexer's end gives the verdict at once (`fail`), one classification for both ends (`packFailure`), bytes for an ended indexer dropped; test with 8 MiB after a bad-time-zone commit. |
+| `git-read`: a junk `.git` makes git read the folder as a bare repository, past every check | confirmed (low) | `GIT_DIR=.git`, `safe.bareRepository=explicit`; test with a shallow bare clone at the top. |
+| A refresh whose credential cannot be used throws: never recorded or alerted, Send errors | confirmed (low) | Caught in `#refreshLocked`, said like any failed refresh; test. |
+| Automatic sending gives up on a commit for good after a passing failure | confirmed (medium) | Only final kinds end a commit; others tried again after `RETRY_MS`; a settled "not arrived" clears it; test. |
+| Host and space failures alert at every read, twice the first time | confirmed (medium) | Same failure = same kind (and words, unless they carry a varying number); one alert while it lasts; test. |
+| Lower findings | fixed | `git read` waits for the unit as a child (trap not held back; EXIT trap); `/resources:ro` in the sandbox; `held` refuses an access list; remote tips by exact ref; a merged-then-deleted remote branch not made again; a push failing with no porcelain line is an unknown outcome; last good R kept; stale reference locks removed at start; grave send failures alert once whatever the routine option; an agent line marked told only when heard; a first automatic sending leases the fresh remote tip. |
+| Lower findings not changed | -- | Unlisted branches still logged once per commit (section 7 and 8 ask for it; `remoteLacks` is cached per tip and refresh). Merge commits in the "changed and changed back" guard: first-parent diffs would list everything a merge of the remote's branch brings in as changed back; left for a remerge-based check. |
+

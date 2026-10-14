@@ -78,15 +78,19 @@ export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Resources {
-    #store; #vms; #host; #root; #uid; #gid; #grants; #git; #access;
+    #store; #vms; #host; #mnt; #uid; #gid; #grants; #git; #access;
 
     /* `host(argv)` reaches the host program (making a view needs root). */
     /* `grants`: the one table of rights. "Attached, read" is a line of it:
        the conversation may read the folder. */
     /* `access`: how private repositories are reached (gitaccess.mjs). Without
        it, only a public https address can be cloned. */
-    constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit, access = null }) {
-        this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git; this.#access = access;
+    /* `mntDir`: where the folders, their read-only views and the work
+       folders live ($MNT of the host program: a chain of directories root
+       owns, see deploy/clavarium-host). The data directory when not given
+       (development, tests). */
+    constructor({ store, vms, host, dataDir, mntDir = dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit, access = null }) {
+        this.#store = store; this.#vms = vms; this.#host = host; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git; this.#access = access;
         /* What an earlier version kept inside each folder's own record is
            taken over into the table, once. */
         for (const r of store.all()) {
@@ -96,12 +100,12 @@ export class Resources {
         }
     }
 
-    folder(name) { return `${this.#root}/resources/${name}`; }
-    view(name) { return `${this.#root}/views/${name}`; }
+    folder(name) { return `${this.#mnt}/resources/${name}`; }
+    view(name) { return `${this.#mnt}/views/${name}`; }
     /* Where the tool of a conversation works, when that is kept here. */
     workFolder(conversation) {
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
-        return `${this.#root}/work/${conversation}`;
+        return `${this.#mnt}/work/${conversation}`;
     }
 
     /* How the table of rights names one of these. */

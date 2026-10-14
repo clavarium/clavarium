@@ -57,6 +57,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true, gitSsh,
+        /* A test machine may have little free disk: no reserve beyond the cap. */
+        gitReserveBytes: 0,
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
         wakeEveryMs: 300, alertSend, talkEveryMs: 200, gitEveryMs: 300,

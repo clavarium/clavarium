@@ -50,7 +50,16 @@ SUPPORTED="24.04 26.04"
 ACCOUNT="clavarium"
 CODE="/opt/clavarium"
 DATA="/home/clavarium"
+# What the machines are given -- the shared folders, their read-only views,
+# the work folders and their disks, what was put aside: under /home too (the
+# VM manager shares from there only), but on a chain of directories that ROOT
+# owns from / down, so that the server cannot swap a path between a check and
+# a mount (see clavarium-host, "held"). The server's own data stays in $DATA.
+MNT="/home/clavarium-mnt"
 VAULT="/var/lib/clavarium-vault"
+# The git reader's sandbox: an empty root for it, and its one script.
+RUNNER_ROOT="/var/lib/clavarium/runner-root"
+GIT_READ="/usr/lib/clavarium/git-read"
 ETC="/etc/clavarium"
 HOST_PROGRAM="/usr/local/sbin/clavarium-host"
 UNIT="/etc/systemd/system/clavarium.service"
@@ -118,7 +127,7 @@ would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
-  code        $CODE (root)      data  $DATA      vault key  $VAULT
+  code        $CODE (root)      data  $DATA      folders  $MNT (root's chain)      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
   edge        $([ "$LOCAL" = "yes" ] && echo "none (--local): no address in https, no sign-in" || [ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
   reached     $([ "$LOCAL" = "yes" ] && echo "from this machine only; from another one of yours, through ssh -L" || [ -n "$RELAY" ] && echo "through the relay $RELAY (this machine dials out; nothing here listens to the outside)" || echo "directly: ports 443 and 80 of this machine")
@@ -150,7 +159,7 @@ id "$ACCOUNT" >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --no-create
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0750 "$DATA"
 install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0700 "$VAULT"
 # What gets mounted into VMs is arranged by root only: see clavarium-host.
-install -d -o root -g root -m 0755 "$DATA/resources" "$DATA/views" "$DATA/removed" "$DATA/work" "$DATA/work-disks"
+install -d -o root -g root -m 0755 "$MNT" "$MNT/resources" "$MNT/views" "$MNT/removed" "$MNT/work" "$MNT/work-disks"
 
 step "code"
 systemctl stop clavarium.service 2>/dev/null || true
@@ -169,14 +178,34 @@ fi
 [ -f "$CODE/node_modules/node-pty/build/Release/pty.node" ] || refuse "the terminal module was not built (see: cd $CODE && npm ci)"
 chown -R root:root "$CODE"
 
+step "the git reader"
+# The one way the server reads an agent's repository: a sandbox around one
+# fixed script (clavarium-host "git read"). Its root is empty and root's.
+install -d -o root -g root -m 0755 /var/lib/clavarium /usr/lib/clavarium "$RUNNER_ROOT"
+install -o root -g root -m 0755 "$HERE/deploy/git-read" "$GIT_READ"
+
 step "the one privileged program"
 install -o root -g root -m 0755 "$HERE/deploy/clavarium-host" "$HOST_PROGRAM"
 install -d -o root -g root -m 0755 "$ETC"
-printf 'DATA=%s\n' "$DATA" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
+printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
 rule="$(mktemp)"
 printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n' "$ACCOUNT" "$HOST_PROGRAM" > "$rule"
 visudo -cf "$rule" >/dev/null || refuse "the sudo rule did not pass its check"
 install -o root -g root -m 0440 "$rule" /etc/sudoers.d/clavarium; rm -f -- "$rule"
+
+step "what the machines are given, on root's chain"
+# ONCE, from an earlier version: resources/, views/, work/, work-disks/ and
+# removed/ move from $DATA to $MNT, with the server stopped (above); the
+# machines are given back what they had, from the new places, through the
+# program just installed. See deploy/move-to-mnt.sh.
+bash "$HERE/deploy/move-to-mnt.sh" --data "$DATA" --mnt "$MNT" --host "$HOST_PROGRAM" --node "$CODE/node/bin/node"
+# Each component from / to each of them belongs to root, nobody else may
+# write it, and no access list says otherwise (ls marks one with a '+').
+for at in /home "$MNT" "$MNT/resources" "$MNT/views" "$MNT/removed" "$MNT/work" "$MNT/work-disks"; do
+    [ "$(stat -c %u "$at")" = "0" ] && [ -d "$at" ] && [ ! -L "$at" ] || refuse "$at must be a directory of root"
+    case "$(stat -c %A "$at")" in ?????w????|????????w?) refuse "$at may be written by others than root" ;; esac
+    mode="$(ls -ld -- "$at" | cut -d' ' -f1)"; [ "${#mode}" -eq 10 ] || refuse "$at has an access list (getfacl): only root may write it"
+done
 # Settings that are not parameters (the speech-to-text endpoint): kept across upgrades.
 [ -e "$ETC/server.env" ] || install -o root -g root -m 0600 /dev/null "$ETC/server.env"
 
