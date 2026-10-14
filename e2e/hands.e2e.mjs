@@ -96,8 +96,9 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     /* Removed from Assets: only a folder attached nowhere can go -- the button is there, greyed, and says why. */
     await me.page.locator('#assets-open').click();
     const asset = me.page.locator('#assets-folder .asset[data-name="reports"]');
-    await asset.locator('.asset-head').click();
-    assert.match(await asset.locator('.asset-head').innerText(), /with-folders \(read\)/, 'it says which conversation uses it');
+    /* A folder just made opens on its card by itself: the arrow is down. */
+    assert.equal(await asset.locator('.asset-head').getAttribute('aria-expanded'), 'true');
+    await me.until('it says which conversation uses it', async () => /with-folders \(read\)/.test(await asset.locator('.asset-head').innerText()));
     assert.equal(await asset.locator('button', { hasText: 'Remove' }).isDisabled(), true);
     assert.match(await asset.innerText(), /attached to 1 conversation: set it to Off first/);
     /* Set to Off from there, for that conversation: no need to go and open it. */

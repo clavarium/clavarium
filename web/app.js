@@ -1349,6 +1349,8 @@
             const made = await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from, ...(from ? { via } : {}) });
             /* The secrets typed are not kept in the page a moment longer. */
             $('git-new').reset(); viaTouched = false; showVia(); fillKeyChoice(via.key);
+            /* A new repository opens on its card, where it is attached: the next thing to do. */
+            assetOpen = `git:${made.name}`;
             if (made.firstSeen) {
                 $('git-said').textContent = `${made.name} was cloned. First contact with ${hostOf(made.from)}: its host key (${made.firstSeen.join(', ')}) was recorded. A different key later will be refused.`;
                 $('git-said').hidden = false;
@@ -1530,7 +1532,7 @@
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; $('folder-box').open = false; }
+        try { const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; $('folder-box').open = false; if (made?.name) assetOpen = `folder:${made.name}`; }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await paintAssets();
     });

@@ -171,7 +171,10 @@ export async function startHome({ port, host, dataDir, env = process.env, conver
        the start wait on the VM manager. */
     const shelf = new Shelf({ store: new Store(`${dataDir}/shelf.json`), run: asHost, tools });
     void shelf.recover();
-    const stopShelf = shelf.start(shelfEveryMs, shelfFirstMs);
+    /* CLAVARIUM_SHELF=off: never rebuilt by itself (the button still works).
+       For a server whose disk cannot hold two images of a few GB each, such
+       as one that is itself a virtual machine on a small disk. */
+    const stopShelf = shelf.start(env.CLAVARIUM_SHELF === 'off' ? 0 : shelfEveryMs, shelfFirstMs);
     if (all.shelf) all.shelf = shelf;
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();

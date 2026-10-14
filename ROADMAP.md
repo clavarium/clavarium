@@ -36,7 +36,12 @@ listed here.
   every version can be traced to this repository. Installing on Ubuntu means
   installing the package, then running its install script, which sets up the
   service and the host program. npm itself never runs anything as root.
-- **Automatic updates, off unless the administrator turns them on.**
+- **Automatic updates: the administrator decides, and the decision is kept.**
+  - Off by default. The install asks; nothing is updated unless the
+    administrator says so, and nothing overrides that choice later.
+  - Turned on, the administrator chooses how deep updates go: patches only
+    (1.4.2 to 1.4.3), minor versions too (1.4 to 1.5), or major versions too
+    (1 to 2).
   - The administrator chooses update windows: every night, a day of the week,
     a day of the month, and an hour range. Inside a window the server picks a
     random moment to look for a new version, so a fleet of servers does not
@@ -44,16 +49,16 @@ listed here.
   - The new version is downloaded beside the current one, checked, switched
     to, started; if it does not start, the previous one comes back.
   - Never while a machine is being built or a git send is in progress.
-  - Turned off (the default), nothing is ever installed by itself: the page
-    only says that a new version exists, and the administrator updates by
-    hand when they decide to.
+  - Whatever is not installed by itself is announced in the page, plainly:
+    "A new version exists (1.5.0). [Update now] [Set up automatic updates]".
 - **The safety of automatic updates.** An update installs code that runs with
   the host program's rights on every server, so:
   1. the provenance is checked before installing: the version must have been
      built and published from this repository on GitHub;
   2. a version is installed only once it has been public for a delay (one or
      two days by default), so a bad release is caught before it spreads;
-  3. never a new major version without the administrator's consent;
+  3. only the depth the administrator chose (patch, minor or major) is ever
+     installed by itself;
   4. a version that changes the host program is announced to the
      administrator, and can be set to wait for a manual confirmation.
 

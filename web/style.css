@@ -267,6 +267,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .asset-head { flex: 1 1 320px; display: grid; grid-template-columns: minmax(120px, 1fr) minmax(140px, 1.4fr) minmax(120px, 1.4fr); gap: 10px; align-items: center; text-align: left; background: transparent; border: 0; padding: 8px 4px; min-height: 44px; font-weight: 400; }
 .asset-head b { overflow-wrap: anywhere; }
 .asset-head[aria-expanded="true"] b { color: var(--brass); }
+/* A card opens: a small arrow says so, turned down when it is open. */
+.asset-head b::before { content: "\25B8"; display: inline-block; width: 1.1em; color: var(--dim); transition: transform .15s; }
+.asset-head[aria-expanded="true"] b::before { transform: rotate(90deg); color: var(--brass); }
+@media (prefers-reduced-motion: reduce) { .asset-head b::before { transition: none; } }
 .asset-inside { flex-basis: 100%; padding: 0 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 700px) { .asset-head { grid-template-columns: 1fr; gap: 2px; } }
 #assets details > summary, #access-advanced > summary, #settings-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
