@@ -8,7 +8,7 @@ test('the tool is the only program of its session: no shell stands behind it', (
     assert.equal(argv.some((a) => /^(ba|z|da)?sh$/.test(a) || a === '-c' && false), false);
     /* After the command, only tmux settings, each introduced by a lone ";". */
     const rest = argv.slice(11).join(' ');
-    assert.equal(rest, '; set -sg escape-time 10 ; set -g status off ; set -g mouse on ; set -g focus-events on');
+    assert.equal(rest, '; set -sg escape-time 10 ; set -g status off ; set -g mouse on ; set -g focus-events on ; set -as terminal-features ,xterm*:hyperlinks');
 });
 
 test('a command cannot smuggle a tmux command, and a name is checked before it reaches tmux', () => {

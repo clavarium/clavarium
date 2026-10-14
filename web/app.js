@@ -40,6 +40,21 @@
         $('notice-cancel').hidden = !cancel;
         $('notice-cancel').onclick = cancel ?? null;
         notice.hidden = false;
+        $('notice-spin').hidden = true; $('notice-steps').hidden = true;
+    };
+    /* WHILE A MACHINE IS BUILT: a wheel that turns, and the three steps with the
+       one in progress marked, so a wait of several minutes reads as progress. */
+    const BUILD_STEPS = ['Starting the machine', 'Preparing the machine', 'Installing the tool'];
+    const building = (step) => {
+        $('notice-spin').hidden = false;
+        const at = step?.startsWith('Installing') ? 2 : BUILD_STEPS.indexOf(step);
+        const list = $('notice-steps'); list.hidden = at < 0; list.replaceChildren();
+        BUILD_STEPS.forEach((label, i) => {
+            const li = document.createElement('li');
+            li.dataset.state = i < at ? 'done' : i === at ? 'now' : 'later';
+            li.textContent = i === 2 && at === 2 && step ? step : label;
+            list.append(li);
+        });
     };
     const view = (which) => { app.dataset.view = which; };
 
@@ -49,7 +64,18 @@
         fontSize: innerWidth < 500 ? 11 : 14,
         fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
         theme: { background: '#0f141a' },
+        /* A link the tool sends as a link (OSC 8): a web address opens in a new
+           tab, with no way back to this page; anything else is not followed. */
+        linkHandler: { activate: (_event, uri) => openWeb(uri), allowNonHttpProtocols: false },
     });
+    /* A web address on screen opens in a new tab, on its own: nothing of this
+       page is handed to it. Only http and https. */
+    function openWeb(uri) {
+        let url;
+        try { url = new URL(uri); } catch { return; }
+        if (url.protocol !== 'https:' && url.protocol !== 'http:') return;
+        window.open(url.href, '_blank', 'noopener,noreferrer');
+    }
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
@@ -249,18 +275,19 @@
         if (!keepSheets) $('panel').hidden = $('files').hidden = $('sharing').hidden = $('copy').hidden = true;
         paintChips();
         $('keys').hidden = !current;
-        if (home && current) void paintShortcuts();
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         const usable = Boolean(c) && c.phase === 'ready';
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
+        if (home && usable) void paintShortcuts();
         if (c && c.phase === 'building') {
             disconnect(); say('building', 'connecting');
             const minutes = c.buildingSince ? Math.floor((Date.now() - Date.parse(c.buildingSince)) / 60000) : 0;
-            show(`${c.step ?? 'Building'}... (${minutes < 1 ? 'started less than a minute ago' : `${minutes} min so far`}; a new machine takes a few minutes)`);
+            show(`${minutes < 1 ? 'Started less than a minute ago' : `${minutes} min so far`}. A new machine takes a few minutes.`);
+            building(c.step);
             return;
         }
-        if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); return; }
+        if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
         if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
@@ -396,7 +423,10 @@
     async function paintShortcuts() {
         let all = [];
         try { const r = await fetch(`${API}/shortcuts`); if (r.ok) all = await r.json(); else return; } catch { return; }
-        $('shortcuts').hidden = !current;
+        /* Shown only when the conversation can be typed into: painting it while a
+           machine is built made it appear and vanish at each poll, a flicker. */
+        const shown = conversations.find((x) => x.name === current);
+        $('shortcuts').hidden = !current || (home && !(shown && shown.phase === 'ready'));
         const row = $('shortcut-row');
         row.replaceChildren();
         for (const shortcut of all) {
@@ -1673,6 +1703,31 @@
         notice.hidden = true;
         await preview(tab, inner, name, entry.size);
     }
+    /* WEB ADDRESSES WRITTEN AS PLAIN TEXT, even when the screen cut them over
+       several rows: a sign-in address is long. The rows that continue one
+       another are read as one line, and the link covers each of its rows. */
+    const URL_IN_TEXT = /https?:\/\/[^\s"'<>()]+/g;
+    terminal.registerLinkProvider({
+        provideLinks(y, callback) {
+            const buffer = terminal.buffer.active;
+            let first = y - 1;
+            while (first > 0 && buffer.getLine(first)?.isWrapped) first--;
+            let last = y - 1;
+            while (buffer.getLine(last + 1)?.isWrapped) last++;
+            const width = terminal.cols;
+            let text = '';
+            for (let row = first; row <= last; row++) text += buffer.getLine(row)?.translateToString(row === last) ?? '';
+            const links = [];
+            for (const m of text.matchAll(URL_IN_TEXT)) {
+                const found = m[0].replace(/[.,;:]+$/, '');
+                const start = m.index, end = m.index + found.length - 1;
+                const startRow = first + Math.floor(start / width), endRow = first + Math.floor(end / width);
+                if (y - 1 < startRow || y - 1 > endRow) continue;
+                links.push({ text: found, range: { start: { x: (start % width) + 1, y: startRow + 1 }, end: { x: (end % width) + 1, y: endRow + 1 } }, activate: () => openWeb(found) });
+            }
+            callback(links.length ? links : undefined);
+        },
+    });
     terminal.registerLinkProvider({
         provideLinks(y, callback) {
             const line = terminal.buffer.active.getLine(y - 1);

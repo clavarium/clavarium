@@ -28,6 +28,10 @@ const SETTINGS = [
     /* Asked for by a tool itself, on its own screen, during the first real
        run: without it the tool cannot tell when its terminal gains focus. */
     ['set', '-g', 'focus-events', 'on'],
+    /* A tool may send a link as a link (an OSC 8 hyperlink: a sign-in address,
+       a page of its documentation); tmux passes it on to the page only when
+       told the outer terminal understands it. The page opens it in a new tab. */
+    ['set', '-as', 'terminal-features', ',xterm*:hyperlinks'],
 ];
 
 export function attachCommand(name, command, cwd) {

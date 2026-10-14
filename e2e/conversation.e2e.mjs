@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { bench, SKIP, wait } from './bench.mjs';
 
 test('a conversation is created from the page, built, and its terminal answers', { skip: SKIP }, async (t) => {
-    const b = await bench(t, { launchSeconds: '2' });
+    const b = await bench(t, { launchSeconds: '6' });
     const me = await b.person();
     await me.page.locator('#new').click();
     await me.page.fill('#create-name', 'first-talk');
@@ -11,13 +11,34 @@ test('a conversation is created from the page, built, and its terminal answers',
     await me.page.locator('#create button[type=submit]').click();
     /* While the machine is being built, the page says so, and offers nothing that cannot work yet. */
     await me.until('the page says it is building', async () => (await me.state()) === 'building');
-    assert.match(await me.page.locator('#notice-text').innerText(), /a new machine takes a few minutes/);
+    assert.match(await me.page.locator('#notice-text').innerText(), /a new machine takes a few minutes/i);
+    /* A wheel turns and the steps say where it is; the shortcut bar stays away for the whole wait (it used to come and go at each poll). */
+    assert.equal(await me.page.locator('#notice-spin').isVisible(), true);
+    assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').count(), 1);
+    for (let i = 0; i < 4; i++) { assert.equal(await me.page.locator('#shortcuts').isVisible(), false); await me.page.waitForTimeout(700); }
     assert.equal(await me.page.locator('#keys').isVisible(), false);
     assert.equal(await me.page.locator('#sleep').isVisible(), false);
     await me.until('it is live', async () => (await me.state()) === 'live', 30_000);
     await me.sees('ready>');
     await me.type('echo $((6*7))-is-the-answer');
     await me.sees('42-is-the-answer');
+    /* A web address on screen opens in a new tab when clicked, even one long enough to be cut over two rows. */
+    await me.type('echo https://example.com/sign-in/' + 'a'.repeat(120));
+    await me.sees('https://example.com/sign-in/');
+    const findRow = () => me.page.evaluate(() => {
+        const t = window.clavariumTerminal; const buffer = t.buffer.active;
+        for (let r = t.rows - 1; r >= 0; r--) {
+            if (!(buffer.getLine(buffer.viewportY + r)?.translateToString(true) ?? '').startsWith('https://example.com/sign-in/')) continue;
+            const box = document.querySelector('.xterm-screen').getBoundingClientRect();
+            return { x: box.left + (10 * box.width) / t.cols, y: box.top + ((r + 0.5) * box.height) / t.rows };
+        }
+        return null;
+    });
+    await me.until('the address is printed on a row of its own', async () => Boolean(await findRow()));
+    const row = await findRow();
+    const [tab] = await Promise.all([me.page.context().waitForEvent('page', { timeout: 5000 }), (async () => { await me.page.mouse.move(row.x, row.y); await me.page.waitForTimeout(300); await me.page.mouse.click(row.x, row.y); })()]);
+    assert.match(tab.url(), /^https:\/\/example\.com\/sign-in\/a{120}$/);
+    await tab.close();
     assert.deepEqual(await me.page.locator('#items .item b').allInnerTexts(), ['first-talk']);
     assert.deepEqual(me.errors, []);
 });
