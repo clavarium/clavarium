@@ -229,16 +229,50 @@
           <div id="assets-git"></div>
         <details id="git-box">
           <summary>Add a repository</summary>
-          <p class="hint">A folder that starts as a repository: empty, or cloned from an https address. It is attached and shared like a folder, to read or to write. What the tool commits stays in it; pushing elsewhere is the tool's business, with what you hand it.</p>
+          <p class="hint">A folder that starts as a repository: empty, or cloned from a remote -- public, or private over SSH or HTTPS. It is attached and shared like a folder, to read or to write. What opens a private remote is kept on this server, sealed, and used here only (to clone, to look, to send): the tool's machine never receives it.</p>
           <form id="git-new" autocomplete="off">
             <label for="git-name">Name</label>
             <input id="git-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website" spellcheck="false" autocapitalize="off" required>
             <label for="git-from">Clone from (optional)</label>
-            <div class="row"><input id="git-from" inputmode="url" placeholder="https://example.com/project.git" spellcheck="false" autocapitalize="off">
-              <button type="submit" class="primary">Add</button></div>
+            <input id="git-from" inputmode="url" maxlength="500" placeholder="git@example.com:team/project.git or https://example.com/team/project.git" spellcheck="false" autocapitalize="off">
+            <fieldset id="git-via">
+              <legend>How this server gets in</legend>
+              <label><input type="radio" name="git-via" value="ssh-key" checked> SSH key made here <small class="hint">(recommended: its private half never leaves this server)</small></label>
+              <label><input type="radio" name="git-via" value="token"> HTTPS access token</label>
+              <label><input type="radio" name="git-via" value="password"> HTTPS user name and password <small class="warn">(not recommended: a password often opens far more than this repository)</small></label>
+              <label><input type="radio" name="git-via" value="none"> Nothing: a public https address</label>
+            </fieldset>
+            <div id="git-via-ssh-key" class="git-via-part">
+              <label for="git-key">Key</label>
+              <div class="row"><select id="git-key"></select><button type="button" id="git-key-new">New key</button></div>
+              <div id="git-key-make" class="row" hidden><input id="git-key-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" aria-label="Name of the new key" placeholder="deploy-key" spellcheck="false" autocapitalize="off"><button type="button" id="git-key-make-go" class="primary">Make the key</button></div>
+              <div id="git-key-shown" hidden>
+                <label for="git-key-public">Public key: add it to the repository on the hosting service, then press Add</label>
+                <div class="row"><textarea id="git-key-public" class="public-key" readonly rows="3" spellcheck="false"></textarea><button type="button" id="git-key-copy">Copy</button></div>
+                <p class="hint">On GitHub a deploy key works for one repository only (Settings - Deploy keys). On GitLab one deploy key can be enabled on several projects (Settings - Repository - Deploy keys). To let Send push, allow it to write there.</p>
+              </div>
+            </div>
+            <div id="git-via-token" class="git-via-part" hidden>
+              <label for="git-token-user">User name (optional)</label>
+              <input id="git-token-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
+              <label for="git-token">Access token (kept sealed here; give it access to this repository only)</label>
+              <input id="git-token" type="password" autocomplete="new-password">
+            </div>
+            <div id="git-via-password" class="git-via-part" hidden>
+              <p class="warn">Not recommended: prefer an SSH key made here, or a token limited to this repository.</p>
+              <label for="git-pass-user">User name</label>
+              <input id="git-pass-user" spellcheck="false" autocapitalize="off" autocomplete="off">
+              <label for="git-pass">Password (kept sealed here)</label>
+              <input id="git-pass" type="password" autocomplete="new-password">
+            </div>
+            <div class="row"><button type="submit" class="primary">Add</button></div>
+            <p id="git-said" class="hint" role="status" hidden></p>
             <p id="git-error" class="error" role="alert" hidden></p>
           </form>
         </details>
+        <div class="panel-top"><b id="git-keys-title">SSH keys made here</b><small class="hint">the private half never leaves this server</small></div>
+        <div id="git-keys"></div>
+        <p id="git-keys-empty" class="hint">No key yet: "New key" in Add a repository makes one.</p>
         </section>
         <section data-kind="mailbox">
           <div class="panel-top"><b id="assets-mailbox-title">Mailboxes</b><small class="hint">read-only copies</small></div>
@@ -332,9 +366,11 @@
         <details id="gitview-remote-box">
           <summary>Where the commits are sent</summary>
           <form id="gitview-remote" autocomplete="off">
-            <label for="gitview-url">Address (https)</label>
+            <label for="gitview-url">Address (https or ssh)</label>
             <input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required>
-            <label for="gitview-user">User name of the key (optional)</label>
+            <label for="gitview-sshkey">SSH key made here (for an ssh address)</label>
+            <select id="gitview-sshkey"></select>
+            <label for="gitview-user">For an https address: user name of the token (optional)</label>
             <input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
             <label for="gitview-key">Key or token that may push (kept sealed here; leave empty to keep the one there is)</label>
             <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>

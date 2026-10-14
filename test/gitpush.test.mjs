@@ -90,16 +90,20 @@ test('a repository rigged by its tool runs nothing here: no hook, no filter, no 
 test('the key is sealed and never said back; only a git repository has a push, and only to an https address', async (t) => {
     const b = bench(t);
     b.review.setRemote('site', { url: b.remote, user: 'me', key: 'very-secret-token' });
-    assert.deepEqual(b.review.settings('site'), { remote: b.remote, user: 'me', hasKey: true });
+    assert.deepEqual(b.review.settings('site'), { remote: b.remote, user: 'me', hasKey: true, sshKey: null });
     assert.equal(readFileSync(join(b.dir, 'git.json'), 'utf8').includes('very-secret-token'), false);
     b.review.setRemote('site', { url: b.remote });
     assert.equal(b.review.settings('site').hasKey, true, 'an empty key keeps the one there is');
     await assert.rejects(b.review.outgoing('notes'), /No such repository/);
     assert.throws(() => b.review.setRemote('nope', { url: b.remote }), /No such repository/);
-    assert.throws(() => b.review.setRemote('site', { url: 'ssh://git@example.com/x.git' }), /https address/);
+    /* ssh is an address commits may go to (with a key made here: see gitaccess.test); a local file is not. */
+    assert.equal(b.review.setRemote('site', { url: 'ssh://git@example.com/x.git' }).remote, 'ssh://git@example.com/x.git');
+    assert.throws(() => b.review.setRemote('site', { url: 'file:///etc' }), /repository address is https/);
+    assert.throws(() => b.review.setRemote('site', { url: 'http://example.com/x.git' }), /repository address is https/);
+    b.review.setRemote('site', { url: b.remote });
     assert.throws(() => b.review.setRemote('site', { url: b.remote, key: 'two\nlines' }), /one line/);
     assert.throws(() => b.review.setRemote('site', { url: b.remote, user: 'a:b' }), /no space and no colon/);
     /* Outside tests, a directory of this machine is not a remote. */
     const strict = new GitReview({ store: new Store(join(b.dir, 'g2.json')), vault: new Vault(join(b.dir, 'vault.key')), resources: { get: () => ({ name: 'site', type: 'git' }), folder: () => b.work }, dataDir: b.dir });
-    assert.throws(() => strict.setRemote('site', { url: b.remote }), /https address/);
+    assert.throws(() => strict.setRemote('site', { url: b.remote }), /repository address is https/);
 });

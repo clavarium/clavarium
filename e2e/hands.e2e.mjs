@@ -142,8 +142,9 @@ test('a git repository is added from the page, attached like a folder, and is a 
     await offered.locator('button').click();
     assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.levels button').allInnerTexts(), ['Read', 'Write']);
     await me.page.locator('#sharing-close').click();
-    /* An address that is not https is refused before git is run. */
-    assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'ssh://git@example.com/x.git' })).body.error, /https address/);
+    /* An address that is not one is refused before git is run; ssh asks for a key. */
+    assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'file:///etc' })).body.error, /repository address is https/);
+    assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'ssh://git@example.com/x.git' })).body.error, /needs a key/);
 });
 
 test('what a tool committed is shown to the owner, then sent -- by the server, with a key the tool never sees', { skip: SKIP }, async (t) => {
@@ -181,7 +182,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     assert.match(execFileSync('git', ['-C', remote, 'log', '--format=%s', 'main'], { encoding: 'utf8' }), /Add the home page/);
     assert.equal(await me.page.locator('#gitview-push').isVisible(), false);
     /* The key: kept, sealed, and in nothing the tool can read. */
-    assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true });
+    assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true, sshKey: null });
     await me.page.locator('#gitview-close').click();
     await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');
     await me.sees('\n0\n');

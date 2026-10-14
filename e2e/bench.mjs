@@ -18,6 +18,7 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { startHome } from '../server/main.mjs';
 import { readTools } from '../server/tools.mjs';
+import { installFakeSsh } from './fake-ssh.mjs';
 
 const HERE = fileURLToPath(new URL('.', import.meta.url));
 
@@ -50,9 +51,12 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
     await new Promise((ready) => engine.listen(0, '127.0.0.1', ready));
     process.env.FAKE_VM_DIR = dir;
+    /* "The hosting service" of private repositories: reached over a stand-in ssh (fake-ssh.mjs). */
+    const sshRoot = join(dir, 'far');
+    const gitSsh = installFakeSsh(sshRoot);
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
     const server = await startHome({
-        port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true,
+        port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true, gitSsh,
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
         wakeEveryMs: 300, alertSend, talkEveryMs: 200,
@@ -128,5 +132,5 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         }
         return { page, context, errors, screen, until, state, sees, type, api, create, newFolder, access };
     }
-    return { origin, dir, person, browser };
+    return { origin, dir, person, browser, sshRoot };
 }

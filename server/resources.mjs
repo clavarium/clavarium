@@ -25,24 +25,15 @@ import { isConversationName } from './names.mjs';
 import { execFile } from 'node:child_process';
 import { Refusal } from './conversations.mjs';
 import { Grants, conversationSubject } from './grants.mjs';
+import { readAddress, explain } from './gitaccess.mjs';
 
 export const ACCESS = ['read', 'write'];
 export const TYPES = ['folder', 'mailbox', 'git'];
 
-/* Where a repository may be cloned from: an https address, with no name and
-   password in it, and nothing a command line would read as an option. */
-export function readOrigin(from) {
-    if (from === undefined || from === null || from === '') return undefined;
-    let url;
-    try { url = new URL(String(from)); } catch { throw new Refusal(400, 'A repository is cloned from an https address.'); }
-    if (url.protocol !== 'https:' || url.username !== '' || url.password !== '' || String(from).length > 500 || /\s/.test(String(from))) {
-        throw new Refusal(400, 'A repository is cloned from an https address, with no name or password in it.');
-    }
-    return url.href;
-}
-/* Runs git as this server's own account: `git(argv, cwd)` -> { code, stderr }. */
-const runGit = (argv, cwd) => new Promise((resolve) => {
-    execFile('git', argv, { cwd, timeout: 600_000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent' } },
+/* Runs git as this server's own account: `git(argv, cwd, env)` -> { code, stderr }.
+   `env` carries what opens a private remote (see gitaccess.mjs): never argv. */
+const runGit = (argv, cwd, env = {}) => new Promise((resolve) => {
+    execFile('git', argv, { cwd, timeout: 600_000, maxBuffer: 1024 * 1024, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: '/bin/true', GIT_CONFIG_NOSYSTEM: '1', HOME: '/nonexistent', LC_ALL: 'C', ...env } },
         (error, _stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stderr: String(stderr ?? '') }));
 });
 /* How the page names a conversation's own work folder, next to its attached folders. */
@@ -50,13 +41,15 @@ export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Resources {
-    #store; #vms; #host; #root; #uid; #gid; #grants; #git;
+    #store; #vms; #host; #root; #uid; #gid; #grants; #git; #access;
 
     /* `host(argv)` reaches the host program (making a view needs root). */
     /* `grants`: the one table of rights. "Attached, read" is a line of it:
        the conversation may read the folder. */
-    constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit }) {
-        this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git;
+    /* `access`: how private repositories are reached (gitaccess.mjs). Without
+       it, only a public https address can be cloned. */
+    constructor({ store, vms, host, dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit, access = null }) {
+        this.#store = store; this.#vms = vms; this.#host = host; this.#root = dataDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git; this.#access = access;
         /* What an earlier version kept inside each folder's own record is
            taken over into the table, once. */
         for (const r of store.all()) {
@@ -82,8 +75,11 @@ export class Resources {
         return map;
     }
 
-    /* Each with where it is attached, as the page shows it. */
-    list() { return this.#store.all().map((r) => ({ ...r, attachments: this.#attachments(r) })); }
+    /* Each with where it is attached, as the page shows it -- and, for a
+       repository, how it is reached (never the secret that opens it). */
+    list() {
+        return this.#store.all().map((r) => ({ ...r, attachments: this.#attachments(r), ...(r.type === 'git' && this.#access ? { via: this.#access.describe(r.name, r.from) } : {}) }));
+    }
     get(name) { return this.#store.get(name); }
 
     /* What one conversation has attached: [{ name, access }]. */
@@ -95,33 +91,46 @@ export class Resources {
        root: this server fills its folders but cannot replace one by a link
        to somewhere else, which is what would otherwise get mounted. */
     /* A GIT REPOSITORY is a folder that starts as one: made empty (git init)
-       or cloned from an https address. It is then attached and shared like
-       any folder -- read, or read and write.
+       or cloned from a remote: a public https address, or a private one
+       reached over ssh or https with what `via` says (gitaccess.mjs), used
+       here and kept here. It is then attached and shared like any folder --
+       read, or read and write.
        GIT IS RUN HERE ONCE, in a folder nobody else has touched yet, and
        never again: a repository that a tool can write in could make git run
        what it likes (hooks, filters). Its history is the tool's business, in
        its own machine. */
-    async create({ name, type = 'folder', from }) {
+    async create({ name, type = 'folder', from, via }) {
         if (!TYPES.includes(type)) throw new Refusal(400, 'A resource is a folder, a mailbox or a git repository.');
-        const origin = type === 'git' ? readOrigin(from) : undefined;
+        const address = type === 'git' ? readAddress(from) : undefined;
+        /* Everything is checked before anything is made. */
+        const credential = this.#access ? this.#access.prepare(address, via) : undefined;
+        if (!this.#access && address && (address.transport !== 'https' || (via?.method && via.method !== 'none'))) throw new Refusal(400, 'Only a public https address can be cloned on this server.');
+        const origin = address?.url;
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         if (name === WORK_TAB) throw new Refusal(409, 'This name is taken: "work" is where each conversation works.');
         if (this.#store.get(name)) throw new Refusal(409, 'A resource already has this name.');
         const made = await this.#host(['folder', 'make', name]);
         if (made.code !== 0) throw new Refusal(502, `The folder could not be made: ${firstLine(made.stderr)}`);
+        let firstSeen = [];
         if (type === 'git') {
             const options = ['-c', 'core.hooksPath=/dev/null', '-c', 'protocol.file.allow=never'];
-            const r = origin
-                ? await this.#git([...options, 'clone', '--quiet', '--no-recurse-submodules', '--', origin, '.'], this.folder(name))
-                : await this.#git([...options, 'init', '--quiet', '--initial-branch=main'], this.folder(name));
+            const clone = (env) => this.#git([...options, 'clone', '--quiet', '--no-recurse-submodules', '--', origin, '.'], this.folder(name), env);
+            let r;
+            try {
+                r = origin
+                    ? (this.#access ? await this.#access.run(credential, address, clone).then((x) => { firstSeen = x.firstSeen; return x.result; }) : await clone({}))
+                    : await this.#git([...options, 'init', '--quiet', '--initial-branch=main'], this.folder(name));
+            } catch (error) { r = { code: 1, stderr: error.message }; }
             if (r.code !== 0) {
                 await this.#host(['folder', 'aside', name]);
-                throw new Refusal(502, origin ? `The repository could not be cloned: ${firstLine(r.stderr)}` : `The repository could not be made: ${firstLine(r.stderr)}`);
+                throw new Refusal(502, origin ? `The repository could not be cloned: ${explain(r.stderr)}` : `The repository could not be made: ${firstLine(r.stderr)}`);
             }
         }
+        if (credential) this.#access.remember(name, credential);
         const resource = { name, type, ...(origin ? { from: origin } : {}), createdAt: new Date().toISOString() };
         this.#store.put(resource);
-        return { ...resource, attachments: {} };
+        /* firstSeen: the host keys recorded by this very clone, to be shown once. */
+        return { ...resource, attachments: {}, ...(type === 'git' && this.#access ? { via: this.#access.describe(name, origin) } : {}), ...(firstSeen.length ? { firstSeen } : {}) };
     }
 
     /* The read-only view of a folder, made if it is not already there. */

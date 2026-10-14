@@ -957,8 +957,8 @@
     /* ---------- Assets: everything kept here ---------- */
     let assetsKind = ''; let assetOpen = '';
     async function paintAssets() {
-        const [all, boxes, secrets] = await Promise.all([
-            fetch(`${API}/resources`).then((r) => r.json()), fetch(`${API}/mailboxes`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => []), readDevices()]);
+        const [all, boxes, secrets, keys] = await Promise.all([
+            fetch(`${API}/resources`).then((r) => r.json()), fetch(`${API}/mailboxes`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => []), fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []), readDevices()]);
         const ready = conversations.filter((c) => c.phase === 'ready');
         const count = { folder: 0, git: 0, mailbox: 0, secret: secrets.length };
         for (const r of all) count[kindOf(r)] += 1;
@@ -982,7 +982,7 @@
             used.textContent = users.length ? users.map(([c, access]) => `${c} (${access})`).join(', ') : 'not used';
             const given = document.createElement('span'); given.className = 'hint';
             const box = kind === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
-            given.textContent = [holders.length ? `on ${holders.map((d) => d.label).join(', ')}` : '', box ? (box.failure ? box.failure : `${box.messages} message(s)`) : '', kind === 'git' && resource.from ? `from ${new URL(resource.from).hostname}` : ''].filter(Boolean).join(' - ');
+            given.textContent = [holders.length ? `on ${holders.map((d) => d.label).join(', ')}` : '', box ? (box.failure ? box.failure : `${box.messages} message(s)`) : '', kind === 'git' && resource.from ? `from ${hostOf(resource.from)}${viaText(resource.via)}` : ''].filter(Boolean).join(' - ');
             head.append(name, used, given);
             head.addEventListener('click', () => { assetOpen = assetOpen === asset ? '' : asset; void paintAssets(); });
             row.append(head);
@@ -994,6 +994,11 @@
             if (assetOpen === asset) {
                 /* Opened: every conversation, with what it may do with this. */
                 const inside = document.createElement('div'); inside.className = 'asset-inside';
+                if (kind === 'git' && resource.from) {
+                    const where = document.createElement('p'); where.className = 'hint';
+                    where.textContent = `Cloned from ${resource.from}${viaText(resource.via)}.${resource.via?.hostKey ? ` Host key recorded for ${hostOf(resource.from)}: ${resource.via.hostKey}.` : ''}`;
+                    inside.append(where);
+                }
                 for (const c of ready) {
                     const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
                     const who = document.createElement('span'); who.textContent = c.name;
@@ -1025,7 +1030,105 @@
         for (const kind of ['folder', 'git', 'mailbox']) $(`assets-${kind}-title`).textContent = `${{ folder: 'Folders', git: 'Repositories', mailbox: 'Mailboxes' }[kind]} (${count[kind]})`;
         $('assets-secret-title').textContent = `Secrets (${count.secret})`;
         paintSecrets(secrets, ready);
+        paintKeys(keys);
     }
+    /* ---------- private repositories: how this server gets in ---------- */
+    /* The host of an address, whatever its form (user@host:path has no URL form). */
+    const hostOf = (from) => { try { return new URL(from).hostname; } catch { return /@([^:/]+):/.exec(String(from))?.[1] ?? String(from); } };
+    const looksSsh = (from) => /^ssh:\/\//i.test(from) || /^[^@/:\s]+@[^:/\s]+:/.test(from);
+    const viaText = (via) => (!via || via.method === 'none' ? '' : via.method === 'ssh-key' ? `, with the SSH key ${via.key}` : via.method === 'token' ? ', with a token' : ', with a password (not recommended)');
+    let gitKeys = [];
+    /* Copies, or, without the clipboard, selects for the person to copy. */
+    async function copyField(field, button) {
+        try { await navigator.clipboard.writeText(field.value); button.textContent = 'Copied'; }
+        catch { field.focus(); field.select(); button.textContent = 'Selected: copy it'; }
+        setTimeout(() => { button.textContent = 'Copy'; }, 2500);
+    }
+    function paintKeys(keys) {
+        gitKeys = keys;
+        const rows = $('git-keys'); rows.replaceChildren();
+        $('git-keys-empty').hidden = keys.length > 0;
+        $('git-keys-title').textContent = `SSH keys made here (${keys.length})`;
+        for (const key of keys) {
+            const row = document.createElement('div'); row.className = 'asset git-key'; row.dataset.name = key.name;
+            const head = document.createElement('div'); head.className = 'row';
+            const name = document.createElement('b'); name.textContent = key.name;
+            const used = document.createElement('span'); used.className = key.usedBy.length ? 'key-used' : 'key-used hint';
+            used.textContent = key.usedBy.length ? `used by ${key.usedBy.join(', ')}` : 'not used';
+            const print = document.createElement('code'); print.className = 'hint'; print.textContent = key.fingerprint;
+            head.append(name, used, print);
+            const shown = document.createElement('div'); shown.className = 'row';
+            const field = document.createElement('textarea'); field.className = 'public-key'; field.readOnly = true; field.rows = 2; field.value = key.publicKey; field.setAttribute('aria-label', `Public key ${key.name}`);
+            const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = 'Copy'; copy.className = 'key-copy';
+            copy.addEventListener('click', () => { void copyField(field, copy); });
+            const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
+            const why = document.createElement('span'); why.className = 'hint';
+            if (key.usedBy.length) { remove.disabled = true; why.textContent = `removing it would cut ${key.usedBy.join(', ')} off: remove ${key.usedBy.length > 1 ? 'those repositories' : 'that repository'} first`; }
+            remove.addEventListener('click', () => {
+                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove the key ${key.name} (it cannot be made again)`;
+                sure.addEventListener('click', async () => {
+                    $('assets-error').hidden = true;
+                    try { await post(`${API}/git-keys/${key.name}/remove`); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                    await paintAssets();
+                });
+                remove.replaceWith(sure);
+            });
+            shown.append(field, copy, remove, why);
+            row.append(head, shown);
+            rows.append(row);
+        }
+        fillKeyChoice();
+    }
+    /* The key offered in "Add a repository": the one chosen stays chosen. */
+    function fillKeyChoice(chosen = $('git-key').value) {
+        const select = $('git-key'); select.replaceChildren();
+        if (gitKeys.length === 0) { const none = document.createElement('option'); none.value = ''; none.textContent = 'No key yet: make one'; select.append(none); }
+        for (const key of gitKeys) {
+            const o = document.createElement('option'); o.value = key.name;
+            o.textContent = key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name;
+            select.append(o);
+        }
+        if (gitKeys.some((k) => k.name === chosen)) select.value = chosen;
+        showChosenKey();
+    }
+    function showChosenKey() {
+        const key = gitKeys.find((k) => k.name === $('git-key').value);
+        $('git-key-shown').hidden = !key;
+        $('git-key-public').value = key?.publicKey ?? '';
+    }
+    const viaChosen = () => $('git-new').querySelector('input[name="git-via"]:checked')?.value ?? 'ssh-key';
+    let viaTouched = false;
+    function showVia() {
+        for (const part of $('git-new').querySelectorAll('.git-via-part')) part.hidden = part.id !== `git-via-${viaChosen()}`;
+    }
+    for (const radio of $('git-new').querySelectorAll('input[name="git-via"]')) radio.addEventListener('change', () => { viaTouched = true; showVia(); });
+    /* Until the person picks a way in, it follows the address: ssh wants a key, https is often public. */
+    $('git-from').addEventListener('input', () => {
+        if (viaTouched) return;
+        const from = $('git-from').value.trim();
+        const pick = looksSsh(from) ? 'ssh-key' : /^https:\/\//i.test(from) ? 'none' : '';
+        if (pick) { $('git-new').querySelector(`input[name="git-via"][value="${pick}"]`).checked = true; showVia(); }
+    });
+    $('git-key').addEventListener('change', showChosenKey);
+    $('git-key-new').addEventListener('click', () => {
+        const taken = new Set(gitKeys.map((k) => k.name));
+        const wanted = $('git-name').value.trim();
+        let suggestion = wanted && !taken.has(wanted) ? wanted : '';
+        for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
+        $('git-key-name').value = suggestion;
+        $('git-key-make').hidden = false; $('git-key-name').focus();
+    });
+    $('git-key-make-go').addEventListener('click', async () => {
+        $('git-error').hidden = true;
+        try {
+            const made = await post(`${API}/git-keys`, { name: $('git-key-name').value.trim() });
+            $('git-key-make').hidden = true;
+            gitKeys = await fetch(`${API}/git-keys`).then((r) => r.json());
+            fillKeyChoice(made.name);
+            await paintAssets();
+        } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
+    });
+    $('git-key-copy').addEventListener('click', () => { void copyField($('git-key-public'), $('git-key-copy')); });
     /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
     function paintSecrets(all, ready) {
         const rows = $('secret-rows');
@@ -1181,9 +1284,19 @@
         $('git-error').hidden = true;
         const button = $('git-new').querySelector('button[type=submit]');
         button.disabled = true; button.textContent = $('git-from').value.trim() ? 'Cloning...' : 'Making...';
+        $('git-said').hidden = true;
+        const from = $('git-from').value.trim(); const method = viaChosen();
+        const via = method === 'ssh-key' ? { method, key: $('git-key').value }
+            : method === 'token' ? { method, user: $('git-token-user').value.trim(), secret: $('git-token').value }
+                : method === 'password' ? { method, user: $('git-pass-user').value.trim(), secret: $('git-pass').value } : { method };
         try {
-            await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from: $('git-from').value.trim() });
-            $('git-new').reset(); $('git-box').open = false;
+            const made = await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from, ...(from ? { via } : {}) });
+            /* The secrets typed are not kept in the page a moment longer. */
+            $('git-new').reset(); viaTouched = false; showVia(); fillKeyChoice(via.key);
+            if (made.firstSeen) {
+                $('git-said').textContent = `${made.name} was cloned. First contact with ${hostOf(made.from)}: its host key (${made.firstSeen.join(', ')}) was recorded. A different key later will be refused.`;
+                $('git-said').hidden = false;
+            } else $('git-box').open = false;
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
         await paintAssets();
@@ -1198,7 +1311,12 @@
         $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').textContent = '';
         const settings = await (await fetch(`${API}/git/${name}`)).json().catch(() => ({}));
         $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? '';
-        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.' : 'No key is kept: a remote that asks for one will refuse.';
+        const keys = await fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []);
+        const pick = $('gitview-sshkey'); pick.replaceChildren();
+        for (const [value, text] of [['', '(none)'], ...keys.map((k) => [k.name, k.name])]) { const o = document.createElement('option'); o.value = value; o.textContent = text; pick.append(o); }
+        pick.value = settings.sshKey ?? '';
+        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.'
+            : settings.sshKey ? `Over ssh, the SSH key ${settings.sshKey} is used.` : 'No key is kept for sending: what the repository was cloned with is used, for the same server only; a remote that asks for more will refuse.';
         let out;
         try {
             const r = await fetch(`${API}/git/${name}/outgoing`);
@@ -1237,7 +1355,7 @@
     $('gitview-remote').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('gitview-error').hidden = true;
-        try { await post(`${API}/git/${gitShown}/remote`, { url: $('gitview-url').value.trim(), user: $('gitview-user').value.trim(), key: $('gitview-key').value }); $('gitview-key').value = ''; await paintGit(); }
+        try { await post(`${API}/git/${gitShown}/remote`, { url: $('gitview-url').value.trim(), user: $('gitview-user').value.trim(), key: $('gitview-key').value, ...(looksSsh($('gitview-url').value.trim()) && $('gitview-sshkey').value ? { sshKey: $('gitview-sshkey').value } : {}) }); $('gitview-key').value = ''; await paintGit(); }
         catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
     });
 

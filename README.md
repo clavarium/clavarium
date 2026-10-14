@@ -110,6 +110,18 @@ send"): the server fetches the commits into a copy of its own, shows them, and
 pushes exactly what was shown with a key it keeps sealed (`server/gitpush.mjs`).
 The tool never holds that key.
 
+A repository may also be cloned from a private remote (`server/gitaccess.mjs`),
+over SSH (`user@host:path`, `ssh://...`) or HTTPS. The safest way in comes
+first: an SSH key made by the server, whose private half is sealed in the vault
+and never leaves the server -- only its public half is shown, to be added as a
+deploy key; one key may open several repositories. An HTTPS access token, or a
+user name and password (not recommended), are sealed too. Whatever opens the
+remote is used by the server only, for the clone, for looking at what would
+be sent, and for Send; a token only ever goes back to the origin it was given
+for. For one git command at a time the SSH key is a 0600 file in a directory
+of the server's own, removed right after; ssh trusts a host on first contact
+and refuses it if its key changes later.
+
 A mailbox can be added as a folder (Folders, "Add a mailbox as a folder"): its
 recent messages become files that a conversation reads and never writes; the
 mailbox itself is never changed. For a mail server of your own whose

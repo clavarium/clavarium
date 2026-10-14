@@ -6,7 +6,10 @@
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/archive
  *   GET  /api/resources
- *   POST /api/resources                     {name}
+ *   POST /api/resources                     {name} | {name, type: 'git', from?, via?: {method, key?, user?, secret?}}
+ *   GET  /api/git-keys                      SSH keys made here: the public half only
+ *   POST /api/git-keys                      {name} -> a new key; its private half never leaves the server
+ *   POST /api/git-keys/<name>/remove        refused while a repository uses it
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
  *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
@@ -53,7 +56,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -128,6 +131,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
+            if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
@@ -156,7 +160,10 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
         /* A folder, or a git repository (empty, or cloned from `from`). A mailbox has its own way in. */
-        if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from })), true;
+        if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from, via: body.via })), true;
+        if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
+        const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
+        if (unkeyed && gitAccess) { gitAccess.removeKey(unkeyed[1]); return send(200, { ok: true }), true; }
         const unlisted = /^\/api\/resources\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unlisted && resources) {
             const gone = resources.get(unlisted[1]);

@@ -174,10 +174,12 @@ test('a git repository is a folder that starts as one: made empty or cloned, by 
     /* Attached like a folder: the view to read, the folder to write. */
     await resources.attach('alpha', 'docs', 'read');
     assert.equal(grants.rightsOf('conversation:alpha', 'git:docs'), 'r');
-    /* Where it may come from: https, and nothing a command line could take for an option. */
+    /* Where it may come from: https, and nothing a command line could take for an option.
+       (ssh needs a way in, which a server without private repositories has not: see gitaccess.test.) */
     for (const from of ['http://example.com/x.git', 'ssh://git@example.com/x.git', 'git@example.com:x.git', 'https://user:pw@example.com/x.git', '--upload-pack=id', 'file:///etc', 'https://example.com/x y.git']) {
-        await assert.rejects(resources.create({ name: 'bad', type: 'git', from }), /https address/, from);
+        await assert.rejects(resources.create({ name: 'bad', type: 'git', from }), /repository address is https|public https address/, from);
     }
+    await assert.rejects(resources.create({ name: 'bad', type: 'git', from: 'https://example.com/x.git', via: { method: 'token', secret: 'x' } }), /public https address/);
     assert.equal(ran.length, 2, 'git was not run for any of those');
     /* A clone that fails leaves no folder on the list; what was made is put aside. */
     const failing = make(true);

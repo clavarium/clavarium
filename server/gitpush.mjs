@@ -17,11 +17,17 @@
  *      copy, whose settings are ours.
  *
  * The key travels to git in its environment, never on a command line.
+ *
+ * WHICH KEY. A key set here for sending, over https, comes first: that is
+ * what this screen always did. Otherwise a repository is sent with what it
+ * was cloned with (gitaccess.mjs) -- an SSH key made here, or a token or
+ * password, which only ever goes back to the https origin it was given for:
+ * pointing the address elsewhere never hands it to another server.
  */
 import { execFile } from 'node:child_process';
 import { rmSync, mkdirSync } from 'node:fs';
 import { Refusal } from './conversations.mjs';
-import { readOrigin } from './resources.mjs';
+import { GitAccess, readAddress, explain, asEnv } from './gitaccess.mjs';
 
 export const DIFF_MAX = 200_000;
 export const COMMITS_MAX = 100;
@@ -35,15 +41,12 @@ const runGit = (argv, { cwd, env = {} } = {}) => new Promise((resolve) => {
         (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout: String(stdout ?? ''), stderr: String(stderr ?? '') }));
 });
 
-/* Settings handed to git through its environment: [[key, value], ...]. */
-const asEnv = (pairs) => Object.fromEntries([['GIT_CONFIG_COUNT', String(pairs.length)], ...pairs.flatMap(([k, v], i) => [[`GIT_CONFIG_KEY_${i}`, k], [`GIT_CONFIG_VALUE_${i}`, v]])]);
-
 export class GitReview {
-    #store; #vault; #resources; #root; #git; #local;
+    #store; #vault; #resources; #root; #git; #local; #access;
 
     /* `localRemotes`: lets a remote be a directory of this machine. For tests only. */
-    constructor({ store, vault, resources, dataDir, git = runGit, localRemotes = false }) {
-        this.#store = store; this.#vault = vault; this.#resources = resources; this.#root = `${dataDir}/git-review`; this.#git = git; this.#local = localRemotes;
+    constructor({ store, vault, resources, dataDir, git = runGit, localRemotes = false, access = new GitAccess({ vault, dataDir }) }) {
+        this.#store = store; this.#vault = vault; this.#resources = resources; this.#root = `${dataDir}/git-review`; this.#git = git; this.#local = localRemotes; this.#access = access;
     }
 
     #repository(name) {
@@ -52,37 +55,46 @@ export class GitReview {
         return r;
     }
     #remoteOf(r) { return this.#store.get(r.name)?.remote ?? r.from; }
-    #auth(name) {
+    /* Runs `work(env)` with what lets git into `remote`: see the top of this file. */
+    async #reach(name, remote, work) {
+        let address;
+        try { address = readAddress(remote, { localRemotes: this.#local }); } catch { address = undefined; }
         const s = this.#store.get(name);
-        if (!s?.sealed) return {};
-        const basic = Buffer.from(`${s.user || 'x-access-token'}:${this.#vault.open(s.sealed)}`).toString('base64');
-        return asEnv([['http.extraHeader', `Authorization: Basic ${basic}`]]);
+        const local = address?.transport === 'local' ? asEnv([['protocol.file.allow', 'always']]) : {};
+        const credential = address?.transport === 'https' && s?.sealed
+            ? { method: 'token', user: s.user, sealed: s.sealed, origin: `https://${address.host}${address.port ? `:${address.port}` : ''}` }
+            : this.#access.credentialOf(name);
+        return (await this.#access.run(credential, address, (env) => work({ ...env, ...local }))).result;
     }
 
-    /* What the page may know: where it goes, and whether a key is kept. Never the key. */
+    /* What the page may know: where it goes, whether a key is kept, which SSH key. Never a key. */
     settings(name) {
         const r = this.#repository(name);
         const s = this.#store.get(r.name);
-        return { remote: this.#remoteOf(r) ?? null, user: s?.user ?? null, hasKey: Boolean(s?.sealed) };
+        const c = this.#access.credentialOf(r.name);
+        return { remote: this.#remoteOf(r) ?? null, user: s?.user ?? null, hasKey: Boolean(s?.sealed), sshKey: c?.method === 'ssh-key' ? c.key : null };
     }
 
-    /* Where commits are sent, and the key that lets them in. An empty key keeps the one there is. */
+    /* Where commits are sent, and the key that lets them in. An empty key keeps the one there is.
+       `sshKey`: for an ssh address, which key made here is used (it then also serves to fetch). */
     setRemote(name, body) {
         const r = this.#repository(name);
-        const asked = String(body?.url ?? '').trim();
-        const remote = this.#local && asked.startsWith('/') ? asked : readOrigin(asked);
-        if (!remote) throw new Refusal(400, 'Where are the commits sent? An https address.');
+        const address = readAddress(String(body?.url ?? ''), { localRemotes: this.#local });
+        if (!address) throw new Refusal(400, 'Where are the commits sent? An https or ssh address.');
+        const remote = address.url;
+        if (body?.sshKey && address.transport !== 'ssh') throw new Refusal(400, 'An SSH key is used with an ssh address.');
         const user = String(body?.user ?? '').trim();
         if (user.length > 100 || /[\s:]/.test(user)) throw new Refusal(400, 'The user name of the key has no space and no colon.');
         const key = String(body?.key ?? '');
         if (key.length > 1000 || /[\r\n\0]/.test(key)) throw new Refusal(400, 'A key is one line.');
+        if (body?.sshKey) this.#access.useKey(r.name, body.sshKey);
         const before = this.#store.get(r.name);
         this.#store.put({ name: r.name, remote, user: user || undefined, sealed: key ? this.#vault.seal(key) : before?.sealed });
         return this.settings(r.name);
     }
 
     /* The repository is gone: its key goes with it. */
-    forget(name) { this.#store.remove(name); rmSync(`${this.#root}/${name}.git`, { recursive: true, force: true }); }
+    forget(name) { this.#store.remove(name); this.#access.forget(name); rmSync(`${this.#root}/${name}.git`, { recursive: true, force: true }); }
 
     /* A fresh bare copy of what the tool committed. See the top of this file. */
     async #copy(r) {
@@ -116,11 +128,11 @@ export class GitReview {
 
         /* What the remote has of this branch, brought into the copy to compare with. */
         const far = `refs/remotes/origin/${branch}`;
-        const fetched = await here(['fetch', '--quiet', '--no-tags', '--', remote, `+refs/heads/${branch}:${far}`], { ...this.#auth(r.name), ...(this.#local ? asEnv([['protocol.file.allow', 'always']]) : {}) });
+        const fetched = await this.#reach(r.name, remote, (env) => here(['fetch', '--quiet', '--no-tags', '--', remote, `+refs/heads/${branch}:${far}`], env));
         let base = far;
         if (fetched.code !== 0) {
             if (!/couldn't find remote ref|could not find remote ref/i.test(fetched.stderr)) {
-                return { state: 'unreachable', branch, head, remote, commits: [], stat: '', diff: '', cut: false, message: `The remote did not answer as expected: ${firstLine(fetched.stderr)}` };
+                return { state: 'unreachable', branch, head, remote, commits: [], stat: '', diff: '', cut: false, message: `The remote did not answer as expected: ${explain(fetched.stderr)}` };
             }
             /* The remote has no such branch yet: everything is new. Compared with nothing. */
             base = (await here(['hash-object', '-t', 'tree', '/dev/null'])).stdout.trim();
@@ -144,9 +156,8 @@ export class GitReview {
         const now = await this.outgoing(r.name);
         if (now.state !== 'ahead') throw new Refusal(409, now.message);
         if (typeof body?.head !== 'string' || body.head !== now.head) throw new Refusal(409, 'The repository changed since you looked: look again at what would be sent.');
-        const sent = await this.#git(['-C', `${this.#root}/${r.name}.git`, '-c', 'core.hooksPath=/dev/null', 'push', '--quiet', '--', now.remote, `${now.head}:refs/heads/${now.branch}`],
-            { env: { ...this.#auth(r.name), ...(this.#local ? asEnv([['protocol.file.allow', 'always']]) : {}) } });
-        if (sent.code !== 0) throw new Refusal(502, `The remote refused: ${firstLine(sent.stderr)}`);
+        const sent = await this.#reach(r.name, now.remote, (env) => this.#git(['-C', `${this.#root}/${r.name}.git`, '-c', 'core.hooksPath=/dev/null', 'push', '--quiet', '--', now.remote, `${now.head}:refs/heads/${now.branch}`], { env }));
+        if (sent.code !== 0) throw new Refusal(502, `The remote refused: ${explain(sent.stderr)}`);
         return { ok: true, branch: now.branch, head: now.head, commits: now.commits.length };
     }
 }
