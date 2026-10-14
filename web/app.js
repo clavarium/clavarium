@@ -91,7 +91,7 @@
         listFolded = !listFolded;
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         applyFold(listFolded);
-        fit.fit(); terminal.focus();
+        fit.fit(); focusTerminal();
     });
 
     /* ---------- light or dark ---------- */
@@ -117,7 +117,7 @@
         lightScreen = !lightScreen;
         try { localStorage.setItem('clavarium-theme', lightScreen ? 'light' : 'dark'); } catch { /* as above */ }
         applyTheme(lightScreen);
-        terminal.focus();
+        focusTerminal();
     });
     const fit = new FitAddon.FitAddon();
     terminal.loadAddon(fit);
@@ -125,6 +125,95 @@
     if (!DEVICE) applyFold(listFolded);
     fit.fit();
     window.clavariumTerminal = terminal; /* for the end-to-end proof */
+
+    /* ---------- the on-screen keyboard, on demand ---------- */
+    /* On a phone or a tablet, a finger on the terminal used to call the
+       on-screen keyboard every time -- to scroll, to tap a path, to look --
+       and it took half the screen from someone who did not want to type
+       (said by the owner). The terminal still takes the focus, so the key
+       row, the shortcuts, dictation and a real keyboard go on working; but
+       the browser is told NOT to raise its keyboard (inputmode "none", the
+       standard way, nothing to do with which tool runs). "Keyboard" raises
+       it, and puts it away again.
+       THE LOCK MUST HOLD ON EVERY PATH. The owner saw the keyboard come back
+       "after some commands": the page itself put the focus in places that
+       raise it (a field of a sheet, focused for the person), and a keyboard
+       closed with the system's own button left the page believing it was
+       still wanted, so the next tap on a key or a shortcut raised it again.
+       Hence: the terminal is only ever focused through focusTerminal(),
+       which applies the lock first; a field is only focused for the person
+       through focusField(), which leaves it alone while the lock is on (a
+       finger on the field still opens the keyboard); and the lock is
+       re-applied whenever anything touches the helper field. Nothing is
+       stored: every page load starts locked, the safe state. */
+    const coarse = matchMedia('(any-pointer: coarse)');
+    /* "any-pointer", not "pointer": a tablet with a trackpad or a mouse
+       attached reports a fine primary pointer, yet its on-screen keyboard
+       still comes up when the screen is touched. */
+    let touchScreen = coarse.matches;
+    let keyboardWanted = false;
+    const keyboardLocked = () => touchScreen && !keyboardWanted;
+    const applyKeyboard = () => {
+        if (!touchScreen) return;
+        const field = terminal.textarea;
+        const mode = keyboardWanted ? 'text' : 'none';
+        /* Written only when it differs: the watcher below sees every write. */
+        if (field && field.getAttribute('inputmode') !== mode) field.setAttribute('inputmode', mode);
+        const label = keyboardWanted ? 'Hide keyboard' : 'Keyboard';
+        if ($('kbd').textContent === label && !$('kbd').hidden) return;
+        $('kbd').hidden = false;
+        $('kbd').setAttribute('aria-pressed', String(keyboardWanted));
+        $('kbd').textContent = label;
+    };
+    /* The one way the page gives the terminal its focus back. */
+    const focusTerminal = () => { applyKeyboard(); terminal.focus(); };
+    /* A field the page would like to put the cursor in for the person. With
+       the lock on it is only brought into sight: focusing it would raise the
+       keyboard the person asked to keep away. A read-only field raises no
+       keyboard, and is focused to select its text. */
+    const focusField = (field) => {
+        if (keyboardLocked() && !field.readOnly) { field.scrollIntoView?.({ block: 'nearest' }); return; }
+        field.focus();
+    };
+    /* Should the terminal's helper field ever be replaced or have its hint
+       changed (by the terminal library, by a reset), the lock is put back. */
+    /* Only its small container is watched, not the whole terminal, whose
+       rows change at every line printed. */
+    const helpers = terminal.textarea?.parentElement;
+    if (helpers) {
+        new MutationObserver(() => applyKeyboard())
+            .observe(helpers, { subtree: true, childList: true, attributes: true, attributeFilter: ['inputmode'] });
+    }
+    terminal.textarea?.addEventListener('focus', applyKeyboard);
+    coarse.addEventListener?.('change', () => { touchScreen = touchScreen || coarse.matches; applyKeyboard(); });
+    /* A keyboard closed by the system (its own "hide" key, the back button)
+       says nothing to the page. Seen from here, the visible height grows back
+       to full: the keyboard is then no longer wanted, and the lock is on
+       again -- otherwise the next key, shortcut or reconnection that gives
+       the terminal its focus would raise it once more. */
+    let fullHeight = 0;
+    let fullWidth = 0;
+    let keyboardSeen = false;
+    const watchViewport = () => {
+        const vv = window.visualViewport;
+        if (!vv || !touchScreen || Math.abs(vv.scale - 1) > 0.01) return;   /* zoomed in: the height says nothing */
+        if (innerWidth !== fullWidth) { fullWidth = innerWidth; fullHeight = vv.height; keyboardSeen = false; return; }  /* turned: measure again */
+        fullHeight = Math.max(fullHeight, vv.height);
+        const open = vv.height < fullHeight - 120;
+        if (open) { if (keyboardWanted) keyboardSeen = true; return; }
+        if (keyboardSeen && keyboardWanted) { keyboardSeen = false; keyboardWanted = false; applyKeyboard(); }
+    };
+    window.visualViewport?.addEventListener('resize', watchViewport);
+    watchViewport();
+    applyKeyboard();
+    $('kbd').addEventListener('click', () => {
+        keyboardWanted = !keyboardWanted;
+        keyboardSeen = false;
+        /* A browser reads the hint when the field takes the focus: it is
+           let go and taken again, so that the change is seen at once. */
+        terminal.blur();
+        focusTerminal();
+    });
 
     const encoder = new TextEncoder();
     const send = (text) => { if (socket?.readyState === 1) socket.send(encoder.encode(text)); };
@@ -148,7 +237,7 @@
         mine.binaryType = 'arraybuffer';
         let failure = ''; let machineGone = false;
         /* Open means the bridge answered, not that the machine is awake yet. */
-        mine.onopen = () => { say('opening', 'connecting'); terminal.focus(); };
+        mine.onopen = () => { say('opening', 'connecting'); focusTerminal(); };
         mine.onmessage = (event) => {
             /* Binary is terminal output. Text is the bridge talking to the page. */
             if (typeof event.data !== 'string') {
@@ -217,38 +306,7 @@
         $(zone).addEventListener('pointerdown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
     }
     for (const button of document.querySelectorAll('#keys button')) {
-        button.addEventListener('click', () => { send(KEYS[button.dataset.keys]); terminal.focus(); });
-    }
-
-    /* ---------- the on-screen keyboard, on demand ---------- */
-    /* On a phone or a tablet, a finger on the terminal used to call the
-       on-screen keyboard every time -- to scroll, to tap a path, to look --
-       and it took half the screen from someone who did not want to type
-       (said by the owner). The terminal still takes the focus, so the key
-       row, the shortcuts, dictation and a real keyboard go on working; but
-       the browser is told NOT to raise its keyboard (inputmode "none", the
-       standard way, nothing to do with which tool runs). "Keyboard" raises
-       it, and puts it away again. */
-    const touchScreen = matchMedia('(pointer: coarse)').matches;
-    let keyboardWanted = false;
-    const applyKeyboard = () => {
-        const field = terminal.textarea;
-        if (!field || !touchScreen) return;
-        field.setAttribute('inputmode', keyboardWanted ? 'text' : 'none');
-        $('kbd').setAttribute('aria-pressed', String(keyboardWanted));
-        $('kbd').textContent = keyboardWanted ? 'Hide keyboard' : 'Keyboard';
-    };
-    if (touchScreen) {
-        $('kbd').hidden = false;
-        applyKeyboard();
-        $('kbd').addEventListener('click', () => {
-            keyboardWanted = !keyboardWanted;
-            /* A browser reads the hint when the field takes the focus: it is
-               let go and taken again, so that the change is seen at once. */
-            terminal.blur();
-            applyKeyboard();
-            terminal.focus();
-        });
+        button.addEventListener('click', () => { send(KEYS[button.dataset.keys]); focusTerminal(); });
     }
 
     /* ---------- one conversation ---------- */
@@ -404,7 +462,7 @@
         }
         $('create-error').hidden = true;
         $('create').hidden = false;
-        $('create-name').focus();
+        focusField($('create-name'));
     }
     $('new').addEventListener('click', () => { void openCreate(); });
     $('create-cancel').addEventListener('click', () => { $('create').hidden = true; });
@@ -444,7 +502,7 @@
                 if (removing) { await post(`${API}/shortcuts/${shortcut.id}/remove`).catch(() => {}); await paintShortcuts(); return; }
                 send(shortcut.text);
                 if (shortcut.enter) setTimeout(() => send('\r'), ENTER_AFTER_MS);
-                terminal.focus();
+                focusTerminal();
             });
             row.append(b);
         }
@@ -452,7 +510,7 @@
         if (DEVICE) return;
         if (removing) quiet('Done', () => { removing = false; void paintShortcuts(); });
         else {
-            quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-enter').checked = true; $('shortcut-label').focus(); });
+            quiet('+ Shortcut', () => { $('shortcut-new').hidden = false; $('shortcut-error').hidden = true; $('shortcut-enter').checked = true; focusField($('shortcut-label')); });
             if (all.length > 0) quiet('Remove...', () => { removing = true; void paintShortcuts(); });
         }
     }
@@ -483,7 +541,7 @@
         sayVoice('', '');
     }
     $('mic').addEventListener('click', async () => {
-        if (stopListening) { stopVoice(); terminal.focus(); return; }
+        if (stopListening) { stopVoice(); focusTerminal(); return; }
         try {
             stopListening = await window.clavariumVoice.listen({
                 state: (word) => sayVoice(WORDS[word] ?? word, word),
@@ -500,13 +558,13 @@
             sayVoice('The microphone is not available. Allow it for this site, then try again.', 'calibrating');
             setTimeout(() => { if (!stopListening) sayVoice('', ''); }, 6000);
         }
-        terminal.focus();
+        focusTerminal();
     });
     $('auto').addEventListener('click', () => {
         autoEnter = !autoEnter;
         $('auto').setAttribute('aria-pressed', String(autoEnter));
         if (!autoEnter) clearTimeout(enterTimer);
-        terminal.focus();
+        focusTerminal();
     });
     async function offerVoice() {
         const available = window.clavariumVoice ? await window.clavariumVoice.available() : false;
@@ -644,7 +702,7 @@
                 'Move it', async () => {
                     try { await post(`${API}/conversations/${encodeURIComponent(current)}/work`, { to }); await refresh(); enter(); }
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
-                }, () => { notice.hidden = true; terminal.focus(); });
+                }, () => { notice.hidden = true; focusTerminal(); });
         };
         void paintAnswerer(); paintWakeups(); void paintTalkBox();
         const offline = here?.offline === true;
@@ -704,7 +762,7 @@
         try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ }
         simpleFilesAt = 0; paintSimple();
         if (simple) void readTalk().then(paintThread);
-        if (!simple) terminal.focus();
+        if (!simple) focusTerminal();
     });
     /* ---------- talk: a conversation with the tool, shown by Parley ---------- */
     /* The exchange is drawn by Parley's own library (a project of its own,
@@ -852,7 +910,7 @@
         const often = $('wakeup-often').value;
         const timed = often === 'daily' || often === 'weekdays';
         $('wakeup-at-box').hidden = !timed;
-        if (often === 'custom') { $('wakeup-line').focus(); return; }
+        if (often === 'custom') { focusField($('wakeup-line')); return; }
         const [h, m] = ($('wakeup-at').value || '07:30').split(':').map(Number);
         $('wakeup-line').value = timed ? `${m} ${h} * * ${often === 'weekdays' ? '1-5' : '*'}` : often;
     };
@@ -957,7 +1015,7 @@
     $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
     $('attach-manage').addEventListener('click', () => { void openAssets(); });
     $('chips').addEventListener('click', () => { if (!DEVICE && current) void openAccess(false); });
-    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; terminal.focus(); });
+    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; focusTerminal(); });
 
     /* ---------- Assets: everything kept here ---------- */
     let assetsKind = ''; let assetOpen = '';
@@ -1046,7 +1104,7 @@
     /* Copies, or, without the clipboard, selects for the person to copy. */
     async function copyField(field, button) {
         try { await navigator.clipboard.writeText(field.value); button.textContent = 'Copied'; }
-        catch { field.focus(); field.select(); button.textContent = 'Selected: copy it'; }
+        catch { focusField(field); field.select(); button.textContent = 'Selected: copy it'; }
         setTimeout(() => { button.textContent = 'Copy'; }, 2500);
     }
     function paintKeys(keys) {
@@ -1121,7 +1179,7 @@
         let suggestion = wanted && !taken.has(wanted) ? wanted : '';
         for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
         $('git-key-name').value = suggestion;
-        $('git-key-make').hidden = false; $('git-key-name').focus();
+        $('git-key-make').hidden = false; focusField($('git-key-name'));
     });
     $('git-key-make-go').addEventListener('click', async () => {
         $('git-error').hidden = true;
@@ -1182,7 +1240,7 @@
         $('assets').hidden = false;
     }
     $('assets-open').addEventListener('click', () => { void openAssets(); });
-    $('assets-close').addEventListener('click', () => { $('assets').hidden = true; terminal.focus(); });
+    $('assets-close').addEventListener('click', () => { $('assets').hidden = true; focusTerminal(); });
 
     /* ---------- who sees what: every agent, every thing, and the lines between ---------- */
     /* The table of rights, drawn. Nothing here is a setting: it shows what was
@@ -1259,7 +1317,7 @@
         show();
     }
     $('map-open').addEventListener('click', async () => { mapFocus = null; $('assets').hidden = true; $('map').hidden = false; await refresh(); await paintMap(); });
-    $('map-close').addEventListener('click', () => { $('map').hidden = true; terminal.focus(); });
+    $('map-close').addEventListener('click', () => { $('map').hidden = true; focusTerminal(); });
 
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings() {
@@ -1334,7 +1392,7 @@
         }
     }
     $('settings-open').addEventListener('click', () => { void openSettings(); });
-    $('settings-close').addEventListener('click', () => { $('settings').hidden = true; terminal.focus(); });
+    $('settings-close').addEventListener('click', () => { $('settings').hidden = true; focusTerminal(); });
     $('git-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('git-error').hidden = true;
@@ -1471,12 +1529,12 @@
         if (out.state === 'ahead') await runChecks();
     }
     async function openGit(name) { gitShown = name; gitAsked = ''; for (const id of ['panel', 'assets', 'settings', 'files', 'sharing']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
-    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; terminal.focus(); });
+    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; focusTerminal(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-check').addEventListener('click', () => { void runChecks(); });
     $('gitview-target').addEventListener('change', () => {
         const value = $('gitview-target').value;
-        if (value === NEW_BRANCH) { $('gitview-push').hidden = true; $('gitview-newbranch').hidden = false; $('gitview-newbranch-go').hidden = false; $('gitview-newbranch').focus(); return; }
+        if (value === NEW_BRANCH) { $('gitview-push').hidden = true; $('gitview-newbranch').hidden = false; $('gitview-newbranch-go').hidden = false; focusField($('gitview-newbranch')); return; }
         gitAsked = value; void paintGit();
     });
     const lookAtNew = () => { const wanted = $('gitview-newbranch').value.trim(); if (!wanted) return; gitAsked = wanted; void paintGit(); };
@@ -1558,13 +1616,13 @@
         /* Shown from its end: the last lines are what one comes for. */
         $('copy-text').scrollTop = $('copy-text').scrollHeight;
     });
-    $('copy-close').addEventListener('click', () => { $('copy').hidden = true; terminal.focus(); });
+    $('copy-close').addEventListener('click', () => { $('copy').hidden = true; focusTerminal(); });
     $('copy-all').addEventListener('click', async () => {
         const field = $('copy-text');
         try { await navigator.clipboard.writeText(field.value); $('copy-status').textContent = 'Copied.'; }
         catch {
             /* No clipboard permission: select it all, the person copies. */
-            field.focus(); field.select();
+            focusField(field); field.select();
             $('copy-status').textContent = 'Selected: now use Copy.';
         }
     });
@@ -1577,7 +1635,7 @@
            the next Enter pressed it again and pasted twice (caught by a test). */
         document.activeElement?.blur?.();
         $('copy').hidden = true;
-        terminal.focus();
+        focusTerminal();
         if (text) terminal.paste(text);
     };
     let reading = false;
@@ -1593,7 +1651,7 @@
             const text = await navigator.clipboard.readText();
             if (text === '') { $('paste-status').textContent = 'There is nothing to paste.'; return; }
             pasteIntoTerminal(text);
-        } catch { $('paste-status').textContent = 'This browser did not let the page read what you copied. Use the field below.'; $('paste-text').focus(); }
+        } catch { $('paste-status').textContent = 'This browser did not let the page read what you copied. Use the field below.'; focusField($('paste-text')); }
         finally { reading = false; }
     });
     $('paste-send').addEventListener('click', () => { const text = $('paste-text').value; $('paste-text').value = ''; pasteIntoTerminal(text); });
@@ -1674,7 +1732,7 @@
         try { await navigator.clipboard.writeText(text); flash(`Copied: ${text.length} character${text.length > 1 ? 's' : ''}`, action); }
         catch {
             /* The browser did not let the page write: the same text, as ordinary text, to copy by hand. */
-            $('copy-text').value = text; $('copy').hidden = false; $('copy-text').focus(); $('copy-text').select();
+            $('copy-text').value = text; $('copy').hidden = false; focusField($('copy-text')); $('copy-text').select();
         }
     }
     area.addEventListener('touchstart', (event) => {
@@ -1841,7 +1899,7 @@
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
         $('preview-body').replaceChildren();
         $('viewer').hidden = true;
-        if ($('files').hidden && $('panel').hidden) terminal.focus();
+        if ($('files').hidden && $('panel').hidden) focusTerminal();
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
@@ -1961,7 +2019,7 @@
             await preview('', '', name, 0, `${API}/files/machine?${new URLSearchParams({ c: current, p: text })}`);
             return;
         }
-        const back = () => { notice.hidden = true; terminal.focus(); };
+        const back = () => { notice.hidden = true; focusTerminal(); };
         if (!reachable()) { show(`"${tab}" is not a folder attached to this conversation.`, 'Back to the terminal', back); return; }
         /* A folder is listed in Files; a file is shown in its window, over the terminal. */
         const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: inner })}`);
@@ -2019,7 +2077,7 @@
     });
 
     $('files-open').addEventListener('click', async () => { for (const id of ['panel', 'assets', 'settings', 'sharing', 'gitview']) $(id).hidden = true; await paintFiles(); $('files').hidden = false; });
-    $('files-close').addEventListener('click', () => { $('files').hidden = true; terminal.focus(); });
+    $('files-close').addEventListener('click', () => { $('files').hidden = true; focusTerminal(); });
     $('files-import').addEventListener('click', () => $('files-pick').click());
     $('files-pick').addEventListener('change', async () => {
         const status = $('files-status');
@@ -2254,7 +2312,7 @@
                     const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await paintManage(); };
                     save.addEventListener('click', () => { void done(); });
                     field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
-                    name.replaceWith(field); rename.replaceWith(save); field.focus(); field.select();
+                    name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
                 });
                 const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)}, paired ${new Date(device.createdAt).toLocaleDateString()}`;
                 if (!device.seenAt) seen.className = 'warn';
@@ -2308,7 +2366,7 @@
     $('sharing-open').addEventListener('click', () => { void openManage(); });
     /* From a conversation: that conversation, and nothing else, is in the basket. */
     $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, 'x']]); });
-    $('sharing-close').addEventListener('click', () => { face('compose'); $('sharing').hidden = true; terminal.focus(); void refresh(); });
+    $('sharing-close').addEventListener('click', () => { face('compose'); $('sharing').hidden = true; focusTerminal(); void refresh(); });
 
     $('sharing-new').addEventListener('click', async () => {
         $('sharing-error').hidden = true;
@@ -2372,7 +2430,7 @@
         const name = current;
         $('panel').hidden = true;
         if (!confirmed) {
-            const resume = socket ? () => { notice.hidden = true; terminal.focus(); } : enter;
+            const resume = socket ? () => { notice.hidden = true; focusTerminal(); } : enter;
             show(`Archive "${name}"? Its machine is deleted, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.`, 'Archive', () => archive(true), resume);
             return;
         }
@@ -2413,7 +2471,7 @@
     addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; });
     if (apple && !asApp) offerInstall();
     $('install').addEventListener('click', async () => {
-        const back = () => { notice.hidden = true; terminal.focus(); };
+        const back = () => { notice.hidden = true; focusTerminal(); };
         if (installEvent) {
             const asked = installEvent; installEvent = null;
             asked.prompt();
@@ -2455,7 +2513,7 @@
             $('others-sheet').hidden = false;
         };
     }
-    $('others-close').addEventListener('click', () => { $('others-sheet').hidden = true; terminal.focus(); });
+    $('others-close').addEventListener('click', () => { $('others-sheet').hidden = true; focusTerminal(); });
     /* A link pasted instead of scanned: only its code is taken, and it is
        handed to this page exactly as a scanned one would be. */
     $('others-add').addEventListener('submit', (event) => {

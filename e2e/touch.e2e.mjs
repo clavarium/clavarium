@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { bench, SKIP, wait } from './bench.mjs';
 
 /* A finger dragged over the terminal, as a touch screen reports it. */
@@ -116,12 +118,176 @@ test('on a touch screen the on-screen keyboard comes on demand: a finger on the 
     assert.equal(await me.page.locator('#kbd').innerText(), 'Keyboard');
 });
 
+/* THE LOCK HOLDS ON EVERY PATH. The owner saw the on-screen keyboard come
+   back "after some commands". Each way the page gives the focus back, or
+   used to put it in a field by itself, is gone through here with the lock
+   on: the helper field of the terminal must still say inputmode "none", and
+   no field that raises a keyboard may have taken the focus unasked. */
+const lockOf = (person) => person.page.evaluate(() => ({ mode: window.clavariumTerminal.textarea.getAttribute('inputmode'), button: document.getElementById('kbd').textContent }));
+/* Records every field that took the focus; read and emptied by `unasked`. */
+const recordFocus = (person) => person.page.evaluate(() => {
+    window.focusedUnasked = [];
+    document.addEventListener('focusin', (event) => {
+        const field = event.target;
+        if (field === window.clavariumTerminal.textarea) {
+            if (field.getAttribute('inputmode') !== 'none') window.focusedUnasked.push('the terminal, without the lock');
+            return;
+        }
+        const typed = field.tagName === 'TEXTAREA' || (field.tagName === 'INPUT' && !['checkbox', 'radio', 'file', 'button', 'submit'].includes(field.type));
+        if (typed && !field.readOnly) window.focusedUnasked.push(field.id || field.getAttribute('aria-label') || field.tagName);
+    }, true);
+});
+const unasked = (person) => person.page.evaluate(() => window.focusedUnasked.splice(0));
+
+test('with the lock on, nothing the page does brings the on-screen keyboard back', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('locked', 'Shell', { onDisk: true });
+    await recordFocus(me);
+    const LOCKED = { mode: 'none', button: 'Keyboard' };
+    const holds = async (path) => {
+        await wait(50);   /* a watcher answers after the change that woke it */
+        assert.deepEqual(await lockOf(me), LOCKED, `the lock holds: ${path}`);
+        assert.deepEqual(await unasked(me), [], `no field took the focus by itself: ${path}`);
+    };
+    const tap = (selector) => me.page.locator(selector).tap();
+    await holds('at first');
+
+    /* A key of the row, then a shortcut, then its own form, which used to put the cursor in its first field. */
+    await tap('#keys button[data-keys="enter"]');
+    await holds('a key of the row');
+    await me.until('the shortcut row is painted', async () => (await me.page.locator('#shortcut-row button.quiet').count()) > 0);
+    await me.page.locator('#shortcut-row button.quiet', { hasText: '+ Shortcut' }).tap();
+    await holds('the form of a new shortcut opens');
+    await me.page.fill('#shortcut-label', 'Hello');
+    await me.page.fill('#shortcut-text', 'echo from-a-shortcut');
+    await unasked(me);   /* filled as a person does, by touching them */
+    await me.page.locator('#shortcut-new button[type=submit]').tap();
+    await me.page.locator('#shortcut-row button.saved', { hasText: 'Hello' }).tap();
+    await me.sees('\nfrom-a-shortcut');
+    await holds('a shortcut sent');
+
+    /* Commands that redraw the whole screen. */
+    await me.type('clear; echo cleared-now');
+    await me.printed('cleared-now');
+    await me.page.evaluate(() => window.clavariumTerminal.reset());
+    await holds('clear, and a reset of the terminal');
+
+    /* Should anything rewrite the hint of the helper field, or take it away, the lock is put back. */
+    await me.page.evaluate(() => window.clavariumTerminal.textarea.setAttribute('inputmode', 'text'));
+    await holds('the hint rewritten from outside');
+    await me.page.evaluate(() => window.clavariumTerminal.textarea.removeAttribute('inputmode'));
+    await holds('the hint removed from outside');
+
+    /* The screen turned, and back. */
+    await me.page.setViewportSize({ width: 780, height: 390 });
+    await me.page.setViewportSize({ width: 390, height: 780 });
+    await holds('a resize');
+
+    /* Sheets and windows that give the focus back when they close. */
+    await tap('#files-open'); await tap('#files-close');
+    await holds('Files closed');
+    await tap('#folders');
+    await me.page.locator('#wakeups-new-box summary').tap();
+    await me.page.selectOption('#wakeup-kind', 'cron');
+    await me.page.selectOption('#wakeup-often', 'custom');
+    await holds('a wake-up "by the clock", written by hand');
+    await tap('#panel-close');
+    await holds('the panel closed');
+    await tap('#copy-open');
+    /* The browser does not let the page read the clipboard here: it says
+       so, and used to put the cursor in the field below. */
+    await tap('#paste-now');
+    await me.until('the refusal is said', async () => /did not let/.test(await me.page.locator('#paste-status').innerText()));
+    await holds('pasting refused by the browser');
+    await tap('#copy-close');
+    await holds('Copy / paste closed');
+    writeFileSync(join(b.dir, 'vms', 'clv-locked', 'root', 'work', 'note.txt'), 'a note\n');
+    await me.type('clear; echo "See /work/note.txt"');
+    await me.printed('See /work/note.txt');
+    const at = await me.page.evaluate(() => {
+        const t = window.clavariumTerminal; const buffer = t.buffer.active;
+        for (let row = t.rows - 1; row >= 0; row--) {
+            const col = (buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? '').lastIndexOf('/work/note.txt');
+            if (col < 0) continue;
+            const box = document.querySelector('.xterm-screen').getBoundingClientRect();
+            return { x: box.left + ((col + 7) * box.width) / t.cols, y: box.top + ((row + 0.5) * box.height) / t.rows };
+        }
+        return null;
+    });
+    await me.page.touchscreen.tap(at.x, at.y);
+    await me.until('the file is shown', async () => /a note/.test(await me.page.locator('#preview-body').innerText().catch(() => '')));
+    await tap('#preview-close');
+    await holds('a file shown, then closed');
+
+    /* A notice answered: archiving asked, then cancelled. */
+    await tap('#folders'); await tap('#archive');
+    await tap('#notice-cancel');
+    await holds('a notice cancelled');
+
+    /* Asleep, then woken: the terminal is opened again. */
+    await tap('#folders'); await tap('#sleep');
+    await me.until('asleep', async () => (await me.state()) === 'asleep');
+    await me.page.locator('#notice-action', { hasText: 'Wake it' }).tap();
+    await me.until('awake', async () => (await me.state()) === 'live');
+    await holds('a wake-up');
+
+    /* The tool left, and started again. */
+    await me.type('exit');
+    await me.until('the tool has exited', async () => (await me.page.locator('#notice-action').innerText()) === 'Start it again');
+    await tap('#notice-action');
+    await me.until('live again', async () => (await me.state()) === 'live');
+    await holds('the tool started again');
+
+    /* A reload remembers nothing, and starts locked. */
+    await me.page.reload();
+    await me.until('live after a reload', async () => (await me.state()) === 'live');
+    await recordFocus(me);
+    await holds('a reload');
+    assert.deepEqual(me.errors, []);
+});
+
+test('a keyboard put away by the system puts the lock back on: the next key does not raise it again', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('put-away');
+    /* The visible height, as the browser reports it while its keyboard comes and goes. */
+    const viewport = (height) => me.page.evaluate((h) => {
+        Object.defineProperty(window.visualViewport, 'height', { configurable: true, get: () => h });
+        window.visualViewport.dispatchEvent(new Event('resize'));
+    }, height);
+    await me.page.locator('#kbd').tap();
+    assert.deepEqual(await lockOf(me), { mode: 'text', button: 'Hide keyboard' });
+    await viewport(780); await viewport(430);
+    /* Still up: a key of the row leaves it as asked (the lock is off). */
+    await me.page.locator('#keys button[data-keys="esc"]').tap();
+    assert.deepEqual(await lockOf(me), { mode: 'text', button: 'Hide keyboard' });
+    /* Put away with the system's own button: the page sees the height come back. */
+    await viewport(780);
+    assert.deepEqual(await lockOf(me), { mode: 'none', button: 'Keyboard' });
+    await me.page.locator('#keys button[data-keys="esc"]').tap();
+    assert.deepEqual(await lockOf(me), { mode: 'none', button: 'Keyboard' });
+});
+
+test('with the lock off, a field opened for typing still takes the cursor', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('unlocked');
+    await me.page.locator('#kbd').tap();
+    await me.until('the shortcut row is painted', async () => (await me.page.locator('#shortcut-row button.quiet').count()) > 0);
+    await me.page.locator('#shortcut-row button.quiet', { hasText: '+ Shortcut' }).tap();
+    assert.equal(await me.page.evaluate(() => document.activeElement?.id), 'shortcut-label');
+});
+
 test('with a mouse and a real keyboard nothing changes: no button, no hint', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     await me.create('desk');
     assert.equal(await me.page.locator('#kbd').isVisible(), false);
     assert.equal(await me.page.evaluate(() => window.clavariumTerminal.textarea.getAttribute('inputmode')), null);
+    /* A field opened for typing takes the cursor, as before. */
+    await me.page.locator('#new').click();
+    await me.until('the name of a new conversation takes the cursor', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'create-name');
 });
 
 /* Where on the page a piece of text of the terminal starts and ends. */
