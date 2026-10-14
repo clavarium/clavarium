@@ -30,13 +30,16 @@ From git(1) SECURITY and how forges (Gitaly) run git. The server's builder
    place, `GIT_TERMINAL_PROMPT=0`, `GIT_NO_REPLACE_OBJECTS=1`, `LC_ALL=C`, `PATH`.
 3. `-c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.allow=never`,
    then `protocol.<p>.allow=always` only for what that command needs (https/ssh
-   to GitLab; file on the landing fetch); `transfer.fsckObjects=true` where we receive.
+   to the remote); `transfer.fsckObjects=true` where we receive.
 4. `--end-of-options` before any value that comes from the agent (or owner).
 5. Full refspecs only: `refs/heads/<x>:refs/heads/<y>` (or the fixed `*` forms
-   below); a push source is a verified 40-hex id, its destination `refs/heads/<y>`.
+   below). A push source is never a bare id (git tries a ref of that name
+   first): it is `refs/clavarium/send`, the only ref left in the workspace,
+   set to the verified id (section 6); its destination `refs/heads/<y>`.
 6. Every ref name validated before use (`branchProblem`: the
    `check-ref-format` rules, allow-list `[A-Za-z0-9._/-]`, no leading `-`, no
-   `..`); bytes checked before decoding, so non-UTF-8 is refused.
+   `..`, no component of 40 or 64 hex characters); bytes checked before
+   decoding, so non-UTF-8 is refused.
 7. Output parsed with `-z` / `%x00` as bytes, and treated as data: messages,
    names and paths are shown escaped, never interpreted.
 8. Credentials only through the environment (`http.extraHeader` via
@@ -44,7 +47,11 @@ From git(1) SECURITY and how forges (Gitaly) run git. The server's builder
    never in argv, never in a file the agent can see.
 9. Never read a configuration value from the agent's repository: remote,
    target, names come from the server's records.
-10. Push only from the server's reference, never from the agent's folder.
+10. Nothing from the agent is ever written into the reference; push only from
+    a throw-away workspace (section 5), never from the agent's folder.
+
+"The remote" is whatever git server the repository points at (GitLab, GitHub,
+Gitea, self-hosted git over ssh or https); nothing here depends on which.
 
 No maintained Node.js library covers this model: simple-git blocks argument
 injection only (a `core.fsmonitor` in the repository's own config ran during
@@ -65,20 +72,23 @@ or `alternates` makes it copy, show and push any repository the server reads.
 
 **Rule: the server never runs git on a path the agent can write.** A root
 host verb reads the folder in a throw-away sandbox and writes a full bundle
-to stdout; the server treats it as hostile, imports it into a fresh empty
-repository, and lands its branches in the reference (`resources/<name>-origin`,
-today's mirror) under `refs/agents/<name>/*`. Review and push read only the
-reference. Kept: the shared folder, the mirror, `gitaccess.mjs`, `branchProblem`,
+to stdout; the server treats it as hostile and imports it into a throw-away
+workspace, made fresh for each review and each send and then deleted. The
+reference (`resources/<name>-origin`, today's mirror) holds only the remote's
+history and only the refresh writes it; **no agent data is ever written
+there**. Kept: the shared folder, the mirror, `gitaccess.mjs`, `branchProblem`,
 `allowed`, `quietMinutes`, `perHour`, the checks in the machine, the log.
 Brought in from `git-runner.md` section 4: the root-owned **`$MNT`** chain
 and **`held`** (section 2), and its host exit-code mapping.
 
 **Deferred** (designed in `git-runner.md`): per-agent folders, fixed-size
 disks, quotas; worktree `make`/`aside`; the upgrade guard and `git selftest`;
-cgroup budgets on server git; keeping rewritten GitLab tips (core: an alert);
+cgroup budgets on server git; keeping rewritten remote tips (core: an alert);
 incremental bundles; per-object/inflated-size limits; owner-confirmed
 non-fast-forward pushes; `fs.watch` (core: today's `lstat` marks); fsck
-exceptions scoped to objects (`fsck.skipList`; core: whole id, allowlist only).
+exceptions scoped to objects (`fsck.skipList`; core: whole id, allowlist
+only); a sandboxed push (section 5: only if git bugs come into scope);
+header-only check reads and a cached R (optimizations).
 
 ## 2. Host verbs
 
@@ -164,7 +174,7 @@ missing, and a 000 `refs/heads` gives 128 + 17 bytes, as an empty repository
 The first line refuses a gitfile, a `.git` link or `commondir` (any of them
 could send git to refs elsewhere in the folder that the check never saw);
 `find -L` checks a linked ref directory where git reads it. A folder changed
-during the read gives at worst a bundle that fails sections 4-5, reported.
+during the read gives at worst a bundle that fails section 4, reported.
 `systemd-run` passes no caller environment: only the `-E` list above.
 
 `runner-root`: empty, root:root 0755 (`install.sh`). `$MNT` matches
@@ -183,15 +193,15 @@ binds host `/dev/shm`, `/dev/pts`; `PrivateIPC` adds a writable `/dev/mqueue`
 `TemporaryFileSystem=/` shows the host root. `PrivateNetwork` leaves a
 read-only host `/sys` (section 9).
 
-## 4. Receive
+## 4. Receive, into a fresh workspace
 
 1. **Limits**: 1 read per repository (server queue + flock), 2 on the host.
    Cap = min(8 GiB, max(512 MiB, 2 x R + 256 MiB)), R = `rev-list
-   --disk-usage --objects --branches --glob=refs/agents/*` on the reference
-   (reachable objects only: garbage never raises it; 0 when there is no
-   reference yet, section 5 step 0); refused below 2 x cap
-   + 5 GiB free. Fresh `$DATA/git-import/<random>` (0700, wiped at start),
-   `git init --bare --object-format=sha1`.
+   --disk-usage --objects --branches` on the reference: the remote's history
+   only, so nothing the agent commits raises it (R = 0 with no reference
+   yet). Refused below 2 x cap + 5 GiB free. The **workspace** (section 5):
+   fresh `$DATA/git-work/<random>` (0700), `git init --bare
+   --object-format=sha1`.
 2. `sudo -n clavarium-host git read <name>`, stdout/stderr pipes. **Every
    stdout byte counted**; past the cap: kill, `git stop`, clean up. Deadline
    360 s over steps 2-5. Stderr: last 4 KB, printable ASCII, labelled "text
@@ -202,7 +212,7 @@ read-only host `/sys` (section 9).
    dropped, one name with two shas refused; at most 1000; names failing
    `branchProblem` dropped and reported; an empty line, then `PACK`.
 4. Pack bytes, still counted, into `git index-pack --stdin --strict[=<id>=<sev>,...]
-   --threads=1 --max-input-size=<cap>`: in an empty repository it checks
+   --threads=1 --max-input-size=<cap>`: in the empty workspace it checks
    every object and link. **fsck exceptions** (owner option, `ignore`/`warn`)
    only for a fixed allowlist of legacy-history ids: `zeroPaddedFilemode`,
    `badFilemode`, `badTimezone`, `badDate`, `missingEmail`,
@@ -211,90 +221,125 @@ read-only host `/sys` (section 9).
    `symlink*`, `nulIn*`, `badTree`, `fullPathname`, `emptyName`,
    `largePathname`, `duplicateEntries`...) is rejected by the option
    validator and never offered. They go as `--strict=<id>=<sev>` (index-pack
-   reads no fsck config, trial) and `-c fetch.fsck.<id>=<sev>` on the refresh
-   and landing fetches; a refusal on an allowlisted id offers it to the owner.
+   reads no fsck config, trial) and `-c fetch.fsck.<id>=<sev>` on the
+   refresh; a refusal on an allowlisted id offers it to the owner.
 5. `cat-file --batch-check` on the header shas: each a commit. One
-   `update-ref --stdin` writes them as `refs/heads/<b>` in the fresh
-   repository (one repository cannot hold `a` and `a/b`).
-6. Land (section 5); remove the fresh directory in `finally`.
+   `update-ref --stdin` writes them as `refs/heads/<b>` in the workspace (one
+   repository cannot hold `a` and `a/b`: refused, named). Steps 1-5 run
+   with no alternates: the bundle must be complete on its own.
 
 Every server-side git: one builder (today's `runGit`) applying the rules at
 the top, plus `GIT_ATTR_SOURCE=<empty tree>`, `core.attributesFile=/dev/null`,
 `gc.auto=0`, `http.followRedirects=false`, a deadline. It runs only in the
-reference and the fresh repository, both the server's. Never `safe.directory`. On
+reference and in workspaces, all the server's. Never `safe.directory`. On
 the deadline it kills git's process group (`detached` spawn,
 `process.kill(-pid)`) and waits for `close` before the mutex is released.
 
-## 5. Landing, one ref at a time
+## 5. The reference and the workspace
 
-Under the **reference mutex** (one per reference, in the server: refresh,
-landing, review, push, maintenance; replaces `#locked` and `#mirrorQueue`),
-waited at most 60 s, else "reference busy", retried quietly.
+**Reference** (`resources/<name>-origin`): only `refs/heads/*` fetched from
+the remote. Written by the refresh (section 6) alone, made by it on first
+use (`makeOrigin`, `shareOrigin`); no remote, or not refreshed yet: no
+reference, R = 0, base = the empty tree. Under the **reference mutex** (one
+per reference, in the server: refresh, review, send, upkeep; replaces
+`#locked` and `#mirrorQueue`), waited at most 60 s, else "reference busy".
+Upkeep: a daily `repack -a -d --threads=1` under the mutex (remote objects
+only); a refresh killed by its deadline has its `*.lock` files removed under
+the mutex, logged.
 
-0. **Reference made if missing.** No `<reference>/HEAD`: `makeOrigin`, `init
-   --bare` (the builder), `shareOrigin`, with or without a remote. Landing
-   never waits for a refresh.
-1. **Stale locks.** The server is the only writer and holds the mutex, so any
-   `*.lock` under `refs/`, `packed-refs.lock`, `HEAD.lock`, `config.lock`,
-   `objects/pack/tmp_*` is stale: removed, logged (also after a git on the
-   reference is killed by its deadline).
-2. Empty `refs/clavarium/incoming/`; `git fetch --no-tags --no-write-fetch-head
-   --end-of-options <fresh> '+refs/heads/*:refs/clavarium/incoming/*'` (objects only).
-3. **One `update-ref` per ref**: first `-d refs/agents/<name>/<b> <old>` for
-   each name gone from the bundle **and from the previous good read too**
-   (two reads in a row agree; "no branches" likewise), then
-   `refs/agents/<name>/<b> <new> <old or zero>` for each new or moved one.
-   Empty `incoming/` again.
-4. **Maintenance**, when `count-objects -v` shows over 1000 loose objects or
-   20 packs, and at least daily: `repack -a -d --threads=1`, then `prune
-   --expire=1.day.ago`, under the deadline. Release.
+**Workspace**: `$DATA/git-work/<random>`, one per review, per send, per
+automatic check read; never reused. `$DATA` is the server account's (0750),
+outside `$MNT`, never bound into a sandbox or mounted into a VM: the agent
+cannot reach it. `git-work/` (0700) is emptied at server start; each
+workspace is removed in `finally`, also after a deadline kill. Its git has
+no config but what the server writes: no agent config, hooks or attributes.
 
-So `a` -> `a/b` deletes `a`, then creates `a/b`; a ref that fails (clash,
-lock) fails alone, is named in the report and retried at the next read. One
-function writes all refs and refuses anything outside `refs/agents/<name>/`
-and `refs/clavarium/incoming/`: **a landing never writes `refs/heads/*`**. A
-non-ancestor new tip is logged "the agent rewrote <b>".
+**Borrowing the remote's objects.** After step 5 of section 4, and only
+when needed (review, send), under the reference mutex, the server writes one
+line into the workspace's `objects/info/alternates`: the absolute path of
+`<reference>/objects`, a server constant. The remote tip is read in the
+reference with `rev-parse --verify --end-of-options refs/heads/<target>`
+(read-only) and used in the workspace as a 40-hex id. Safe because:
+- git reads an alternate as an object source only; every write in the
+  workspace (objects, packs, refs, locks) goes to the workspace's own
+  directories, and the reference has no alternates of its own;
+- no `gc`, `repack` or `prune` ever runs in a workspace (`gc.auto=0`), the
+  only commands that could act on borrowed objects;
+- the line is added after index-pack and the commit check, so the receive
+  checks still see an empty repository and an incomplete bundle is refused;
+- the mutex is held while the workspace uses it, so no refresh or upkeep
+  removes a borrowed pack mid-use; at worst a missing object fails the
+  review or send, never the reference.
+
+Borrowing supplies remote objects the agent has not fetched (the remote
+tip, base); it does not shrink the full bundle's import, which waits for the
+deferred incremental bundles.
+
+**The push runs in the workspace, not in a second sandbox.** The workspace
+holds the credential (environment only) and agent-made objects that passed
+index-pack `--strict` and the commit check; it holds no agent config, hook,
+attribute or path, and the remote, target and refspec come from the server.
+Reaching the credential from those objects would take a bug in git's pack or
+transport code: out of scope by the threat model. If that ever changes, the
+push moves into a unit like section 3 with network to the remote only
+(deferred).
 
 ## 6. Review, refresh, push
 
-**Review.** Read and land first (failure: shown, no review), refresh, then in
-the reference under the mutex (10 s, else "busy"): base `refs/heads/<target>`,
-head `refs/agents/<name>/<b>` (owner's pick; default the last moved). Today's
-`#outgoing` fields, the true `rev-list --count`, and `git diff --text
---no-ext-diff --no-textconv --no-color` with `GIT_ATTR_SOURCE` = empty tree:
-no `.gitattributes` can hide or rewrite a file. Streamed, killed at
-`DIFF_MAX`, "cut" shown. Against hidden history: new-object size
+**Review.** Refresh, then read into a fresh workspace (failure: shown, no
+review); under the mutex (10 s, else "busy"), borrow the remote's objects,
+then in the workspace: base = the remote tip id of `<target>`, head =
+`refs/heads/<b>` (owner's pick; default the last moved, from the server's
+records). Today's `#outgoing` fields, the true `rev-list --count`, and `git
+diff --text --no-ext-diff --no-textconv --no-color` with `GIT_ATTR_SOURCE` =
+empty tree: no `.gitattributes` can hide or rewrite a file. Streamed, killed
+at `DIFF_MAX`, "cut" shown. Against hidden history: new-object size
 (`rev-list --objects --disk-usage base..head`), the 10 largest new blobs
 (`cat-file --batch-check`), paths changed with no net change (`log
 --name-only` minus `diff --name-only`), full messages and authors; control
 characters shown escaped; an extra confirmation above 100 commits or when
-the diff is cut. Keeps `head`, `remoteTip`, "branches as of <time>". **No
-remote**: no refresh; state `no-remote`, commits against the empty tree;
-Send refused "no address".
+the diff is cut. The server keeps `branch`, `head`, `remoteTip` (ids) and
+"branches as of <time>"; the workspace is deleted. Another pick is a new
+review. **No remote**: no refresh, no borrowing; state `no-remote`, commits
+against the empty tree; Send refused "no address".
 
 **Refresh** (today's `#refresh`, under the mutex): `fetch --prune --no-tags
 --end-of-options <remote> '+refs/heads/*:refs/heads/*'`, never `--atomic`, never a wider
-refspec (pruning stays in `refs/heads/`). A tip before that is not an
-ancestor of its successor, or is gone, alerts the owner. Nothing more.
+refspec. A tip before that is not an ancestor of its successor, or is gone,
+alerts the owner. The only writer of the reference.
 
-**Send** (page or automatic): (1) read and land, else refused "could not
-confirm the agent's branch"; (2) under the mutex, refresh from GitLab, else
-"GitLab unreachable"; (3) `refs/agents/<name>/<b>` must equal the reviewed
-`head` (else 409 "the agent changed this branch"), `refs/heads/<target>` the
-reviewed `remoteTip` or be absent if it was (else 409 "GitLab moved"), and
-`merge-base --is-ancestor <remoteTip> <head>` hold (else "diverged"); (4):
+**Send** (page or automatic), in its own fresh workspace: (1) read and
+receive (section 4), else refused "could not confirm the agent's branch";
+(2) under the mutex, refresh from the remote, else "remote unreachable"; if
+the reference's `refs/heads/<target>` is `head` or has it as an ancestor:
+"already on the remote", sent, logged and counted in `perHour` once,
+nothing pushed; (3) the workspace's `refs/heads/<b>` must be **exactly the reviewed `head`
+id** (else 409 "the agent changed this branch"; same id, same content: git's
+SHA-1 has collision detection), the reference's `refs/heads/<target>` the
+reviewed `remoteTip` or absent if it was (else 409 "the remote moved"); then
+one `update-ref --stdin` deletes every agent ref and writes
+`refs/clavarium/send` = `head`, the workspace's only ref; borrow, and
+`merge-base --is-ancestor <remoteTip> refs/clavarium/send` must hold (else
+"diverged"); (4) in the workspace:
 
 ```
 git push --porcelain --no-verify --force-with-lease=refs/heads/<target>:<remoteTip, or empty> \
-  --end-of-options <remote> <head>:refs/heads/<target>
+  --end-of-options <remote> refs/clavarium/send:refs/heads/<target>
 ```
 
-No `+`, no `--force`: (3) makes it a fast-forward; the lease makes GitLab
-refuse if it moved since. (5) `update-ref refs/heads/<target> <head>
-<remoteTip>`, so our own push is never seen as a GitLab rewrite. A push
-ended by deadline or signal (not a porcelain refusal) has an unknown
-outcome: refresh under the mutex; `refs/heads/<target>` = `head` -> sent,
-(5), counted in `perHour`; else "outcome unknown, refreshed: not on GitLab".
+The lease implies force when it matches: the fast-forward rests on (3)
+together with a source that can only be the reviewed id (no ref named after
+an id can exist, rule 6, and none but `refs/clavarium/send` is left). The
+porcelain line must name that source and destination with flag ` ` or `*`;
+a `+` or "(forced update)" is a failure, alerted. (5) Refresh: the pushed
+commits enter the reference only as the remote's history, as a fast-forward
+(no rewrite alert); if it fails: "sent, reference not refreshed", counted.
+A push ended by deadline or signal (not a porcelain refusal) has an
+unknown outcome: refresh; `refs/heads/<target>` = `head` -> sent, counted
+in `perHour`; else "outcome unknown, refreshed: not on the remote"; if the
+refresh fails: "outcome unknown, remote unreachable", kept in the server's
+records, auto-send blocked for that branch until a later refresh settles
+it. The workspace is deleted in every case.
 
 ## 7. Automatic sending, on the new reading
 
@@ -304,11 +349,18 @@ Today's rules and options: off until the owner names branches (`allowed`),
 - **Trigger**: today's 30 s tick on the `lstat` marks; a change schedules a
   read 5 s after the last one; a change during a read sets a dirty flag (one
   more read). A safety read every 10 minutes while in use; one at start.
-- **Real debounce**: per landed branch, `movedAt` = the last landing that
-  changed its tip; each new tip restarts the clock. Candidate: name allowed,
-  tip not on GitLab's same-name branch, now - `movedAt` >= `quietMinutes`, no
-  read queued, running or dirty. `perHour` cap with alert; checks in the
-  machine against `refs/heads/<b>` = `head`; Send as above, never forced;
+  Each read is a check read: a fresh workspace (section 4, no borrowing),
+  its branch tips recorded, then deleted.
+- **Real debounce**: the server's records keep, per branch, its last tip
+  and `movedAt` = the read that first saw it; each new tip restarts the
+  clock. Candidate: name allowed, tip has commits the remote lacks (under
+  the mutex, read-only in the reference: `cat-file -e <tip>^{commit}` and
+  `merge-base --is-ancestor <tip> refs/heads/<b>` both succeeding means
+  not a candidate, nothing logged; no such branch, missing or not an
+  ancestor: a candidate), checked before the cap and the checks, now - `movedAt` >= `quietMinutes`, no read queued,
+  running or dirty. `perHour` cap with alert; checks in the machine against
+  `refs/heads/<b>` = tip; Send as above with that tip as `head` and the
+  reference's tip as `remoteTip`, in a fresh workspace, never forced;
   diverged, refused, checks failed logged once per commit.
 
 ## 8. Every failure is a failure
@@ -327,15 +379,18 @@ Owner: every row (log; phone after 2 in a row). AI: one wake-up line, where it c
 | Over the byte cap | "N MB, over the cap" | "your branches add up to more than N MB" |
 | Not enough free space | "not read: N MB free" + alert | no |
 | Bad header (v3, prerequisite, two shas, over 1000, too long, no `PACK`) | "could not be read safely: <reason>" | v3: "use SHA-1"; prerequisite: "git fetch --unshallow"; over 1000: "delete branches" |
-| Invalid branch name | listed, not landed | "branch <b> was not taken: <rule>" |
+| Invalid branch name | listed, not offered | "branch <b> was not taken: <rule>" |
 | index-pack refused (fsck), tip not a commit | id, object, path; exception offered only for an allowlisted id, else "refused" | "fsck refused your commits: <id>" |
-| No branches (two reads in a row) | "no branches"; `refs/agents/<name>/` emptied | "nothing committed on a branch (git switch -c <name>)" |
-| One ref failed to land | the ref and git's line | after 2 in a row on a clash: "branch <b> clashes with <b2>; rename one" |
-| Stale lock removed / reference busy | logged; review: "busy, try again" | no |
-| Refresh failed, GitLab unreachable | `explain()` text; alert after 3 | no |
-| GitLab rewrite or delete | "<b> was rewritten on GitLab" + alert | "origin/<b> was rewritten; fetch again" |
-| Read before Send failed / agent moved / GitLab moved / lease refused / no address | the reason (409) | automatic, GitLab moved: "pull origin/<b> first" |
-| Push outcome unknown | "outcome unknown, refreshed: <sent / not on GitLab>" | no |
+| No branches | "no branches"; nothing to review or send | "nothing committed on a branch (git switch -c <name>)" |
+| Two branches clash (`a` and `a/b`) | both named, read refused | "branch <b> clashes with <b2>; rename one" |
+| Reference busy / stale refresh lock removed | review: "busy, try again"; logged | no |
+| Refresh failed, remote unreachable | `explain()` text; alert after 3 | no |
+| Remote rewrite or delete | "<b> was rewritten on the remote" + alert | "origin/<b> was rewritten; fetch again" |
+| Read before Send failed / agent moved / remote moved / lease refused / no address | the reason (409) | automatic, remote moved: "pull origin/<b> first" |
+| Push outcome unknown | "outcome unknown, refreshed: <sent / not on the remote>"; refresh failed: "outcome unknown, remote unreachable", auto-send blocked for <b> | no |
+| Push ok, refresh after it failed | "sent, reference not refreshed" (counted) | no |
+| Already on the remote | "already sent" (counted once) | no |
+| Push reported a forced update or another source | "push not as reviewed" + alert | no |
 | Not in list / diverged / cap / checks failed | as today, once per commit | diverged: "pull origin/<b> first"; checks: their output |
 
 ## 9. Attacks stopped; what is not protected
@@ -347,25 +402,26 @@ Owner: every row (log; phone after 2 in a row). AI: one wake-up line, where it c
 | A config command the overrides miss; FIFO, endless or huge files | Dynamic uid, no capability, no network, nothing writable, no `/proc`, 3 devices, seccomp (`@system-service` minus io_uring, userfaultfd, keyring, setuid, `kcmp`, `process_vm_*`, host SysV/POSIX IPC); `RuntimeMaxSec`, `MemoryMax`, `TasksMax`, byte cap; host-fixed exit codes. |
 | Endless header, forged bundle, prerequisites | Bounded Node parse; empty fresh repository; `index-pack --strict`; commit check. |
 | Hostile `.gitmodules`, `.git` path, symlink tree; agent asking for the waiver | fsck; exceptions only for the legacy-history allowlist, never offered for these. |
-| Unreadable ref directory read as "deleted" | `git-read` refuses (67); deletes only when two reads agree. |
-| Ref names with `..`, a leading `-`, control or non-ASCII bytes | Header bytes checked, `branchProblem`; `--end-of-options`, full refspecs; only `refs/heads/` read, only `refs/agents/<name>/` written. |
-| Credentials or a remote taken from the agent | Credentials only in the server's environment; remote and target from the server's records; push only from the reference. |
-| `a` -> `a/b` wedge; killed git leaving locks; GitLab refs overwritten | One ref per command, deletes first; stale locks removed under the mutex; group kill; one function writes only the agent prefixes. |
+| Unreadable ref directory read as "deleted" | `git-read` refuses (67); a missing branch deletes nothing. |
+| Ref names with `..`, a leading `-`, control or non-ASCII bytes | Header bytes checked, `branchProblem`; `--end-of-options`, full refspecs; only `refs/heads/` read; agent refs written only in a workspace. |
+| Credentials or a remote taken from the agent | Credentials only in the server's environment; remote and target from the server's records; push only from a server workspace the agent cannot reach. |
+| Agent data kept or planted in the reference; a workspace reused | Nothing from the agent is written there (only the refresh writes it); one fresh workspace per review, send and check read, deleted after, `git-work/` emptied at start; alternates read-only, added after the receive checks; group kill. |
 | `.gitattributes` hiding a change | `--text`, no textconv, attributes from the empty tree. |
 | History hidden from the review (add then delete, huge blobs, past 100 commits) | New-object size, largest blobs, no-net-change paths, full messages, escaped control characters, extra confirmation. |
-| Branch changed between review and Send | Read before Send, 409 on `head`; lease on the shown `remoteTip`. |
-| Commit loop | Debounce, read pacing, `perHour`, alert, reachable-only cap, maintenance. |
+| Branch changed between review and Send | Send re-reads into a fresh workspace and pushes only the exact reviewed `head` id; lease on the shown `remoteTip`. |
+| Branch named after the reviewed id (push source or lease forcing another commit) | `branchProblem` refuses 40/64-hex components; agent refs deleted, push from `refs/clavarium/send` only; porcelain line checked (no `+`, no forced update). |
+| Commit loop | Debounce, read pacing, `perHour`, alert; cap from the remote's size only; workspaces deleted. |
 | A bent path (compromised server): name, or `resources/` swapped for a link (`RENAME_EXCHANGE`) | The host takes a name only; the source sits on the root-owned `$MNT` chain checked by `held`, so the server cannot change any component; the sandbox uid reads only world-readable bits. |
 
 **Out of scope** (threat model): unknown bugs in git, the kernel, systemd,
-including in the server-side parsers (index-pack, fetch, diff, merge-base on
-agent objects). **Not protected**: server memory against a pack under the
+including in the server-side parsers (index-pack, diff, merge-base, push on
+agent objects, the last with the credential in its environment). **Not protected**: server memory against a pack under the
 cap that inflates hugely (deadlines only, until cgroup budgets); the multipass mount's links and special
 files; a read-only `/sys` in the sandbox; the shared folder (no attribution,
 unbounded, as today); what is reviewed carelessly or auto-sent (merge
 parents beyond the first shown only as a count); agents seeing each other's
-branches; the agent's network; GitLab rewrites beyond the alert; an
-allowlisted fsck waiver covering the whole reference.
+branches; the agent's network; remote rewrites beyond the alert; an
+allowlisted fsck waiver covering a whole read.
 
 ## 10. Test plan
 
@@ -375,15 +431,23 @@ group-writable, non-pipe output, busy); `held` on `vm mount folder`; the
 exact vector including the second filter line, no "must not" setting;
 mapping 0, 65 + 17 bytes, 65, 66, 67, 79, 80, 81, 82, 78, and git exiting 78
 or 200 mapping to 66; each header refusal at and one byte over its limit,
-1000/1001 names; cap-1/cap/cap+1, a rewrite loop not raising the cap;
-deadline cleanup, group kill; landing `a` <-> `a/b` (loose, packed), one ref
-failing alone, the prefix guard, no branches deleting only on the second
-read; reference made on the first Review with `refreshMinutes=0` and on an
-auto-send read before any reference; no-remote repository shows its commits,
-Send "no address"; many small landings then maintenance bound loose objects
-and packs; stale locks; refresh never touches `refs/agents/*`; lease present
-and absent; both 409s; diverged never pushed; own push not a rewrite; push
-timing out after the remote accepted it reports sent; fsck option rejects
+1000/1001 names; cap-1/cap/cap+1, agent history never raising the cap;
+deadline cleanup, group kill; `a` and `a/b` refused and named; the reference
+unchanged (refs and `objects/` identical) after a check read, a review, a
+refused send; alternates written only after index-pack and the commit check
+(a bundle lacking an object the reference has is refused); each workspace
+removed after success, failure and deadline kill, `git-work/` emptied at
+start; Send in a new workspace refused when the tip differs from the
+reviewed id by any byte; auto-send read before any reference; no-remote
+repository shows its commits, Send "no address"; stale refresh locks; lease
+present and absent; both 409s; diverged never pushed; the post-push refresh
+is a fast-forward, no rewrite alert; push
+timing out after the remote accepted it reports sent; a failed refresh after
+a push, a double Send from the page, and a server SIGKILLed mid-push then
+restarted each end in "already on the remote" (no 409, no AI message); an
+unknown outcome with the refresh failing blocks auto-send for the branch;
+remote ahead and agent branch behind: no checks, no `perHour` slot, no
+"diverged"; `branchProblem` refuses a 40- and a 64-hex component; fsck option rejects
 `hasDotgit`, `gitmodulesUrl`, `symlinkPointsToGitDir`; review guards
 (add-then-delete path listed, largest blob, >100 commits and cut diff ask
 twice, escaped control characters); debounce, dirty flag, `perHour`; every
@@ -399,8 +463,10 @@ stdin at EOF; `git bundle create - --branches` succeeds under both filters;
 read (after `reset-failed`), and the next read works; mapping read for a
 real timeout and OOM; `refs/heads/feat` at 000 -> 67, `refs/heads` at 000 ->
 67, the same through a linked `refs` directory -> 67; a gitfile, `.git`
-link or `commondir` pointing inside the folder -> 66; a server killed mid-read reads again after restart; worktrees and many
-branches land, GitLab refs unchanged; `zeroPaddedFilemode` history imports
+link or `commondir` pointing inside the folder -> 66; a server killed mid-read or mid-review reads again after restart, its workspace gone; worktrees and many
+branches read, reference unchanged; a review against a 1 GB reference: its `objects/` unchanged and the
+workspace gets no objects from it (the alternates line only), a remote tip
+the bundle lacks resolves through the alternate; `zeroPaddedFilemode` history imports
 only with the exception; lease push to a local bare remote (ok, moved, new
 branch); install moves `resources/` to `$MNT`, backup and restore keep the
 chain root's; a 1-2 GB read timed.
@@ -413,13 +479,17 @@ non-commit tip, truncated pack, endless line); a pack bomb; hostile config
 (`include.path=/etc/shadow`, `core.sshCommand`, fsmonitor, pager,
 `credential.helper`, `url.*.insteadOf`); branches named `--upload-pack=x`,
 `-f`, `a/../b`, non-UTF-8; `-diff`/
-`textconv` attributes; SIGKILL in `update-ref`; amend or GitLab move between
+`textconv` attributes; SIGKILL of the server mid-send; amend or remote move between
 review and Send; 1000 commits a minute; `/proc/1/environ` and the vault path;
 a loop of `RENAME_EXCHANGE` of `resources/` (or a parent) with a link to
 `/root` during `git read` (refused, or the real folder bound; the server
 account cannot do it at all on `$MNT`); a tree tripping `gitmodulesUrl` or
 `hasDotgit` refused with no exception offered; an add-then-delete commit
-shown in the review; a 0700 ref directory never deletes landed refs.
+shown in the review; a 0700 ref directory gives 67, nothing deleted; a
+bundle whose tip is a remote commit it does not carry, refused; a branch
+named after the reviewed id pointing at another commit (refused, and with
+`branchProblem` bypassed the push still sends the reviewed id); a
+non-fast-forward through a matching lease (refused by (3), never pushed).
 
 ## Review log (round 3)
 
@@ -438,3 +508,21 @@ shown in the review; a 0700 ref directory never deletes landed refs.
 After round 3 (owner): threat model and rules added at the top; `git-read`
 also refuses a non-plain `.git` and follows linked ref directories (finding
 5 completed); cap R = 0 before the reference exists (finding 6).
+
+Owner change: no agent data in the reference. It holds only the remote's
+history, written only by the refresh; each review, send and check read uses
+a fresh server-only workspace that borrows the remote's objects read-only
+(alternates, after the receive checks) and pushes with a lease, then is
+deleted; a send pushes only the exact reviewed id. Gone: landing, `refs/agents/*`,
+per-ref deletes and the two-read rule, landing lock cleanup, agent-object
+maintenance, the cap ratchet (R is now the remote's size). Push not
+sandboxed (threat model). "GitLab" now reads "the remote".
+
+## Review log (round 4)
+
+| Finding | Verdict | Change |
+|---|---|---|
+| Push source as a bare id resolves to an agent branch of that name; the lease forces it | confirmed (critical) | Push from `refs/clavarium/send` after deleting agent refs; `branchProblem` refuses 40/64-hex components; porcelain line checked; "no force" note corrected (rule 5, section 6); section 8, 9 rows; attack tests. |
+| Sent push reported as "remote moved"; unknown outcome with a failed refresh undefined | confirmed (low) | "Already on the remote" after the Send refresh; "sent, reference not refreshed"; "outcome unknown, remote unreachable" blocks auto-send; section 8 rows; tests. |
+| A branch only behind the remote is an auto-send candidate (false "diverged") | confirmed (medium) | Candidate = tip has commits the remote lacks, checked first; test. |
+| Borrowing saves nothing; "copies nothing" test meaningless | confirmed (low, doc only) | Test reworded; section 5 sentence; header-only check reads and cached R deferred. |
