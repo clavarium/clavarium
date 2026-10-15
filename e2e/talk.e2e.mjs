@@ -144,7 +144,7 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.page.locator('#simple-thread .parley-terminal').click();
     assert.equal(await me.page.locator('#simple').isVisible(), false, 'its terminal, as it was');
     /* The owner's own words, for every device, whatever they say: shown as text. */
-    await me.page.locator('#settings-open').click();
+    await me.page.locator('#nav-settings').click();
     await me.page.locator('#words-box summary').click();
     await me.page.fill('#words-own', '{"send": "Clique ici pour faire <b>taratata</b>"}');
     await me.page.locator('#words-save').click();

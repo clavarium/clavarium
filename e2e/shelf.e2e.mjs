@@ -18,7 +18,7 @@ test('a conversation built from the ready-made machine goes through its three st
     const me = await b.person();
 
     /* Settings -> Advanced: none yet. A short disk refuses the rebuild, and says so. */
-    await me.page.locator('#settings-open').click();
+    await me.page.locator('#nav-settings').click();
     await me.page.locator('#settings-advanced summary').click();
     await me.until('it says there is none yet', async () => /None yet/.test(await me.page.locator('#shelf-state').innerText()));
     process.env.FAKE_SHELF_ROOM = 'free 2048';

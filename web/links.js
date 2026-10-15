@@ -1,6 +1,7 @@
-/* WHO GETS WHAT, AND FLOWS: two sheets of the owner's page.
+/* THE MAP (once "Who gets what"), AND FLOWS: the first tab of Access, with
+ * its Map / Flows switch (app.js opens, closes and filters Access).
  *
- *   Who gets what   devices, conversations and assets in columns that each
+ *   Map             devices, conversations and assets in columns that each
  *                   scroll on their own; a link is a right, coloured by what
  *                   it gives. At rest no line, a count on each box; a box
  *                   touched shows its links, greys the rest, and says them in
@@ -8,7 +9,8 @@
  *                   touched, then another), changed by the knob on it, taken
  *                   away there: with the very requests and confirmations of
  *                   the per-conversation, per-device and per-asset screens.
- *                   On a phone: a list, then one box and its links as rows.
+ *                   On a phone: a list; a box touched rises from the bottom
+ *                   with its links in words, and Edit gives them as rows.
  *   Flows           the trace of one box (what reaches it, what it reaches,
  *                   step by step; a loop shows on both sides), every flow on
  *                   its own, laid out in the order things go; a setup exported
@@ -50,6 +52,8 @@
     const curve = (a, z) => { const dx = Math.max(30, (z.x - a.x) * 0.5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${z.x - dx},${z.y} ${z.x},${z.y}`; };
     const markers = (prefix) => { const d = s('defs'); for (const k of ALL_KINDS) { const m = s('marker', { id: `${prefix}-${k}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto' }); const p = s('path', { d: 'M0 0 10 5 0 10z' }); p.style.fill = css(k); m.append(p); d.append(m); } return d; };
     const phone = () => matchMedia('(max-width: 600px)').matches;
+    /* The map is on screen: Access is open, on its map. */
+    const shownNow = () => !document.getElementById('links').hidden && !document.getElementById('access').hidden && !document.getElementById('access-map').hidden;
 
     window.clavariumLinks = (env) => {
         const $ = (id) => document.getElementById(id);
@@ -61,9 +65,8 @@
         let allLines = true;
         try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
         let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null;
-        const ph = { screen: 'list', kind: 'device', id: null, adding: false };
+        const ph = { screen: 'list', kind: 'device', id: null, adding: false, sheet: null };
         let traceOf = '*';
-        let returnView = null;
 
         const node = (id) => byId.get(id);
         /* What a link gives, as a colour. */
@@ -206,7 +209,7 @@
         }
         function draw() {
             const bd = board(); const svg = $('links-svg');
-            if ($('links').hidden || phone()) return;
+            if (!shownNow() || phone()) return;
             const rel = (pinned || focus) ? related(pinned || focus) : null;
             bd.classList.toggle('simple', !allLines && !drag);
             const b = bd.getBoundingClientRect();
@@ -295,7 +298,7 @@
             const items = wordsFor(n);
             const actions = h('span', { class: 'lk-card-actions' });
             if (n.pending === 'pair') actions.append(h('button', { type: 'button', class: 'primary', text: 'Pair it...', onclick: () => { void pairIt(n); } }));
-            if (n.pending === 'missing' || n.pending === 'connect') actions.append(h('button', { type: 'button', class: 'primary', text: n.pending === 'missing' ? 'Add its value...' : 'Add it...', onclick: () => { close(); env.openAssets(); } }));
+            if (n.pending === 'missing' || n.pending === 'connect') actions.append(h('button', { type: 'button', class: 'primary', text: n.pending === 'missing' ? 'Add its value...' : 'Add it...', onclick: () => { env.openAssets(); } }));
             if (n.pending) actions.append(h('button', { type: 'button', text: 'Forget it', onclick: () => { void forget(n); } }));
             actions.append(h('button', { type: 'button', id: 'links-trace-it', text: 'Trace it', onclick: () => { void openFlows(n.id); } }),
                 h('button', { type: 'button', text: 'See everything', onclick: () => { pinned = null; picked = null; draw(); hint(); } }));
@@ -304,7 +307,7 @@
             c.hidden = false;
         }
         async function pairIt(n) {
-            try { const what = await request('/setup/pair', { label: n.name }); close(); await env.pairNew(what.grants, what.label); }
+            try { const what = await request('/setup/pair', { label: n.name }); closeSheet(); await env.pairNew(what.grants, what.label); }
             catch (e) { err(e.message); }
         }
         async function forget(n) {
@@ -414,23 +417,41 @@
             pop.style.left = `${x}px`; pop.style.top = `${y}px`;
         }
 
-        /* ---------- on a phone: a list, then one box and its links as rows ---------- */
+        /* ---------- on a phone: a list; a box touched rises from the bottom with its links; Edit gives its links as rows ---------- */
+        function closeSheet() { if (!ph.sheet) return; ph.sheet = null; $('links-phone').querySelector('.lk-sheet-wrap')?.remove(); }
+        function sheetFor(n) {
+            const items = wordsFor(n);
+            const edit = () => { ph.sheet = null; ph.screen = 'one'; ph.id = n.id; ph.adding = false; paintPhone(); $('access').scrollTop = 0; };
+            const actions = h('div', { class: 'lk-row lk-sheet-acts' });
+            if (n.pending === 'pair') actions.append(h('button', { type: 'button', class: 'primary', text: 'Pair it...', onclick: () => { void pairIt(n); } }));
+            if (n.pending === 'missing' || n.pending === 'connect') actions.append(h('button', { type: 'button', class: 'primary', text: 'Add it...', onclick: () => { closeSheet(); env.openAssets(); } }));
+            actions.append(h('button', { type: 'button', id: 'links-sheet-edit', class: n.pending ? null : 'primary', text: 'Edit', onclick: edit }),
+                h('button', { type: 'button', text: 'Trace it', onclick: () => { void openFlows(n.id); } }));
+            return h('div', { class: 'lk-sheet-wrap', onclick: (e) => { if (e.target === e.currentTarget) closeSheet(); } },
+                h('div', { class: `lk-sheet lk-c-${COLUMN[n.kind]}`, id: 'links-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${n.name}: its links`, 'data-id': n.id },
+                    h('div', { class: 'lk-sheet-top' }, h('span', { class: 'lk-ic', text: KIND_ICON[n.kind], 'aria-hidden': 'true' }),
+                        h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: n.sub })),
+                        h('button', { type: 'button', class: 'lk-x', 'aria-label': 'Close', text: '×', onclick: closeSheet })),
+                    items.length ? h('ul', { class: 'lk-sheet-links' }, items.map((i) => h('li', {}, i))) : h('p', { class: 'lk-none', text: 'No link yet.' }),
+                    actions));
+        }
         const PHONE_KINDS = [['device', 'Devices'], ['conversation', 'Conversations'], ['asset', 'Assets']];
         function paintPhone() {
             const box = $('links-phone');
             if (!phone()) { box.replaceChildren(); return; }
             if (ph.screen === 'one' && !node(ph.id)) ph.screen = 'list';
             if (ph.screen === 'list') {
-                const kinds = h('div', { class: 'lk-kinds' }, PHONE_KINDS.map(([k, w]) => h('button', { type: 'button', 'aria-pressed': String(k === ph.kind), text: w, onclick: () => { ph.kind = k; paintPhone(); } })));
+                const kinds = h('div', { class: 'lk-kinds' }, h('span', { class: 'hint lk-show', text: 'Show' }), PHONE_KINDS.map(([k, w]) => h('button', { type: 'button', 'aria-pressed': String(k === ph.kind), text: w, onclick: () => { ph.kind = k; paintPhone(); } })));
                 const list = h('ul', { class: 'lk-plist' });
                 for (const n of graph.nodes.filter((x) => COLUMN[x.kind] === ph.kind).sort((a, b) => a.name.localeCompare(b.name))) {
                     const ls = graph.links.filter((l) => l.from === n.id || l.to === n.id);
-                    list.append(h('li', {}, h('button', { type: 'button', class: `lk-item${n.pending ? ' pending' : ''}`, 'data-id': n.id, onclick: () => { ph.screen = 'one'; ph.id = n.id; ph.adding = false; paintPhone(); $('links').scrollTop = 0; } },
+                    list.append(h('li', {}, h('button', { type: 'button', class: `lk-item${n.pending ? ' pending' : ''}`, 'data-id': n.id, onclick: () => { ph.sheet = n.id; paintPhone(); $('links-sheet-edit')?.focus(); } },
                         h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: `${n.sub} - ${ls.length} link${ls.length === 1 ? '' : 's'}` })),
                         h('span', { class: 'lk-dots' }, ls.slice(0, 6).map((l) => h('i', { style: `background:${css(KIND(l))}` }))), h('span', { class: 'lk-chev', text: '›' }))));
                 }
                 if (!list.children.length) list.append(h('li', { class: 'lk-none', text: 'Nothing here yet.' }));
                 box.replaceChildren(kinds, list);
+                if (ph.sheet && node(ph.sheet)) box.append(sheetFor(node(ph.sheet))); else ph.sheet = null;
                 return;
             }
             const n = node(ph.id);
@@ -464,7 +485,7 @@
                 h('h3', { class: 'lk-ptitle', text: n.name }), h('p', { class: 'lk-sb', text: n.sub })];
             const actions = h('div', { class: 'lk-row' }, h('button', { type: 'button', text: 'Trace it', onclick: () => { void openFlows(n.id); } }));
             if (n.pending === 'pair') actions.prepend(h('button', { type: 'button', class: 'primary', text: 'Pair it...', onclick: () => { void pairIt(n); } }));
-            if (n.pending === 'missing' || n.pending === 'connect') actions.prepend(h('button', { type: 'button', class: 'primary', text: 'Add it...', onclick: () => { close(); env.openAssets(); } }));
+            if (n.pending === 'missing' || n.pending === 'connect') actions.prepend(h('button', { type: 'button', class: 'primary', text: 'Add it...', onclick: () => { env.openAssets(); } }));
             parts.push(actions);
             if (n.kind === 'device' || n.kind === 'conversation') {
                 parts.push(h('h4', { text: n.kind === 'device' ? 'This device may use' : 'Its agent may use' }), out.length ? h('div', { class: 'lk-rows' }, out.map((l) => row(l, node(l.to), KIND_WORD[node(l.to).kind]))) : h('p', { class: 'lk-none', text: 'Nothing yet.' }));
@@ -751,39 +772,33 @@
             }
         }
 
-        /* ---------- opening and closing ---------- */
-        function showSheet(id) {
-            env.hideSheets();
+        /* ---------- shown in Access (app.js): the map, or its flows ---------- */
+        function showPane(id) {
+            closePop(); closeSheet();
             for (const x of ['links', 'flows']) $(x).hidden = x !== id;
-            /* On a phone the list and the room are two screens: the sheet lives in the room. */
-            if (returnView === null) { returnView = document.getElementById('app').dataset.view ?? ''; document.getElementById('app').dataset.view = 'room'; }
+            env.modeIs(id === 'flows' ? 'flows' : 'map');
         }
-        function close() {
-            closePop();
-            $('links').hidden = true; $('flows').hidden = true;
-            if (returnView !== null) { document.getElementById('app').dataset.view = returnView; returnView = null; }
-            env.focusTerminal();
-        }
-        async function open() {
-            err(''); pinned = null; picked = null; ph.screen = 'list';
-            showSheet('links');
-            await load(); paint();
+        /* Leaving is the page's: Access closes as a whole. */
+        function close() { closePop(); closeSheet(); env.leave(); }
+        /* `pin`: a box shown alone at once (Access opened from a conversation). */
+        async function open({ pin = null } = {}) {
+            err(''); picked = null; ph.screen = 'list';
+            showPane('links');
+            await load();
+            pinned = pin && byId.has(pin) ? pin : null;
+            if (pinned && phone()) { ph.kind = COLUMN[node(pinned).kind]; ph.sheet = pinned; }
+            paint();
             if (document.fonts?.ready) document.fonts.ready.then(() => draw());
         }
         async function openFlows(of) {
-            flowsErr(''); $('flows-said').textContent = '';
-            closePop();
-            showSheet('flows');
+            flowsErr('');
+            showPane('flows');
             await load();
             traceOf = of ?? '*';
             paintFlows();
         }
         for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.addEventListener('click', () => { view = b.dataset.view; picked = null; pinned = null; try { localStorage.setItem('clavarium-links-view', view); } catch { /* not kept */ } paint(); });
         $('links-all').addEventListener('change', () => { allLines = $('links-all').checked; try { localStorage.setItem('clavarium-links-all', allLines ? '1' : '0'); } catch { /* not kept */ } draw(); });
-        $('links-close').addEventListener('click', close);
-        $('links-flows').addEventListener('click', () => { void openFlows(); });
-        $('flows-close').addEventListener('click', close);
-        $('flows-back').addEventListener('click', () => { void open(); });
         $('flows-of').addEventListener('change', (e) => { traceOf = e.target.value; paintFlows(); });
         $('flows-export').addEventListener('click', () => { void exportFile(); });
         $('flows-import').addEventListener('click', () => { $('flows-file').click(); });
@@ -791,15 +806,17 @@
             const file = $('flows-file').files?.[0]; $('flows-file').value = '';
             if (!file) return;
             flowsErr('');
+            /* Imported from any tab: what it holds is shown in Flows. */
+            await env.toFlows();
             if (file.size > 512 * 1024) { flowsErr(`${file.name} is too large: a setup is at most 512 KB.`); return; }
             importing = { text: await file.text(), file: file.name, choices: {} };
             await previewFile();
             $('flows-preview').scrollIntoView({ block: 'start' });
         });
-        $('links').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); if (pop) { closePop(); draw(); } else if (pinned) { pinned = null; picked = null; draw(); hint(); } else close(); } });
+        $('links').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); if (ph.sheet) closeSheet(); else if (pop) { closePop(); draw(); } else if (pinned) { pinned = null; picked = null; draw(); hint(); } else close(); } });
         /* A click away from it closes the knob's card (a button it just replaced is not "away"). */
         document.addEventListener('click', (e) => { if (pop && e.target.isConnected && !e.target.closest('.lk-pop, .lk-knob, .lk-node, svg')) { closePop(); draw(); } });
-        addEventListener('resize', () => { if (!$('links').hidden) { paintPhone(); draw(); place(); } });
+        addEventListener('resize', () => { if (shownNow()) { paintPhone(); draw(); place(); } });
         $('links-scroller').addEventListener('scroll', () => draw(), { passive: true });
         return { open, openFlows, close };
     };

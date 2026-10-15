@@ -154,14 +154,20 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             const pane = () => spawnSync('tmux', ['-L', tmuxOf(name), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
             await until(`the terminal of ${name} has the page's size`, async () => pane() === await page.evaluate(() => `${window.clavariumTerminal.cols}x${window.clavariumTerminal.rows}`));
         }
+        /* Access, one of the three places at the bottom left, on one of its tabs: 'map', 'devices' or 'assets'. */
+        async function openAccess(tab = 'map') {
+            await page.locator('#nav-access').click();
+            await page.locator(`#tab-${tab}`).click();
+            await until(`the ${tab} tab of Access is shown`, async () => (await page.locator(`#tab-${tab}`).getAttribute('aria-selected')) === 'true' && page.locator('#access').isVisible());
+        }
         /* A folder is made in Assets. */
         async function newFolder(name) {
-            await page.locator('#assets-open').click();
+            await openAccess('assets');
             await page.locator('#folder-box summary').click();
             await page.fill('#folder-name', name);
             await page.locator('#folder-new button[type=submit]').click();
             await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-folder .asset[data-name="${name}"]`).count()) === 1);
-            await page.locator('#assets-close').click();
+            await page.locator('#access-close').click();
         }
         /* What the conversation shown may do with it, set in Access: 'Read', 'Write', or 'Off' (detached). */
         async function access(name, level) {
@@ -190,7 +196,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         /* On a phone: the bar's "..." menu is opened, and the keys behind "More". */
         async function menu() { if ((await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, newFolder, access, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, newFolder, access, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot };
 }

@@ -10,7 +10,7 @@
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/vendor/parley-ui.css">
-<div id="app">
+<div id="app" data-place="conversations">
   <aside id="list" hidden>
     <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
     <form id="create" hidden autocomplete="off">
@@ -26,12 +26,15 @@
     </form>
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
-    <span class="sp"></span>
-    <button type="button" id="links-open" hidden>Who gets what</button>
-    <button type="button" id="assets-open" hidden>Assets</button>
-    <button type="button" id="sharing-open" hidden>Devices &amp; sharing</button>
-    <button type="button" id="settings-open" hidden>Settings</button>
   </aside>
+  <!-- THE THREE PLACES of the owner's page: its conversations, who gets what
+       (Access), and its settings. Bottom left on a wide screen; a bar along
+       the bottom on a phone. -->
+  <nav id="nav" aria-label="Places" hidden>
+    <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4z"/></svg><span>Conversations</span></button>
+    <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.3 7.2 15.7 10.8M8.3 16.8l7.4-3.6"/></svg><span>Access</span></button>
+    <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg><span>Settings</span></button>
+  </nav>
   <section id="room">
     <header>
       <button type="button" id="back" aria-label="All conversations" hidden>&lsaquo;</button>
@@ -144,6 +147,7 @@
             <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
             <div id="panel-rows"></div>
             <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
+            <div class="row to-access"><button type="button" id="access-assets-here">Attach an asset</button><span class="hint">Every asset, in Access, with what this conversation may do with each.</span></div>
             <div class="panel-top"><b>Secrets handed to its tool</b></div>
             <div id="access-secrets"></div>
             <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
@@ -259,7 +263,8 @@
             <p class="hint">Give a phone or a tablet its terminal, its chat, or both. Change it here at any time, or take it back.</p>
             <div id="share-here"></div>
             <p id="share-here-none" class="hint" hidden>No device has it.</p>
-            <div class="row"><button type="button" id="share" hidden>Share...</button></div>
+            <div class="row"><button type="button" id="share" hidden>Pair a new device...</button></div>
+            <div class="row to-access"><button type="button" id="access-devices-here">Share with a device</button><span class="hint">Every device, in Access, with what each has of this conversation.</span></div>
           </div>
         </details>
         <details class="chapter" id="chapter-advanced" data-chapter="advanced">
@@ -270,37 +275,53 @@
           </div>
         </details>
       </div>
-      <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
-      <!-- WHO GETS WHAT: every device, conversation and asset, and the rights between them (links.js). -->
-      <div id="links" class="sheet" hidden>
-        <div class="panel-top"><b>Who gets what</b><span class="row"><button type="button" id="links-flows">Flows</button><button type="button" id="links-close">Close</button></span></div>
-        <div id="links-tabs" class="lk-tabs" role="tablist" aria-label="What to show">
-          <button type="button" role="tab" data-view="devices">Devices</button>
-          <button type="button" role="tab" data-view="convs">Conversations</button>
-          <button type="button" role="tab" data-view="all">Everything</button>
-          <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
+      <!-- ACCESS: who gets what, in one page with three tabs. The map (and
+           its flows), the devices and what each was given, the assets kept
+           here. Export and Import stay in its header, whatever the tab. A
+           conversation opens it filtered on itself: a badge takes that away. -->
+      <div id="access" class="sheet" hidden>
+        <div class="panel-top access-top">
+          <b>Access</b>
+          <span id="access-for" class="for-badge" hidden><span class="hint">Only</span> <b id="access-for-name"></b><button type="button" id="access-for-clear" aria-label="Show everything, not only this conversation" title="Show everything">&times;</button></span>
+          <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json" hidden><button type="button" id="access-close">Close</button></span>
         </div>
-        <div id="links-legend" class="lk-legend"></div>
-        <p id="links-hint" class="hint" aria-live="polite"></p>
-        <p id="links-error" class="error" role="alert" hidden></p>
-        <div id="links-card" class="lk-card" hidden aria-live="polite"></div>
-        <div id="links-scroller" class="lk-scroller"><div id="links-board" class="lk-board"><svg id="links-svg" class="lk-links" aria-hidden="true"></svg></div></div>
-        <div id="links-phone" class="lk-phone"></div>
-      </div>
-      <!-- FLOWS: the trace of one box, every flow apart, a setup to a file and back (links.js, server/setup.mjs). -->
-      <div id="flows" class="sheet" hidden>
-        <div class="panel-top"><b>Flows</b><span class="row"><button type="button" id="flows-back">Who gets what</button><button type="button" id="flows-close">Close</button></span></div>
-        <div class="row lk-files"><button type="button" id="flows-export">Export everything</button><button type="button" id="flows-import">Import a setup...</button><input type="file" id="flows-file" accept=".json,application/json" hidden><span id="flows-said" class="hint" role="status"></span></div>
-        <p id="flows-error" class="error" role="alert" hidden></p>
-        <div id="flows-preview" class="lk-preview" hidden></div>
-        <div class="row lk-tpick"><label for="flows-of">Trace</label><select id="flows-of"></select><span id="flows-note" class="hint"></span></div>
-        <div id="flows-trace" class="lk-trace"></div>
-        <div id="flows-all"></div>
-      </div>
-      <div id="assets" class="sheet" hidden>
-        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
+        <span id="flows-said" class="hint" role="status"></span>
+        <div id="access-tabs" class="seg" role="tablist" aria-label="Access">
+          <button type="button" role="tab" id="tab-map" data-tab="map" aria-controls="access-map" aria-selected="true">Map</button>
+          <button type="button" role="tab" id="tab-devices" data-tab="devices" aria-controls="sharing" aria-selected="false">Devices</button>
+          <button type="button" role="tab" id="tab-assets" data-tab="assets" aria-controls="assets" aria-selected="false">Assets</button>
+        </div>
+        <div id="access-map" class="pane" role="tabpanel" aria-labelledby="tab-map">
+          <div class="row map-bar">
+            <div class="levels map-mode" id="map-mode" role="group" aria-label="Map or flows"><button type="button" data-mode="map" aria-pressed="true">Who gets what</button><button type="button" data-mode="flows" aria-pressed="false">Flows</button></div>
+            <div id="links-tabs" class="lk-tabs" role="tablist" aria-label="What the map shows">
+              <span class="hint lk-show">Show</span>
+              <button type="button" role="tab" data-view="devices">Devices</button>
+              <button type="button" role="tab" data-view="convs">Conversations</button>
+              <button type="button" role="tab" data-view="all">Everything</button>
+            </div>
+            <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
+          </div>
+        <!-- THE MAP (once "Who gets what"): every device, conversation and asset, and the rights between them (links.js). -->
+        <div id="links" class="pane">
+          <div id="links-legend" class="lk-legend"></div>
+          <p id="links-hint" class="hint" aria-live="polite"></p>
+          <p id="links-error" class="error" role="alert" hidden></p>
+          <div id="links-card" class="lk-card" hidden aria-live="polite"></div>
+          <div id="links-scroller" class="lk-scroller"><div id="links-board" class="lk-board"><svg id="links-svg" class="lk-links" aria-hidden="true"></svg></div></div>
+          <div id="links-phone" class="lk-phone"></div>
+        </div>
+        <!-- FLOWS: the trace of one box, every flow apart, a setup to a file and back (links.js, server/setup.mjs). -->
+        <div id="flows" class="pane" hidden>
+          <p id="flows-error" class="error" role="alert" hidden></p>
+          <div id="flows-preview" class="lk-preview" hidden></div>
+          <div class="row lk-tpick"><label for="flows-of">Trace</label><select id="flows-of"></select><span id="flows-note" class="hint"></span></div>
+          <div id="flows-trace" class="lk-trace"></div>
+          <div id="flows-all"></div>
+        </div>
+        </div>
+      <div id="assets" class="pane" role="tabpanel" aria-labelledby="tab-assets" hidden>
         <p class="hint">Folders, repositories, mailboxes, secrets: what is kept here, which conversations use it, which devices were given it.</p>
-        <div class="row"><button type="button" id="assets-links" class="primary">Who gets what</button></div>
         <div id="assets-filters" class="choices" role="group" aria-label="Kind of asset"></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <section data-kind="folder">
@@ -397,6 +418,55 @@
         </form>
           </details>
         </section>
+      </div>
+      <div id="sharing" class="pane" role="tabpanel" aria-labelledby="tab-devices" hidden>
+        <div class="panel-top" id="sharing-top" hidden><b id="sharing-title">Share</b><button type="button" id="sharing-close">Back</button></div>
+        <!-- Choosing what a device gets: a basket you add to. -->
+        <div id="share-compose">
+          <b>Who is it for?</b>
+          <div id="share-who" class="choices" role="radiogroup" aria-label="Who is it for"></div>
+          <div id="share-name-row">
+            <input id="sharing-label" maxlength="40" placeholder="A name you will recognise: Dad's tablet" autocomplete="off" aria-label="Name of the new device">
+            <div id="share-suggest" class="choices"></div>
+          </div>
+          <div class="share-cols">
+            <div class="share-col">
+              <b id="share-basket-title">It will get</b>
+              <div id="share-basket"></div>
+              <p id="share-basket-empty" class="hint">Nothing yet. Add something.</p>
+            </div>
+            <div class="share-col">
+              <b>Add something</b>
+              <input id="share-search" placeholder="Search" autocomplete="off" aria-label="Search what can be added" hidden>
+              <div id="share-filters" class="choices" role="group" aria-label="Kind of thing"></div>
+              <div id="share-add"></div>
+            </div>
+          </div>
+          <div class="share-foot">
+            <p id="sharing-summary"></p>
+            <button type="button" id="sharing-new" class="primary">Show a code</button>
+          </div>
+          <p id="sharing-error" class="error" role="alert" hidden></p>
+        </div>
+        <!-- The code, and whether it was used. -->
+        <div id="share-code" hidden>
+          <img id="sharing-qr" alt="Pairing code to scan">
+          <p id="sharing-link" class="hint link"></p>
+          <div class="row"><button type="button" id="sharing-copy">Copy the link</button><span id="sharing-status" class="hint" role="status"></span></div>
+          <p id="share-waiting" role="status"></p>
+          <div class="row"><button type="button" id="share-done" class="primary" hidden>Done</button><button type="button" id="share-cancel">Cancel this code</button></div>
+        </div>
+        <!-- Who has what. -->
+        <div id="share-manage" hidden>
+          <div class="row">
+            <div class="choices" id="share-by" role="group" aria-label="How it is listed"><button type="button" id="share-by-device" aria-pressed="true">By device</button><button type="button" id="share-by-thing" aria-pressed="false">By thing</button></div>
+            <span class="sp"></span><button type="button" id="share-new-device" class="primary">+ New device</button>
+          </div>
+          <div id="sharing-devices"></div>
+          <p id="sharing-none" class="hint" hidden>Nothing is shared with any device.</p>
+          <div id="share-things" hidden></div>
+        </div>
+      </div>
       </div>
       <!-- SETTINGS: the platform, and this device. -->
       <div id="settings" class="sheet" hidden>
@@ -543,54 +613,6 @@
           <p id="gitview-log-empty" class="hint">Nothing yet.</p>
           <div id="gitview-log"></div>
         </details>
-      </div>
-      <div id="sharing" class="sheet" hidden>
-        <div class="panel-top"><b id="sharing-title">Share</b><button type="button" id="sharing-close">Close</button></div>
-        <!-- Choosing what a device gets: a basket you add to. -->
-        <div id="share-compose">
-          <b>Who is it for?</b>
-          <div id="share-who" class="choices" role="radiogroup" aria-label="Who is it for"></div>
-          <div id="share-name-row">
-            <input id="sharing-label" maxlength="40" placeholder="A name you will recognise: Dad's tablet" autocomplete="off" aria-label="Name of the new device">
-            <div id="share-suggest" class="choices"></div>
-          </div>
-          <div class="share-cols">
-            <div class="share-col">
-              <b id="share-basket-title">It will get</b>
-              <div id="share-basket"></div>
-              <p id="share-basket-empty" class="hint">Nothing yet. Add something.</p>
-            </div>
-            <div class="share-col">
-              <b>Add something</b>
-              <input id="share-search" placeholder="Search" autocomplete="off" aria-label="Search what can be added" hidden>
-              <div id="share-filters" class="choices" role="group" aria-label="Kind of thing"></div>
-              <div id="share-add"></div>
-            </div>
-          </div>
-          <div class="share-foot">
-            <p id="sharing-summary"></p>
-            <button type="button" id="sharing-new" class="primary">Show a code</button>
-          </div>
-          <p id="sharing-error" class="error" role="alert" hidden></p>
-        </div>
-        <!-- The code, and whether it was used. -->
-        <div id="share-code" hidden>
-          <img id="sharing-qr" alt="Pairing code to scan">
-          <p id="sharing-link" class="hint link"></p>
-          <div class="row"><button type="button" id="sharing-copy">Copy the link</button><span id="sharing-status" class="hint" role="status"></span></div>
-          <p id="share-waiting" role="status"></p>
-          <div class="row"><button type="button" id="share-done" class="primary" hidden>Done</button><button type="button" id="share-cancel">Cancel this code</button></div>
-        </div>
-        <!-- Who has what. -->
-        <div id="share-manage" hidden>
-          <div class="row">
-            <div class="choices" role="group" aria-label="How it is listed"><button type="button" id="share-by-device" aria-pressed="true">By device</button><button type="button" id="share-by-thing" aria-pressed="false">By thing</button></div>
-            <span class="sp"></span><button type="button" id="share-new-device" class="primary">+ New device</button>
-          </div>
-          <div id="sharing-devices"></div>
-          <p id="sharing-none" class="hint" hidden>Nothing is shared with any device.</p>
-          <div id="share-things" hidden></div>
-        </div>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>

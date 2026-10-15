@@ -74,12 +74,12 @@ test('a code works once; a removed device is out at once, with nothing left on s
 
     /* The owner removes the phone, in two clicks. */
     await owner.page.locator('#notice-action').click().catch(() => {});
-    await owner.page.locator('#sharing-open').click();
+    await owner.openAccess('devices');
     await owner.until('the phone is listed', async () => (await owner.page.locator('#sharing-devices .device').count()) === 1);
     await owner.page.locator('#sharing-devices .device button', { hasText: 'Revoke device' }).click();
     await owner.page.locator('#sharing-devices button.danger').click();
     await owner.until('no device left', async () => (await owner.page.locator('#sharing-devices .device').count()) === 0);
-    await owner.page.locator('#sharing-close').click();
+    await owner.page.locator('#access-close').click();
 
     await phone.until('the phone says it is out, in words', async () => /was closed, or this device was removed/.test(await phone.page.locator('#notice-text').innerText().catch(() => '')), 25_000);
     for (const gone of ['#keys', '#shortcuts', '#files-open']) assert.equal(await phone.page.locator(gone).isVisible(), false, `${gone} is no longer offered`);
@@ -284,10 +284,11 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await thing.locator('button', { hasText: 'Take back' }).click();
     await owner.page.locator('#share-things button.danger').click();
     await owner.until('recipes is shared with nobody', async () => /Not shared \(\d\)/.test(await owner.page.locator('#share-things').innerText()) && !(await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes'));
-    await owner.page.locator('#sharing-close').click();
-    /* Seen at a glance, outside the sheet. */
+    await owner.page.locator('#access-close').click();
+    /* Seen at a glance, outside Access: the list; and how many devices there are, on the tab that lists them. */
     await owner.until('the list marks both conversations as shared', async () => (await owner.page.locator('#items .shared-mark').count()) === 2);
-    assert.match(await owner.page.locator('#sharing-open').innerText(), /Devices & sharing \(1\)/);
+    assert.equal(await owner.page.locator('#access').isVisible(), false);
+    assert.match(await owner.page.locator('#tab-devices').textContent(), /Devices \(1\)/);
     /* The tablet finds the changes by itself: accounts given, recipes gone. */
     await tablet.page.reload();
     await tablet.until('live again', async () => (await tablet.state()) === 'live');
@@ -302,7 +303,7 @@ test('a folder is shared from its own row, alone and to read; a code not wanted 
     const owner = await b.person();
     await owner.create('private');
     await owner.api('/api/resources', { name: 'album' });
-    await owner.page.locator('#assets-open').click();
+    await owner.openAccess('assets');
     const album = owner.page.locator('#assets-folder .asset[data-name="album"]');
     await album.locator('.asset-head').click();
     await album.locator('button', { hasText: 'Share...' }).click();

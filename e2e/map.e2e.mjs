@@ -15,7 +15,9 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await me.api('/api/secrets', { name: 'DEPLOY_A', value: 'not-a-real-value' });
     await me.api('/api/conversations/client-a/secrets', { secret: 'DEPLOY_A', attached: true });
     const page = me.page;
-    await page.locator('#links-open').click();
+    /* The map is what Access opens on. */
+    await page.locator('#nav-access').click();
+    assert.equal(await page.locator('#tab-map').getAttribute('aria-selected'), 'true');
     await page.locator('#links-tabs [data-view=convs]').click();
     const node = (id) => page.locator(`#links-board .lk-node[data-id="${id}"]`);
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 6);

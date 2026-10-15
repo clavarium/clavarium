@@ -7,7 +7,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     const me = await b.person();
     await me.create('with-key');
     /* Made in Assets; a value goes in and is nowhere afterwards. */
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     await me.page.locator('#secret-box summary').click();
     await me.page.fill('#secret-name', 'MODEL_KEY');
     await me.page.fill('#secret-value', 'sk-not-shown-again');
@@ -15,7 +15,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.until('the secret is listed', async () => (await me.page.locator('#secret-rows .asset[data-name="MODEL_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('sk-not-shown-again'), false, 'the value is nowhere in the page');
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
     /* Handed to this conversation's tool from Access, in two taps. */
     await me.page.locator('#folders').click();
     await me.page.locator('#attach-open').click();

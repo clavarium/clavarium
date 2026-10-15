@@ -30,7 +30,7 @@ test('a private repository is added with a new key: its public half is shown and
     const answers = [];
     me.page.on('response', async (r) => { if (r.url().includes('/api/')) answers.push(await r.text().catch(() => '')); });
     await me.create('coder');
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     await me.page.locator('#git-box summary').click();
     await me.page.fill('#git-name', 'site');
     await me.page.fill('#git-from', 'git@example.com:team/site.git');
@@ -78,7 +78,7 @@ test('a private repository is added with a new key: its public half is shown and
     assert.equal(await key.locator('button', { hasText: 'Remove' }).isDisabled(), true);
     assert.match(await key.innerText(), /would cut site off/);
     assert.equal((await me.api('/api/git-keys/deploy-a/remove', {})).status, 409);
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
 
     /* The tool reads the repository; it never sees the key. */
     await me.access('site', 'Read');
@@ -101,7 +101,7 @@ test('a git server\'s recorded key is forgotten from Settings, deep down, after 
     writeFileSync(knownHosts, `example.com ssh-ed25519 ${FAKE_HOST_KEY}\ngit.example.org ssh-ed25519 ${FAKE_HOST_KEY}\n`);
     const me = await b.person();
     await me.create('settler');
-    await me.page.locator('#settings-open').click();
+    await me.page.locator('#nav-settings').click();
     /* Out of the way: under Advanced, closed. */
     assert.equal(await me.page.locator('#git-hosts').isVisible(), false);
     await me.page.locator('#settings-advanced summary').click();

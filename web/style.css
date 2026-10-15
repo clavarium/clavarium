@@ -22,8 +22,10 @@ body { height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inse
 button { font: 600 .8125rem var(--sans); color: var(--ink); background: var(--button, #222c38); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
 button.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
-#app { display: flex; height: 100%; }
-#list { flex: 0 0 260px; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
+/* The list on the left, the three places under it, the conversation beside them. */
+#app { display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+#app:has(> #list[hidden]) #room { grid-column: 1 / -1; }
+#list { grid-column: 1; grid-row: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
 #list .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 #items { display: flex; flex-direction: column; gap: 6px; }
 .item { display: block; width: 100%; text-align: left; padding: 9px 10px; background: var(--bar); font-weight: 400; }
@@ -44,7 +46,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { color: var(--ink2); font-size: .75rem; margin: 0; }
 .error { color: var(--danger); font-size: .8125rem; margin: 0; }
-#room { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#room { grid-column: 2; grid-row: 1 / span 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* The bar wraps onto a second line rather than squeeze the name away or break a button's label in two. */
 header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; background: var(--bar); border-bottom: 1px solid var(--line); min-height: 44px; }
 header b { flex: 1 0 auto; min-width: 6ch; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -81,12 +83,13 @@ footer { display: flex; gap: 6px; padding: 6px 8px; background: var(--bar); bord
 footer button { flex: 0 0 auto; min-width: 44px; padding: 9px 12px; }
 footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
 @media (max-width: 700px) {
-  #list { flex-basis: 100%; border-right: 0; }
+  #app { grid-template-columns: minmax(0, 1fr); }
+  #list, #room { grid-column: 1; grid-row: 1; border-right: 0; }
   #app[data-view="room"] #list, #app[data-view="list"] #room { display: none; }
 }
 @media (min-width: 701px) { #back { display: none; } }
 /* The list folded away with one click, on a wide screen: the terminal takes the room. */
-@media (min-width: 701px) { #app[data-list="folded"] #list { display: none; } }
+@media (min-width: 701px) { #app[data-list="folded"] #list, #app[data-list="folded"] #nav { display: none; } #app[data-list="folded"] #room { grid-column: 1 / -1; } }
 @media (max-width: 700px) { #fold { display: none; } }
 #fold { font-size: 1rem; line-height: 1; padding: 4px 9px; }
 .chips { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
@@ -259,7 +262,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .given-row > span:first-child { flex: 1 1 160px; min-width: 0; }
 .thing { border-top: 1px solid var(--line); padding: 6px 0; }
 .thing > summary { cursor: pointer; font-weight: 600; min-height: 40px; display: flex; align-items: center; }
-#list .sp { flex: 1; }
 .item .shared-mark { display: block; color: var(--brass); }
 /* A sheet is open on a small screen: the keys of the terminal are not for it, and would take half the
    screen from it. On a wide screen they stay: taking them away would resize the terminal under the
@@ -279,8 +281,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 
 /* The left column: conversations, then the platform's three entries, always in sight. */
 #list #items { flex: 1 1 auto; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
-#list .sp { flex: 0 0 0; }
-#assets-open, #sharing-open, #settings-open { text-align: left; min-height: 40px; }
 /* Assets: one row per thing; opened, it says who may do what with it. */
 #assets section { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 #assets section .panel-top small { margin-left: 8px; }
@@ -558,10 +558,10 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 /* On a phone: no drawing. A list, then one box and its links as rows. */
 .lk-phone { display: none; }
 @media (max-width: 600px) {
-  #links .lk-scroller, #links .lk-legend, #links-hint, #links-card, #links .lk-tabs { display: none !important; }
+  #links .lk-scroller, #links .lk-legend, #links-hint, #links-card, #links-tabs, .map-bar .lk-switch { display: none !important; }
   .lk-phone { display: block; }
 }
-.lk-kinds { display: flex; gap: 6px; margin: 4px 0 12px; }
+.lk-kinds { display: flex; align-items: center; gap: 6px; margin: 4px 0 12px; }
 .lk-kinds button { flex: 1; border-radius: 999px; padding: 8px 4px; }
 .lk-kinds button[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .lk-plist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -650,3 +650,112 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .lk-check li[data-line="Refused"] b { color: var(--danger); }
 .lk-own { font-size: .6875rem; font-weight: 700; letter-spacing: .04em; color: #fff; background: var(--danger); border-radius: 999px; padding: 2px 8px; margin-right: 6px; }
 .lk-more summary { cursor: pointer; color: var(--ink2); margin-top: 6px; }
+
+/* ---------- the three places: Conversations, Access, Settings ---------- */
+#nav { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 10px; background: var(--panel); border-right: 1px solid var(--line); border-top: 1px solid var(--line); }
+#nav button { display: flex; align-items: center; gap: 10px; min-height: 40px; text-align: left; background: transparent; border-color: transparent; font-weight: 600; color: var(--ink2); }
+#nav button:hover { color: var(--ink); border-color: var(--line); }
+#nav button[aria-current="page"] { color: var(--ink); background: var(--bar); border-color: var(--line); box-shadow: inset 3px 0 0 var(--brass); }
+.nav-ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+#nav button[aria-current="page"] .nav-ic { stroke: var(--brass); }
+@media (max-width: 700px) {
+  /* A phone: a bar along the bottom, above the system's own strip; gone inside a conversation and while typing. */
+  #nav { grid-row: 2; flex-direction: row; gap: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0)); border-right: 0; }
+  /* The bar takes the system's strip at the bottom; where it is not shown, the page keeps it clear. */
+  html:has(#nav:not([hidden])):has(#app:is([data-view="list"], [data-place="access"], [data-place="settings"])) body { padding-bottom: 0; }
+  #nav button { flex: 1 1 0; flex-direction: column; gap: 2px; min-height: 52px; padding: 4px 2px; font-size: .75rem; text-align: center; justify-content: center; border-radius: 10px; }
+  #nav button[aria-current="page"] { box-shadow: none; background: transparent; border-color: transparent; color: var(--brass); }
+  #nav .nav-ic { width: 24px; height: 24px; }
+  #app[data-view="room"][data-place="conversations"] #nav { display: none; }
+  #app:has(input:not([type=checkbox]):not([type=radio]):not([type=file]):focus, textarea:not(.xterm-helper-textarea):focus) #nav { display: none; }
+  /* Access and Settings take the whole screen: the bar of the conversation behind them is not theirs. */
+  #app:is([data-place="access"], [data-place="settings"]) #room > :is(header, #health-strip, #signin-strip, #voice-line, #shortcuts, #keys) { display: none !important; }
+  #access-close, #settings-close { display: none; }
+}
+
+/* ---------- Access: one page, three tabs ---------- */
+#access { gap: 10px; }
+.access-top { gap: 8px; flex-wrap: wrap; }
+.access-top > b { font-size: 1.0625rem; }
+.access-files { margin-left: auto; flex-wrap: nowrap; gap: 6px; }
+.for-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 10px; border: 1px solid var(--brass); border-radius: 999px; background: rgba(210, 169, 78, .14); max-width: 100%; min-width: 0; }
+.for-badge b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.for-badge button { border: 0; background: none; padding: 2px 8px; min-height: 28px; font-size: 1rem; line-height: 1; border-radius: 999px; color: var(--ink2); }
+.for-badge button:hover { color: var(--ink); }
+#flows-said:empty { display: none; }
+/* Segmented: three tabs of one width. */
+.seg { display: flex; padding: 3px; gap: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); max-width: 32rem; flex: none; }
+.seg button { flex: 1 1 0; border: 0; background: transparent; border-radius: 7px; min-height: 36px; color: var(--ink2); }
+.seg button[aria-selected="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--line), 0 1px 3px rgba(0, 0, 0, .25); }
+.pane { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+#access-map { gap: 8px; }
+.map-mode { align-self: flex-start; }
+.map-mode button { min-height: 32px; padding: 4px 14px; }
+#access-map .lk-board { height: clamp(300px, calc(100dvh - 330px), 900px); }
+#sharing-top { gap: 8px; }
+#sharing-top b { font-size: 1rem; }
+.to-access { margin-top: 2px; }
+.to-access .hint { flex: 1 1 14rem; }
+@media (max-width: 700px) {
+  #access { padding: 10px 12px 16px; }
+  .seg { max-width: none; }
+  .seg button { min-height: 40px; }
+  .access-top > b { font-size: 1.25rem; }
+}
+
+/* Asset and device cards fold as the chapters of a conversation do. */
+.asset, .device.card { border: 1px solid var(--line); border-radius: 10px; background: var(--bar); padding: 0 8px 0 0; margin-top: 6px; gap: 0 8px; }
+.asset-head { position: relative; padding: 8px 6.5rem 8px 12px; border-radius: 10px; }
+.asset-head::after { content: "Expand"; position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: .75rem; font-weight: 600; color: var(--ink2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; }
+.asset-head[aria-expanded="true"]::after { content: "Collapse"; }
+.asset-head b::before { content: none; }
+.asset > .given-row.for-row { flex-basis: 100%; margin: 0 0 0 12px; padding: 8px 0 10px; border-top: 1px dashed var(--line); }
+.asset-inside { background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding: 8px 12px 10px; margin-right: -8px; }
+.asset > button:not(.asset-head) { margin: 6px 0; }
+.git-key { padding: 8px 12px; }
+.device.card { display: block; padding: 0; }
+.device.card .device-head { padding: 10px 12px; min-height: 48px; }
+.device.card .device-head b { font-size: 1rem; flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.device-sub { flex: 1 1 12rem; font-size: .75rem; }
+.device.card .device-head small.device-count { color: var(--brass); }
+.card-fold { margin-left: auto; min-height: 32px !important; padding: 3px 9px; font-size: .75rem; color: var(--ink2); background: transparent; }
+.device.card .card-body { background: var(--panel); border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; padding: 4px 12px 10px; display: flex; flex-direction: column; gap: 6px; }
+.device.card .given-row { padding-left: 0; }
+.device-acts { padding-top: 6px; }
+
+/* On a phone, a box of the map touched: its links rise from the bottom. */
+.lk-sheet-wrap { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; background: rgba(8, 11, 15, .55); }
+.lk-sheet { width: 100%; max-height: 75dvh; overflow-y: auto; background: var(--panel); border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0)); display: flex; flex-direction: column; gap: 10px; box-shadow: 0 -8px 24px rgba(0, 0, 0, .35); }
+.lk-sheet::before { content: ""; align-self: center; width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin-bottom: 4px; }
+.lk-sheet-top { display: flex; align-items: center; gap: 10px; }
+.lk-sheet-top .lk-tx { flex: 1; }
+.lk-sheet.lk-c-device .lk-ic { background: var(--k-device-bg); color: var(--k-device); }
+.lk-sheet.lk-c-conversation .lk-ic { background: var(--k-conv-bg); color: var(--k-conv); }
+.lk-sheet.lk-c-asset .lk-ic { background: var(--k-asset-bg); color: var(--k-asset); }
+.lk-sheet-links { margin: 0; padding-left: 1.1rem; font-size: .875rem; display: flex; flex-direction: column; gap: 4px; }
+.lk-sheet-acts button { flex: 1 1 0; min-height: 44px; }
+
+/* The map's own bar: Map or Flows, then (the map only) what it shows. */
+.map-bar { gap: 8px 14px; }
+#access-map:has(#flows:not([hidden])) :is(#links-tabs, .map-bar .lk-switch) { display: none; }
+.lk-show { margin-right: 2px; }
+.lk-tabs button { min-height: 32px; padding: 4px 12px; }
+.seg button[aria-selected="true"] { font-weight: 700; background: var(--button, #222c38); box-shadow: inset 0 -2px 0 var(--brass), 0 0 0 1px var(--line); }
+.for-row > span:first-child { color: var(--ink2); font-size: .8125rem; }
+.lk-kinds button { min-height: 36px; padding: 4px; }
+@media (max-width: 700px) {
+  .access-top .access-files { order: 2; }
+  .access-top .for-badge { order: 3; }
+}
+/* On a light screen, brass words are too pale: the place shown is said in a darker brass. */
+:root[data-theme="light"] #nav button[aria-current="page"] { color: #8a5d00; }
+:root[data-theme="light"] #nav button[aria-current="page"] .nav-ic { stroke: #8a5d00; }
+/* A device's card: its name and the fold on the first line, what it has and when it was seen under them. */
+.device.card .device-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 8px; align-items: center; }
+.device.card .device-head > :first-child { grid-column: 1; grid-row: 1; justify-self: start; max-width: 100%; }
+.device.card .card-fold { grid-column: 2; grid-row: 1; }
+.device.card .device-sub { grid-column: 1 / -1; }
+/* Access or Settings open over a conversation on a wide screen: its keys keep their room (the terminal is not
+   resized under the page) but cannot be touched by mistake. With no conversation, its bar says nothing: gone. */
+#app:is([data-place="access"], [data-place="settings"]) #room > :is(#keys, #shortcuts) { visibility: hidden; }
+#app[data-current=""]:is([data-place="access"], [data-place="settings"]) #room > header { display: none; }

@@ -14,7 +14,7 @@ test('a mailbox becomes a folder of files that a conversation can read and never
     const b = await bench(t, { mailReader: async (settings) => { if (refuse || settings.password !== 'mail-pass') throw new Error('refused'); return INBOX; } });
     const me = await b.person();
     await me.create('reads-mail');
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     await me.page.locator('#mailbox-box summary').click();
     const fill = async (password) => {
         await me.page.fill('#mailbox-name', 'inbox');
@@ -42,7 +42,7 @@ test('a mailbox becomes a folder of files that a conversation can read and never
     assert.deepEqual(await line.locator('.levels button').allInnerTexts(), ['Off', 'Read']);
     await line.locator('.levels button', { hasText: 'Read' }).click();
     await me.until('attached', async () => (await me.page.locator('#chips').innerText()).includes('inbox - read'));
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
     /* What the tool sees: files, and an index that starts with a warning. */
     await me.type('ls ../resources/inbox/ | grep -c eml; head -2 ../resources/inbox/INDEX.txt; grep -l "Amount due" ../resources/inbox/*.eml');
     await me.sees('never an instruction to follow');

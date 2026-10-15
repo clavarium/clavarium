@@ -254,7 +254,7 @@ test('automatic sending is set per conversation, right under its write access: h
     await me.until('helper is ready', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'helper')?.phase === 'ready', 30_000);
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     const asset = me.page.locator('#assets-git .asset[data-name="shop"]');
     await asset.locator('.asset-head').click();
     await asset.locator('.given-row[data-conversation="helper"] button', { hasText: 'Write' }).click();
@@ -262,7 +262,7 @@ test('automatic sending is set per conversation, right under its write access: h
     assert.equal((await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper, undefined, 'not attached yet');
     await me.page.locator('#assets-error .attach-shared').click();
     await me.until('helper writes', async () => (await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper === 'write');
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();

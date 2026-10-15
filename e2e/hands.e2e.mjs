@@ -114,7 +114,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await me.until('inside the sub-folder', async () => (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'reports/out');
     await me.page.locator('#files-close').click();
     /* Removed from Assets: only a folder attached nowhere can go -- the button is there, greyed, and says why. */
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     const asset = me.page.locator('#assets-folder .asset[data-name="reports"]');
     /* A folder just made opens on its card by itself: the arrow is down. */
     assert.equal(await asset.locator('.asset-head').getAttribute('aria-expanded'), 'true');
@@ -127,7 +127,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await asset.locator('button', { hasText: 'Remove' }).click();
     await me.page.locator('#assets button.danger').click();
     await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-folder .asset').count()) === 0);
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
@@ -135,13 +135,13 @@ test('a git repository is added from the page, attached like a folder, and is a 
     const b = await bench(t);
     const me = await b.person();
     await me.create('coder');
-    await me.page.locator('#assets-open').click();
+    await me.openAccess('assets');
     await me.page.locator('#git-box summary').click();
     await me.page.fill('#git-name', 'site');
     await me.page.locator('#git-new button[type=submit]').click();
     await me.until('the repository is listed', async () => (await me.page.locator('#assets-git .asset[data-name="site"]').count()) === 1);
     assert.match(await me.page.locator('#assets-git-title').innerText(), /Repositories \(1\)/);
-    await me.page.locator('#assets-close').click();
+    await me.page.locator('#access-close').click();
     await me.access('site', 'Write');
     assert.match(await me.page.locator('#chips').innerText(), /site - write/);
     await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
