@@ -121,7 +121,7 @@ export class Mailboxes {
 
     /* What the page may know. Never the password. */
     list() {
-        return this.#store.all().map((m) => ({ name: m.name, host: m.host, user: m.user, messages: m.messages ?? 0, syncedAt: m.syncedAt ?? null, failure: m.failure ?? null }));
+        return this.#store.all().map((m) => ({ name: m.name, host: m.host, port: m.port ?? 993, user: m.user, messages: m.messages ?? 0, syncedAt: m.syncedAt ?? null, failure: m.failure ?? null }));
     }
 
     /* Adds a mailbox after proving it can be read, as a folder of that name. */

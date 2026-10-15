@@ -8,7 +8,7 @@ listed here.
 
 - **Network limits per agent.** A machine reaches only its model provider and
   the addresses its owner allows; everything else is refused from outside the
-  machine, and the "who sees what" map shows it. Today an agent can send what
+  machine, and "Who gets what" shows it. Today an agent can send what
   it reads to any address on the internet, without any of the owner's keys
   (for example by pushing its repository to a server of its own).
 - **Checks run in the runner.** The pre-push hook and the owner's check command

@@ -109,7 +109,7 @@ test('a mailbox is saved only once it has been read; its password is sealed and 
     const boxes = new SignInMailboxes({ store: new Store(join(dir, 'signin.json')), vault: new Vault(join(dir, 'vault.key')), rules: (name) => (name === 'chat' ? RULES : undefined), reader });
     await assert.rejects(boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'wrong' }));
     assert.equal(boxes.settings('chat').configured, false);
-    assert.deepEqual(await boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'right' }), { available: true, configured: true, host: 'imap.example.com', user: 'u' });
+    assert.deepEqual(await boxes.set('chat', { host: 'imap.example.com', user: 'u', password: 'right' }), { available: true, configured: true, host: 'imap.example.com', port: 993, user: 'u' });
     assert.ok(!readFileSync(join(dir, 'signin.json'), 'utf8').includes('right'));
     /* Polled by a page: the mailbox is not asked each time. */
     reads = 0;

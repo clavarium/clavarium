@@ -133,3 +133,18 @@ test('every relative link, picture, stylesheet, download and anchor leads somewh
 test('every setup offered for download is valid JSON', () => {
     for (const f of FILES.filter((x) => x.endsWith('.json'))) assert.doesNotThrow(() => JSON.parse(read(f)), f);
 });
+
+/* "Import it in Clavarium", the case pages say: so it must be a file the
+   import reads (server/setup.mjs), with every agent on a tool Clavarium has. */
+test('every setup offered for download is one the import reads', async () => {
+    const { readSetup } = await import('../server/setup.mjs');
+    const { readTools } = await import('../server/tools.mjs');
+    const tools = readTools(readFileSync(join(ROOT, '..', 'config', 'tools.json'), 'utf8'));
+    const setups = FILES.filter((x) => x.endsWith('.clavarium.json'));
+    assert.ok(setups.length >= 5);
+    for (const f of setups) {
+        const { doc } = readSetup(read(f), tools);
+        assert.ok(doc.nodes.filter((n) => n.kind === 'conversation').every((n) => tools.some((t) => t.id === n.tool)), `${f}: an agent on a tool Clavarium does not have`);
+        assert.match(read(f.replace('.clavarium.json', '.html')), /Scripts are not built yet/, `${f}: its page says what the import does not do`);
+    }
+});

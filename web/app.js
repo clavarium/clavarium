@@ -570,7 +570,7 @@
             items.append(b);
         }
         $('empty').hidden = conversations.length > 0;
-        $('sharing-open').hidden = $('assets-open').hidden = $('settings-open').hidden = DEVICE;
+        $('sharing-open').hidden = $('assets-open').hidden = $('settings-open').hidden = $('links-open').hidden = DEVICE;
         $('sharing-open').textContent = sharedDevices.length > 0 ? `Devices & sharing (${sharedDevices.length})` : 'Devices & sharing';
     }
     async function refresh() {
@@ -1752,82 +1752,18 @@
     $('assets-open').addEventListener('click', () => { void openAssets(); });
     $('assets-close').addEventListener('click', () => { $('assets').hidden = true; focusTerminal(); });
 
-    /* ---------- who sees what: every agent, every thing, and the lines between ---------- */
-    /* The table of rights, drawn. Nothing here is a setting: it shows what was
-       given, so that it can be answered at a glance, and shown to somebody. */
-    const SVG = 'http://www.w3.org/2000/svg';
-    const svg = (tag, attrs = {}, text) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); if (text !== undefined) e.textContent = text; return e; };
-    let mapFocus = null;        /* { side: 'agent' | 'thing', name } */
-    async function paintMap() {
-        const [things, keys] = await Promise.all([fetch(`${API}/resources`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => [])]);
-        const agents = conversations.map((c) => ({ name: c.name, label: c.toolLabel ?? c.tool, asleep: c.asleep === true }));
-        const right = [...things.map((r) => ({ name: r.name, kind: kindOf(r) === 'git' ? 'repository' : kindOf(r) })), ...keys.map((k) => ({ name: k.name ?? k, kind: 'key' }))];
-        const links = [];
-        for (const c of conversations) {
-            for (const r of c.resources ?? []) links.push({ agent: c.name, thing: r.name, access: r.access === 'write' ? 'write' : 'read' });
-            for (const k of c.secrets ?? []) links.push({ agent: c.name, thing: k.name ?? k, access: 'use' });
-        }
-        const ROW = 46; const W = 760; const LEFT = 250; const RIGHT = 510;
-        const height = Math.max(agents.length, right.length, 1) * ROW + 16;
-        const y = (i) => 8 + i * ROW + ROW / 2;
-        const drawing = svg('svg', { viewBox: `0 0 ${W} ${height}`, role: 'img', 'aria-label': `${agents.length} agent(s), ${right.length} thing(s), ${links.length} right(s) given` });
-        const curve = (a, t) => `M${LEFT} ${y(a)} C${LEFT + 110} ${y(a)} ${RIGHT - 110} ${y(t)} ${RIGHT} ${y(t)}`;
-        /* What is NOT given is drawn too, and kept out of sight until one agent
-           or one thing is looked at: an absence nobody sees reassures nobody. */
-        agents.forEach((a, ai) => right.forEach((t, ti) => {
-            if (links.some((l) => l.agent === a.name && l.thing === t.name)) return;
-            const g = svg('g', { class: 'map-no', 'data-agent': a.name, 'data-thing': t.name, hidden: '' });
-            g.append(svg('path', { d: curve(ai, ti) }));
-            const mx = (LEFT + RIGHT) / 2; const my = (y(ai) + y(ti)) / 2;
-            g.append(svg('path', { class: 'map-cross', d: `M${mx - 7} ${my - 7} l14 14 m0 -14 l-14 14` }));
-            drawing.append(g);
-        }));
-        for (const link of links) {
-            const a = agents.findIndex((x) => x.name === link.agent); const t = right.findIndex((x) => x.name === link.thing);
-            if (a < 0 || t < 0) continue;
-            drawing.append(svg('path', { class: 'map-line', 'data-access': link.access, 'data-agent': link.agent, 'data-thing': link.thing, d: curve(a, t) }));
-        }
-        let hover = null;
-        const subs = new Map();
-        /* One agent or one thing looked at: its lines stay lit, the others fade,
-           and what it does not see is crossed out. Hovering shows it for a
-           moment; a touch or a click keeps it. */
-        const show = () => {
-            const focus = hover ?? mapFocus;
-            const of = (el) => (focus?.side === 'agent' ? el.dataset.agent : el.dataset.thing);
-            for (const line of drawing.querySelectorAll('.map-line')) line.dataset.dim = String(Boolean(focus) && of(line) !== focus.name);
-            for (const no of drawing.querySelectorAll('.map-no')) no.toggleAttribute('hidden', !focus || of(no) !== focus.name);
-            for (const g of drawing.querySelectorAll('.map-box')) {
-                const { side, name } = g.dataset;
-                const seen = !focus || focus.side === side || links.some((l) => (side === 'agent' ? l.agent === name && l.thing === focus.name : l.thing === name && l.agent === focus.name));
-                g.dataset.seen = String(seen); g.dataset.focus = String(Boolean(focus) && focus.side === side && focus.name === name);
-                g.querySelector('.map-sub').textContent = seen ? subs.get(`${side}/${name}`) : 'does not see';
-            }
-            const mine = focus ? links.filter((l) => (focus.side === 'agent' ? l.agent : l.thing) === focus.name) : links;
-            $('map-said').textContent = !focus ? `${agents.length} agent(s), ${right.length} thing(s) kept here, ${links.length} right(s) given.`
-                : focus.side === 'agent' ? `${focus.name} sees ${mine.length} of ${right.length}: ${mine.map((l) => `${l.thing} (${l.access === 'use' ? 'handed' : l.access})`).join(', ') || 'nothing'}. The rest does not exist for it.`
-                    : `${focus.name} is seen by ${mine.length} of ${agents.length} agent(s): ${mine.map((l) => `${l.agent} (${l.access === 'use' ? 'handed' : l.access})`).join(', ') || 'none'}.`;
-        };
-        const box = (side, i, name, sub) => {
-            subs.set(`${side}/${name}`, sub);
-            const g = svg('g', { class: 'map-box', 'data-side': side, 'data-name': name, 'data-seen': 'true', tabindex: 0, role: 'button' });
-            const x = side === 'agent' ? 8 : RIGHT;
-            g.append(svg('rect', { x, y: y(i) - 17, width: side === 'agent' ? LEFT - 8 : W - RIGHT - 8, height: 34, rx: 8 }));
-            g.append(svg('text', { x: x + 12, y: y(i) + 5, class: 'map-name' }, name.length > 22 ? `${name.slice(0, 21)}...` : name));
-            g.append(svg('text', { x: side === 'agent' ? LEFT - 12 : W - 20, y: y(i) + 5, class: 'map-sub', 'text-anchor': 'end' }, sub));
-            const pick = () => { mapFocus = mapFocus?.side === side && mapFocus.name === name ? null : { side, name }; hover = null; show(); };
-            g.addEventListener('click', pick); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(); } });
-            g.addEventListener('mouseenter', () => { hover = { side, name }; show(); });
-            g.addEventListener('mouseleave', () => { hover = null; show(); });
-            return g;
-        };
-        agents.forEach((a, i) => drawing.append(box('agent', i, a.name, a.asleep ? `${a.label} - asleep` : a.label)));
-        right.forEach((t, i) => drawing.append(box('thing', i, t.name, t.kind)));
-        $('map-drawing').replaceChildren(drawing);
-        show();
-    }
-    $('map-open').addEventListener('click', async () => { mapFocus = null; $('assets').hidden = true; $('map').hidden = false; await refresh(); await paintMap(); });
-    $('map-close').addEventListener('click', () => { $('map').hidden = true; focusTerminal(); });
+    /* ---------- who gets what, and flows: see links.js ---------- */
+    /* What those sheets share with the rest of the page: the requests, the
+       automatic sending form of Access, the share sheet for a device to pair. */
+    const links = DEVICE ? undefined : window.clavariumLinks?.({
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); },
+        autoSending: (conversation, name) => autoSending(conversation, name),
+        partsFor: (name) => partsFor(name),
+        hideSheets: () => { for (const id of ['panel', 'files', 'assets', 'settings', 'gitview', 'sharing', 'copy']) $(id).hidden = true; },
+        pairNew: async (grants, label) => { await openCompose(grants.map((g) => [g.asset, g.rights])); $('sharing-label').value = label; sayChoice(); },
+    });
+    $('links-open').addEventListener('click', () => { void links?.open(); });
+    $('assets-links').addEventListener('click', () => { $('assets').hidden = true; void links?.open(); });
 
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings() {

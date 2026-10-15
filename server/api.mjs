@@ -45,6 +45,13 @@
  *   GET  /api/voice                         is dictation available?
  *   POST /api/voice                         the body IS a WAV recording -> {text}
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
+ *   GET  /api/flows                         who gets what: devices, conversations, assets, the rights between them, the flows
+ *   POST /api/flows/name                    {around, name}: a flow named by the owner ('' gives it back its own)
+ *   POST /api/setup/export                  {flow?} -> {name, text}: the configuration as one file, never the data
+ *   POST /api/setup/preview                 {text, choices?}: what an import would do, said before anything is done
+ *   POST /api/setup/import                  {text, choices?}: made in the background; GET says how far it is
+ *   POST /api/setup/pair                    {label}: what a device to pair will get (the code is made by /api/shares)
+ *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>  the body IS the file
  *
@@ -56,13 +63,16 @@ import { Refusal } from './conversations.mjs';
 import { list, download, importFile, page, PAGE_HEADERS } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
+import { FILE_MAX } from './setup.mjs';
 
 const BODY_MAX = 16 * 1024;
+/* A setup file travels inside the JSON of a request: room for it, escaped. */
+const SETUP_BODY_MAX = 3 * FILE_MAX;
 
-function readBody(request) {
+function readBody(request, max = BODY_MAX) {
     return new Promise((resolve, reject) => {
         let size = 0; const parts = [];
-        request.on('data', (d) => { size += d.length; if (size > BODY_MAX) { reject(new Refusal(413, 'Request too large.')); request.destroy(); } else parts.push(d); });
+        request.on('data', (d) => { size += d.length; if (size > max) { reject(new Refusal(413, 'Request too large.')); request.destroy(); } else parts.push(d); });
         request.on('end', () => {
             if (parts.length === 0) return resolve({});
             try { const j = JSON.parse(Buffer.concat(parts).toString('utf8')); resolve(j && typeof j === 'object' ? j : {}); }
@@ -73,7 +83,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -153,6 +163,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
+            if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
+            if (pathname === '/api/setup/import' && setup) return send(200, setup.job()), true;
             const looked = /^\/api\/conversations\/([^/]+)\/health$/.exec(pathname);
             if (looked && health) return send(200, health.of(decodeURIComponent(looked[1]))), true;
             /* The words of the chat screen, for a screen whose language is `lang`; and the owner's choice of them. */
@@ -184,10 +196,27 @@ export async function handleApi(request, response, conversations, headers, resou
         if (!originOk(request.headers) || !String(request.headers['content-type'] ?? '').startsWith('application/json')) {
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
-        const body = await readBody(request);
+        const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
         if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
+        /* Who gets what, and a whole setup in one file: see setup.mjs. */
+        if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
+            if (!setup) return send(404, { error: 'Not found.' }), true;
+            const choices = body.choices && typeof body.choices === 'object' ? body.choices : {};
+            if (pathname === '/api/flows/name') return send(200, setup.rename(body.around, body.name)), true;
+            if (pathname === '/api/setup/export') return send(200, setup.exportText({ flow: typeof body.flow === 'string' ? body.flow : undefined })), true;
+            if (pathname === '/api/setup/preview') return send(200, setup.preview(body.text, choices)), true;
+            if (pathname === '/api/setup/import') return send(202, setup.start(body.text, choices)), true;
+            if (pathname === '/api/setup/pair') return send(200, setup.toPair(body.label)), true;
+            if (pathname === '/api/setup/drop') { setup.drop(body.id); return send(200, { ok: true }), true; }
+            return send(404, { error: 'Not found.' }), true;
+        }
         /* A folder, or a git repository (empty, or cloned from `from`). A mailbox has its own way in. */
-        if (pathname === '/api/resources' && resources) return send(201, await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from, via: body.via })), true;
+        if (pathname === '/api/resources' && resources) {
+            const made = await resources.create({ name: body.name, type: body.type === 'git' ? 'git' : 'folder', from: body.from, via: body.via });
+            /* One an import was waiting for: attached where the file said. */
+            void setup?.assetAdded(made.name).catch(() => {});
+            return send(201, made), true;
+        }
         if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
         if (pathname === '/api/shelf/rebuild' && shelf) return send(202, await shelf.rebuild()), true;
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
@@ -201,11 +230,11 @@ export async function handleApi(request, response, conversations, headers, resou
             if (gone) sharing?.devices.forgetAsset(resources.assetOf(gone));
             return send(200, { ok: true }), true;
         }
-        if (pathname === '/api/mailboxes' && mailboxes) return send(201, await mailboxes.add(body)), true;
+        if (pathname === '/api/mailboxes' && mailboxes) { const made = await mailboxes.add(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
         const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
-        if (pathname === '/api/secrets' && secrets) return send(201, secrets.set(body)), true;
+        if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;

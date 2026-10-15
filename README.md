@@ -72,9 +72,7 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   terminal, for whoever does not read one: a box to say what is wanted,
   what is ready to read, and what the tool says now as plain text, read by
   the page from its own screen. What is written is typed into the same
-  terminal; the server reads nothing more. In Assets, "Who sees what" draws
-  the table of rights: every agent, every thing kept here, a line for each
-  right given, and what an agent does not see.
+  terminal; the server reads nothing more.
 
 - **12 - talk through the app**: a branching on Clavarium Parley, a project
   of its own (copied unchanged in `server/parley`). Every machine has a
@@ -111,6 +109,25 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   holds what the VM manager says it has (drawn in `blueprint/machine.html`).
   The page's text has one size per
   device, the terminal's included; on a phone the terminal has the room.
+
+- **14 - who gets what, and flows**: one screen draws every device,
+  conversation and asset, and each right between them in the colour of what
+  it gives (terminal, chat, read, write, use). At rest each box says how many
+  links it has; a box touched shows its own, greys the rest and says them in
+  words, through a conversation too. A link is made by dragging from a dot
+  or touching one box then the other, changed or taken away by the knob on
+  it: the same requests and confirmations as Access, Sharing and Assets. On
+  a phone, a list, then one box and its links as rows. Apart, "Flows":
+  the trace of one box (what reaches it, what it reaches, step by step),
+  every group that touches nothing else, named after its most linked
+  conversation, and a whole setup as one file (`server/setup.mjs`): its
+  configuration, never its data, no secret, no key, no password, no time in
+  it. A file is shown whole before it is imported (what is new, what is
+  already here, what is missing, every text a tool will be typed); nothing
+  in it runs on the server; a tool not in `config/tools.json` is refused.
+  What a file cannot bring (a secret's value, a password, a device's
+  pairing) waits, drawn dashed, and is done by itself once added. Drawn in
+  `blueprint/flows.html`.
 
 Not yet: mailbox and git resources, delivery.
 

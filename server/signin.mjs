@@ -153,7 +153,7 @@ export class SignInMailboxes {
     /* What the page may know: that a mailbox is set, and where. Never the password. */
     settings(conversation) {
         const s = this.#store.get(conversation);
-        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, host: s?.host ?? null, user: s?.user ?? null };
+        return { available: this.#rules(conversation) !== undefined, configured: s !== undefined, host: s?.host ?? null, port: s?.port ?? null, user: s?.user ?? null };
     }
 
     /* Saves a mailbox after proving it can be read; an empty host removes it. */

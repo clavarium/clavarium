@@ -157,7 +157,12 @@ export class Resources {
        never again: a repository that a tool can write in could make git run
        what it likes (hooks, filters). Its history is the tool's business, in
        its own machine. */
-    async create({ name, type = 'folder', from, via }) {
+    /* `pin`: a commit the clone is put at (an imported setup names one, see
+       setup.mjs): done in the same fresh folder, right after the clone, with
+       hooks off. Not found there, the clone stays at the newest commit, and
+       says so (`pinned: false`). */
+    async create({ name, type = 'folder', from, via, pin }) {
+        if (pin !== undefined && (typeof pin !== 'string' || !/^[0-9a-f]{7,40}$/.test(pin))) throw new Refusal(400, 'A pinned commit is written in hexadecimal, 7 to 40 characters.');
         if (!TYPES.includes(type)) throw new Refusal(400, 'A resource is a folder, a mailbox or a git repository.');
         const address = type === 'git' ? readAddress(from) : undefined;
         /* Everything is checked before anything is made. */
@@ -185,11 +190,16 @@ export class Resources {
                 throw new Refusal(502, origin ? `The repository could not be cloned: ${explain(r.stderr)}` : `The repository could not be made: ${firstLine(r.stderr)}`);
             }
         }
+        let pinned;
+        if (type === 'git' && origin && pin) {
+            const r = await this.#git(['-c', 'core.hooksPath=/dev/null', '-c', 'protocol.file.allow=never', 'reset', '--quiet', '--hard', pin], this.folder(name)).catch(() => ({ code: 1 }));
+            pinned = r.code === 0;
+        }
         if (credential) this.#access.remember(name, credential);
         const resource = { name, type, ...(origin ? { from: origin } : {}), createdAt: new Date().toISOString() };
         this.#store.put(resource);
         /* firstSeen: the host keys recorded by this very clone, to be shown once. */
-        return { ...resource, attachments: {}, ...(type === 'git' && this.#access ? { via: this.#access.describe(name, origin) } : {}), ...(firstSeen.length ? { firstSeen } : {}) };
+        return { ...resource, attachments: {}, ...(type === 'git' && this.#access ? { via: this.#access.describe(name, origin) } : {}), ...(firstSeen.length ? { firstSeen } : {}), ...(pinned === undefined ? {} : { pinned }) };
     }
 
     /* The read-only view of a folder, made if it is not already there. */

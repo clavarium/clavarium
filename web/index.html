@@ -27,6 +27,7 @@
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
     <span class="sp"></span>
+    <button type="button" id="links-open" hidden>Who gets what</button>
     <button type="button" id="assets-open" hidden>Assets</button>
     <button type="button" id="sharing-open" hidden>Devices &amp; sharing</button>
     <button type="button" id="settings-open" hidden>Settings</button>
@@ -261,17 +262,36 @@
         </details>
       </div>
       <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
-      <div id="map" class="sheet" hidden>
-        <div class="panel-top"><b>Who sees what</b><button type="button" id="map-close">Close</button></div>
-        <p class="hint">Every agent on the left, everything kept here on the right. A line is a right you gave. No line: for that agent, it does not exist. Touch an agent or a thing to see it alone.</p>
-        <div id="map-legend" class="row"><span class="key" data-access="write">reads and writes</span><span class="key" data-access="read">reads</span><span class="key" data-access="use">is handed (a key)</span><span class="key" data-access="none">does not see</span></div>
-        <div id="map-drawing"></div>
-        <p id="map-said" class="hint" role="status"></p>
+      <!-- WHO GETS WHAT: every device, conversation and asset, and the rights between them (links.js). -->
+      <div id="links" class="sheet" hidden>
+        <div class="panel-top"><b>Who gets what</b><span class="row"><button type="button" id="links-flows">Flows</button><button type="button" id="links-close">Close</button></span></div>
+        <div id="links-tabs" class="lk-tabs" role="tablist" aria-label="What to show">
+          <button type="button" role="tab" data-view="devices">Devices</button>
+          <button type="button" role="tab" data-view="convs">Conversations</button>
+          <button type="button" role="tab" data-view="all">Everything</button>
+          <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
+        </div>
+        <div id="links-legend" class="lk-legend"></div>
+        <p id="links-hint" class="hint" aria-live="polite"></p>
+        <p id="links-error" class="error" role="alert" hidden></p>
+        <div id="links-card" class="lk-card" hidden aria-live="polite"></div>
+        <div id="links-scroller" class="lk-scroller"><div id="links-board" class="lk-board"><svg id="links-svg" class="lk-links" aria-hidden="true"></svg></div></div>
+        <div id="links-phone" class="lk-phone"></div>
+      </div>
+      <!-- FLOWS: the trace of one box, every flow apart, a setup to a file and back (links.js, server/setup.mjs). -->
+      <div id="flows" class="sheet" hidden>
+        <div class="panel-top"><b>Flows</b><span class="row"><button type="button" id="flows-back">Who gets what</button><button type="button" id="flows-close">Close</button></span></div>
+        <div class="row lk-files"><button type="button" id="flows-export">Export everything</button><button type="button" id="flows-import">Import a setup...</button><input type="file" id="flows-file" accept=".json,application/json" hidden><span id="flows-said" class="hint" role="status"></span></div>
+        <p id="flows-error" class="error" role="alert" hidden></p>
+        <div id="flows-preview" class="lk-preview" hidden></div>
+        <div class="row lk-tpick"><label for="flows-of">Trace</label><select id="flows-of"></select><span id="flows-note" class="hint"></span></div>
+        <div id="flows-trace" class="lk-trace"></div>
+        <div id="flows-all"></div>
       </div>
       <div id="assets" class="sheet" hidden>
         <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
         <p class="hint">Folders, repositories, mailboxes, secrets: what is kept here, which conversations use it, which devices were given it.</p>
-        <div class="row"><button type="button" id="map-open" class="primary">Who sees what</button></div>
+        <div class="row"><button type="button" id="assets-links" class="primary">Who gets what</button></div>
         <div id="assets-filters" class="choices" role="group" aria-label="Kind of asset"></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <section data-kind="folder">
@@ -612,6 +632,7 @@
 </div>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/fit.js"></script>
+<script src="/links.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>
 </html>
