@@ -200,3 +200,51 @@ test('the folders, their views and the work folders are where the host program k
     assert.equal(resources.view('notes'), join(mnt, 'views', 'notes'));
     assert.equal(resources.workFolder('alpha'), join(mnt, 'work', 'alpha'));
 });
+
+/* A repair and a change of level used to interleave: the repair read "write",
+   waited for its unmount, and mounted the folder itself after the owner had
+   switched to read (or detached). They take turns now, and the repair reads
+   the level again just before mounting. */
+for (const then of ['read', 'none']) {
+    test(`a repair that meets a switch to ${then} never leaves the folder itself mounted`, async (t) => {
+        const dir = mkdtempSync(join(tmpdir(), 'clv-res-'));
+        t.after(() => rmSync(dir, { recursive: true, force: true }));
+        const vm = []; let hold = null; let held = null;
+        const resources = new Resources({
+            store: new Store(join(dir, 'resources.json')),
+            vms: new Vms(async (argv) => {
+                const line = argv.slice(1).join(' ');
+                if (hold && line.startsWith('umount')) { const gate = hold; hold = null; held(); await gate; }
+                vm.push(line);
+                return { code: 0, stdout: '', stderr: '' };
+            }, ['vmm']),
+            host: async (argv) => { if (argv[0] === 'folder' && argv[1] === 'make') mkdirSync(join(dir, 'resources', argv[2]), { recursive: true }); return { code: 0, stdout: '', stderr: '' }; },
+            dataDir: dir, uid: 1001, gid: 1002,
+        });
+        await resources.create({ name: 'notes' });
+        await resources.attach('alpha', 'notes', 'write');
+        vm.length = 0;
+        let release; const gate = new Promise((r) => { release = r; });
+        const reached = new Promise((r) => { held = r; }); hold = gate;
+        const repaired = resources.repair('alpha', '/resources/notes');
+        await reached;
+        const switched = resources.attach('alpha', 'notes', then);
+        await new Promise((r) => setTimeout(r, 20));
+        release();
+        await Promise.all([repaired, switched]);
+        const last = vm.filter((l) => l.startsWith('mount') || l.startsWith('umount')).pop();
+        if (then === 'read') assert.equal(last, 'mount clv-alpha view notes 1001 1002');
+        else assert.match(last, /^umount clv-alpha notes/);
+        assert.deepEqual(resources.of('alpha'), then === 'read' ? [{ name: 'notes', access: 'read' }] : []);
+    });
+}
+
+test('a repair of a folder detached meanwhile mounts nothing', async (t) => {
+    const b = bench(t);
+    await b.resources.create({ name: 'notes' });
+    await b.resources.attach('alpha', 'notes', 'write');
+    await b.resources.attach('alpha', 'notes', 'none');
+    b.vm.length = 0;
+    assert.equal(await b.resources.repair('alpha', '/resources/notes'), 'it is not attached any more');
+    assert.deepEqual(b.vm, []);
+});

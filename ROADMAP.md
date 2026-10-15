@@ -20,6 +20,10 @@ listed here.
 - **GitLab webhook.** GitLab calls the server on each push, so the reference
   repository is refreshed at once instead of every few minutes.
 
+- **Parley on npm.** An agent installs Parley itself (`npm install -g
+  clavarium-parley`, an exact version) when it is asked to talk through the
+  app; until then the package is dropped next to it, in its work folder.
+
 ## Later
 
 - **Lock files in .git with a sticky bit**, as a second belt behind the runner,
@@ -43,7 +47,8 @@ listed here.
     (1.4.2 to 1.4.3), minor versions too (1.4 to 1.5), or major versions too
     (1 to 2).
   - The administrator chooses update windows: every night, a day of the week,
-    a day of the month, and an hour range. Inside a window the server picks a
+    a day of the month, and an hour range. Turned on with no window given, it
+    is every night between 2 and 5 am. Inside a window the server picks a
     random moment to look for a new version, so a fleet of servers does not
     all update at the same minute.
   - The new version is downloaded beside the current one, checked, switched

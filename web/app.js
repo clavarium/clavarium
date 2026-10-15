@@ -509,7 +509,7 @@
     const post = async (path, body) => {
         const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw new Error(j.error || 'The request failed.');
+        if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind });
         return j;
     };
     function paint() {
@@ -742,10 +742,20 @@
        the platform and what belonged to one conversation were interleaved:
        the owner said he got lost in it.) */
     const kindOf = (resource) => (resource.type === 'mailbox' || resource.type === 'git' ? resource.type : 'folder');
-    const attachTo = async (conversation, name, access, errorId = 'panel-error') => {
+    /* Giving a repository for writing next to a conversation that sends from
+       it by itself: the server asks first (kind "confirm-shared"); the owner
+       reads why, in words, and confirms with a button -- or does not. */
+    const attachTo = async (conversation, name, access, errorId = 'panel-error', shared = false) => {
         $(errorId).hidden = true;
-        try { await post(`${API}/conversations/${encodeURIComponent(conversation)}/resources`, { resource: name, access }); }
-        catch (error) { $(errorId).textContent = error.message; $(errorId).hidden = false; }
+        try { await post(`${API}/conversations/${encodeURIComponent(conversation)}/resources`, { resource: name, access, ...(shared ? { shared: true } : {}) }); }
+        catch (error) {
+            $(errorId).textContent = error.message; $(errorId).hidden = false;
+            if (error.kind === 'confirm-shared') {
+                const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'danger attach-shared'; yes.textContent = 'Confirm and attach';
+                yes.addEventListener('click', async () => { yes.disabled = true; await attachTo(conversation, name, access, errorId, true); if (errorId === 'panel-error') await paintPanel(); else await paintAssets(); });
+                $(errorId).append(' ', yes);
+            }
+        }
         await refresh();
     };
     const handTo = async (conversation, secret, attached, errorId = 'panel-error') => {
@@ -792,6 +802,10 @@
         const hint = document.createElement('p'); hint.className = 'hint';
         hint.textContent = 'When one of its branches has commits the remote lacks, then nothing new for the quiet delay, and its name is in this list, it is sent to the branch of the same name, as Send would: never forced, only while this conversation\'s machine runs.';
         const asking = document.createElement('p'); asking.className = 'hint auto-confirm'; asking.hidden = true; asking.setAttribute('role', 'alert');
+        /* Said plainly, whatever the list: what makes the server ask. */
+        const unknown = document.createElement('p'); unknown.className = 'hint auto-unknown'; unknown.hidden = true;
+        unknown.textContent = 'The remote\'s default branch is not known yet (it is learnt at a refresh): until it is, nothing is sent by itself unless you confirm each branch or pattern of the list.';
+        const shared = document.createElement('p'); shared.className = 'hint auto-shared'; shared.hidden = true;
         const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = 'Confirm and save'; sure.hidden = true;
         const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = 'Save';
         const said = document.createElement('span'); said.className = 'hint auto-said'; said.setAttribute('role', 'status');
@@ -802,26 +816,34 @@
         form.append(fields);
         fields.append(field('Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.', branches), hint,
             field('Quiet delay, in seconds', quiet), field('Sendings an hour, at most (0: no cap)', perHour),
-            check('It may create a branch the remote does not have', create), check('Only after the checks passed in its machine', checks), asking, actions);
+            check('It may create a branch the remote does not have', create), check('Only after the checks passed in its machine', checks), unknown, shared, asking, actions);
         box.append(summary, form);
         const fill = (about) => {
             const s = about.settings;
             branches.value = s.branches.join('\n'); quiet.value = String(s.quietSeconds); perHour.value = String(s.perHour);
             create.checked = s.create; checks.checked = s.checks;
             state.textContent = s.branches.length ? `on: ${s.branches.join(', ')}` : 'off';
+            unknown.hidden = Boolean(about.defaultBranch);
+            const others = about.sharedWith ?? [];
+            shared.hidden = others.length === 0;
+            shared.textContent = `Other conversations write in this same folder (${others.join(', ')}): their commits can be sent by this setting, and the checks run on hooks they can write.`;
         };
+        /* What the owner confirmed so far, for this form: each kind of
+           confirmation is asked in turn, and sent again with the others. */
+        const flags = {};
         const send = async (confirmed) => {
             said.textContent = ''; asking.hidden = true; sure.hidden = true;
-            const body = { branches: branches.value, quietSeconds: quiet.value === '' ? '' : Number(quiet.value), perHour: perHour.value === '' ? '' : Number(perHour.value), create: create.checked, checks: checks.checked, ...(confirmed ? { sure: true } : {}) };
+            if (confirmed) Object.assign(flags, confirmed);
+            const body = { branches: branches.value, quietSeconds: quiet.value === '' ? '' : Number(quiet.value), perHour: perHour.value === '' ? '' : Number(perHour.value), create: create.checked, checks: checks.checked, ...flags };
             const r = await fetch(where, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
             const j = await r.json().catch(() => ({}));
-            if (r.ok) { fill(j); said.textContent = 'Saved.'; return; }
+            if (r.ok) { for (const k of Object.keys(flags)) delete flags[k]; fill(j); said.textContent = 'Saved.'; return; }
             /* Nothing was saved: the owner reads what it would allow, then confirms or changes the list. */
-            if (j.kind === 'confirm-wide') { asking.textContent = j.error; asking.hidden = false; sure.hidden = false; return; }
+            if (j.kind === 'confirm-wide' || j.kind === 'confirm-shared') { asking.textContent = j.error; asking.hidden = false; sure.hidden = false; sure.dataset.kind = j.kind; return; }
             said.textContent = j.error || 'The request failed.';
         };
-        form.addEventListener('submit', (event) => { event.preventDefault(); void send(false); });
-        sure.addEventListener('click', () => { void send(true); });
+        form.addEventListener('submit', (event) => { event.preventDefault(); for (const k of Object.keys(flags)) delete flags[k]; void send(null); });
+        sure.addEventListener('click', () => { void send(sure.dataset.kind === 'confirm-shared' ? { shared: true } : { sure: true }); });
         void fetch(where).then((r) => (r.ok ? r.json() : null)).then((about) => { if (about) { fill(about); fields.disabled = false; } }).catch(() => {});
         return box;
     }

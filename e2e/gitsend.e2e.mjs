@@ -202,14 +202,27 @@ test('automatic sending is set per conversation, right under its write access: h
     assert.deepEqual([await field('branches').inputValue(), await field('quietSeconds').inputValue(), await field('perHour').inputValue(), await field('create').isChecked(), await field('checks').isChecked()],
         ['', '5', '20', false, true]);
 
-    /* Saved, and said in the summary. */
+    /* The remote is empty: its default branch is not known, said, and any
+       pattern is asked about -- the owner may still confirm it. */
+    assert.equal(await line.locator('.auto-unknown').isVisible(), true, 'the default branch not known: said');
     await field('branches').fill('try/*');
     await field('quietSeconds').fill('30');
     await field('perHour').fill('0');
     await field('create').check();
     await line.locator('button[type=submit]').click();
+    await me.until('try/* is asked about', async () => (await line.locator('.auto-confirm').isVisible()));
+    assert.match(await line.locator('.auto-confirm').innerText(), /default branch is not known yet/);
+    assert.deepEqual((await me.api('/api/conversations/builder/git/shop/auto')).body.settings.branches, [], 'not saved yet');
+    /* Once known (a first commit on the remote, a refresh), try/* needs nobody's word. */
+    const seed = join(b.dir, 'seed');
+    git(b.dir, 'clone', '--quiet', remote, seed); git(seed, 'commit', '--quiet', '--allow-empty', '-m', 'Start'); git(seed, 'push', '--quiet', 'origin', 'HEAD:main');
+    await me.api('/api/git/shop/refresh', {});
+    assert.equal((await me.api('/api/conversations/builder/git/shop/auto')).body.defaultBranch, 'main');
+    /* Saved, and said in the summary. */
+    await line.locator('button[type=submit]').click();
     await me.until('saved', async () => (await line.locator('.auto-said').innerText()) === 'Saved.');
     assert.equal(await line.locator('.auto-state').innerText(), 'on: try/*');
+    assert.equal(await line.locator('.auto-unknown').isVisible(), false, 'known now: no longer said');
 
     /* "*" and the default branch: asked about, nothing saved until confirmed. */
     for (const wide of ['*', 'main']) {
@@ -233,6 +246,29 @@ test('automatic sending is set per conversation, right under its write access: h
     await line.locator('summary').click();
     assert.deepEqual([await field('branches').inputValue(), await field('quietSeconds').inputValue(), await field('perHour').inputValue(), await field('create').isChecked(), await field('checks').isChecked()],
         ['try/*\nmain', '30', '0', true, true]);
+
+    /* A second writer of the same folder, next to automatic sending: asked
+       first, in words, in Assets; confirmed, it is attached, and builder's
+       panel says that helper's commits can be sent by its setting. */
+    assert.equal((await me.api('/api/conversations', { name: 'helper', tool: 'shell' })).status, 201);
+    await me.until('helper is ready', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'helper')?.phase === 'ready', 30_000);
+    await me.page.reload();
+    await me.until('live again', async () => (await me.state()) === 'live');
+    await me.page.locator('#assets-open').click();
+    const asset = me.page.locator('#assets-git .asset[data-name="shop"]');
+    await asset.locator('.asset-head').click();
+    await asset.locator('.given-row[data-conversation="helper"] button', { hasText: 'Write' }).click();
+    await me.until('a second writer is asked about', async () => /Other conversations write in this same folder/.test(await me.page.locator('#assets-error').innerText()));
+    assert.equal((await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper, undefined, 'not attached yet');
+    await me.page.locator('#assets-error .attach-shared').click();
+    await me.until('helper writes', async () => (await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper === 'write');
+    await me.page.locator('#assets-close').click();
+    await me.page.reload();
+    await me.until('live again', async () => (await me.state()) === 'live');
+    await me.page.locator('#folders').click();
+    await me.until('the line is back', async () => (await line.count()) === 1);
+    await line.locator('summary').click();
+    assert.match(await line.locator('.auto-shared').innerText(), /Other conversations write in this same folder \(helper\): their commits can be sent by this setting/);
 
     /* Read-only again: the line goes, and so do its settings. */
     await row.locator('.levels button', { hasText: 'Read' }).click();

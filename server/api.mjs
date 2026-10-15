@@ -300,9 +300,14 @@ export async function handleApi(request, response, conversations, headers, resou
         if (attach && resources) {
             const conversation = decodeURIComponent(attach[1]);
             if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
-            await resources.attach(conversation, String(body.resource ?? ''), String(body.access ?? ''));
-            /* Its automatic sending goes with the write attachment. */
-            if (String(body.access ?? '') !== 'write') gitKeeper?.forgetAttachment(String(body.resource ?? ''), conversation);
+            const name = String(body.resource ?? ''); const access = String(body.access ?? '');
+            /* A second writer next to one that sends by itself: confirmed first. */
+            if (access === 'write') gitKeeper?.beforeWriter(name, conversation, body.shared === true);
+            /* Its automatic sending goes with the write attachment -- forgotten
+               BEFORE the change, so that a change that fails half-way (unmounted,
+               not mounted again) never leaves settings to come back later. */
+            if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
+            await resources.attach(conversation, name, access);
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);

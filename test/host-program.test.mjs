@@ -339,3 +339,21 @@ test('the reader script: a plain .git only, readable refs only, every ref git sk
         assert.equal(r.status, 3);
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+/* The host allowed a disk of 2048 GB while the server stops at 256, and grew
+   one whatever room was left where the VM manager keeps its disks. */
+test('a disk grows only within the server\'s bound, and only when the host has the room for it', () => {
+    assert.equal(host('vm', 'set', 'clv-demo', 'disk', '256').code, 0);
+    assert.equal(host('vm', 'set', 'clv-demo', 'disk', '257').code, 78);
+    assert.equal(host('vm', 'set', 'clv-demo', 'disk', '2048').code, 78);
+    /* What it grows by may all be filled, and 6144 MB must stay free. */
+    assert.equal(host('disk', 'room', '8', '20', String(12 * 1024 + 6144)).code, 0);
+    const short = host('disk', 'room', '8', '20', String(12 * 1024 + 6143));
+    assert.equal(short.code, 78);
+    assert.match(short.err, /growing this disk from 8 to 20 GB needs 18432 MB/);
+    assert.equal(host('disk', 'room', '8', '8', '6144').code, 0, 'nothing more: only the minimum');
+    assert.equal(spawnSync('/bin/bash', [PROGRAM, 'disk', 'room', '8', '20', '999999']).status, 78, 'only in "say only"');
+    /* The size the VM manager says, in whole gigabytes. */
+    const sizes = spawnSync('/bin/bash', ['-c', `source <(sed -n '/^size_gb()/,/^}/p' "$0"); for v in 8.0GiB 16G 20480M 10737418240 1T bad; do printf '%s=%s\\n' "$v" "$(size_gb "$v")"; done`, PROGRAM], { encoding: 'utf8' });
+    assert.equal(sizes.stdout, '8.0GiB=8\n16G=16\n20480M=20\n10737418240=10\n1T=1024\nbad=\n');
+});

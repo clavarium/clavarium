@@ -190,3 +190,52 @@ test('the catalogue gives Claude Code and OpenCode at least 2 GB, and lets npm u
         assert.ok(tool.fixups.length > 0, `${id} is updated by npm as the machine's user`);
     }
 });
+
+/* The phase used to be set only after an awaited question to the VM
+   manager: two restarts, or a restart and a resize, asked together both
+   passed the check and ran alongside. */
+test('a change of the machine takes it at once: a second restart, a resize or a move asked meanwhile is refused', async (t) => {
+    const b = bench(t);
+    b.ready('demo');
+    const first = b.all.restart('demo');
+    assert.equal(b.store.get('demo').phase, 'restarting', 'taken before anything is awaited');
+    await assert.rejects(b.all.restart('demo'), /being restarted already/);
+    await assert.rejects(b.all.resize('demo', { memoryMb: 4096 }), /being restarted already/);
+    await assert.rejects(b.all.moveWork('demo', 'disk'), /being restarted already/);
+    await first; await b.all.restarted;
+    assert.equal(b.store.get('demo').phase, 'ready');
+    assert.equal(b.calls.filter((c) => c.startsWith('start')).length, 1, 'one restart, not two');
+});
+
+test('a change refused after it took the machine gives it back as it was', async (t) => {
+    const b = bench(t);
+    b.ready('gone'); b.states.delete('clv-gone');
+    await assert.rejects(b.all.resize('gone', { memoryMb: 4096 }), /no longer exists/);
+    assert.equal(b.store.get('gone').phase, 'ready');
+    await assert.rejects(b.all.restart('gone'), /no longer exists/);
+    assert.equal(b.store.get('gone').phase, 'ready');
+});
+
+test('the move of the work folder looks at what must hold under its own phase, and gives the machine back when it refuses', async (t) => {
+    const b = bench(t);
+    b.ready('demo');
+    const moving = b.all.moveWork('demo', 'disk');
+    assert.equal(b.store.get('demo').phase, 'moving');
+    await assert.rejects(b.all.restart('demo'), /moving its work folder/);
+    /* The stand-in prints no size: the move is refused, before anything is touched. */
+    await assert.rejects(moving, /size of the work folder could not be read/);
+    assert.equal(b.store.get('demo').phase, 'ready');
+    assert.equal(b.calls.some((c) => c.startsWith('stop') || c.startsWith('start')), false);
+});
+
+/* A machine made when its tool needed less memory: its disk still grows. */
+test('a resize that does not change the memory is not refused for a memory below what the tool now needs', async (t) => {
+    const b = bench(t);
+    b.ready('demo', { memoryMb: 1024 });
+    b.sizes.set('clv-demo', { memory: '1024M', disk: '8.0GiB' });
+    await b.all.resize('demo', { diskGb: 20 });
+    await b.all.resized;
+    assert.equal(b.store.get('demo').diskGb, 20);
+    assert.equal(b.store.get('demo').memoryMb, 1024);
+    await assert.rejects(b.all.resize('demo', { memoryMb: 1536 }), /between 2048 MB/, 'a change of memory is still checked');
+});

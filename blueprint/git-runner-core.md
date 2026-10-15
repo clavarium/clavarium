@@ -403,18 +403,26 @@ Today's rules and options: off until the owner names branches (`allowed`),
 the attachment (conversation x repository), set in the conversation's
 Access panel under its Write access ("Automatic sending"; read-only: none):
 branches (exact or `try/*`; `*` and the remote's default branch, learnt by
-`ls-remote --symref` at a refresh, main/master while unknown, only once
-confirmed), `quietSeconds` (5), `perHour` (20, 0 = no cap), `create` (off:
+`ls-remote --symref` at a refresh, only once confirmed; while that default
+branch is unknown, every pattern needs confirming, and nothing unconfirmed
+is sent; decided again by the send, under the lock, after its own refresh,
+with the default branch it just learnt), `quietSeconds` (5), `perHour`
+(20, 0 = no cap), `create` (off:
 only branches the remote has, asked again under the lock by the send),
 `checks` (on). Empty list by default. A conversation's sending acts only
 while its machine runs, with its checks run there, its cap, the log line
 naming it, the AI line told to its agent. The folder stays one for all
 writers (per-agent folders deferred): the runner reads its branches once,
-and each conversation's list decides for the branches it names. Detached,
-made read-only or archived: its settings are forgotten. Migration: the old
-per-repository values become the start of every conversation then in write
-(`create` on, the list counted as confirmed: nothing stops or starts at the
-update), and are removed from `git-keep.json`.
+and each conversation's list decides for the branches it names. So, with
+more than one writer, a non-empty list is saved (and a second writer is
+added next to one) only once the owner confirmed, server-side, that the
+other conversations' commits can be sent by it; the panel says so. Detached,
+made read-only or archived: its settings are forgotten (before the change,
+so a change that fails half-way leaves none behind). No migration (owner's
+decision: no history to keep): an old per-repository setting found in
+`git-keep.json` is dropped at load, carried into no conversation; every
+conversation starts from the defaults (empty list, `create` off, nothing
+confirmed).
 
 - **Trigger**: today's 30 s tick on the `lstat` marks, each repository on
   its own (A3: one whose read takes its whole time limit no longer holds up

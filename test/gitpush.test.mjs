@@ -466,9 +466,9 @@ test('an automatic sending makes a branch on the remote only when allowed, asked
     assert.equal(b.review.defaultBranch('site'), 'main', 'learnt at the refresh of the send');
     git(b.work, 'checkout', '--quiet', '-b', 'try/new');
     const two = b.commit('b.txt', 'b\n', 'two');
-    await assert.rejects(b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true }), (e) => e.kind === 'no-branch' && /does not exist on the remote/.test(e.message));
+    await assert.rejects(b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true, allow: () => true }), (e) => e.kind === 'no-branch' && /does not exist on the remote/.test(e.message));
     assert.throws(() => git(b.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/try/new'));
-    const sent = await b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true, create: true });
+    const sent = await b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true, create: true, allow: () => true });
     assert.equal(sent.made, true);
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/try/new'), two);
     /* Asked once a day, not at every refresh: it rarely changes, and each question goes to the remote. */
@@ -476,4 +476,19 @@ test('an automatic sending makes a branch on the remote only when allowed, asked
     const before = asked();
     await b.review.refresh('site');
     assert.equal(asked(), before);
+});
+
+test('an automatic sending is decided again under the lock, after its refresh: no `allow`, or one that says no with the fresh default branch, sends nothing', async (t) => {
+    const b = bench(t);
+    const one = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: one });
+    git(b.work, 'checkout', '--quiet', '-b', 'try/new');
+    const two = b.commit('b.txt', 'b\n', 'two');
+    const ask = { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true, create: true };
+    await assert.rejects(b.review.send('site', ask), (e) => e.kind === 'not-allowed', 'no decision given: nothing goes by itself');
+    const seen = [];
+    await assert.rejects(b.review.send('site', { ...ask, allow: (d) => { seen.push(d); return false; } }), (e) => e.kind === 'not-allowed');
+    assert.deepEqual(seen, ['main'], 'asked with the default branch the send\'s own refresh knows');
+    assert.throws(() => git(b.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/try/new'));
 });

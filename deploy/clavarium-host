@@ -132,6 +132,24 @@ shelf_of() { [[ "${1:-}" =~ ^clvshelf-[0-9]{8}-[0-9]{6}$ ]] || refuse "not one o
 memory_ok() { number "$1"; [ "$1" -ge 512 ] && [ "$1" -le 65536 ] || refuse "memory out of bounds: $1"; }
 # Megabytes free where the VM manager keeps its disks.
 store_free() { local at="$SHELF_STORE"; [ -d "$at" ] || at="/var"; df -m --output=avail "$at" | tail -1 | tr -d ' '; }
+# The largest disk a conversation's machine may have, in gigabytes: the
+# server's own bound (DISK_MAX_GB in server/conversations.mjs).
+DISK_MAX_GB="256"
+# Whole gigabytes of a size as the VM manager writes it ("8.0GiB", "16G",
+# "16384M", bytes), rounded down; nothing when it has another shape.
+size_gb() {
+    [[ "${1:-}" =~ ^([0-9]{1,12})(\.[0-9]{1,3})?([KMGT]?)(i?B)?$ ]] || return 0
+    local n="${BASH_REMATCH[1]}"
+    case "${BASH_REMATCH[3]}" in T) echo $((n * 1024)) ;; G) echo "$n" ;; M) echo $((n / 1024)) ;; K) echo $((n / 1048576)) ;; *) echo $((n / 1073741824)) ;; esac
+}
+# Room to grow a disk from <has> to <wants> gigabytes, with <free> megabytes
+# free where the VM manager keeps its disks: what it grows by may all be
+# filled, and the same minimum as for a ready-made machine must stay free.
+grow_room() {
+    local has="$1" wants="$2" free="$3" need
+    need=$(( (wants > has ? wants - has : 0) * 1024 + SHELF_MIN_FREE_MB ))
+    [ "$free" -ge "$need" ] || refuse "only ${free} MB free for machines; growing this disk from ${has} to ${wants} GB needs ${need} MB"
+}
 
 # HELD: the path cannot be bent by anyone but root. Every component from /
 # down to the entry's parent is a real directory (not a link), belongs to
@@ -248,7 +266,13 @@ case "$AREA $VERB" in
         vm_of "${1:-}"; [ $# -eq 3 ] || usage
         case "$2" in
             memory) memory_ok "$3"; run "$MULTIPASS" set "local.$1.memory=${3}M" ;;
-            disk)   [[ "$3" =~ ^[0-9]{1,4}$ ]] && [ "$3" -ge 5 ] && [ "$3" -le 2048 ] || refuse "disk out of bounds: $3"
+            disk)   [[ "$3" =~ ^[0-9]{1,4}$ ]] && [ "$3" -ge 5 ] && [ "$3" -le "$DISK_MAX_GB" ] || refuse "disk out of bounds: $3"
+                    # Refused when the host has not the room for it, whatever
+                    # the server said (its size unknown: counted from nothing).
+                    if [ "$SAY" != "yes" ]; then
+                        has="$(size_gb "$("$MULTIPASS" get "local.$1.disk" 2>/dev/null | head -1 | tr -d ' ')")"
+                        grow_room "${has:-0}" "$3" "$(store_free)"
+                    fi
                     run "$MULTIPASS" set "local.$1.disk=${3}G" ;;
             *) refuse "only memory and disk can be set" ;;
         esac ;;
@@ -555,6 +579,13 @@ case "$AREA $VERB" in
         [ "$SAY" = "yes" ] || refuse "unknown verb: path held"
         [ $# -eq 1 ] || usage
         held_check "$1"; echo "held: $1"; exit 0 ;;
+    "disk room")
+        # <has GB> <wants GB> <free MB>: the check `vm set disk` makes, with
+        # these figures. --say-only only: it exists so that the check can be
+        # tested without a VM manager; it changes nothing.
+        [ "$SAY" = "yes" ] || refuse "unknown verb: disk room"
+        [ $# -eq 3 ] || usage; number "$1"; number "$2"; [[ "$3" =~ ^[0-9]{1,9}$ ]] || refuse "not a number: $3"
+        grow_room "$1" "$2" "$3"; echo "room: $2 GB"; exit 0 ;;
     "git code")
         # <Result> <ExecMainCode> <ExecMainStatus>: the exit code "git read"
         # gives for a unit that ended so. --say-only only: it exists so that

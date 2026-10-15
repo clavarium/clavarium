@@ -23,7 +23,8 @@
  *   attachment, not to the repository. Each list is empty to begin with,
  *   and nothing is ever sent automatically to a branch outside it; "*" and
  *   the remote's default branch count only once the owner confirmed them
- *   (one click too many is cheaper than a tool sending to production). A
+ *   (one click too many is cheaper than a tool sending to production) --
+ *   and, while that default branch is not known, every pattern does. A
  *   branch whose tip has commits the remote lacks, and whose tip has not
  *   moved for that conversation's quiet delay, and whose name is in its
  *   list, is sent to the remote's branch of the same name exactly as Send
@@ -76,7 +77,7 @@ export const RETRY_MS = 5 * 60_000;
 /* Sending failures that are final for a commit: nothing changes them but a
    new commit, or the agent pulling. Every other failure passes, and the same
    commit is tried again later. */
-const FINAL = new Set(['diverged', 'remote-moved', 'refused', 'forced', 'no-address', 'look', 'confirm']);
+const FINAL = new Set(['diverged', 'remote-moved', 'refused', 'forced', 'no-address', 'look', 'confirm', 'not-allowed']);
 /* Read failures whose message carries a number that changes from one read to
    the next (free room, bytes counted): the same failure all the same. */
 const VARYING = new Set(['space', 'cap']);
@@ -93,7 +94,7 @@ export const DEFAULTS = Object.freeze({
 export const AUTO_DEFAULTS = Object.freeze({ branches: [], confirmed: [], quietSeconds: 5, perHour: 20, create: false, checks: true });
 export const QUIET_MAX = 86_400;
 export const PER_HOUR_MAX = 1000;
-/* What the previous version kept per repository; taken over per conversation, once. */
+/* What the previous version kept per repository; dropped at load (withoutOldSetting). */
 const OLD_KEYS = ['autoBranches', 'quietMinutes', 'perHour'];
 /* What git in the tool's repository rewrites at a commit, a branch change, a pull: looked at, never read. */
 const MARKS = ['.git/HEAD', '.git/logs/HEAD', '.git/packed-refs', '.git/ORIG_HEAD', '.git/FETCH_HEAD', '.git/refs/heads'];
@@ -117,8 +118,12 @@ export function allowed(patterns, branch) {
 export function defaultsOf(defaultBranch) { return defaultBranch ? [defaultBranch] : ['main', 'master']; }
 /* A pattern the owner must confirm: one made of nothing but "*" (any
    branch), or one that reaches the default branch (what is usually
-   deployed). */
+   deployed). While the remote's default branch is NOT KNOWN (never
+   refreshed, an empty remote, a remote that does not say), any branch could
+   be it: every pattern needs the owner's word, and nothing unconfirmed is
+   sent by itself until the default branch is known. */
 export function needsConfirmation(pattern, defaultBranch) {
+    if (!defaultBranch) return true;
     return /^[*/]+$/.test(pattern) || defaultsOf(defaultBranch).some((d) => allowed([pattern], d));
 }
 /* May a conversation with these settings send `branch` by itself? A
@@ -159,28 +164,24 @@ export function readAuto(body, before, defaultBranch) {
     next.confirmed = body?.sure === true ? wide : next.confirmed.filter((p) => wide.includes(p));
     const asked = wide.filter((p) => !next.confirmed.includes(p));
     if (asked.length) {
+        if (!defaultBranch) throw new GitFailure(409, 'confirm-wide', `Confirm: the remote's default branch is not known yet (it is learnt at a refresh), so any of ${asked.join(', ')} could be it. Until you confirm, or it is known, nothing is sent automatically.`);
         const where = defaultsOf(defaultBranch).join(' or ');
         throw new GitFailure(409, 'confirm-wide', `Confirm: ${asked.join(', ')} would let this conversation send by itself to any branch, or to the remote's default branch (${where}).`);
     }
     return next;
 }
 
-/* A record of the previous version: its one setting for the repository
-   becomes the starting setting of each conversation that writes in it, and
-   is no longer kept. Branches that the remote lacked were made then, and
-   the owner's list said "*" or "main" without being asked: both are kept as
-   they were, so that nothing stops or starts on its own at an update.
-   null: nothing to take over. */
-export function migrated(record, writers) {
+/* A record of the previous version, which kept one setting of automatic
+   sending for the whole repository: that setting is DROPPED, not carried
+   into any conversation (the owner's decision: there is no history to
+   keep). Every conversation starts from AUTO_DEFAULTS -- an empty list,
+   no branch made, nothing confirmed -- and the old keys are removed from
+   the file. null: nothing to drop. */
+export function withoutOldSetting(record) {
     if (!OLD_KEYS.some((k) => k in record)) return null;
-    const branches = [...new Set(branchList(record.autoBranches).filter((p) => !patternProblem(p)))].slice(0, PATTERNS_MAX);
-    const clamp = (n, high, otherwise) => (Number.isFinite(Number(n)) ? Math.min(high, Math.max(0, Math.round(Number(n)))) : otherwise);
-    const start = { branches, confirmed: branches, quietSeconds: clamp(Number(record.quietMinutes ?? 10) * 60, QUIET_MAX, 600), perHour: clamp(record.perHour ?? 4, PER_HOUR_MAX, 4), create: true, checks: true, sent: [] };
-    const auto = { ...(record.auto ?? {}) };
-    for (const conversation of writers) if (!auto[conversation]) auto[conversation] = { ...start, branches: [...branches], confirmed: [...branches] };
     const rest = { ...record };
     for (const k of OLD_KEYS) delete rest[k];
-    return { ...rest, auto };
+    return rest;
 }
 
 export class GitKeeper {
@@ -195,9 +196,9 @@ export class GitKeeper {
         this.#store = store; this.#review = review; this.#resources = resources; this.#checks = checks; this.#alerts = alerts; this.#now = now; this.#tellAgent = tellAgent;
         review.listen({ read: (name, failure, got) => this.#readOutcome(name, failure, got), refresh: (name, result) => this.#refreshOutcome(name, result) });
         review.useWaivers?.((name) => this.settings(name).fsck);
-        /* The previous version's per-repository setting, taken over once (see migrated). */
+        /* The previous version's per-repository setting, dropped (see withoutOldSetting). */
         for (const record of store.all()) {
-            const next = migrated(record, this.#writers(record.name));
+            const next = withoutOldSetting(record);
             if (next) store.put(next);
         }
     }
@@ -286,7 +287,9 @@ export class GitKeeper {
         if (!this.#writers(r.name).includes(conversation)) throw new Refusal(409, 'Automatic sending is set where the repository is attached for writing.');
         const entry = this.#record(r.name).auto?.[conversation];
         const defaultBranch = this.#defaultBranch(r.name);
-        return { settings: autoSettings(entry), defaultBranch, asked: defaultsOf(defaultBranch), sentThisHour: this.#recentOf(entry?.sent).length };
+        /* sharedWith: the other conversations that write in this same
+           folder, for the panel to say that their commits can be sent too. */
+        return { settings: autoSettings(entry), defaultBranch, asked: defaultsOf(defaultBranch), sharedWith: this.#writers(r.name).filter((c) => c !== conversation), sentThisHour: this.#recentOf(entry?.sent).length };
     }
     setAuto(name, conversation, body) {
         const r = this.#repository(name);
@@ -294,10 +297,34 @@ export class GitKeeper {
         const record = this.#record(r.name);
         const before = record.auto?.[conversation];
         const next = readAuto(body, before, this.#defaultBranch(r.name));
+        /* ONE FOLDER, SEVERAL WRITERS. The branches are read from the one
+           folder they all write in, and the checks run on hooks any of them
+           may have written: a list set here also sends what another agent
+           committed. Allowed -- the owner decides -- but said, and confirmed
+           each time it is saved while that is so (kind "confirm-shared"; the
+           page sends again with `shared`). */
+        const others = this.#writers(r.name).filter((c) => c !== conversation);
+        if (next.branches.length > 0 && others.length > 0 && body?.shared !== true) {
+            throw new GitFailure(409, 'confirm-shared', `Confirm: other conversations write in this same folder (${others.join(', ')}): their commits can be sent by this setting, and the checks run on hooks they can write.`);
+        }
         this.#store.put({ ...record, auto: { ...(record.auto ?? {}), [conversation]: { ...next, sent: before?.sent ?? [] } } });
         this.#held.delete(r.name);
         return this.auto(r.name, conversation);
     }
+    /* A conversation about to be given the repository for writing, while
+       another one that writes in it sends by itself: the newcomer's commits,
+       in the same folder, could be sent by that setting. Refused (kind
+       "confirm-shared") unless the owner confirmed it (`confirmed`). */
+    beforeWriter(name, conversation, confirmed) {
+        const r = this.#resources.get(String(name ?? ''));
+        if (r?.type !== 'git' || confirmed === true) return;
+        const writers = this.#writers(r.name);
+        if (writers.includes(conversation)) return;
+        const sending = writers.filter((c) => this.#autoOf(r.name, c).branches.length > 0);
+        if (sending.length === 0) return;
+        throw new GitFailure(409, 'confirm-shared', `Confirm: ${sending.join(', ')} send${sending.length === 1 ? 's' : ''} commits from ${r.name} automatically. Other conversations write in this same folder: ${conversation}'s commits can be sent by that setting too.`);
+    }
+
     /* Detached (or made read-only): its settings go with the attachment, so
        that attaching it again starts from an empty list, not from a choice
        made for another job. */
@@ -530,7 +557,10 @@ export class GitKeeper {
         try {
             /* auto: no owner was shown a remote tip; the remote's tip of the
                moment is the lease, and "has it all" the guard. */
-            const sent = await this.#review.send(name, { branch: b, head: tip.id, target: b, remoteTip, auto: true, create: s.create });
+            /* allow: decided again by the send, under the lock, after its
+               refresh -- with the settings and the default branch of then. */
+            const allow = (defaultBranch) => mayAutoSend(this.#autoOf(name, conversation), b, defaultBranch);
+            const sent = await this.#review.send(name, { branch: b, head: tip.id, target: b, remoteTip, auto: true, create: s.create, allow });
             held.done.set(b, tip.id); held.said.delete(b); held.retry.delete(b);
             if (sent.already) { this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Already on the remote: ${b}.` }, { sent: true, by: conversation }); return true; }
             this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Sent automatically for ${conversation}: ${sent.commits} commit(s) to ${sent.branch}${sent.made ? ' (a new branch)' : ''}, ${checked}.${sent.note ? ` ${sent.note}` : ''}` }, { sent: true, by: conversation });

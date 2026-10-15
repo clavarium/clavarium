@@ -459,6 +459,8 @@ test('attack: one repository whose reads hang holds up every other repository of
         listen() {}, useWaivers() {}, remoteOf: () => 'https://git.example.com/x.git', refresh: async () => ({ ok: true }), upkeep: async () => {},
         readTips: async (name) => { started[name] = Date.now() - t0; if (name === 'slow') await new Promise((r) => setTimeout(r, 3000)); return {}; },
         tips: () => ({}), runner: null,
+        /* A remote whose default branch is known: try/* needs nobody's word. */
+        defaultBranch: () => 'main',
     };
     const list = [{ name: 'slow', type: 'git', attachments: { alpha: 'write' } }, { name: 'fast', type: 'git', attachments: { alpha: 'write' } }];
     const resources = { get: (n) => list.find((x) => x.name === n), list: () => list, folder: (n) => join(dir, n), hasOrigin: () => false };

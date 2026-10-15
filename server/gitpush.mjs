@@ -273,8 +273,8 @@ export class GitReview {
        for on its own -- when not known yet (an empty remote has none: asked
        again at the next refresh), then once a day: it rarely changes, and
        every question is one more trip to the remote. A failure keeps what
-       was known (unknown: automatic sending treats main and
-       master as the default, see gitkeeper.mjs). */
+       was known (unknown: automatic sending sends nothing by itself that
+       the owner did not confirm, see gitkeeper.mjs). */
     async #learnDefault(r, remote) {
         const record = this.#record(r.name);
         const at = record.defaultBranchAt ? new Date(record.defaultBranchAt).getTime() : 0;
@@ -512,6 +512,14 @@ export class GitReview {
                 /* (2) What the remote has now. Already there: nothing to push. */
                 const fresh = await this.#refreshLocked(r);
                 if (!fresh.ok) throw new GitFailure(502, 'unreachable', `Not sent: the remote is unreachable. ${fresh.message}`);
+                /* Automatic sending: whether this branch may go by itself is
+                   decided again here, under the lock, with the remote's
+                   default branch as this very refresh learnt it (it may have
+                   changed, or become known, since the decision was made).
+                   `allow(defaultBranch)` comes from the keeper; none: not sent. */
+                if (review.auto === true && (typeof review.allow !== 'function' || review.allow(this.defaultBranch(r.name)) !== true)) {
+                    throw new GitFailure(409, 'not-allowed', `Not sent: ${target} may not be sent automatically (the remote's default branch, or a pattern not confirmed). Confirm it in the conversation's panel, or send it from the review.`);
+                }
                 const now = (await this.#tipsIn(reference)).get(target) ?? null;
                 if (review.auto === true) remoteTip = now;
                 if (now && (now === head || (await this.#has(reference, head) && await this.#isAncestor(reference, head, now)))) return sent({ already: true, commits: 0, made: false });

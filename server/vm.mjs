@@ -41,9 +41,10 @@ export function megabytes(text) {
 /* Runs one command and resolves with what happened; it never throws for a
    non-zero exit, because "the VM does not exist" is an answer, not a crash. */
 export function runner(prefix) {
-    return (argv, { input, timeoutMs = 120_000 } = {}) => new Promise((resolve) => {
+    /* `maxBytes`: what is taken in of its output, at most (8 MB unless said). */
+    return (argv, { input, timeoutMs = 120_000, maxBytes = 8 * 1024 * 1024 } = {}) => new Promise((resolve) => {
         const all = [...prefix, ...argv];
-        const child = execFile(all[0], all.slice(1), { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, encoding: 'utf8' },
+        const child = execFile(all[0], all.slice(1), { timeout: timeoutMs, maxBuffer: maxBytes, encoding: 'utf8' },
             (error, stdout, stderr) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout, stderr }));
         child.stdin.on('error', () => {});
         child.stdin.end(input ?? '');

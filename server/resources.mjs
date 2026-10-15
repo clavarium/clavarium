@@ -79,6 +79,21 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 
 export class Resources {
     #store; #vms; #host; #mnt; #uid; #gid; #grants; #git; #access;
+    /* ONE LOCK PER (conversation, resource). Attaching, repairing and
+       mounting again all unmount and mount the same place in the same
+       machine; interleaved, a repair that read "write" before an owner
+       switched to read would mount the folder itself after the view. So
+       they take turns, and whoever mounts reads the access under the lock. */
+    #locks = new Map();
+    #locked(conversation, name, work) {
+        const key = `${conversation}\0${name}`;
+        const before = this.#locks.get(key) ?? Promise.resolve();
+        const run = before.then(work, work);
+        const tail = run.then(() => {}, () => {});
+        this.#locks.set(key, tail);
+        tail.then(() => { if (this.#locks.get(key) === tail) this.#locks.delete(key); });
+        return run;
+    }
 
     /* `host(argv)` reaches the host program (making a view needs root). */
     /* `grants`: the one table of rights. "Attached, read" is a line of it:
@@ -221,6 +236,9 @@ export class Resources {
 
     /* access: 'read', 'write', or 'none' to detach. */
     async attach(conversation, name, access) {
+        return this.#locked(conversation, name, () => this.#attach(conversation, name, access));
+    }
+    async #attach(conversation, name, access) {
         const resource = this.#store.get(name);
         if (!resource) throw new Refusal(404, 'No such resource.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
@@ -264,14 +282,17 @@ export class Resources {
        conversation itself is fine. */
     async remount(conversation) {
         const failed = [];
-        for (const { name, access } of this.of(conversation)) {
+        for (const { name } of this.of(conversation)) await this.#locked(conversation, name, async () => {
+            /* Read again under the lock: it may have changed meanwhile. */
+            const access = this.of(conversation).find((x) => x.name === name)?.access;
+            if (access === undefined) return;
             try {
                 if (access === 'read') await this.ensureView(name);
                 const r = await this.#vms.mount(conversation, access === 'read' ? 'view' : 'folder', name, this.#uid, this.#gid);
                 if (r.code !== 0 && !/already mounted/i.test(`${r.stderr}${r.stdout}`)) failed.push(name);
                 if (this.#store.get(name)?.type === 'git') await this.#showOrigin(conversation, name).catch(() => failed.push(originFolder(name)));
             } catch { failed.push(name); }
-        }
+        });
         return failed;
     }
 
@@ -303,15 +324,29 @@ export class Resources {
             return r.code === 0 ? '' : said(r);
         }
         const name = path.slice('/resources/'.length);
-        const attached = this.of(conversation).find((x) => x.name === name);
-        const originOf = this.of(conversation).find((x) => this.#store.get(x.name)?.type === 'git' && originFolder(x.name) === name);
-        if (!attached && !originOf) return 'it is not attached any more';
-        try {
-            if (!attached || attached.access === 'read') await this.ensureView(name);
-        } catch (error) { return error.message; }
-        await this.#vms.umount(conversation, name);
-        const r = await this.#vms.mount(conversation, attached?.access === 'write' ? 'folder' : 'view', name, this.#uid, this.#gid);
-        return r.code === 0 ? '' : said(r);
+        const find = () => ({
+            attached: this.of(conversation).find((x) => x.name === name),
+            originOf: this.of(conversation).find((x) => this.#store.get(x.name)?.type === 'git' && originFolder(x.name) === name),
+        });
+        const first = find();
+        if (!first.attached && !first.originOf) return 'it is not attached any more';
+        /* The lock of the resource this place belongs to: the repository, for its origin. */
+        return this.#locked(conversation, first.attached ? name : first.originOf.name, async () => {
+            let { attached, originOf } = find();
+            if (!attached && !originOf) return 'it is not attached any more';
+            try {
+                if (!attached || attached.access === 'read') await this.ensureView(name);
+            } catch (error) { return error.message; }
+            await this.#vms.umount(conversation, name);
+            /* The access is read again just before mounting: never mount with a stale one. */
+            ({ attached, originOf } = find());
+            if (!attached && !originOf) return 'it is not attached any more';
+            if (attached?.access === 'read') {
+                try { await this.ensureView(name); } catch (error) { return error.message; }
+            }
+            const r = await this.#vms.mount(conversation, attached?.access === 'write' ? 'folder' : 'view', name, this.#uid, this.#gid);
+            return r.code === 0 ? '' : said(r);
+        });
     }
 
     /* Removes a folder from the list. Only one that is attached nowhere; and

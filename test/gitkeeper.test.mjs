@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitReview } from '../server/gitpush.mjs';
-import { GitKeeper, DEFAULTS, AUTO_DEFAULTS, allowed, patternProblem, readAuto, needsConfirmation, mayAutoSend, migrated, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
+import { GitKeeper, DEFAULTS, AUTO_DEFAULTS, allowed, patternProblem, readAuto, needsConfirmation, mayAutoSend, withoutOldSetting, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
 import { GitRunner, runGit } from '../server/gitrunner.mjs';
 import { Resources, originFolder } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
@@ -174,7 +174,13 @@ test('automatic sending, per conversation: empty by default, checked, "*" and th
     assert.equal(needsConfirmation('develop', 'develop'), true, 'the remote\'s default, whatever its name');
     assert.equal(needsConfirmation('main', 'develop'), false);
     assert.equal(needsConfirmation('master', null), true, 'unknown: main and master are asked about');
-    assert.equal(needsConfirmation('try/*', null), false);
+    /* Unknown, any branch could be the default one: every pattern is asked about. */
+    assert.equal(needsConfirmation('try/*', null), true, 'unknown: every pattern is asked about');
+    assert.equal(needsConfirmation('try/*', 'main'), false, 'known: only what reaches it');
+    assert.equal(mayAutoSend({ branches: ['try/*'], confirmed: [] }, 'try/a', null), false, 'unknown and unconfirmed: nothing goes by itself');
+    assert.equal(mayAutoSend({ branches: ['try/*'], confirmed: ['try/*'] }, 'try/a', null), true, 'confirmed: it goes');
+    assert.equal(mayAutoSend({ branches: ['try/*'], confirmed: [] }, 'try/a', 'main'), true, 'known, and not the default: it goes');
+    assert.throws(() => readAuto({ branches: 'try/*' }, undefined, null), (e) => e.kind === 'confirm-wide' && /default branch is not known yet/.test(e.message));
     /* The decision. */
     assert.equal(mayAutoSend({ branches: ['*'], confirmed: [] }, 'x', 'main'), false, 'not confirmed: counts for nothing');
     assert.equal(mayAutoSend({ branches: ['*'], confirmed: ['*'] }, 'x', 'main'), true);
@@ -196,7 +202,7 @@ test('automatic sending, per conversation: empty by default, checked, "*" and th
     assert.deepEqual(b.keeper.about('site').auto, { alpha: ['try/*'] }, 'the review panel says which conversation sends by itself');
 });
 
-test('a file of the previous version loads: its setting for the repository becomes the start of every conversation that writes in it, and is no longer kept', async (t) => {
+test('a file of the previous version loads: its setting for the repository is dropped, never carried into a conversation; every conversation starts from the prudent defaults', async (t) => {
     const b = await bench(t);
     await b.resources.attach('beta', 'site', 'write');
     await b.resources.attach('gamma', 'site', 'read');
@@ -209,32 +215,29 @@ test('a file of the previous version loads: its setting for the repository becom
     ]));
     const old = new GitKeeper({ store: new Store(file), review: b.review, resources: b.resources, checks: { machineFor: async () => undefined }, alerts: null });
     const about = old.about('site');
-    assert.deepEqual([about.settings.refreshMinutes, about.settings.alert, about.settings.fsck, about.log.length, about.origin.ok], [7, false, {}, 1, true]);
-    const start = { branches: ['main', 'try/*'], confirmed: ['main', 'try/*'], quietSeconds: 180, perHour: 2, create: true, checks: true };
-    assert.deepEqual(old.auto('site', 'alpha').settings, start, 'the owner\'s choice, kept as it was');
-    assert.deepEqual(old.auto('site', 'beta').settings, start, 'for every conversation that writes in it');
+    assert.deepEqual([about.settings.refreshMinutes, about.settings.alert, about.settings.fsck, about.log.length, about.origin.ok], [7, false, {}, 1, true], 'the rest of the record is kept');
+    assert.deepEqual(about.auto, {}, 'nobody sends by itself');
+    assert.deepEqual(old.auto('site', 'alpha').settings, { ...AUTO_DEFAULTS }, 'not carried: an empty list, no branch made, nothing confirmed');
+    assert.deepEqual(old.auto('site', 'beta').settings, { ...AUTO_DEFAULTS });
     assert.throws(() => old.auto('site', 'gamma'), /attached for writing/);
     const text = readFileSync(file, 'utf8');
-    for (const key of ['autoBranches', 'quietMinutes', '"perHour": 99999']) assert.equal(text.includes(key), false, `${key} is no longer kept`);
+    for (const key of ['autoBranches', 'quietMinutes', '"perHour"']) assert.equal(text.includes(key), false, `${key} is no longer kept`);
     const records = JSON.parse(text);
-    assert.deepEqual(records.find((r) => r.name === 'gone'), { name: 'gone', auto: {} });
-    assert.deepEqual(records.find((r) => r.name === 'quiet'), { name: 'quiet' }, 'nothing to take over: untouched');
-    /* Each conversation then on its own; loaded again, nothing more is taken over. */
-    old.setAuto('site', 'beta', { branches: '' });
-    const again = new GitKeeper({ store: new Store(file), review: b.review, resources: b.resources, checks: { machineFor: async () => undefined }, alerts: null });
-    assert.deepEqual(again.auto('site', 'beta').settings.branches, []);
-    assert.deepEqual(again.auto('site', 'alpha').settings.branches, ['main', 'try/*']);
+    assert.equal(records.find((r) => r.name === 'site').auto, undefined, 'no setting made for any conversation');
+    assert.deepEqual(records.find((r) => r.name === 'gone'), { name: 'gone' });
+    assert.deepEqual(records.find((r) => r.name === 'quiet'), { name: 'quiet' }, 'nothing to drop: untouched');
     /* The model alone. */
-    assert.equal(migrated({ name: 'x', refreshMinutes: 5 }, ['alpha']), null);
-    assert.deepEqual(migrated({ name: 'x', autoBranches: [], quietMinutes: 10, perHour: 4 }, ['alpha']).auto.alpha.branches, []);
+    assert.equal(withoutOldSetting({ name: 'x', refreshMinutes: 5 }), null);
+    assert.deepEqual(withoutOldSetting({ name: 'x', autoBranches: ['*'], quietMinutes: 10, perHour: 4, refreshMinutes: 5, auto: { alpha: { branches: ['try/*'] } } }), { name: 'x', refreshMinutes: 5, auto: { alpha: { branches: ['try/*'] } } }, 'only the old keys go');
 });
 
 test('automatic sending of a conversation: its settings, its running machine, its checks, its cap; detached or archived, forgotten', async (t) => {
     const up = new Set(['alpha']);
     const b = await bench(t, { runs: async (c, name, resources) => up.has(c) && resources.of(c).some((x) => x.name === name && x.access === 'write') });
     await b.resources.attach('beta', 'site', 'write');
-    b.auto({ branches: 'try/*', quietSeconds: 0, perHour: 1 });
-    b.auto({ branches: 'feat/*', quietSeconds: 0, checks: false }, 'beta');
+    /* Two writers in one folder: each list is confirmed as such (see the test of both orders). */
+    b.auto({ branches: 'try/*', quietSeconds: 0, perHour: 1, shared: true });
+    b.auto({ branches: 'feat/*', quietSeconds: 0, checks: false, shared: true }, 'beta');
     git(b.work, 'checkout', '--quiet', '-b', 'feat/x'); const feat = b.commit('f.txt', 'f\n', 'feat');
     git(b.work, 'checkout', '--quiet', '-b', 'try/y'); const tryY = b.commit('y.txt', 'y\n', 'try');
     await settle(b);
@@ -258,7 +261,7 @@ test('automatic sending of a conversation: its settings, its running machine, it
     assert.equal(b.keeper.auto('site', 'alpha').sentThisHour, 1);
     assert.equal(b.keeper.auto('site', 'beta').sentThisHour, 1);
     /* Only branches the remote has, unless the owner allowed making them. */
-    b.auto({ branches: 'try/*, new/*', quietSeconds: 0, perHour: 0, create: false });
+    b.auto({ branches: 'try/*, new/*', quietSeconds: 0, perHour: 0, create: false, shared: true });
     git(b.work, 'checkout', '--quiet', '-b', 'new/z'); b.commit('z.txt', 'z\n', 'new');
     await settle(b);
     assert.equal(remoteOf('new/z'), '');
@@ -644,4 +647,48 @@ test('lock files a stopped server left in a reference are removed at start, unde
     assert.equal(existsSync(join(reference, 'packed-refs.lock')), false);
     assert.match(b.log()[0].what, /Stale lock files .* removed: packed-refs\.lock/);
     assert.equal((await b.keeper.refresh('site')).origin.ok, true, 'the next refresh works');
+});
+
+/* The decision used to be made before the send, with the default branch of
+   then, and never looked at again: a branch that became the remote's
+   default meanwhile went out unconfirmed. */
+test('automatic sending is decided again after the send\'s own refresh: a branch that just became the remote\'s default is not sent unconfirmed', async (t) => {
+    const b = await bench(t);
+    await b.keeper.refresh('site');
+    assert.equal(b.review.defaultBranch('site'), 'main');
+    b.keeper.set('site', { refreshMinutes: 0 });
+    git(b.seed, 'push', '--quiet', 'origin', 'main:develop');
+    git(b.work, 'checkout', '--quiet', '-b', 'develop');
+    const mine = b.commit('d.txt', 'd\n', 'develop');
+    b.auto({ branches: 'develop', quietSeconds: 0 });
+    assert.deepEqual(b.keeper.auto('site', 'alpha').settings.confirmed, [], 'not the default branch when saved: nothing to confirm');
+    /* The remote now says develop is its default branch; known here only a day later, at a refresh. */
+    git(b.remote, 'symbolic-ref', 'HEAD', 'refs/heads/develop');
+    b.later(25 * 60);
+    await settle(b);
+    assert.equal(b.review.defaultBranch('site'), 'develop', 'learnt by the send\'s refresh');
+    assert.notEqual(git(b.remote, 'rev-parse', 'refs/heads/develop'), mine, 'not sent');
+    assert.ok(b.log().some((l) => l.ok === false && /may not be sent automatically/.test(l.what)), JSON.stringify(b.log()));
+});
+
+/* One folder, two writers: allowed, never silently. Both orders. */
+test('a list of automatic sending next to another writer of the same folder is confirmed, in both orders, and the panel says so', async (t) => {
+    const b = await bench(t);
+    await b.keeper.refresh('site');
+    /* A list first, then a second writer. */
+    b.auto({ branches: 'try/*' });
+    assert.throws(() => b.keeper.beforeWriter('site', 'beta', false), (e) => e.kind === 'confirm-shared' && e.status === 409 && /Other conversations write in this same folder/.test(e.message));
+    assert.doesNotThrow(() => b.keeper.beforeWriter('site', 'beta', true), 'confirmed: allowed');
+    assert.doesNotThrow(() => b.keeper.beforeWriter('site', 'alpha', false), 'already a writer: nothing new');
+    assert.doesNotThrow(() => b.keeper.beforeWriter('nope', 'beta', false), 'not a repository: nothing to say');
+    await b.resources.attach('beta', 'site', 'write');
+    assert.deepEqual(b.keeper.auto('site', 'alpha').sharedWith, ['beta'], 'the panel names the other writers');
+    /* A second writer first, then a list. */
+    assert.throws(() => b.keeper.setAuto('site', 'beta', { branches: 'feat/*', sure: true }), (e) => e.kind === 'confirm-shared' && /alpha/.test(e.message) && /their commits can be sent by this setting/.test(e.message));
+    assert.deepEqual(b.keeper.auto('site', 'beta').settings.branches, [], 'refused: nothing saved');
+    assert.deepEqual(b.keeper.setAuto('site', 'beta', { branches: 'feat/*', sure: true, shared: true }).settings.branches, ['feat/*']);
+    assert.doesNotThrow(() => b.keeper.setAuto('site', 'beta', { branches: '' }), 'an empty list needs nobody\'s word');
+    /* No list anywhere: a second writer needs no confirmation. */
+    b.keeper.setAuto('site', 'alpha', { branches: '' });
+    assert.doesNotThrow(() => b.keeper.beforeWriter('site', 'gamma', false));
 });

@@ -38,22 +38,41 @@ export const PROBE_NAME = 'clavarium-health';
 
 export const EVERY_MS = 120_000;
 const PROBE_MS = 15_000;
+/* What the clock waits for one conversation's look before it goes on. */
+const LOOK_MS = 60_000;
 /* Below this, memory or disk is said to be almost full. */
 const MEMORY_LOW_MB = 120;
 const DISK_LOW_MB = 300;
 
-/* What the probe printed, as facts. */
-export function readProbe(text) {
+/* WHAT THE PROBE PRINTS IS THE AGENT'S TO WRITE: it is root in its machine,
+   and awk, df or sh there are whatever it put there. So only what was asked
+   is read -- the disks / and /work (only when expected), a mount line only
+   for a path that should be mounted, with a state of ours, numbers that are
+   whole -- and no more than PROBE_BYTES of it, in PROBE_LINES lines. */
+export const PROBE_BYTES = 16 * 1024;
+export const PROBE_LINES = 200;
+const MOUNT_STATES = new Set(['ok', 'unreadable', 'missing']);
+const whole = (text) => (/^\d{1,15}$/.test(text) ? Number(text) : undefined);
+
+/* What the probe printed, as facts. `paths`: what should be mounted (what
+   the probe was given). */
+export function readProbe(text, paths = []) {
     const facts = { mounts: {}, disks: {} };
-    for (const line of String(text ?? '').split('\n')) {
+    const expected = new Set(paths);
+    const disks = new Set(['/', ...(expected.has('/work') ? ['/work'] : [])]);
+    for (const line of String(text ?? '').slice(0, PROBE_BYTES).split('\n').slice(0, PROBE_LINES)) {
         const parts = line.trim().split(' ');
-        if (parts[0] === 'memory' && parts.length === 3) facts.memory = { totalMb: Math.round(Number(parts[1]) / 1024), availableMb: Math.round(Number(parts[2]) / 1024) };
-        if (parts[0] === 'oom' && parts.length === 2) facts.oomKills = Number(parts[1]);
-        if (parts[0] === 'disk' && parts.length === 4) facts.disks[parts[1]] = { availableMb: Number(parts[2]), sizeMb: Number(parts[3]) };
-        if (parts[0] === 'mount' && parts.length === 3) facts.mounts[parts[2]] = parts[1];
+        const [a, b, c] = parts.slice(1).map(whole);
+        if (parts[0] === 'memory' && parts.length === 3 && a !== undefined && b !== undefined) facts.memory = { totalMb: Math.round(a / 1024), availableMb: Math.round(b / 1024) };
+        if (parts[0] === 'oom' && parts.length === 2 && a !== undefined) facts.oomKills = a;
+        if (parts[0] === 'disk' && parts.length === 4 && disks.has(parts[1]) && b !== undefined && c !== undefined) facts.disks[parts[1]] = { availableMb: b, sizeMb: c };
+        if (parts[0] === 'mount' && parts.length === 3 && expected.has(parts[2]) && MOUNT_STATES.has(parts[1])) facts.mounts[parts[2]] = parts[1];
     }
     return facts;
 }
+/* What is kept and shown for one conversation, at most. */
+const PROBLEMS_MAX = 20;
+const TEXT_MAX = 300;
 
 /* The sentences the page shows, and how serious they are: 'ok', 'info',
    'warn' (something to act on), 'bad' (the machine does not serve). */
@@ -79,16 +98,17 @@ export function judge(record) {
     }
     const order = ['ok', 'info', 'warn', 'bad'];
     const level = problems.reduce((worst, p) => (order.indexOf(p.level) > order.indexOf(worst) ? p.level : worst), 'ok');
-    return { level, problems };
+    return { level, problems: problems.slice(0, PROBLEMS_MAX).map((p) => ({ ...p, text: p.text.slice(0, TEXT_MAX) })) };
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #settleMs; #probeMs;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #settleMs; #probeMs; #lookMs;
 
     /* `settleMs`: how long a missing folder is given before it is mounted
-       again (a machine that has just started may still be mounting it). */
-    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS }) {
-        this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs;
+       again (a machine that has just started may still be mounting it).
+       `lookMs`: how long the clock waits for one conversation's look. */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS }) {
+        this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs; this.#lookMs = lookMs;
     }
 
     /* The last thing known, or null. Cheap: nothing is asked. */
@@ -142,8 +162,9 @@ export class Health {
     }
 
     async #probe(name, paths) {
-        const r = await this.#vms.exec(name, ['sh', '-c', PROBE, PROBE_NAME, ...paths], { timeoutMs: this.#probeMs }).catch(() => ({ code: 1, stdout: '' }));
-        const facts = readProbe(r.stdout);
+        /* Its output is the agent's: not more than a few pages of it are even taken in. */
+        const r = await this.#vms.exec(name, ['sh', '-c', PROBE, PROBE_NAME, ...paths], { timeoutMs: this.#probeMs, maxBytes: PROBE_BYTES * 4 }).catch(() => ({ code: 1, stdout: '' }));
+        const facts = readProbe(r.stdout, paths);
         if (r.code !== 0 && !facts.memory) return undefined;
         return facts;
     }
@@ -162,8 +183,17 @@ export class Health {
         const timer = setInterval(async () => {
             if (going) return;
             going = true;
-            try { for (const name of this.#conversations.awake()) await this.check(name).catch(() => {}); }
-            finally { going = false; }
+            /* All at once, each within its own time: one machine slow to
+               answer (or a mount that hangs) does not hold up the others.
+               A look still going when its time is up goes on; the next tick
+               joins it rather than starting another (check). */
+            try {
+                await Promise.all(this.#conversations.awake().map((name) => {
+                    let timer;
+                    const bound = new Promise((resolve) => { timer = setTimeout(resolve, this.#lookMs); timer.unref?.(); });
+                    return Promise.race([this.check(name).catch(() => {}), bound]).finally(() => clearTimeout(timer));
+                }));
+            } finally { going = false; }
         }, everyMs);
         timer.unref?.();
         return () => clearInterval(timer);

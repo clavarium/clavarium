@@ -247,7 +247,10 @@ export class Conversations {
        was asked. */
     async restart(name) {
         const c = this.#busyCheck(name);
-        if (await this.#vms.state(name) === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        try {
+            if (await this.#vms.state(name) === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        } catch (error) { release(); throw error; }
         this.#cancelStop(name);
         this.#store.patch(name, { phase: 'restarting', step: 'Stopping the machine', restarted: undefined });
         this.restarted = this.#cycle(name, c, async () => undefined, true)
@@ -266,13 +269,19 @@ export class Conversations {
         const memory = memoryMb === undefined || memoryMb === null || memoryMb === '' ? c.memoryMb : Number(memoryMb);
         const disk = diskGb === undefined || diskGb === null || diskGb === '' ? c.diskGb ?? DISK_GB : Number(diskGb);
         const least = tool?.memoryMb ?? 512;
-        if (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
+        /* Memory is checked only when it changes: a machine made when its tool
+           needed less keeps what it has, and its disk can still grow. */
+        if (memory !== c.memoryMb && (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB)) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
         if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
         if (disk < (c.diskGb ?? DISK_GB)) throw new Refusal(400, `A disk can only grow: it has ${c.diskGb ?? DISK_GB} GB.`);
         if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB)) throw new Refusal(409, 'Nothing to change: it already has this.');
         if (c.asleep === true) throw new Refusal(409, 'It is asleep: wake it first, then change its memory or its disk.');
-        const state = await this.#vms.state(name);
-        if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        let state;
+        try {
+            state = await this.#vms.state(name);
+            if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        } catch (error) { release(); throw error; }
         this.#cancelStop(name);
         this.#store.patch(name, { phase: 'restarting', step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
         const set = async () => {
@@ -308,6 +317,19 @@ export class Conversations {
     }
     async reconcileAll() {
         for (const c of this.#store.all()) if (c.phase === 'ready') await this.reconcile(c.name);
+    }
+
+    /* TAKES THE CONVERSATION FOR ONE CHANGE OF ITS MACHINE, at once: the
+       phase is set before anything is awaited, so that a second restart, a
+       resize or a move asked meanwhile is refused by #busyCheck instead of
+       running alongside. Returns what gives it back as it was, for a change
+       refused before it started. */
+    #claim(name, phase, step) {
+        const before = this.#store.get(name);
+        this.#store.patch(name, { phase, step });
+        return () => {
+            if (this.#store.get(name)?.phase === phase) this.#store.patch(name, { phase: before.phase, step: before.step });
+        };
     }
 
     #busyCheck(name) {
@@ -429,8 +451,19 @@ export class Conversations {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (to !== 'kept' && to !== 'disk') throw new Refusal(400, 'The work goes to "kept" or to "disk".');
-        if (c.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+        this.#busyCheck(name);
         if ((c.work ?? 'disk') === to) throw new Refusal(409, to === 'kept' ? 'Its work is already kept here.' : 'It already works on the disk of its machine.');
+        /* Its own phase from here: what must hold is looked at in a machine
+           nobody restarts, resizes or moves meanwhile. */
+        const release = this.#claim(name, 'moving', 'Looking at the work folder');
+        try { await this.#moveChecks(name, to); } catch (error) { release(); throw error; }
+        this.#cancelStop(name);
+        this.#store.patch(name, { phase: 'moving', step: 'Stopping the tool', moved: undefined });
+        this.moved = this.#move(name, to);
+        return this.#store.get(name);
+    }
+
+    async #moveChecks(name, to) {
         if (await this.#vms.state(name) !== 'Running') throw new Refusal(409, 'Its machine is not running: open the conversation first.');
         const inVm = (argv, timeoutMs = 60_000) => this.#vms.exec(name, ['sudo', '-n', ...argv], { timeoutMs });
         const said = (r) => firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
@@ -454,10 +487,12 @@ export class Conversations {
             if (free.code !== 0 || !Number.isInteger(left)) throw new Refusal(502, `The room left on the machine's disk could not be read: ${said(free)}`);
             if (size + ROOM_MB > left) throw new Refusal(409, `Not moved: its work holds ${size} MB and the disk of its machine has ${left} MB left. At least ${ROOM_MB} MB must stay free after the move.`);
         }
+    }
 
-        this.#cancelStop(name);
-        this.#store.patch(name, { phase: 'moving', step: 'Stopping the tool', moved: undefined });
-        this.moved = (async () => {
+    #move(name, to) {
+        const inVm = (argv, timeoutMs = 60_000) => this.#vms.exec(name, ['sudo', '-n', ...argv], { timeoutMs });
+        const said = (r) => firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
+        return (async () => {
             const step = (text) => this.#store.patch(name, { step: text });
             let failure;
             try {
@@ -473,7 +508,6 @@ export class Conversations {
             /* The tool is started again, where its work now is. */
             this.ready(name);
         })();
-        return this.#store.get(name);
     }
 
     async #toKept(name, inVm, said, step) {
