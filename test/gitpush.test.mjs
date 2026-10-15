@@ -1,7 +1,7 @@
 /* The review and Send, with a real git: an agent's repository read as the
    host program reads it (git-stand-in.mjs), the reference (the remote's
    history), a remote, and what goes between them. Design:
-   docs/blueprint/git-runner-core.md, sections 4 to 6. */
+   blueprint/git-runner-core.md, sections 4 to 6. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, chmodSync, readFileSync, readdirSync, symlinkSync } from 'node:fs';

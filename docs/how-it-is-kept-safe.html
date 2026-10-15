@@ -15,6 +15,7 @@
 
   Every colour is defined on bare :root; the dark block only redefines.
 -->
+<link rel="stylesheet" href="base.css">
 <style>
 :root {
   --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
@@ -44,13 +45,6 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
 a { color: var(--accent); }
 .wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
-header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
-header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
-.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
-.mark b { color: var(--brass); font-weight: 600; }
-nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
-nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
-nav a:hover, nav a[aria-current] { color: var(--text); }
 
 .hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
 h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
@@ -117,19 +111,28 @@ table.k td:first-child { font-weight: 650; }
 .scrollx { overflow-x: auto; }
 .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
-footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
-footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
-footer a { color: var(--dim); }
 </style>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
     <nav aria-label="Pages">
-      <a href="./">Home</a>
-      <a href="examples.html">Examples</a>
+      <a href="index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button">Use cases</button>
+        <span class="drop-menu">
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
+        <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/office.html">Office: one report per client</a>
+        <a href="cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="examples.html">All examples</a>
+        </span>
+      </span>
       <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
       <a href="how-to-install-it.html">Install</a>
       <a href="how-it-is-kept-safe.html" aria-current="page">Security</a>
       <a href="questions.html">FAQ</a>
@@ -242,19 +245,24 @@ $ <span class="c">(its port 22)</span>
       <tr><td>The tool's own remote control</td><td>One tool, on your computer, with all of it in reach.</td><td>Any command-line agent, several at once, each apart.</td></tr>
     </table>
     </div>
-    <a class="more" href="./">Back to the home page →</a>
+    <a class="more" href="index.html">Back to the home page →</a>
   </div>
 </section>
 </main>
 
-<footer>
+<footer class="foot">
   <div class="wrap">
-    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
-    <a href="examples.html">Examples</a>
-    <a href="how-to-use-it.html">Use</a>
-    <a href="how-to-install-it.html">Install</a>
-    <a href="how-it-is-kept-safe.html">Security</a>
-    <a href="questions.html">FAQ</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="examples.html">Use cases</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
   </div>
 </footer>
 </body>

@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your coding agents</title>
+<meta name="description" content="Target page, not the real one: the coding agents case of Clavarium, its use, its whole setup and the setup file.">
+<!--
+  TARGET PAGE. Shows PLANNED features: coding agents (Claude Code, OpenCode, Codex CLI) each in its
+  own small machine with only its repository; one list; a Night watch script that answers terminal
+  questions by your rules and sends the risky ones to your phone; a Send script that alone holds the
+  push key. The drawing and the "Copy it" button use the same data as code.clavarium.json, which is
+  embedded below (id="setup-data"). Names are invented. Built with textContent, no innerHTML.
+-->
+<link rel="stylesheet" href="../base.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f5f2; --text: #16181d; --dim: #5a5f69; --line: #d6d9df;
+  --accent: #0b53c0; --gold: #8a5f0c; --gold-bg: #fbf3df; --ok: #17794f; --no: #a8321f; --no-bg: #fbe9e6;
+  --w-bg: #ffffff; --w-ink: #000000; --w-soft: #f1efe9; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #2a2d33; --w-lit: #d98a00; --w-lit-bg: #fff3d6; --w-line: #d6d9df; --w-dim: #5a5f69; --w-ok: #17794f; --w-no: #a8321f; --w-no-bg: #fbe9e6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #3d4450; --script-bg: #eef0f3; --folder: #8a5d0a; --folder-bg: #fbf3df; --person: #14161a; --person-bg: #ffffff;
+  --read: #0b53c0; --write: #17794f; --talk: #6b4fa8; --lit: #d98a00; --lit-bg: #fff1d1;
+  --t-bg: #10151b; --t-bar: #19212b; --t-line: #2b3745; --t-ink: #e7edf4; --t-ink2: #a3b1c2; --t-ok: #5fc39d; --t-no: #ee7f79; --t-brass: #d2a94e;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+    --accent: #8ab4ff; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+    --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-ok: #146b45; --w-no-bg: #f6dcd7;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #c3cad5; --script-bg: #232831; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+    --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+    --t-bg: #0a0d11; --t-bar: #131920;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+  --accent: #8ab4ff; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+  --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-ok: #146b45; --w-no-bg: #f6dcd7;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #c3cad5; --script-bg: #232831; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+  --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+  --t-bg: #0a0d11; --t-bar: #131920;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); overflow-x: hidden; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 32px; } }
+
+.back { font-size: 15px; text-decoration: none; }
+.back::before { content: ""; display: inline-block; width: 8px; height: 8px; border-left: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); margin-right: 6px; vertical-align: 1px; }
+
+.hero { padding-top: 20px; }
+h1 { margin: 0; font-size: clamp(30px, 4.6vw, 48px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; }
+.lead { margin: 12px 0 0; font-size: 19px; color: var(--dim); max-width: 46em; }
+section.part { padding-top: 56px; }
+h2 { margin: 0 0 6px; font-size: 24px; font-weight: 700; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+h2 button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 2px 14px; font-size: 14px; font-weight: 600; color: var(--accent); }
+.sub { margin: 0 0 20px; color: var(--dim); font-size: 16px; }
+
+/* ---- how it is used ---- */
+.uses { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 36px 28px; }
+@media (max-width: 1000px) { .uses { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .uses { grid-template-columns: minmax(0, 1fr); } }
+.use { min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.use .pic { display: flex; justify-content: center; min-width: 0; min-height: 430px; align-items: stretch; }
+@media (max-width: 640px) { .use .pic { min-height: 0; } }
+.use .cap { display: flex; gap: 10px; align-items: baseline; font-size: 17px; line-height: 1.4; margin: 0; }
+.use .cap .n { flex: none; font: 600 14px var(--mono); color: var(--gold); border: 1.5px solid var(--gold); border-radius: 50%; width: 26px; height: 26px; display: grid; place-items: center; }
+.use .pic > * { transition: box-shadow .3s, transform .3s; }
+.use.now .pic > * { box-shadow: 0 0 0 3px var(--lit), 0 10px 30px rgba(0,0,0,.10); }
+
+/* light screens */
+.scr { width: 100%; max-width: 360px; background: var(--w-bg); color: var(--w-ink); border: 1px solid var(--w-line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.ti { font-size: 21px; font-weight: 700; line-height: 1.2; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.ti small { font-size: 14px; font-weight: 500; color: var(--w-dim); }
+.lbl { font-size: 13px; font-weight: 650; color: var(--w-dim); margin-bottom: -6px; }
+.val { border: 1.5px solid var(--w-ink); border-radius: 10px; padding: 8px 12px; font-size: 17px; display: flex; align-items: center; gap: 8px; }
+.val .dd { margin-left: auto; border: 5px solid transparent; border-top: 6px solid var(--w-dim); border-bottom: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips span { border: 1px solid var(--w-line); border-radius: 999px; padding: 2px 11px; font-size: 14px; }
+.chips span.on { border: 2px solid var(--w-btn); color: var(--w-btn); font-weight: 650; }
+.sw { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; line-height: 1.25; }
+.sw i { flex: none; width: 44px; height: 25px; border-radius: 999px; background: var(--w-ok); position: relative; }
+.sw i::after { content: ""; position: absolute; top: 3px; left: 22px; width: 19px; height: 19px; border-radius: 50%; background: var(--w-bg); }
+.btn { align-self: flex-start; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 10px; padding: 9px 18px; font-weight: 650; font-size: 16px; text-align: center; }
+.btn.alt { background: var(--w-bg); color: var(--w-btn); border: 2px solid var(--w-btn); }
+.row { display: flex; gap: 8px; flex-wrap: wrap; }
+.fine { font-size: 14px; color: var(--w-dim); display: flex; gap: 8px; align-items: center; line-height: 1.3; }
+.fine svg { flex: none; }
+
+/* the list */
+.agents { display: flex; flex-direction: column; gap: 8px; }
+.ag { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--w-line); border-radius: 12px; padding: 10px 9px 10px 12px; position: relative; }
+.ag.on { border-color: var(--w-lit); box-shadow: inset 0 0 0 1.5px var(--w-lit); background: var(--w-lit-bg); }
+.ag.off .nm b, .ag.off .out { color: var(--w-dim); }
+.ag .st { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--w-ok); }
+.ag .st.wait { background: var(--w-lit); }
+.ag .st.paused { background: none; border: 2px solid var(--w-dim); }
+.ag .nm { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; line-height: 1.2; }
+.ag .nm b { font-size: 17px; }
+.ag .tool { border: 1px solid var(--w-line); border-radius: 6px; padding: 0 18px 0 6px; font-size: 12.5px; background: var(--w-bg); position: relative; }
+.ag .tool::after { content: ""; position: absolute; right: 6px; top: 50%; margin-top: -2px; border: 4px solid transparent; border-top-color: var(--w-dim); border-bottom: 0; }
+.ag .out { font: 13px/1.3 var(--mono); }
+.ag .aq { font: 700 14px/1.3 var(--mono); }
+.ag .yn { display: flex; gap: 6px; }
+.ag .yn span { border-radius: 8px; padding: 3px 16px; font-size: 15px; font-weight: 650; border: 2px solid var(--w-btn); color: var(--w-btn); background: var(--w-bg); }
+.ag .yn span:first-child { background: var(--w-btn); color: var(--w-btn-ink); }
+.ag .ctl { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--w-btn); position: relative; }
+.ag .ctl.pause::before, .ag .ctl.pause::after { content: ""; position: absolute; top: 10px; width: 3px; height: 10px; background: var(--w-btn); border-radius: 1px; }
+.ag .ctl.pause::before { left: 11px; } .ag .ctl.pause::after { left: 16px; }
+.ag .ctl.play { background: var(--w-btn); }
+.ag .ctl.play::before { content: ""; position: absolute; top: 9px; left: 12px; border: 6px solid transparent; border-left: 9px solid var(--w-btn-ink); border-right: 0; }
+.menu { margin: 2px 0 0; border: 1px solid var(--w-line); border-radius: 8px; background: var(--w-bg); box-shadow: 0 6px 18px rgba(0,0,0,.14); font-size: 14px; display: flex; flex-direction: column; min-width: 150px; }
+.menu span { padding: 4px 10px; }
+.menu span.on { background: var(--w-soft); font-weight: 650; }
+.menu small { padding: 4px 10px 2px; font-size: 12px; color: var(--w-dim); }
+.add { border: 2px dashed var(--w-line); border-radius: 12px; padding: 8px 12px; color: var(--w-dim); font-size: 15px; }
+
+/* dark panel: technical */
+.term { width: 100%; max-width: 360px; background: var(--t-bg); color: var(--t-ink); border-radius: 14px; overflow: hidden; display: flex; flex-direction: column; box-shadow: 0 10px 30px rgba(0,0,0,.18); }
+.term .bar { background: var(--t-bar); border-bottom: 1px solid var(--t-line); padding: 8px 12px; font-size: 13px; color: var(--t-ink2); display: flex; align-items: center; gap: 8px; }
+.term .bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--t-line); }
+.term .bar b { color: var(--t-ink); margin-left: 6px; font-weight: 600; }
+.term pre { margin: 0; padding: 14px; font: 14px/1.6 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; flex: 1; }
+.term .p { color: var(--t-brass); }
+.term .ok { color: var(--t-ok); }
+.term .no { color: var(--t-no); }
+.term .dm { color: var(--t-ink2); }
+
+/* the night */
+.nrow { display: grid; grid-template-columns: 46px minmax(0,1fr) auto; gap: 8px; align-items: center; font-size: 14px; padding-top: 9px; border-top: 1px solid var(--w-line); }
+.nt { color: var(--w-dim); font-variant-numeric: tabular-nums; }
+.nq b { display: block; font-size: 13px; }
+.nq code { font: 14px/1.3 var(--mono); }
+.na { color: var(--w-ok); font-weight: 650; font-size: 13.5px; text-align: right; line-height: 1.2; }
+.na small { display: block; color: var(--w-dim); font-weight: 500; font-size: 12px; }
+.nrow.out .na { color: var(--w-lit); }
+.rulebox { background: var(--w-soft); border-radius: 10px; padding: 8px 12px; font-size: 14px; line-height: 1.45; }
+.rulebox b { display: block; font-size: 13px; color: var(--w-dim); }
+.rulebox code { font: 13.5px var(--mono); }
+
+/* the phone */
+.phone { width: 300px; max-width: 100%; min-height: 430px; border: 9px solid var(--w-frame); border-radius: 34px; background: var(--w-bg); color: var(--w-ink); overflow: hidden; display: flex; flex-direction: column; padding: 18px 14px 14px; gap: 12px; }
+.phone .top { display: flex; justify-content: space-between; align-items: baseline; font-size: 14px; color: var(--w-dim); }
+.phone .top b { font-size: 20px; color: var(--w-ink); }
+.ask { border: 2px solid var(--w-lit); background: var(--w-lit-bg); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.ask .hd { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 650; }
+.ask code { font: 700 20px/1.25 var(--mono); }
+.ask .why { font-size: 14px; color: var(--w-dim); }
+.ask .row .btn { flex: 1; font-size: 19px; padding: 10px; }
+.phone .wait { margin-top: auto; font-size: 14px; color: var(--w-dim); display: flex; gap: 8px; align-items: center; }
+
+/* ready to send */
+.chg { border: 1px solid var(--w-line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.chg .hd { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.chg .hd b { font-size: 17px; }
+.chg .hd span { font: 13px var(--mono); white-space: nowrap; }
+.chg .hd .plus { color: var(--w-ok); } .chg .hd .minus { color: var(--w-no); }
+.diff { font: 13px/1.5 var(--mono); background: var(--w-soft); border-radius: 8px; padding: 6px 8px; overflow-wrap: anywhere; }
+.diff div { white-space: pre-wrap; }
+.diff .m { color: var(--w-no); } .diff .a { color: var(--w-ok); }
+.chg.small { color: var(--w-dim); }
+
+/* ---- the whole setup ---- */
+.board { border: 1px solid var(--line); border-radius: 16px; background: var(--bg); padding: 12px; }
+.canvas { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.canvas svg { display: block; width: 100%; height: auto; min-width: 740px; }
+.slide { display: none; font-size: 14px; color: var(--dim); margin: 0 0 6px; }
+@media (max-width: 780px) { .slide { display: block; } }
+.board text { font-family: var(--sans); }
+.nd { cursor: pointer; }
+.nd .bx { stroke-width: 1.5; transition: opacity .2s; }
+.nd.agent .bx { fill: var(--agent-bg); stroke: var(--text); stroke-width: 3.5; }
+.nd.script .bx { fill: var(--script-bg); stroke: var(--script); stroke-dasharray: 6 4; stroke-width: 2; }
+.nd.asset .bx { fill: var(--folder-bg); stroke: var(--folder); }
+.nd.person .bx { fill: var(--person-bg); stroke: var(--person); stroke-width: 2; }
+.nd .nm { font-size: 17px; font-weight: 700; fill: var(--text); }
+.nd .tl { font-size: 13.5px; fill: var(--dim); }
+.nd.on .bx { fill: var(--lit-bg); stroke: var(--lit); }
+.nd.near .bx { stroke: var(--lit); }
+.ln { fill: none; stroke-width: 2; transition: opacity .2s; }
+.ln.read, .ln.both { stroke: var(--read); }
+.ln.write { stroke: var(--write); }
+.ln.talk { stroke: var(--talk); stroke-dasharray: 6 5; }
+.ln.wk { stroke-width: 3.5; }
+svg.focus .ln:not(.near) { opacity: .12; }
+svg.focus .nd:not(.on):not(.near) { opacity: .4; }
+.wkdot { fill: var(--lit); stroke: var(--bg); stroke-width: 2; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 0 0; padding: 0; list-style: none; font-size: 14px; color: var(--dim); }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend svg { flex: none; }
+.info { margin: 14px 0 0; min-height: 3.2em; font-size: 17px; line-height: 1.45; border-left: 4px solid var(--lit); padding: 4px 0 4px 14px; }
+.info b { font-weight: 700; }
+.info .sees { color: var(--dim); }
+
+/* ---- what you need ---- */
+.needs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+@media (max-width: 900px) { .needs { grid-template-columns: minmax(0, 1fr); } }
+.need { border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; background: var(--soft); min-width: 0; }
+.need h3 { margin: 0 0 10px; font-size: 18px; display: flex; gap: 8px; align-items: center; }
+.need ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.need li { font-size: 16px; line-height: 1.35; }
+.need li > b, .need li > code { margin-right: 8px; }
+.need code { font: 600 14px var(--mono); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 1px 7px; overflow-wrap: anywhere; }
+.need .who { color: var(--dim); font-size: 15px; }
+.need p { margin: 12px 0 0; font-size: 15px; color: var(--dim); line-height: 1.4; }
+.flag { flex: none; display: inline-block; vertical-align: -3px; border-radius: 2px; }
+
+/* ---- take it ---- */
+.take { margin-top: 56px; padding-top: 28px; padding-bottom: 8px; }
+.take::before { content: ""; display: block; border-top: 1px solid var(--line); margin-bottom: 28px; }
+.take .acts { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 14px 0 14px; }
+.take .dl { background: var(--accent); color: var(--bg); text-decoration: none; font-size: 20px; font-weight: 650; border-radius: 12px; padding: 15px 26px; display: inline-flex; gap: 10px; align-items: center; }
+.take .cp { border: 2px solid var(--accent); color: var(--accent); background: var(--bg); font-size: 18px; font-weight: 650; border-radius: 12px; padding: 12px 22px; }
+.take .said { font-size: 15px; color: var(--ok); min-height: 1.4em; margin: 0; }
+.take p { margin: 0 0 10px; font-size: 17px; max-width: 48em; }
+.take .ws { font-size: 16px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .ag .st:not(.paused):not(.wait) { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .use.now .nrow, .use.now .ask { animation: rise .5s ease-out both; }
+  .use.now .nrow:nth-of-type(2) { animation-delay: .5s; } .use.now .nrow:nth-of-type(3) { animation-delay: 1s; } .use.now .nrow:nth-of-type(4) { animation-delay: 1.5s; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  .term .cur::after { content: ""; display: inline-block; width: 8px; height: 1.1em; vertical-align: -3px; background: var(--t-ink); animation: pulse .9s step-end infinite; }
+}
+.back-row { margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<p class="ribbon">Target page: shows planned features. Names are invented.</p>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="../index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button" aria-current="page">Use cases</button>
+        <span class="drop-menu">
+        <a href="../cases/family.html">Marcel, 82, tells his story</a>
+        <a href="../cases/code.html" aria-current="page">Your coding agents</a>
+        <a href="../cases/office.html">Office: one report per client</a>
+        <a href="../cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="../cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="../examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+
+
+<main>
+  <section class="hero wrap">
+    <p class="back-row"><a class="back" href="../index.html#code">&larr; All cases</a></p>
+    <h1>Your coding agents</h1>
+    <p class="lead">Claude Code, OpenCode and Codex, each in its own small machine, in one list; your rules answer at night, and only you push.</p>
+  </section>
+
+  <section class="part wrap" aria-labelledby="use-h">
+    <h2 id="use-h">How it is used <button type="button" id="play">Pause</button></h2>
+    <p class="sub">Nadia has three repositories and three agents. One day and one night.</p>
+    <ol class="uses" id="uses"></ol>
+  </section>
+
+  <section class="part wrap" aria-labelledby="setup-h">
+    <h2 id="setup-h">The whole setup</h2>
+    <p class="sub">Drawn from the setup file itself. Touch a box.</p>
+    <div class="board">
+      <p class="slide">Slide sideways to see all of it.</p>
+      <div class="canvas" id="canvas"></div>
+      <p class="info" id="info" aria-live="polite"></p>
+      <ul class="legend" id="legend"></ul>
+    </div>
+  </section>
+
+  <section class="part wrap" aria-labelledby="need-h">
+    <h2 id="need-h">What you need</h2>
+    <div class="needs" id="needs"></div>
+  </section>
+
+  <section class="take wrap" aria-labelledby="take-h">
+    <h2 id="take-h">Take this setup</h2>
+    <div class="acts">
+      <a class="dl" href="code.clavarium.json" download>Download this setup</a>
+      <button type="button" class="cp" id="copy">Copy it</button>
+    </div>
+    <p class="said" id="said" aria-live="polite"></p>
+    <p>Import it in Clavarium: it creates the machines, attaches the folders, installs the scripts at their pinned version, then asks for the keys it needs.</p>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="../examples.html">Use cases</a>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+
+<script type="application/json" id="setup-data">
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Nadia (you)",
+   "x": 504,
+   "y": 240
+  },
+  {
+   "id": "a1",
+   "kind": "agent",
+   "name": "shop-api",
+   "x": 268,
+   "y": 126,
+   "tool": "Claude Code",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the shop-api repository with your Claude Code login and tools; commits its work and puts finished branches in Ready to send.",
+   "key": "CLAUDE_CODE_LOGIN"
+  },
+  {
+   "id": "a2",
+   "kind": "agent",
+   "name": "website",
+   "x": 268,
+   "y": 232,
+   "tool": "OpenCode",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the website repository with a Mistral model; commits its work and puts finished branches in Ready to send.",
+   "key": "MISTRAL_API_KEY"
+  },
+  {
+   "id": "a3",
+   "kind": "agent",
+   "name": "docs",
+   "x": 268,
+   "y": 338,
+   "tool": "Codex CLI",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the docs repository with an OpenAI model; commits its work and puts finished branches in Ready to send.",
+   "key": "OPENAI_API_KEY"
+  },
+  {
+   "id": "f1",
+   "kind": "asset",
+   "name": "shop-api repository",
+   "x": 21,
+   "y": 134
+  },
+  {
+   "id": "f2",
+   "kind": "asset",
+   "name": "website repository",
+   "x": 21,
+   "y": 240
+  },
+  {
+   "id": "f3",
+   "kind": "asset",
+   "name": "docs repository",
+   "x": 21,
+   "y": 346
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "Night watch",
+   "x": 508,
+   "y": 126,
+   "wake": "Nothing but its links",
+   "does": "Answers the terminal questions your rules cover; sends the others to your phone with Yes and No; writes each answer in the night log. Calls no model.",
+   "source": "https://example.com/clavarium/scripts/night-watch.git",
+   "pin": "4f2c9a1e"
+  },
+  {
+   "id": "f4",
+   "kind": "asset",
+   "name": "Your rules",
+   "x": 741,
+   "y": 28
+  },
+  {
+   "id": "f6",
+   "kind": "asset",
+   "name": "Night log",
+   "x": 741,
+   "y": 134
+  },
+  {
+   "id": "f5",
+   "kind": "asset",
+   "name": "Ready to send",
+   "x": 501,
+   "y": 346
+  },
+  {
+   "id": "s2",
+   "kind": "script",
+   "name": "Send",
+   "x": 748,
+   "y": 338,
+   "wake": "Nothing but its links",
+   "does": "When you press Send on a branch you have read, pushes that branch to git.example.com. Only it holds the push key. Calls no model.",
+   "key": "GIT_PUSH_KEY",
+   "source": "https://example.com/clavarium/scripts/send.git",
+   "pin": "b81e07d3"
+  },
+  {
+   "id": "f7",
+   "kind": "asset",
+   "name": "git.example.com",
+   "x": 741,
+   "y": 452
+  }
+ ],
+ "links": [
+  {
+   "from": "p1",
+   "to": "a1",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "a2",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "a3",
+   "kind": "talk"
+  },
+  {
+   "from": "f1",
+   "to": "a1",
+   "kind": "both"
+  },
+  {
+   "from": "f2",
+   "to": "a2",
+   "kind": "both"
+  },
+  {
+   "from": "f3",
+   "to": "a3",
+   "kind": "both"
+  },
+  {
+   "from": "a1",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "a2",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "a3",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "f4",
+   "to": "s1",
+   "kind": "read"
+  },
+  {
+   "from": "s1",
+   "to": "f6",
+   "kind": "write"
+  },
+  {
+   "from": "s1",
+   "to": "p1",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "f4",
+   "kind": "write"
+  },
+  {
+   "from": "f6",
+   "to": "p1",
+   "kind": "read"
+  },
+  {
+   "from": "a1",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "a2",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "a3",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "f5",
+   "to": "p1",
+   "kind": "read",
+   "wakes": true,
+   "only": "finished branches"
+  },
+  {
+   "from": "p1",
+   "to": "s2",
+   "kind": "talk"
+  },
+  {
+   "from": "f5",
+   "to": "s2",
+   "kind": "read",
+   "only": "branches you sent"
+  },
+  {
+   "from": "s2",
+   "to": "f7",
+   "kind": "write"
+  }
+ ]
+}
+</script>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var RAW = document.getElementById("setup-data").textContent.trim();
+  var SETUP = JSON.parse(RAW);
+
+  function h(tag, cls, text, parent) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function s(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  var ICONS = {
+    lock: [["rect", { x: 5, y: 11, width: 14, height: 11, rx: 2, fill: "currentColor" }], ["path", { d: "M8 11V8a4 4 0 0 1 8 0v3", fill: "none", stroke: "currentColor", "stroke-width": 2.4 }]],
+    phone: [["rect", { x: 6, y: 2, width: 12, height: 20, rx: 2.5, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["circle", { cx: 12, cy: 18, r: 1.3, fill: "currentColor" }]],
+    key: [["circle", { cx: 7, cy: 12, r: 4.5, fill: "none", stroke: "currentColor", "stroke-width": 2.4 }], ["path", { d: "M11.5 12H23M19 12v4.5M23 12v3.5", fill: "none", stroke: "currentColor", "stroke-width": 2.4, "stroke-linecap": "round" }]],
+    folder: [["path", { d: "M2 6a1 1 0 0 1 1-1h6l2 2h10a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z", fill: "currentColor" }]],
+    box: [["path", { d: "M3 7l9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    cloud: [["path", { d: "M7 18h10a4 4 0 0 0 .5-8 6 6 0 0 0-11.3 1.5A3.3 3.3 0 0 0 7 18z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    down: [["path", { d: "M12 3v12M6 10l6 6 6-6M4 20h16", fill: "none", stroke: "currentColor", "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round" }]]
+  };
+  function ic(name, size, parent, colour) {
+    var v = s("svg", { viewBox: "0 0 24 24", width: size, height: size, "aria-hidden": "true" }, parent);
+    if (colour) v.style.color = "var(--" + colour + ")";
+    ICONS[name].forEach(function (p) { s(p[0], p[1], v); });
+    return v;
+  }
+  function flag(code, w, parent) {
+    var v = s("svg", { viewBox: "0 0 30 20", width: w, height: w * 2 / 3, "class": "flag", "aria-hidden": "true" }, parent);
+    if (code === "fr") {
+      s("rect", { width: 10, height: 20, fill: "#0055a4" }, v); s("rect", { x: 10, width: 10, height: 20, fill: "#ffffff" }, v); s("rect", { x: 20, width: 10, height: 20, fill: "#d52b1e" }, v);
+    } else {
+      s("rect", { width: 30, height: 20, fill: "#ffffff" }, v);
+      for (var i = 0; i < 13; i += 2) s("rect", { y: (i * 20 / 13).toFixed(2), width: 30, height: (20 / 13).toFixed(2), fill: "#d52b1e" }, v);
+      s("rect", { width: 13, height: (140 / 13).toFixed(2), fill: "#0a3161" }, v);
+    }
+    s("rect", { x: .25, y: .25, width: 29.5, height: 19.5, fill: "none", stroke: "var(--line)", "stroke-width": .5 }, v);
+    return v;
+  }
+  function pic(el, label) { el.setAttribute("role", "img"); el.setAttribute("aria-label", label); return el; }
+
+  /* ---------- 1. a new agent ---------- */
+  function newPic() {
+    var p = pic(h("div", "scr"), "New agent: repository shop-api, tool Claude Code, uses your Claude Code login and tools; button Create its machine");
+    var t = h("div", "ti", "New agent", p); h("small", null, "1 of 3", t);
+    h("div", "lbl", "Repository", p);
+    var v = h("div", "val", null, p); ic("folder", 18, v, "folder"); h("span", null, "shop-api", v);
+    h("div", "lbl", "Tool", p);
+    var c = h("div", "chips", null, p);
+    [["Claude Code", true], ["OpenCode"], ["Codex CLI"]].forEach(function (x) { h("span", x[1] ? "on" : null, x[0], c); });
+    var sw = h("div", "sw", null, p); h("i", null, null, sw); h("span", null, "Use my Claude Code login and tools", sw);
+    h("div", "btn", "Create its machine", p);
+    var f = h("div", "fine", null, p); ic("box", 18, f); h("span", null, "Its machine holds shop-api and nothing else.", f);
+    return p;
+  }
+  /* ---------- 2. one list ---------- */
+  function listPic() {
+    var p = pic(h("div", "scr"), "Your coding agents: shop-api running Claude Code, website asks Use port 3000 with Yes and No, docs paused with its tool menu open: Claude Code, OpenCode, Codex CLI");
+    var t = h("div", "ti", "Your coding agents", p); h("small", null, "Nadia", t);
+    var l = h("div", "agents", null, p);
+    function row(a) {
+      var r = h("div", "ag" + (a.on ? " on" : "") + (a.off ? " off" : ""), null, l);
+      h("span", "st " + (a.c || ""), null, r);
+      var nm = h("span", "nm", null, r);
+      h("b", null, a.name, nm); h("span", "tool", a.tool, nm);
+      if (a.out) h("span", "out", a.out, nm);
+      if (a.ask) { h("span", "aq", a.ask, nm); var yn = h("span", "yn", null, nm); h("span", null, "Yes", yn); h("span", null, "No", yn); }
+      if (a.menu) { var m = h("span", "menu", null, nm); h("small", null, "Change tool", m); ["Claude Code", "OpenCode", "Codex CLI"].forEach(function (x) { h("span", x === "Codex CLI" ? "on" : null, x, m); }); }
+      h("span", "ctl " + a.ctl, null, r);
+    }
+    row({ name: "shop-api", tool: "Claude Code", out: "pytest: 41 passed", ctl: "pause" });
+    row({ name: "website", tool: "OpenCode · Mistral", ask: "Use port 3000?", c: "wait", ctl: "pause", on: true });
+    row({ name: "docs", tool: "Codex CLI", out: "paused", c: "paused", ctl: "play", off: true, menu: true });
+    h("div", "add", "+ New agent", p);
+    return p;
+  }
+  /* ---------- 3. inside its machine (technical: dark) ---------- */
+  function termPic() {
+    var p = pic(h("div", "term"), "The terminal inside shop-api's machine: only the shop-api folder; the website folder does not exist there; git push has no key");
+    var b = h("div", "bar", null, p); h("i", null, null, b); h("i", null, null, b); h("i", null, null, b); h("b", null, "shop-api, its machine", b);
+    var pre = h("pre", null, null, p);
+    function ln(cls, text) { h("span", cls, text, pre); pre.appendChild(document.createTextNode("\n")); }
+    ln("p", "$ ls ~"); ln(null, "shop-api");
+    ln("p", "$ cat ~/website/.env"); ln("no", "No such file or directory");
+    ln("p", "$ git commit -m \"Fix cart total\""); ln("ok", "[fix-cart-total 3e1a9c2] Fix cart total");
+    ln("p", "$ git push"); ln("no", "No push key in this machine.");
+    ln("dm", "Branch put in Ready to send.");
+    h("span", "p cur", "$ ", pre);
+    return p;
+  }
+  /* ---------- 4. the night ---------- */
+  function nightPic() {
+    var p = pic(h("div", "scr"), "Night log: three terminal questions answered yes by your rules; at 05:12 Drop table orders? goes to your phone");
+    var t = h("div", "ti", "Night log", p); h("small", null, "Tuesday", t);
+    var rb = h("div", "rulebox", null, p); h("b", null, "Your rules", rb);
+    h("code", null, "tests, installs, inside the repository: yes", rb); h("br", null, null, rb);
+    h("code", null, "drop, delete data, network: ask me", rb);
+    [["01:02", "website", "npm install?", "yes", "by rule"], ["02:14", "shop-api", "Install pytest?", "yes", "by rule"], ["03:40", "docs", "Delete build/?", "yes", "by rule"], ["05:12", "shop-api", "Drop table orders?", "to your phone", "", true]].forEach(function (r) {
+      var row = h("div", "nrow" + (r[5] ? " out" : ""), null, p);
+      h("span", "nt", r[0], row);
+      var q = h("span", "nq", null, row); h("b", null, r[1], q); h("code", null, r[2], q);
+      var a = h("span", "na", r[3], row); if (r[4]) h("small", null, r[4], a);
+    });
+    return p;
+  }
+  /* ---------- 5. the phone ---------- */
+  function phonePic() {
+    var p = pic(h("div", "phone"), "Nadia's phone at 05:12: shop-api asks Drop table orders?, with Yes and No");
+    var t = h("div", "top", null, p); h("b", null, "Clavarium", t); h("span", null, "05:12", t);
+    var a = h("div", "ask", null, p);
+    var hd = h("div", "hd", null, a); ic("phone", 18, hd); h("span", null, "shop-api asks you", hd);
+    h("code", null, "Drop table orders?", a);
+    h("div", "why", "Your rule: drop asks you.", a);
+    var yn = h("div", "row", null, a); h("div", "btn alt", "Yes", yn); h("div", "btn", "No", yn);
+    var w = h("div", "wait", null, p); ic("lock", 16, w); h("span", null, "shop-api waits. The others keep working.", w);
+    return p;
+  }
+  /* ---------- 6. ready to send ---------- */
+  function sendPic() {
+    var p = pic(h("div", "scr"), "Ready to send: branch fix-cart-total of shop-api, 42 lines added, 7 removed, its change shown; buttons Send and Not yet; the push key stays with Send");
+    var t = h("div", "ti", "Ready to send", p); h("small", null, "2 branches", t);
+    var c = h("div", "chg", null, p);
+    var hd = h("div", "hd", null, c); h("b", null, "shop-api · fix-cart-total", hd);
+    var nums = h("span", null, null, hd); h("span", "plus", "+42 ", nums); h("span", "minus", "−7", nums);
+    var d = h("div", "diff", null, c);
+    h("div", "m", "- total = sum(prices)", d); h("div", "a", "+ total = sum(p.price * p.qty", d); h("div", "a", "+             for p in cart)", d);
+    var r = h("div", "row", null, c); h("div", "btn", "Send", r); h("div", "btn alt", "Not yet", r);
+    var c2 = h("div", "chg small", null, p); var hd2 = h("div", "hd", null, c2); h("b", null, "docs · new-install-page", hd2); h("span", null, "+120", hd2);
+    var f = h("div", "fine", null, p); ic("key", 18, f, "gold"); h("span", null, "The push key stays with Send, outside the agents' machines.", f);
+    return p;
+  }
+
+  var USES = [
+    { pic: newPic, text: "Pick a repository and a tool. It gets its own small machine, and keeps your Claude Code login." },
+    { pic: listPic, text: "One list, on the computer and the phone: switch, pause, resume, change the tool." },
+    { pic: termPic, text: "Inside, an agent sees its repository. Not the others, not your computer, no push key." },
+    { pic: nightPic, text: "At night, simple terminal questions are answered by your rules." },
+    { pic: phonePic, text: "A risky one reaches your phone: Yes or No." },
+    { pic: sendPic, text: "In the morning you read each change and press Send." }
+  ];
+  var usesEl = document.getElementById("uses"), items = [];
+  USES.forEach(function (u, i) {
+    var li = h("li", "use", null, usesEl);
+    h("div", "pic", null, li).appendChild(u.pic());
+    var cap = h("p", "cap", null, li); h("span", "n", String(i + 1), cap); h("span", null, u.text, cap);
+    items.push(li);
+  });
+  /* The day plays out: one picture after the other is lit. Still when motion is reduced. */
+  var cur = -1, timer = null, playing = !still, playBtn = document.getElementById("play");
+  function light(i) { cur = i; items.forEach(function (li, k) { li.classList.toggle("now", k === i); }); }
+  function tick() { clearTimeout(timer); if (!playing) return; timer = setTimeout(function () { light((cur + 1) % items.length); tick(); }, 3600); }
+  playBtn.textContent = playing ? "Pause" : "Play";
+  playBtn.addEventListener("click", function () { playing = !playing; playBtn.textContent = playing ? "Pause" : "Play"; if (playing) light((cur + 1) % items.length); tick(); });
+  if (playing) { light(0); tick(); }
+
+  /* ---------- the whole setup, drawn from the file ---------- */
+  var SIZE = { agent: [164, 62], script: [164, 62], asset: [178, 46], person: [172, 46] };
+  var nodes = SETUP.nodes, links = SETUP.links, byId = {};
+  nodes.forEach(function (x) { byId[x.id] = x; });
+  var W = 0, H = 0;
+  nodes.forEach(function (x) { W = Math.max(W, x.x + SIZE[x.kind][0]); H = Math.max(H, x.y + SIZE[x.kind][1]); });
+  var svg = s("svg", { viewBox: "0 0 " + (W + 20) + " " + (H + 16), role: "img", "aria-label": "The whole setup: " + nodes.length + " boxes and " + links.length + " links, as in the setup file" }, document.getElementById("canvas"));
+  var defs = s("defs", {}, svg);
+  ["read", "write", "talk"].forEach(function (k) {
+    var m = s("marker", { id: "m-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "11", markerHeight: "11", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" }, defs);
+    s("path", { d: "M0 0 L10 5 L0 10 z", fill: "var(--" + k + ")" }, m);
+  });
+  function centre(x) { return [x.x + SIZE[x.kind][0] / 2, x.y + SIZE[x.kind][1] / 2]; }
+  /* Where the line from a box's centre towards a point leaves the box. */
+  function edge(x, to) {
+    var c = centre(x), w = SIZE[x.kind][0] / 2 + 3, hh = SIZE[x.kind][1] / 2 + 3, dx = to[0] - c[0], dy = to[1] - c[1];
+    var t = Math.min(dx ? w / Math.abs(dx) : Infinity, dy ? hh / Math.abs(dy) : Infinity);
+    return [c[0] + dx * t, c[1] + dy * t];
+  }
+  var lineEls = [], nodeEls = {};
+  var lg = s("g", {}, svg), wg = s("g", {}, svg), ng = s("g", {}, svg);
+  links.forEach(function (l) {
+    var a = byId[l.from], b = byId[l.to], p = edge(a, centre(b)), q = edge(b, centre(a));
+    var cls = "ln " + l.kind + (l.wakes ? " wk" : "");
+    var ln = s("path", { d: "M" + p[0].toFixed(1) + " " + p[1].toFixed(1) + " L" + q[0].toFixed(1) + " " + q[1].toFixed(1), "class": cls }, lg);
+    var mk = "url(#m-" + (l.kind === "both" ? "read" : l.kind) + ")";
+    ln.setAttribute("marker-end", mk);
+    if (l.kind === "both" || l.kind === "talk") ln.setAttribute("marker-start", mk);
+    if (l.wakes) { var w = s("circle", { cx: q[0].toFixed(1), cy: q[1].toFixed(1), r: 6, "class": "wkdot" }, wg); lineEls.push({ el: w, l: l }); }
+    lineEls.push({ el: ln, l: l });
+  });
+  nodes.forEach(function (x) {
+    var g = s("g", { "class": "nd " + x.kind, tabindex: "0", role: "button", "aria-label": x.name }, ng);
+    var w = SIZE[x.kind][0], hh = SIZE[x.kind][1];
+    s("rect", { x: x.x, y: x.y, width: w, height: hh, rx: x.kind === "person" ? hh / 2 : x.kind === "asset" ? 6 : 12, "class": "bx" }, g);
+    if (x.kind === "asset") s("path", { d: "M" + (x.x + 10) + " " + x.y + " v-6 h40 l6 6", fill: "var(--folder-bg)", stroke: "var(--folder)", "stroke-width": 1.5 }, g);
+    var two = x.kind === "agent" || x.kind === "script";
+    var nm = s("text", { x: x.x + w / 2, y: x.y + (two ? 26 : 29), "text-anchor": "middle", "class": "nm" }, g); nm.textContent = x.name;
+    if (two) {
+      var sub = x.kind === "agent" ? x.tool + (x.key ? " · key" : "") : "script @ " + (x.pin || "").slice(0, 7);
+      var st = s("text", { x: x.x + w / 2, y: x.y + 47, "text-anchor": "middle", "class": "tl" }, g); st.textContent = sub;
+    }
+    if (x.kind === "agent") { var lk = ic("lock", 14, g); lk.setAttribute("x", x.x + w - 20); lk.setAttribute("y", x.y + 6); lk.style.color = "var(--dim)"; }
+    nodeEls[x.id] = g;
+    g.addEventListener("click", function () { pick(x.id); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(x.id); } });
+  });
+
+  var info = document.getElementById("info"), picked = null;
+  function names(arr) { return arr.length ? arr.join(", ") : "nothing"; }
+  function other(l, id) { return byId[l.from === id ? l.to : l.from]; }
+  function describe(x) {
+    var mine = links.filter(function (l) { return l.from === x.id || l.to === x.id; });
+    function list(kinds, filt) { return mine.filter(function (l) { return kinds.indexOf(l.kind) >= 0 && (!filt || filt(l)); }).map(function (l) { var o = other(l, x.id); return o.name + (l.only ? " (" + l.only + ")" : ""); }); }
+    var wakers = mine.filter(function (l) { return (l.wakes && l.to === x.id) || (l.kind === "talk" && l.to === x.id); }).map(function (l) { return byId[l.from].name; });
+    if (x.kind === "asset") {
+      return [x.name + ".", "Read by " + names(list(["read", "both"], function (l) { return l.to !== x.id || l.kind === "both"; })) + "; written by " + names(list(["write", "both"], function (l) { return l.to === x.id || l.kind === "both"; })) + "."];
+    }
+    var reads = list(["read", "both"]), writes = list(["write", "both"]), talks = list(["talk"]);
+    var sees = "Reads " + names(reads) + "; writes " + names(writes) + "; talks with " + names(talks) + ".";
+    if (x.kind === "person") return [x.name + ": you decide.", sees + " Woken by " + names(wakers) + "."];
+    return [x.name + ": " + x.does, sees + (x.key ? " Needs " + x.key + "." : "") + " Woken by " + names(wakers) + "."];
+  }
+  function pick(id) {
+    picked = picked === id ? null : id;
+    svg.classList.toggle("focus", !!picked);
+    var near = {};
+    lineEls.forEach(function (o) { var on = picked && (o.l.from === picked || o.l.to === picked); o.el.classList.toggle("near", !!on); if (on) { near[o.l.from] = 1; near[o.l.to] = 1; } });
+    for (var k in nodeEls) { nodeEls[k].classList.toggle("on", k === picked); nodeEls[k].classList.toggle("near", !!picked && k !== picked && !!near[k]); }
+    info.textContent = "";
+    if (!picked) { info.textContent = "Touch a box: what it does and what it sees."; return; }
+    var d = describe(byId[picked]);
+    h("b", null, d[0], info); info.appendChild(document.createTextNode(" ")); h("span", "sees", d[1], info);
+  }
+  pick(null);
+
+  var legend = document.getElementById("legend");
+  function leg(draw, text) { var li = h("li", null, null, legend); var v = s("svg", { width: 34, height: 18, viewBox: "0 0 34 18", "aria-hidden": "true" }, li); draw(v); h("span", null, text, li); }
+  function legLine(kind, both, wk) { return function (v) { var p = s("path", { d: "M3 9 H30", "class": "ln " + kind + (wk ? " wk" : "") }, v); p.setAttribute("marker-end", "url(#m-" + (kind === "both" ? "read" : kind) + ")"); if (both) p.setAttribute("marker-start", "url(#m-" + (kind === "both" ? "read" : kind) + ")"); if (wk) s("circle", { cx: 29, cy: 9, r: 5, "class": "wkdot" }, v); }; }
+  leg(function (v) { s("rect", { x: 2, y: 2, width: 30, height: 14, rx: 4, fill: "var(--agent-bg)", stroke: "var(--text)", "stroke-width": 2.5 }, v); }, "agent, in its own machine");
+  leg(function (v) { s("rect", { x: 2, y: 2, width: 30, height: 14, rx: 4, fill: "var(--script-bg)", stroke: "var(--script)", "stroke-dasharray": "4 3", "stroke-width": 1.5 }, v); }, "script, pinned");
+  leg(function (v) { s("rect", { x: 2, y: 3, width: 30, height: 13, rx: 3, fill: "var(--folder-bg)", stroke: "var(--folder)", "stroke-width": 1.5 }, v); }, "folder");
+  leg(legLine("read"), "reads"); leg(legLine("write"), "writes"); leg(legLine("both", true), "reads and writes"); leg(legLine("talk", true), "talk (wakes the one asked)"); leg(legLine("read", false, true), "an arrival wakes the reader");
+
+  /* ---------- what you need, keys taken from the file ---------- */
+  var needs = document.getElementById("needs");
+  function card(icon, colour, title) { var c = h("div", "need", null, needs); var t = h("h3", null, null, c); ic(icon, 22, t, colour); h("span", null, title, t); return c; }
+  var kc = card("key", "gold", "Keys"), ku = h("ul", null, null, kc);
+  nodes.filter(function (x) { return x.key; }).forEach(function (x) {
+    var li = h("li", null, null, ku); h("code", null, x.key, li);
+    h("span", "who", x.key === "CLAUDE_CODE_LOGIN" ? "your Claude Code login, for " + x.name : "for " + x.name + (x.kind === "script" ? " only" : ""), li);
+  });
+  h("p", null, "The file holds their names, never the keys. Clavarium asks for them after import.", kc);
+  var PROV = { "Claude Code": ["Anthropic", "us"], "OpenCode": ["Mistral, your choice", "fr"], "Codex CLI": ["OpenAI", "us"] };
+  var mc = card("cloud", "accent", "Where the models run"), mu = h("ul", null, null, mc);
+  nodes.filter(function (x) { return x.kind === "agent"; }).forEach(function (x) {
+    var pv = PROV[x.tool] || ["your choice", null];
+    var li = h("li", null, null, mu); h("b", null, x.name, li);
+    var sp = h("span", "who", x.tool + " → " + pv[0] + " ", li); sp.style.whiteSpace = "nowrap"; if (pv[1]) flag(pv[1], 21, sp);
+  });
+  h("p", null, "At the provider you choose. What an agent reads in its repository goes to that provider. Night watch and Send call no model.", mc);
+  var hc = card("box", "text", "The machine"), hu = h("ul", null, null, hc);
+  [["A small computer", "with Ubuntu, or your server"], ["One small machine per agent", "made by Clavarium"], ["Your phone", "for the risky questions"]].forEach(function (r) { var li = h("li", null, null, hu); h("b", null, r[0], li); h("span", "who", r[1], li); });
+  h("p", null, "No local model in this setup. One is possible only on a powerful computer.", hc);
+
+  /* ---------- copy: the file itself, or the same text kept in this page ---------- */
+  var said = document.getElementById("said");
+  document.getElementById("copy").addEventListener("click", function () {
+    function put(text) {
+      function byHand() {
+        var t = document.createElement("textarea"); t.value = text; t.setAttribute("readonly", ""); t.style.position = "fixed"; t.style.opacity = "0"; document.body.appendChild(t); t.select();
+        var ok = false; try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+        t.remove(); said.textContent = ok ? "Copied." : "Could not copy here: use Download.";
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(function () { said.textContent = "Copied."; }, byHand);
+      else byHand();
+    }
+    fetch("code.clavarium.json").then(function (r) { if (!r.ok) throw new Error("no file"); return r.text(); }).then(function (t) { put(t.trim()); }, function () { put(RAW); });
+  });
+})();
+</script>
+</body>
+</html>

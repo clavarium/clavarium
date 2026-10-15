@@ -2,7 +2,7 @@
    the host program, treated as hostile), and the builder every server-side
    git goes through. With a real git; the host program's read is played by
    the real reader script (git-stand-in.mjs) or by a process that writes
-   chosen bytes. Design: docs/blueprint/git-runner-core.md. */
+   chosen bytes. Design: blueprint/git-runner-core.md. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync, readdirSync, chmodSync, readFileSync } from 'node:fs';

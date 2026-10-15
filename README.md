@@ -10,7 +10,7 @@ A conversation is a VM with a terminal in it. Everything else is a folder.
 
 ## Where it stands
 
-Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
+Built slice by slice; the plan is in `blueprint/architecture.html`, tab
 "Plan". Done so far:
 
 - **0 - repository and rules**: hooks, checks, conventions.
@@ -91,7 +91,8 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   loose is unmounted and mounted again. What is wrong is said over the
   terminal, with a Restart button (asked first; a clean stop, then by force).
   Its memory and disk are set in its settings (a disk only grows); the record
-  holds what the VM manager says it has. The page's text has one size per
+  holds what the VM manager says it has (drawn in `blueprint/machine.html`).
+  The page's text has one size per
   device, the terminal's included; on a phone the terminal has the room.
 
 Not yet: mailbox and git resources, delivery.
@@ -174,10 +175,10 @@ The host needs `tmux` and `bindfs` (the read-only views).
 
 It listens on the loopback interface only.
 
-The agreed design is in `docs/blueprint/`: `architecture.html` (architecture,
+The agreed design is in `blueprint/`: `architecture.html` (architecture,
 security layers, resources, app and sharing, rules, decisions, plan) and
 `app-designs.html` (three first design ideas for the installable app). Open
-either file in a browser.
+either file in a browser. The public site is `docs/`: plain files, no build.
 
 ## Tests
 

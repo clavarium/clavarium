@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: Europe only</title>
+<meta name="description" content="Target page, not the real one: interview recordings read only by models hosted in Europe.">
+<!--
+  TARGET PAGE. It simulates PLANNED features: folders marked "Europe only" and "agents may only read";
+  attaching such a folder to an agent whose model runs outside Europe is refused, with the reason;
+  a table of model, provider and country per agent; importing a setup file.
+  The drawing and the downloaded file come from the same JSON (embedded below, and fetched when possible).
+  Names are invented. Everything is built with textContent, no innerHTML.
+-->
+<link rel="stylesheet" href="../base.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f5f2; --text: #16181d; --dim: #5a5f69; --line: #d6d9df;
+  --accent: #0b53c0; --accent-ink: #ffffff; --gold: #8a5f0c; --gold-bg: #fbf3df; --ok: #17794f; --no: #a8321f; --no-bg: #fbe9e6;
+  --w-bg: #ffffff; --w-ink: #000000; --w-soft: #f1efe9; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-line: #d6d9df; --w-dim: #5a5f69; --w-ok: #17794f; --w-no: #a8321f; --w-no-bg: #fbe9e6; --w-lit: #d98a00; --w-lit-bg: #fff3d6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #3d4757; --script-bg: #eef0f3; --folder: #8a5d0a; --folder-bg: #fbf3df; --person: #14161a; --person-bg: #ffffff;
+  --read: #0b53c0; --write: #17794f; --talk: #6b4fa8; --lit: #d98a00; --lit-bg: #fff1d1;
+  --t-bg: #10151b; --t-line: #2b3745; --t-ink: #e7edf4; --t-ink2: #a3b1c2; --t-brass: #d2a94e;
+  --fl-eu: #003399; --fl-gold: #ffcc00; --fl-blue: #0055a4; --fl-white: #ffffff; --fl-red: #d52b1e; --fl-navy: #0a3161;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+    --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+    --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-ok: #146b45; --w-no: #a8321f; --w-no-bg: #f6dcd7; --w-lit: #b87400; --w-lit-bg: #f6e3b4;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #c3cad6; --script-bg: #232831; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+    --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+    --t-bg: #0a0d11;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+  --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+  --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-ok: #146b45; --w-no: #a8321f; --w-no-bg: #f6dcd7; --w-lit: #b87400; --w-lit-bg: #f6e3b4;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #c3cad6; --script-bg: #232831; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+  --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+  --t-bg: #0a0d11;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); overflow-x: hidden; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 32px; } }
+
+.back { color: var(--dim); text-decoration: none; font-size: 15px; }
+.back:hover { color: var(--text); }
+
+.hero { padding-top: 20px; }
+h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; text-wrap: balance; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.lead { margin: 12px 0 0; font-size: 18px; color: var(--dim); }
+section.part { padding-top: 56px; }
+h2 { margin: 0 0 6px; font-size: 22px; font-weight: 680; }
+.under { margin: 0 0 18px; color: var(--dim); }
+
+/* ---- how it is used: the pictures ---- */
+.uses { list-style: none; margin: 20px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 36px 28px; }
+.use { min-width: 0; display: flex; flex-direction: column; }
+.use .pic { flex: 1; display: flex; justify-content: center; align-items: stretch; }
+.tag { margin: 14px 0 2px; display: flex; gap: 10px; font-size: 13px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--gold); }
+.tag .n { font-family: var(--mono); color: var(--dim); }
+.txt { margin: 0; font-size: 17px; line-height: 1.45; }
+
+.scr { width: 100%; max-width: 380px; background: var(--w-bg); color: var(--w-ink); border: 1px solid var(--w-line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.scr .ti { font-size: 21px; font-weight: 700; line-height: 1.2; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr .ti small { font-size: 14px; font-weight: 500; color: var(--w-dim); }
+.scr .val { border: 1.5px solid var(--w-ink); border-radius: 10px; padding: 8px 12px; font-size: 17px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.scr .val small { color: var(--w-dim); font-size: 14px; display: flex; align-items: center; gap: 6px; }
+.scr .btn { align-self: flex-start; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 10px; padding: 9px 18px; font-weight: 650; font-size: 16px; }
+.scr .btn.alt { background: var(--w-bg); color: var(--w-btn); border: 2px solid var(--w-btn); padding: 7px 14px; font-size: 15px; }
+.scr .sw { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 650; }
+.scr .sw i { flex: none; width: 46px; height: 26px; border-radius: 999px; border: 1px solid var(--w-ok); background: var(--w-ok); position: relative; }
+.scr .sw i::after { content: ""; position: absolute; top: 3px; left: 23px; width: 18px; height: 18px; border-radius: 50%; background: var(--w-bg); }
+.scr .files { display: flex; flex-direction: column; border-top: 1px solid var(--w-line); }
+.scr .file { display: flex; align-items: center; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--w-line); font: 14.5px/1.3 var(--mono); }
+.scr .file svg { flex: none; color: var(--w-dim); }
+.scr .file span { min-width: 0; overflow-wrap: anywhere; }
+.scr .file em { margin-left: auto; font: 600 13px var(--sans); font-style: normal; color: var(--w-dim); white-space: nowrap; }
+.scr .file.new { background: var(--w-lit-bg); margin: 0 -8px; padding: 7px 8px; border-radius: 8px; border-bottom-color: transparent; }
+.scr .file.new em { color: var(--w-lit); }
+.scr .file.done em { color: var(--w-ok); }
+.scr .who { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--w-dim); }
+.scr .who b { color: var(--w-ink); font-weight: 650; }
+.bar { height: 8px; border-radius: 999px; background: var(--w-soft); overflow: hidden; }
+.bar i { display: block; height: 100%; width: 100%; background: var(--w-ok); border-radius: inherit; }
+.down { align-self: center; width: 2px; height: 16px; background: var(--w-dim); position: relative; margin: -2px 0 4px; }
+.down::after { content: ""; position: absolute; left: -5px; bottom: -6px; border: 6px solid transparent; border-top: 7px solid var(--w-dim); border-bottom: 0; }
+.scr .msg { align-self: flex-start; max-width: 94%; background: var(--w-soft); border-radius: 14px 14px 14px 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; font-size: 16.5px; line-height: 1.35; }
+.scr .msg small { font-size: 13px; font-weight: 650; opacity: .8; }
+.scr .echo { align-self: flex-end; max-width: 90%; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 14px 14px 4px 14px; padding: 6px 12px; font-size: 16.5px; line-height: 1.35; }
+.srcchip { align-self: flex-start; display: inline-flex; align-items: center; gap: 7px; border: 2px solid var(--w-ok); color: var(--w-ok); background: var(--w-bg); border-radius: 999px; padding: 3px 12px 3px 4px; font-size: 15px; font-weight: 700; }
+.srcchip .pl { width: 24px; height: 24px; border-radius: 50%; background: var(--w-ok); color: #ffffff; display: grid; place-items: center; }
+.scr .refuse { border: 2px solid var(--w-no); background: var(--w-no-bg); border-radius: 10px; padding: 12px; font-size: 16px; line-height: 1.35; display: flex; align-items: flex-start; gap: 10px; }
+.scr .refuse b { color: var(--w-no); display: block; font-size: 22px; line-height: 1.15; margin-bottom: 4px; }
+.scr table { width: 100%; border-collapse: collapse; font-size: 15px; }
+.scr th { text-align: left; font-size: 12.5px; font-weight: 650; color: var(--w-dim); text-transform: uppercase; letter-spacing: .04em; padding: 0 6px 6px 0; }
+.scr td { padding: 8px 6px 8px 0; border-top: 1px solid var(--w-line); vertical-align: middle; }
+.scr td b { font-weight: 650; }
+.scr td .c { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.scr tr.out td { color: var(--w-dim); }
+.scr .seen { font-size: 14px; color: var(--w-dim); display: flex; gap: 6px; align-items: center; }
+.ptag { align-self: center; border: 1px solid var(--w-line); border-radius: 999px; padding: 2px 10px; font-size: 14px; line-height: 1.35; color: var(--w-ink); background: var(--w-bg); text-align: center; }
+.ptag b { font-weight: 700; color: var(--w-no); }
+.flag { flex: none; display: block; border-radius: 2px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .bar i { animation: fill 3.2s ease-out infinite; }
+  @keyframes fill { from { width: 0; } 70%, to { width: 100%; } }
+  .scr .file.new { animation: arrive 3.2s ease-out infinite; }
+  @keyframes arrive { from { opacity: .2; transform: translateY(-6px); } 15%, to { opacity: 1; transform: none; } }
+}
+
+/* ---- the whole setup ---- */
+.board { border: 1px solid var(--line); border-radius: 16px; background: var(--soft); padding: 12px; }
+.board #board svg { display: block; width: 100%; max-width: 600px; height: auto; margin: 0 auto; overflow: visible; }
+.board text { font-family: var(--sans); fill: var(--text); pointer-events: none; }
+.board .nm { font-size: 15px; font-weight: 650; }
+.board .sb { font-size: 12.5px; fill: var(--dim); }
+.board .bx { stroke-width: 1.5; }
+.board .bx.agent { fill: var(--agent-bg); stroke: var(--agent); }
+.board .bx.script { fill: var(--script-bg); stroke: var(--script); }
+.board .bx.asset { fill: var(--folder-bg); stroke: var(--folder); }
+.board .bx.person { fill: var(--person-bg); stroke: var(--person); }
+.board .box { cursor: pointer; }
+.board .box:focus { outline: none; }
+.board .box:focus-visible .bx, .board .box.on .bx { stroke-width: 3.5; }
+.board .box.on .bx { stroke: var(--lit); }
+.board .ln { fill: none; stroke-width: 2; }
+.board .ln.read, .board .ln.both { stroke: var(--read); }
+.board .ln.write { stroke: var(--write); }
+.board .ln.talk { stroke: var(--talk); stroke-dasharray: 2 4; stroke-linecap: round; }
+.board .ln.no { stroke: var(--no); stroke-dasharray: 6 4; }
+.board .ln.on { stroke-width: 3.5; }
+.board .wk { fill: var(--lit); stroke: var(--soft); stroke-width: 2; }
+.board .xc { fill: var(--no-bg); stroke: var(--no); stroke-width: 2; }
+.board .x { fill: none; stroke: var(--no); stroke-width: 3; stroke-linecap: round; }
+.board .no-t { fill: var(--no); font-size: 13px; font-weight: 700; }
+@media (max-width: 560px) { .board { padding: 8px 4px; } .board .nm { font-size: 18px; } .board .sb { font-size: 14.5px; } .board .no-t { font-size: 15px; } .say, .legend { margin-left: 6px; margin-right: 6px; } }
+.say { margin: 12px 0 0; min-height: 3em; border-left: 4px solid var(--lit); background: var(--bg); border-radius: 0 10px 10px 0; padding: 8px 12px; font-size: 16px; }
+.say b { font-weight: 680; }
+.legend { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 14px; color: var(--dim); }
+.legend li { display: flex; align-items: center; gap: 6px; }
+.legend svg { flex: none; width: 30px; height: 12px; }
+
+/* ---- what you need ---- */
+.need { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+.need > div { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.need h3 { margin: 0; font-size: 14px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--gold); display: flex; align-items: center; gap: 8px; }
+.need ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.need li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 16px; }
+.need li b { font-weight: 680; }
+.need li .k { font: 600 14.5px var(--mono); border: 1px solid var(--gold); background: var(--gold-bg); border-radius: 6px; padding: 1px 8px; }
+.need li small { color: var(--dim); font-size: 14px; }
+.need p { margin: 0; font-size: 15px; color: var(--dim); }
+
+/* ---- take it ---- */
+.take .dl { display: flex; flex-wrap: wrap; gap: 12px; margin: 4px 0 14px; }
+.take .dl a, .take .dl button { border-radius: 12px; padding: 14px 24px; font-size: 19px; font-weight: 650; text-decoration: none; border: 2px solid var(--accent); }
+.take .dl a { background: var(--accent); color: var(--accent-ink); }
+.take .dl button { background: var(--bg); color: var(--accent); }
+.take p { margin: 0 0 10px; }
+.take .done { color: var(--ok); font-weight: 650; min-height: 1.5em; }
+.take details { margin-top: 12px; }
+.take summary { cursor: pointer; color: var(--accent); }
+.take pre { margin: 10px 0 0; max-height: 340px; overflow: auto; background: var(--t-bg); color: var(--t-ink); border: 1px solid var(--t-line); border-radius: 10px; padding: 12px 14px; font: 13px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.back-row { margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<p class="ribbon">Target page: shows planned features. Names are invented.</p>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="../index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button" aria-current="page">Use cases</button>
+        <span class="drop-menu">
+        <a href="../cases/family.html">Marcel, 82, tells his story</a>
+        <a href="../cases/code.html">Your coding agents</a>
+        <a href="../cases/office.html">Office: one report per client</a>
+        <a href="../cases/europe.html" aria-current="page">Sensitive data that stays in Europe</a>
+        <a href="../cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="../examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+
+
+<main>
+  <section class="hero wrap">
+    <p class="back-row"><a class="back" href="../index.html#europe">&larr; All cases</a></p>
+    <h1 id="h1">Sensitive data that stays in Europe</h1>
+    <p class="lead">Your interview recordings go only to models hosted in Europe. Any other agent is refused, with the reason.</p>
+  </section>
+
+  <section class="part wrap" aria-labelledby="use-h">
+    <h2 id="use-h">How it is used</h2>
+    <p class="under">A research team, twelve interviews, three helpers.</p>
+    <ol class="uses" id="uses"></ol>
+  </section>
+
+  <section class="part wrap" aria-labelledby="set-h">
+    <h2 id="set-h">The whole setup</h2>
+    <p class="under">Touch a box: what it does, what it sees.</p>
+    <div class="board">
+      <div id="board"></div>
+      <p class="say" id="say" aria-live="polite"></p>
+      <ul class="legend" id="legend"></ul>
+    </div>
+  </section>
+
+  <section class="part wrap" aria-labelledby="need-h">
+    <h2 id="need-h">What you need</h2>
+    <div class="need" id="need"></div>
+  </section>
+
+  <section class="part wrap take" aria-labelledby="take-h">
+    <h2 id="take-h">Take this setup</h2>
+    <div class="dl">
+      <a href="europe.clavarium.json" download>Download this setup</a>
+      <button type="button" id="copy">Copy it</button>
+    </div>
+    <p class="done" id="done" aria-live="polite"></p>
+    <p>Import it in Clavarium: it creates the machines, attaches the folders, installs the scripts at their pinned version, then asks for the keys it needs.</p>
+    <details>
+      <summary>See the file</summary>
+      <pre id="file"></pre>
+    </details>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="../examples.html">Use cases</a>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+
+<script type="application/json" id="setup">{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Nora, lead researcher",
+   "x": 364,
+   "y": 32
+  },
+  {
+   "id": "a1",
+   "kind": "asset",
+   "name": "interviews",
+   "x": 258,
+   "y": 138
+  },
+  {
+   "id": "a4",
+   "kind": "asset",
+   "name": "literature",
+   "x": 464,
+   "y": 138
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "transcriber",
+   "x": 272,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Turns each new recording into text, word for word, with who speaks and when.",
+   "key": "Mistral key",
+   "source": "https://example.com/research/transcriber.git",
+   "pin": "3f9a2c1"
+  },
+  {
+   "id": "g2",
+   "kind": "agent",
+   "name": "analyst",
+   "x": 464,
+   "y": 236,
+   "tool": "Claude Code",
+   "mode": "conversation",
+   "wake": "Nothing but its links",
+   "does": "Searches the published papers with Nora and drafts the related-work section. Never sees the interviews.",
+   "key": "Anthropic key"
+  },
+  {
+   "id": "a2",
+   "kind": "asset",
+   "name": "transcripts",
+   "x": 258,
+   "y": 350
+  },
+  {
+   "id": "a5",
+   "kind": "asset",
+   "name": "drafts",
+   "x": 464,
+   "y": 350
+  },
+  {
+   "id": "g1",
+   "kind": "agent",
+   "name": "note-taker",
+   "x": 368,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Nothing but its links",
+   "does": "Writes notes for each transcript: themes, quotes with their minute, open questions. Answers the team, citing the interview and the minute.",
+   "key": "Mistral key"
+  },
+  {
+   "id": "a3",
+   "kind": "asset",
+   "name": "notes",
+   "x": 261,
+   "y": 562
+  },
+  {
+   "id": "p2",
+   "kind": "person",
+   "name": "Theo, research assistant",
+   "x": 467,
+   "y": 562
+  }
+ ],
+ "links": [
+  {
+   "from": "p1",
+   "to": "a1",
+   "kind": "write"
+  },
+  {
+   "from": "p1",
+   "to": "a4",
+   "kind": "write"
+  },
+  {
+   "from": "a1",
+   "to": "s1",
+   "kind": "read",
+   "wakes": true,
+   "only": "recordings"
+  },
+  {
+   "from": "a4",
+   "to": "g2",
+   "kind": "read"
+  },
+  {
+   "from": "p1",
+   "to": "g2",
+   "kind": "talk"
+  },
+  {
+   "from": "s1",
+   "to": "a2",
+   "kind": "write"
+  },
+  {
+   "from": "g2",
+   "to": "a5",
+   "kind": "write"
+  },
+  {
+   "from": "a2",
+   "to": "g1",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "g1",
+   "to": "a3",
+   "kind": "write"
+  },
+  {
+   "from": "g1",
+   "to": "p2",
+   "kind": "talk"
+  },
+  {
+   "from": "a3",
+   "to": "p2",
+   "kind": "read"
+  }
+ ]
+}</script>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var EMBEDDED = document.getElementById("setup").textContent;
+  var TEXT = EMBEDDED;
+
+  function h(tag, cls, text, parent) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function s(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function txt(parent, t) { parent.appendChild(document.createTextNode(t)); }
+
+  var ICONS = {
+    lock: [["rect", { x: 5, y: 11, width: 14, height: 11, rx: 2, fill: "currentColor" }], ["path", { d: "M8 11V8a4 4 0 0 1 8 0v3", fill: "none", stroke: "currentColor", "stroke-width": 2.4 }]],
+    play: [["path", { d: "M8 5l11 7-11 7z", fill: "currentColor" }]],
+    key: [["circle", { cx: 7, cy: 12, r: 4.5, fill: "none", stroke: "currentColor", "stroke-width": 2.4 }], ["path", { d: "M11.5 12H23M19 12v4.5M23 12v3.5", fill: "none", stroke: "currentColor", "stroke-width": 2.4, "stroke-linecap": "round" }]],
+    audio: [["path", { d: "M4 9v6M8 6v12M12 3v18M16 7v10M20 10v4", fill: "none", stroke: "currentColor", "stroke-width": 2.2, "stroke-linecap": "round" }]],
+    doc: [["path", { d: "M6 2h8l5 5v15H6z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }], ["path", { d: "M9 12h7M9 16h7", stroke: "currentColor", "stroke-width": 2 }]],
+    cloud: [["path", { d: "M7 19a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 10.5z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    box: [["rect", { x: 3, y: 5, width: 18, height: 14, rx: 2, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M7 15h4", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round" }]]
+  };
+  function ic(name, size, parent, colour) {
+    var v = s("svg", { viewBox: "0 0 24 24", width: size, height: size, "aria-hidden": "true" }, parent);
+    if (colour) v.style.color = "var(--" + colour + ")";
+    ICONS[name].forEach(function (p) { s(p[0], p[1], v); });
+    return v;
+  }
+  function flag(code, w, parent, x, y) {
+    var v = s("svg", { viewBox: "0 0 30 20", width: w, height: w * 2 / 3, "class": "flag", "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    if (code === "eu") {
+      s("rect", { width: 30, height: 20, fill: "var(--fl-eu)" }, v);
+      for (var k = 0; k < 12; k++) { var a = k * Math.PI / 6; s("circle", { cx: (15 + 6 * Math.cos(a)).toFixed(2), cy: (10 + 6 * Math.sin(a)).toFixed(2), r: 1.1, fill: "var(--fl-gold)" }, v); }
+    } else if (code === "fr") {
+      s("rect", { width: 10, height: 20, fill: "var(--fl-blue)" }, v); s("rect", { x: 10, width: 10, height: 20, fill: "var(--fl-white)" }, v); s("rect", { x: 20, width: 10, height: 20, fill: "var(--fl-red)" }, v);
+    } else {
+      s("rect", { width: 30, height: 20, fill: "var(--fl-white)" }, v);
+      for (var i = 0; i < 13; i += 2) s("rect", { y: (i * 20 / 13).toFixed(2), width: 30, height: (20 / 13).toFixed(2), fill: "var(--fl-red)" }, v);
+      s("rect", { width: 13, height: (140 / 13).toFixed(2), fill: "var(--fl-navy)" }, v);
+    }
+    s("rect", { x: .25, y: .25, width: 29.5, height: 19.5, fill: "none", stroke: "var(--line)", "stroke-width": .5 }, v);
+    return v;
+  }
+
+  /* What the setup file cannot say (yet): where each model runs, and the marks on each folder.
+     Keyed by the ids of the file. */
+  var MODEL = {
+    s1: { model: "Voxtral", provider: "Mistral", country: "France", flag: "fr", eu: true },
+    g1: { model: "Mistral Large", provider: "Mistral", country: "France", flag: "fr", eu: true },
+    g2: { model: "Claude", provider: "Anthropic", country: "USA", flag: "us", eu: false }
+  };
+  var MARKS = {
+    a1: "Europe only; agents may only read.",
+    a2: "Europe only; agents may only read.",
+    a3: "Europe only.",
+    a4: "Published papers: no mark.",
+    a5: "No mark."
+  };
+  /* The attempt that is refused: drawn, and not in the file. */
+  var REFUSED = { from: "a1", to: "g2", why: "Refused: interviews is Europe only, and analyst's model runs in the USA." };
+
+  /* ---------- 1. how it is used ---------- */
+  function scr(label) { var p = h("div", "scr"); p.setAttribute("role", "img"); p.setAttribute("aria-label", label); return p; }
+  function ti(p, t, small) { var d = h("div", "ti", t, p); if (small) h("small", null, small, d); return d; }
+  function file(parent, name, note, cls, icon) {
+    var f = h("div", "file" + (cls ? " " + cls : ""), null, parent);
+    ic(icon || "audio", 16, f); h("span", null, name, f); if (note) h("em", null, note, f);
+    return f;
+  }
+  function who(parent, name, m) {
+    var w = h("div", "who", null, parent);
+    flag(m.flag, 22, w); h("b", null, name, w); txt(w, m.model + ", " + m.provider + ", " + m.country);
+    return w;
+  }
+
+  function pMark() {
+    var p = scr("Nora marks the interviews folder: Europe only, on; agents may only read, on");
+    ti(p, "interviews", "12 files");
+    var a = h("div", "sw", null, p); h("i", null, null, a); h("span", null, "Europe only", a); flag("eu", 27, a);
+    var b = h("div", "sw", null, p); h("i", null, null, b); h("span", null, "Agents may only read", b);
+    var f = h("div", "files", null, p);
+    file(f, "interview-01.m4a", "41 min"); file(f, "interview-02.m4a", "36 min"); file(f, "interview-03.m4a", "52 min");
+    h("div", "seen", "and 9 more", p);
+    return p;
+  }
+  function pDrop() {
+    var p = scr("A new recording arrives in interviews; the transcriber, Voxtral at Mistral in France, writes it as text into transcripts");
+    ti(p, "interviews", "Nora");
+    var f = h("div", "files", null, p);
+    file(f, "interview-12.m4a", "new", "new");
+    who(p, "transcriber", MODEL.s1);
+    var bar = h("div", "bar", null, p); h("i", null, null, bar);
+    h("span", "down", null, p);
+    ti(p, "transcripts");
+    var t = h("div", "files", null, p);
+    file(t, "interview-12.txt", "written", "done", "doc");
+    return p;
+  }
+  function pAsk() {
+    var p = scr("Theo asks the note-taker, Mistral Large in France, about participant 7; the answer cites interview 7 at minute 12:40");
+    ti(p, "note-taker", "Theo");
+    who(p, "", MODEL.g1);
+    h("div", "echo", "What did participant 7 say about housing?", p);
+    var m = h("div", "msg", null, p); h("small", null, "note-taker", m);
+    txt(m, "She moved three times in two years, each time because of the rent.");
+    var src = h("div", "srcchip", null, p); ic("play", 14, h("span", "pl", null, src)); h("span", null, "interview-07, 12:40", src);
+    return p;
+  }
+  function pRefuse() {
+    var p = scr("Nora tries to attach interviews to the analyst agent: refused, because its model, Claude, runs at Anthropic in the USA");
+    ti(p, "Attach interviews");
+    var v = h("div", "val", null, p); h("span", null, "analyst", v); var sm = h("small", null, null, v); flag("us", 20, sm); txt(sm, "Claude");
+    h("div", "btn", "Attach", p);
+    var r = h("div", "refuse", null, p); flag("us", 30, r);
+    var t = h("span", null, null, r); h("b", null, "Refused", t);
+    txt(t, "interviews is Europe only. analyst's model, Claude, runs at Anthropic in the USA.");
+    h("div", "btn alt", "Pick an agent in Europe", p);
+    return p;
+  }
+  function pTable(flow) {
+    var p = scr("Where data goes: each agent, its model, its provider and the country. The analyst, in the USA, reads only the literature");
+    ti(p, "Where data goes");
+    var tb = h("table", null, null, p), hr = h("tr", null, null, h("thead", null, null, tb));
+    ["Agent", "Model", "Provider", "Country"].forEach(function (c) { h("th", null, c, hr); });
+    var body = h("tbody", null, null, tb);
+    flow.nodes.filter(function (x) { return MODEL[x.id]; }).forEach(function (x) {
+      var m = MODEL[x.id], tr = h("tr", m.eu ? null : "out", null, body);
+      h("b", null, x.name, h("td", null, null, tr)); h("td", null, m.model, tr); h("td", null, m.provider, tr);
+      var c = h("span", "c", null, h("td", null, null, tr)); flag(m.flag, 20, c); txt(c, m.country);
+    });
+    var sn = h("div", "seen", null, p); ic("lock", 14, sn); txt(sn, "analyst reads literature only.");
+    var tg = h("div", "ptag", null, p); h("b", null, "Limit: ", tg); txt(tg, "no log yet of which file went to which model");
+    return p;
+  }
+  var USES = [
+    { kind: "Set up", text: "Nora marks the folder: Europe only, read only.", pic: pMark },
+    { kind: "Use", text: "She drops a recording. It comes back as text.", pic: pDrop },
+    { kind: "Use", text: "Theo asks the note-taker. Each answer cites the minute.", pic: pAsk },
+    { kind: "Refused", text: "An agent whose model runs in the USA: refused, with the reason.", pic: pRefuse },
+    { kind: "Check", text: "Each agent: its model, its provider, its country.", pic: pTable }
+  ];
+  function drawUses(flow) {
+    var ol = document.getElementById("uses"); ol.textContent = "";
+    USES.forEach(function (u, i) {
+      var li = h("li", "use", null, ol);
+      h("div", "pic", null, li).appendChild(u.pic(flow));
+      var tag = h("p", "tag", null, li); h("span", "n", String(i + 1), tag); h("span", null, u.kind, tag);
+      h("p", "txt", u.text, li);
+    });
+  }
+
+  /* ---------- 2. the whole setup, drawn from the file ---------- */
+  var SIZE = { agent: [164, 62], script: [164, 62], asset: [178, 46], person: [172, 46] };
+  var WORDS = { read: "reads", write: "writes", both: "reads and writes", talk: "talks with" };
+  function byId(flow, id) { return flow.nodes.filter(function (x) { return x.id === id; })[0]; }
+  function isWorker(x) { return x.kind === "agent" || x.kind === "script"; }
+  function names(list) { return list.length ? list.join(", ") : "nothing"; }
+
+  /* One line: what a box does, and what it sees. */
+  function line(flow, x) {
+    var mine = flow.links.filter(function (l) { return l.from === x.id || l.to === x.id; });
+    function other(l) { return byId(flow, l.from === x.id ? l.to : l.from); }
+    function of(kinds) { return mine.filter(function (l) { return kinds.indexOf(l.kind) >= 0; }); }
+    if (isWorker(x)) {
+      var reads = of(["read", "both"]).map(function (l) { return other(l).name + (l.only ? " (" + l.only + " only)" : ""); });
+      var writes = of(["write", "both"]).map(function (l) { return other(l).name; });
+      var seen = {}; of(["read", "write", "both"]).forEach(function (l) { seen[other(l).id] = true; });
+      var unseen = flow.nodes.filter(function (o) { return o.kind === "asset" && !seen[o.id]; }).map(function (o) { return o.name; });
+      var m = MODEL[x.id];
+      return [x.name, x.does + " Reads " + names(reads) + "; writes " + names(writes) + "; never sees " + names(unseen) + "." + (m ? " Model: " + m.model + ", " + m.provider + ", " + m.country + "." : "") + (x.key ? " Needs the " + x.key + "." : "")];
+    }
+    if (x.kind === "asset") {
+      var r = mine.filter(function (l) { return l.from === x.id && l.kind !== "write"; }).map(function (l) { return other(l).name + (l.only ? " (" + l.only + ")" : ""); });
+      var w = mine.filter(function (l) { return l.to === x.id && l.kind !== "read"; }).map(function (l) { return other(l).name; });
+      return [x.name, "A folder. " + (MARKS[x.id] || "") + " Written by " + names(w) + "; read by " + names(r) + "." + (x.id === REFUSED.from ? " " + REFUSED.why : "")];
+    }
+    var acts = mine.map(function (l) {
+      var o = other(l);
+      if (l.kind === "talk") return "talks with " + o.name;
+      return (l.from === x.id ? "drops files in " : "reads ") + o.name;
+    });
+    return [x.name, "A person. Gets a code, and only this: " + names(acts) + "."];
+  }
+
+  var board = { picked: null, boxes: {}, lines: [] };
+  function drawBoard(flow) {
+    var host = document.getElementById("board"); host.textContent = "";
+    board.boxes = {}; board.lines = [];
+    var minX = Infinity, maxX = -Infinity, maxY = 0;
+    flow.nodes.forEach(function (x) { var z = SIZE[x.kind]; minX = Math.min(minX, x.x); maxX = Math.max(maxX, x.x + z[0]); maxY = Math.max(maxY, x.y + z[1]); });
+    var pad = 14, side = 40;
+    var vb = [minX - pad, 6, maxX - minX + 2 * pad + side, maxY + 10];
+    var svg = s("svg", { viewBox: vb.join(" "), role: "group", "aria-label": "The whole setup: " + flow.nodes.length + " boxes, " + flow.links.length + " links" }, host);
+    var defs = s("defs", {}, svg);
+    ["read", "write", "talk", "no"].forEach(function (k) {
+      var m = s("marker", { id: "ar-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "9", markerHeight: "9", markerUnits: "userSpaceOnUse", orient: "auto" }, defs);
+      s("path", { d: "M0 0 L10 5 L0 10 z", fill: "var(--" + (k === "no" ? "no" : k) + ")" }, m);
+    });
+    var gl = s("g", {}, svg), gb = s("g", {}, svg);
+
+    function box(x) { var z = SIZE[x.kind]; return { x: x.x, y: x.y, w: z[0], h: z[1], cx: x.x + z[0] / 2, cy: x.y + z[1] / 2 }; }
+    function hits(seg, skip) {
+      return flow.nodes.some(function (o) {
+        if (skip.indexOf(o.id) >= 0) return false;
+        var b = box(o);
+        for (var t = 0; t <= 1; t += .02) { var px = seg[0] + (seg[2] - seg[0]) * t, py = seg[1] + (seg[3] - seg[1]) * t; if (px > b.x - 4 && px < b.x + b.w + 4 && py > b.y - 4 && py < b.y + b.h + 4) return true; }
+        return false;
+      });
+    }
+    /* A path between two boxes: straight down, or along the row, or around the side when a box stands in the way. */
+    function route(a, b, ids) {
+      var A = box(a), B = box(b);
+      if (Math.abs(A.cy - B.cy) < 10) { var dir = B.cx > A.cx ? 1 : -1; var x1 = dir > 0 ? A.x + A.w : A.x, x2 = dir > 0 ? B.x : B.x + B.w; return { d: "M" + x1 + " " + A.cy + " H" + x2, mid: [(x1 + x2) / 2, A.cy] }; }
+      var down = B.cy > A.cy ? 1 : -1;
+      var sx = A.cx + Math.max(-A.w / 3, Math.min(A.w / 3, (B.cx - A.cx) / 3)), sy = down > 0 ? A.y + A.h : A.y;
+      var ex = B.cx + Math.max(-B.w / 3, Math.min(B.w / 3, (A.cx - B.cx) / 3)), ey = down > 0 ? B.y : B.y + B.h;
+      if (!hits([sx, sy, ex, ey], ids)) {
+        var k = (ey - sy) / 2;
+        return { d: "M" + sx + " " + sy + " C" + sx + " " + (sy + k) + " " + ex + " " + (ey - k) + " " + ex + " " + ey, mid: [(sx + ex) / 2, (sy + ey) / 2] };
+      }
+      var right = (A.cx + B.cx) / 2 >= (minX + maxX) / 2;
+      var out = right ? maxX + side - 8 : minX - side + 8;
+      var ax = right ? A.x + A.w : A.x, bx = right ? B.x + B.w : B.x;
+      return { d: "M" + ax + " " + A.cy + " C" + out + " " + A.cy + " " + out + " " + B.cy + " " + bx + " " + B.cy, mid: [out - (right ? 10 : -10), (A.cy + B.cy) / 2] };
+    }
+
+    flow.links.forEach(function (l) {
+      var a = byId(flow, l.from), b = byId(flow, l.to); if (!a || !b) return;
+      var r = route(a, b, [a.id, b.id]);
+      var cls = l.kind === "both" ? "read" : l.kind;
+      var p = s("path", { d: r.d, "class": "ln " + l.kind, "marker-end": "url(#ar-" + cls + ")" }, gl);
+      var t = s("title", {}, p); t.textContent = a.name + " " + (l.kind === "read" ? "is read by" : WORDS[l.kind]) + " " + b.name;
+      if (l.wakes) s("circle", { cx: r.mid[0], cy: r.mid[1], r: 6, "class": "wk" }, gl);
+      board.lines.push({ el: p, from: l.from, to: l.to });
+    });
+    /* The refused attempt, on top: dashed red, with a cross. */
+    var ra = byId(flow, REFUSED.from), rb = byId(flow, REFUSED.to);
+    if (ra && rb) {
+      var r = route(ra, rb, [ra.id, rb.id]);
+      s("path", { d: r.d, "class": "ln no" }, gl);
+      s("circle", { cx: r.mid[0], cy: r.mid[1], r: 12, "class": "xc" }, gl);
+      s("path", { d: "M" + (r.mid[0] - 5) + " " + (r.mid[1] - 5) + "l10 10m0 -10l-10 10", "class": "x" }, gl);
+      var nt = s("text", { x: r.mid[0] - 18, y: r.mid[1] + 5, "class": "no-t", "text-anchor": "end" }, gl); nt.textContent = "refused";
+    }
+
+    flow.nodes.forEach(function (x) {
+      var b = box(x);
+      var g = s("g", { "class": "box", tabindex: "0", role: "button", "aria-label": x.name }, gb);
+      var rx = x.kind === "person" ? b.h / 2 : x.kind === "asset" ? 8 : 12;
+      s("rect", { x: b.x, y: b.y, width: b.w, height: b.h, rx: rx, "class": "bx " + x.kind }, g);
+      var m = MODEL[x.id];
+      if (isWorker(x)) {
+        var tn = s("text", { x: b.cx, y: b.y + 25, "class": "nm", "text-anchor": "middle" }, g); tn.textContent = x.name;
+        var sub = x.kind === "script" ? "script" : x.tool;
+        var tk = s("title", {}, g); tk.textContent = x.name + (x.kind === "script" ? ", a script" : ", an agent (" + x.tool + ")");
+        if (m) { flag(m.flag, 18, g, b.x + 12, b.y + 37); sub = m.provider + ", " + m.country; }
+        var ts = s("text", { x: m ? b.x + 36 : b.cx, y: b.y + 49, "class": "sb", "text-anchor": m ? "start" : "middle" }, g); ts.textContent = sub;
+      } else if (x.kind === "asset") {
+        var eu = /Europe only/.test(MARKS[x.id] || "");
+        if (eu) flag("eu", 21, g, b.x + 10, b.y + 16);
+        var ta = s("text", { x: eu ? b.x + 38 : b.cx, y: b.cy + 5, "class": "nm", "text-anchor": eu ? "start" : "middle" }, g); ta.textContent = x.name;
+      } else {
+        var tp = s("text", { x: b.cx, y: b.cy + 5, "class": "nm", "text-anchor": "middle" }, g); tp.textContent = x.name.split(",")[0];
+        var tt = s("title", {}, g); tt.textContent = x.name;
+      }
+      function pick() { show(flow, x.id); }
+      g.addEventListener("click", pick);
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      board.boxes[x.id] = g;
+    });
+    show(flow, board.picked && byId(flow, board.picked) ? board.picked : "a1");
+  }
+  function show(flow, id) {
+    board.picked = id;
+    for (var k in board.boxes) board.boxes[k].classList.toggle("on", k === id);
+    board.lines.forEach(function (l) { l.el.classList.toggle("on", l.from === id || l.to === id); });
+    var say = document.getElementById("say"); say.textContent = "";
+    var t = line(flow, byId(flow, id));
+    h("b", null, t[0] + ": ", say); txt(say, t[1]);
+  }
+  function legend() {
+    var ul = document.getElementById("legend");
+    [["read", "reads"], ["write", "writes"], ["talk", "talks"], ["wk", "an arrival wakes it"], ["no", "refused, not in the file"]].forEach(function (k) {
+      var li = h("li", null, null, ul);
+      var v = s("svg", { width: 30, height: 12, viewBox: "0 0 30 12", "aria-hidden": "true" }, li);
+      if (k[0] === "wk") s("circle", { cx: 15, cy: 6, r: 5, fill: "var(--lit)" }, v);
+      else s("path", { d: "M1 6 H29", fill: "none", stroke: "var(--" + k[0] + ")", "stroke-width": 2.5, "stroke-dasharray": k[0] === "talk" ? "2 4" : k[0] === "no" ? "6 4" : "none", "stroke-linecap": k[0] === "talk" ? "round" : "butt" }, v);
+      txt(li, k[1]);
+    });
+  }
+
+  /* ---------- 3. what you need, from the file ---------- */
+  function drawNeed(flow) {
+    var box = document.getElementById("need"); box.textContent = "";
+    var workers = flow.nodes.filter(isWorker);
+
+    var k = h("div", null, null, box); var kh = h("h3", null, null, k); ic("key", 18, kh, "gold"); txt(kh, "Keys");
+    var ku = h("ul", null, null, k), keys = {};
+    workers.forEach(function (x) { if (x.key) (keys[x.key] = keys[x.key] || []).push(x.name); });
+    Object.keys(keys).forEach(function (name) { var li = h("li", null, null, ku); h("span", "k", name, li); h("small", null, keys[name].join(", "), li); });
+    h("p", null, "The file names them. Clavarium asks for them.", k);
+
+    var pr = h("div", null, null, box); var ph = h("h3", null, null, pr); ic("cloud", 18, ph, "gold"); txt(ph, "Model providers");
+    var pu = h("ul", null, null, pr), seen = {};
+    workers.forEach(function (x) {
+      var m = MODEL[x.id]; if (!m) return;
+      var key = m.provider + m.country;
+      if (!seen[key]) { seen[key] = { m: m, who: [] }; }
+      seen[key].who.push(x.name);
+    });
+    Object.keys(seen).forEach(function (key) { var e = seen[key], li = h("li", null, null, pu); flag(e.m.flag, 22, li); h("b", null, e.m.provider + ", " + e.m.country, li); h("small", null, e.who.join(", "), li); });
+    h("p", null, "What an agent reads goes to its model's provider.", pr);
+
+    var mc = h("div", null, null, box); var mh = h("h3", null, null, mc); ic("box", 18, mh, "gold"); txt(mh, "The machine");
+    var mu = h("ul", null, null, mc);
+    h("li", null, "Any recent computer, or a small server.", mu);
+    h("li", null, "Each helper in its own sealed machine on it.", mu);
+    h("p", null, "The models run at the providers: no powerful machine needed. A local model would need one; not used here.", mc);
+  }
+
+  /* ---------- 4. take it ---------- */
+  function setFile(text) { document.getElementById("file").textContent = text; }
+  document.getElementById("copy").addEventListener("click", function () {
+    var done = document.getElementById("done");
+    function put(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      return Promise.reject(new Error("no clipboard"));
+    }
+    put(TEXT).then(function () { done.textContent = "Copied. Paste it in Clavarium, under Import."; },
+      function () { var d = document.querySelector(".take details"); d.open = true; var sel = window.getSelection(), rg = document.createRange(); rg.selectNodeContents(document.getElementById("file")); sel.removeAllRanges(); sel.addRange(rg); done.textContent = "Could not copy: the file is selected below, copy it by hand."; });
+  });
+
+  function all(text) {
+    var flow;
+    try { flow = JSON.parse(text); } catch (e) { return false; }
+    if (!flow || flow.clavarium !== "flow" || !Array.isArray(flow.nodes) || !Array.isArray(flow.links)) return false;
+    TEXT = text; setFile(text);
+    drawUses(flow); drawBoard(flow); drawNeed(flow);
+    return true;
+  }
+  legend();
+  all(EMBEDDED);
+  /* The file next to this page is the one that counts; read here when the page is served (not from file://). */
+  if (location.protocol !== "file:" && window.fetch) {
+    fetch("europe.clavarium.json", { cache: "no-cache" }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) { if (t && t !== EMBEDDED) all(t); }).catch(function () {});
+  }
+})();
+</script>
+</body>
+</html>

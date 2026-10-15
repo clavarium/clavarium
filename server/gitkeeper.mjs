@@ -37,7 +37,7 @@
  *   (The folder is one for all the conversations that write in it: the
  *   runner reads its branches once, and each conversation's settings decide
  *   for the branches they name. Per-agent folders are deferred: see
- *   docs/blueprint/git-runner-core.md.)
+ *   blueprint/git-runner-core.md.)
  *
  * ONLY WHILE A MACHINE USES IT. A repository that no running machine has
  * attached does nothing by nature: the clock neither refreshes it nor sends

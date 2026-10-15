@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium: how you install it</title>
-<meta name="description" content="One command on an Ubuntu machine you own; a relay if home has no public address; backup, restore, and what was really tried.">
+<meta name="description" content="One command on Ubuntu; choosing an AI provider; how to start if you do not code; a relay, backups, and what was really tried.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -15,6 +15,7 @@
 
   Every colour is defined on bare :root; the dark block only redefines.
 -->
+<link rel="stylesheet" href="base.css">
 <style>
 :root {
   --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
@@ -44,13 +45,6 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
 a { color: var(--accent); }
 .wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
-header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
-header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
-.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
-.mark b { color: var(--brass); font-weight: 600; }
-nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
-nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
-nav a:hover, nav a[aria-current] { color: var(--text); }
 
 .hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
 h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
@@ -109,19 +103,33 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 h2 + .note { margin-top: -0.6rem; }
 .wide { max-width: 46rem; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
-footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
-footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
-footer a { color: var(--dim); }
+.main { max-width: 40rem; border-color: var(--accent); }
+.copy { display: block; margin: 0 1rem .9rem; border: 0; border-radius: 8px; background: var(--accent); color: var(--on-accent); font: 600 1rem var(--sans); padding: .6rem 1.4rem; cursor: pointer; }
+.steps { margin: 0; padding-left: 1.4rem; display: grid; gap: .45rem; max-width: 44em; }
+.steps li::marker { color: var(--brass); font-weight: 700; }
+code { font-family: var(--mono); font-size: .9em; }
 </style>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
     <nav aria-label="Pages">
-      <a href="./">Home</a>
-      <a href="examples.html">Examples</a>
+      <a href="index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button">Use cases</button>
+        <span class="drop-menu">
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
+        <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/office.html">Office: one report per client</a>
+        <a href="cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="examples.html">All examples</a>
+        </span>
+      </span>
       <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
       <a href="how-to-install-it.html" aria-current="page">Install</a>
       <a href="how-it-is-kept-safe.html">Security</a>
       <a href="questions.html">FAQ</a>
@@ -133,7 +141,46 @@ footer a { color: var(--dim); }
 <section class="hero" style="border-top:0">
   <div class="wrap">
     <h1>How you install it</h1>
-    <p class="lead">One command, parameters only. It asks nothing, and can be run again to upgrade.</p>
+    <p class="lead">On Ubuntu, one command. It asks nothing, and can be run again to upgrade.</p>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Install on Ubuntu</h2>
+    <p class="note">Ubuntu Server 24.04 or 26.04. In its terminal:</p>
+    <div class="snip wide main"><pre id="cmd">git clone https://example.com/clavarium.git
+cd clavarium
+sudo deploy/install.sh \
+  --domain clav.example.com \
+  --operator you@example.com</pre><button class="copy" type="button" data-copy="cmd">Copy</button></div>
+    <ul class="rows" style="margin-top:1rem">
+      <li>Your sub-domain and your email instead of the examples.</li>
+      <li>No domain yet? <code>--local</code> instead of both: <a href="#try">try it first</a>.</li>
+      <li>Windows and Mac: later.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="provider">
+  <div class="wrap">
+    <h2>Choose an AI provider</h2>
+    <p class="note">A subscription you have (Claude, ChatGPT), or a key from a service that hosts models, in Europe if you like. What an agent reads goes to that provider.</p>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <h2>How to start, if you do not code</h2>
+    <ol class="steps">
+      <li>A small computer, left on. A mini PC does. Put Ubuntu Server on it.</li>
+      <li>Point a name of yours to it. <a href="#relay">No public address at home?</a></li>
+      <li>Paste the lines above in its terminal. Keep the password it shows.</li>
+      <li>Open your address in a browser, on your phone too. Sign in.</li>
+      <li>New conversation: pick an agent, and sign in to your AI provider in its window.</li>
+      <li>Give it a folder. Say what you want, in plain words.</li>
+    </ol>
+    <p class="note" style="margin-top:1rem">Steps 1 to 3 are the only technical ones: ask someone who knows Linux, once.</p>
   </div>
 </section>
 
@@ -144,19 +191,15 @@ footer a { color: var(--dim); }
       <li><b>A small machine</b><span>Ubuntu Server 24.04 or 26.04, on a processor that can run virtual machines. A mini PC does.</span></li>
       <li><b>1 to 2 GB of memory per agent at work</b><span>and a few GB of disk each. An agent asleep costs no memory. Tried on 4 cores, 6 GB, 40 GB.</span></li>
       <li><b>A name for it</b><span>A domain or a sub-domain of yours, pointing to the machine, or to its relay.</span></li>
-      <li><b>An AI of yours</b><span>A subscription (Claude, ChatGPT), or a key from a service that hosts models. clavarium brings none and charges nothing.</span></li>
+      <li><b>An AI of yours</b><span>A subscription, or a key from a service that hosts models. clavarium brings none and charges nothing.</span></li>
     </ul>
   </div>
 </section>
 
 <section id="machine">
   <div class="wrap">
-    <h2>On the machine</h2>
-    <p class="note">From the folder of the source:</p>
-    <div class="snip wide"><pre>sudo deploy/install.sh \
-  --domain clav.example.com \
-  --operator you@example.com</pre></div>
-    <ul class="rows" style="margin-top:1rem">
+    <h2>What the command sets up</h2>
+    <ul class="rows">
       <li>An account that owns its data and nothing else, and the one program it may run with more rights.</li>
       <li>The address in https, a sign-in in front of everything, and a password for each operator, shown once.</li>
       <li>The key that opens the sealed secrets, kept apart from the data.</li>
@@ -168,7 +211,7 @@ footer a { color: var(--dim); }
 <section id="try">
   <div class="wrap">
     <h2>To try it first, with no domain</h2>
-    <p class="note">On an Ubuntu machine of your own. No name, no sign-in: the page answers on that machine only.</p>
+    <p class="note">No name, no sign-in: the page answers on that machine only.</p>
     <div class="snip wide"><pre>sudo deploy/install.sh --local
 
 # from another computer of yours
@@ -176,7 +219,6 @@ ssh -L 7717:127.0.0.1:7717 you@that-machine     # then http://127.0.0.1:7717</pr
     <ul class="rows" style="margin-top:1rem">
       <li>Whoever can open a page on that machine is its operator: not for a machine other people use.</li>
       <li>For real use, run the installer again with a domain and an operator.</li>
-      <li>Run on a fresh Ubuntu 24.04: installed in under eight minutes, and the page answered on that machine only.</li>
     </ul>
   </div>
 </section>
@@ -257,15 +299,29 @@ sudo deploy/restore.sh ARCHIVE.tgz --vault-key FILE</pre></div>
 </section>
 </main>
 
-<footer>
+<footer class="foot">
   <div class="wrap">
-    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
-    <a href="examples.html">Examples</a>
-    <a href="how-to-use-it.html">Use</a>
-    <a href="how-to-install-it.html">Install</a>
-    <a href="how-it-is-kept-safe.html">Security</a>
-    <a href="questions.html">FAQ</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="examples.html">Use cases</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
   </div>
 </footer>
+<script>
+document.querySelectorAll("[data-copy]").forEach(function (b) {
+  b.addEventListener("click", function () {
+    var t = document.getElementById(b.getAttribute("data-copy")).textContent;
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(t).then(function () { b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500); });
+  });
+});
+</script>
 </body>
 </html>

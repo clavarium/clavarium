@@ -46,8 +46,9 @@ Fix the cause, never the check.
 
 ## 5. Agree, then code
 
-No feature without a diagram or a mockup accepted first. `docs/blueprint/` is
-the reference; a change of mind changes it first.
+No feature without a diagram or a mockup accepted first. `blueprint/` is
+the reference; a change of mind changes it first. `docs/` is the public site,
+served as it is: no build, and `test/site.test.mjs` checks its links.
 
 ## 6. Stay small
 

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A conversation's machine</title>
+<!--
+  WHAT WAS BUILT for a conversation's machine: how its health is looked at,
+  how a folder that came loose is put back, and how it is restarted or given
+  more memory or disk. Code: server/health.mjs, server/conversations.mjs
+  (restart, resize), server/vm.mjs, deploy/clavarium-host (vm kill, set, size).
+-->
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f6f8; --text: #16181d; --dim: #5a5f69; --line: #c9ced6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #5a5f69; --script-bg: #eef0f3; --yours: #9a6c12; --yours-bg: #fbf3df;
+  --read: #0b53c0; --write: #17794f; --stop: #b3401f; --wall: #16181d;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --yours: #d2a94e; --yours-bg: #2e2612;
+    --read: #8ab4ff; --write: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1115; --soft: #171a20; --text: #e6e8ec; --dim: #a3a9b4; --line: #444c59;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #a3a9b4; --script-bg: #20242c; --yours: #d2a94e; --yours-bg: #2e2612;
+  --read: #8ab4ff; --write: #5fc39d; --stop: #f08a6b; --wall: #e6e8ec;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
+main { max-width: 34rem; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+h1 { font-size: clamp(1.6rem, 5vw, 2.2rem); margin: 1rem 0 .3rem; letter-spacing: -.02em; text-wrap: balance; }
+.lead { color: var(--dim); margin: 0 0 1rem; }
+svg { display: block; width: 100%; height: auto; margin-top: .9rem; border: 1px solid var(--line); border-radius: 12px; background: var(--soft); }
+svg text { font-family: var(--sans); fill: var(--text); font-size: 14px; }
+svg .t { font-weight: 650; font-size: 15px; } svg .s { fill: var(--dim); font-size: 12.5px; } svg .m { font-family: var(--mono); font-size: 12px; } svg .h { font-weight: 700; font-size: 13px; letter-spacing: .06em; fill: var(--yours); }
+.vm { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.sv { fill: var(--script-bg); stroke: var(--script); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.fx { fill: var(--yours-bg); stroke: var(--yours); stroke-width: 1.5; }
+.you { fill: var(--bg); stroke: var(--wall); stroke-width: 2; }
+.a { fill: none; stroke: var(--dim); stroke-width: 1.8; marker-end: url(#ha); }
+.no { fill: none; stroke: var(--stop); stroke-width: 1.8; stroke-dasharray: 5 5; marker-end: url(#hn); }
+.fs { fill: var(--stop) !important; }
+ul.plain { margin: 1rem 0 0; padding-left: 1.2rem; color: var(--dim); }
+ul.plain b { color: var(--text); }
+</style>
+</head>
+<body>
+<main>
+<h1>A conversation's machine</h1>
+<p class="lead">Looked at, put back when a folder comes loose, restarted on request. A machine asleep is never woken.</p>
+
+<svg viewBox="0 0 400 1150" role="img" aria-label="Health: after a start, a wake, a restart, and every two minutes while it runs, the VM manager is asked for the machine's state. A machine asleep or stopped is only said, never woken. A running one runs one command inside: does it answer, memory left and out-of-memory kills, disk full, each folder mounted and readable. A missing folder is looked at again five seconds later, then unmounted and mounted again, then looked at again. What is wrong is said over the terminal with a Restart button. Restart, or new memory and disk: a clean stop of up to 120 seconds, a forced stop if it hangs, memory and disk set on the stopped machine (a disk only grows), a start, then folders, tmux and the agent, and secrets come back, and its health is looked at.">
+  <defs>
+    <marker id="ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
+    <marker id="hn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--stop)"/></marker>
+  </defs>
+
+  <text class="h" x="20" y="30">HEALTH</text>
+  <rect class="you" x="20" y="42" width="360" height="52" rx="10"/><text class="t" x="34" y="64">When</text><text class="s" x="34" y="83">after start, wake, restart · every 2 min while it runs</text>
+  <path class="a" d="M200 94 V118"/>
+  <rect class="sv" x="20" y="120" width="360" height="52" rx="10"/><text class="t" x="34" y="142">Its state, from multipass</text><text class="s" x="34" y="161">running, asleep, stopped, unknown</text>
+  <path class="no" d="M330 172 V190"/><text class="s fs" x="372" y="206" text-anchor="end">asleep or stopped:</text><text class="s fs" x="372" y="222" text-anchor="end">said, never woken</text>
+  <path class="a" d="M120 172 V236"/><text class="s" x="128" y="200">running</text>
+  <rect class="vm" x="20" y="238" width="360" height="128" rx="10"/><text class="t" x="34" y="262">One command inside, 15 s at most</text>
+  <text class="m" x="34" y="286">answers at all?</text>
+  <text class="m" x="34" y="306">memory left · out-of-memory kills</text>
+  <text class="m" x="34" y="326">disk / and /work almost full?</text>
+  <text class="m" x="34" y="346">each folder mounted and readable?</text>
+  <path class="a" d="M200 366 V396"/><text class="s" x="208" y="386">a folder missing</text>
+  <rect class="fx" x="20" y="398" width="360" height="52" rx="10"/><text class="t" x="34" y="420">Looked at again 5 s later</text><text class="s" x="34" y="439">still missing, machine still running</text>
+  <path class="a" d="M200 450 V474"/>
+  <rect class="fx" x="20" y="476" width="360" height="52" rx="10"/><text class="t" x="34" y="498">umount, then mount</text><text class="s" x="34" y="517">then looked at again</text>
+  <path class="a" d="M200 528 V552"/>
+  <rect class="you" x="20" y="554" width="360" height="52" rx="10"/><text class="t" x="34" y="576">Said over the terminal</text><text class="s" x="34" y="595">put back, or not · with a Restart button</text>
+
+  <text class="h" x="380" y="650" text-anchor="end">RESTART · MEMORY AND DISK</text>
+  <path class="a" d="M105 606 V664"/>
+  <rect class="you" x="20" y="666" width="170" height="44" rx="10"/><text class="t" x="34" y="693">Restart</text>
+  <rect class="you" x="210" y="666" width="170" height="44" rx="10"/><text class="t" x="224" y="693">Memory · disk</text>
+  <path class="a" d="M105 710 V734"/><path class="a" d="M295 710 V734"/>
+  <rect class="sv" x="20" y="736" width="360" height="52" rx="10"/><text class="t" x="34" y="758">Clean stop</text><text class="s" x="34" y="777">up to 120 s</text>
+  <path class="no" d="M120 788 V812"/><text class="s fs" x="128" y="806">hangs or fails</text>
+  <rect class="sv" x="20" y="814" width="250" height="44" rx="10"/><text class="t" x="34" y="841">Forced stop</text>
+  <path class="a" d="M330 788 V890"/><text class="s" x="338" y="842">stopped</text>
+  <path class="a" d="M120 858 V890"/>
+  <rect class="fx" x="20" y="892" width="360" height="52" rx="10"/><text class="t" x="34" y="914">Set memory, grow the disk</text><text class="s" x="34" y="933">Memory · disk only · a disk only grows</text>
+  <path class="a" d="M200 944 V968"/>
+  <rect class="sv" x="20" y="970" width="360" height="44" rx="10"/><text class="t" x="34" y="997">Start</text>
+  <path class="a" d="M200 1014 V1038"/>
+  <rect class="vm" x="20" y="1040" width="360" height="94" rx="10"/><text class="t" x="34" y="1064">Back as it was</text>
+  <text class="m" x="34" y="1088">folders · tmux and the agent</text>
+  <text class="m" x="34" y="1108">secrets, in memory</text>
+  <text class="m" x="34" y="1126">then HEALTH, from the top</text>
+</svg>
+
+<ul class="plain">
+  <li><b>Asked first.</b> Restart and a new size ask before stopping anything.</li>
+  <li><b>Per conversation.</b> Memory and disk are in its settings; the record keeps what multipass says it has.</li>
+  <li><b>Untouched:</b> its work folder, its folders, its branches.</li>
+</ul>
+</main>
+</body>
+</html>

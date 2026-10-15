@@ -1,0 +1,312 @@
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "you",
+   "kind": "person",
+   "name": "You, the office",
+   "x": 364,
+   "y": 32
+  },
+  {
+   "id": "bin",
+   "kind": "asset",
+   "name": "Brun: incoming",
+   "x": 121,
+   "y": 138
+  },
+  {
+   "id": "brd",
+   "kind": "script",
+   "name": "Brun invoice reader",
+   "x": 128,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Brun: incoming and writes its number, date, supplier and amount into Brun: ledger.",
+   "key": "Brun model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "blg",
+   "kind": "asset",
+   "name": "Brun: ledger",
+   "x": 121,
+   "y": 350
+  },
+  {
+   "id": "bag",
+   "kind": "agent",
+   "name": "Brun agent",
+   "x": 128,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Brun: ledger and asks Inès about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Brun model key"
+  },
+  {
+   "id": "brp",
+   "kind": "asset",
+   "name": "Brun: reports",
+   "x": 121,
+   "y": 562
+  },
+  {
+   "id": "bpp",
+   "kind": "person",
+   "name": "Inès, at Brun",
+   "x": 124,
+   "y": 668
+  },
+  {
+   "id": "nin",
+   "kind": "asset",
+   "name": "Nord: incoming",
+   "x": 361,
+   "y": 138
+  },
+  {
+   "id": "nrd",
+   "kind": "script",
+   "name": "Nord invoice reader",
+   "x": 368,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Nord: incoming and writes its number, date, supplier and amount into Nord: ledger.",
+   "key": "Nord model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "nlg",
+   "kind": "asset",
+   "name": "Nord: ledger",
+   "x": 361,
+   "y": 350
+  },
+  {
+   "id": "nag",
+   "kind": "agent",
+   "name": "Nord agent",
+   "x": 368,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Nord: ledger and asks Omar about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Nord model key"
+  },
+  {
+   "id": "nrp",
+   "kind": "asset",
+   "name": "Nord: reports",
+   "x": 361,
+   "y": 562
+  },
+  {
+   "id": "npp",
+   "kind": "person",
+   "name": "Omar, at Nord",
+   "x": 364,
+   "y": 668
+  },
+  {
+   "id": "lin",
+   "kind": "asset",
+   "name": "Lys: incoming",
+   "x": 601,
+   "y": 138
+  },
+  {
+   "id": "lrd",
+   "kind": "script",
+   "name": "Lys invoice reader",
+   "x": 608,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Lys: incoming and writes its number, date, supplier and amount into Lys: ledger.",
+   "key": "Lys model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "llg",
+   "kind": "asset",
+   "name": "Lys: ledger",
+   "x": 601,
+   "y": 350
+  },
+  {
+   "id": "lag",
+   "kind": "agent",
+   "name": "Lys agent",
+   "x": 608,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Lys: ledger and asks Chloé about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Lys model key"
+  },
+  {
+   "id": "lrp",
+   "kind": "asset",
+   "name": "Lys: reports",
+   "x": 601,
+   "y": 562
+  },
+  {
+   "id": "lpp",
+   "kind": "person",
+   "name": "Chloé, at Lys",
+   "x": 604,
+   "y": 668
+  }
+ ],
+ "links": [
+  {
+   "from": "you",
+   "to": "bin",
+   "kind": "write"
+  },
+  {
+   "from": "bpp",
+   "to": "bin",
+   "kind": "write"
+  },
+  {
+   "from": "bin",
+   "to": "brd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "brd",
+   "to": "blg",
+   "kind": "write"
+  },
+  {
+   "from": "blg",
+   "to": "bag",
+   "kind": "read"
+  },
+  {
+   "from": "bag",
+   "to": "brp",
+   "kind": "write"
+  },
+  {
+   "from": "bag",
+   "to": "bpp",
+   "kind": "talk"
+  },
+  {
+   "from": "brp",
+   "to": "bpp",
+   "kind": "read"
+  },
+  {
+   "from": "brp",
+   "to": "you",
+   "kind": "read"
+  },
+  {
+   "from": "you",
+   "to": "nin",
+   "kind": "write"
+  },
+  {
+   "from": "npp",
+   "to": "nin",
+   "kind": "write"
+  },
+  {
+   "from": "nin",
+   "to": "nrd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "nrd",
+   "to": "nlg",
+   "kind": "write"
+  },
+  {
+   "from": "nlg",
+   "to": "nag",
+   "kind": "read"
+  },
+  {
+   "from": "nag",
+   "to": "nrp",
+   "kind": "write"
+  },
+  {
+   "from": "nag",
+   "to": "npp",
+   "kind": "talk"
+  },
+  {
+   "from": "nrp",
+   "to": "npp",
+   "kind": "read"
+  },
+  {
+   "from": "nrp",
+   "to": "you",
+   "kind": "read"
+  },
+  {
+   "from": "you",
+   "to": "lin",
+   "kind": "write"
+  },
+  {
+   "from": "lpp",
+   "to": "lin",
+   "kind": "write"
+  },
+  {
+   "from": "lin",
+   "to": "lrd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "lrd",
+   "to": "llg",
+   "kind": "write"
+  },
+  {
+   "from": "llg",
+   "to": "lag",
+   "kind": "read"
+  },
+  {
+   "from": "lag",
+   "to": "lrp",
+   "kind": "write"
+  },
+  {
+   "from": "lag",
+   "to": "lpp",
+   "kind": "talk"
+  },
+  {
+   "from": "lrp",
+   "to": "lpp",
+   "kind": "read"
+  },
+  {
+   "from": "lrp",
+   "to": "you",
+   "kind": "read"
+  }
+ ]
+}

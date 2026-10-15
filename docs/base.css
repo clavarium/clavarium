@@ -1,0 +1,243 @@
+/* ============================================================================
+   clavarium -- the frame every page shares: the ribbon, the bar at the top,
+   the "Use cases" menu and the footer. Nothing else.
+
+   WHY THIS FILE EXISTS. The pages are written by hand, with no build step, and
+   each one carried its own copy of the header and footer rules. Copies drift:
+   the home page and the case pages drew a different mark, a different nav size
+   and a different footer from the six older pages. The markup of the header
+   and footer is now the same on every page, and its CSS lives here, once, so
+   it cannot drift. Each page keeps only the rules for its own content.
+
+   THE COLOURS ARE PREFIXED --shell-*, ON PURPOSE. Every page defines its own
+   --bg, --dim, --line... in its own <style>, which comes after this file, and
+   their values differ by a shade from page to page. Had the frame used those
+   names, each page would have repainted it in its own shade. The frame reads
+   only its own tokens, so it is the same pixel on every page.
+
+   THE RULE FOR THE COLOURS: every colour is defined on bare :root, and the
+   dark blocks only REDEFINE. Dark follows the system unless the page says
+   data-theme="light"; data-theme="dark" forces it.
+
+   THE SELECTORS ARE header.top AND footer.foot, NOT .top. The home page and
+   the case pages already use `.top` inside their drawings (`.win .top`,
+   `.phone .top`); a bare `.top` here would make those sticky.
+   ============================================================================ */
+
+:root {
+    --shell-bg:        #ffffff;
+    --shell-soft:      #f5f6f8;
+    --shell-text:      #16181d;
+    --shell-dim:       #52565f;
+    --shell-line:      #d3d7de;
+    --shell-line-soft: #e2e5ea;
+    --shell-accent:    #0b53c0;
+    --shell-brass:     #9a6c12;
+    --shell-ribbon-bg: #f5f6f8;
+    --shell-ribbon-ink:#6a6f78;
+    --shell-shadow: 0 1px 2px rgba(16, 18, 24, .06), 0 8px 28px rgba(16, 18, 24, .10);
+    --shell-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+                  Arial, "Noto Sans", sans-serif;
+    --shell-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                  "DejaVu Sans Mono", monospace;
+    --shell-gutter: 16px;
+}
+@media (min-width: 700px) {
+    :root { --shell-gutter: 32px; }
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --shell-bg:        #0f1115;
+        --shell-soft:      #171a20;
+        --shell-text:      #e6e8ec;
+        --shell-dim:       #a3a9b4;
+        --shell-line:      #38404c;
+        --shell-line-soft: #262c35;
+        --shell-accent:    #8ab4ff;
+        --shell-brass:     #d2a94e;
+        --shell-ribbon-bg: #14171c;
+        --shell-ribbon-ink:#8d939e;
+        --shell-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+    }
+}
+:root[data-theme="dark"] {
+    --shell-bg:        #0f1115;
+    --shell-soft:      #171a20;
+    --shell-text:      #e6e8ec;
+    --shell-dim:       #a3a9b4;
+    --shell-line:      #38404c;
+    --shell-line-soft: #262c35;
+    --shell-accent:    #8ab4ff;
+    --shell-brass:     #d2a94e;
+    --shell-ribbon-bg: #14171c;
+    --shell-ribbon-ink:#8d939e;
+    --shell-shadow: 0 1px 2px rgba(0, 0, 0, .5), 0 8px 28px rgba(0, 0, 0, .45);
+}
+
+
+/* -- THE RIBBON, ON TARGET PAGES ONLY --------------------------------------
+   The home page and the case pages show planned features, and say so. It is
+   a note, not a warning: small, grey, no colour, no icon. It sits above the
+   bar and scrolls away with the page; the bar stays. */
+.ribbon {
+    margin: 0; padding: 3px var(--shell-gutter);
+    background: var(--shell-ribbon-bg); color: var(--shell-ribbon-ink);
+    font: 12px/1.5 var(--shell-sans); text-align: center;
+}
+
+
+/* -- THE FRAME'S OWN WIDTH --------------------------------------------------
+   The pages do not agree on a content width (64rem, 68rem, 72rem). The bar
+   and the footer take one width of their own, so the mark and the menu sit at
+   the same place on every page. Written as `header.top > .wrap`, which outranks
+   any page's plain `.wrap`. */
+header.top > .wrap,
+footer.foot > .wrap {
+    box-sizing: border-box; width: 100%; max-width: 72rem;
+    margin: 0 auto; padding: 0 var(--shell-gutter);
+}
+
+
+/* -- THE BAR AT THE TOP OF EVERY PAGE ---------------------------------------
+   IT STAYS AT THE TOP: the pages are long, and the menu is the one thing that
+   is useful at every scroll position. z-index 10 sits above the pages' own
+   drawings (the highest of which is 2).
+
+   AND THE ANCHORS MOVE DOWN BY WHAT THE BAR TAKES, or "#install" would put its
+   heading under the bar. On a phone the bar is two lines. */
+header.top {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--shell-bg);
+    border-bottom: 1px solid var(--shell-line-soft);
+    font: 16px/1.5 var(--shell-sans);
+}
+[id] { scroll-margin-top: 4.5rem; }
+@media (max-width: 40rem) { [id] { scroll-margin-top: 6.5rem; } }
+
+header.top > .wrap {
+    position: relative;
+    display: flex; align-items: center; flex-wrap: wrap;
+    gap: .35rem 1.2rem;
+    padding-top: .7rem; padding-bottom: .7rem;
+}
+
+/* The mark: ">_ clavarium", the prompt in brass. The same in the footer. */
+.mark {
+    font-family: var(--shell-mono); font-size: .95rem; font-weight: 600;
+    letter-spacing: -.02em; color: var(--shell-text); text-decoration: none;
+    white-space: nowrap;
+}
+.mark b { color: var(--shell-brass); font-weight: 600; }
+
+header.top nav {
+    margin-left: auto;
+    display: flex; align-items: center; flex-wrap: wrap; gap: .2rem 1.1rem;
+}
+header.top nav a,
+header.top nav .drop-word {
+    font-size: .9rem; line-height: 1.5; color: var(--shell-dim);
+    text-decoration: none; padding: .35rem 0;
+}
+header.top nav a:hover,
+header.top nav .drop-word:hover { color: var(--shell-text); text-decoration: underline; }
+/* WHERE YOU ARE: the word in full ink, with a brass rule under it. On a case
+   page that word is "Use cases". */
+header.top nav > a[aria-current="page"],
+header.top nav .drop-word[aria-current="page"] {
+    color: var(--shell-text);
+    text-decoration: underline; text-decoration-color: var(--shell-brass);
+    text-decoration-thickness: 2px; text-underline-offset: .4em;
+}
+header.top a:focus-visible,
+header.top .drop-word:focus-visible,
+footer.foot a:focus-visible {
+    outline: 2px solid var(--shell-accent); outline-offset: 3px; border-radius: 2px;
+}
+
+
+/* -- THE ONE ENTRY THAT OPENS -----------------------------------------------
+   ON HOVER AND ON FOCUS, IN PLACE, MOVING NOTHING. The panel is absolute, so
+   the bar keeps its height whatever happens.
+
+   A BUTTON, NOT A LINK. A link with a panel under it is fine with a mouse and
+   useless without one: a tap follows the link and the panel is never seen. A
+   button goes nowhere, and focusing it is what opens the panel -- so a click,
+   a tap and a Tab all do the same thing, and Tab then walks the entries,
+   which keeps the panel open through :focus-within. Clicking away blurs it and
+   it closes. No script on any of those paths.
+
+   THE BRIDGE IS NOT DECORATION. There is a gap between the word and the panel;
+   a pointer crossing it would leave the word, close the panel and never
+   arrive. `.drop-word::after` is a transparent strip over that gap. It hangs
+   from the word itself, so it stays under the word on a phone too, where the
+   panel is placed differently. */
+header.top .drop { position: relative; display: inline-flex; }
+/* A button drawn as one of the words beside it: the browser's font, padding,
+   border and background are all reset; size and ink come from the nav rule. */
+header.top nav .drop-word {
+    position: relative; z-index: 1;
+    margin: 0; border: 0; background: none;
+    font-family: inherit; font-weight: inherit; cursor: pointer;
+}
+header.top .drop-word::after {
+    content: ""; position: absolute; left: -.6rem; right: -.6rem;
+    top: 100%; height: 1.1rem;
+}
+.drop-menu {
+    position: absolute; right: 0; top: calc(100% + .7rem); z-index: 11;
+    display: none; flex-direction: column; gap: .1rem;
+    min-width: 15rem; padding: .4rem;
+    border: 1px solid var(--shell-line); border-radius: 10px;
+    background: var(--shell-bg); box-shadow: var(--shell-shadow);
+}
+header.top .drop:hover .drop-menu,
+header.top .drop:focus-within .drop-menu { display: flex; }
+header.top nav .drop-menu a {
+    display: block; padding: .4rem .6rem; border-radius: 6px;
+    color: var(--shell-text); white-space: nowrap;
+}
+header.top nav .drop-menu a:hover { background: var(--shell-soft); text-decoration: none; }
+header.top nav .drop-menu a[aria-current="page"] {
+    background: var(--shell-soft); box-shadow: inset 3px 0 0 var(--shell-brass);
+}
+/* The five cases, then the way to all of them: a rule between the groups. */
+.drop-sep {
+    display: block; height: 1px; margin: .3rem .5rem;
+    background: var(--shell-line-soft);
+}
+
+/* ON A PHONE THE NAV WRAPS UNDER THE MARK, and "Use cases" is near its left
+   end: a panel hung from the word's right edge would leave the screen on the
+   left. So on a narrow screen the panel hangs from the bar instead, one
+   gutter in from each edge, and its entries may wrap. */
+@media (max-width: 40rem) {
+    /* The nav takes its own line, flush left under the mark. */
+    header.top nav { margin-left: 0; width: 100%; }
+    header.top .drop { position: static; }
+    .drop-menu {
+        left: var(--shell-gutter); right: var(--shell-gutter);
+        top: calc(100% - .2rem); min-width: 0;
+    }
+    header.top nav .drop-menu a { white-space: normal; padding: .5rem .6rem; }
+}
+
+
+/* -- THE FOOTER OF EVERY PAGE -----------------------------------------------
+   The mark, the same pages as the bar (and the source), one line. */
+footer.foot {
+    margin-top: 3rem;
+    border-top: 1px solid var(--shell-line-soft);
+    padding: 1.6rem 0 2.4rem;
+    color: var(--shell-dim); font: 14px/1.5 var(--shell-sans);
+}
+footer.foot > .wrap {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: .6rem 1.4rem;
+}
+footer.foot nav { display: flex; flex-wrap: wrap; gap: .3rem 1.1rem; }
+footer.foot nav a { color: var(--shell-dim); text-decoration: none; }
+footer.foot nav a:hover { color: var(--shell-text); text-decoration: underline; }
+footer.foot .foot-line { margin: 0 0 0 auto; }
+@media (max-width: 40rem) {
+    footer.foot > .wrap { flex-direction: column; }
+    footer.foot .foot-line { margin: 0; }
+}

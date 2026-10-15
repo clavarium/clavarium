@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium: how it works</title>
+<meta name="description" content="How the pieces of Clavarium work: here, how a git repository goes between the team's server and an agent without the agent ever holding the key.">
+<link rel="stylesheet" href="base.css">
+<style>
+:root { --text: #16181d; --dim: #5a5f69; --ref: #0b53c0; --ref-bg: #e8f0fd; --vm: #17794f; --vm-bg: #e6f4ec; --git: #6b4fa8; --git-bg: #efe9f8; --key: #9a6c12; --key-bg: #fbf3df; --stop: #b3401f; --bg: #ffffff; --sans: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --text: #e6e8ec; --dim: #a3a9b4; --ref: #8ab4ff; --ref-bg: #172742; --vm: #5fc39d; --vm-bg: #13291f; --git: #c39bf0; --git-bg: #251b36; --key: #d2a94e; --key-bg: #2e2612; --stop: #f08a6b; --bg: #0f1115; } }
+:root[data-theme="dark"] { --text: #e6e8ec; --dim: #a3a9b4; --ref: #8ab4ff; --ref-bg: #172742; --vm: #5fc39d; --vm-bg: #13291f; --git: #c39bf0; --git-bg: #251b36; --key: #d2a94e; --key-bg: #2e2612; --stop: #f08a6b; --bg: #0f1115; }
+body { background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); margin: 0; }
+.page { max-width: 860px; margin: 0 auto; padding: 32px 16px 48px; }
+.page h1 { font-size: clamp(1.7rem, 5vw, 2.4rem); margin: 0 0 8px; }
+.page h2 { font-size: 1.35rem; margin: 36px 0 6px; }
+.page .lead, .page .say { color: var(--dim); margin: 0 0 16px; }
+.page ol { padding-left: 1.3rem; } .page li { margin: 6px 0; }
+svg { display: block; width: 100%; height: auto; }
+svg text { font-family: var(--sans); fill: var(--text); }
+.box-git { fill: var(--git-bg); stroke: var(--git); stroke-width: 2; }
+.box-ref { fill: var(--ref-bg); stroke: var(--ref); stroke-width: 2.5; }
+.box-vm { fill: var(--vm-bg); stroke: var(--vm); stroke-width: 2; }
+.title { font-weight: 700; font-size: 17px; }
+.sub { font-size: 13px; fill: var(--dim); }
+.arrow { fill: none; stroke-width: 2.5; }
+.a-key { stroke: var(--key); }
+.a-safe { stroke: var(--ref); }
+.a-read { stroke: var(--vm); stroke-dasharray: 7 5; }
+.lab { font-size: 13px; font-weight: 600; }
+.lab-key { fill: var(--key); }
+.lab-ref { fill: var(--ref); }
+.lab-vm { fill: var(--vm); }
+.num { font-weight: 800; font-size: 13px; fill: #fff; }
+.pill-key { fill: var(--key); }
+.pill-ref { fill: var(--ref); }
+.pill-vm { fill: var(--vm); }
+.keychip { fill: var(--key-bg); stroke: var(--key); stroke-width: 1.5; }
+.alert { fill: none; stroke: var(--stop); stroke-width: 1.5; stroke-dasharray: 4 4; }
+.alert-t { fill: var(--stop); font-size: 13px; font-weight: 600; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; font-size: 14px; color: var(--dim); }
+.legend span::before { content: ""; display: inline-block; width: 22px; vertical-align: middle; margin-right: 6px; border-top: 3px solid currentColor; }
+.l-key { color: var(--key); } .l-ref { color: var(--ref); } .l-vm { color: var(--vm); }
+.l-vm::before { border-top-style: dashed !important; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button">Use cases</button>
+        <span class="drop-menu">
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
+        <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/office.html">Office: one report per client</a>
+        <a href="cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html" aria-current="page">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main class="page">
+  <h1>How it works</h1>
+  <p class="lead">The pieces of Clavarium, one picture each.</p>
+
+  <section id="git">
+    <h2>A git repository: one reference, the key stays on the server</h2>
+    <p class="say">The agent never holds the key. It only reads from the reference and commits in its own folder.</p>
+    <svg viewBox="0 0 760 640" role="img" aria-label="GitLab at the top, the server's reference repository in the middle, the agent's work folder at the bottom, and the four arrows between them">
+    <defs>
+      <marker id="m-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" style="fill: var(--key)"/></marker>
+      <marker id="m-ref" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" style="fill: var(--ref)"/></marker>
+      <marker id="m-vm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" style="fill: var(--vm)"/></marker>
+    </defs>
+
+    <!-- GitLab -->
+    <rect class="box-git" x="250" y="10" width="260" height="70" rx="14"/>
+    <text class="title" x="380" y="42" text-anchor="middle">GitLab (origin)</text>
+    <text class="sub" x="380" y="63" text-anchor="middle">the team's repository</text>
+
+    <!-- Reference -->
+    <rect class="box-ref" x="150" y="210" width="460" height="150" rx="16"/>
+    <text class="title" x="380" y="242" text-anchor="middle">Reference repository</text>
+    <text class="sub" x="380" y="262" text-anchor="middle">on the server, written by it alone</text>
+    <text x="180" y="295" font-size="14">• origin branches (a copy of GitLab)</text>
+    <text x="180" y="318" font-size="14">• the agent's commits, kept apart</text>
+    <text x="180" y="341" font-size="14">• no hook, no settings from the agent</text>
+    <rect class="keychip" x="520" y="225" width="74" height="28" rx="14"/>
+    <text x="557" y="244" text-anchor="middle" font-size="13" font-weight="700" style="fill: var(--key)">the key</text>
+
+    <!-- VM -->
+    <rect class="box-vm" x="150" y="490" width="460" height="120" rx="16"/>
+    <text class="title" x="380" y="522" text-anchor="middle">Shared work folder</text>
+    <text class="sub" x="380" y="542" text-anchor="middle">in the agent's machine (shared with the agents allowed in)</text>
+    <text x="380" y="575" font-size="14" text-anchor="middle">the agent writes and commits here</text>
+    <text x="380" y="597" font-size="13" text-anchor="middle" style="fill: var(--dim)">no key here</text>
+
+    <!-- 1: GitLab -> reference (fetch with key) -->
+    <path class="arrow a-key" d="M300 82 C 270 130, 270 160, 300 206" marker-end="url(#m-key)"/>
+    <circle class="pill-key" cx="252" cy="140" r="12"/><text class="num" x="252" y="145" text-anchor="middle">1</text>
+    <text class="lab lab-key" x="60" y="128">fetch with the key</text>
+    <text class="sub" x="60" y="146">every 5 minutes</text>
+    <text class="sub" x="60" y="163">or on demand</text>
+
+    <!-- 4: reference -> GitLab (push with key) -->
+    <path class="arrow a-key" d="M460 206 C 490 160, 490 130, 460 84" marker-end="url(#m-key)"/>
+    <circle class="pill-key" cx="508" cy="140" r="12"/><text class="num" x="508" y="145" text-anchor="middle">4</text>
+    <text class="lab lab-key" x="530" y="128">push with the key</text>
+    <text class="sub" x="530" y="146">after review (Send)</text>
+    <text class="sub" x="530" y="163">or automatic, allowed branches</text>
+
+    <!-- 2: reference -> VM (read only, agent fetches) -->
+    <path class="arrow a-read" d="M300 364 C 270 410, 270 440, 300 486" marker-end="url(#m-vm)"/>
+    <circle class="pill-vm" cx="252" cy="425" r="12"/><text class="num" x="252" y="430" text-anchor="middle">2</text>
+    <text class="lab lab-vm" x="40" y="413">read only:</text>
+    <text class="sub" x="40" y="431">the agent runs git fetch</text>
+    <text class="sub" x="40" y="448">from the reference</text>
+
+    <!-- 3: VM -> reference (server fetches commits) -->
+    <path class="arrow a-safe" d="M460 486 C 490 440, 490 410, 460 366" marker-end="url(#m-ref)"/>
+    <circle class="pill-ref" cx="508" cy="425" r="12"/><text class="num" x="508" y="430" text-anchor="middle">3</text>
+    <text class="lab lab-ref" x="530" y="413">the server fetches</text>
+    <text class="sub" x="530" y="431">the agent's commits</text>
+    <text class="sub" x="530" y="448">(never hooks or settings)</text>
+
+    <!-- alert -->
+    <rect class="alert" x="616" y="250" width="142" height="92" rx="10"/>
+    <text class="alert-t" x="686" y="273" text-anchor="middle">when it goes wrong</text>
+    <text class="sub" x="686" y="293" text-anchor="middle">GitLab moved on,</text>
+    <text class="sub" x="687" y="310" text-anchor="middle">a conflict, a refusal:</text>
+    <text class="sub" x="687" y="327" text-anchor="middle">both are told</text>
+  </svg>
+    <div class="legend"><span class="l-key">uses the key (on the server)</span><span class="l-ref">no key, nothing run</span><span class="l-vm">read only, from the machine</span></div>
+    <ol>
+      <li><b>GitLab to the reference</b>: the server fetches what is new, with the key.</li>
+      <li><b>The reference to the agent</b>: the agent fetches it itself, read only.</li>
+      <li><b>The agent to the reference</b>: the server fetches its commits; only commits travel, never its hooks or settings.</li>
+      <li><b>The reference to GitLab</b>: the server pushes, after your review, or by itself to the branches you allowed.</li>
+    </ol>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="examples.html">Use cases</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+</body>
+</html>

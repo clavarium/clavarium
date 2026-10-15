@@ -1,0 +1,204 @@
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Marcel, 82",
+   "x": 364,
+   "y": 32
+  },
+  {
+   "id": "a1",
+   "kind": "asset",
+   "name": "what Marcel brings",
+   "x": 258,
+   "y": 138
+  },
+  {
+   "id": "a6",
+   "kind": "asset",
+   "name": "known faces",
+   "x": 464,
+   "y": 138
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "voice reader",
+   "x": 176,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Turns each recording, made on the spot or old, into text, word for word.",
+   "key": "MISTRAL_KEY_VOICE",
+   "source": "https://example.com/voices/voice-reader.git",
+   "pin": "4c1e9a7"
+  },
+  {
+   "id": "s2",
+   "kind": "script",
+   "name": "paper reader",
+   "x": 368,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads letters, certificates and record books: the text, the names, the dates, the places.",
+   "key": "MISTRAL_KEY_PAPERS",
+   "source": "https://example.com/voices/paper-reader.git",
+   "pin": "b72d03f"
+  },
+  {
+   "id": "s3",
+   "kind": "script",
+   "name": "photo reader",
+   "x": 560,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Names the known faces on each photo, on this computer; a face it is not sure of stays unnamed, for Marcel to name.",
+   "source": "https://example.com/voices/photo-reader.git",
+   "pin": "9e05c41"
+  },
+  {
+   "id": "a2",
+   "kind": "asset",
+   "name": "what was understood",
+   "x": 361,
+   "y": 350
+  },
+  {
+   "id": "s4",
+   "kind": "script",
+   "name": "extractor",
+   "x": 368,
+   "y": 448,
+   "wake": "Nothing but its links",
+   "does": "Calls the model to cut the text into chapters and draw the facts, each tied to its source; says when two sources disagree.",
+   "key": "MISTRAL_KEY_EXTRACTOR",
+   "source": "https://example.com/voices/extractor.git",
+   "pin": "d18a6b2"
+  },
+  {
+   "id": "a4",
+   "kind": "asset",
+   "name": "his memories",
+   "x": 361,
+   "y": 562
+  },
+  {
+   "id": "g2",
+   "kind": "agent",
+   "name": "storyteller",
+   "x": 368,
+   "y": 660,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Nothing but its links",
+   "does": "Writes the story from his memories, each line pointing to its source; asks Marcel through Parley; answers Léa.",
+   "key": "MISTRAL_KEY_STORYTELLER"
+  },
+  {
+   "id": "a5",
+   "kind": "asset",
+   "name": "the family story",
+   "x": 261,
+   "y": 774
+  },
+  {
+   "id": "p2",
+   "kind": "person",
+   "name": "Léa, granddaughter",
+   "x": 467,
+   "y": 774
+  }
+ ],
+ "links": [
+  {
+   "from": "p1",
+   "to": "a1",
+   "kind": "write"
+  },
+  {
+   "from": "p1",
+   "to": "a6",
+   "kind": "write"
+  },
+  {
+   "from": "a1",
+   "to": "s1",
+   "kind": "read",
+   "wakes": true,
+   "only": "recordings"
+  },
+  {
+   "from": "a1",
+   "to": "s2",
+   "kind": "read",
+   "wakes": true,
+   "only": "papers"
+  },
+  {
+   "from": "a1",
+   "to": "s3",
+   "kind": "read",
+   "wakes": true,
+   "only": "photos"
+  },
+  {
+   "from": "a6",
+   "to": "s3",
+   "kind": "read"
+  },
+  {
+   "from": "s1",
+   "to": "a2",
+   "kind": "write"
+  },
+  {
+   "from": "s2",
+   "to": "a2",
+   "kind": "write"
+  },
+  {
+   "from": "s3",
+   "to": "a2",
+   "kind": "write"
+  },
+  {
+   "from": "a2",
+   "to": "s4",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "s4",
+   "to": "a4",
+   "kind": "write"
+  },
+  {
+   "from": "a4",
+   "to": "g2",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "g2",
+   "to": "a5",
+   "kind": "write"
+  },
+  {
+   "from": "g2",
+   "to": "p1",
+   "kind": "talk"
+  },
+  {
+   "from": "g2",
+   "to": "p2",
+   "kind": "talk"
+  },
+  {
+   "from": "a5",
+   "to": "p2",
+   "kind": "read"
+  }
+ ]
+}

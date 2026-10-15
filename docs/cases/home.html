@@ -1,0 +1,769 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Assistant Setup</title>
+<meta name="description" content="Target page, not the real one: the case of a personal assistant for the calendar, the mail and the house, and its setup file.">
+<!--
+  TARGET PAGE. Shows PLANNED features: an assistant agent in its own machine that reads the
+  calendar and the mail (read only), says each morning on the phone what is missing or clashing,
+  and asks Home Assistant to warm the house in time, within what its token allows; its model at
+  a provider or on Ollama at home; the setup file import.
+  The drawing and the Copy button use the same JSON as home.clavarium.json (embedded below,
+  and fetched when the page is served). Names and addresses are invented. No innerHTML.
+-->
+<link rel="stylesheet" href="../base.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f5f2; --text: #16181d; --dim: #5a5f69; --line: #d6d9df;
+  --accent: #0b53c0; --accent-ink: #ffffff; --gold: #8a5f0c; --gold-bg: #fbf3df; --ok: #17794f; --no: #a8321f;
+  --w-bg: #ffffff; --w-ink: #000000; --w-soft: #f1efe9; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #2a2d33; --w-lit: #d98a00; --w-lit-bg: #fff3d6; --w-stop: #c0392b; --w-line: #d6d9df; --w-dim: #5a5f69; --w-ok: #17794f;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #36547a; --script-bg: #eef2f7; --folder: #8a5d0a; --folder-bg: #fbf3df; --person: #14161a; --person-bg: #ffffff;
+  --read: #0b53c0; --write: #17794f; --talk: #6b4fa8; --lit: #d98a00; --lit-bg: #fff1d1;
+  --t-bg: #10151b; --t-line: #2b3745; --t-ink: #e7edf4; --t-ink2: #a3b1c2; --t-brass: #d2a94e; --t-ok: #7fd3a8;
+  --fl-blue: #0055a4; --fl-white: #ffffff; --fl-red: #d52b1e;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+    --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79;
+    --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-stop: #b8352a; --w-ok: #146b45;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #a9c1e0; --script-bg: #1b2330; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+    --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+    --t-bg: #0a0d11;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+  --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79;
+  --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-stop: #b8352a; --w-ok: #146b45;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #a9c1e0; --script-bg: #1b2330; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+  --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+  --t-bg: #0a0d11;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); overflow-x: hidden; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 32px; } }
+
+.back { color: var(--dim); text-decoration: none; font-size: 15px; }
+.back:hover { color: var(--text); }
+
+.hero { padding-top: 20px; }
+h1 { margin: 0; font-size: clamp(30px, 4.6vw, 48px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; text-wrap: balance; }
+.lead { margin: 12px 0 0; font-size: 19px; color: var(--dim); }
+section.part { padding-top: 56px; }
+h2 { margin: 0 0 6px; font-size: 22px; font-weight: 700; }
+.hint { margin: 0 0 20px; color: var(--dim); font-size: 16px; }
+
+/* ---- how it is used ---- */
+.steps { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 32px; }
+@media (max-width: 1023px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 699px) { .steps { grid-template-columns: minmax(0, 1fr); } }
+.step { min-width: 0; display: flex; flex-direction: column; }
+.pic { min-height: 470px; display: flex; align-items: center; justify-content: center; }
+.pic > * { max-width: 100%; }
+@media (max-width: 699px) { .pic { min-height: 0; } }
+.tag { margin: 14px 0 2px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--gold); }
+.tag .n { font-family: var(--mono); color: var(--dim); }
+.txt { margin: 0; font-size: 17px; line-height: 1.4; }
+
+.scr { width: 330px; background: var(--w-bg); color: var(--w-ink); border: 1px solid var(--w-line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.scr .ti { font-size: 21px; font-weight: 700; line-height: 1.2; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr .ti small { font-size: 14px; font-weight: 500; color: var(--w-dim); }
+.scr .fine { font-size: 14px; color: var(--w-dim); margin: 0; }
+
+/* the phone and the morning word */
+.phone { position: relative; width: 300px; height: 420px; border: 9px solid var(--w-frame); border-radius: 34px; background: var(--w-bg); overflow: hidden; }
+.win { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 16px 14px 14px; color: var(--w-ink); }
+.win .top { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 1px solid var(--w-line); padding-bottom: 8px; font-size: 15px; }
+.win .top b { font-size: 17px; }
+.win .top span { color: var(--w-dim); }
+.q { background: var(--w-soft); border-radius: 12px; padding: 10px 12px; font-size: 16px; line-height: 1.3; }
+.q.new { background: var(--w-lit-bg); outline: 1.5px solid var(--w-lit); }
+.bt { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn { background: var(--w-btn); color: var(--w-btn-ink); border: 2px solid var(--w-btn); border-radius: 10px; padding: 6px 12px; font-size: 15px; font-weight: 700; }
+.btn.ghost { background: transparent; color: var(--w-btn); }
+.win .fine { margin: auto 0 0; font-size: 13.5px; color: var(--w-dim); text-align: center; }
+
+/* the calendar, read only */
+.ro { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: var(--w-dim); border: 1px solid var(--w-line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+.ev { display: grid; grid-template-columns: 38px 48px minmax(0, 1fr); gap: 0 8px; align-items: baseline; border: 1px solid var(--w-line); border-radius: 10px; padding: 7px 10px; font-size: 15.5px; line-height: 1.3; }
+.ev b { font-weight: 700; }
+.ev .tm { font: 13px/1.3 var(--mono); color: var(--w-dim); }
+.ev small { grid-column: 3; font-size: 13px; font-weight: 700; color: var(--w-stop); }
+.ev.lit { border-color: var(--w-lit); background: var(--w-lit-bg); }
+
+/* a mail */
+.ml { border: 1px solid var(--w-line); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; font-size: 15.5px; line-height: 1.3; }
+.ml .fr { display: flex; align-items: center; gap: 8px; font: 13px/1.3 var(--mono); color: var(--w-dim); overflow-wrap: anywhere; }
+.ml b { font-size: 16.5px; }
+.ml.new { border-color: var(--w-lit); background: var(--w-lit-bg); }
+.bub { align-self: flex-start; max-width: 96%; background: var(--w-soft); border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 16px; line-height: 1.35; }
+.bub small { display: block; font-size: 13px; font-weight: 650; color: var(--w-dim); }
+
+/* Home Assistant */
+.dev { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 2px 10px; align-items: center; border: 1px solid var(--w-line); border-radius: 12px; padding: 10px 12px; }
+.dev i { width: 10px; height: 10px; border-radius: 50%; background: var(--w-ok); }
+.dev b { font-size: 18px; }
+.dev .val { grid-column: 2; justify-self: start; border: 1.5px solid var(--w-ok); color: var(--w-ok); border-radius: 999px; padding: 0 10px; font-size: 14.5px; font-weight: 700; }
+.dev code { grid-column: 2; font: 13px/1.3 var(--mono); color: var(--w-dim); }
+.dev.lit { border-color: var(--w-lit); background: var(--w-lit-bg); }
+
+/* what it may do */
+.ad { display: flex; align-items: center; gap: 10px; border: 1px solid var(--w-line); border-radius: 10px; padding: 7px 10px; font-size: 16px; min-height: 42px; }
+.ad span { min-width: 0; }
+.ad .st { margin-left: auto; flex: none; font-size: 12.5px; font-weight: 700; }
+.ad.yes .st { color: var(--w-ok); }
+.ad.no { border-color: var(--w-stop); }
+.ad.no .st { color: var(--w-stop); }
+.ad svg { flex: none; }
+
+/* where the model runs */
+.dia { width: 330px; background: var(--w-bg); border: 1px solid var(--w-line); border-radius: 16px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.dia svg { display: block; width: 100%; height: auto; overflow: visible; }
+.dia text { font-family: var(--sans); fill: var(--w-ink); }
+.dia .lab { font-size: 15px; font-weight: 700; }
+.dia .sub { font-size: 12.5px; fill: var(--w-dim); }
+.dia .or { font-size: 14px; font-weight: 700; fill: var(--w-dim); }
+.dia .wall { fill: var(--w-bg); stroke: var(--w-frame); stroke-width: 3; }
+.dia .home { fill: none; stroke: var(--w-dim); stroke-width: 1.5; stroke-dasharray: 5 4; }
+.dia .svc { fill: var(--w-bg); stroke: var(--w-ok); stroke-width: 2; }
+.dia .far { fill: var(--w-bg); stroke: var(--w-btn); stroke-width: 2; }
+.dia .ln { fill: none; stroke-width: 2.4; }
+.dia .ln.ok { stroke: var(--w-ok); }
+.dia .ln.far { stroke: var(--w-btn); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .q.new, .ml.new, .dev.lit { animation: glow 1.8s ease-in-out infinite; }
+  @keyframes glow { 50% { box-shadow: 0 0 0 4px var(--w-lit-bg); } }
+  .later { animation: rise .6s ease-out 1s both; }
+  .later2 { animation: rise .6s ease-out 1.8s both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+  .dia .ln { stroke-dasharray: 7 5; animation: run 1.4s linear infinite; }
+  @keyframes run { to { stroke-dashoffset: -24; } }
+}
+
+/* ---- the whole setup ---- */
+.board { border: 1px solid var(--line); border-radius: 16px; background: var(--bg); padding: 12px 8px; }
+#drawing > svg { display: block; width: 100%; max-width: 900px; height: auto; margin: 0 auto; overflow: visible; }
+.board text { font-family: var(--sans); fill: var(--text); }
+.board .nm { font-size: 16px; font-weight: 680; }
+.board .sb { font-size: 13px; fill: var(--dim); }
+.board .lb { font-size: 13px; font-weight: 600; paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+.board.narrow .nm { font-size: 13.5px; }
+.board.narrow .sb { font-size: 11.5px; }
+.board.narrow .lb { font-size: 11.5px; }
+.bx { cursor: pointer; }
+.bx rect.b { stroke-width: 2; transition: fill .2s; }
+.bx.agent rect.b { fill: var(--agent-bg); stroke: var(--agent); }
+.bx.script rect.b { fill: var(--script-bg); stroke: var(--script); }
+.bx.asset rect.b { fill: var(--folder-bg); stroke: var(--folder); }
+.bx.person rect.b { fill: var(--person-bg); stroke: var(--person); }
+.bx:hover rect.b, .bx.on rect.b { fill: var(--lit-bg); }
+.bx.on rect.b { stroke-width: 3; }
+.bx:focus { outline: none; }
+.bx:focus-visible rect.b { stroke: var(--accent); stroke-width: 3; }
+.lk { fill: none; stroke-width: 2; transition: opacity .2s; }
+.lk.read { stroke: var(--read); } .lk.write { stroke: var(--write); } .lk.both { stroke: var(--read); }
+.lk.talk { stroke: var(--talk); stroke-dasharray: 6 4; }
+.mk-read { fill: var(--read); } .mk-write { fill: var(--write); } .mk-talk { fill: var(--talk); } .mk-both { fill: var(--read); }
+.wk { fill: var(--lit); stroke: var(--bg); stroke-width: 2; }
+.dimmed .lk:not(.hot), .dimmed .lkl:not(.hot) { opacity: .18; }
+.lk.hot { stroke-width: 3; }
+.info { margin: 12px 4px 0; min-height: 3.2em; font-size: 16px; line-height: 1.4; }
+.info b { font-weight: 700; }
+.info .sees { display: block; color: var(--dim); }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 12px 4px 0; font-size: 14px; color: var(--dim); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { flex: none; }
+.rule svg { flex: none; }
+.rule { margin: 14px 4px 0; display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; }
+
+/* ---- what you need ---- */
+.need { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 899px) { .need { grid-template-columns: minmax(0, 1fr); } }
+.nd { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.nd h3 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--gold); display: flex; align-items: center; gap: 8px; }
+.nd p { margin: 0; font-size: 16px; line-height: 1.4; }
+.nd .big { font-size: 20px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.keys { border: 1px solid var(--t-line); background: var(--t-bg); color: var(--t-ink); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 6px; }
+.keys div { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; }
+.keys code { font: 600 14px/1.4 var(--mono); color: var(--t-brass); overflow-wrap: anywhere; }
+.keys span { font-size: 13.5px; color: var(--t-ink2); }
+.flag { flex: none; display: block; border-radius: 2px; }
+
+/* ---- take it ---- */
+.take .btns { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 4px 0 14px; }
+.take .dl { background: var(--accent); color: var(--accent-ink); text-decoration: none; font-size: 20px; font-weight: 650; border-radius: 12px; padding: 15px 26px; display: inline-flex; align-items: center; gap: 10px; }
+.take .cp { border: 2px solid var(--accent); background: var(--bg); color: var(--accent); font-size: 18px; font-weight: 650; border-radius: 12px; padding: 12px 22px; }
+.take .said { font-size: 15px; color: var(--ok); min-height: 1.4em; }
+.take p { margin: 0 0 10px; font-size: 17px; max-width: 46em; }
+.take .file { font-family: var(--mono); font-size: 14px; color: var(--dim); }
+.back-row { margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<p class="ribbon">Target page: shows planned features. Names are invented.</p>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="../index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button" aria-current="page">Use cases</button>
+        <span class="drop-menu">
+        <a href="../cases/family.html">Marcel, 82, tells his story</a>
+        <a href="../cases/code.html">Your coding agents</a>
+        <a href="../cases/office.html">Office: one report per client</a>
+        <a href="../cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="../cases/home.html" aria-current="page">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="../examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+
+
+<main>
+  <section class="hero wrap">
+    <p class="back-row"><a class="back" href="../index.html#home">&larr; All cases</a></p>
+    <h1>Your assistant: calendar, mail, home</h1>
+    <p class="lead">Each morning, what is missing or clashing. In the evening, a warm house.</p>
+  </section>
+
+  <section class="part wrap" aria-labelledby="use-h">
+    <h2 id="use-h">How it is used</h2>
+    <ol class="steps" id="steps"></ol>
+  </section>
+
+  <section class="part wrap" aria-labelledby="setup-h">
+    <h2 id="setup-h">The whole setup</h2>
+    <p class="hint">Touch a box.</p>
+    <div class="board" id="board">
+      <div id="drawing"></div>
+      <p class="info" id="info" aria-live="polite"></p>
+      <div class="legend" id="legend"></div>
+      <p class="rule" id="rule"></p>
+    </div>
+  </section>
+
+  <section class="part wrap" aria-labelledby="need-h">
+    <h2 id="need-h">What you need</h2>
+    <div class="need" id="need"></div>
+  </section>
+
+  <section class="part wrap take" aria-labelledby="take-h">
+    <h2 id="take-h">Take this setup</h2>
+    <div class="btns">
+      <a class="dl" href="home.clavarium.json" download>Download this setup</a>
+      <button class="cp" type="button" id="copy">Copy it</button>
+      <span class="said" id="said" aria-live="polite"></span>
+    </div>
+    <p>Import it in Clavarium: it creates the machines, attaches the folders, installs the scripts at their pinned version, then asks for the keys it needs.</p>
+    <p class="file">home.clavarium.json: key names only, never a key.</p>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="../examples.html">Use cases</a>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+
+<script type="application/json" id="setup-data">
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "a1",
+   "kind": "asset",
+   "name": "calendar, read only",
+   "x": 230,
+   "y": 32
+  },
+  {
+   "id": "a2",
+   "kind": "asset",
+   "name": "mail, read only",
+   "x": 492,
+   "y": 32
+  },
+  {
+   "id": "g1",
+   "kind": "agent",
+   "name": "assistant",
+   "x": 368,
+   "y": 130,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Reads the family calendar and the mail, never changes them. Each morning, tells Noah on his phone what is missing or clashing, with buttons. On a new mail, sees who comes home late and asks Home Assistant to warm the house in time. Cannot pay, cannot send mail.",
+   "key": "MODEL_KEY_ASSISTANT"
+  },
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Noah, at home",
+   "x": 600,
+   "y": 244
+  },
+  {
+   "id": "a3",
+   "kind": "asset",
+   "name": "house requests",
+   "x": 300,
+   "y": 244
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "Home Assistant",
+   "x": 368,
+   "y": 342,
+   "wake": "Nothing but its links",
+   "does": "Passes each request of the assistant to Home Assistant. Its token there allows the heating and the lights only; anything else is refused.",
+   "key": "HOME_ASSISTANT_TOKEN",
+   "source": "https://example.com/home/ha-bridge.git",
+   "pin": "7c2e91d"
+  }
+ ],
+ "links": [
+  {
+   "from": "a1",
+   "to": "g1",
+   "kind": "read"
+  },
+  {
+   "from": "a2",
+   "to": "g1",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "g1",
+   "to": "p1",
+   "kind": "talk"
+  },
+  {
+   "from": "g1",
+   "to": "a3",
+   "kind": "write"
+  },
+  {
+   "from": "a3",
+   "to": "s1",
+   "kind": "read",
+   "wakes": true
+  }
+ ]
+}
+</script>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var EMBEDDED = document.getElementById("setup-data").textContent.trim();
+  var SETUP = JSON.parse(EMBEDDED);
+
+  function h(tag, cls, text, parent) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function s(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function st(tag, attrs, text, parent) { var n = s(tag, attrs, parent); n.textContent = text; return n; }
+  function txt(parent, t) { parent.appendChild(document.createTextNode(t)); }
+
+  /* Small drawn icons (24 x 24), coloured by currentColor. */
+  var ICONS = {
+    lock: [["rect", { x: 5, y: 11, width: 14, height: 11, rx: 2, fill: "currentColor" }], ["path", { d: "M8 11V8a4 4 0 0 1 8 0v3", fill: "none", stroke: "currentColor", "stroke-width": 2.4 }]],
+    key: [["circle", { cx: 7, cy: 12, r: 4.5, fill: "none", stroke: "currentColor", "stroke-width": 2.4 }], ["path", { d: "M11.5 12H23M19 12v4.5M23 12v3.5", fill: "none", stroke: "currentColor", "stroke-width": 2.4, "stroke-linecap": "round" }]],
+    cloud: [["path", { d: "M7 19h11a4.5 4.5 0 0 0 .5-9A6 6 0 0 0 7 9.5 4.8 4.8 0 0 0 7 19z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    box: [["rect", { x: 3, y: 4, width: 18, height: 13, rx: 2, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M8 21h8M12 17v4", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round" }]],
+    clock: [["circle", { cx: 12, cy: 12, r: 9, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M12 7v5l3 2", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linecap": "round" }]],
+    mail: [["rect", { x: 3, y: 5, width: 18, height: 14, rx: 2, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M3 7l9 6 9-6", fill: "none", stroke: "currentColor", "stroke-width": 2 }]],
+    eye: [["path", { d: "M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }], ["circle", { cx: 12, cy: 12, r: 3, fill: "currentColor" }]],
+    house: [["path", { d: "M3 11l9-7 9 7M6 9.5V20h12V9.5", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    yes: [["circle", { cx: 12, cy: 12, r: 10, fill: "currentColor" }], ["path", { d: "M7 12.5l3.2 3L17 9", fill: "none", stroke: "#ffffff", "stroke-width": 2.6, "stroke-linecap": "round", "stroke-linejoin": "round" }]],
+    no: [["circle", { cx: 12, cy: 12, r: 10, fill: "currentColor" }], ["path", { d: "M8 8l8 8M16 8l-8 8", fill: "none", stroke: "#ffffff", "stroke-width": 2.6, "stroke-linecap": "round" }]]
+  };
+  function ic(name, size, parent, x, y) {
+    var v = s("svg", { viewBox: "0 0 24 24", width: size, height: size, "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    ICONS[name].forEach(function (p) { s(p[0], p[1], v); });
+    return v;
+  }
+  function flagFr(w, parent, x, y) {
+    var v = s("svg", { viewBox: "0 0 30 20", width: w, height: w * 2 / 3, "class": "flag", "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    s("rect", { width: 10, height: 20, fill: "var(--fl-blue)" }, v); s("rect", { x: 10, width: 10, height: 20, fill: "var(--fl-white)" }, v); s("rect", { x: 20, width: 10, height: 20, fill: "var(--fl-red)" }, v);
+    s("rect", { x: .25, y: .25, width: 29.5, height: 19.5, fill: "none", stroke: "var(--line)", "stroke-width": .5 }, v);
+    return v;
+  }
+  function scr(label, title, small) {
+    var p = h("div", "scr"); p.setAttribute("role", "img"); p.setAttribute("aria-label", label);
+    var t = h("div", "ti", title, p); if (small) h("small", null, small, t);
+    return p;
+  }
+  /* A line of words with its first part in bold. */
+  function said(parent, cls, bold, rest) { var d = h("div", cls, null, parent); h("b", null, bold, d); txt(d, rest); return d; }
+
+  /* ---------- the six pictures ---------- */
+  function picMorning() {
+    var ph = h("div", "phone"); ph.setAttribute("role", "img");
+    ph.setAttribute("aria-label", "Your phone at 7:30: the assistant found no train ticket for Thursday's trip to Lyon, button Remind me tonight; on Tuesday at 17:00 the dentist and the school meeting clash, buttons Show me both and Ignore");
+    var w = h("div", "win", null, ph);
+    var t = h("div", "top", null, w); h("b", null, "Your assistant", t); h("span", null, "Monday 7:30", t);
+    said(w, "q", "Lyon, Thursday", ": no train ticket in your mail.");
+    var r1 = h("div", "bt", null, w); h("span", "btn", "Remind me tonight", r1);
+    said(w, "q new", "Tuesday 17:00", ": dentist and school meeting.");
+    var r2 = h("div", "bt", null, w); h("span", "btn", "Show me both", r2); h("span", "btn ghost", "Ignore", r2);
+    h("p", "fine", "It cannot change the calendar.", w);
+    return ph;
+  }
+  function picReads() {
+    var p = scr("This week in the family calendar, read only: Tuesday at 17:00 the dentist and the school meeting clash; Thursday, Lyon all day, no ticket found in the mail", "This week", null);
+    var ro = h("span", "ro", null, p.firstChild); ic("eye", 14, ro); txt(ro, "read only");
+    function ev(cls, day, tm, what, note) {
+      var r = h("div", "ev" + (cls ? " " + cls : ""), null, p); h("b", null, day, r); h("span", "tm", tm, r); h("span", null, what, r);
+      if (note) h("small", null, note, r);
+    }
+    ev("", "Mon", "18:30", "Léa, judo");
+    ev("lit", "Tue", "17:00", "Dentist, Noah", "same time");
+    ev("lit", "Tue", "17:00", "School meeting");
+    ev("lit", "Thu", "all day", "Lyon, Noah", "no ticket in the mail");
+    ev("", "Fri", "18:30", "Léa back by train");
+    h("p", "fine", "It reads the calendar and the mail. It changes neither.", p);
+    return p;
+  }
+  function picLate() {
+    var p = scr("A new mail at 17:52: Léa's train is 20 minutes late, arrival 18:50; the assistant notes it and asks Home Assistant for heat at 18:10 and the hall light at 18:45", "New mail", "Friday 17:52");
+    var m = h("div", "ml new", null, p);
+    var fr = h("span", "fr", null, m); ic("mail", 16, fr); txt(fr, "trains@example.com");
+    h("b", null, "Train 6142: 20 minutes late", m);
+    txt(m, "Léa Martin. Arrival 18:50, not 18:30.");
+    var b = h("div", "bub later", null, p); h("small", null, "Your assistant, 17:53", b);
+    txt(b, "Léa home at 18:50. Asked Home Assistant: heat at 18:10, hall light at 18:45.");
+    return p;
+  }
+  function picHouse() {
+    var p = scr("Home Assistant: heating 20 degrees at 18:10 and hall light on at 18:45, both asked by your assistant", "Home", "Home Assistant");
+    function dev(cls, name, val) {
+      var r = h("div", "dev" + cls, null, p); h("i", null, null, r); h("b", null, name, r);
+      h("span", "val later", val, r); h("code", null, "asked by your assistant", r);
+    }
+    dev(" lit", "Heating", "20° at 18:10");
+    dev("", "Hall light", "on at 18:45");
+    h("p", "fine", "Léa comes home to a warm house.", p);
+    return p;
+  }
+  function picFence() {
+    var p = scr("What the assistant may do: the heating and the lights, allowed in Home Assistant; door locks and alarm refused; it cannot pay and cannot send mail", "What it may do", null);
+    function row(ok, what, state) {
+      var r = h("div", "ad " + (ok ? "yes" : "no"), null, p); ic(ok ? "yes" : "no", 20, r).style.color = ok ? "var(--w-ok)" : "var(--w-stop)";
+      h("span", null, what, r); h("span", "st", state, r);
+    }
+    row(true, "Heating", "allowed");
+    row(true, "Lights", "allowed");
+    row(false, "Door locks, alarm", "refused");
+    row(false, "Pay", "cannot");
+    row(false, "Send mail", "cannot");
+    h("p", "fine", "You set the house part in Home Assistant, with its token.", p);
+    return p;
+  }
+  function picModel() {
+    var box = h("div", "dia"); box.setAttribute("role", "img");
+    box.setAttribute("aria-label", "The assistant, in its own machine at home, uses either Ollama on your own box, if it is powerful enough, or a model at a provider you choose, here Mistral in France");
+    var v = s("svg", { viewBox: "0 0 330 430" }, box);
+    s("rect", { x: 2, y: 2, width: 326, height: 300, rx: 16, "class": "home" }, v);
+    ic("house", 18, v, 14, 12).style.color = "var(--w-dim)"; st("text", { x: 38, y: 26, "class": "sub" }, "at home", v);
+    s("rect", { x: 100, y: 46, width: 130, height: 62, rx: 12, "class": "wall" }, v); ic("lock", 13, v, 210, 52).style.color = "var(--w-dim)";
+    st("text", { x: 165, y: 74, "class": "lab", "text-anchor": "middle" }, "assistant", v); st("text", { x: 165, y: 94, "class": "sub", "text-anchor": "middle" }, "own machine", v);
+    s("rect", { x: 18, y: 180, width: 130, height: 60, rx: 12, "class": "svc" }, v);
+    st("text", { x: 83, y: 206, "class": "lab", "text-anchor": "middle" }, "Ollama", v); st("text", { x: 83, y: 226, "class": "sub", "text-anchor": "middle" }, "on your box", v);
+    s("path", { d: "M135 108 C135 140 83 140 83 176", "class": "ln ok" }, v);
+    st("text", { x: 83, y: 264, "class": "sub", "text-anchor": "middle" }, "If the box is powerful.", v);
+    st("text", { x: 83, y: 282, "class": "sub", "text-anchor": "middle" }, "Its text stays at home.", v);
+    st("text", { x: 160, y: 152, "class": "or", "text-anchor": "middle" }, "or", v);
+    s("rect", { x: 160, y: 330, width: 160, height: 66, rx: 12, "class": "far" }, v);
+    ic("cloud", 20, v, 172, 342).style.color = "var(--w-btn)";
+    st("text", { x: 198, y: 358, "class": "lab" }, "Provider", v);
+    flagFr(22, v, 172, 370); st("text", { x: 200, y: 383, "class": "sub" }, "Mistral, France", v);
+    s("path", { d: "M195 108 C195 200 240 240 240 326", "class": "ln far" }, v);
+    st("text", { x: 320, y: 418, "class": "sub", "text-anchor": "end" }, "you choose; what it reads goes there", v);
+    return box;
+  }
+  var STEPS = [
+    ["Morning", "Each morning, on your phone: what is missing or clashing.", picMorning],
+    ["Read only", "It reads the family calendar and the mail. It cannot change them.", picReads],
+    ["Late", "A new mail: Léa’s train is 20 minutes late.", picLate],
+    ["Home", "It asks Home Assistant to warm the house and light the hall in time.", picHouse],
+    ["Limits", "It acts on the house within what you allow. It cannot pay or send mail.", picFence],
+    ["Model", "Its model: a provider you choose, or Ollama on your own box.", picModel]
+  ];
+  var stepsEl = document.getElementById("steps");
+  STEPS.forEach(function (sp, i) {
+    var li = h("li", "step", null, stepsEl);
+    h("div", "pic", null, li).appendChild(sp[2]());
+    var tag = h("p", "tag", null, li); h("span", "n", String(i + 1), tag); h("span", null, sp[0], tag);
+    h("p", "txt", sp[1], li);
+  });
+
+  /* ---------- the whole setup, drawn from the setup file ---------- */
+  var SIZE = { agent: [164, 62], script: [164, 62], asset: [178, 46], person: [172, 46] };
+  var KIND = { agent: "agent", script: "script", asset: "folder", person: "person" };
+  var VERB = { read: "reads", write: "writes", both: "reads and writes", talk: "talks with" };
+  var IDLE = "Nothing but its links", OUTSIDE = "A call from outside";
+  var board = document.getElementById("board"), drawing = document.getElementById("drawing"), info = document.getElementById("info");
+  var data = SETUP, picked = null, narrowNow = null;
+
+  function byId(id) { return data.nodes.filter(function (x) { return x.id === id; })[0]; }
+  /* Woken by the clock: any wake but its links or a call. */
+  function clocked(x) { return (x.kind === "agent" || x.kind === "script") && x.wake && x.wake !== IDLE && x.wake !== OUTSIDE; }
+  /* What a box sees, in words, from its links. */
+  function sees(x) {
+    var parts = [];
+    data.links.forEach(function (l) {
+      var other, verb;
+      if (l.from === x.id) { other = byId(l.to); verb = VERB[l.kind]; }
+      else if (l.to === x.id) {
+        other = byId(l.from);
+        if (l.kind === "talk") verb = "talks with";
+        else if (x.kind === "asset") verb = (l.kind === "write" ? "written by" : "read by");
+        else verb = VERB[l.kind];
+      }
+      else return;
+      var t = verb + " " + other.name;
+      if (l.only) t += " (" + l.only + " only)";
+      if (l.wakes && l.to === x.id && x.kind !== "asset") t += ", woken by each arrival";
+      if (l.wakes && l.from === x.id && x.kind === "asset") t += ", waking it";
+      parts.push(t);
+    });
+    return parts.join("; ");
+  }
+  function describe(x) {
+    info.textContent = "";
+    if (!x) { h("span", "sees", "Each box is a person, a folder, a script or an agent. Touch one.", info); return; }
+    h("b", null, x.name, info);
+    var what = x.does || (x.kind === "asset" ? "A folder." : "A person, with a window on the phone.");
+    txt(info, ": " + what);
+    if (clocked(x)) txt(info, " Woken: " + x.wake + ".");
+    if (x.wake === OUTSIDE) txt(info, " Woken by a web call.");
+    if (x.key) txt(info, " Key: " + x.key + ".");
+    else if (x.kind === "agent" || x.kind === "script") txt(info, " No key.");
+    if (x.pin) txt(info, " Pinned at " + x.pin + ".");
+    h("span", "sees", "Sees: " + sees(x) + ".", info);
+  }
+
+  /* Places each box: on a wide screen at its place in the file; on a phone, each row of the file
+     made to fit the width, its boxes made thinner. */
+  function layout(narrow) {
+    var rows = {}, out = {}, W, H;
+    data.nodes.forEach(function (x) { var r = Math.round((x.y - 24) / 106); (rows[r] = rows[r] || []).push(x); });
+    var keys = Object.keys(rows).map(Number).sort(function (a, b) { return a - b; });
+    if (!narrow) {
+      data.nodes.forEach(function (x) { out[x.id] = { x: x.x, y: x.y, w: SIZE[x.kind][0], h: SIZE[x.kind][1] }; });
+      W = 900; H = 24 + (keys[keys.length - 1] + 1) * 106;
+      return { at: out, W: W, H: H, rows: rows, side: 800, row: 106 };
+    }
+    W = 360; var usable = 334, gap = 8, ROW = 96, top = 12;
+    keys.forEach(function (r) {
+      var list = rows[r].slice().sort(function (a, b) { return a.x - b.x; });
+      var natural = list.reduce(function (s0, x) { return s0 + SIZE[x.kind][0] * .8; }, 0) + gap * (list.length - 1);
+      var scale = natural > usable ? usable / natural : 1;
+      var width = natural * scale, at = (usable - width) / 2 + 2;
+      list.forEach(function (x) {
+        var w = SIZE[x.kind][0] * .8 * scale, hh = x.kind === "asset" || x.kind === "person" ? 44 : 58;
+        if (list.length === 3) w = (usable - 2 * gap) / 3;
+        out[x.id] = { x: at, y: top + r * ROW + (58 - hh) / 2, w: w, h: hh };
+        at += w + gap;
+      });
+    });
+    H = top + (keys[keys.length - 1] + 1) * ROW;
+    return { at: out, W: W, H: H, rows: rows, side: 350, row: ROW };
+  }
+  function rowOf(L, id) { for (var r in L.rows) if (L.rows[r].some(function (x) { return x.id === id; })) return Number(r); return 0; }
+
+  function draw() {
+    var narrow = drawing.clientWidth < 620;
+    narrowNow = narrow;
+    board.classList.toggle("narrow", narrow);
+    drawing.textContent = "";
+    var L = layout(narrow);
+    var svg = s("svg", { viewBox: "0 0 " + L.W + " " + L.H, role: "group", "aria-label": "The whole setup: " + data.nodes.length + " boxes, " + data.links.length + " links" }, drawing);
+    var defs = s("defs", {}, svg);
+    ["read", "write", "talk", "both"].forEach(function (k) {
+      var m = s("marker", { id: "m-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "9", markerHeight: "9", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" }, defs);
+      s("path", { d: "M0 0 L10 5 L0 10 z", "class": "mk-" + k }, m);
+    });
+    var linkLayer = s("g", {}, svg), labelLayer = s("g", {}, svg), boxLayer = s("g", {}, svg);
+    var drawn = [];
+
+    data.links.forEach(function (l) {
+      var A = L.at[l.from], B = L.at[l.to]; if (!A || !B) return;
+      var ra = rowOf(L, l.from), rb = rowOf(L, l.to), d, lx, ly, ex, ey;
+      var acx = A.x + A.w / 2, bcx = B.x + B.w / 2;
+      if (ra === rb) {
+        var right = bcx > acx, x1 = right ? A.x + A.w : A.x, x2 = right ? B.x : B.x + B.w, y = A.y + A.h / 2;
+        d = "M" + x1 + " " + y + " H" + x2; lx = (x1 + x2) / 2; ly = y - 8; ex = x2; ey = y;
+      } else if (Math.abs(rb - ra) === 1) {
+        var down = rb > ra;
+        var off = function (P, Q) { return Math.max(-P.w / 3, Math.min(P.w / 3, (Q.x + Q.w / 2 - (P.x + P.w / 2)) / 3)); };
+        var sx = acx + off(A, B), sy = down ? A.y + A.h : A.y, tx = bcx + off(B, A), ty = down ? B.y : B.y + B.h;
+        var my = (sy + ty) / 2;
+        d = "M" + sx + " " + sy + " C" + sx + " " + my + " " + tx + " " + my + " " + tx + " " + ty;
+        lx = (sx + tx) / 2; ly = my + 4; ex = tx; ey = ty;
+      } else {
+        /* A link that skips rows goes round by the side, so it crosses no box. */
+        var X = L.side, y1 = A.y + A.h / 2, y2 = B.y + B.h / 2;
+        d = "M" + (A.x + A.w) + " " + y1 + " H" + (X - 14) + " Q" + X + " " + y1 + " " + X + " " + (y1 + (y2 > y1 ? 14 : -14)) + " V" + (y2 + (y2 > y1 ? -14 : 14)) + " Q" + X + " " + y2 + " " + (X - 14) + " " + y2 + " H" + (B.x + B.w);
+        lx = X; ly = (y1 + y2) / 2; ex = B.x + B.w; ey = y2;
+      }
+      var p = s("path", { d: d, "class": "lk " + l.kind, "marker-end": "url(#m-" + l.kind + ")" }, linkLayer);
+      if (l.kind === "talk" || l.kind === "both") p.setAttribute("marker-start", "url(#m-" + l.kind + ")");
+      if (l.wakes) s("circle", { cx: ex, cy: ey + (ey > (A.y + A.h / 2) ? -10 : 10), r: 5, "class": "wk" }, linkLayer);
+      var parts = [];
+      if (l.only) parts.push(l.only);
+      if (l.kind === "talk" && byId(l.to).kind === "person") parts.push(narrow ? "talks" : "talks, via Parley");
+      var lab = null;
+      if (parts.length) {
+        lab = st("text", { x: lx, y: ly, "class": "lb lkl", "text-anchor": "middle" }, parts.join(", "), labelLayer);
+        lab.style.fill = "var(--" + l.kind + ")";
+        if (Math.abs(rb - ra) > 1) { lab.setAttribute("transform", "rotate(-90 " + lx + " " + ly + ")"); lab.setAttribute("y", ly - 6); }
+      }
+      drawn.push({ l: l, p: p, lab: lab });
+    });
+
+    data.nodes.forEach(function (x) {
+      var P = L.at[x.id], g = s("g", { "class": "bx " + x.kind, tabindex: "0", role: "button", "aria-label": x.name + ", " + KIND[x.kind] }, boxLayer);
+      var rx = x.kind === "person" ? P.h / 2 : x.kind === "asset" ? 6 : 12;
+      s("rect", { x: P.x, y: P.y, width: P.w, height: P.h, rx: rx, "class": "b" }, g);
+      if (x.kind === "asset") s("path", { d: "M" + (P.x + 10) + " " + P.y + " v-6 h" + (narrow ? 26 : 34) + " l6 6", fill: "var(--folder-bg)", stroke: "var(--folder)", "stroke-width": 2 }, g);
+      var cx = P.x + P.w / 2, worker = x.kind === "agent" || x.kind === "script";
+      var nm = st("text", { x: cx, y: worker ? P.y + P.h / 2 - 3 : P.y + P.h / 2 + 5, "class": "nm", "text-anchor": "middle" }, x.name, g);
+      if (worker) {
+        st("text", { x: cx, y: P.y + P.h / 2 + (narrow ? 14 : 17), "class": "sb", "text-anchor": "middle" }, x.kind === "agent" ? (narrow ? x.tool : "agent · " + x.tool) : (narrow ? "script" : "script · " + x.pin), g);
+        var lk = ic("lock", narrow ? 10 : 13, g, P.x + P.w - (narrow ? 14 : 19), P.y + 5); lk.style.color = "var(--dim)";
+        /* Woken by the clock: a small clock in the other corner. */
+        if (clocked(x)) { var ck = ic("clock", narrow ? 12 : 15, g, P.x + (narrow ? 4 : 6), P.y + 4); ck.style.color = "var(--lit)"; }
+      }
+      /* Fits a long name into a thin box. */
+      var room = P.w - 10;
+      if (nm.getComputedTextLength && nm.getComputedTextLength() > room) { nm.setAttribute("textLength", room); nm.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+      function pick() { picked = picked === x.id ? null : x.id; light(); }
+      g.addEventListener("click", pick);
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      x._g = g;
+    });
+
+    function light() {
+      svg.classList.toggle("dimmed", !!picked);
+      data.nodes.forEach(function (x) { x._g.classList.toggle("on", x.id === picked); x._g.setAttribute("aria-pressed", x.id === picked ? "true" : "false"); });
+      drawn.forEach(function (d) { var hot = picked && (d.l.from === picked || d.l.to === picked); d.p.classList.toggle("hot", !!hot); if (d.lab) d.lab.classList.toggle("hot", !!hot); });
+      describe(picked ? byId(picked) : null);
+    }
+    light();
+  }
+
+  function legend() {
+    var el = document.getElementById("legend"); el.textContent = "";
+    [["read", "reads"], ["write", "writes"], ["talk", "talks"]].forEach(function (k) {
+      var sp = h("span", null, null, el), v = s("svg", { width: 34, height: 12, viewBox: "0 0 34 12", "aria-hidden": "true" }, sp);
+      s("path", { d: "M2 6 H26", "class": "lk " + k[0] }, v); s("path", { d: "M24 1 L33 6 L24 11 z", "class": "mk-" + k[0] }, v);
+      txt(sp, k[1]);
+    });
+    var sp = h("span", null, null, el), v = s("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" }, sp);
+    s("circle", { cx: 7, cy: 7, r: 5, "class": "wk" }, v); txt(sp, "an arrival wakes it");
+    var sp3 = h("span", null, null, el); ic("clock", 14, sp3).style.color = "var(--lit)"; txt(sp3, "the clock wakes it");
+    var sp2 = h("span", null, null, el); ic("lock", 14, sp2).style.color = "var(--dim)"; txt(sp2, "its own sealed box");
+    /* The rule the drawing shows: no box writes in a folder marked read only. */
+    var rule = document.getElementById("rule"); rule.textContent = "";
+    var ro = data.nodes.filter(function (x) { return x.kind === "asset" && / read only$/.test(x.name); });
+    var written = ro.filter(function (x) { return data.links.some(function (l) { return l.to === x.id && (l.kind === "write" || l.kind === "both") || l.from === x.id && l.kind === "both"; }); });
+    if (ro.length) {
+      ic("lock", 18, rule).style.color = written.length ? "var(--no)" : "var(--ok)";
+      txt(rule, written.length ? "Check who writes in " + written.map(function (x) { return "“" + x.name + "”"; }).join(" and ") + "." : "No box can write in the calendar or the mail.");
+    }
+  }
+
+  function render() { legend(); draw(); }
+  render();
+  window.addEventListener("resize", function () { if ((drawing.clientWidth < 620) !== narrowNow) draw(); });
+
+  /* The file itself, when the page is served: the drawing then follows it. */
+  var fileText = null;
+  function getText() {
+    if (fileText) return Promise.resolve(fileText);
+    return fetch("home.clavarium.json", { cache: "no-store" }).then(function (r) { if (!r.ok) throw new Error(); return r.text(); })
+      .then(function (t) { fileText = t; return t; })
+      .catch(function () { return EMBEDDED + "\n"; });
+  }
+  if (location.protocol !== "file:") getText().then(function (t) { try { var d = JSON.parse(t); if (d && d.clavarium === "flow") { data = d; picked = null; render(); } } catch (e) { /* keeps the embedded one */ } });
+
+  /* ---------- what you need, from the same file ---------- */
+  var need = document.getElementById("need");
+  var c1 = h("div", "nd", null, need); var t1 = h("h3", null, null, c1); ic("key", 18, t1); txt(t1, "Keys");
+  var keys = h("div", "keys", null, c1);
+  SETUP.nodes.forEach(function (x) { if (x.key) { var d = h("div", null, null, keys); h("code", null, x.key, d); h("span", null, x.name, d); } });
+  h("p", null, "Names only. You paste the keys at import.", c1);
+  h("p", null, "With Ollama on your box, the assistant needs no model key.", c1);
+  var c2 = h("div", "nd", null, need); var t2 = h("h3", null, null, c2); ic("cloud", 18, t2); txt(t2, "Model");
+  var b2 = h("p", "big", null, c2); flagFr(28, b2); txt(b2, "Mistral, France");
+  h("p", null, "As the example. You choose the provider.", c2);
+  h("p", null, "What it reads goes there: your calendar, the mails it reads.", c2);
+  var b1 = h("p", "big", null, c2); ic("box", 24, b1); txt(b1, "Or Ollama, on your box");
+  h("p", null, "Then the model runs at home: its text stays there.", c2);
+  var c3 = h("div", "nd", null, need); var t3 = h("h3", null, null, c3); ic("house", 18, t3); txt(t3, "Machine and house");
+  h("p", "big", "A small computer, always on", c3);
+  h("p", null, "Ollama needs a powerful one: a strong graphics card, or much memory.", c3);
+  h("p", null, "Home Assistant on the same network, with a token for the heating and the lights only.", c3);
+  h("p", null, "n8n or Node-RED can also call the assistant and get its answer back.", c3);
+
+  /* ---------- copy ---------- */
+  var saidEl = document.getElementById("said");
+  document.getElementById("copy").addEventListener("click", function () {
+    getText().then(function (t) {
+      if (!navigator.clipboard) throw new Error();
+      return navigator.clipboard.writeText(t);
+    }).then(function () { saidEl.style.color = ""; saidEl.textContent = "Copied."; })
+      .catch(function () { saidEl.style.color = "var(--no)"; saidEl.textContent = "Could not copy here. Use Download."; });
+  });
+})();
+</script>
+</body>
+</html>

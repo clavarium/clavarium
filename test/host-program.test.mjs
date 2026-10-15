@@ -129,7 +129,7 @@ test('the ready-made machine: its own names only, and a conversation is copied f
    What can be seen without root: the exact sandbox, the refusals, the
    mapping of how a unit ended to the codes the server trusts. What the
    sandbox really stops was tried as root: see the trial at the end of
-   docs/blueprint/git-runner-core.md. */
+   blueprint/git-runner-core.md. */
 const withMnt = (...args) => {
     const r = spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', '--mnt', '/srv/clavarium-mnt', ...args], { encoding: 'utf8' });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };

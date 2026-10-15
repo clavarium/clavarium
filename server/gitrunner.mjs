@@ -1,5 +1,5 @@
 /* THE GIT RUNNER: every git command this server runs, and the one way an
- * agent's commits reach it. Design: docs/blueprint/git-runner-core.md.
+ * agent's commits reach it. Design: blueprint/git-runner-core.md.
  *
  * THE RULE: THE SERVER NEVER RUNS GIT ON A PATH THE AGENT CAN WRITE. A
  * repository the agent writes holds a config (hooks, fsmonitor, sshCommand,

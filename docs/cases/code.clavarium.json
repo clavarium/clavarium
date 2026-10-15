@@ -1,0 +1,231 @@
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Nadia (you)",
+   "x": 504,
+   "y": 240
+  },
+  {
+   "id": "a1",
+   "kind": "agent",
+   "name": "shop-api",
+   "x": 268,
+   "y": 126,
+   "tool": "Claude Code",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the shop-api repository with your Claude Code login and tools; commits its work and puts finished branches in Ready to send.",
+   "key": "CLAUDE_CODE_LOGIN"
+  },
+  {
+   "id": "a2",
+   "kind": "agent",
+   "name": "website",
+   "x": 268,
+   "y": 232,
+   "tool": "OpenCode",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the website repository with a Mistral model; commits its work and puts finished branches in Ready to send.",
+   "key": "MISTRAL_API_KEY"
+  },
+  {
+   "id": "a3",
+   "kind": "agent",
+   "name": "docs",
+   "x": 268,
+   "y": 338,
+   "tool": "Codex CLI",
+   "mode": "terminal",
+   "wake": "Nothing but its links",
+   "does": "Works on the docs repository with an OpenAI model; commits its work and puts finished branches in Ready to send.",
+   "key": "OPENAI_API_KEY"
+  },
+  {
+   "id": "f1",
+   "kind": "asset",
+   "name": "shop-api repository",
+   "x": 21,
+   "y": 134
+  },
+  {
+   "id": "f2",
+   "kind": "asset",
+   "name": "website repository",
+   "x": 21,
+   "y": 240
+  },
+  {
+   "id": "f3",
+   "kind": "asset",
+   "name": "docs repository",
+   "x": 21,
+   "y": 346
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "Night watch",
+   "x": 508,
+   "y": 126,
+   "wake": "Nothing but its links",
+   "does": "Answers the terminal questions your rules cover; sends the others to your phone with Yes and No; writes each answer in the night log. Calls no model.",
+   "source": "https://example.com/clavarium/scripts/night-watch.git",
+   "pin": "4f2c9a1e"
+  },
+  {
+   "id": "f4",
+   "kind": "asset",
+   "name": "Your rules",
+   "x": 741,
+   "y": 28
+  },
+  {
+   "id": "f6",
+   "kind": "asset",
+   "name": "Night log",
+   "x": 741,
+   "y": 134
+  },
+  {
+   "id": "f5",
+   "kind": "asset",
+   "name": "Ready to send",
+   "x": 501,
+   "y": 346
+  },
+  {
+   "id": "s2",
+   "kind": "script",
+   "name": "Send",
+   "x": 748,
+   "y": 338,
+   "wake": "Nothing but its links",
+   "does": "When you press Send on a branch you have read, pushes that branch to git.example.com. Only it holds the push key. Calls no model.",
+   "key": "GIT_PUSH_KEY",
+   "source": "https://example.com/clavarium/scripts/send.git",
+   "pin": "b81e07d3"
+  },
+  {
+   "id": "f7",
+   "kind": "asset",
+   "name": "git.example.com",
+   "x": 741,
+   "y": 452
+  }
+ ],
+ "links": [
+  {
+   "from": "p1",
+   "to": "a1",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "a2",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "a3",
+   "kind": "talk"
+  },
+  {
+   "from": "f1",
+   "to": "a1",
+   "kind": "both"
+  },
+  {
+   "from": "f2",
+   "to": "a2",
+   "kind": "both"
+  },
+  {
+   "from": "f3",
+   "to": "a3",
+   "kind": "both"
+  },
+  {
+   "from": "a1",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "a2",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "a3",
+   "to": "s1",
+   "kind": "talk"
+  },
+  {
+   "from": "f4",
+   "to": "s1",
+   "kind": "read"
+  },
+  {
+   "from": "s1",
+   "to": "f6",
+   "kind": "write"
+  },
+  {
+   "from": "s1",
+   "to": "p1",
+   "kind": "talk"
+  },
+  {
+   "from": "p1",
+   "to": "f4",
+   "kind": "write"
+  },
+  {
+   "from": "f6",
+   "to": "p1",
+   "kind": "read"
+  },
+  {
+   "from": "a1",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "a2",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "a3",
+   "to": "f5",
+   "kind": "write"
+  },
+  {
+   "from": "f5",
+   "to": "p1",
+   "kind": "read",
+   "wakes": true,
+   "only": "finished branches"
+  },
+  {
+   "from": "p1",
+   "to": "s2",
+   "kind": "talk"
+  },
+  {
+   "from": "f5",
+   "to": "s2",
+   "kind": "read",
+   "only": "branches you sent"
+  },
+  {
+   "from": "s2",
+   "to": "f7",
+   "kind": "write"
+  }
+ ]
+}

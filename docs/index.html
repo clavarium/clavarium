@@ -1,0 +1,854 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clavarium</title>
+<meta name="description" content="AI helpers on a computer you own. Each sees only what you give it.">
+<!--
+  TARGET PAGE. NOT THE REAL HOME PAGE. The pictures simulate these PLANNED features:
+    - The window: one phone page per person (Marcel's "Tell your story": the storyteller asks,
+      he speaks, his words become text; Léa reads chapters and asks, each answer cites its source).
+    - Helpers each sealed in its own box on this computer; the models run at a provider the
+      owner chooses (a European one if they like), or locally on a powerful machine.
+    - Ready setups: one tap on Monthly report makes one space per client.
+    - Spaces: one per client, with its own folder, key and agent; each member sees one space.
+    - Where data goes: model, provider and country per agent; "Europe only" folders
+      refused to agents whose model is hosted elsewhere.
+    - Your coding agents: one list (Claude Code, OpenCode with a model you choose, Codex), on the
+      computer and the phone, each in its own machine on its own repository. While you are away,
+      routine terminal questions are answered by your rules; the risky one reaches your phone,
+      through Parley. Only you push.
+    - Your home server: n8n or Home Assistant calls an agent and gets its answer back; agents
+      may run on your own Ollama; each reaches only the addresses you allow.
+    - Install: one command on Ubuntu. Windows and Mac: later. No Docker (it makes VMs).
+  Names are invented. Everything is built with textContent, no innerHTML.
+-->
+<link rel="stylesheet" href="base.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f5f2; --text: #16181d; --dim: #5a5f69; --line: #d6d9df;
+  --accent: #0b53c0; --gold: #8a5f0c; --gold-bg: #fbf3df; --ok: #17794f; --no: #a8321f; --no-bg: #fbe9e6;
+  --w-bg: #ffffff; --w-ink: #000000; --w-soft: #f1efe9; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #2a2d33; --w-lit: #d98a00; --w-stop: #c0392b; --w-line: #d6d9df; --w-dim: #5a5f69; --w-ok: #17794f; --w-no: #a8321f; --w-no-bg: #fbe9e6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --folder: #8a5d0a; --folder-bg: #fbf3df; --person: #14161a; --person-bg: #ffffff;
+  --read: #0b53c0; --write: #17794f; --talk: #6b4fa8; --lit: #d98a00; --lit-bg: #fff1d1;
+  --t-bg: #10151b; --t-bar: #19212b; --t-line: #2b3745; --t-ink: #e7edf4; --t-ink2: #a3b1c2; --t-ok: #5fc39d; --t-no: #ee7f79; --t-brass: #d2a94e; --t-no-bg: rgba(238,127,121,.14);
+  --t-agent: #8ab4ff; --t-agent-bg: #172742; --t-folder: #e0b75a; --t-folder-bg: #2e2612; --w-lit-bg: #fff3d6;
+  --ph-sky: #c9b48a; --ph-sand: #a88f60; --ph-line: #8e7a52; --ph-edge: #f4ecd8; --ph-a: #5b4a32; --ph-b: #3f3324; --ph-c: #6d5a3e; --ph-mark: #ffb733;
+  --fl-eu: #003399; --fl-gold: #ffcc00; --fl-blue: #0055a4; --fl-white: #ffffff; --fl-red: #d52b1e; --fl-navy: #0a3161;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+    --accent: #8ab4ff; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+    --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #3a414c; --w-lit: #b87400; --w-stop: #b8352a; --w-ok: #146b45; --w-no: #a8321f; --w-no-bg: #f6dcd7; --w-lit-bg: #f6e3b4;
+    --agent: #8ab4ff; --agent-bg: #172742; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+    --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+    --t-bg: #0a0d11; --t-bar: #131920; --t-line: #2b3745;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+  --accent: #8ab4ff; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+  --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #3a414c; --w-lit: #b87400; --w-stop: #b8352a; --w-ok: #146b45; --w-no: #a8321f; --w-no-bg: #f6dcd7; --w-lit-bg: #f6e3b4;
+  --agent: #8ab4ff; --agent-bg: #172742; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+  --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c;
+  --t-bg: #0a0d11; --t-bar: #131920; --t-line: #2b3745;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); overflow-x: hidden; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 32px; } }
+
+
+.hero { padding-top: 28px; padding-bottom: 8px; }
+h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; max-width: 20em; text-wrap: balance; }
+.lead { margin: 12px 0 0; font-size: 18px; color: var(--dim); }
+
+.ask { padding-top: 36px; }
+.ask h2 { margin: 0 0 12px; font-size: 20px; font-weight: 680; }
+.cases { display: flex; flex-wrap: wrap; gap: 8px; }
+.cases button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 8px 16px; font-size: 15px; line-height: 1.25; text-align: left; }
+.cases button:hover { border-color: var(--dim); }
+.full { text-align: center; margin: 26px 0 0; font-size: 17px; }
+.full a { color: var(--accent); font-weight: 650; text-decoration: none; }
+.full a:hover { text-decoration: underline; }
+.pager { display: flex; align-items: center; justify-content: flex-end; gap: 10px; margin: 14px 0 0; }
+.pager.low { justify-content: center; margin-top: 22px; }
+.pager button { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--text); font-size: 22px; line-height: 1; cursor: pointer; }
+.pager button:hover { border-color: var(--dim); }
+.pager .count { color: var(--dim); font-size: 15px; font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .steps.go-next { animation: go-next .28s ease-out; }
+  .steps.go-prev { animation: go-prev .28s ease-out; }
+  @keyframes go-next { from { opacity: 0; transform: translateX(40px); } to { opacity: 1; transform: none; } }
+  @keyframes go-prev { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
+}
+@media (max-width: 700px) {
+  /* On a phone the cases are one row that scrolls sideways, so the first picture shows at once. */
+  .cases { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+  .cases::-webkit-scrollbar { display: none; }
+  .cases button { white-space: nowrap; flex: none; }
+  .pager { justify-content: center; }
+}
+.cases button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+.steps { list-style: none; margin: 32px 0 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: auto auto; gap: 0 32px; }
+.step { min-width: 0; display: grid; grid-row: span 2; grid-template-rows: subgrid; align-content: start; }
+.step > .rest { min-width: 0; }
+.pic { display: flex; align-items: stretch; justify-content: center; min-width: 0; }
+.pic > * { display: flex; flex-direction: column; }
+.pic > .phone > .win { flex: 1; }
+.pic > * { max-width: 100%; }
+/* The third picture, under the hood, sits in the same frame as the two others, so the three line up. */
+.step:nth-child(3) .pic > * { width: 100%; max-width: 340px; justify-content: center; background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.tag { margin: 16px 0 4px; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; color: var(--gold); }
+.tag .n { font-family: var(--mono); color: var(--dim); }
+.tag button { margin-left: auto; border: 0; background: none; padding: 0; font-size: 13px; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--accent); text-decoration: underline; }
+.txt { margin: 0; font-size: 17px; line-height: 1.45; }
+/* Tags inside a picture: where the models run, or a true limit. */
+.ptags { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.ptag { border: 1px solid var(--w-line); border-radius: 999px; padding: 2px 10px; font-size: 14px; line-height: 1.35; color: var(--w-ink); background: var(--w-bg); text-align: center; }
+.ptag b { font-weight: 700; }
+.ptag.lim b { color: var(--w-no); }
+/* A line under the case buttons: a note, or names it works with. */
+.aside { margin: 16px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 16px; }
+.aside[hidden] { display: none; }
+.aside b { font-weight: 650; }
+.aside .nm { border: 1px solid var(--line); border-radius: 8px; padding: 1px 9px; background: var(--soft); }
+@media (max-width: 899px) {
+  .steps { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; gap: 40px; }
+  .step { display: flex; flex-direction: column; grid-row: auto; }
+}
+
+/* ---- light screens (use, set up) ---- */
+.scr { width: 100%; max-width: 340px; background: var(--w-bg); color: var(--w-ink); border: 1px solid var(--w-line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.scr .ti { font-size: 21px; font-weight: 700; line-height: 1.2; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr .ti small { font-size: 14px; font-weight: 500; color: var(--w-dim); }
+.scr .val { border: 1.5px solid var(--w-ink); border-radius: 10px; padding: 8px 12px; font-size: 17px; }
+.scr .btn { align-self: flex-start; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 10px; padding: 9px 18px; font-weight: 650; font-size: 16px; }
+.scr .btn.alt { background: var(--w-bg); color: var(--w-btn); border: 2px solid var(--w-btn); }
+.scr .sw { display: flex; align-items: center; gap: 10px; font-size: 19px; font-weight: 650; }
+.scr .sw i { flex: none; width: 46px; height: 26px; border-radius: 999px; border: 1px solid var(--w-line); background: var(--w-soft); position: relative; }
+.scr .sw i::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--w-dim); }
+.scr .sw.on i { background: var(--w-ok); border-color: var(--w-ok); }
+.scr .sw.on i::after { left: 23px; background: var(--w-bg); }
+.scr .sw svg { flex: none; }
+.scr .q { background: var(--w-soft); border-radius: 10px; padding: 10px 12px; font-size: 16px; }
+.scr .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.scr .row .btn { padding: 7px 14px; font-size: 15px; }
+.scr .refuse { border: 2px solid var(--w-no); background: var(--w-no-bg); border-radius: 10px; padding: 12px; font-size: 18px; line-height: 1.3; display: flex; align-items: center; gap: 10px; }
+.scr .refuse b { color: var(--w-no); display: block; font-size: 22px; line-height: 1.15; }
+.scr .fine { font-size: 14px; color: var(--w-dim); }
+.flag { flex: none; display: block; border-radius: 2px; }
+
+/* office: the client spaces, made by one tap */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tile { border: 3px solid var(--w-ink); border-radius: 12px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; font-size: 18px; font-weight: 700; color: var(--w-ink); }
+.tile svg { color: var(--w-dim); }
+.tile.add { border: 2px dashed var(--w-line); color: var(--w-dim); font-weight: 500; font-size: 16px; }
+.tabs { display: flex; gap: 6px; align-items: center; }
+.tabs span { border: 1px solid var(--w-line); border-radius: 8px; padding: 3px 10px; }
+.tabs .cur { border: 2px solid var(--w-ink); font-weight: 700; font-size: 19px; }
+.tabs .lk { background: var(--w-soft); color: var(--w-dim); height: 30px; width: 46px; display: grid; place-items: center; }
+.tabs small { margin-left: auto; color: var(--w-dim); font-size: 14px; }
+.rep { border: 1px solid var(--w-line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: end; }
+.rep b { font-size: 17px; }
+.rep small { display: block; font-size: 13px; color: var(--w-dim); }
+.rep .tot { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bars { grid-row: 1 / span 3; grid-column: 2; display: flex; align-items: flex-end; gap: 4px; height: 56px; }
+.bars i { width: 9px; background: var(--w-btn); border-radius: 2px 2px 0 0; opacity: .75; }
+
+/* coding agents: the night */
+.scr.night { gap: 10px; }
+.night .nrow { display: grid; grid-template-columns: 44px minmax(0,1fr) auto; gap: 8px; align-items: center; font-size: 14px; padding: 8px 0 0; border-top: 1px solid var(--w-line); }
+.night .nt { color: var(--w-dim); font-variant-numeric: tabular-nums; }
+.night .nq b { display: block; font-size: 13px; }
+.night .nq code { font: 13.5px/1.3 var(--mono); }
+.night .na { color: var(--w-ok); font-weight: 650; font-size: 13.5px; white-space: nowrap; }
+.night .more { font-size: 14px; color: var(--w-dim); padding-left: 52px; margin-top: -6px; }
+.night .ask { border: 2px solid var(--w-lit); background: var(--w-lit-bg); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.night .ask .hd { display: flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 650; }
+.night .ask code { font: 700 19px/1.25 var(--mono); }
+.night .ask .row .btn { flex: 1; text-align: center; font-size: 18px; padding: 9px; }
+
+/* ---- the phone windows ---- */
+.phone { width: 310px; height: 420px; border: 9px solid var(--w-frame); border-radius: 34px; background: var(--w-bg); overflow: hidden; }
+.win { height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 16px 14px 14px; color: var(--w-ink); }
+.win .top { display: flex; justify-content: space-between; align-items: baseline; }
+.win .top b { font-size: 22px; line-height: 1.1; }
+.win .top span { font-size: 15px; opacity: .8; }
+.win .stat { display: flex; gap: 8px; align-items: center; font-size: 14px; color: var(--w-dim); margin-top: -4px; }
+.win .dot { flex: none; width: 10px; height: 10px; border-radius: 50%; background: var(--w-ok); }
+.win .dot.busy { background: var(--w-lit); }
+.win .card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 9px; justify-content: flex-end; }
+.win .who { font-size: 13px; font-weight: 650; opacity: .8; }
+.win .say { margin: 0; font-size: 17px; line-height: 1.3; }
+.win .msg { align-self: flex-start; max-width: 94%; background: var(--w-soft); border-radius: 14px 14px 14px 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.win .echo { margin: 0; align-self: flex-end; max-width: 90%; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 14px 14px 4px 14px; padding: 6px 12px; font-size: 17px; line-height: 1.3; }
+.win .echo.said { font-style: italic; font-size: 16px; }
+.win .voice { display: flex; align-items: center; gap: 10px; border: 2px solid var(--w-stop); border-radius: 12px; padding: 8px 12px; font-size: 16px; }
+.win .wave { flex: 1; height: 22px; background: repeating-linear-gradient(90deg, var(--w-ink) 0 3px, transparent 3px 7px); opacity: .6; }
+.win .big { border: 2px solid var(--w-btn); background: var(--w-bg); color: var(--w-btn); border-radius: 12px; padding: 8px 12px; font-size: 17px; font-weight: 650; }
+.win .card > .big { align-self: flex-end; min-width: 62%; padding: 6px 12px; font-size: 16px; }
+.phone { position: relative; }
+.phone .again { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: rgba(255,255,255,.82); border-radius: inherit; color: #0b53c0; font: 650 18px var(--sans, system-ui); z-index: 2; }
+@media (prefers-reduced-motion: no-preference) { .phone .again svg { animation: again-spin 1s linear infinite; } @keyframes again-spin { to { transform: rotate(360deg); } } }
+.win .acts { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.win .acts .big { text-align: center; font-size: 21px; padding: 12px; }
+.win .big.main { background: var(--w-btn); color: var(--w-btn-ink); }
+.win .big.stop { background: var(--w-stop); border-color: var(--w-stop); color: #ffffff; }
+.win .icon-btn.sendf { padding: 0 10px; font-weight: 650; font-size: 15px; line-height: 1.2; text-align: center; color: #0b53c0; border-color: #0b53c0; padding: 9px 10px; }
+.win .icon-btn { border: 2px solid var(--w-line); border-radius: 12px; color: var(--w-dim); display: grid; place-items: center; }
+.win .ready { border: 3px solid var(--w-ok); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.win .ready .rl { color: var(--w-ok); font-weight: 700; font-size: 14px; }
+.win .ready b { font-size: 19px; line-height: 1.2; }
+.win .ready p { margin: 0; font-size: 16px; line-height: 1.4; }
+/* Léa: a page of the book, then the answer and its source */
+.book { border: 1px solid var(--w-line); background: var(--w-soft); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.book .bh { display: flex; gap: 10px; align-items: center; }
+.book .bh small { display: block; font-size: 13px; font-weight: 700; color: var(--w-ok); }
+.book .bh b { font-size: 18px; line-height: 1.15; }
+.book p { margin: 0; font: 15.5px/1.4 Georgia, "Times New Roman", serif; }
+.srcchip { align-self: flex-start; white-space: nowrap; display: inline-flex; align-items: center; gap: 7px; border: 2px solid var(--w-ok); color: var(--w-ok); background: var(--w-bg); border-radius: 999px; padding: 3px 12px 3px 4px; font-size: 16px; font-weight: 700; }
+.srcchip .pl { width: 24px; height: 24px; border-radius: 50%; background: var(--w-ok); color: #ffffff; display: grid; place-items: center; }
+.photo { position: relative; flex: none; height: 82px; border-radius: 6px; overflow: hidden; border: 5px solid var(--ph-edge); background: linear-gradient(180deg, var(--ph-sky) 0 52%, var(--ph-sand) 52% 100%); }
+.photo::before { content: ""; position: absolute; left: 0; right: 0; top: 46%; height: 5px; background: var(--ph-line); }
+.photo.sm { width: 74px; height: 56px; border-width: 3px; }
+.photo.sm .fig { transform: scale(.55); transform-origin: bottom center; margin-left: -8px; }
+.fig { position: absolute; bottom: 0; width: 30px; }
+.fig .hd { width: 17px; height: 17px; border-radius: 50%; background: var(--ph-a); margin: 0 auto 2px; }
+.fig .bd { height: 42px; border-radius: 12px 12px 0 0; background: var(--ph-b); }
+.fig.f1 { left: 16%; } .fig.f2 { left: 44%; } .fig.f2 .bd { height: 36px; background: var(--ph-c); } .fig.f3 { left: 70%; } .fig.f3 .bd { height: 46px; }
+.fig.mk::after { content: ""; position: absolute; inset: -4px -4px 0 -4px; border: 3px solid var(--ph-mark); border-bottom: 0; border-radius: 16px 16px 0 0; }
+
+/* ---- home server: a flow that calls an agent ---- */
+.flow { flex: 1; display: flex; flex-direction: column; justify-content: center; align-items: stretch; gap: 0; }
+.node { border: 2px solid var(--w-line); border-radius: 10px; padding: 8px 12px; font-size: 17px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.node.me { border-color: var(--w-btn); color: var(--w-btn); }
+.node .res { margin-left: auto; font-weight: 600; font-size: 15px; color: var(--w-ok); white-space: nowrap; }
+.down { align-self: center; width: 2px; height: 18px; background: var(--w-dim); position: relative; margin-bottom: 6px; }
+.down::after { content: ""; position: absolute; left: -5px; bottom: -6px; border: 6px solid transparent; border-top: 7px solid var(--w-dim); border-bottom: 0; }
+.note { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--w-line); background: var(--w-soft); border-radius: 12px; padding: 10px 12px; font-size: 16px; line-height: 1.3; }
+.note small { display: block; font-size: 13px; font-weight: 650; }
+
+/* ---- your coding agents: the list, on the phone ---- */
+.agents { display: flex; flex-direction: column; gap: 8px; }
+.ag { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--w-line); border-radius: 12px; padding: 10px 9px 10px 12px; }
+.ag.on { border-color: var(--w-lit); box-shadow: inset 0 0 0 1.5px var(--w-lit); background: var(--w-lit-bg); }
+.ag.off .nm b, .ag.off .out { color: var(--w-dim); }
+.ag .st { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--w-ok); }
+.ag .st.wait { background: var(--w-lit); }
+.ag .st.paused { background: none; border: 2px solid var(--w-dim); }
+.ag .nm { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; line-height: 1.2; }
+.ag .nm b { font-size: 17px; }
+.ag .tool { border: 1px solid var(--w-line); border-radius: 6px; padding: 0 18px 0 6px; font-size: 12.5px; color: var(--w-ink); background: var(--w-bg); position: relative; }
+.ag .tool::after { content: ""; position: absolute; right: 6px; top: 50%; margin-top: -2px; border: 4px solid transparent; border-top-color: var(--w-dim); border-bottom: 0; }
+.ag .out { font: 13px/1.3 var(--mono); color: var(--w-ink); }
+.ag .aq { font: 700 14px/1.3 var(--mono); }
+.ag .yn { display: flex; gap: 6px; }
+.ag .yn span { border-radius: 8px; padding: 3px 16px; font-size: 15px; font-weight: 650; border: 2px solid var(--w-btn); color: var(--w-btn); background: var(--w-bg); }
+.ag .yn span:first-child { background: var(--w-btn); color: var(--w-btn-ink); }
+.ag .ctl { flex: none; width: 32px; height: 32px; border-radius: 50%; border: 1.5px solid var(--w-btn); position: relative; }
+.ag .ctl.pause::before, .ag .ctl.pause::after { content: ""; position: absolute; top: 10px; width: 3px; height: 10px; background: var(--w-btn); border-radius: 1px; }
+.ag .ctl.pause::before { left: 11px; } .ag .ctl.pause::after { left: 16px; }
+.ag .ctl.play { background: var(--w-btn); }
+.ag .ctl.play::before { content: ""; position: absolute; top: 9px; left: 12px; border: 6px solid transparent; border-left: 9px solid var(--w-btn-ink); border-right: 0; }
+
+/* ---- the light drawings (under the hood) ---- */
+.dia { width: 100%; max-width: 360px; }
+.dia svg { width: 100%; height: auto; display: block; overflow: visible; }
+.dia text { font-family: var(--sans); fill: var(--text); }
+.dia .lab { font-size: 18px; font-weight: 650; }
+.dia .lab-s { font-size: 16px; font-weight: 650; }
+.dia .sub { font-size: 14px; fill: var(--dim); }
+.dia .who-t { font-size: 16px; font-weight: 600; }
+.dia .svc { fill: var(--soft); stroke: var(--ok); stroke-width: 2; }
+.dia .big { font-size: 21px; font-weight: 700; }
+.dia .ok-t { fill: var(--ok); font-size: 16px; font-weight: 700; }
+.dia .dim-t { fill: var(--dim); font-size: 14px; }
+.dia .no-t { fill: var(--no); font-size: 16px; font-weight: 700; }
+.dia .frame { fill: none; stroke: var(--ok); stroke-width: 2; stroke-dasharray: 7 5; }
+.dia .wall { fill: var(--bg); stroke: var(--text); stroke-width: 4; transition: fill .3s; }
+.dia .wall.on { fill: var(--lit-bg); }
+.dia .person { fill: var(--person-bg); stroke: var(--person); stroke-width: 2; transition: fill .3s; }
+.dia .person.on, .dia .folder.on { fill: var(--lit-bg); }
+.dia .agent { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.dia .folder { fill: var(--folder-bg); stroke: var(--folder); stroke-width: 1.5; transition: fill .3s; }
+.dia .grey { fill: var(--soft); stroke: var(--line); stroke-width: 1.5; }
+.dia .grey-t { fill: var(--dim); }
+.dia .keyp { fill: var(--gold-bg); stroke: var(--gold); stroke-width: 2; }
+.dia .ln { fill: none; stroke: var(--dim); stroke-width: 2; }
+.dia .ln.ok { stroke: var(--ok); }
+.dia .ln.no { stroke: var(--no); stroke-dasharray: 5 4; }
+.dia .mk { fill: var(--dim); }
+.dia .mk.ok { fill: var(--ok); }
+.dia .xc { fill: var(--no-bg); stroke: var(--no); stroke-width: 2; }
+.dia .x { fill: none; stroke: var(--no); stroke-width: 3.5; stroke-linecap: round; }
+@media (prefers-reduced-motion: no-preference) {
+  .win .dot.busy, .ag .st:not(.paused):not(.wait) { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .win .echo.said::after { content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 3px; vertical-align: -2px; background: currentColor; animation: pulse .9s step-end infinite; }
+  .tile { animation: pop .45s ease-out both; }
+  .tile:nth-child(2) { animation-delay: .35s; } .tile:nth-child(3) { animation-delay: .7s; } .tile:nth-child(4) { animation-delay: 1.05s; }
+  @keyframes pop { from { opacity: 0; transform: scale(.85); } }
+}
+
+/* ---- install ---- */
+.install { margin-top: 72px; padding-top: 32px; border-top: 1px solid var(--line); }
+.install h2 { margin: 0 0 8px; font-size: 20px; }
+.install p { margin: 0 0 10px; }
+.install .dl { display: flex; flex-wrap: wrap; gap: 12px; margin: 8px 0 16px; }
+.install .dl a { background: var(--accent); color: var(--bg); text-decoration: none; font-size: 19px; font-weight: 650; border-radius: 12px; padding: 14px 24px; }
+</style>
+</head>
+<body>
+<p class="ribbon">Target page: shows planned features. Names are invented.</p>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="index.html" aria-current="page">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button">Use cases</button>
+        <span class="drop-menu">
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
+        <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/office.html">Office: one report per client</a>
+        <a href="cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero wrap">
+    <h1>AI helpers on a computer you own. Each sees only what you give it.</h1>
+    <p class="lead">Free and open source. On your computer or your server.</p>
+  </section>
+
+  <section class="ask wrap" aria-labelledby="ask-h">
+    <h2 id="ask-h">What is your case?</h2>
+    <div class="cases" id="cases" role="group" aria-labelledby="ask-h"></div>
+    <p class="aside" id="aside" hidden></p>
+    <div class="pager" id="pager-top"></div>
+    <ol class="steps" id="steps" aria-live="polite"></ol>
+    <p class="full"><a id="full-link" href="cases/family.html">See the full case, and download its setup &rarr;</a></p>
+    <div class="pager low" id="pager-low"></div>
+  </section>
+
+  <section class="install wrap" id="install">
+    <h2>Install</h2>
+    <div class="dl"><a href="how-to-install-it.html#install">Install on Ubuntu</a></div>
+    <p>You bring the AI: a provider you choose, in Europe if you like, or a model on your own machine.</p>
+    <p>What an agent reads goes to its model's provider.</p>
+    <p>Windows and Mac: later.</p>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="examples.html">Use cases</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function h(tag, cls, text, parent) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function s(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+
+  /* ---------- picture builders ---------- */
+  function scr(cls) { return h("div", "scr" + (cls ? " " + cls : "")); }
+  function title(p, t, small) { var d = h("div", "ti", t, p); if (small) h("small", null, small, d); return d; }
+
+  /* Small drawn icons (24 x 24), coloured by currentColor. */
+  var ICONS = {
+    lock: [["rect", { x: 5, y: 11, width: 14, height: 11, rx: 2, fill: "currentColor" }], ["path", { d: "M8 11V8a4 4 0 0 1 8 0v3", fill: "none", stroke: "currentColor", "stroke-width": 2.4 }]],
+    camera: [["path", { d: "M3 8h4l2-3h6l2 3h4v11H3z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }], ["circle", { cx: 12, cy: 13, r: 3.5, fill: "none", stroke: "currentColor", "stroke-width": 2 }]],
+    play: [["path", { d: "M8 5l11 7-11 7z", fill: "currentColor" }]],
+    phone: [["rect", { x: 6, y: 2, width: 12, height: 20, rx: 2.5, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["circle", { cx: 12, cy: 18, r: 1.3, fill: "currentColor" }]],
+    person: [["circle", { cx: 12, cy: 7.5, r: 4.5, fill: "currentColor" }], ["path", { d: "M3 23c0-5.5 4-9 9-9s9 3.5 9 9z", fill: "currentColor" }]],
+    key: [["circle", { cx: 7, cy: 12, r: 4.5, fill: "none", stroke: "currentColor", "stroke-width": 2.4 }], ["path", { d: "M11.5 12H23M19 12v4.5M23 12v3.5", fill: "none", stroke: "currentColor", "stroke-width": 2.4, "stroke-linecap": "round" }]],
+    folder: [["path", { d: "M2 6a1 1 0 0 1 1-1h6l2 2h10a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z", fill: "currentColor" }]]
+  };
+  function ic(name, size, parent, x, y, colour) {
+    var v = s("svg", { viewBox: "0 0 24 24", width: size, height: size, "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    if (colour) v.style.color = "var(--" + colour + ")";
+    ICONS[name].forEach(function (p) { s(p[0], p[1], v); });
+    return v;
+  }
+  /* Small flags, drawn (30 x 20). */
+  function flag(code, w, parent, x, y) {
+    var v = s("svg", { viewBox: "0 0 30 20", width: w, height: w * 2 / 3, "class": "flag", "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    if (code === "eu") {
+      s("rect", { width: 30, height: 20, fill: "var(--fl-eu)" }, v);
+      for (var k = 0; k < 12; k++) { var a = k * Math.PI / 6; s("circle", { cx: (15 + 6 * Math.cos(a)).toFixed(2), cy: (10 + 6 * Math.sin(a)).toFixed(2), r: 1.1, fill: "var(--fl-gold)" }, v); }
+    } else if (code === "fr") {
+      s("rect", { width: 10, height: 20, fill: "var(--fl-blue)" }, v); s("rect", { x: 10, width: 10, height: 20, fill: "var(--fl-white)" }, v); s("rect", { x: 20, width: 10, height: 20, fill: "var(--fl-red)" }, v);
+    } else {
+      s("rect", { width: 30, height: 20, fill: "var(--fl-white)" }, v);
+      for (var i = 0; i < 13; i += 2) s("rect", { y: (i * 20 / 13).toFixed(2), width: 30, height: (20 / 13).toFixed(2), fill: "var(--fl-red)" }, v);
+      s("rect", { width: 13, height: (140 / 13).toFixed(2), fill: "var(--fl-navy)" }, v);
+    }
+    s("rect", { x: .25, y: .25, width: 29.5, height: 19.5, fill: "none", stroke: "var(--line)", "stroke-width": .5 }, v);
+    return v;
+  }
+  /* A light drawing: rectangles, labels, arrows, red crosses. */
+  function dia(vb, label) {
+    var box = h("div", "dia");
+    var svg = s("svg", { viewBox: vb, role: "img", "aria-label": label }, box);
+    var defs = s("defs", {}, svg);
+    ["dim", "ok"].forEach(function (k) {
+      var m = s("marker", { id: "ar-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "10", markerHeight: "10", markerUnits: "userSpaceOnUse", orient: "auto" }, defs);
+      s("path", { d: "M0 0 L10 5 L0 10 z", "class": "mk" + (k === "ok" ? " ok" : "") }, m);
+    });
+    return {
+      el: box, svg: svg,
+      R: function (x, y, w, hh, rx, cls) { return s("rect", { x: x, y: y, width: w, height: hh, rx: rx, "class": cls }, svg); },
+      T: function (x, y, txt, cls, anchor) { var e = s("text", { x: x, y: y, "class": cls }, svg); if (anchor) e.setAttribute("text-anchor", anchor); e.textContent = txt; return e; },
+      A: function (d, cls) { var p = s("path", { d: d, "class": "ln" + (cls ? " " + cls : "") }, svg); if (cls !== "no") p.setAttribute("marker-end", "url(#ar-" + (cls === "ok" ? "ok" : "dim") + ")"); return p; },
+      X: function (cx, cy) { s("circle", { cx: cx, cy: cy, r: 15, "class": "xc" }, svg); s("path", { d: "M" + (cx - 6) + " " + (cy - 6) + "l12 12m0 -12l-12 12", "class": "x" }, svg); }
+    };
+  }
+
+  /* ---------- Marcel: the window and the drawing, moving together ---------- */
+  var Q = "Tell me about a summer you remember.";
+  var FRAMES = [
+    { card: { q: Q }, acts: "speak", lit: ["marcel"] },
+    { card: { q: Q, voice: "Recording 1:48", said: "Paul and I took the early train to the sea" }, acts: "stop", lit: ["marcel", "voice"] },
+    { prog: "Writing chapter 4.", busy: true, card: { q: "Who is on the left of this photo?", photo: true, options: ["My brother Paul", "I do not know"] }, lit: ["marcel", "photos"] },
+    { prog: "Writing chapter 4.", busy: true, card: { echo: "My brother Paul", q: "Thank you. Paul goes into chapter 4." }, acts: "speak", lit: ["writer"] },
+    { card: { ready: ["New chapter", "Chapter 4: The summer of 1962", "In July 1962 Marcel and his brother Paul took the early train to the sea."] }, acts: "speak", lit: ["writer", "story", "lea"] }
+  ];
+  var HERO = 1;
+
+  var marcel = { win: null, rects: {}, i: 0, timer: null, first: true, playing: !still };
+
+  function photo(parent, small) {
+    var p = h("div", "photo" + (small ? " sm" : ""), null, parent);
+    p.setAttribute("role", "img"); p.setAttribute("aria-label", "An old photo: three people on a beach");
+    ["f1" + (small ? "" : " mk"), "f2", "f3"].forEach(function (c) { var f = h("div", "fig " + c, null, p); h("div", "hd", null, f); h("div", "bd", null, f); });
+  }
+  function phonePic() {
+    var ph = h("div", "phone");
+    ph.setAttribute("role", "img");
+    ph.setAttribute("aria-label", "Marcel's phone page, Tell your story: he answers the storyteller's question by voice");
+    marcel.win = h("div", "win", null, ph);
+    return ph;
+  }
+  function renderWin(f) {
+    var w = marcel.win; if (!w) return;
+    w.textContent = "";
+    var top = h("div", "top", null, w); h("b", null, "Tell your story", top); h("span", null, "Marcel", top);
+    if (f.prog) { var st = h("div", "stat", null, w); h("span", "dot" + (f.busy ? " busy" : ""), null, st); h("span", null, f.prog, st); }
+    var d = f.card, c = h("div", "card", null, w);
+    if (d.echo) h("p", "echo", d.echo, c);
+    if (d.q) {
+      var m = h("div", "msg", null, c); h("div", "who", "Storyteller", m);
+      if (d.photo) photo(m);
+      h("p", "say", d.q, m);
+    }
+    if (d.options) d.options.forEach(function (o) { h("div", "big", o, c); });
+    if (d.voice) { var v = h("div", "voice", null, c); h("span", "wave", null, v); h("span", null, d.voice, v); }
+    if (d.said) h("p", "echo said", d.said, c);
+    if (d.ready) { var r = h("div", "ready", null, c); h("div", "rl", d.ready[0], r); h("b", null, d.ready[1], r); h("p", null, d.ready[2], r); }
+    if (!f.acts) return;
+    var a = h("div", "acts", null, w);
+    if (f.acts === "stop") h("div", "big stop", "Stop", a); else h("div", "big main", "Speak", a);
+    h("div", "icon-btn sendf", "Send a photo or a recording", a);
+  }
+  /* Léa's phone: a page of the story, a question, and an answer that points back to his voice. */
+  function leaPic() {
+    var ph = h("div", "phone"); ph.setAttribute("role", "img"); ph.setAttribute("aria-label", "Léa's phone page, The family story: chapter 4, and an answer from Marcel's recording");
+    var w = h("div", "win", null, ph);
+    var top = h("div", "top", null, w); h("b", null, "The family story", top); h("span", null, "Léa", top);
+    var bk = h("div", "book", null, w), bh = h("div", "bh", null, bk);
+    photo(bh, true);
+    var tt = h("div", null, null, bh); h("small", null, "Chapter 4", tt); h("b", null, "The summer of 1962", tt);
+    h("p", null, "In July 1962 Marcel and his brother Paul took the early train to the sea.", bk);
+    var c = h("div", "card", null, w);
+    h("p", "echo", "Tell me more about Paul.", c);
+    var m = h("div", "msg", null, c); h("div", "who", "Storyteller", m);
+    h("p", "say", "He borrowed their uncle's camera that summer.", m);
+    var src = h("div", "srcchip", null, c); ic("play", 14, h("span", "pl", null, src)); h("span", null, "From Marcel's recording", src);
+    return ph;
+  }
+  /* Under the hood: Marcel, helpers each sealed in its own box on this computer, the story, Léa;
+     the models run outside, at the provider Marcel's family chose. */
+  function famPic() {
+    var D = dia("0 0 360 392", "On this computer: Marcel's files and helpers, each sealed in its own box; they write the story; Léa reads it. The models run outside, at a provider you choose: here Mistral, in France.");
+    marcel.rects = {};
+    D.R(4, 74, 352, 210, 18, "frame");
+    ic("lock", 18, D.svg, 16, 84, "ok"); D.T(38, 99, "This computer", "ok-t");
+    marcel.rects.marcel = D.R(105, 4, 150, 48, 24, "person"); D.T(180, 35, "Marcel", "lab", "middle");
+    D.A("M180 52 V118");
+    [["voice", "Voice"], ["photos", "Photos"], ["writer", "Writer"]].forEach(function (b, i) {
+      var x = 16 + i * 112;
+      marcel.rects[b[0]] = D.R(x, 122, 104, 66, 12, "wall");
+      ic("lock", 14, D.svg, x + 84, 128, "dim");
+      D.T(x + 52, 162, b[1], "lab-s", "middle");
+    });
+    D.A("M180 188 V206 H140 V216");
+    marcel.rects.story = D.R(60, 220, 160, 48, 10, "folder"); D.T(140, 250, "Story", "lab", "middle");
+    D.A("M36 188 V308");
+    D.R(4, 312, 214, 76, 12, "grey");
+    D.T(16, 342, "Models: your choice", "lab");
+    flag("fr", 24, D.svg, 16, 358); D.T(48, 373, "Mistral, France", "lab");
+    marcel.rects.lea = D.R(232, 312, 104, 48, 24, "person"); D.T(284, 342, "Léa", "lab", "middle");
+    D.A("M284 312 V250 H224");
+    return D.el;
+  }
+  function showFrame(i) {
+    marcel.i = i;
+    var f = FRAMES[i];
+    renderWin(f);
+    for (var k in marcel.rects) marcel.rects[k].classList.toggle("on", f.lit.indexOf(k) >= 0);
+  }
+  function tick() {
+    clearTimeout(marcel.timer);
+    if (!marcel.playing || !marcel.win) return;
+    var wait = marcel.first ? 5000 : (marcel.i === FRAMES.length - 1 ? 4500 : 2600);
+    marcel.first = false;
+    marcel.timer = setTimeout(function () {
+      var next = (marcel.i + 1) % FRAMES.length;
+      if (next !== 0) { showFrame(next); tick(); return; }
+      /* The story starts over: a turning arrow says so, for a moment, before the first step comes back. */
+      restarting(true);
+      marcel.timer = setTimeout(function () { restarting(false); showFrame(0); tick(); }, 1400);
+    }, wait);
+  }
+  function restarting(on) {
+    var ph = marcel.win && marcel.win.parentNode; if (!ph) return;
+    var old = ph.querySelector(".again"); if (old) old.remove();
+    if (!on) return;
+    var b = h("div", "again", null, ph); b.setAttribute("aria-hidden", "true");
+    var NS = "http://www.w3.org/2000/svg", v = document.createElementNS(NS, "svg");
+    v.setAttribute("viewBox", "0 0 24 24"); v.setAttribute("width", "44"); v.setAttribute("height", "44");
+    var path = document.createElementNS(NS, "path");
+    path.setAttribute("d", "M20 12a8 8 0 1 1-2.34-5.66M20 4v5h-5");
+    path.setAttribute("fill", "none"); path.setAttribute("stroke", "currentColor"); path.setAttribute("stroke-width", "2.4"); path.setAttribute("stroke-linecap", "round"); path.setAttribute("stroke-linejoin", "round");
+    v.append(path); b.append(v); h("span", null, "Again", b);
+  }
+  function playButton(tagEl) {
+    var b = h("button", null, marcel.playing ? "Pause" : "Play", tagEl);
+    b.type = "button";
+    b.addEventListener("click", function () {
+      marcel.playing = !marcel.playing;
+      b.textContent = marcel.playing ? "Pause" : "Play";
+      if (marcel.playing) { showFrame((marcel.i + 1) % FRAMES.length); }
+      tick();
+    });
+  }
+
+  /* ---------- your coding agents ---------- */
+  /* The night: terminal questions answered by your rules; the risky one reaches your phone. */
+  function awayPic() {
+    var p = scr("night"); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Last night: routine terminal questions answered by your rules; Drop table orders? waits for you on your phone");
+    title(p, "Last night");
+    var row = h("div", "nrow", null, p);
+    h("span", "nt", "02:14", row);
+    var q = h("span", "nq", null, row); h("b", null, "shop-api", q); h("code", null, "Install pytest?", q);
+    h("span", "na", "yes, by rule", row);
+    h("div", "more", "and 2 more, answered by your rules", p);
+    var ask = h("div", "ask", null, p);
+    var hd = h("div", "hd", null, ask); ic("phone", 18, hd); h("span", null, "05:12, shop-api asks you", hd);
+    h("code", null, "Drop table orders?", ask);
+    var yn = h("div", "row", null, ask); h("div", "btn alt", "Yes", yn); h("div", "btn", "No", yn);
+    return p;
+  }
+  var AGENTS = [
+    { name: "shop-api", tool: "Claude Code", out: "pytest: 41 passed", c: "", ctl: "pause" },
+    { name: "website", tool: "OpenCode · Mistral", ask: "Use port 3000?", c: "wait", ctl: "pause", on: true },
+    { name: "docs", tool: "Codex", out: "paused", c: "paused", ctl: "play" }
+  ];
+  function agentsPic() {
+    var ph = h("div", "phone"); ph.setAttribute("role", "img");
+    ph.setAttribute("aria-label", "Your phone: three coding agents in one list; website asks a question with Yes and No");
+    var w = h("div", "win", null, ph);
+    h("b", null, "Your coding agents", h("div", "top", null, w));
+    var l = h("div", "agents", null, w);
+    AGENTS.forEach(function (a) {
+      var r = h("div", "ag" + (a.on ? " on" : "") + (a.c === "paused" ? " off" : ""), null, l);
+      h("span", "st " + a.c, null, r);
+      var nm = h("span", "nm", null, r);
+      h("b", null, a.name, nm);
+      h("span", "tool", a.tool, nm);
+      if (a.out) h("span", "out", a.out, nm);
+      if (a.ask) { h("span", "aq", a.ask, nm); var yn = h("span", "yn", null, nm); h("span", null, "Yes", yn); h("span", null, "No", yn); }
+      h("span", "ctl " + a.ctl, null, r);
+    });
+    return ph;
+  }
+  function hoodPic() {
+    var D = dia("0 0 390 290", "Three agents, each sealed in its own machine, each linked to its own repository: Claude Code with Anthropic's model, OpenCode with a model you choose, Codex with OpenAI's; a reach into another repository is blocked; only you push");
+    [["Claude Code", "shop-api", "Anthropic"], ["OpenCode", "website", "your model"], ["Codex", "docs", "OpenAI"]].forEach(function (a, i) {
+      var cx = 65 + i * 130;
+      D.R(cx - 59, 8, 118, 70, 12, "wall"); D.T(cx, 38, a[0], "lab-s", "middle"); D.T(cx, 62, a[2], "who-t", "middle");
+      D.A("M" + cx + " 78 V164", "ok");
+      D.R(cx - 52, 168, 104, 46, 8, "folder"); D.T(cx, 197, a[1], "lab-s", "middle");
+    });
+    D.A("M110 78 L130 108", "no"); D.X(138, 120);
+    D.T(138, 156, "blocked", "no-t", "middle");
+    D.R(6, 232, 378, 54, 27, "keyp");
+    ic("person", 30, D.svg, 24, 244, "text"); ic("key", 30, D.svg, 58, 244, "gold");
+    D.T(102, 266, "Only you push.", "big");
+    return D.el;
+  }
+
+  /* ---------- the office ---------- */
+  function officeSetPic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Monthly report: one tap makes a locked space for each client, Brun, Nord and Lys");
+    title(p, "Monthly report", "1 tap");
+    var t = h("div", "tiles", null, p);
+    ["Brun", "Nord", "Lys"].forEach(function (n) { var d = h("div", "tile", null, t); ic("lock", 18, d); h("span", null, n, d); });
+    h("div", "tile add", "+ client", t);
+    return p;
+  }
+  function officeUsePic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Inès's page: only the Brun space is open, other spaces locked; the March report with its total; one question");
+    var tb = h("div", "tabs", null, p); h("span", "cur", "Brun", tb);
+    ic("lock", 16, h("span", "lk", null, tb)); ic("lock", 16, h("span", "lk", null, tb));
+    h("small", null, "Inès", tb);
+    var r = h("div", "rep", null, p);
+    var hd = h("div", null, null, r); h("b", null, "March report", hd); h("small", null, "today 07:04", hd);
+    h("div", "tot", "€48,210", r);
+    var bars = h("div", "bars", null, r);
+    [46, 62, 38, 70, 55, 88].forEach(function (v) { h("i", null, null, bars).style.height = v + "%"; });
+    h("div", "q", "Two invoices share the number 118. Keep both?", p);
+    var row = h("div", "row", null, p); h("div", "btn", "Keep both", row); h("div", "btn alt", "Keep the first", row);
+    return p;
+  }
+  function officeHoodPic() {
+    var D = dia("0 0 360 250", "Three client spaces, Brun, Nord and Lys, each walled, with its own folder, key and agent; Brun's agent hits the wall to Nord");
+    ["Brun", "Nord", "Lys"].forEach(function (n, i) {
+      var x = 4 + i * 120;
+      D.R(x, 4, 112, 160, 12, "wall"); D.T(x + 56, 34, n, "lab", "middle");
+      ic("folder", 32, D.svg, x + 18, 50, "folder"); ic("key", 30, D.svg, x + 62, 51, "gold");
+      D.R(x + 12, 112, 70, 34, 17, "agent"); D.T(x + 47, 134, "agent", "lab-s", "middle");
+    });
+    D.A("M82 129 H104", "no"); D.X(120, 129);
+    D.T(180, 206, "Brun's agent asks for Nord:", "lab-s", "middle");
+    D.T(180, 232, "no such folder here.", "no-t", "middle");
+    return D.el;
+  }
+
+  /* ---------- Europe only ---------- */
+  function euSetPic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "The interviews folder: Europe only, on; agents may only read, on");
+    title(p, "interviews", "12 files");
+    var a = h("div", "sw on", null, p); h("i", null, null, a); h("span", null, "Europe only", a); flag("eu", 27, a);
+    var b = h("div", "sw on", null, p); h("i", null, null, b); h("span", null, "Agents may only read", b);
+    return p;
+  }
+  function euUsePic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Attaching interviews to the analyst agent is refused: Claude runs in the USA");
+    title(p, "Attach interviews");
+    h("div", "val", "analyst", p);
+    h("div", "btn", "Attach", p);
+    var r = h("div", "refuse", null, p); flag("us", 30, r);
+    var t = h("span", null, null, r); h("b", null, "Refused", t); t.appendChild(document.createTextNode("Claude runs in the USA."));
+    return p;
+  }
+  function euHoodPic() {
+    var D = dia("0 0 360 216", "The interviews folder, Europe only, goes to the note-taker, Mistral in France; the analyst, Claude in the USA, is blocked");
+    D.R(4, 76, 124, 64, 10, "folder"); flag("eu", 27, D.svg, 52, 86); D.T(66, 128, "interviews", "lab-s", "middle");
+    D.R(190, 6, 166, 70, 12, "agent"); D.T(273, 34, "note-taker", "lab-s", "middle");
+    flag("fr", 24, D.svg, 202, 47); D.T(232, 60, "Mistral, France", "who-t");
+    D.R(190, 140, 166, 70, 12, "grey"); D.T(273, 168, "analyst", "lab-s grey-t", "middle");
+    flag("us", 24, D.svg, 202, 181); D.T(232, 194, "Claude, USA", "who-t");
+    D.A("M128 98 C160 98 154 41 186 41", "ok");
+    D.A("M128 120 L188 172", "no"); D.X(158, 146);
+    return D.el;
+  }
+
+  /* ---------- your home server ---------- */
+  /* The assistant's morning word: what it noticed in the calendar and the mail, each with a button. */
+  function homeFlowPic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Your assistant this morning: no train ticket found for Thursday's trip to Lyon; two meetings at 17:00 on Tuesday");
+    title(p, "This morning", "Your assistant");
+    var a1 = h("div", "q", null, p); h("b", null, "Lyon, Thursday", a1); a1.appendChild(document.createTextNode(": no train ticket in your mail."));
+    var r1 = h("div", "row", null, p); h("div", "btn", "Remind me tonight", r1);
+    var a2 = h("div", "q", null, p); h("b", null, "Tuesday 17:00", a2); a2.appendChild(document.createTextNode(": dentist and school meeting."));
+    var r2 = h("div", "row", null, p); h("div", "btn", "Show me both", r2); h("div", "btn ghost", "Ignore", r2);
+    return p;
+  }
+  /* What it does with it: Home Assistant warms the house and lights the hall in time. */
+  function homeAgentsPic() {
+    var p = scr(); p.setAttribute("role", "img"); p.setAttribute("aria-label", "Home Assistant: heating on at 18:10 and hall light at 18:45, asked by your assistant");
+    var n = h("div", "note", null, p); ic("phone", 20, n);
+    var nt = h("div", null, null, n); h("small", null, "Home Assistant", nt); nt.appendChild(document.createTextNode("Léa\u2019s train is late: home at 18:50"));
+    title(p, "Home");
+    var l = h("div", "agents", null, p);
+    [{ name: "Heating", tool: "20\u00b0 at 18:10", out: "asked by your assistant" }, { name: "Hall light", tool: "on at 18:45", out: "asked by your assistant" }].forEach(function (a) {
+      var r = h("div", "ag", null, l); h("span", "st", null, r);
+      var nm = h("span", "nm", null, r); h("b", null, a.name, nm); h("span", "tool", a.tool, nm); h("span", "out", a.out, nm);
+    });
+    return p;
+  }
+  function homeHoodPic() {
+    var D = dia("0 0 360 290", "The home agent, in its own machine, reads the calendar and the mail, may act on the house in Home Assistant within what you allow, uses your model; everything else is blocked");
+    D.R(4, 105, 124, 80, 12, "wall"); ic("lock", 14, D.svg, 106, 111, "dim");
+    D.T(66, 141, "assistant", "lab", "middle"); D.T(66, 164, "own machine", "who-t", "middle");
+    D.R(214, 4, 142, 56, 12, "svc"); D.T(285, 28, "Calendar, mail", "lab-s", "middle"); D.T(285, 48, "read only", "who-t", "middle");
+    D.R(214, 76, 142, 56, 12, "svc"); D.T(285, 100, "Home Assistant", "lab-s", "middle"); D.T(285, 120, "what you allow", "who-t", "middle");
+    D.R(214, 148, 142, 56, 12, "svc"); D.T(285, 172, "Model", "lab-s", "middle"); D.T(285, 192, "your choice", "who-t", "middle");
+    D.R(214, 222, 142, 60, 12, "grey"); D.T(285, 248, "Paying, sending", "lab-s grey-t", "middle"); D.T(285, 268, "everything else", "lab-s grey-t", "middle");
+    D.A("M128 120 C170 120 170 32 210 32", "ok");
+    D.A("M128 135 C165 135 170 104 210 104", "ok");
+    D.A("M128 150 C165 150 170 176 210 176", "ok");
+    D.A("M128 165 C170 165 170 252 210 252", "no"); D.X(172, 214);
+    return D.el;
+  }
+
+  /* ---------- the cases ---------- */
+  var USE = "Use", SET = "Set up", HOOD = "Under the hood";
+  var CASES = [
+    { id: "family", label: "Marcel, 82, tells his story",
+      steps: [
+        { kind: USE, text: "Marcel speaks. His story writes itself.", pic: phonePic, play: true },
+        { kind: USE, text: "Léa, his granddaughter, reads it and asks questions. Each answer says where it comes from.", pic: leaPic },
+        { kind: HOOD, text: "Each helper sees only what it is given. You choose who runs the models.", pic: famPic }
+      ] },
+    { id: "code", label: "Your coding agents",
+      note: ["Already have Claude Code?", "Keeps your Claude Code login and tools; adds a box per repository and approvals on your phone."],
+      steps: [
+        { kind: USE, text: "They work all night. Your phone asks only the risky question.", pic: awayPic },
+        { kind: USE, text: "All your coding agents in one list, on your phone too.", pic: agentsPic },
+        { kind: HOOD, text: "As many Claude Code sessions as you like, each in its own machine: not on the vendor's site, not loose on your computer.", pic: hoodPic }
+      ] },
+    { id: "office", label: "Office: one report per client",
+      steps: [
+        { kind: SET, text: "Pick Monthly report: each client gets its own space.", pic: officeSetPic },
+        { kind: USE, text: "On the 1st, Inès opens Brun: the report is ready, other clients stay locked.", pic: officeUsePic },
+        { kind: HOOD, text: "One space per client: its own folder, key and agent.", pic: officeHoodPic,
+          tags: [["Models:", "your choice"], ["Limit:", "an agent can read its key", true]] }
+      ] },
+    { id: "europe", label: "Sensitive data that stays in Europe",
+      steps: [
+        { kind: SET, text: "Mark the interviews folder Europe only.", pic: euSetPic },
+        { kind: USE, text: "Attach it to an agent whose model runs elsewhere: refused.", pic: euUsePic },
+        { kind: HOOD, text: "Who runs each model, and where.", pic: euHoodPic,
+          tags: [["Limit:", "no log yet of which file went where", true]] }
+      ] },
+    { id: "home", label: "Your assistant: calendar, mail, home",
+      works: ["Home Assistant", "Ollama", "n8n", "Node-RED"],
+      steps: [
+        { kind: USE, text: "It reads your calendar and your mail, and tells you what is missing or clashing.", pic: homeFlowPic },
+        { kind: USE, text: "It sees when people come home, and asks Home Assistant to warm the house in time.", pic: homeAgentsPic },
+        { kind: HOOD, text: "It reads, warns, and acts within what you allow. It cannot pay or send mail.", pic: homeHoodPic }
+      ] }
+  ];
+
+  /* ---------- render ---------- */
+  var casesEl = document.getElementById("cases"), asideEl = document.getElementById("aside"), stepsEl = document.getElementById("steps"), btns = {};
+  CASES.forEach(function (c) {
+    var b = h("button", null, c.label, casesEl);
+    b.type = "button";
+    b.addEventListener("click", function () { choose(c.id, true); });
+    btns[c.id] = b;
+  });
+
+  /* Moving between cases: only when the visitor asks (buttons, arrows, a swipe); nothing slides by itself. */
+  var current = 0;
+  function pagers() {
+    ["pager-top", "pager-low"].forEach(function (pid) {
+      var p = document.getElementById(pid); p.textContent = "";
+      var prev = h("button", null, "\u2039", p); prev.type = "button"; prev.setAttribute("aria-label", "Previous case");
+      h("span", "count", (current + 1) + " / " + CASES.length, p);
+      var next = h("button", null, "\u203a", p); next.type = "button"; next.setAttribute("aria-label", "Next case");
+      prev.addEventListener("click", function () { step(-1, pid === "pager-low"); });
+      next.addEventListener("click", function () { step(1, pid === "pager-low"); });
+    });
+  }
+  function step(d, fromLow) {
+    var i = (current + d + CASES.length) % CASES.length;
+    choose(CASES[i].id, true);
+    stepsEl.classList.remove("go-next", "go-prev"); void stepsEl.offsetWidth; stepsEl.classList.add(d > 0 ? "go-next" : "go-prev");
+    /* From the arrows under the pictures, the visitor is taken back to the top of the new case. */
+    if (fromLow) document.getElementById("pager-top").scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+  var touch = null;
+  stepsEl.addEventListener("touchstart", function (e) { var t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
+  stepsEl.addEventListener("touchend", function (e) {
+    if (!touch) return; var t = e.changedTouches[0], dx = t.clientX - touch.x, dy = t.clientY - touch.y; touch = null;
+    if (Math.abs(dx) > 60 && Math.abs(dy) < 45) step(dx < 0 ? 1 : -1, false);
+  }, { passive: true });
+
+  function choose(id, fromClick) {
+    var c = CASES.filter(function (x) { return x.id === id; })[0] || CASES[0];
+    current = CASES.indexOf(c);
+    document.getElementById("full-link").href = "cases/" + c.id + ".html";
+    pagers();
+    if (btns[c.id] && btns[c.id].scrollIntoView && fromClick) btns[c.id].scrollIntoView({ block: "nearest", inline: "nearest" });
+    for (var k in btns) btns[k].setAttribute("aria-pressed", k === c.id ? "true" : "false");
+    clearTimeout(marcel.timer);
+    marcel.win = null; marcel.rects = {}; marcel.first = true;
+    stepsEl.textContent = ""; asideEl.textContent = "";
+    asideEl.hidden = !(c.note || c.works);
+    if (c.note) { h("b", null, c.note[0], asideEl); h("span", null, c.note[1], asideEl); }
+    if (c.works) { h("b", null, "Works with", asideEl); c.works.forEach(function (w) { h("span", "nm", w, asideEl); }); }
+    c.steps.forEach(function (st, i) {
+      var li = h("li", "step", null, stepsEl);
+      var pic = h("div", "pic", null, li);
+      var art = pic.appendChild(st.pic());
+      if (st.tags) { var tg = h("div", "ptags", null, art); st.tags.forEach(function (x) { var e = h("span", "ptag" + (x[2] ? " lim" : ""), null, tg); h("b", null, x[0] + " ", e); e.appendChild(document.createTextNode(x[1])); }); }
+      var rest = h("div", "rest", null, li);
+      var tag = h("p", "tag", null, rest);
+      h("span", "n", String(i + 1), tag);
+      h("span", null, st.kind, tag);
+      if (st.play) playButton(tag);
+      h("p", "txt", st.text, rest);
+    });
+    if (marcel.win) { showFrame(HERO); tick(); }
+    if (fromClick && history.replaceState) history.replaceState(null, "", "#" + c.id);
+  }
+
+  var start = (location.hash || "").slice(1);
+  choose(start || "family", false);
+})();
+</script>
+</body>
+</html>

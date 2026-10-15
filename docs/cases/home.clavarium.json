@@ -1,0 +1,87 @@
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "a1",
+   "kind": "asset",
+   "name": "calendar, read only",
+   "x": 230,
+   "y": 32
+  },
+  {
+   "id": "a2",
+   "kind": "asset",
+   "name": "mail, read only",
+   "x": 492,
+   "y": 32
+  },
+  {
+   "id": "g1",
+   "kind": "agent",
+   "name": "assistant",
+   "x": 368,
+   "y": 130,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Reads the family calendar and the mail, never changes them. Each morning, tells Noah on his phone what is missing or clashing, with buttons. On a new mail, sees who comes home late and asks Home Assistant to warm the house in time. Cannot pay, cannot send mail.",
+   "key": "MODEL_KEY_ASSISTANT"
+  },
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Noah, at home",
+   "x": 600,
+   "y": 244
+  },
+  {
+   "id": "a3",
+   "kind": "asset",
+   "name": "house requests",
+   "x": 300,
+   "y": 244
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "Home Assistant",
+   "x": 368,
+   "y": 342,
+   "wake": "Nothing but its links",
+   "does": "Passes each request of the assistant to Home Assistant. Its token there allows the heating and the lights only; anything else is refused.",
+   "key": "HOME_ASSISTANT_TOKEN",
+   "source": "https://example.com/home/ha-bridge.git",
+   "pin": "7c2e91d"
+  }
+ ],
+ "links": [
+  {
+   "from": "a1",
+   "to": "g1",
+   "kind": "read"
+  },
+  {
+   "from": "a2",
+   "to": "g1",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "g1",
+   "to": "p1",
+   "kind": "talk"
+  },
+  {
+   "from": "g1",
+   "to": "a3",
+   "kind": "write"
+  },
+  {
+   "from": "a3",
+   "to": "s1",
+   "kind": "read",
+   "wakes": true
+  }
+ ]
+}

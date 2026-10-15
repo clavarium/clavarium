@@ -1,0 +1,151 @@
+{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "p1",
+   "kind": "person",
+   "name": "Nora, lead researcher",
+   "x": 364,
+   "y": 32
+  },
+  {
+   "id": "a1",
+   "kind": "asset",
+   "name": "interviews",
+   "x": 258,
+   "y": 138
+  },
+  {
+   "id": "a4",
+   "kind": "asset",
+   "name": "literature",
+   "x": 464,
+   "y": 138
+  },
+  {
+   "id": "s1",
+   "kind": "script",
+   "name": "transcriber",
+   "x": 272,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Turns each new recording into text, word for word, with who speaks and when.",
+   "key": "Mistral key",
+   "source": "https://example.com/research/transcriber.git",
+   "pin": "3f9a2c1"
+  },
+  {
+   "id": "g2",
+   "kind": "agent",
+   "name": "analyst",
+   "x": 464,
+   "y": 236,
+   "tool": "Claude Code",
+   "mode": "conversation",
+   "wake": "Nothing but its links",
+   "does": "Searches the published papers with Nora and drafts the related-work section. Never sees the interviews.",
+   "key": "Anthropic key"
+  },
+  {
+   "id": "a2",
+   "kind": "asset",
+   "name": "transcripts",
+   "x": 258,
+   "y": 350
+  },
+  {
+   "id": "a5",
+   "kind": "asset",
+   "name": "drafts",
+   "x": 464,
+   "y": 350
+  },
+  {
+   "id": "g1",
+   "kind": "agent",
+   "name": "note-taker",
+   "x": 368,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Nothing but its links",
+   "does": "Writes notes for each transcript: themes, quotes with their minute, open questions. Answers the team, citing the interview and the minute.",
+   "key": "Mistral key"
+  },
+  {
+   "id": "a3",
+   "kind": "asset",
+   "name": "notes",
+   "x": 261,
+   "y": 562
+  },
+  {
+   "id": "p2",
+   "kind": "person",
+   "name": "Theo, research assistant",
+   "x": 467,
+   "y": 562
+  }
+ ],
+ "links": [
+  {
+   "from": "p1",
+   "to": "a1",
+   "kind": "write"
+  },
+  {
+   "from": "p1",
+   "to": "a4",
+   "kind": "write"
+  },
+  {
+   "from": "a1",
+   "to": "s1",
+   "kind": "read",
+   "wakes": true,
+   "only": "recordings"
+  },
+  {
+   "from": "a4",
+   "to": "g2",
+   "kind": "read"
+  },
+  {
+   "from": "p1",
+   "to": "g2",
+   "kind": "talk"
+  },
+  {
+   "from": "s1",
+   "to": "a2",
+   "kind": "write"
+  },
+  {
+   "from": "g2",
+   "to": "a5",
+   "kind": "write"
+  },
+  {
+   "from": "a2",
+   "to": "g1",
+   "kind": "read",
+   "wakes": true
+  },
+  {
+   "from": "g1",
+   "to": "a3",
+   "kind": "write"
+  },
+  {
+   "from": "g1",
+   "to": "p2",
+   "kind": "talk"
+  },
+  {
+   "from": "a3",
+   "to": "p2",
+   "kind": "read"
+  }
+ ]
+}

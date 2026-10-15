@@ -1,5 +1,5 @@
 /* RED TEAM: the git runner core attacked by the AI agent, which can write
-   anything in its repository folder (docs/blueprint/git-runner-core.md,
+   anything in its repository folder (blueprint/git-runner-core.md,
    "Threat model"). Each test is one attack. It PASSES when the attack fails
    safely, and FAILS when the attack works: a failing test here is a finding,
    left in place on purpose until the product is fixed.

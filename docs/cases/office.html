@@ -1,0 +1,997 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Office reports setup</title>
+<meta name="description" content="Target page, not the real one: one monthly report per client, each client in its own space, and the setup file that builds it.">
+<!--
+  TARGET PAGE: shows planned features (client spaces, setups imported from a file,
+  people with a code that opens one space). Names are invented. Built with textContent only.
+  The drawing of "The whole setup" is made from the JSON embedded below, which is the
+  exact text of office.clavarium.json; when the file can be fetched, it is drawn from the file.
+-->
+<link rel="stylesheet" href="../base.css">
+<style>
+:root {
+  --bg: #ffffff; --soft: #f5f5f2; --text: #16181d; --dim: #5a5f69; --line: #d6d9df;
+  --accent: #0b53c0; --accent-ink: #ffffff; --gold: #8a5f0c; --gold-bg: #fbf3df; --ok: #17794f; --no: #a8321f; --no-bg: #fbe9e6;
+  --w-bg: #ffffff; --w-ink: #000000; --w-soft: #f1efe9; --w-btn: #0a3f91; --w-btn-ink: #ffffff; --w-frame: #2a2d33; --w-lit: #d98a00; --w-lit-bg: #fff3d6; --w-line: #d6d9df; --w-dim: #5a5f69; --w-ok: #17794f; --w-no: #a8321f; --w-no-bg: #fbe9e6;
+  --agent: #0b53c0; --agent-bg: #e8f0fd; --script: #4b5563; --script-bg: #eef0f3; --folder: #8a5d0a; --folder-bg: #fbf3df; --person: #14161a; --person-bg: #ffffff;
+  --read: #0b53c0; --write: #17794f; --talk: #6b4fa8; --lit: #d98a00; --lit-bg: #fff1d1; --pick: #d98a00;
+  --t-bg: #10151b; --t-line: #2b3745; --t-ink: #e7edf4; --t-ink2: #a3b1c2; --t-brass: #d2a94e;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+    --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+    --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-ok: #146b45; --w-no-bg: #f6dcd7;
+    --agent: #8ab4ff; --agent-bg: #172742; --script: #c2c8d2; --script-bg: #22272f; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+    --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c; --pick: #ffb733;
+    --t-bg: #0a0d11; --t-line: #2b3745;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1116; --soft: #171b22; --text: #e6e8ec; --dim: #a3a9b4; --line: #39414d;
+  --accent: #8ab4ff; --accent-ink: #0e1116; --gold: #d2a94e; --gold-bg: #2a2212; --ok: #5fc39d; --no: #ee7f79; --no-bg: #3a1c19;
+  --w-bg: #eeede8; --w-ink: #111111; --w-soft: #dedbd2; --w-line: #bfc3ca; --w-dim: #4f545d; --w-frame: #3a414c; --w-lit: #b87400; --w-lit-bg: #f6e3b4; --w-ok: #146b45; --w-no-bg: #f6dcd7;
+  --agent: #8ab4ff; --agent-bg: #172742; --script: #c2c8d2; --script-bg: #22272f; --folder: #e0b75a; --folder-bg: #2e2612; --person: #e6e8ec; --person-bg: #20242c;
+  --read: #8ab4ff; --write: #5fc39d; --talk: #c39bf0; --lit: #ffb733; --lit-bg: #3a2b0c; --pick: #ffb733;
+  --t-bg: #0a0d11; --t-line: #2b3745;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); overflow-x: hidden; }
+a { color: var(--accent); }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 72rem; margin: 0 auto; padding: 0 16px; }
+@media (min-width: 700px) { .wrap { padding: 0 32px; } }
+
+.back { color: var(--accent); text-decoration: none; font-size: 15px; }
+.back:hover { text-decoration: underline; }
+
+.hero { padding-top: 20px; }
+h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; text-wrap: balance; }
+.lead { margin: 12px 0 0; font-size: 18px; color: var(--dim); }
+section.part { padding-top: 56px; }
+h2 { margin: 0 0 6px; font-size: 22px; font-weight: 700; }
+.sub { margin: 0 0 20px; color: var(--dim); }
+
+/* ---- how it is used ---- */
+.uses { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px 32px; }
+@media (max-width: 1023px) { .uses { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 679px) { .uses { grid-template-columns: minmax(0, 1fr); } }
+.use { min-width: 0; display: flex; flex-direction: column; }
+.use .who { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 650; color: var(--dim); margin-bottom: 8px; }
+.use .who svg { color: var(--dim); }
+.use .pic { display: flex; justify-content: center; min-width: 0; }
+.use .pic > * { max-width: 100%; }
+.use .line { margin: 14px 0 0; display: flex; gap: 10px; font-size: 17px; line-height: 1.4; }
+.use .line .n { flex: none; font: 600 14px/1.9 var(--mono); color: var(--gold); }
+
+/* light screens */
+.scr { width: 100%; max-width: 340px; height: 420px; background: var(--w-bg); color: var(--w-ink); border: 1px solid var(--w-line); border-radius: 16px; padding: 18px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.scr .ti { font-size: 21px; font-weight: 700; line-height: 1.2; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.scr .ti small { font-size: 14px; font-weight: 500; color: var(--w-dim); }
+.btn { align-self: flex-start; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 10px; padding: 9px 18px; font-weight: 650; font-size: 16px; }
+.btn.alt { background: var(--w-bg); color: var(--w-btn); border: 2px solid var(--w-btn); }
+.fine { font-size: 14px; color: var(--w-dim); line-height: 1.35; }
+.mt { margin-top: auto; }
+
+.spaces { display: flex; flex-direction: column; gap: 8px; }
+.sp { border: 3px solid var(--w-ink); border-radius: 12px; padding: 8px 12px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; align-items: center; }
+.sp b { font-size: 18px; }
+.sp .has { grid-column: 2; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 13.5px; color: var(--w-dim); }
+.sp .has span { display: inline-flex; align-items: center; gap: 4px; }
+.sp.add { border: 2px dashed var(--w-line); color: var(--w-dim); display: block; font-size: 16px; }
+.keyrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.keyrow label { font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 6px; }
+.keyrow .fld { border: 1.5px solid var(--w-ink); border-radius: 10px; padding: 7px 12px; font: 15px var(--mono); display: flex; justify-content: space-between; gap: 8px; }
+.keyrow .fld.empty { border-color: var(--w-line); color: var(--w-dim); font-family: var(--sans); }
+.keyrow .fld .ok { color: var(--w-ok); font: 650 14px var(--sans); }
+
+.phone { width: 310px; height: 420px; border: 9px solid var(--w-frame); border-radius: 34px; background: var(--w-bg); overflow: hidden; }
+.win { height: 100%; display: flex; flex-direction: column; gap: 11px; padding: 14px 14px 14px; color: var(--w-ink); }
+.tabs { display: flex; gap: 6px; align-items: center; }
+.tabs span { border: 1px solid var(--w-line); border-radius: 8px; padding: 3px 10px; }
+.tabs .cur { border: 2px solid var(--w-ink); font-weight: 700; font-size: 19px; }
+.tabs .lk { background: var(--w-soft); color: var(--w-dim); height: 30px; width: 40px; display: grid; place-items: center; }
+.tabs small { margin-left: auto; color: var(--w-dim); font-size: 14px; }
+.files { display: flex; flex-direction: column; border: 1px solid var(--w-line); border-radius: 12px; }
+.files div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 7px 10px; font-size: 14.5px; border-top: 1px solid var(--w-line); }
+.files div:first-child { border-top: 0; }
+.files code { font: 13.5px var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.files svg { color: var(--folder); }
+.files em { font-style: normal; font-size: 13px; color: var(--w-ok); font-weight: 650; white-space: nowrap; }
+.files em.busy { color: var(--w-lit); }
+.files .new { background: var(--w-lit-bg); }
+.big { border: 2px solid var(--w-btn); border-radius: 12px; padding: 9px 12px; font-size: 17px; font-weight: 650; text-align: center; color: var(--w-btn); background: var(--w-bg); }
+.big.main { background: var(--w-btn); color: var(--w-btn-ink); }
+.card { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 9px; justify-content: flex-end; }
+.msg { align-self: flex-start; max-width: 94%; background: var(--w-soft); border-radius: 14px 14px 14px 4px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; }
+.msg .wh { font-size: 13px; font-weight: 650; opacity: .8; }
+.msg p { margin: 0; font-size: 16.5px; line-height: 1.3; }
+.inv { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.inv span { border: 1px solid var(--w-line); background: var(--w-bg); border-radius: 8px; padding: 4px 8px; font-size: 13.5px; line-height: 1.3; }
+.inv b { display: block; font: 700 14px var(--mono); }
+.echo { margin: 0; align-self: flex-end; max-width: 90%; background: var(--w-btn); color: var(--w-btn-ink); border-radius: 14px 14px 4px 14px; padding: 6px 12px; font-size: 17px; line-height: 1.3; }
+.opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.opts .big { font-size: 15.5px; padding: 8px 6px; }
+.rep { border: 1px solid var(--w-line); border-radius: 10px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: end; }
+.rep .rl { color: var(--w-ok); font-weight: 700; font-size: 13px; }
+.rep b { font-size: 18px; }
+.rep small { display: block; font-size: 13px; color: var(--w-dim); }
+.rep .tot { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bars { grid-row: 1 / span 4; grid-column: 2; display: flex; align-items: flex-end; gap: 4px; height: 70px; }
+.bars i { width: 10px; background: var(--w-btn); border-radius: 2px 2px 0 0; opacity: .75; }
+.facts { display: flex; flex-direction: column; gap: 4px; font-size: 15px; }
+.facts div { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--w-line); padding-bottom: 3px; }
+.facts b { font-variant-numeric: tabular-nums; }
+
+/* the light drawings */
+.dia { width: 100%; }
+.dia svg { width: 100%; height: auto; display: block; overflow: visible; }
+.dia text { font-family: var(--sans); fill: var(--text); }
+.wallpic { width: 100%; max-width: 340px; height: 420px; background: var(--bg); border: 1px solid var(--line); border-radius: 16px; padding: 14px; display: flex; flex-direction: column; justify-content: center; gap: 12px; box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 10px 30px rgba(0,0,0,.08); }
+.ptag { align-self: center; border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 14px; line-height: 1.35; text-align: center; }
+.ptag b { color: var(--no); }
+.lab { font-size: 18px; font-weight: 650; }
+.lab-s { font-size: 15px; font-weight: 650; }
+.no-t { fill: var(--no) !important; font-size: 16px; font-weight: 700; }
+.wall { fill: var(--bg); stroke: var(--text); stroke-width: 4; }
+.agentb { fill: var(--agent-bg); stroke: var(--agent); stroke-width: 1.5; }
+.ln { fill: none; stroke: var(--no); stroke-width: 2; stroke-dasharray: 5 4; }
+.xc { fill: var(--no-bg); stroke: var(--no); stroke-width: 2; }
+.x { fill: none; stroke: var(--no); stroke-width: 3.5; stroke-linecap: round; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sp { animation: pop .45s ease-out both; }
+  .sp:nth-child(2) { animation-delay: .3s; } .sp:nth-child(3) { animation-delay: .6s; } .sp:nth-child(4) { animation-delay: .9s; }
+  @keyframes pop { from { opacity: 0; transform: scale(.9); } }
+  .files em.busy::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; margin-right: 5px; animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 50% { opacity: .25; } }
+  .fade { animation: fade .5s ease-out both; }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } }
+}
+
+/* ---- the whole setup ---- */
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+.bar .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.bar button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 6px 14px; font-size: 15px; }
+.bar button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; color: var(--dim); margin: 0 0 10px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { flex: none; }
+.board { border: 1px solid var(--line); border-radius: 16px; background: var(--bg); padding: 12px; }
+.board svg { width: 100%; height: auto; display: block; }
+.board text { font-family: var(--sans); fill: var(--text); pointer-events: none; }
+.board .nm { font-size: 15px; font-weight: 650; }
+.board .tg { font-size: 12.5px; fill: var(--dim); }
+.board .node { cursor: pointer; }
+.board .node rect { stroke-width: 1.5; }
+.board .k-agent rect { fill: var(--agent-bg); stroke: var(--agent); }
+.board .k-script rect { fill: var(--script-bg); stroke: var(--script); stroke-dasharray: 6 3; }
+.board .k-asset rect { fill: var(--folder-bg); stroke: var(--folder); }
+.board .k-person rect { fill: var(--person-bg); stroke: var(--person); }
+.board .node:hover rect, .board .node:focus-visible rect { stroke-width: 3; }
+.board .node:focus { outline: none; }
+.board .node.on rect { stroke: var(--pick); stroke-width: 3.5; }
+.board .node.dimmed, .board .lk.dimmed { opacity: .25; }
+.board .lk path { fill: none; stroke-width: 2; }
+.board .lk.read path { stroke: var(--read); }
+.board .lk.write path { stroke: var(--write); }
+.board .lk.talk path { stroke: var(--talk); stroke-dasharray: 6 4; }
+.board .wk { fill: var(--lit); stroke: var(--bg); stroke-width: 2; }
+.info { margin: 12px 0 0; min-height: 3.2em; font-size: 16px; line-height: 1.45; }
+.info b { font-weight: 700; }
+.info .sees { display: block; color: var(--dim); font-size: 15px; }
+
+/* ---- what you need ---- */
+.needs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 899px) { .needs { grid-template-columns: minmax(0, 1fr); } }
+.need { border: 1px solid var(--line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.need .hd { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
+.need .hd svg { color: var(--gold); flex: none; }
+.need p { margin: 0; }
+.need .dimp { color: var(--dim); font-size: 15px; }
+.kchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.kchips span { font: 14px var(--mono); border: 1px solid var(--gold); background: var(--gold-bg); border-radius: 8px; padding: 2px 8px; }
+.lim b { color: var(--no); }
+
+/* ---- get it ---- */
+.get { border-top: 1px solid var(--line); margin-top: 64px; padding-top: 32px; }
+.acts { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 4px 0 14px; }
+.dl { background: var(--accent); color: var(--accent-ink); text-decoration: none; font-size: 20px; font-weight: 650; border-radius: 12px; padding: 15px 26px; display: inline-flex; align-items: center; gap: 10px; }
+.cp { border: 2px solid var(--accent); color: var(--accent); background: var(--bg); font-size: 18px; font-weight: 650; border-radius: 12px; padding: 12px 22px; }
+.said { color: var(--ok); font-weight: 650; min-height: 1.5em; }
+.said.no { color: var(--no); }
+.get p { margin: 0 0 10px; }
+.get details { margin-top: 18px; }
+.get summary { cursor: pointer; color: var(--accent); }
+.get pre { margin: 10px 0 0; background: var(--t-bg); color: var(--t-ink); border: 1px solid var(--t-line); border-radius: 12px; padding: 14px 16px; font: 13px/1.5 var(--mono); max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.back-row { margin: 0 0 12px; }
+</style>
+</head>
+<body>
+<p class="ribbon">Target page: shows planned features. Names are invented.</p>
+
+<header class="top">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Pages">
+      <a href="../index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button" aria-current="page">Use cases</button>
+        <span class="drop-menu">
+        <a href="../cases/family.html">Marcel, 82, tells his story</a>
+        <a href="../cases/code.html">Your coding agents</a>
+        <a href="../cases/office.html" aria-current="page">Office: one report per client</a>
+        <a href="../cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="../cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="../examples.html">All examples</a>
+        </span>
+      </span>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+    </nav>
+  </div>
+</header>
+
+
+
+<main>
+  <section class="hero wrap">
+    <p class="back-row"><a class="back" href="../index.html#office">&larr; All cases</a></p>
+    <h1>Office: one report per client</h1>
+    <p class="lead">Each client gets a monthly report from its own folder, and sees only its own space.</p>
+  </section>
+
+  <section class="part wrap" aria-labelledby="use-h">
+    <h2 id="use-h">How it is used</h2>
+    <p class="sub">An office with three clients: Brun, Nord and Lys. Inès works at Brun.</p>
+    <ol class="uses" id="uses"></ol>
+  </section>
+
+  <section class="part wrap" aria-labelledby="set-h">
+    <h2 id="set-h">The whole setup</h2>
+    <p class="sub">Every box and link of the file below. Touch a box.</p>
+    <div class="bar"><div class="chips" id="chips" role="group" aria-label="Show"></div></div>
+    <div class="legend" id="legend"></div>
+    <div class="board" id="board"></div>
+    <p class="info" id="info" aria-live="polite"></p>
+  </section>
+
+  <section class="part wrap" aria-labelledby="need-h">
+    <h2 id="need-h">What you need</h2>
+    <ul class="needs" id="needs"></ul>
+  </section>
+
+  <section class="get wrap" aria-labelledby="get-h">
+    <h2 id="get-h">Get this setup</h2>
+    <div class="acts">
+      <a class="dl" href="office.clavarium.json" download>Download this setup</a>
+      <button class="cp" type="button" id="copy">Copy it</button>
+      <span class="said" id="said" aria-live="polite"></span>
+    </div>
+    <p>Import it in Clavarium: it creates the machines, attaches the folders, installs the scripts at their pinned version, then asks for the keys it needs.</p>
+    <details>
+      <summary id="peek">See the file</summary>
+      <pre id="text"></pre>
+    </details>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <a class="mark" href="../index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="../examples.html">Use cases</a>
+      <a href="../how-to-use-it.html">Use</a>
+      <a href="../how-it-works.html">How it works</a>
+      <a href="../how-to-install-it.html">Install</a>
+      <a href="../how-it-is-kept-safe.html">Security</a>
+      <a href="../questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
+  </div>
+</footer>
+
+<script type="application/json" id="setup">{
+ "clavarium": "flow",
+ "version": 1,
+ "nodes": [
+  {
+   "id": "you",
+   "kind": "person",
+   "name": "You, the office",
+   "x": 364,
+   "y": 32
+  },
+  {
+   "id": "bin",
+   "kind": "asset",
+   "name": "Brun: incoming",
+   "x": 121,
+   "y": 138
+  },
+  {
+   "id": "brd",
+   "kind": "script",
+   "name": "Brun invoice reader",
+   "x": 128,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Brun: incoming and writes its number, date, supplier and amount into Brun: ledger.",
+   "key": "Brun model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "blg",
+   "kind": "asset",
+   "name": "Brun: ledger",
+   "x": 121,
+   "y": 350
+  },
+  {
+   "id": "bag",
+   "kind": "agent",
+   "name": "Brun agent",
+   "x": 128,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Brun: ledger and asks Inès about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Brun model key"
+  },
+  {
+   "id": "brp",
+   "kind": "asset",
+   "name": "Brun: reports",
+   "x": 121,
+   "y": 562
+  },
+  {
+   "id": "bpp",
+   "kind": "person",
+   "name": "Inès, at Brun",
+   "x": 124,
+   "y": 668
+  },
+  {
+   "id": "nin",
+   "kind": "asset",
+   "name": "Nord: incoming",
+   "x": 361,
+   "y": 138
+  },
+  {
+   "id": "nrd",
+   "kind": "script",
+   "name": "Nord invoice reader",
+   "x": 368,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Nord: incoming and writes its number, date, supplier and amount into Nord: ledger.",
+   "key": "Nord model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "nlg",
+   "kind": "asset",
+   "name": "Nord: ledger",
+   "x": 361,
+   "y": 350
+  },
+  {
+   "id": "nag",
+   "kind": "agent",
+   "name": "Nord agent",
+   "x": 368,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Nord: ledger and asks Omar about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Nord model key"
+  },
+  {
+   "id": "nrp",
+   "kind": "asset",
+   "name": "Nord: reports",
+   "x": 361,
+   "y": 562
+  },
+  {
+   "id": "npp",
+   "kind": "person",
+   "name": "Omar, at Nord",
+   "x": 364,
+   "y": 668
+  },
+  {
+   "id": "lin",
+   "kind": "asset",
+   "name": "Lys: incoming",
+   "x": 601,
+   "y": 138
+  },
+  {
+   "id": "lrd",
+   "kind": "script",
+   "name": "Lys invoice reader",
+   "x": 608,
+   "y": 236,
+   "wake": "Nothing but its links",
+   "does": "Reads each invoice or statement arriving in Lys: incoming and writes its number, date, supplier and amount into Lys: ledger.",
+   "key": "Lys model key",
+   "source": "https://example.com/clavarium-office/invoice-reader.git",
+   "pin": "3f9a2c71e0"
+  },
+  {
+   "id": "llg",
+   "kind": "asset",
+   "name": "Lys: ledger",
+   "x": 601,
+   "y": 350
+  },
+  {
+   "id": "lag",
+   "kind": "agent",
+   "name": "Lys agent",
+   "x": 608,
+   "y": 448,
+   "tool": "OpenCode",
+   "mode": "conversation",
+   "wake": "Monday to Friday at 7:30",
+   "does": "Each weekday at 7:30, checks Lys: ledger and asks Chloé about anything odd, like two invoices with one number. On the first working day of the month, writes last month's report.",
+   "key": "Lys model key"
+  },
+  {
+   "id": "lrp",
+   "kind": "asset",
+   "name": "Lys: reports",
+   "x": 601,
+   "y": 562
+  },
+  {
+   "id": "lpp",
+   "kind": "person",
+   "name": "Chloé, at Lys",
+   "x": 604,
+   "y": 668
+  }
+ ],
+ "links": [
+  {
+   "from": "you",
+   "to": "bin",
+   "kind": "write"
+  },
+  {
+   "from": "bpp",
+   "to": "bin",
+   "kind": "write"
+  },
+  {
+   "from": "bin",
+   "to": "brd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "brd",
+   "to": "blg",
+   "kind": "write"
+  },
+  {
+   "from": "blg",
+   "to": "bag",
+   "kind": "read"
+  },
+  {
+   "from": "bag",
+   "to": "brp",
+   "kind": "write"
+  },
+  {
+   "from": "bag",
+   "to": "bpp",
+   "kind": "talk"
+  },
+  {
+   "from": "brp",
+   "to": "bpp",
+   "kind": "read"
+  },
+  {
+   "from": "brp",
+   "to": "you",
+   "kind": "read"
+  },
+  {
+   "from": "you",
+   "to": "nin",
+   "kind": "write"
+  },
+  {
+   "from": "npp",
+   "to": "nin",
+   "kind": "write"
+  },
+  {
+   "from": "nin",
+   "to": "nrd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "nrd",
+   "to": "nlg",
+   "kind": "write"
+  },
+  {
+   "from": "nlg",
+   "to": "nag",
+   "kind": "read"
+  },
+  {
+   "from": "nag",
+   "to": "nrp",
+   "kind": "write"
+  },
+  {
+   "from": "nag",
+   "to": "npp",
+   "kind": "talk"
+  },
+  {
+   "from": "nrp",
+   "to": "npp",
+   "kind": "read"
+  },
+  {
+   "from": "nrp",
+   "to": "you",
+   "kind": "read"
+  },
+  {
+   "from": "you",
+   "to": "lin",
+   "kind": "write"
+  },
+  {
+   "from": "lpp",
+   "to": "lin",
+   "kind": "write"
+  },
+  {
+   "from": "lin",
+   "to": "lrd",
+   "kind": "read",
+   "wakes": true,
+   "only": "invoices and statements"
+  },
+  {
+   "from": "lrd",
+   "to": "llg",
+   "kind": "write"
+  },
+  {
+   "from": "llg",
+   "to": "lag",
+   "kind": "read"
+  },
+  {
+   "from": "lag",
+   "to": "lrp",
+   "kind": "write"
+  },
+  {
+   "from": "lag",
+   "to": "lpp",
+   "kind": "talk"
+  },
+  {
+   "from": "lrp",
+   "to": "lpp",
+   "kind": "read"
+  },
+  {
+   "from": "lrp",
+   "to": "you",
+   "kind": "read"
+  }
+ ]
+}</script>
+<script>
+(function () {
+  "use strict";
+  var NS = "http://www.w3.org/2000/svg";
+  var still = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var EMBEDDED = document.getElementById("setup").textContent;
+
+  function h(tag, cls, text, parent) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function s(tag, attrs, parent) {
+    var n = document.createElementNS(NS, tag);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    if (parent) parent.appendChild(n);
+    return n;
+  }
+  function st(x, y, txt, cls, parent, anchor) {
+    var t = s("text", { x: x, y: y }, parent);
+    if (cls) t.setAttribute("class", cls);
+    if (anchor) t.setAttribute("text-anchor", anchor);
+    t.textContent = txt;
+    return t;
+  }
+
+  /* Small drawn icons (24 x 24), coloured by currentColor. */
+  var ICONS = {
+    lock: [["rect", { x: 5, y: 11, width: 14, height: 11, rx: 2, fill: "currentColor" }], ["path", { d: "M8 11V8a4 4 0 0 1 8 0v3", fill: "none", stroke: "currentColor", "stroke-width": 2.4 }]],
+    phone: [["rect", { x: 6, y: 2, width: 12, height: 20, rx: 2.5, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["circle", { cx: 12, cy: 18, r: 1.3, fill: "currentColor" }]],
+    screen: [["rect", { x: 2, y: 4, width: 20, height: 13, rx: 2, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M8 21h8M12 17v4", fill: "none", stroke: "currentColor", "stroke-width": 2 }]],
+    person: [["circle", { cx: 12, cy: 7.5, r: 4.5, fill: "currentColor" }], ["path", { d: "M3 23c0-5.5 4-9 9-9s9 3.5 9 9z", fill: "currentColor" }]],
+    key: [["circle", { cx: 7, cy: 12, r: 4.5, fill: "none", stroke: "currentColor", "stroke-width": 2.4 }], ["path", { d: "M11.5 12H23M19 12v4.5M23 12v3.5", fill: "none", stroke: "currentColor", "stroke-width": 2.4, "stroke-linecap": "round" }]],
+    folder: [["path", { d: "M2 6a1 1 0 0 1 1-1h6l2 2h10a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z", fill: "currentColor" }]],
+    doc: [["path", { d: "M6 2h8l5 5v15H6z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }], ["path", { d: "M9 12h7M9 16h7", stroke: "currentColor", "stroke-width": 2 }]],
+    bot: [["rect", { x: 4, y: 7, width: 16, height: 13, rx: 4, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["circle", { cx: 9.5, cy: 13, r: 1.6, fill: "currentColor" }], ["circle", { cx: 14.5, cy: 13, r: 1.6, fill: "currentColor" }], ["path", { d: "M12 3v4", stroke: "currentColor", "stroke-width": 2 }]],
+    cloud: [["path", { d: "M7 19a5 5 0 0 1-.6-10A6 6 0 0 1 18 8.5 4.5 4.5 0 0 1 17.5 19z", fill: "none", stroke: "currentColor", "stroke-width": 2, "stroke-linejoin": "round" }]],
+    box: [["rect", { x: 3, y: 4, width: 18, height: 12, rx: 2, fill: "none", stroke: "currentColor", "stroke-width": 2 }], ["path", { d: "M3 20h18", stroke: "currentColor", "stroke-width": 2 }]]
+  };
+  function ic(name, size, parent, x, y, colour) {
+    var v = s("svg", { viewBox: "0 0 24 24", width: size, height: size, "aria-hidden": "true" }, parent);
+    if (x != null) { v.setAttribute("x", x); v.setAttribute("y", y); }
+    if (colour) v.style.color = "var(--" + colour + ")";
+    ICONS[name].forEach(function (p) { s(p[0], p[1], v); });
+    return v;
+  }
+  function pic(el, label) { el.setAttribute("role", "img"); el.setAttribute("aria-label", label); return el; }
+  function tabs(parent) {
+    var tb = h("div", "tabs", null, parent); h("span", "cur", "Brun", tb);
+    ic("lock", 16, h("span", "lk", null, tb)); ic("lock", 16, h("span", "lk", null, tb));
+    h("small", null, "Inès", tb);
+  }
+
+  /* ---------- How it is used: six pictures ---------- */
+  function setPic() {
+    var p = pic(h("div", "scr"), "Your computer: Monthly report makes three spaces, Brun, Nord and Lys, each with a folder, a key and an agent");
+    var t = h("div", "ti", "Monthly report", p); h("small", null, "ready setup", t);
+    var l = h("div", "spaces", null, p);
+    ["Brun", "Nord", "Lys"].forEach(function (n) {
+      var d = h("div", "sp", null, l); ic("lock", 18, d); h("b", null, n, d);
+      var has = h("div", "has", null, d);
+      [["folder", "folders"], ["key", "key"], ["bot", "agent"]].forEach(function (x) { var sp = h("span", null, null, has); ic(x[0], 14, sp); sp.appendChild(document.createTextNode(x[1])); });
+    });
+    h("div", "sp add", "+ client", l);
+    h("div", "btn mt", "Create 3 spaces", p);
+    return p;
+  }
+  function keysPic() {
+    var p = pic(h("div", "scr"), "Your computer: one model key per client; Brun's is in, Nord's and Lys's wait");
+    var t = h("div", "ti", "Keys", p); h("small", null, "1 of 3", t);
+    [["Brun model key", "sk-••••••7f2", true], ["Nord model key", "Paste the key", false], ["Lys model key", "Paste the key", false]].forEach(function (k) {
+      var r = h("div", "keyrow", null, p), lb = h("label", null, null, r); ic("key", 16, lb, null, null, "gold"); lb.appendChild(document.createTextNode(k[0]));
+      var f = h("div", "fld" + (k[2] ? "" : " empty"), null, r); h("span", null, k[1], f); if (k[2]) h("span", "ok", "given to Brun agent", f);
+    });
+    h("p", "fine mt", "Each key goes to one client's agent only.", p);
+    return p;
+  }
+  function dropPic() {
+    var ph = pic(h("div", "phone"), "Inès's phone, Brun space: four September documents sent, three read, one being read");
+    var w = h("div", "win", null, ph); tabs(w);
+    h("b", null, "Incoming", w);
+    var f = h("div", "files", null, w);
+    [["invoice-116.pdf", "read"], ["invoice-118.pdf", "read"], ["invoice-118-ostra.pdf", "read"], ["statement-sept.pdf", "reading", true]].forEach(function (x) {
+      var r = h("div", x[2] ? "new" : null, null, f); ic("doc", 16, r); h("code", null, x[0], r); h("em", x[2] ? "busy" : null, x[1], r);
+    });
+    h("p", "fine", "Read by the Brun invoice reader as each one arrives.", w);
+    h("div", "big main mt", "Send a document", w);
+    return ph;
+  }
+  var ask = { card: null, timer: null };
+  function askPic() {
+    var ph = pic(h("div", "phone"), "Inès's phone: the Brun agent says two invoices share the number 118 and asks whether to keep both; Inès answers Keep both");
+    var w = h("div", "win", null, ph); tabs(w);
+    ask.card = h("div", "card", null, w);
+    showAsk(still ? 1 : 0);
+    return ph;
+  }
+  function showAsk(i) {
+    var c = ask.card; if (!c) return;
+    c.textContent = "";
+    var m = h("div", "msg", null, c); h("div", "wh", "Brun agent", m);
+    h("p", null, "Two invoices share the number 118. Keep both?", m);
+    var inv = h("div", "inv", null, m);
+    [["118", "Vela, €1,240"], ["118", "Ostra, €312"]].forEach(function (x) { var sp = h("span", null, null, inv); h("b", null, "No. " + x[0], sp); sp.appendChild(document.createTextNode(x[1])); });
+    if (i === 0) { var o = h("div", "opts", null, c); h("div", "big main", "Keep both", o); h("div", "big", "Keep the first", o); }
+    else {
+      h("p", "echo" + (still ? "" : " fade"), "Keep both", c);
+      var r = h("div", "msg" + (still ? "" : " fade"), null, c); h("div", "wh", "Brun agent", r); h("p", null, "Noted. Both go in the September report.", r);
+    }
+    if (still) return;
+    clearTimeout(ask.timer);
+    ask.timer = setTimeout(function () { showAsk(i ? 0 : 1); }, i ? 4200 : 3000);
+  }
+  function reportPic() {
+    var ph = pic(h("div", "phone"), "Inès's phone on October 1: the September report is ready, total €52,940; the other spaces stay locked");
+    var w = h("div", "win", null, ph); tabs(w);
+    var r = h("div", "rep", null, w);
+    h("div", "rl", "Ready", r);
+    var hd = h("div", null, null, r); h("b", null, "September report", hd); h("small", null, "Thu 1 Oct, 07:31", hd);
+    h("div", "tot", "€52,940", r);
+    var bars = h("div", "bars", null, r);
+    [46, 62, 38, 70, 55, 88].forEach(function (v) { h("i", null, null, bars).style.height = v + "%"; });
+    var f = h("div", "facts", null, w);
+    [["Invoices", "38"], ["Statements", "2"], ["Questions answered", "1"]].forEach(function (x) { var d = h("div", null, null, f); h("span", null, x[0], d); h("b", null, x[1], d); });
+    h("div", "big main mt", "Open the report", w);
+    return ph;
+  }
+  function wallPic() {
+    var box = pic(h("div", "wallpic"), "Three client spaces, each walled with its own folder, key and agent; Brun's agent asks for Nord's folder and is told there is no such folder");
+    var d = h("div", "dia", null, box);
+    var svg = s("svg", { viewBox: "0 0 360 230", "aria-hidden": "true" }, d);
+    ["Brun", "Nord", "Lys"].forEach(function (n, i) {
+      var x = 4 + i * 120;
+      s("rect", { x: x, y: 4, width: 112, height: 160, rx: 12, "class": "wall" }, svg); st(x + 56, 34, n, "lab", svg, "middle");
+      ic("folder", 32, svg, x + 18, 50, "folder"); ic("key", 30, svg, x + 62, 51, "gold");
+      s("rect", { x: x + 12, y: 112, width: 70, height: 34, rx: 17, "class": "agentb" }, svg); st(x + 47, 134, "agent", "lab-s", svg, "middle");
+    });
+    s("path", { d: "M82 129 H104", "class": "ln" }, svg);
+    s("circle", { cx: 120, cy: 129, r: 15, "class": "xc" }, svg); s("path", { d: "M114 123l12 12m0 -12l-12 12", "class": "x" }, svg);
+    st(180, 198, "Brun's agent asks for Nord's folder:", "lab-s", svg, "middle");
+    st(180, 222, "no such folder here.", "no-t", svg, "middle");
+    var t = h("div", "ptag", null, box); h("b", null, "Limit: ", t); t.appendChild(document.createTextNode("an agent can read the key it is given"));
+    return box;
+  }
+  var USES = [
+    { who: ["screen", "You, on your computer"], line: "Pick Monthly report, add Brun, Nord and Lys: each gets its own space.", pic: setPic },
+    { who: ["screen", "You, on your computer"], line: "Give one model key per client. Each agent gets only its own.", pic: keysPic },
+    { who: ["phone", "Inès, on her phone"], line: "Inès drops Brun's invoices in. Each one is read as it arrives.", pic: dropPic },
+    { who: ["phone", "Inès, on her phone"], line: "When something looks wrong, the Brun agent asks her.", pic: askPic },
+    { who: ["phone", "Inès, on her phone"], line: "On the first working day, the report is ready. She sees Brun only.", pic: reportPic },
+    { who: ["box", "Under the hood"], line: "Brun's agent cannot see Nord's folder or key.", pic: wallPic }
+  ];
+  var usesEl = document.getElementById("uses");
+  USES.forEach(function (u, i) {
+    var li = h("li", "use", null, usesEl);
+    var who = h("div", "who", null, li); ic(u.who[0], 16, who); h("span", null, u.who[1], who);
+    h("div", "pic", null, li).appendChild(u.pic());
+    var ln = h("p", "line", null, li); h("span", "n", String(i + 1), ln); h("span", null, u.line, ln);
+  });
+
+  /* ---------- The whole setup: drawn from the setup file ---------- */
+  var SIZE = { agent: [164, 62], script: [164, 62], asset: [178, 46], person: [172, 46] };
+  var WAKE_SHORT = { "Every hour": "every hour", "Monday to Friday at 7:30": "Mon to Fri, 7:30", "A call from outside": "a call from outside" };
+  var flow = null, filter = null, picked = null, cols = [];
+  var board = document.getElementById("board"), info = document.getElementById("info"), chipsEl = document.getElementById("chips");
+
+  function byId(id) { for (var i = 0; i < flow.nodes.length; i++) if (flow.nodes[i].id === id) return flow.nodes[i]; return null; }
+  /* With one client shown, the top row moves over that client's column. */
+  function geom(x) { var z = SIZE[x.kind], left = x.x; if (filter != null && cols[filter] && rowOf(x) === 0) left = cols[filter].cx - z[0] / 2; return { l: left, t: x.y, w: z[0], h: z[1], cx: left + z[0] / 2, cy: x.y + z[1] / 2, r: left + z[0], b: x.y + z[1] }; }
+  function rowOf(x) { return Math.round((x.y - 24) / 106); }
+  /* The columns are found from the boxes: one per client, named after the folder at its top. */
+  function findCols() {
+    var centres = [];
+    flow.nodes.forEach(function (x) { if (rowOf(x) === 0) return; var c = geom(x).cx; if (!centres.some(function (k) { return Math.abs(k - c) < 40; })) centres.push(c); });
+    centres.sort(function (a, b) { return a - b; });
+    return centres.map(function (c) {
+      var top = flow.nodes.filter(function (x) { return rowOf(x) > 0 && Math.abs(geom(x).cx - c) < 40; }).sort(function (a, b) { return a.y - b.y; })[0];
+      return { cx: c, name: top ? top.name.split(":")[0] : "" };
+    });
+  }
+  function colOf(x) { if (rowOf(x) === 0) return -1; var best = 0; cols.forEach(function (c, i) { if (Math.abs(c.cx - geom(x).cx) < Math.abs(cols[best].cx - geom(x).cx)) best = i; }); return best; }
+  function shown(x) { return filter == null || colOf(x) === -1 || colOf(x) === filter; }
+
+  function route(l) {
+    var a = geom(byId(l.from)), b = geom(byId(l.to)), ra = rowOf(byId(l.from)), rb = rowOf(byId(l.to));
+    if (Math.abs(ra - rb) === 1) {
+      var down = ra < rb, y1 = down ? a.b : a.t, y2 = down ? b.t : b.b, m = (y1 + y2) / 2;
+      return "M" + a.cx + " " + y1 + " C" + a.cx + " " + m + " " + b.cx + " " + m + " " + b.cx + " " + y2;
+    }
+    if (ra === 0 || rb === 0) {
+      /* to or from the top row: along the right of the column */
+      var low = ra === 0 ? b : a, top = ra === 0 ? a : b, lane = low.r + 14, ci = colOf(ra === 0 ? byId(l.to) : byId(l.from));
+      var ty = top.cy + (ci - 1) * 9, tx = lane < top.cx ? top.l : top.r;
+      var pts = [[low.r, low.cy], [lane, low.cy], [lane, ty], [tx, ty]];
+      if (ra === 0) pts.reverse();
+      return "M" + pts.map(function (p) { return p[0] + " " + p[1]; }).join(" L");
+    }
+    /* a long link in one column: along its left side */
+    var lane2 = Math.min(a.l, b.l) - (l.kind === "talk" ? 14 : 28);
+    return "M" + a.l + " " + a.cy + " L" + lane2 + " " + a.cy + " L" + lane2 + " " + b.cy + " L" + b.l + " " + b.cy;
+  }
+  /* A name too long for its box is drawn a little narrower. */
+  function fit(t, room) {
+    var w = 0; try { w = t.getComputedTextLength(); } catch (e) { return; }
+    if (w > room) { t.setAttribute("textLength", room); t.setAttribute("lengthAdjust", "spacingAndGlyphs"); }
+  }
+  function sub(x) {
+    if (x.kind === "agent") return x.tool + (WAKE_SHORT[x.wake] ? " · " + WAKE_SHORT[x.wake] : "");
+    if (x.kind === "script") return "script · " + (x.pin ? x.pin.slice(0, 7) : "not pinned");
+    if (x.kind === "asset") return "folder";
+    return "person";
+  }
+  function draw() {
+    board.textContent = "";
+    var vis = flow.nodes.filter(shown);
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    vis.forEach(function (x) { var g = geom(x); minX = Math.min(minX, g.l - 34); maxX = Math.max(maxX, g.r + 24); minY = Math.min(minY, g.t - 8); maxY = Math.max(maxY, g.b + 8); });
+    var svg = s("svg", { viewBox: [minX, minY, maxX - minX, maxY - minY].join(" "), role: "group", "aria-label": "The whole setup: " + vis.length + " boxes" }, board);
+    var defs = s("defs", {}, svg);
+    ["read", "write", "talk"].forEach(function (k) {
+      var m = s("marker", { id: "m-" + k, viewBox: "0 0 10 10", refX: "9", refY: "5", markerWidth: "9", markerHeight: "9", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" }, defs);
+      s("path", { d: "M0 0 L10 5 L0 10 z", fill: "var(--" + k + ")" }, m);
+    });
+    var near = picked ? [picked] : null;
+    if (picked) flow.links.forEach(function (l) { if (l.from === picked) near.push(l.to); if (l.to === picked) near.push(l.from); });
+    flow.links.forEach(function (l) {
+      if (!shown(byId(l.from)) || !shown(byId(l.to))) return;
+      var g = s("g", { "class": "lk " + (l.kind === "both" ? "read" : l.kind) }, svg);
+      if (picked && l.from !== picked && l.to !== picked) g.classList.add("dimmed");
+      var p = s("path", { d: route(l), "marker-end": "url(#m-" + (l.kind === "both" ? "read" : l.kind) + ")" }, g);
+      if (l.kind === "talk" || l.kind === "both") p.setAttribute("marker-start", "url(#m-" + (l.kind === "both" ? "read" : "talk") + ")");
+      if (l.wakes) {
+        var len = p.getTotalLength ? p.getTotalLength() : 0, pt = len ? p.getPointAtLength(len * 0.45) : null;
+        if (pt) s("circle", { cx: pt.x.toFixed(1), cy: pt.y.toFixed(1), r: 6, "class": "wk" }, g);
+      }
+    });
+    vis.forEach(function (x) {
+      var gm = geom(x);
+      var g = s("g", { "class": "node k-" + x.kind, tabindex: "0", role: "button", "aria-label": x.name + ", " + sub(x) }, svg);
+      if (picked === x.id) g.classList.add("on");
+      if (near && near.indexOf(x.id) < 0) g.classList.add("dimmed");
+      s("rect", { x: gm.l, y: gm.t, width: gm.w, height: gm.h, rx: x.kind === "person" ? gm.h / 2 : x.kind === "asset" ? 8 : 12 }, g);
+      var icon = { agent: "bot", script: "doc", asset: "folder", person: "person" }[x.kind];
+      var col = { agent: "agent", script: "script", asset: "folder", person: "person" }[x.kind];
+      ic(icon, 16, g, gm.l + 12, gm.t + (x.kind === "agent" || x.kind === "script" ? 12 : 15), col);
+      var nm = st(gm.l + 34, gm.t + (x.kind === "agent" || x.kind === "script" ? 25 : 28), x.name, "nm", g);
+      fit(nm, gm.w - 44);
+      if (x.kind === "agent" || x.kind === "script") {
+        var sx = gm.l + 12;
+        if (x.key) { ic("key", 14, g, sx, gm.t + 37, "gold"); sx += 20; }
+        fit(st(sx, gm.t + 48, sub(x), "tg", g), gm.r - 8 - sx);
+      }
+      function pick() { picked = picked === x.id ? null : x.id; say(); draw(); var again = board.querySelector('[aria-label="' + CSS.escape(x.name + ", " + sub(x)) + '"]'); if (again) again.focus(); }
+      g.addEventListener("click", pick);
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    });
+  }
+  function names(list) {
+    if (!list.length) return "nothing";
+    if (list.length === 1) return list[0];
+    return list.slice(0, -1).join(", ") + " and " + list[list.length - 1];
+  }
+  /* One line of what a box does, and what it sees, from the file. */
+  function say() {
+    info.textContent = "";
+    var x = picked && byId(picked);
+    if (!x) { info.textContent = "Touch a box to see what it does and what it sees."; return; }
+    var reads = [], writes = [], talks = [], readBy = [], writtenBy = [], wakes = [];
+    flow.links.forEach(function (l) {
+      var other = byId(l.from === x.id ? l.to : l.from);
+      if (l.from !== x.id && l.to !== x.id) return;
+      if (l.kind === "talk") talks.push(other.name);
+      else if (x.kind === "asset") { if (l.from === x.id) readBy.push(other.name + (l.wakes ? " (wakes it)" : "")); else writtenBy.push(other.name); }
+      else if (l.from === x.id) writes.push(other.name);
+      else { reads.push(other.name + (l.only ? " (" + l.only + " only)" : "")); if (l.wakes) wakes.push("an arrival in " + other.name); }
+    });
+    h("b", null, x.name + ": ", info);
+    var doesLine, seesLine;
+    if (x.kind === "agent" || x.kind === "script") {
+      doesLine = x.does || "";
+      var clock = x.wake && x.wake !== "Nothing but its links" ? " Wakes: " + x.wake + "." : "";
+      seesLine = "Reads " + names(reads) + ". Writes " + names(writes) + "." + (talks.length ? " Talks with " + names(talks) + "." : "") + (x.key ? " Key: " + x.key + "." : "") + (wakes.length ? " Woken by " + names(wakes) + "." : "") + clock;
+    } else if (x.kind === "asset") {
+      doesLine = "A folder. Written by " + names(writtenBy) + ".";
+      seesLine = "Read by " + names(readBy) + ". Nobody else sees it.";
+    } else {
+      doesLine = "A person, with a code that opens only what is linked here.";
+      seesLine = (writes.length ? "Drops files in " + names(writes) + ". " : "") + (reads.length ? "Reads " + names(reads) + ". " : "") + (talks.length ? "Talks with " + names(talks) + "." : "");
+    }
+    info.appendChild(document.createTextNode(doesLine));
+    h("span", "sees", seesLine, info);
+  }
+  function chips() {
+    chipsEl.textContent = "";
+    [{ label: "All clients", v: null }].concat(cols.map(function (c, i) { return { label: c.name, v: i }; })).forEach(function (c) {
+      var b = h("button", null, c.label, chipsEl); b.type = "button";
+      b.setAttribute("aria-pressed", filter === c.v ? "true" : "false");
+      b.addEventListener("click", function () { filter = c.v; if (picked && !shown(byId(picked))) { picked = null; say(); } chips(); draw(); });
+    });
+  }
+  function legend() {
+    var lg = document.getElementById("legend");
+    [["read", "reads"], ["write", "writes"], ["talk", "talks"]].forEach(function (k) {
+      var sp = h("span", null, null, lg), v = s("svg", { width: 30, height: 10, "aria-hidden": "true" }, sp);
+      s("path", { d: "M1 5 H29", stroke: "var(--" + k[0] + ")", "stroke-width": 2.5, "stroke-dasharray": k[0] === "talk" ? "5 3" : "none" }, v);
+      sp.appendChild(document.createTextNode(k[1]));
+    });
+    var w = h("span", null, null, lg), wv = s("svg", { width: 14, height: 14, "aria-hidden": "true" }, w); s("circle", { cx: 7, cy: 7, r: 6, fill: "var(--lit)" }, wv);
+    w.appendChild(document.createTextNode("an arrival wakes it"));
+    var k = h("span", null, null, lg); ic("key", 16, k, null, null, "gold"); k.appendChild(document.createTextNode("needs a key"));
+  }
+
+  /* ---------- What you need: from the same file ---------- */
+  function needs() {
+    var ul = document.getElementById("needs"); ul.textContent = "";
+    var keys = [], tools = [], scripts = [], people = [];
+    flow.nodes.forEach(function (x) {
+      if (x.key && keys.indexOf(x.key) < 0) keys.push(x.key);
+      if (x.kind === "agent" && tools.indexOf(x.tool) < 0) tools.push(x.tool);
+      if (x.kind === "script" && scripts.indexOf(x.source + " " + x.pin) < 0) scripts.push(x.source + " " + x.pin);
+      if (x.kind === "person" && x.name.indexOf("You") !== 0) people.push(x.name.split(",")[0]);
+    });
+    function card(icon, title) { var li = h("li", "need", null, ul), hd = h("div", "hd", null, li); ic(icon, 22, hd); h("span", null, title, hd); return li; }
+    var a = card("key", keys.length + " keys");
+    var kc = h("div", "kchips", null, a); keys.forEach(function (k) { h("span", null, k, kc); });
+    h("p", "dimp", "One key per client, at your model provider. The file holds their names, never the keys.", a);
+    var lim = h("p", "dimp lim", null, a); h("b", null, "Limit: ", lim); lim.appendChild(document.createTextNode("an agent can read the key it is given."));
+    var b = card("cloud", "A model provider you choose");
+    h("p", null, "The agents run " + names(tools) + ", which works with many providers: in Europe if you like, or elsewhere.", b);
+    h("p", "dimp", "What an agent reads goes to its model's provider.", b);
+    var c = card("screen", "A computer that stays on");
+    h("p", null, "Any computer or small server, on weekdays at 7:30. No local model needed.", c);
+    h("p", "dimp", "A local model instead: only on a powerful computer, with a strong graphics card.", c);
+    h("p", "dimp", scripts.length + " script, pinned: invoice reader " + (scripts[0] || "").split(" ")[1].slice(0, 7) + ". " + people.length + " people get a code: " + names(people) + ".", c);
+  }
+
+  function use(text) {
+    var next;
+    try { next = JSON.parse(text); } catch (e) { return; }
+    if (!next || next.clavarium !== "flow" || !Array.isArray(next.nodes) || !Array.isArray(next.links)) return;
+    flow = next; cols = findCols();
+    if (filter != null && filter >= cols.length) filter = null;
+    document.getElementById("text").textContent = text;
+    document.getElementById("peek").textContent = "See the file: " + flow.nodes.length + " boxes, " + flow.links.length + " links";
+    chips(); draw(); say(); needs();
+  }
+  legend();
+  /* On a phone the three columns are alike: one client is shown first. */
+  if (window.matchMedia && window.matchMedia("(max-width: 699px)").matches) filter = 0;
+  use(EMBEDDED);
+  var fileText = null;
+  if (location.protocol !== "file:" && window.fetch) {
+    fetch("office.clavarium.json", { cache: "no-cache" }).then(function (r) { return r.ok ? r.text() : null; }).then(function (t) {
+      if (!t) return; fileText = t; if (t !== EMBEDDED) use(t);
+    }).catch(function () {});
+  }
+
+  /* ---------- Copy it ---------- */
+  var said = document.getElementById("said");
+  document.getElementById("copy").addEventListener("click", function () {
+    var getText = fileText ? Promise.resolve(fileText) : (location.protocol !== "file:" && window.fetch
+      ? fetch("office.clavarium.json").then(function (r) { if (!r.ok) throw new Error(); return r.text(); }).catch(function () { return EMBEDDED; })
+      : Promise.resolve(EMBEDDED));
+    getText.then(function (t) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(t);
+      throw new Error();
+    }).then(function () {
+      said.className = "said"; said.textContent = "Copied.";
+    }).catch(function () {
+      said.className = "said no"; said.textContent = "Could not copy: open See the file and copy it by hand.";
+      document.querySelector(".get details").open = true;
+    });
+  });
+})();
+</script>
+</body>
+</html>

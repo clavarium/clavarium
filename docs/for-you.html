@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clavarium</title>
-<meta name="description" content="Your AI assistants work while you are away. Safely, on your machine.">
+<title>Clavarium: for the one who uses it</title>
+<meta name="description" content="Say what you want; your assistant prepares it, on a small computer of your own. You send things yourself.">
 <!--
   THE HOME PAGE. Written by hand, no build step: the file you read is the file
   that is served.
@@ -15,6 +15,7 @@
 
   Every colour is defined on bare :root; the dark block only redefines.
 -->
+<link rel="stylesheet" href="base.css">
 <style>
 :root {
   --bg: #ffffff; --bg-soft: #f5f6f8; --bg-code: #f1f2f5; --text: #16181d; --dim: #52565f;
@@ -44,13 +45,6 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 var(--sans); }
 a { color: var(--accent); }
 .wrap { width: 100%; max-width: 64rem; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 2rem); }
-header.top { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--line-soft); }
-header.top .wrap { display: flex; align-items: center; gap: 1.2rem; min-height: 3.2rem; flex-wrap: wrap; }
-.mark { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: -.02em; color: var(--text); text-decoration: none; }
-.mark b { color: var(--brass); font-weight: 600; }
-nav { display: flex; gap: 1.1rem; margin-left: auto; flex-wrap: wrap; }
-nav a { color: var(--dim); text-decoration: none; font-size: .92rem; padding: .6rem 0; }
-nav a:hover, nav a[aria-current] { color: var(--text); }
 
 .hero { padding: clamp(2.4rem, 8vw, 4.6rem) 0 clamp(1.8rem, 5vw, 3rem); }
 h1 { margin: 0; font-size: clamp(2rem, 6.4vw, 3.3rem); line-height: 1.1; letter-spacing: -.02em; font-weight: 680; max-width: 16em; text-wrap: balance; }
@@ -68,7 +62,7 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 .more { display: inline-block; margin-top: 1.4rem; font-weight: 600; text-decoration: none; }
 
 /* The scenes: small drawings made of the pieces the product itself shows. */
-.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 9.5rem; }
+.scene { flex: 1; border: 1px solid #2b3745; border-radius: 10px; background: #0f141a; color: #e7edf4; box-shadow: var(--shadow); font: 12px/1.45 var(--sans); padding: .7rem; display: flex; flex-direction: column; gap: .5rem; min-height: 13.5rem; }
 .scene .card { border: 1px solid #2b3745; border-radius: 8px; padding: .45rem .55rem; background: #161d26; }
 .scene .who { display: flex; align-items: center; gap: .4rem; font-weight: 700; }
 .scene .dot { width: .45rem; height: .45rem; border-radius: 50%; background: #5fc39d; }
@@ -101,25 +95,33 @@ h2 { margin: 0 0 1.4rem; font-size: clamp(1.3rem, 4vw, 1.7rem); font-weight: 650
 @media (max-width: 860px) { .two { grid-template-columns: 1fr; } }
 .two h2 { margin-bottom: .8rem; }
 .other { margin: 1.6rem 0 0; }
-.other { color: var(--dim); }
-.other a { font-weight: 600; text-decoration: none; white-space: nowrap; }
-.pair { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
+.other a { font-weight: 600; text-decoration: none; }
+.pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); gap: clamp(1.2rem, 4vw, 2.6rem); align-items: center; }
 @media (max-width: 800px) { .pair { grid-template-columns: 1fr; } }
 .shot { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); background: #0f141a; }
 .note { margin: 0 0 .9rem; color: var(--dim); }
-footer { border-top: 1px solid var(--line-soft); padding: 1.6rem 0 2.4rem; color: var(--dim); font-size: .88rem; }
-footer .wrap { display: flex; gap: 1.2rem; flex-wrap: wrap; }
-footer a { color: var(--dim); }
 </style>
 </head>
 <body>
 <header class="top">
   <div class="wrap">
-    <a class="mark" href="./"><b>&gt;_</b> clavarium</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
     <nav aria-label="Pages">
-      <a href="./" aria-current="page">Home</a>
-      <a href="examples.html">Examples</a>
+      <a href="index.html">Home</a>
+      <span class="drop">
+        <button class="drop-word" type="button">Use cases</button>
+        <span class="drop-menu">
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
+        <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/office.html">Office: one report per client</a>
+        <a href="cases/europe.html">Sensitive data that stays in Europe</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <span class="drop-sep" aria-hidden="true"></span>
+        <a href="examples.html">All examples</a>
+        </span>
+      </span>
       <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
       <a href="how-to-install-it.html">Install</a>
       <a href="how-it-is-kept-safe.html">Security</a>
       <a href="questions.html">FAQ</a>
@@ -130,15 +132,43 @@ footer a { color: var(--dim); }
 <main>
 <section class="hero" style="border-top:0">
   <div class="wrap">
-    <h1>Your AI assistants work while you are away. Safely, on your machine.</h1>
-    <p class="lead">No more night lost on “shall I go on?”. No more agent with your whole disk and every key in reach.</p>
+    <h1>Say what you want. Your assistant prepares it.</h1>
+    <p class="lead">An assistant that works on a small computer of your own. You talk to it from your phone or tablet.</p>
     <ul class="claims">
-      <li>Free · MIT</li>
-      <li>Open source</li>
-      <li>On a machine you own</li>
-      <li>Claude Code · OpenCode · Codex · Gemini</li>
-      <li>Terminal or chat · phone too</li>
+      <li>Phone, tablet or computer</li>
+      <li>Speak or type</li>
+      <li>Reads mail, never sends</li>
+      <li>Your phone tells you</li>
+      <li>You send things yourself</li>
+      <li>Free</li>
     </ul>
+  </div>
+</section>
+
+<section id="screen">
+  <div class="wrap pair">
+    <img class="shot" style="max-width:26rem;justify-self:center" loading="lazy" src="shots/talk.png" width="1800" height="2000" alt="A real exchange on a tablet: the assistant says it is ready; the person writes what they want; the assistant asks 'Should the cover be blue or red?' with two buttons, blue and red; below, a box to write in, the document it made, and what it says now.">
+    <div>
+      <h2>You talk with it, as in any messaging app</h2>
+      <ul class="rows">
+        <li>You write, or you speak. It answers there.</li>
+        <li>When it has a question, it shows the choices. You touch one.</li>
+        <li>What it prepared is listed underneath: touch one, it opens.</li>
+        <li>This picture is a real exchange, with a real assistant.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="jobs">
+  <div class="wrap">
+    <h2>What people hand to it</h2>
+    <ol class="three">
+      <li><p class="cap">Tomorrow's order</p><p class="say">Yesterday's sales come in. A proposal for each supplier is ready, for you to check before you call.</p></li>
+      <li><p class="cap">Unpaid invoices, every Friday</p><p class="say">The list of who is late, and a reminder written for each. You read them and send them.</p></li>
+      <li><p class="cap">Paperwork, filed</p><p class="say">Photograph a letter with your phone. It is named, put in the right folder, and found again.</p></li>
+    </ol>
+    <a class="more" href="examples.html#office">More of them →</a>
   </div>
 </section>
 
@@ -147,57 +177,91 @@ footer a { color: var(--dim); }
     <h2>How you use it</h2>
     <ol class="three">
       <li>
-        <p class="cap"><span>01</span>You give an assistant one folder</p>
-        <p class="say">It runs in a machine of its own and sees that folder, nothing else.</p>
+        <p class="cap"><span>01</span>Say it aloud, or type it</p>
+        <p class="say">Open the app on your tablet. One box to write in, or one button to speak.</p>
         <div class="scene" aria-hidden="true">
-          <div class="card">
-            <div class="who"><span class="dot"></span>client-a <span class="tag">attached</span></div>
-            <div class="dim">folder client-a <span class="gold">write</span></div>
-          </div>
-          <div class="dim end">A second agent looked for it: found none.</div>
+          <div class="card term">Read this week's customer mail.<br>Draft my replies.</div>
+          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span class="dim">speak, or type</span><span class="send">Dictate</span></div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>02</span>It works while you are away</p>
-        <p class="say">A file wakes it; several AI models read its question, and one doubt stops it and tells your phone.</p>
+        <p class="cap"><span>02</span>Your phone tells you when it asks</p>
+        <p class="say">Go and do something else. When the assistant has a question, your phone tells you. Touch the message, then touch your answer.</p>
         <div class="scene" aria-hidden="true">
-          <div class="card term">Delete this folder? (y/n)</div>
-          <div class="row"><span class="pill">model 1 <b>yes</b></span><span class="pill">model 2 <b class="no">no</b></span></div>
-          <div class="gold end" style="font-weight:700">Nothing typed · phone told</div>
+          <div class="paper"><b>Your assistant has a question</b>Mrs Martin asks for a discount. Offer one?</div>
+          <div class="dim end">It waits. It does not guess.</div>
         </div>
       </li>
       <li>
-        <p class="cap"><span>03</span>You send what it made</p>
-        <p class="say">You are shown what would go out and send it with a key that never enters a machine.</p>
+        <p class="cap"><span>03</span>Read what is ready, send it yourself</p>
+        <p class="say">The replies wait as files in the app, with a short report. You read them, then send them from your own mail.</p>
         <div class="scene" aria-hidden="true">
-          <div class="card end" style="display:flex;align-items:center;gap:.5rem"><span>1 commit waiting<br><span class="dim">nothing sent yet</span></span><span class="pill" style="margin-left:auto">Show</span><span class="send" style="margin-left:0">Send</span></div>
+          <div class="card"><div class="who">Report</div><div class="dim">6 mails read · 2 replies drafted</div></div>
+          <div class="card"><div class="who">Reply to Mrs Martin</div></div>
+          <div class="card"><div class="who">Reply to Mr Lee</div></div>
+          <div class="gold end" style="font-weight:700">You send.</div>
         </div>
       </li>
     </ol>
-    <a class="more" href="examples.html">See the 15 examples →</a>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap two">
+    <div>
+      <h2>It sees only what you give it</h2>
+      <ul class="rows">
+        <li>The folders and the mailbox you choose, and nothing else.</li>
+        <li>It reads your mail. It cannot send any.</li>
+        <li>What it reads is read by the AI service it uses.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>It can work while you are away</h2>
+      <ul class="rows">
+        <li>It can start when a mail or a file arrives, or at a set hour.</li>
+        <li>Several AI models can answer its questions, only when they all agree.</li>
+        <li>If they disagree, it waits for you. Every question and answer is kept.</li>
+      </ul>
+    </div>
   </div>
 </section>
 
 <section id="install">
-  <div class="wrap">
-    <h2>How you install it</h2>
-    <p class="note">One command on an Ubuntu Server 24.04 or 26.04 machine you own. You bring the AI: a subscription, or a key.</p>
-    <div class="snip"><pre>sudo deploy/install.sh \
-  --domain clav.example.com \
-  --operator you@example.com</pre></div>
-    <a class="more" href="how-to-install-it.html">Every way to install it, and what it needs →</a>
+  <div class="wrap two">
+    <div>
+      <h2>The small computer</h2>
+      <ul class="rows">
+        <li>A box the size of a book, left on at home or in the back room.</li>
+        <li>Your papers and your mail are kept on it, not on somebody else's.</li>
+        <li>Whoever sets it up looks after it. You only open the app.</li>
+      </ul>
+    </div>
+    <div>
+      <h2>How you get it</h2>
+      <ul class="rows">
+        <li>clavarium is free.</li>
+        <li>Someone who knows computers sets it up once.</li>
+        <li><a href="index.html">The page for that person →</a></li>
+      </ul>
+    </div>
   </div>
 </section>
 </main>
 
-<footer>
+<footer class="foot">
   <div class="wrap">
-    <span><span class="mark"><b>&gt;_</b> clavarium</span></span>
-    <a href="examples.html">Examples</a>
-    <a href="how-to-use-it.html">Use</a>
-    <a href="how-to-install-it.html">Install</a>
-    <a href="how-it-is-kept-safe.html">Security</a>
-    <a href="questions.html">FAQ</a>
+    <a class="mark" href="index.html"><b>&gt;_</b> clavarium</a>
+    <nav aria-label="Site">
+      <a href="examples.html">Use cases</a>
+      <a href="how-to-use-it.html">Use</a>
+      <a href="how-it-works.html">How it works</a>
+      <a href="how-to-install-it.html">Install</a>
+      <a href="how-it-is-kept-safe.html">Security</a>
+      <a href="questions.html">FAQ</a>
+      <a href="https://example.com/clavarium">Source</a>
+    </nav>
+    <p class="foot-line">Free and open source, MIT.</p>
   </div>
 </footer>
 </body>

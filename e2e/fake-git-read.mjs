@@ -7,7 +7,7 @@
  * program would give (0, 65, 66, 67, 82). It is NOT a sandbox: the git it
  * runs reads the folder's config as the sandboxed one would, but with this
  * account's rights. What the sandbox stops is tried for real, as root, in
- * the trial written at the end of docs/blueprint/git-runner-core.md.
+ * the trial written at the end of blueprint/git-runner-core.md.
  *
  * FAKE_GIT_READ_CODE, when set, is the exit code to give instead (with no
  * output): for the tests of what each code means.

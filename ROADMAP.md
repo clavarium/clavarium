@@ -64,13 +64,6 @@ listed here.
 
 ## Site
 
-- **The new site goes into the repository** (docs/, served as it is by GitHub
-  Pages), with checks that every page has the same header and
-  footer and that no link is broken.
-- **Install, Linux first:** the install command for Ubuntu as the main button,
-  one line on choosing an AI provider, and a plain "how to start" for people
-  who do not code. Docker is not offered: Clavarium makes virtual machines,
-  which a container cannot.
 - **A virtual machine image to download**, with Clavarium already inside, to
   open in Hyper-V, VMware or VirtualBox. Look first at how such images are
   built and published from GitHub (release assets, size limits). It needs

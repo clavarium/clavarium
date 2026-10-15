@@ -1,5 +1,5 @@
 /* THE LIFE OF A CONVERSATION: created, built, opened, left running, rested,
-   archived. See docs/blueprint/architecture.html, "When does a VM stop?".
+   archived. See blueprint/architecture.html, "When does a VM stop?".
  *
  *   - closing the page stops NOTHING: the tool keeps working in its VM;
  *   - once the tool has exited, the VM is stopped after a short delay;
