@@ -19,12 +19,13 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await page.locator('#links-tabs [data-view=convs]').click();
     const node = (id) => page.locator(`#links-board .lk-node[data-id="${id}"]`);
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 6);
-    /* At rest no line: a count on each box. All at once: a line for each right given. */
+    /* At rest every link is drawn, a line for each right given; this device may hide them, a count staying on each box. */
+    const kinds = () => page.locator('#links-svg path[data-kind]').evaluateAll((l) => l.filter((x) => getComputedStyle(x).display !== 'none').map((x) => x.dataset.kind).sort().join());
+    await me.until('every link is drawn at rest', async () => (await kinds()) === 'read,use,write,write');
+    await page.locator('#links-all').uncheck();
     assert.equal(await node('conversation:client-a').locator('.lk-cnt').innerText(), '3');
     assert.equal(await page.locator('#links-svg path[data-kind]:visible').count(), 0);
     await page.locator('#links-all').check();
-    assert.deepEqual(await page.locator('#links-svg path[data-kind]').evaluateAll((l) => l.map((x) => x.dataset.kind).sort()), ['read', 'use', 'write', 'write']);
-    await page.locator('#links-all').uncheck();
     /* One agent alone: what it sees, in words; what it does not see, greyed. */
     await node('conversation:client-a').click();
     await me.until('it says what client-a sees', async () => /its agent: read and write of site-a[\s\S]*its agent: read of brand[\s\S]*its agent: use of DEPLOY_A/.test(await page.locator('#links-card').innerText()));

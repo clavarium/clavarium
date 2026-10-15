@@ -57,8 +57,9 @@
         let byId = new Map();
         let view = matchMedia('(min-width: 900px)').matches ? 'all' : 'devices';
         try { const v = localStorage.getItem('clavarium-links-view'); if (VIEWS[v]) view = v; } catch { /* none kept */ }
-        let allLines = false;
-        try { allLines = localStorage.getItem('clavarium-links-all') === '1'; } catch { /* none kept */ }
+        /* Every link is drawn unless this device chose to hide them: a screen with no line read as broken. */
+        let allLines = true;
+        try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
         let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null;
         const ph = { screen: 'list', kind: 'device', id: null, adding: false };
         let traceOf = '*';
