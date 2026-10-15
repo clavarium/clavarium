@@ -15,9 +15,10 @@
  * The hook is fed what git feeds it on a real push: the remote's name and
  * address as arguments, and on its input one line "<local ref> <local
  * commit> <remote ref> <remote commit>" for the exact commit to send and the
- * exact branch it would go to. The machine's repository must be AT that
- * commit, or what was checked is not what would be sent: then the check
- * fails and says why.
+ * exact branch it would go to. They run where that exact commit is checked
+ * out: the repository's own folder, or another working tree of it (git
+ * worktree), or else a working tree made at that commit for the checks and
+ * taken away after them. What was checked is always what would be sent.
  *
  * Bounded: a time limit (killed after it), and only the end of the output
  * comes back.
@@ -35,12 +36,29 @@ const NOT_THERE = 90; const MOVED = 91; const NOTHING = 95; const TIMED_OUT = 12
 export const SCRIPT = `exec 2>&1
 repo="$1"; head="$2"; line="$3"; url="$4"; cmd="$5"; hook="$6"
 cd "$repo" 2>/dev/null || { echo "The repository is not at $repo in this machine."; exit ${NOT_THERE}; }
-now="$(git rev-parse --verify --quiet HEAD)"
-if [ "$now" != "$head" ]; then echo "The repository here is at \${now:-no commit}, not at the commit to send ($head): what would be checked is not what would be sent. Look again."; exit ${MOVED}; fi
 tmp="$(mktemp -d)" || exit 1
-trap 'rm -rf "$tmp"' EXIT
+made=""
+trap '[ -n "$made" ] && git -C "$repo" worktree remove --force "$made" >/dev/null 2>&1; rm -rf "$tmp"' EXIT
+now="$(git rev-parse --verify --quiet HEAD)"
+where="Checked in $repo."
+if [ "$now" != "$head" ]; then
+  # The commit may be checked out in another working tree of this repository
+  # (git worktree): it is checked there, as it is.
+  found="$(git worktree list --porcelain 2>/dev/null | awk -v h="$head" '/^worktree /{w=substr($0,10)} /^HEAD /{if ($2==h) {print w; exit}}')"
+  if [ -n "$found" ] && cd "$found" 2>/dev/null; then where="Checked in $found, where this commit is checked out."
+  else
+    # Nowhere: a working tree of its own, at exactly this commit, made for
+    # the checks and taken away after them.
+    git cat-file -e "$head^{commit}" 2>/dev/null || { echo "The commit to send ($head) is not in this repository. Look again."; exit ${MOVED}; }
+    git worktree add --detach --quiet "$tmp/at" "$head" >/dev/null 2>&1 || { echo "The repository here is at \${now:-no commit}, not at the commit to send ($head), and a working tree at that commit could not be made. Look again."; exit ${MOVED}; }
+    made="$tmp/at"; cd "$made" || exit ${MOVED}
+    where="Checked in a working tree made at this commit, then taken away."
+  fi
+fi
+[ "$(git rev-parse --verify --quiet HEAD)" = "$head" ] || { echo "What would be checked is not the commit to send ($head). Look again."; exit ${MOVED}; }
 status=0; ran=0
 {
+  echo "$where"
   if [ -n "$(git status --porcelain --untracked-files=no 2>/dev/null | head -1)" ]; then echo "Note: files changed here and not committed are part of what was checked."; fi
   if [ "$hook" = yes ]; then
     path="$(git rev-parse --git-path hooks/pre-push)"
