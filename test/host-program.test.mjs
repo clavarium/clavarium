@@ -45,6 +45,11 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['shelf', 'size', 'clvshelf-20261014-120000'], 'du -sm /var/snap/multipass/common/data/multipassd/vault/instances/clvshelf-20261014-120000'],
         [['shelf', 'room'], 'df /var/snap/multipass/common'],
         [['shelf', 'list'], 'multipass list --format csv (ready-made machines only)'],
+        [['vm', 'stop', 'clv-demo'], 'multipass stop clv-demo'],
+        [['vm', 'kill', 'clv-demo'], 'multipass stop --force clv-demo'],
+        [['vm', 'set', 'clv-demo', 'memory', '2048'], 'multipass set local.clv-demo.memory=2048M'],
+        [['vm', 'set', 'clv-demo', 'disk', '16'], 'multipass set local.clv-demo.disk=16G'],
+        [['vm', 'size', 'clv-demo'], 'multipass get local.clv-demo.memory\nmultipass get local.clv-demo.disk'],
     ];
     for (const [args, expected] of cases) assert.deepEqual(host(...args), { code: 0, out: expected, err: '' }, args.join(' '));
 });
@@ -73,6 +78,9 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
         ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['work', 'make', '../x'], ['work', 'aside', '/etc'], ['work', 'erase', 'demo'], ['work', 'room', '../x'], ['vm', 'unwork', 'primary'],
         /* A work folder goes to its own conversation's machine, never to another. */
         ['vm', 'mount', 'clv-other', 'work', 'demo', '0', '0'], ['vm', 'mount', 'clv-demo', 'work', '../demo', '0', '0'], ['folder', 'aside', '/etc'], ['folder', 'erase', 'reports'],
+        /* Memory and disk only, of our machines only, within bounds; nothing else of the VM manager's settings. */
+        ['vm', 'set', 'primary', 'memory', '2048'], ['vm', 'set', 'clv-demo', 'cpus', '8'], ['vm', 'set', 'clv-demo', 'memory', '100'], ['vm', 'set', 'clv-demo', 'memory', '2G'],
+        ['vm', 'set', 'clv-demo', 'disk', '2'], ['vm', 'set', 'clv-demo', 'disk', '16G'], ['vm', 'set', 'clv-demo', 'disk', '99999'], ['vm', 'kill', 'primary'], ['vm', 'size', 'clvshelf-20261014-120000'],
     ]) assert.equal(host(...args).code, 78, args.join(' '));
     assert.equal(host('vm').code, 64);
     const aside = host('folder', 'aside', 'reports');

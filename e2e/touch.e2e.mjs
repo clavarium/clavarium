@@ -58,6 +58,7 @@ test('what was copied elsewhere is pasted into the terminal, by the button or th
     await me.create('pasting');
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await me.page.evaluate(() => navigator.clipboard.writeText('echo pasted-by-button'));
+    await me.more();
     await me.page.locator('#copy-open').click();
     await me.page.locator('#paste-now').click();
     await me.sees('echo pasted-by-button');
@@ -65,6 +66,7 @@ test('what was copied elsewhere is pasted into the terminal, by the button or th
     await me.until('the command ran', async () => (await me.screen()).split('pasted-by-button').length >= 3);
     /* Without the permission, the field does the same job. */
     await me.context.clearPermissions();
+    await me.more();
     await me.page.locator('#copy-open').click();
     await me.page.fill('#paste-text', 'echo pasted-by-field');
     await me.page.locator('#paste-send').click();
@@ -81,6 +83,7 @@ test('an Enter pressed while the browser is still reading what was copied does n
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write']);
     /* A slow clipboard, as when the browser asks first. */
     await me.page.evaluate(() => { navigator.clipboard.readText = () => new Promise((done) => setTimeout(() => done('pasted-once'), 700)); });
+    await me.more();
     await me.page.locator('#copy-open').click();
     await me.page.locator('#paste-now').click();
     await me.page.keyboard.press('Enter');
@@ -157,6 +160,7 @@ test('with the lock on, nothing the page does brings the on-screen keyboard back
     await tap('#keys button[data-keys="enter"]');
     await holds('a key of the row');
     await me.until('the shortcut row is painted', async () => (await me.page.locator('#shortcut-row button.quiet').count()) > 0);
+    await me.more();
     await me.page.locator('#shortcut-row button.quiet', { hasText: '+ Shortcut' }).tap();
     await holds('the form of a new shortcut opens');
     await me.page.fill('#shortcut-label', 'Hello');
@@ -185,16 +189,17 @@ test('with the lock on, nothing the page does brings the on-screen keyboard back
     await holds('a resize');
 
     /* Sheets and windows that give the focus back when they close. */
-    await tap('#files-open'); await tap('#files-close');
+    await me.menu(); await tap('#files-open'); await tap('#files-close');
     await holds('Files closed');
-    await tap('#folders');
+    await me.menu(); await tap('#folders');
+    await me.chapter('wakeups');
     await me.page.locator('#wakeups-new-box summary').tap();
     await me.page.selectOption('#wakeup-kind', 'cron');
     await me.page.selectOption('#wakeup-often', 'custom');
     await holds('a wake-up "by the clock", written by hand');
     await tap('#panel-close');
     await holds('the panel closed');
-    await tap('#copy-open');
+    await me.more(); await tap('#copy-open');
     /* The browser does not let the page read the clipboard here: it says
        so, and used to put the cursor in the field below. */
     await tap('#paste-now');
@@ -221,12 +226,12 @@ test('with the lock on, nothing the page does brings the on-screen keyboard back
     await holds('a file shown, then closed');
 
     /* A notice answered: archiving asked, then cancelled. */
-    await tap('#folders'); await tap('#archive');
+    await me.menu(); await tap('#folders'); await me.chapter('advanced'); await tap('#archive');
     await tap('#notice-cancel');
     await holds('a notice cancelled');
 
     /* Asleep, then woken: the terminal is opened again. */
-    await tap('#folders'); await tap('#sleep');
+    await me.menu(); await tap('#folders'); await tap('#sleep');
     await me.until('asleep', async () => (await me.state()) === 'asleep');
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).tap();
     await me.until('awake', async () => (await me.state()) === 'live');
@@ -275,6 +280,7 @@ test('with the lock off, a field opened for typing still takes the cursor', { sk
     await me.create('unlocked');
     await me.page.locator('#kbd').tap();
     await me.until('the shortcut row is painted', async () => (await me.page.locator('#shortcut-row button.quiet').count()) > 0);
+    await me.more();
     await me.page.locator('#shortcut-row button.quiet', { hasText: '+ Shortcut' }).tap();
     assert.equal(await me.page.evaluate(() => document.activeElement?.id), 'shortcut-label');
 });

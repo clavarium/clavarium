@@ -9,6 +9,7 @@ import { bench, SKIP, wait } from './bench.mjs';
 /* From a conversation: it is in the basket already; a name, and the code. */
 async function share(owner, label = 'A phone') {
     await owner.page.locator('#folders').click();
+    await owner.chapter('sharing');
     await owner.until('its sheet is shown', async () => owner.page.locator('#share').isVisible());
     await owner.page.locator('#share').click();
     await owner.until('the basket holds the conversation', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
@@ -104,6 +105,7 @@ test('shared with a phone: files of the conversation, and only where the owner a
 
     const local = join(mkdtempSync(join(tmpdir(), 'clv-photo-')), 'beach.txt');
     writeFileSync(local, 'the sea\n');
+    await phone.menu();
     await phone.page.locator('#files-open').click();
     await phone.page.locator('#files-tabs button', { hasText: 'photos' }).click();
     const [chooser] = await Promise.all([phone.page.waitForEvent('filechooser'), phone.page.locator('#files-import').click()]);
@@ -115,6 +117,7 @@ test('shared with a phone: files of the conversation, and only where the owner a
     await phone.type('cat ../resources/photos/beach.txt');
     await phone.sees('the sea');
     /* Read-only is said, and enforced by the server whatever the page shows. */
+    await phone.menu();
     await phone.page.locator('#files-open').click();
     await phone.page.locator('#files-tabs button', { hasText: 'papers' }).click();
     await phone.until('read-only is said', async () => phone.page.locator('#files-readonly').isVisible());
@@ -215,6 +218,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.api('/api/resources', { name: 'recipes' });
     await owner.api('/api/resources', { name: 'accounts' });
     await owner.page.locator('#folders').click();
+    await owner.chapter('sharing');
     await owner.until('its sheet is shown', async () => owner.page.locator('#share').isVisible());
     await owner.page.locator('#share').click();
     /* Only the conversation the owner came from is in the basket; nothing else was chosen for them. */
@@ -243,6 +247,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.until('it says the tablet is connected', async () => /Dad's tablet is connected/.test(await owner.page.locator('#share-waiting').innerText()), 20_000);
     await owner.page.locator('#share-done').click();
     assert.equal(await tablet.page.locator('#others').innerText(), 'Conversations (2)');
+    await tablet.menu();
     await tablet.page.locator('#files-open').click();
     const tab = tablet.page.locator('#files-tabs button', { hasText: 'recipes' });
     assert.match(await tab.innerText(), /recipes - read \(given to this device\)/);
@@ -282,6 +287,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     /* The tablet finds the changes by itself: accounts given, recipes gone. */
     await tablet.page.reload();
     await tablet.until('live again', async () => (await tablet.state()) === 'live');
+    await tablet.menu();
     await tablet.page.locator('#files-open').click();
     await tablet.until('its tabs follow', async () => { const tabs = (await tablet.page.locator('#files-tabs button').allInnerTexts()).join('|'); return /accounts/.test(tabs) && !/recipes/.test(tabs); });
     assert.deepEqual(owner.errors, []);

@@ -19,6 +19,17 @@ export const ROOM_MB = 1024;
 const MACHINE_PATH = /^\/work(\/[A-Za-z0-9._@+%~-]+)+$/;
 export const MACHINE_FILE_MAX = 5 * 1024 * 1024;
 const MOVE_MS = 30 * 60_000;
+/* A clean stop is given this long; then the machine is stopped by force. */
+export const STOP_MS = 120_000;
+/* What a conversation's machine may be given. Memory in megabytes, disk in
+   gigabytes: a disk only ever grows (the VM manager cannot shrink one). */
+export const MEMORY_MAX_MB = 16384;
+export const DISK_MAX_GB = 256;
+/* A machine is made with this disk (DISK in deploy/clavarium-host). */
+export const DISK_GB = 8;
+/* Repairs made once on machines built before they were part of the recipe
+   (see tools.mjs, "npm-writable"): the number goes up when one is added. */
+export const FIXES = 1;
 
 /* An error whose message is meant for the person, and safe to show. */
 export class Refusal extends Error {
@@ -41,6 +52,9 @@ export class Conversations {
     /* Set by the server: the ready-made machine to copy for a tool, or
        undefined for the long way. See shelf.mjs. */
     shelf = { pick: () => undefined };
+    /* Set by the server: told when a machine was just started by an opening
+       (its folders are then looked at, see health.mjs). */
+    started = () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -53,6 +67,7 @@ export class Conversations {
                it is said, with where to look, rather than guessed at. */
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
+            if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
         }
     }
 
@@ -62,8 +77,13 @@ export class Conversations {
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
 
     list() {
-        return this.#store.all().map((c) => ({ ...c, toolLabel: this.#tools.find((t) => t.id === c.tool)?.label ?? c.tool }));
+        return this.#store.all().map((c) => {
+            const tool = this.#tools.find((t) => t.id === c.tool);
+            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb };
+        });
     }
+
+    get(name) { return this.#store.get(name); }
 
     /* `workOnDisk`: the tool works on its machine's own disk instead of in a
        folder kept by the server. Faster for a large code project; but what
@@ -77,7 +97,7 @@ export class Conversations {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
-        const conversation = { name, tool, memoryMb: memory, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
+        const conversation = { name, tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
         this.#store.put(conversation);
         this.built = this.#build(name, chosen, memory);
         return conversation;
@@ -198,13 +218,142 @@ export class Conversations {
             say('Waking the machine...');
             const started = await this.#vms.start(name);
             if (started.code !== 0) { this.left(name); throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`); }
+            this.started(name);
         }
         /* `woke` tells the preparation that the machine has just started:
            whatever was put in its memory before is gone. */
         try { await this.prepare(name, woke); }
         catch (error) { this.left(name); throw error; }
         const tool = this.#tools.find((t) => t.id === c.tool);
+        /* A machine built before a repair was part of the recipe gets it
+           once, beside the opening, not in its way. */
+        if ((c.fixed ?? 0) < FIXES && tool.fixups.length > 0) void this.#fixup(name, tool);
         return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...tool.command], WORK));
+    }
+
+    async #fixup(name, tool) {
+        for (const step of tool.fixups) {
+            const r = await this.#vms.exec(name, step.argv, { timeoutMs: 120_000 }).catch(() => ({ code: 1 }));
+            if (r.code !== 0) return;
+        }
+        if (this.#store.get(name)) this.#store.patch(name, { fixed: FIXES });
+    }
+
+    /* RESTARTS THE MACHINE, as asked by its owner: a clean stop, a stop by
+       force if the clean one hangs or fails, then a start. The tool and its
+       terminal come back as after any start (`ready`); its folders are
+       looked at after (health.mjs). The answer comes at once; `restarted`
+       says how it ended. A machine asleep is restarted too: that is what
+       was asked. */
+    async restart(name) {
+        const c = this.#busyCheck(name);
+        if (await this.#vms.state(name) === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        this.#cancelStop(name);
+        this.#store.patch(name, { phase: 'restarting', step: 'Stopping the machine', restarted: undefined });
+        this.restarted = this.#cycle(name, c, async () => undefined, true)
+            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.'));
+        return this.#store.get(name);
+    }
+
+    /* GIVES ITS MACHINE MORE OR LESS MEMORY, OR A LARGER DISK. The VM
+       manager takes it only from a stopped machine: a running one is
+       stopped (cleanly first), set, and started again -- its work folder,
+       its folders and its branches are not touched. A disk only grows.
+       What is recorded afterwards is what the VM manager says it has. */
+    async resize(name, { memoryMb, diskGb } = {}) {
+        const c = this.#busyCheck(name);
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        const memory = memoryMb === undefined || memoryMb === null || memoryMb === '' ? c.memoryMb : Number(memoryMb);
+        const disk = diskGb === undefined || diskGb === null || diskGb === '' ? c.diskGb ?? DISK_GB : Number(diskGb);
+        const least = tool?.memoryMb ?? 512;
+        if (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
+        if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
+        if (disk < (c.diskGb ?? DISK_GB)) throw new Refusal(400, `A disk can only grow: it has ${c.diskGb ?? DISK_GB} GB.`);
+        if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB)) throw new Refusal(409, 'Nothing to change: it already has this.');
+        if (c.asleep === true) throw new Refusal(409, 'It is asleep: wake it first, then change its memory or its disk.');
+        const state = await this.#vms.state(name);
+        if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+        this.#cancelStop(name);
+        this.#store.patch(name, { phase: 'restarting', step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
+        const set = async () => {
+            if (memory !== c.memoryMb) {
+                this.#store.patch(name, { step: `Setting its memory to ${memory} MB` });
+                const r = await this.#vms.setMemory(name, memory);
+                if (r.code !== 0) return `its memory could not be set (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+            }
+            if (disk !== (c.diskGb ?? DISK_GB)) {
+                this.#store.patch(name, { step: `Growing its disk to ${disk} GB` });
+                const r = await this.#vms.setDisk(name, disk);
+                if (r.code !== 0) return `its disk could not be grown (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+            }
+            return undefined;
+        };
+        this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
+            await this.reconcile(name);
+            const now = this.#store.get(name);
+            const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.diskGb ?? disk} GB of disk`;
+            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`);
+        });
+        return this.#store.get(name);
+    }
+
+    /* What the VM manager says the machine has, written in its record. */
+    async reconcile(name) {
+        if (!this.#store.get(name)) return;
+        const real = await this.#vms.size(name).catch(() => ({}));
+        const patch = {};
+        if (real.memoryMb !== undefined && real.memoryMb !== this.#store.get(name).memoryMb) patch.memoryMb = real.memoryMb;
+        if (real.diskGb !== undefined && real.diskGb !== this.#store.get(name).diskGb) patch.diskGb = real.diskGb;
+        if (Object.keys(patch).length > 0 && this.#store.get(name)) this.#store.patch(name, patch);
+    }
+    async reconcileAll() {
+        for (const c of this.#store.all()) if (c.phase === 'ready') await this.reconcile(c.name);
+    }
+
+    #busyCheck(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'restarting' ? 'Its machine is being restarted already.' : c.phase === 'moving' ? 'It is moving its work folder.' : 'This conversation is not ready.');
+        return c;
+    }
+
+    /* Stops the machine (cleanly, then by force), runs `between` on the
+       stopped machine, and starts it again when `restart`. Returns what
+       went wrong, in words, or undefined. */
+    async #cycle(name, c, between, restart) {
+        const step = (text) => { if (this.#store.get(name)) this.#store.patch(name, { step: text }); };
+        try {
+            this.drop(name);
+            let state = await this.#vms.state(name);
+            if (state !== 'Stopped') {
+                step('Stopping the machine');
+                /* A machine asleep cannot be stopped cleanly: it is not running. */
+                const clean = state === 'Suspended' ? { code: 1 } : await this.#vms.stop(name, STOP_MS);
+                state = await this.#vms.state(name);
+                if (clean.code !== 0 || state !== 'Stopped') {
+                    step('Stopping the machine by force');
+                    await this.#vms.kill(name);
+                    state = await this.#vms.state(name);
+                }
+                if (state !== 'Stopped') return `the machine did not stop (it is ${state ?? 'gone'}).`;
+            }
+            const failed = await between();
+            if (!restart) return failed;
+            step('Starting the machine');
+            const started = await this.#vms.start(name);
+            if (started.code !== 0) return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
+            /* Whatever was put in its memory is gone: the next opening prepares it again. */
+            this.#fresh.add(name);
+            return failed;
+        } catch { return 'it stopped on an unexpected error.'; }
+    }
+
+    async #settle(name, said) {
+        if (!this.#store.get(name)) return;
+        const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
+        this.#store.patch(name, { phase: 'ready', step: undefined, asleep: false, restarted: said });
+        /* The tool is started again in its terminal, as after any start. */
+        if (running) this.ready(name);
     }
 
     /* A screen takes over a terminal that was kept open: the machine is

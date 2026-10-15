@@ -4,6 +4,10 @@
  *   GET  /api/conversations
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
+ *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
+ *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?}: stopped, set, started again
+ *   GET  /api/conversations/<name>/health        what was last seen of its machine
+ *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/archive
  *   GET  /api/resources
  *   POST /api/resources                     {name} | {name, type: 'git', from?, via?: {method, key?, user?, secret?}}
@@ -68,7 +72,7 @@ function readBody(request) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -135,7 +139,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
-                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
@@ -148,6 +152,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
+            const looked = /^\/api\/conversations\/([^/]+)\/health$/.exec(pathname);
+            if (looked && health) return send(200, health.of(decodeURIComponent(looked[1]))), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
             if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
@@ -301,6 +307,16 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
         if (moved) return send(202, await conversations.moveWork(decodeURIComponent(moved[1]), body.to)), true;
+        const machine = /^\/api\/conversations\/([^/]+)\/(restart|machine|health)$/.exec(pathname);
+        if (machine) {
+            const conversation = decodeURIComponent(machine[1]);
+            if (machine[2] === 'health') {
+                if (!health || !conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+                return send(200, await health.check(conversation)), true;
+            }
+            if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
+            return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb })), true;
+        }
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
         if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
         const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
@@ -314,6 +330,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') answerer?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') wakeups?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') talk?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') health?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {
         /* A git failure also says which (`kind`), and an fsck id the owner may waive (`offer`). */

@@ -275,6 +275,45 @@ export class Resources {
         return failed;
     }
 
+    /* WHAT SHOULD BE MOUNTED IN A MACHINE, as paths of that machine: its
+       work folder when it is kept here, each attached folder, and the
+       origin of each attached repository that has one. */
+    expected(conversation, workKept) {
+        const paths = workKept ? ['/work'] : [];
+        for (const { name } of this.of(conversation)) {
+            paths.push(`/resources/${name}`);
+            if (this.#store.get(name)?.type === 'git' && this.hasOrigin(name)) paths.push(`/resources/${originFolder(name)}`);
+        }
+        return paths;
+    }
+
+    /* ONE MOUNT THAT CAME LOOSE IS PUT BACK. The VM manager may still
+       believe a folder is mounted while the link that served it is dead
+       (seen: "already mounted", and nothing in the machine). So it is
+       unmounted first, whatever it believes, then mounted again exactly as
+       it was: the same folder or view, the same owner. Returns '' when it
+       is back, or what went wrong. Only called on a machine known to run. */
+    async repair(conversation, path) {
+        const said = (r) => firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
+        if (path === '/work') {
+            await this.#vms.workUnmount(conversation);
+            const made = await this.#vms.workMake(conversation);
+            if (made.code !== 0) return said(made);
+            const r = await this.#vms.workMount(conversation, this.#uid, this.#gid);
+            return r.code === 0 ? '' : said(r);
+        }
+        const name = path.slice('/resources/'.length);
+        const attached = this.of(conversation).find((x) => x.name === name);
+        const originOf = this.of(conversation).find((x) => this.#store.get(x.name)?.type === 'git' && originFolder(x.name) === name);
+        if (!attached && !originOf) return 'it is not attached any more';
+        try {
+            if (!attached || attached.access === 'read') await this.ensureView(name);
+        } catch (error) { return error.message; }
+        await this.#vms.umount(conversation, name);
+        const r = await this.#vms.mount(conversation, attached?.access === 'write' ? 'folder' : 'view', name, this.#uid, this.#gid);
+        return r.code === 0 ? '' : said(r);
+    }
+
     /* Removes a folder from the list. Only one that is attached nowhere; and
        its content is MOVED ASIDE, not erased: deleting somebody's files is
        not something a click on a web page should be able to finish. */

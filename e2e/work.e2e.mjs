@@ -50,7 +50,7 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     const move = async (button, warning) => {
         const before = (await me.api('/api/conversations')).body[0].work;
         await me.page.locator('#folders').click();
-        await me.page.evaluate(() => { document.getElementById('access-advanced').open = true; });
+        await me.page.evaluate(() => { document.getElementById('chapter-machine').open = true; });
         await me.until('the way to the other place is offered', async () => (await me.page.locator('#work-move').innerText()).startsWith(button));
         await me.page.locator('#work-move').click();
         assert.match(await me.page.locator('#notice-text').innerText(), warning);

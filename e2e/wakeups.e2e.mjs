@@ -14,6 +14,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.page.goto(`${b.origin}/?c=painter`);
     await me.until('painter is shown', async () => (await me.state()) === 'live' && (await me.page.locator('#name').innerText()) === 'painter');
     await me.page.locator('#folders').click();
+    await me.chapter('wakeups');
     await me.page.locator('#wakeups-new-box summary').click();
     /* Nothing to type: refused, and said. */
     await me.page.locator('#wakeups-new button[type=submit]').click();
@@ -39,6 +40,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.sees('\ntold of: need-a-banner.md', 30_000);
     /* By the clock is always a cron line: the usual choices write it, in sight. */
     await me.page.locator('#folders').click();
+    await me.chapter('wakeups');
     await me.page.locator('#wakeups-new-box summary').click();
     await me.page.selectOption('#wakeup-kind', 'cron');
     assert.equal(await me.page.inputValue('#wakeup-line'), '0 * * * *');
@@ -53,6 +55,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.page.locator('#panel-close').click();
     /* A call from outside: its address is shown once, and calling it wakes the tool. No account is needed: the address is the right. */
     await me.page.locator('#folders').click();
+    await me.chapter('wakeups');
     await me.page.locator('#wakeups-new-box summary').click();
     await me.page.selectOption('#wakeup-kind', 'call');
     await me.page.fill('#wakeup-message', 'echo "called with: {text}"');
@@ -71,6 +74,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.sees('\ncalled with: order 12', 30_000);
     /* Turned off: the next arrival wakes nobody. */
     await me.page.locator('#folders').click();
+    await me.chapter('wakeups');
     await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));
     await me.page.locator('#wakeups-rows .wakeup .levels button', { hasText: 'Off' }).first().click();
     await me.until('it is off', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'painter').wakeups.items[0].on === false);

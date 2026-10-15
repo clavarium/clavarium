@@ -18,9 +18,13 @@
       <span id="chips" class="chips"></span>
       <button type="button" id="others" hidden>This device</button>
       <button type="button" id="install" class="primary" hidden>Install the app</button>
-      <button type="button" id="theme" aria-label="Light or dark screen">Light</button>
-      <button type="button" id="copy-open" hidden>Copy / paste</button>
-      <button type="button" id="files-open" hidden>Files</button>
+      <div id="menu-items">
+        <button type="button" id="theme" class="in-menu" aria-label="Light or dark screen">Light</button>
+        <button type="button" id="copy-open" class="in-menu" hidden>Copy / paste</button>
+        <button type="button" id="files-open" class="in-menu" hidden>Files</button>
+        <span class="in-menu text-size" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span>
+      </div>
+      <button type="button" id="menu" aria-expanded="false" aria-label="More">&#8943;</button>
     </header>
     <main>
       <div id="terminal"></div>
@@ -82,18 +86,20 @@
       <div id="shortcut-row" class="chips-row"></div>
     </div>
     <!-- The keys a phone keyboard does not have. -->
-    <footer id="keys" title="To select text with the mouse, hold Shift while dragging: the tool otherwise takes the mouse for itself.">
+    <footer id="keys" data-more="false" title="To select text with the mouse, hold Shift while dragging: the tool otherwise takes the mouse for itself.">
       <button type="button" data-keys="esc">Esc</button>
-      <button type="button" data-keys="tab">Tab</button>
+      <button type="button" data-keys="tab" class="extra">Tab</button>
       <button type="button" data-keys="left" aria-label="Left">&larr;</button>
       <button type="button" data-keys="down" aria-label="Down">&darr;</button>
       <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
       <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
+      <button type="button" data-keys="backspace" class="extra" aria-label="Backspace">&#9003;</button>
       <button type="button" data-keys="enter" class="wide">Enter</button>
-      <button type="button" data-keys="stop" class="careful" title="Ctrl+C: interrupts what is running">Ctrl+C</button>
-      <button type="button" id="kbd" aria-pressed="false" hidden title="Show or hide the on-screen keyboard">Keyboard</button>
-      <button type="button" id="mic" aria-pressed="false" hidden>Dictate</button>
-      <button type="button" id="auto" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>
+      <button type="button" data-keys="stop" class="careful extra" title="Ctrl+C: interrupts what is running">Ctrl+C</button>
+      <button type="button" id="kbd" aria-pressed="false" data-short="Kbd" hidden title="Show or hide the on-screen keyboard">Keyboard</button>
+      <button type="button" id="mic" aria-pressed="false" data-short="Mic" hidden>Dictate</button>
+      <button type="button" id="auto" class="extra" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>
+      <button type="button" id="keys-more" aria-expanded="false" title="More keys, and the ready-made answers">More</button>
     </footer>
   </section>
 </div>

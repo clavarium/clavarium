@@ -29,6 +29,15 @@ export function vmName(conversation) {
     return `${PREFIX}${conversation}`;
 }
 
+/* A size as the VM manager writes it ("2G", "2.0GiB", "1024M", "1073741824")
+   in megabytes, or undefined. A bare number is bytes. */
+export function megabytes(text) {
+    const m = /^(\d+(?:\.\d+)?)([KMGT]?)(?:i?B)?$/i.exec(String(text ?? '').trim());
+    if (!m) return undefined;
+    const power = { '': -2, K: -1, M: 0, G: 1, T: 2 }[m[2].toUpperCase()];
+    return Number(m[1]) * 1024 ** power;
+}
+
 /* Runs one command and resolves with what happened; it never throws for a
    non-zero exit, because "the VM does not exist" is an answer, not a crash. */
 export function runner(prefix) {
@@ -103,7 +112,21 @@ export class Vms {
     }
 
     start(conversation) { return this.run(['vm', 'start', vmName(conversation)], { timeoutMs: 300_000 }); }
-    stop(conversation) { return this.run(['vm', 'stop', vmName(conversation)], { timeoutMs: 300_000 }); }
+    stop(conversation, timeoutMs = 300_000) { return this.run(['vm', 'stop', vmName(conversation)], { timeoutMs }); }
+    /* Stopped without waiting for the system inside: after a clean stop hung. */
+    kill(conversation) { return this.run(['vm', 'kill', vmName(conversation)], { timeoutMs: 300_000 }); }
+    /* Memory in megabytes, disk in gigabytes: only on a stopped machine. */
+    setMemory(conversation, mb) { return this.run(['vm', 'set', vmName(conversation), 'memory', String(mb)], { timeoutMs: 120_000 }); }
+    setDisk(conversation, gb) { return this.run(['vm', 'set', vmName(conversation), 'disk', String(gb)], { timeoutMs: 600_000 }); }
+    /* What the machine really has: { memoryMb, diskGb }, each undefined when it cannot be told. */
+    async size(conversation) {
+        const r = await this.run(['vm', 'size', vmName(conversation)], { timeoutMs: 60_000 });
+        if (r.code !== 0) return { memoryMb: undefined, diskGb: undefined };
+        const line = (key) => new RegExp(`^${key} (\\S+)$`, 'm').exec(r.stdout ?? '')?.[1];
+        const mb = megabytes(line('memory'));
+        const disk = megabytes(line('disk'));
+        return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024) };
+    }
     suspend(conversation) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
     remove(conversation) { return this.run(['vm', 'delete', vmName(conversation)], { timeoutMs: 300_000 }); }
 }

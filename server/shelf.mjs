@@ -27,7 +27,7 @@
  */
 import { createHash } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
-import { NODE_STEPS } from './tools.mjs';
+import { NODE_STEPS, NPM_WRITABLE } from './tools.mjs';
 import { SHARING_STEP } from './vm.mjs';
 
 const DAY = 24 * 60 * 60_000;
@@ -78,6 +78,10 @@ export function preparation(tools) {
         { label: 'Preparing for shared folders', argv: SHARING_STEP },
     ];
     const seen = new Set(steps.map((s) => JSON.stringify([s.argv, null])));
+    /* What npm installed becomes the machine user's AFTER every tool is
+       installed: done once at the end, not where the first tool asked for it
+       (a later tool's install, as root, would undo it). */
+    for (const step of NPM_WRITABLE) seen.add(JSON.stringify([step.argv, null]));
     for (const tool of tools) {
         for (const step of tool.steps) {
             const key = JSON.stringify([step.argv, step.input ?? null]);
@@ -86,6 +90,7 @@ export function preparation(tools) {
             steps.push({ label: `Installing ${tool.label}`, argv: step.argv, ...(step.input === undefined ? {} : { input: step.input }) });
         }
     }
+    if (tools.some((tool) => tool.fixups?.length > 0)) for (const step of NPM_WRITABLE) steps.push({ label: 'Letting the tools update themselves', argv: step.argv });
     steps.push(
         { label: 'Tidying up', argv: ['sudo', '-n', 'apt-get', 'clean'] },
         { label: 'Tidying up', argv: ['sudo', '-n', 'rm', '-rf', '/root/.npm'] },

@@ -5,7 +5,7 @@
     "command": [
       "claude"
     ],
-    "memoryMb": 1024,
+    "memoryMb": 2048,
     "install": [
       "node",
       [
@@ -18,6 +18,7 @@
         "--no-audit",
         "@anthropic-ai/claude-code"
       ],
+      "npm-writable",
       {
         "argv": [
           "install",
@@ -61,7 +62,8 @@
         "--no-fund",
         "--no-audit",
         "opencode-ai"
-      ]
+      ],
+      "npm-writable"
     ]
   },
   {
@@ -82,7 +84,8 @@
         "--no-fund",
         "--no-audit",
         "@openai/codex"
-      ]
+      ],
+      "npm-writable"
     ]
   },
   {
@@ -103,7 +106,8 @@
         "--no-fund",
         "--no-audit",
         "@google/gemini-cli"
-      ]
+      ],
+      "npm-writable"
     ]
   },
   {

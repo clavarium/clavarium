@@ -67,6 +67,21 @@ test('the preparation updates the system, prepares sharing, installs each tool o
     assert.equal(steps.find((s) => s.argv.includes('sha256sum')).input, NODE_STEPS.find((s) => s.input).input);
 });
 
+test('npm is made the machine user\'s once, after every tool was installed: a later install as root would undo it', async () => {
+    const { readTools, NPM_WRITABLE } = await import('../server/tools.mjs');
+    const tools = readTools(JSON.stringify([
+        { id: 'one', label: 'One', command: ['one'], memoryMb: 1024, install: ['node', ['sudo', '-n', 'npm', 'install', '-g', 'one'], 'npm-writable'] },
+        { id: 'two', label: 'Two', command: ['two'], memoryMb: 1024, install: ['node', ['sudo', '-n', 'npm', 'install', '-g', 'two'], 'npm-writable'] },
+    ]));
+    const lines = preparation(tools).map((s) => s.argv.join(' '));
+    for (const step of NPM_WRITABLE) {
+        const line = step.argv.join(' ');
+        assert.equal(lines.filter((l) => l === line).length, 1, line);
+        assert.ok(lines.indexOf(line) > lines.indexOf('sudo -n npm install -g two'), `${line} comes after the last install`);
+    }
+    assert.equal(preparation(TOOLS).some((s) => s.label === 'Letting the tools update themselves'), TOOLS.some((t) => t.fixups.length > 0));
+});
+
 /* The host program, played: records the calls, answers what the test says. */
 function bench(t, { free = 50_000 } = {}) {
     let fail;

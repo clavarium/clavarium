@@ -64,6 +64,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         wakeEveryMs: 300, alertSend, talkEveryMs: 200, gitEveryMs: 300,
         /* The ready-made machine is built only when a test asks for it. */
         shelfEveryMs: 0,
+        /* A folder missing in a machine is given a moment, not seconds, before it is mounted again. */
+        healthSettleMs: 200,
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
     });
@@ -147,6 +149,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await page.locator('#folders').click();
             const row = page.locator(`#panel-rows .folder[data-name="${name}"]`);
             await until('its sheet is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('This conversation - '));
+            await chapter('access');
             if (level === 'Off') {
                 await row.locator('button', { hasText: 'Detach' }).click();
                 await until(`${name} is detached`, async () => (await row.count()) === 0);
@@ -160,7 +163,15 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             }
             await page.locator('#panel-close').click();
         }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, newFolder, access };
+        /* A chapter of "This conversation" is unfolded, if it is not already. */
+        async function chapter(key) {
+            const box = page.locator(`details.chapter[data-chapter="${key}"]`);
+            if (!(await box.evaluate((d) => d.open))) await box.locator(':scope > summary').click();
+        }
+        /* On a phone: the bar's "..." menu is opened, and the keys behind "More". */
+        async function menu() { if ((await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
+        async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, newFolder, access, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot };
 }

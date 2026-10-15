@@ -27,6 +27,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.page.locator('#settings-close').click();
     /* Its place is in "This conversation"; off, and it says what turning it on means. */
     await me.page.locator('#folders').click();
+    await me.chapter('answerer');
     await me.until('it says what it is', async () => /3 models answer.*THE SCREEN OF THIS CONVERSATION IS SENT to: reader-one, reader-two, reader-three/.test(await me.page.locator('#answerer-about').innerText()));
     assert.match(await me.page.locator('#answerer-state').innerText(), /Off: nobody answers but you/);
     /* No mandate, no answerer. */
@@ -49,6 +50,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     /* And the owner's phone is told, with where to go. */
     assert.deepEqual(alerted, [{ title: 'worker waits for you', body: 'reader-two: the charter does not allow deleting', url: '/?c=worker' }]);
     await me.page.locator('#folders').click();
+    await me.chapter('answerer');
     await me.until('it says why', async () => /It stopped and waits for you\. reader-two: the charter does not allow deleting/.test(await me.page.locator('#answerer-state').innerText()));
     /* What it did is written down: who said what, on which screen. */
     await me.page.locator('#answerer-log-box summary').first().click();
@@ -71,6 +73,7 @@ test('where no models are named, the page says so and there is nothing to turn o
     const me = await b.person();
     await me.create('plain');
     await me.page.locator('#folders').click();
+    await me.chapter('answerer');
     await me.until('it says none is set', async () => /None is set on this installation/.test(await me.page.locator('#answerer-about').innerText()));
     assert.equal(await me.page.locator('#answerer-fields').isVisible(), false);
     assert.equal((await me.api('/api/conversations/plain/answerer', { on: true, objectives: 'x', charter: 'y' })).status, 503);

@@ -120,11 +120,21 @@ if (area === 'vm') {
     const socket = (vm) => `e2e-${vm}`.slice(0, 40);
     const killTmux = (vm) => spawnSync('tmux', ['-L', socket(vm), 'kill-server'], { stdio: 'ignore' });
 
+    /* What the VM manager says the machine has: memory in MB, disk in GB. */
+    const sizeFile = (vm) => join(home(vm), 'size.json');
+    const sizeOf = (vm) => (existsSync(sizeFile(vm)) ? JSON.parse(readFileSync(sizeFile(vm), 'utf8')) : { memory: 1024, disk: 8 });
+    const setSize = (vm, change) => writeFileSync(sizeFile(vm), JSON.stringify({ ...sizeOf(vm), ...change }));
+    /* What a test makes the machine report about itself (see health.mjs):
+       { oom, availableMb, diskLeftMb, dead: [paths whose link died], silent: true }. */
+    const healthOf = (vm) => (existsSync(join(home(vm), 'health.json')) ? JSON.parse(readFileSync(join(home(vm), 'health.json'), 'utf8')) : {});
+    /* A link that died is healed by unmounting it, as a real one is. */
+    const heal = (vm, path) => { const h = healthOf(vm); if (h.dead?.includes(path)) writeFileSync(join(home(vm), 'health.json'), JSON.stringify({ ...h, dead: h.dead.filter((x) => x !== path) })); };
     if (verb === 'launch') {
         const vm = argv[0];
         if (stateOf(vm)) fail(`launch failed: instance "${vm}" already exists`);
         mkdirSync(join(root(vm), 'resources'), { recursive: true });
         setState(vm, 'Running');
+        setSize(vm, { memory: Number(argv[1]), disk: 8 });
         /* Building takes a moment in real life; a little of it is kept, so that
            the page's "building" state is really seen by the tests. */
         spawnSync('sleep', [process.env.FAKE_VM_LAUNCH_SECONDS ?? '1']);
@@ -137,6 +147,7 @@ if (area === 'vm') {
         if (stateOf(vm)) fail(`clone failed: instance "${vm}" already exists`);
         cpSync(root(from), root(vm), { recursive: true });
         setState(vm, 'Stopped');
+        setSize(vm, { memory: Number(argv[2]), disk: 8 });
         spawnSync('sleep', [process.env.FAKE_VM_STEP_SECONDS ?? '0']);
         process.exit(0);
     }
@@ -144,6 +155,27 @@ if (area === 'vm') {
         const s = stateOf(argv[0]);
         if (!s) fail(`info failed: instance "${argv[0]}" does not exist`);
         console.log(JSON.stringify({ info: { [argv[0]]: { state: s } } }));
+        process.exit(0);
+    }
+    if (verb === 'size') {
+        const { memory, disk } = sizeOf(argv[0]);
+        console.log(`memory ${memory}M\ndisk ${disk}.0GiB`);
+        process.exit(0);
+    }
+    if (verb === 'set') {
+        const [vm, key, value] = argv;
+        if (stateOf(vm) !== 'Stopped') fail(`set failed: instance "${vm}" must be stopped`);
+        if (key === 'disk' && Number(value) < sizeOf(vm).disk) fail('set failed: disk can only grow');
+        setSize(vm, { [key]: Number(value) });
+        process.exit(0);
+    }
+    /* A clean stop that hangs, when a test says so: the force is then needed. */
+    if (verb === 'stop' && existsSync(join(home(argv[0]), 'stuck'))) { spawnSync('sleep', ['2']); fail('stop failed: timed out'); }
+    if (verb === 'kill') {
+        const vm = argv[0];
+        if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
+        killTmux(vm); setState(vm, 'Stopped'); rmSync(join(home(vm), 'stuck'), { force: true });
+        appendFileSync(join(home(vm), 'killed'), 'x');
         process.exit(0);
     }
     if (verb === 'start' || verb === 'stop' || verb === 'suspend') {
@@ -174,9 +206,10 @@ if (area === 'vm') {
         symlinkSync(source, link);
         process.exit(0);
     }
-    if (verb === 'unwork') { rmSync(inVm(argv[0], '/work'), { force: true }); mkdirSync(inVm(argv[0], '/work')); process.exit(0); }
+    if (verb === 'unwork') { rmSync(inVm(argv[0], '/work'), { force: true }); mkdirSync(inVm(argv[0], '/work')); heal(argv[0], '/work'); process.exit(0); }
     if (verb === 'umount') {
         rmSync(inVm(argv[0], `/resources/${argv[1]}`), { force: true });
+        heal(argv[0], `/resources/${argv[1]}`);
         process.exit(0);
     }
     if (verb === 'exec') {
@@ -187,6 +220,21 @@ if (area === 'vm') {
         const [program, ...rest] = command;
         const stdin = () => readFileSync(0);
         if (program === 'snap' || program === 'chown') process.exit(0);
+        /* The health probe (server/health.mjs): played from what is here, and what the test said. */
+        if (program === 'sh' && rest[0] === '-c' && rest[2] === 'clavarium-health') {
+            const h = healthOf(vm);
+            /* A machine that does not answer: the channel into it fails. */
+            if (h.silent) { console.error('exec failed: ssh connection timed out'); process.exit(2); }
+            const { memory } = sizeOf(vm);
+            const lines = [`memory ${memory * 1024} ${(h.availableMb ?? Math.round(memory * 0.6)) * 1024}`, `oom ${h.oom ?? 0}`, `disk / ${h.diskLeftMb ?? 5000} 8000`];
+            for (const path of rest.slice(3)) {
+                const link = inVm(vm, path);
+                const there = lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink() && existsSync(link);
+                lines.push(`mount ${there && !h.dead?.includes(path) ? 'ok' : 'missing'} ${path}`);
+            }
+            console.log(lines.join('\n'));
+            process.exit(0);
+        }
         /* A copy's first start, and the look that its tool is there: each given
            a moment, so that a test sees every step of the build go by. */
         if (program === 'cloud-init' || program === 'which') {
@@ -218,7 +266,7 @@ if (area === 'vm') {
             child.on('error', () => process.exit(127));
             child.on('exit', (code) => process.exit(code ?? 1));
         }
-    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork'].includes(verb)) {
+    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'size', 'set', 'kill'].includes(verb)) {
         fail(`unknown verb: ${verb}`, 64);
     }
 }

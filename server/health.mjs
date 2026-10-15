@@ -1,0 +1,171 @@
+/* THE HEALTH OF A CONVERSATION'S MACHINE, said in the page instead of a
+   terminal that stays silent.
+ *
+ * What is looked at, and how cheaply:
+ *   - the state the VM manager gives (Running, Stopped, Suspended, Starting,
+ *     Unknown): one question to the VM manager, which never wakes a machine;
+ *   - only when it runs, ONE short command inside it (PROBE, below): does
+ *     it answer at all, how much memory is left, did the kernel kill a
+ *     program for lack of memory, how full is its disk, and is each folder
+ *     that should be mounted really there and readable.
+ *
+ * A FOLDER THAT CAME LOOSE IS PUT BACK. The VM manager may believe a folder
+ * is mounted while the link that served it is dead: it then answers "already
+ * mounted" and does nothing. So what is missing inside the machine is looked
+ * at a second time a moment later (a machine that has just started may still
+ * be mounting), then unmounted and mounted again (resources.mjs, repair).
+ *
+ * Never on a machine that does not run: a machine asleep or stopped is left
+ * as it is, and only its state is said. Looked at after a start, a wake, a
+ * restart, and every few minutes while it runs (`start`).
+ */
+
+/* The command run inside the machine. Its arguments are the paths that
+   should be mounted; they are passed as arguments, never parsed by the
+   shell. It prints one fact per line; the server reads only these lines. */
+export const PROBE = [
+    'awk \'/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print "memory", t+0, a+0}\' /proc/meminfo',
+    'awk \'$1=="oom_kill"{n=$2} END{print "oom", n+0}\' /proc/vmstat',
+    'df -Pm / | awk \'NR==2{print "disk /", $4, $2}\'',
+    'for p in "$@"; do',
+    '  if awk -v p="$p" \'$2==p{f=1} END{exit !f}\' /proc/mounts; then',
+    '    if timeout 5 ls -- "$p" >/dev/null 2>&1; then echo "mount ok $p"; else echo "mount unreadable $p"; fi',
+    '  else echo "mount missing $p"; fi',
+    'done',
+    'if [ -d /work ] && awk \'$2=="/work"{f=1} END{exit !f}\' /proc/mounts; then timeout 5 df -Pm /work 2>/dev/null | awk \'NR==2{print "disk /work", $4, $2}\'; fi',
+].join('\n');
+export const PROBE_NAME = 'clavarium-health';
+
+export const EVERY_MS = 120_000;
+const PROBE_MS = 15_000;
+/* Below this, memory or disk is said to be almost full. */
+const MEMORY_LOW_MB = 120;
+const DISK_LOW_MB = 300;
+
+/* What the probe printed, as facts. */
+export function readProbe(text) {
+    const facts = { mounts: {}, disks: {} };
+    for (const line of String(text ?? '').split('\n')) {
+        const parts = line.trim().split(' ');
+        if (parts[0] === 'memory' && parts.length === 3) facts.memory = { totalMb: Math.round(Number(parts[1]) / 1024), availableMb: Math.round(Number(parts[2]) / 1024) };
+        if (parts[0] === 'oom' && parts.length === 2) facts.oomKills = Number(parts[1]);
+        if (parts[0] === 'disk' && parts.length === 4) facts.disks[parts[1]] = { availableMb: Number(parts[2]), sizeMb: Number(parts[3]) };
+        if (parts[0] === 'mount' && parts.length === 3) facts.mounts[parts[2]] = parts[1];
+    }
+    return facts;
+}
+
+/* The sentences the page shows, and how serious they are: 'ok', 'info',
+   'warn' (something to act on), 'bad' (the machine does not serve). */
+export function judge(record) {
+    const problems = [];
+    const add = (level, text) => problems.push({ level, text });
+    const s = record.state;
+    if (s === undefined) add('bad', 'Its machine no longer exists.');
+    else if (s === 'Starting' || s === 'Restarting') add('info', 'Its machine is starting.');
+    else if (s === 'Suspended') add('info', 'Its machine is asleep. It wakes when you open the conversation.');
+    else if (s === 'Stopped') add('info', 'Its machine is stopped. It starts when you open the conversation.');
+    else if (s !== 'Running') add('bad', `The VM manager says its machine is "${s}".`);
+    if (s === 'Running') {
+        if (record.answering === false) add('bad', 'Its machine does not answer. Restarting it usually helps.');
+        if (record.oomKills > 0) add('warn', `It ran out of memory ${record.oomKills === 1 ? 'once' : `${record.oomKills} times`} since it started: a program was stopped by the system. Give it more memory (Machine).`);
+        if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
+        for (const [path, d] of Object.entries(record.disks ?? {})) {
+            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.02)) add('warn', `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+        }
+        for (const path of record.remounted ?? []) add('info', `${path} had come loose in the machine: it was mounted again.`);
+        for (const { path, why } of record.failed ?? []) add('bad', `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
+        for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', `${path} is not reachable in the machine.`);
+    }
+    const order = ['ok', 'info', 'warn', 'bad'];
+    const level = problems.reduce((worst, p) => (order.indexOf(p.level) > order.indexOf(worst) ? p.level : worst), 'ok');
+    return { level, problems };
+}
+
+export class Health {
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #settleMs; #probeMs;
+
+    /* `settleMs`: how long a missing folder is given before it is mounted
+       again (a machine that has just started may still be mounting it). */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS }) {
+        this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs;
+    }
+
+    /* The last thing known, or null. Cheap: nothing is asked. */
+    of(name) { return this.#records.get(name) ?? null; }
+    forget(name) { this.#records.delete(name); }
+
+    /* Looks now. One look at a time per conversation: a second caller gets the same. */
+    check(name, { repair = true } = {}) {
+        const going = this.#running.get(name);
+        if (going) return going;
+        const look = this.#look(name, repair).finally(() => this.#running.delete(name));
+        this.#running.set(name, look);
+        return look;
+    }
+
+    async #look(name, repair) {
+        const c = this.#conversations.get(name);
+        if (!c) return null;
+        const at = new Date().toISOString();
+        /* A machine being built, moved or restarted is somebody else's business just now. */
+        if (c.phase !== 'ready') return this.#keep(name, { at, state: c.phase === 'restarting' ? 'Restarting' : 'Starting', busy: true });
+        const state = await this.#vms.state(name).catch(() => 'Unknown');
+        if (state !== 'Running') return this.#keep(name, { at, state });
+        const paths = this.#resources ? this.#resources.expected(name, c.work === 'kept') : (c.work === 'kept' ? ['/work'] : []);
+        let facts = await this.#probe(name, paths);
+        if (!facts) return this.#keep(name, { at, state, answering: false });
+        const loose = () => paths.filter((p) => facts.mounts[p] !== 'ok');
+        const remounted = []; const failed = [];
+        if (loose().length > 0 && repair && this.#resources) {
+            await new Promise((r) => setTimeout(r, this.#settleMs));
+            facts = (await this.#probe(name, paths)) ?? facts;
+            /* Looked at again just before acting: never on a machine that went to sleep meanwhile. */
+            const still = loose();
+            if (still.length > 0 && this.#conversations.get(name)?.phase === 'ready' && (await this.#vms.state(name).catch(() => undefined)) === 'Running') {
+                for (const path of still) {
+                    const why = await this.#resources.repair(name, path).catch((error) => error.message);
+                    if (why) failed.push({ path, why });
+                }
+                facts = (await this.#probe(name, paths)) ?? facts;
+                for (const path of still) {
+                    if (facts.mounts[path] === 'ok') remounted.push(path);
+                    else if (!failed.some((f) => f.path === path)) failed.push({ path, why: 'still not there after mounting it again' });
+                }
+            }
+        }
+        return this.#keep(name, {
+            at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, disks: facts.disks,
+            missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}),
+            /* What was put back stays said until a later look finds nothing to put back. */
+        });
+    }
+
+    async #probe(name, paths) {
+        const r = await this.#vms.exec(name, ['sh', '-c', PROBE, PROBE_NAME, ...paths], { timeoutMs: this.#probeMs }).catch(() => ({ code: 1, stdout: '' }));
+        const facts = readProbe(r.stdout);
+        if (r.code !== 0 && !facts.memory) return undefined;
+        return facts;
+    }
+
+    #keep(name, record) {
+        const kept = { ...record, ...judge(record) };
+        this.#records.set(name, kept);
+        return kept;
+    }
+
+    /* Every so often, each conversation whose machine should run. A machine
+       that does not run is not touched (its state alone is asked). */
+    start(everyMs = EVERY_MS) {
+        if (!everyMs) return () => {};
+        let going = false;
+        const timer = setInterval(async () => {
+            if (going) return;
+            going = true;
+            try { for (const name of this.#conversations.awake()) await this.check(name).catch(() => {}); }
+            finally { going = false; }
+        }, everyMs);
+        timer.unref?.();
+        return () => clearInterval(timer);
+    }
+}

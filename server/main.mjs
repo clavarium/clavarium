@@ -47,6 +47,7 @@ import { GitChecks } from './gitchecks.mjs';
 import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
+import { Health } from './health.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const FILES = {
@@ -93,7 +94,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -126,7 +127,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -154,7 +155,7 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     const asHost = runner(host);
@@ -259,9 +260,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         alert: (name, message) => { void alerts.tell({ title: message.kind === 'ask' ? `${name} asks you something` : `${name} waits for you`, body: message.text ?? '', url: `/?c=${name}` }); } });
+    /* The health of each machine, and folders that came loose put back: see health.mjs. */
+    const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    const stopHealth = health.start(healthEveryMs);
+    /* A machine woken by an opening: its folders are looked at once it is up. */
+    all.started = (name) => { void health.check(name); };
+    /* What the VM manager says each machine has is what is recorded (a record
+       may say otherwise: set by hand, or by an earlier version). Not waited for. */
+    void all.reconcileAll?.().catch(() => {});
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf });
-    server.on('close', () => { stopShelf(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health });
+    server.on('close', () => { stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => answerer.typed(name, data),
@@ -280,8 +289,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        runs. A page then shows its terminal at once. */
     /* A machine is ready: its folders are shown in it (after a rebuild there
        are some), then its terminal is opened and kept. */
-    all.ready = (name) => { void (async () => { await folders.remount(name).catch(() => {}); await bridge.warm(name); })(); };
-    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) await bridge.warm(name); })();
+    /* Then its health is looked at (folders that did not come back are put back). */
+    all.ready = (name) => { void (async () => { await folders.remount(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); })(); };
+    /* Their health too: after a restart of the host, a folder may not have come back. */
+    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { void health.check(name).catch(() => {}); await bridge.warm(name); } })();
     return listening;
 }
 

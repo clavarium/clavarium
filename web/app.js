@@ -8,7 +8,12 @@
     const RETRY_MS = 1500;
     const NAME = /^[a-z](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
     /* What each key of the row sends, as a terminal expects it. */
-    const KEYS = { esc: '\x1b', tab: '\t', enter: '\r', stop: '\x03', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D' };
+    const KEYS = { esc: '\x1b', tab: '\t', enter: '\r', stop: '\x03', up: '\x1b[A', down: '\x1b[B', right: '\x1b[C', left: '\x1b[D', backspace: '\x7f' };
+    /* Held down, these repeat as on a real keyboard: at once, then after a
+       pause, then quickly, until the finger lifts or leaves the key. */
+    const REPEATING = new Set(['up', 'down', 'left', 'right', 'tab', 'enter', 'backspace']);
+    const REPEAT_AFTER_MS = 400;
+    const REPEAT_EVERY_MS = 60;
 
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
@@ -39,6 +44,7 @@
         $('notice-action').onclick = run ?? null;
         $('notice-cancel').hidden = !cancel;
         $('notice-cancel').onclick = cancel ?? null;
+        $('notice-health').hidden = true; $('notice-restart').hidden = true;
         notice.hidden = false;
         $('notice-spin').hidden = true; $('notice-steps').hidden = true;
     };
@@ -216,11 +222,17 @@
     });
 
     const encoder = new TextEncoder();
-    const send = (text) => { if (socket?.readyState === 1) socket.send(encoder.encode(text)); };
+    const send = (text) => {
+        if (socket?.readyState === 1) socket.send(encoder.encode(text));
+        /* Something was sent: the tool has its answer. */
+        if (String(text).includes('\r')) $('room').removeAttribute('data-asking');
+    };
     const sendSize = () => {
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
     };
-    const disconnect = () => { wanted = false; socket?.close(); socket = undefined; stopVoice?.(); };
+    const disconnect = () => { wanted = false; clearTimeout(slowTimer); socket?.close(); socket = undefined; stopVoice?.(); };
+    const SLOW_OPEN_MS = 12_000;
+    let slowTimer;
 
     function connect() {
         disconnect();
@@ -236,6 +248,9 @@
         socket = mine;
         mine.binaryType = 'arraybuffer';
         let failure = ''; let machineGone = false;
+        /* An opening that takes long: what is known of the machine is said under the wait. */
+        clearTimeout(slowTimer);
+        slowTimer = setTimeout(() => { if (socket === mine && state.dataset.state !== 'live') void explainMachine(true); }, SLOW_OPEN_MS);
         /* Open means the bridge answered, not that the machine is awake yet. */
         mine.onopen = () => { say('opening', 'connecting'); focusTerminal(); };
         mine.onmessage = (event) => {
@@ -282,7 +297,7 @@
                 /* Its machine is gone (a backup put back elsewhere, a machine
                    deleted by hand): the owner can have it built again. */
                 if (machineGone && !DEVICE) show(`${failure} What was on its disk is lost; its folders are kept.`, 'Build its machine again', () => void rebuild());
-                else show(failure || 'The terminal could not be opened.', 'Try again', connect);
+                else { show(failure || 'The terminal could not be opened.', 'Try again', connect); void explainMachine(false); }
                 /* On a device this is often the owner closing the conversation:
                    asking again says so in plain words, instead of an error. */
                 if (DEVICE) void refresh();
@@ -305,9 +320,131 @@
     for (const zone of ['keys', 'shortcut-row']) {
         $(zone).addEventListener('pointerdown', (event) => { if (event.target.closest('button')) event.preventDefault(); });
     }
-    for (const button of document.querySelectorAll('#keys button')) {
-        button.addEventListener('click', () => { send(KEYS[button.dataset.keys]); focusTerminal(); });
+    /* A KEY HELD DOWN REPEATS. Sent at once when the finger (or the mouse)
+       goes down; for the keys that repeat, again after a pause, then
+       quickly; never once it is lifted, cancelled, or has left the key.
+       A click from the keyboard (Enter or Space on the focused button)
+       sends once. */
+    const stopRepeats = new Set();
+    for (const button of document.querySelectorAll('#keys button[data-keys]')) {
+        const key = button.dataset.keys;
+        let delay = null; let every = null;
+        const stop = () => { clearTimeout(delay); clearInterval(every); delay = null; every = null; };
+        stopRepeats.add(stop);
+        button.addEventListener('pointerdown', (event) => {
+            if (event.button !== 0) return;
+            stop();
+            send(KEYS[key]);
+            if (REPEATING.has(key)) delay = setTimeout(() => { delay = null; every = setInterval(() => send(KEYS[key]), REPEAT_EVERY_MS); }, REPEAT_AFTER_MS);
+        });
+        for (const end of ['pointerup', 'pointercancel', 'pointerleave', 'lostpointercapture']) button.addEventListener(end, stop);
+        /* A finger is held by the key it touched: whether it left is seen from where it is. */
+        button.addEventListener('pointermove', (event) => {
+            if (delay === null && every === null) return;
+            const box = button.getBoundingClientRect();
+            if (event.clientX < box.left || event.clientX > box.right || event.clientY < box.top || event.clientY > box.bottom) stop();
+        });
+        button.addEventListener('contextmenu', (event) => event.preventDefault());
+        button.addEventListener('click', (event) => {
+            /* detail 0: from the keyboard; otherwise the key was already sent on the way down. */
+            if (event.detail === 0) send(KEYS[key]);
+            focusTerminal();
+        });
     }
+    addEventListener('blur', () => { for (const stop of stopRepeats) stop(); });
+    document.addEventListener('visibilitychange', () => { for (const stop of stopRepeats) stop(); });
+
+    /* ---------- More keys, and ready-made answers when the tool asks (a phone) ---------- */
+    $('keys-more').addEventListener('click', () => {
+        const more = $('keys').dataset.more !== 'true';
+        $('keys').dataset.more = String(more);
+        $('keys-more').setAttribute('aria-expanded', String(more));
+        $('keys-more').textContent = more ? 'Less' : 'More';
+        focusTerminal();
+    });
+    /* A tool that waits for an answer rings (a terminal bell): its ready-made
+       answers come up on a phone, and go once something is sent. */
+    const asking = (on) => $('room').toggleAttribute('data-asking', on);
+    terminal.onBell(() => asking(true));
+
+    /* ---------- the bar on a phone: one line, the rest behind "..." ---------- */
+    const header = document.querySelector('header');
+    const closeMenu = () => { if (header) header.dataset.menu = 'closed'; $('menu').setAttribute('aria-expanded', 'false'); };
+    $('menu').addEventListener('click', () => {
+        const open = header?.dataset.menu !== 'open';
+        if (header) header.dataset.menu = open ? 'open' : 'closed';
+        $('menu').setAttribute('aria-expanded', String(open));
+    });
+    /* A choice made in it, or a touch anywhere else, folds it away. */
+    $('menu-items').addEventListener('click', (event) => { if (event.target.closest('button') && !event.target.closest('.text-size')) closeMenu(); });
+    document.addEventListener('pointerdown', (event) => { if (header?.dataset.menu === 'open' && !event.target.closest('header')) closeMenu(); });
+
+    /* ---------- the size of the text: one setting of this device ---------- */
+    /* Not a magnifier: every text of the page, the terminal's too, grows or
+       shrinks and is laid out again; nothing has to be scrolled sideways.
+       It is a share of the browser's own text size, so that setting counts
+       too. Pinched with two fingers, Ctrl and the wheel, Ctrl + and Ctrl -,
+       or the buttons in Settings (on a phone, behind "..."). */
+    const TEXT_STEPS = [0.7, 0.8, 0.9, 1, 1.1, 1.25, 1.4, 1.6, 1.8, 2, 2.25, 2.5];
+    const SIZE_MIN = 0.7; const SIZE_MAX = 2.5;
+    let textScale = 1;
+    try { const kept = Number(localStorage.getItem('clavarium-text')); if (kept >= SIZE_MIN && kept <= SIZE_MAX) textScale = kept; } catch { /* a private window */ }
+    const terminalBase = innerWidth < 500 ? 11 : 14;
+    const applyTerminalText = () => {
+        const rootPx = Number.parseFloat(getComputedStyle(document.documentElement).fontSize) || 16 * textScale;
+        const size = Math.max(6, Math.round(terminalBase * (rootPx / 16) * 2) / 2);
+        if (terminal.options.fontSize === size) return;
+        terminal.options.fontSize = size;
+        /* The terminal is laid out again; its new size goes to the machine (onResize). */
+        fit.fit();
+    };
+    function applyText(scale, { save = true, terminalToo = true } = {}) {
+        textScale = Math.min(SIZE_MAX, Math.max(SIZE_MIN, Math.round(scale * 100) / 100));
+        document.documentElement.style.fontSize = `${textScale * 100}%`;
+        for (const b of document.querySelectorAll('.text-size .text-now')) b.textContent = `${Math.round(textScale * 100)}%`;
+        if (terminalToo) applyTerminalText();
+        if (save) { try { localStorage.setItem('clavarium-text', String(textScale)); } catch { /* as above */ } }
+    }
+    const stepText = (way) => {
+        if (way === 0) return applyText(1);
+        const next = way > 0 ? TEXT_STEPS.find((x) => x > textScale + 0.001) : [...TEXT_STEPS].reverse().find((x) => x < textScale - 0.001);
+        applyText(next ?? textScale);
+    };
+    for (const b of document.querySelectorAll('.text-size button')) {
+        b.addEventListener('click', () => stepText(b.dataset.text === 'larger' ? 1 : b.dataset.text === 'smaller' ? -1 : 0));
+    }
+    /* Ctrl + and Ctrl -, Ctrl 0: taken before the terminal sees them. */
+    addEventListener('keydown', (event) => {
+        if (!(event.ctrlKey || event.metaKey) || event.altKey) return;
+        const way = event.key === '+' || event.key === '=' ? 1 : event.key === '-' || event.key === '_' ? -1 : event.key === '0' ? 0 : null;
+        if (way === null) return;
+        event.preventDefault(); event.stopPropagation();
+        stepText(way);
+    }, true);
+    let wheelAt = 0;
+    addEventListener('wheel', (event) => {
+        if (!event.ctrlKey) return;
+        event.preventDefault(); event.stopPropagation();
+        if (Date.now() - wheelAt < 120 || event.deltaY === 0) return;
+        wheelAt = Date.now();
+        stepText(event.deltaY < 0 ? 1 : -1);
+    }, { passive: false, capture: true });
+    /* Two fingers pinched: the text follows them; the terminal is laid out
+       once they lift (not at every move: each new size is sent to the machine). */
+    let pinch = null;
+    const spread = (touches) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+    document.addEventListener('touchstart', (event) => { if (event.touches.length === 2) pinch = { from: spread(event.touches), scale: textScale }; }, { passive: true, capture: true });
+    document.addEventListener('touchmove', (event) => {
+        if (!pinch || event.touches.length !== 2) return;
+        event.preventDefault();
+        const ratio = spread(event.touches) / Math.max(1, pinch.from);
+        applyText(pinch.scale * ratio, { save: false, terminalToo: false });
+    }, { passive: false, capture: true });
+    const endPinch = (event) => { if (!pinch || event.touches.length >= 2) return; pinch = null; applyText(textScale); };
+    document.addEventListener('touchend', endPinch, { capture: true });
+    document.addEventListener('touchcancel', endPinch, { capture: true });
+    window.clavariumText = () => ({ scale: textScale, terminal: terminal.options.fontSize });
+    applyText(textScale, { save: false });
 
     /* ---------- one conversation ---------- */
     /* True while a first-time visitor is reading the welcome: the terminal is
@@ -322,6 +459,7 @@
         $('archive').hidden = !c;
         $('files-open').hidden = $('share').hidden = !usable;
         $('sleep').hidden = !usable || c.asleep === true;
+        $('restart').hidden = DEVICE || !usable;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -350,6 +488,7 @@
             building(c.step);
             return;
         }
+        if (c && c.phase === 'restarting') { disconnect(); say('restarting', 'connecting'); show(`${c.step ?? 'Restarting its machine'}... The tool starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
@@ -432,15 +571,17 @@
                 $('list').hidden = false; $('back').hidden = false;
             }
             home = true;
+            if (conversations.find((x) => x.name === current)?.answerer?.needs) $('room').setAttribute('data-asking', '');
             paint();
             paintChips();
+            paintHealth();
             const now = mark(conversations.find((x) => x.name === current));
             paintActions();
-            if (before !== now || now.startsWith('building')) enter(true);
+            if (before !== now || now.startsWith('building') || now.startsWith('restarting') || now.startsWith('moving')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
-        if (!DEVICE && !$('panel').hidden) { void paintAnswerer(); paintWakeups(); }
-        if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving') ? 2500 : 10000);
+        if (!DEVICE && !$('panel').hidden) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
+        if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
 
     /* ---------- creating ---------- */
@@ -767,10 +908,146 @@
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
         void paintAnswerer(); paintWakeups(); void paintTalkBox();
+        paintMachine(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
+    /* ---------- the chapters of "This conversation": folded or not, kept on this device ---------- */
+    /* What is used every day is open at first; the rest is one tap away. */
+    const OPEN_AT_FIRST = { general: true, machine: true, access: true };
+    let chapters = {};
+    try { chapters = JSON.parse(localStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
+    for (const chapter of document.querySelectorAll('details.chapter')) {
+        const key = chapter.dataset.chapter;
+        chapter.open = chapters[key] ?? OPEN_AT_FIRST[key] ?? false;
+        chapter.addEventListener('toggle', () => {
+            chapters[key] = chapter.open;
+            try { localStorage.setItem('clavarium-chapters', JSON.stringify(chapters)); } catch { /* as above */ }
+        });
+    }
+    const openChapter = (key) => { const chapter = document.querySelector(`details.chapter[data-chapter="${key}"]`); if (chapter) chapter.open = true; return chapter; };
+
+    /* ---------- the machine: its health, its size, a restart ---------- */
+    const sizeWords = (mb) => (mb >= 1024 ? `${Number.isInteger(mb / 1024) ? mb / 1024 : (mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+    function healthLines(list, record, { all = true } = {}) {
+        list.replaceChildren();
+        const problems = (record?.problems ?? []).filter((p) => all || p.level === 'warn' || p.level === 'bad');
+        for (const p of problems) { const li = document.createElement('li'); li.dataset.level = p.level; li.textContent = p.text; list.append(li); }
+        if (all && record && record.state === 'Running' && record.answering) {
+            const li = document.createElement('li'); li.dataset.level = problems.length ? 'info' : 'ok';
+            const parts = [problems.length ? 'Running' : 'Running, and nothing wrong was seen'];
+            if (record.memory) parts.push(`memory: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB`);
+            if (record.disks?.['/']) parts.push(`disk: ${record.disks['/'].availableMb} MB left`);
+            li.textContent = `${parts.join('; ')} (looked at ${new Date(record.at).toLocaleTimeString()}).`;
+            list.prepend(li);
+        }
+        if (all && !record) { const li = document.createElement('li'); li.dataset.level = 'info'; li.textContent = 'Not looked at yet.'; list.append(li); }
+        return problems.length;
+    }
+    /* Said over the terminal while something is wrong; dismissed until something else is. */
+    let healthDismissed = '';
+    function paintHealth() {
+        const c = conversations.find((x) => x.name === current);
+        const h = c?.health;
+        const serious = h && (h.level === 'warn' || h.level === 'bad') && c.phase === 'ready' && !c.asleep;
+        const key = serious ? `${current}:${h.problems.map((p) => p.text).join('|')}` : '';
+        $('health-strip').hidden = !serious || key === healthDismissed;
+        if (!serious) return;
+        $('health-strip').dataset.level = h.level;
+        $('health-text').textContent = h.problems.filter((p) => p.level === 'warn' || p.level === 'bad').map((p) => p.text).join(' ');
+        $('health-restart').hidden = DEVICE;
+        $('health-dismiss').onclick = () => { healthDismissed = key; $('health-strip').hidden = true; };
+    }
+    /* The page has waited, or the terminal failed: the machine is looked at
+       (never woken), and what is seen is said under the notice. */
+    async function explainMachine(waiting) {
+        if (DEVICE || !home || !current) return;
+        const name = current;
+        let record;
+        try { record = await post(`${API}/conversations/${encodeURIComponent(name)}/health`, {}); } catch { return; }
+        if (name !== current || notice.hidden) return;
+        const c = conversations.find((x) => x.name === name);
+        if (c) c.health = record;
+        const shown = healthLines($('notice-health'), record, { all: true });
+        $('notice-health').hidden = false;
+        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || waiting));
+        $('notice-restart').onclick = () => restartMachine(false);
+        if (!shown && waiting) $('notice-text').textContent = `${$('notice-text').textContent} Still waiting.`;
+    }
+    /* RESTARTING ITS MACHINE: asked first, in words, over the terminal. */
+    async function restartMachine(confirmed) {
+        const name = current;
+        if (!name) return;
+        $('panel').hidden = true;
+        if (!confirmed) {
+            const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+            show(`Restart the machine of "${name}"? It is stopped cleanly (by force if it does not stop), then started again. THE TOOL IS STOPPED AND STARTED AGAIN: what it is doing now is interrupted. Its work folder, its folders and its branches stay.`,
+                'Restart', () => void restartMachine(true), resume);
+            return;
+        }
+        disconnect();
+        say('restarting', 'connecting'); show('Restarting its machine...'); $('notice-spin').hidden = false;
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/restart`, {}); healthDismissed = ''; await refresh(); enter(); }
+        catch (error) { show(error.message, 'Back', enter); }
+    }
+    $('restart').addEventListener('click', () => { void restartMachine(false); });
+    $('health-restart').addEventListener('click', () => { void restartMachine(false); });
+    $('health-check').addEventListener('click', async () => {
+        $('health-check').disabled = true; $('health-check').textContent = 'Looking...';
+        try { const record = await post(`${API}/conversations/${encodeURIComponent(current)}/health`, {}); const c = conversations.find((x) => x.name === current); if (c) c.health = record; healthDismissed = ''; paintMachine(c); paintHealth(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        finally { $('health-check').disabled = false; $('health-check').textContent = 'Look now'; }
+    });
+    const MEMORY_CHOICES = [768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384];
+    const DISK_CHOICES = [8, 10, 16, 20, 32, 48, 64, 96, 128, 192, 256];
+    function paintMachine(here) {
+        /* General: what it is. */
+        const facts = $('general-facts'); facts.replaceChildren();
+        const fact = (term, value) => { const dt = document.createElement('dt'); dt.textContent = term; const dd = document.createElement('dd'); dd.textContent = value; facts.append(dt, dd); };
+        if (here) {
+            fact('Name', here.name);
+            fact('Tool', here.toolLabel ?? here.tool);
+            if (here.createdAt) fact('Created', new Date(here.createdAt).toLocaleString());
+            fact('Machine', `${sizeWords(here.memoryMb)} of memory, ${here.diskGb ? `${here.diskGb} GB` : 'an unknown size of'} disk`);
+            fact('Works in', here.work === 'kept' ? 'a folder kept here (/work)' : 'the disk of its machine (/work)');
+        }
+        healthLines($('machine-health'), here?.health ?? null);
+        $('machine-restarted').textContent = here?.restarted ?? ''; $('machine-restarted').hidden = !here?.restarted;
+        /* The choices are not painted over while somebody is choosing. */
+        const memory = $('machine-memory'); const disk = $('machine-disk');
+        const of = `${here?.name}/${here?.memoryMb}/${here?.diskGb}/${here?.memoryMinMb}`;
+        if (here && memory.dataset.of !== of && document.activeElement !== memory && document.activeElement !== disk) {
+            const least = here.memoryMinMb ?? 512;
+            const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least), here.memoryMb])].sort((a, b) => a - b);
+            memory.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = `${sizeWords(m)}${m === here.memoryMb ? ' (now)' : ''}${m === least ? ' (least for its tool)' : ''}`; return o; }));
+            memory.value = String(here.memoryMb);
+            const now = here.diskGb ?? 8;
+            const disks = [...new Set([now, ...DISK_CHOICES.filter((d) => d > now)])].sort((a, b) => a - b);
+            disk.replaceChildren(...disks.map((d) => { const o = document.createElement('option'); o.value = String(d); o.textContent = `${d} GB${d === now ? ' (now)' : ''}`; return o; }));
+            disk.value = String(now);
+            memory.dataset.of = of;
+        }
+        $('machine-size').hidden = DEVICE || !here || here.phase !== 'ready';
+    }
+    $('machine-size').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const name = current;
+        const here = conversations.find((x) => x.name === name);
+        if (!here) return;
+        const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value);
+        if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8)) { $('panel-error').textContent = 'Nothing to change: choose another memory or disk first.'; $('panel-error').hidden = false; return; }
+        $('panel').hidden = true;
+        const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
+        const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
+        show(`Give "${name}" ${changes}? ITS MACHINE IS STOPPED CLEANLY, SET, AND STARTED AGAIN: what the tool is doing now is interrupted. Its work folder, its folders and its branches stay.`,
+            'Change it', async () => {
+                disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb }); await refresh(); enter(); }
+                catch (error) { show(error.message, 'Back', enter); }
+            }, resume);
+    });
+
     /* ---------- the simple screen: the same conversation, without its terminal ---------- */
     /* For whoever does not read a terminal. The terminal stays where it is,
        underneath, attached as always: what is written in the box is typed
@@ -1069,11 +1346,12 @@
         await refresh();
         await paintPanel();
         $('attach-picker').hidden = !picking;
+        if (picking) openChapter('access');
         $('panel').hidden = false;
         if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
-    $('attach-open').addEventListener('click', () => { $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
+    $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
     $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
     $('attach-manage').addEventListener('click', () => { void openAssets(); });
     $('chips').addEventListener('click', () => { if (!DEVICE && current) void openAccess(false); });

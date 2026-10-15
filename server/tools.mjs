@@ -9,6 +9,7 @@
  * downloaded over HTTPS only, its checksum is compared BEFORE it is unpacked,
  * and the checksum comes from this repository, never from the network. */
 import { readFileSync } from 'node:fs';
+import { VM_USER } from './vm.mjs';
 
 export const NODE_VERSION = 'v24.20.0';
 export const NODE_SHA256 = '2f2c0da162318f0de47665410c7c8c2ed3d36c8f3105de4bbc61176c70a7cbf2';
@@ -24,6 +25,19 @@ export const NODE_STEPS = [
     { argv: ['sha256sum', '-c', '-'], input: `${NODE_SHA256}  ${TMP}\n` },
     { argv: ['sudo', '-n', 'tar', '-xJf', TMP, '-C', '/usr/local', '--strip-components=1', '--no-same-owner'] },
     { argv: ['rm', '-f', TMP] },
+];
+
+/* "npm-writable": what npm installs globally becomes the machine user's, so
+   that a tool that updates itself (Claude Code does, with npm, as that user)
+   can: otherwise it says "Auto-update failed" for ever. The user is root in
+   its machine through sudo anyway: nothing is given away. Put AFTER the
+   tool's own `npm install -g`, which runs as root. Machines built before
+   this was in the recipe get it once, at an opening (conversations.mjs). */
+export const NPM_WRITABLE = [
+    { argv: ['sudo', '-n', 'mkdir', '-p', '/usr/local/lib/node_modules'] },
+    { argv: ['sudo', '-n', 'chown', '-R', `${VM_USER}:${VM_USER}`, '/usr/local/lib/node_modules'] },
+    /* The directory only: the links to the tools in it can then be replaced. */
+    { argv: ['sudo', '-n', 'chown', `${VM_USER}:${VM_USER}`, '/usr/local/bin'] },
 ];
 
 const isArgv = (x) => Array.isArray(x) && x.length > 0 && x.every((a) => typeof a === 'string' && a !== '');
@@ -42,6 +56,7 @@ export function readTools(text) {
         if (!Array.isArray(t.install)) throw new Error(`${t.id}: install must be a list of steps`);
         const steps = t.install.flatMap((s) => {
             if (s === 'node') return NODE_STEPS;
+            if (s === 'npm-writable') return NPM_WRITABLE;
             /* A step that writes a small file gives its content apart, to go
                on standard input: { "argv": [...], "input": "..." }. Steps run
                in the home of the machine's user, so a path can be relative. */
@@ -49,7 +64,7 @@ export function readTools(text) {
                 if (!isArgv(s.argv) || typeof s.input !== 'string' || s.input.length > 4096) throw new Error(`${t.id}: a step with input needs "argv" and a short "input"`);
                 return [{ argv: s.argv, input: s.input }];
             }
-            if (!isArgv(s)) throw new Error(`${t.id}: an install step must be "node", an argument vector, or { argv, input }`);
+            if (!isArgv(s)) throw new Error(`${t.id}: an install step must be "node", "npm-writable", an argument vector, or { argv, input }`);
             return [{ argv: s }];
         });
         /* Optional: whose mail is a sign-in mail for this tool, and where its
@@ -60,7 +75,9 @@ export function readTools(text) {
             if (!domains(t.signin.senders) || !domains(t.signin.links)) throw new Error(`${t.id}: signin needs "senders" and "links", lists of domain names`);
             signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]) });
         }
-        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), memoryMb: t.memoryMb, steps: Object.freeze(steps), signin });
+        /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
+        const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
+        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

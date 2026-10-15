@@ -149,11 +149,13 @@ test('archiving asks first, then removes the conversation and its machine', { sk
     const me = await b.person();
     await me.create('short-lived');
     await me.page.locator('#folders').click();
+    await me.chapter('advanced');
     await me.page.locator('#archive').click();
     assert.match(await me.page.locator('#notice-text').innerText(), /Its machine is deleted/);
     await me.page.locator('#notice-cancel').click();
     assert.equal(await me.state(), 'live', 'Cancel changes nothing');
     await me.page.locator('#folders').click();
+    await me.chapter('advanced');
     await me.page.locator('#archive').click();
     await me.page.locator('#notice-action', { hasText: 'Archive' }).click();
     await me.until('gone from the list', async () => (await me.page.locator('#items .item').count()) === 0);

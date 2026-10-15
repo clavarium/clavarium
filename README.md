@@ -84,6 +84,16 @@ Built slice by slice; the plan is in `docs/blueprint/architecture.html`, tab
   the owner's phone is alerted when the tool asks. Off by default, per
   conversation; the terminal stays the default way.
 
+- **13 - the machine**: each conversation's machine is looked at after a
+  start, a wake-up, a restart, and every two minutes while it runs (never one
+  that sleeps): its state, whether it answers, its memory, its disk, and
+  whether each folder that should be in it really is. A folder that came
+  loose is unmounted and mounted again. What is wrong is said over the
+  terminal, with a Restart button (asked first; a clean stop, then by force).
+  Its memory and disk are set in its settings (a disk only grows); the record
+  holds what the VM manager says it has. The page's text has one size per
+  device, the terminal's included; on a phone the terminal has the room.
+
 Not yet: mailbox and git resources, delivery.
 
 Where the tool works (`/work`) is a folder kept by the server: what the tool

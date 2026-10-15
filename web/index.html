@@ -39,10 +39,19 @@
       <span id="tool" class="tag" hidden></span>
       <span id="state" data-state="connecting">connecting</span>
       <span id="chips" class="chips"></span>
-      <button type="button" id="simple-toggle" aria-pressed="false" title="A plain screen: what it says, what is ready, a box to say what you want">Simple</button>
-      <button type="button" id="files-open" hidden>Files</button>
-      <button type="button" id="folders" hidden>This conversation</button>
+      <div id="menu-items">
+        <button type="button" id="simple-toggle" class="in-menu" aria-pressed="false" title="A plain screen: what it says, what is ready, a box to say what you want">Simple</button>
+        <button type="button" id="files-open" class="in-menu" hidden>Files</button>
+        <button type="button" id="folders" class="in-menu" hidden>This conversation</button>
+        <span class="in-menu text-size" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span>
+      </div>
+      <button type="button" id="menu" aria-expanded="false" aria-label="More">&#8943;</button>
     </header>
+    <div id="health-strip" role="status" hidden>
+      <span id="health-text"></span>
+      <button type="button" id="health-restart" class="primary">Restart the machine...</button>
+      <button type="button" id="health-dismiss">Dismiss</button>
+    </div>
     <div id="signin-strip" hidden>
       <span class="tag">sign-in</span>
       <span id="signin-text"></span>
@@ -70,134 +79,180 @@
         <pre id="simple-says" aria-live="off"></pre>
       </div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
-      <!-- ACCESS: what THIS conversation has. Nothing is created here. -->
+      <!-- THIS CONVERSATION: its settings, in chapters that fold, as a project's
+           settings do. Nothing is created here: what it is given is made in Assets. -->
       <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b id="panel-title">This conversation</b><button type="button" id="panel-close">Close</button></div>
-        <p class="hint">What this conversation has: it appears in its machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
         <p id="panel-error" class="error" role="alert" hidden></p>
-        <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
-        <div id="panel-rows"></div>
-        <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
-        <div class="panel-top"><b>Secrets handed to its tool</b></div>
-        <div id="access-secrets"></div>
-        <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
-        <p id="secret-note" class="hint" role="status"></p>
-        <div id="attach-picker" hidden>
-          <div class="panel-top"><b id="attach-title">Attach</b><button type="button" id="attach-close">Done</button></div>
-          <div id="attach-rows"></div>
-          <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p>
-          <button type="button" id="attach-manage">Manage all assets</button>
-        </div>
-        <div class="panel-top"><b>Network</b></div>
-        <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
-        <div class="levels" id="network" role="group" aria-label="Network of this conversation">
-          <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
-        </div>
-        <div id="answerer-box">
-          <div class="panel-top"><b>Answers in your place</b></div>
-          <p class="hint" id="answerer-about"></p>
-          <div id="answerer-fields" hidden>
-            <label for="answerer-objectives">Objectives: what you want done</label>
-            <textarea id="answerer-objectives" rows="3" maxlength="4000" spellcheck="true"></textarea>
-            <label for="answerer-charter">Charter: what it may answer, and what it must leave to you</label>
-            <textarea id="answerer-charter" rows="4" maxlength="4000" spellcheck="true"></textarea>
-            <label for="answerer-limit">Answers in a row before you are asked (0: no limit)</label>
-            <input id="answerer-limit" type="number" min="0" max="100000" step="1" inputmode="numeric">
-            <div class="row">
-              <div class="levels" id="answerer-on" role="group" aria-label="Answers in your place"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div>
-              <button type="button" id="answerer-resume" hidden>I am here: carry on</button>
+        <details class="chapter" id="chapter-general" data-chapter="general">
+          <summary><span class="chapter-title">General</span><span class="chapter-about">What it is, and how you talk with it.</span></summary>
+          <div class="chapter-body">
+            <dl id="general-facts" class="facts"></dl>
+            <div id="talk-box">
+            <div class="panel-top"><b>Talk through the app</b></div>
+            <p class="hint" id="talk-about">The tool is given a few tools of its own to tell you something, ask you something, show you a file, and read what you answer: a conversation on the simple screen instead of in its terminal. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER. It works as far as the tool agrees to use it.</p>
+            <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
+            <p class="hint" id="talk-declare" hidden></p>
             </div>
-            <p id="answerer-state" role="status"></p>
-            <details id="answerer-log-box">
-              <summary>What it answered</summary>
-              <div id="answerer-log"></div>
-            </details>
           </div>
-        </div>
-        <div id="talk-box">
-          <div class="panel-top"><b>Talk through the app</b></div>
-          <p class="hint" id="talk-about">The tool is given a few tools of its own to tell you something, ask you something, show you a file, and read what you answer: a conversation on the simple screen instead of in its terminal. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER. It works as far as the tool agrees to use it.</p>
-          <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
-          <p class="hint" id="talk-declare" hidden></p>
-        </div>
-        <div id="wakeups-box">
-          <div class="panel-top"><b>Wake it by itself</b></div>
-          <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken.</p>
-          <div id="wakeups-rows"></div>
-          <div id="wakeup-address-box" class="notice-box" hidden>
-            <b>Its address, shown this once</b>
-            <input id="wakeup-address" readonly spellcheck="false" aria-label="The address that wakes it">
-            <p class="hint">Whoever has this address can wake the tool. Copy it now: it is not kept in a form that can be shown again.</p>
-            <div class="row"><button type="button" id="wakeup-address-copy" class="primary">Copy</button><button type="button" id="wakeup-address-done">I have it</button></div>
-          </div>
-          <details id="wakeups-new-box">
-            <summary>Add a wake-up</summary>
-            <form id="wakeups-new" autocomplete="off">
-              <label for="wakeup-kind">When</label>
-              <select id="wakeup-kind">
-                <option value="arrival">Something arrives in...</option>
-                <option value="cron">By the clock</option>
-                <option value="call">A call from outside (a scheduler, a script)</option>
-              </select>
-              <div data-for="arrival">
-                <label for="wakeup-resource">Where</label>
-                <select id="wakeup-resource"></select>
-                <label class="check"><input type="checkbox" id="wakeup-changed"> Also when a file that was there changes</label>
-                <label for="wakeup-quiet">Seconds it must stay still first</label>
-                <input id="wakeup-quiet" type="number" min="0" max="3600" step="1" value="10" inputmode="numeric">
-              </div>
-              <div data-for="cron" hidden>
-                <label for="wakeup-often">How often</label>
-                <select id="wakeup-often">
-                  <option value="*/15 * * * *">Every 15 minutes</option>
-                  <option value="*/30 * * * *">Every 30 minutes</option>
-                  <option value="0 * * * *" selected>Every hour</option>
-                  <option value="daily">Every day at...</option>
-                  <option value="weekdays">Monday to Friday at...</option>
-                  <option value="custom">Something else: I write the cron line</option>
-                </select>
-                <div id="wakeup-at-box" hidden><label for="wakeup-at">Time (the server's clock)</label><input id="wakeup-at" type="time" value="07:30"></div>
-                <label for="wakeup-line">The cron line this sets: minute hour day month weekday</label>
-                <input id="wakeup-line" spellcheck="false" autocapitalize="off" value="0 * * * *">
-              </div>
-              <div data-for="call" hidden><p class="hint">It gets an address of its own. Whatever calls that address with POST wakes the tool. What the caller sends replaces {text} in your line, as one plain line.</p></div>
-              <label for="wakeup-message">What is typed to the tool</label>
-              <textarea id="wakeup-message" rows="3" maxlength="1000" placeholder="New requests arrived in /resources/handoff: {files}. Read them and do what they ask."></textarea>
-              <p class="hint">{files} is replaced by the names of what arrived.</p>
-              <button type="submit" class="primary">Add</button>
-            </form>
-          </details>
-          <label for="wakeups-limit">Wake-ups an hour at most (0: no cap)</label>
-          <div class="row"><input id="wakeups-limit" type="number" min="0" step="1" inputmode="numeric"><button type="button" id="wakeups-limit-save">Set</button><span class="hint" id="wakeups-sent"></span></div>
-        </div>
-        <details id="access-advanced">
-          <summary>Its machine</summary>
-        <div id="work-box">
-          <div class="panel-top"><b>Where the tool works</b></div>
-          <p id="work-now" class="hint"></p>
-          <p id="work-moved" class="hint" hidden></p>
-          <button type="button" id="work-move"></button>
-        </div>
-        <div id="signin-setup" hidden>
-          <div class="panel-top"><b>Sign-in mailbox</b></div>
-          <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
-          <p id="signin-state" class="hint"></p>
-          <form id="signin-form" autocomplete="off">
-            <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
-              <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
-              <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">
-              <button type="submit" class="primary">Save</button><button type="button" id="signin-remove">Remove</button></div>
-          </form>
-        </div>
         </details>
-        <!-- What is done to the conversation itself: not every day, so not in the bar. -->
-        <div class="panel-top"><b>Actions</b></div>
-        <div class="row" id="conversation-actions">
-          <button type="button" id="share" hidden>Share...</button>
-          <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
-          <span class="sp"></span>
-          <button type="button" id="archive" hidden>Archive...</button>
-        </div>
+        <details class="chapter" id="chapter-machine" data-chapter="machine">
+          <summary><span class="chapter-title">Machine</span><span class="chapter-about">Its health, its memory and disk; restart, sleep.</span></summary>
+          <div class="chapter-body">
+            <div class="panel-top"><b>Health</b><button type="button" id="health-check">Look now</button></div>
+            <ul id="machine-health" class="health-lines" aria-live="polite"></ul>
+            <p id="machine-restarted" class="hint" role="status" hidden></p>
+            <div class="row" id="machine-actions">
+              <button type="button" id="restart" hidden>Restart the machine...</button>
+              <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+            </div>
+            <div class="panel-top"><b>Memory and disk</b></div>
+            <form id="machine-size" autocomplete="off">
+              <label for="machine-memory">Memory</label>
+              <select id="machine-memory"></select>
+              <label for="machine-disk">Disk</label>
+              <select id="machine-disk"></select>
+              <p class="hint" id="machine-size-hint">Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.</p>
+              <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
+            </form>
+            <div id="work-box">
+            <div class="panel-top"><b>Where the tool works</b></div>
+            <p id="work-now" class="hint"></p>
+            <p id="work-moved" class="hint" hidden></p>
+            <button type="button" id="work-move"></button>
+            </div>
+          </div>
+        </details>
+        <details class="chapter" id="chapter-access" data-chapter="access">
+          <summary><span class="chapter-title">Access</span><span class="chapter-about">Folders, repositories, mailboxes, secrets, network.</span></summary>
+          <div class="chapter-body">
+            <p class="hint">What this conversation has: it appears in its machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
+            <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
+            <div id="panel-rows"></div>
+            <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
+            <div class="panel-top"><b>Secrets handed to its tool</b></div>
+            <div id="access-secrets"></div>
+            <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
+            <p id="secret-note" class="hint" role="status"></p>
+            <div id="attach-picker" hidden>
+            <div class="panel-top"><b id="attach-title">Attach</b><button type="button" id="attach-close">Done</button></div>
+            <div id="attach-rows"></div>
+            <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p>
+            <button type="button" id="attach-manage">Manage all assets</button>
+            </div>
+            <div class="panel-top"><b>Network</b></div>
+            <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
+            <div class="levels" id="network" role="group" aria-label="Network of this conversation">
+            <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
+            </div>
+            <div id="signin-setup" hidden>
+            <div class="panel-top"><b>Sign-in mailbox</b></div>
+            <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
+            <p id="signin-state" class="hint"></p>
+            <form id="signin-form" autocomplete="off">
+              <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
+                <input id="signin-user" placeholder="user" aria-label="Mailbox user" spellcheck="false" autocapitalize="none">
+                <input id="signin-password" type="password" placeholder="password" aria-label="Mailbox password" autocomplete="new-password">
+                <button type="submit" class="primary">Save</button><button type="button" id="signin-remove">Remove</button></div>
+            </form>
+            </div>
+          </div>
+        </details>
+        <details class="chapter" id="chapter-wakeups" data-chapter="wakeups">
+          <summary><span class="chapter-title">Wake-ups</span><span class="chapter-about">A line typed to the tool when something arrives, or by the clock.</span></summary>
+          <div class="chapter-body">
+            <div id="wakeups-box">
+            <div class="panel-top"><b>Wake it by itself</b></div>
+            <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken.</p>
+            <div id="wakeups-rows"></div>
+            <div id="wakeup-address-box" class="notice-box" hidden>
+              <b>Its address, shown this once</b>
+              <input id="wakeup-address" readonly spellcheck="false" aria-label="The address that wakes it">
+              <p class="hint">Whoever has this address can wake the tool. Copy it now: it is not kept in a form that can be shown again.</p>
+              <div class="row"><button type="button" id="wakeup-address-copy" class="primary">Copy</button><button type="button" id="wakeup-address-done">I have it</button></div>
+            </div>
+            <details id="wakeups-new-box">
+              <summary>Add a wake-up</summary>
+              <form id="wakeups-new" autocomplete="off">
+                <label for="wakeup-kind">When</label>
+                <select id="wakeup-kind">
+                  <option value="arrival">Something arrives in...</option>
+                  <option value="cron">By the clock</option>
+                  <option value="call">A call from outside (a scheduler, a script)</option>
+                </select>
+                <div data-for="arrival">
+                  <label for="wakeup-resource">Where</label>
+                  <select id="wakeup-resource"></select>
+                  <label class="check"><input type="checkbox" id="wakeup-changed"> Also when a file that was there changes</label>
+                  <label for="wakeup-quiet">Seconds it must stay still first</label>
+                  <input id="wakeup-quiet" type="number" min="0" max="3600" step="1" value="10" inputmode="numeric">
+                </div>
+                <div data-for="cron" hidden>
+                  <label for="wakeup-often">How often</label>
+                  <select id="wakeup-often">
+                    <option value="*/15 * * * *">Every 15 minutes</option>
+                    <option value="*/30 * * * *">Every 30 minutes</option>
+                    <option value="0 * * * *" selected>Every hour</option>
+                    <option value="daily">Every day at...</option>
+                    <option value="weekdays">Monday to Friday at...</option>
+                    <option value="custom">Something else: I write the cron line</option>
+                  </select>
+                  <div id="wakeup-at-box" hidden><label for="wakeup-at">Time (the server's clock)</label><input id="wakeup-at" type="time" value="07:30"></div>
+                  <label for="wakeup-line">The cron line this sets: minute hour day month weekday</label>
+                  <input id="wakeup-line" spellcheck="false" autocapitalize="off" value="0 * * * *">
+                </div>
+                <div data-for="call" hidden><p class="hint">It gets an address of its own. Whatever calls that address with POST wakes the tool. What the caller sends replaces {text} in your line, as one plain line.</p></div>
+                <label for="wakeup-message">What is typed to the tool</label>
+                <textarea id="wakeup-message" rows="3" maxlength="1000" placeholder="New requests arrived in /resources/handoff: {files}. Read them and do what they ask."></textarea>
+                <p class="hint">{files} is replaced by the names of what arrived.</p>
+                <button type="submit" class="primary">Add</button>
+              </form>
+            </details>
+            <label for="wakeups-limit">Wake-ups an hour at most (0: no cap)</label>
+            <div class="row"><input id="wakeups-limit" type="number" min="0" step="1" inputmode="numeric"><button type="button" id="wakeups-limit-save">Set</button><span class="hint" id="wakeups-sent"></span></div>
+            </div>
+          </div>
+        </details>
+        <details class="chapter" id="chapter-answerer" data-chapter="answerer">
+          <summary><span class="chapter-title">Answerer</span><span class="chapter-about">Models that answer its simple questions while you are away.</span></summary>
+          <div class="chapter-body">
+            <div id="answerer-box">
+            <div class="panel-top"><b>Answers in your place</b></div>
+            <p class="hint" id="answerer-about"></p>
+            <div id="answerer-fields" hidden>
+              <label for="answerer-objectives">Objectives: what you want done</label>
+              <textarea id="answerer-objectives" rows="3" maxlength="4000" spellcheck="true"></textarea>
+              <label for="answerer-charter">Charter: what it may answer, and what it must leave to you</label>
+              <textarea id="answerer-charter" rows="4" maxlength="4000" spellcheck="true"></textarea>
+              <label for="answerer-limit">Answers in a row before you are asked (0: no limit)</label>
+              <input id="answerer-limit" type="number" min="0" max="100000" step="1" inputmode="numeric">
+              <div class="row">
+                <div class="levels" id="answerer-on" role="group" aria-label="Answers in your place"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div>
+                <button type="button" id="answerer-resume" hidden>I am here: carry on</button>
+              </div>
+              <p id="answerer-state" role="status"></p>
+              <details id="answerer-log-box">
+                <summary>What it answered</summary>
+                <div id="answerer-log"></div>
+              </details>
+            </div>
+            </div>
+          </div>
+        </details>
+        <details class="chapter" id="chapter-sharing" data-chapter="sharing">
+          <summary><span class="chapter-title">Sharing</span><span class="chapter-about">Give this conversation to another device.</span></summary>
+          <div class="chapter-body">
+            <p class="hint">A device you give it to sees this conversation, and only what you choose. It can be taken back in Devices &amp; sharing.</p>
+            <div class="row"><button type="button" id="share" hidden>Share...</button></div>
+          </div>
+        </details>
+        <details class="chapter" id="chapter-advanced" data-chapter="advanced">
+          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Archive it.</span></summary>
+          <div class="chapter-body">
+            <p class="hint">Archiving deletes its machine, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.</p>
+            <div class="row" id="conversation-actions"><button type="button" id="archive" hidden>Archive...</button></div>
+          </div>
+        </details>
       </div>
       <!-- ASSETS: everything kept here, whatever the conversation. Made here, attached from here or from Access. -->
       <div id="map" class="sheet" hidden>
@@ -313,6 +368,8 @@
         <div class="panel-top"><b>Settings</b><button type="button" id="settings-close">Close</button></div>
         <div class="panel-top"><b>This device</b></div>
         <div class="row"><span>Screen</span><button type="button" id="theme" aria-label="Light or dark screen">Light</button><button type="button" id="install" class="primary" hidden>Install the app</button></div>
+        <div class="row"><span>Text size</span><span class="text-size" id="settings-text" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span></div>
+        <p class="hint">All text, the terminal's too, on this device only. Also: two fingers pinched, Ctrl and the wheel, Ctrl + and Ctrl -.</p>
         <div class="panel-top"><b>Alerts</b></div>
         <p class="hint" id="alerts-state">When a tool stops and waits for you, this device can be told.</p>
         <div class="row"><button type="button" id="alerts-on" class="primary">Alert me on this device</button><button type="button" id="alerts-off" hidden>Stop alerting this device</button><button type="button" id="alerts-test" hidden>Send a test</button></div>
@@ -502,7 +559,8 @@
         <span id="notice-spin" class="spin" aria-hidden="true" hidden></span>
         <p id="notice-text"></p>
         <ol id="notice-steps" hidden></ol>
-        <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
+        <ul id="notice-health" class="health-lines" hidden></ul>
+        <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-restart" type="button" hidden>Restart the machine...</button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
       </div>
     </main>
     <p id="voice-line" role="status" hidden></p>
@@ -518,19 +576,21 @@
       </form>
     </div>
     <!-- The keys a phone keyboard does not have. -->
-    <footer id="keys" title="To select text with the mouse, hold Shift while dragging: what is selected is copied. With a finger, press and hold.">
+    <footer id="keys" data-more="false" title="To select text with the mouse, hold Shift while dragging: what is selected is copied. With a finger, press and hold.">
       <button type="button" data-keys="esc">Esc</button>
-      <button type="button" data-keys="tab">Tab</button>
+      <button type="button" data-keys="tab" class="extra">Tab</button>
       <button type="button" data-keys="left" aria-label="Left">&larr;</button>
       <button type="button" data-keys="down" aria-label="Down">&darr;</button>
       <button type="button" data-keys="up" aria-label="Up">&uarr;</button>
       <button type="button" data-keys="right" aria-label="Right">&rarr;</button>
+      <button type="button" data-keys="backspace" class="extra" aria-label="Backspace">&#9003;</button>
       <button type="button" data-keys="enter" class="wide">Enter</button>
-      <button type="button" data-keys="stop" class="careful" title="Ctrl+C: interrupts what is running">Ctrl+C</button>
-      <button type="button" id="copy-open" hidden title="Copy text of the screen, or paste">Copy / paste</button>
-      <button type="button" id="kbd" aria-pressed="false" hidden title="Show or hide the on-screen keyboard">Keyboard</button>
-      <button type="button" id="mic" aria-pressed="false" hidden>Dictate</button>
-      <button type="button" id="auto" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>
+      <button type="button" data-keys="stop" class="careful extra" title="Ctrl+C: interrupts what is running">Ctrl+C</button>
+      <button type="button" id="copy-open" class="extra" hidden title="Copy text of the screen, or paste">Copy / paste</button>
+      <button type="button" id="kbd" aria-pressed="false" data-short="Kbd" hidden title="Show or hide the on-screen keyboard">Keyboard</button>
+      <button type="button" id="mic" aria-pressed="false" data-short="Mic" hidden>Dictate</button>
+      <button type="button" id="auto" class="extra" aria-pressed="false" hidden title="Press Enter when I stop talking">auto</button>
+      <button type="button" id="keys-more" aria-expanded="false" title="More keys, and the ready-made answers">More</button>
     </footer>
   </section>
 </div>
