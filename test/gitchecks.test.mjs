@@ -77,7 +77,7 @@ test('a failing hook or command fails the checks; the output comes back, bounded
     assert.equal(existsSync(join(b.dir, 'command-ran')), false);
 });
 
-test('the checks run where the commit to send is checked out: another working tree of the repository, or one made at that commit and taken away after', async (t) => {
+test('the checks always run in a copy made at the commit to send, taken away after: never in the folder the tool works in', async (t) => {
     const b = bench(t);
     const seen = join(b.dir, 'seen');
     writeFileSync(join(b.work, 'b.txt'), 'b\n'); git(b.work, 'add', 'b.txt'); git(b.work, 'commit', '--quiet', '-m', 'two');
@@ -85,15 +85,16 @@ test('the checks run where the commit to send is checked out: another working tr
     let r = await b.ask({ command: `git rev-parse HEAD > ${seen}; test ! -e b.txt` });
     assert.equal(r.status, 'passed', r.output);
     assert.equal(readFileSync(seen, 'utf8').trim(), b.head);
-    assert.match(r.output, /working tree made at this commit/);
+    assert.match(r.output, /a copy made at this commit/);
     assert.equal(git(b.work, 'worktree', 'list').split('\n').length, 1, 'the working tree made for the checks is gone');
     assert.equal(git(b.work, 'rev-parse', 'HEAD') === b.head, false, 'the repository itself was not moved');
-    /* The commit is checked out in another working tree (git worktree): checked there, as it is. */
-    const other = join(b.dir, 'machine', 'wt-staging');
-    git(b.work, 'worktree', 'add', '--quiet', '-b', 'staging', other, b.head);
-    r = await b.ask({ command: `pwd > ${seen}` });
+    /* Even when the repository is at that commit, and has changes not committed: the copy is checked, not the folder. */
+    git(b.work, 'reset', '--quiet', '--hard', b.head);
+    writeFileSync(join(b.work, 'a.txt'), 'changed, not committed\n');
+    r = await b.ask({ command: `pwd > ${seen}; grep -qx a a.txt` });
     assert.equal(r.status, 'passed', r.output);
-    assert.equal(readFileSync(seen, 'utf8').trim(), other);
+    assert.notEqual(readFileSync(seen, 'utf8').trim(), b.work);
+    assert.equal(readFileSync(join(b.work, 'a.txt'), 'utf8'), 'changed, not committed\n', 'the folder the tool works in is untouched');
     /* A commit that is not in the repository: failed, and said. */
     r = await b.ask({ head: 'f'.repeat(40), command: 'true' });
     assert.equal(r.status, 'failed');
