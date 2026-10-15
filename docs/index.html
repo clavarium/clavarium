@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Clavarium</title>
-<meta name="description" content="AI helpers on a computer you own. Each sees only what you give it.">
+<meta name="description" content="Unlock your AI. Keep the keys. Any agent, any provider, on a computer you own.">
 <!--
   TARGET PAGE. NOT THE REAL HOME PAGE. The pictures simulate these PLANNED features:
     - The window: one phone page per person (Marcel's "Tell your story": the storyteller asks,
@@ -70,6 +70,9 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .hero { padding-top: 28px; padding-bottom: 8px; }
 h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-spacing: -.02em; font-weight: 720; max-width: 20em; text-wrap: balance; }
 .lead { margin: 12px 0 0; font-size: 18px; color: var(--dim); }
+.points { margin: 14px 0 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 16px; }
+.points li::before { content: "\2713"; margin-right: 8px; color: var(--shell-accent); font-weight: 700; }
+.free { margin: 12px 0 0; font-size: 14px; color: var(--dim); }
 
 .ask { padding-top: 36px; }
 .ask h2 { margin: 0 0 12px; font-size: 20px; font-weight: 680; }
@@ -339,8 +342,14 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
 
 <main id="top">
   <section class="hero wrap">
-    <h1>AI helpers on a computer you own. Each sees only what you give it.</h1>
-    <p class="lead">Free and open source. On your computer or your server.</p>
+    <h1>Unlock your AI. Keep the keys.</h1>
+    <p class="lead">Any agent, any provider, on a computer you own.</p>
+    <ul class="points">
+      <li>Switch provider without starting over.</li>
+      <li>Run several agents at once, each in its own machine.</li>
+      <li>You decide what each one sees.</li>
+    </ul>
+    <p class="free">Free and open source. On your computer or your server.</p>
   </section>
 
   <section class="ask wrap" aria-labelledby="ask-h">
