@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const TEXT_MAX = 4000;
 /* What it is doing now is one short line: a screen shows it while it works. */
 export const DOING_MAX = 200;

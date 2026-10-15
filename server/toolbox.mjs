@@ -6,7 +6,7 @@
  * (see talk.mjs) and installs it, as it would install anything.
  *
  *   /tools/index.json                  { tools: [{ name, version, file, sha256, usage }] }
- *   /tools/clavarium-parley-0.3.0.tgz  Parley, the first of them (npm pack)
+ *   /tools/clavarium-parley-0.4.0.tgz  Parley, the first of them (npm pack)
  *
  * Adding a tool is putting its archive in SOURCES with one line of usage.
  *

@@ -193,7 +193,7 @@ const terminalOf = (b, phone, c) => new Promise((done) => {
     ws.on('error', () => done('refused'));
 });
 
-test('a conversation shared in parts: what was not given is refused by the server, not only hidden -- the terminal, its shortcuts and dictation; the chat, its words; never turning it on or inviting the tool', async (t) => {
+test('a conversation shared in parts: what was not given is refused by the server, not only hidden -- the terminal; shortcuts and dictation unless it may write in the chat; the chat, its words; never turning it on or inviting the tool', async (t) => {
     const b = await bench(t);
     assert.equal((await b.operator('/api/conversations/family/talk', { on: true })).status, 200);
     const chatOnly = await b.pairPhone([{ asset: 'conversation:family', rights: 'rw' }]);
@@ -205,10 +205,10 @@ test('a conversation shared in parts: what was not given is refused by the serve
     const parts = async (phone) => { const me = await (await at(phone, '/me')).json(); return [me.terminal, me.chat]; };
     assert.deepEqual([await parts(chatOnly), await parts(terminalOnly), await parts(readOnly)], [[false, 'write'], [true, null], [false, 'read']]);
 
-    /* The chat alone: no terminal channel, no shortcuts; it writes, reminds, and dictates into the chat. */
+    /* The chat alone: no terminal channel; it writes, reminds, dictates into the chat, and has the owner's ready answers there. */
     assert.equal(await terminalOf(b, chatOnly), 'refused');
     assert.equal(await terminalOf(b, chatOnly, 'family'), 'refused');
-    assert.equal(await status(chatOnly, '/shortcuts'), 403);
+    assert.equal(await status(chatOnly, '/shortcuts'), 200);
     assert.equal(await status(chatOnly, '/conversations/family/talk'), 200);
     assert.equal(await status(chatOnly, '/conversations/family/talk', { text: 'Hello from Dad.' }), 201);
     assert.equal(await status(chatOnly, '/conversations/family/talk/remind', {}), 200);
@@ -228,8 +228,9 @@ test('a conversation shared in parts: what was not given is refused by the serve
     assert.equal(await status(terminalOnly, '/conversations/family/talk/remind', {}), 403);
     assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).messages.map((m) => m.text).join('|'), 'Hello from Dad.');
 
-    /* The chat to read only: read, and nothing written, typed or dictated. */
+    /* The chat to read only: read, and nothing written, typed or dictated; no ready answers to send. */
     assert.equal(await status(readOnly, '/conversations/family/talk'), 200);
+    assert.equal(await status(readOnly, '/shortcuts'), 403);
     assert.equal(await status(readOnly, '/conversations/family/talk', { text: 'no' }), 403);
     assert.equal(await status(readOnly, '/conversations/family/talk/remind', {}), 403);
     assert.equal(await terminalOf(b, readOnly), 'refused');

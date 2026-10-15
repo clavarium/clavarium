@@ -28,8 +28,9 @@
  * A conversation is shared in two parts, chosen by the owner (grants.mjs):
  * its TERMINAL ("x") and its CHAT ("r" to read it, "w" to write there).
  * What was not given is refused here, not only left out of the page:
- *   no terminal   no terminal channel (see deviceTerminal), no shortcuts,
- *                 no dictation unless it may write in the chat
+ *   no terminal   no terminal channel (see deviceTerminal); its shortcuts
+ *                 and dictation only if it may write in the chat (they are
+ *                 then its ready answers, and what is said fills its box)
  *   no chat       none of the talk routes, its words included
  * Its files go with either part: a file the tool shows in its chat opens
  * from them.
@@ -133,8 +134,8 @@ export async function handleDoor(request, response, { devices, conversations, re
         /* The files a device was given for itself need no conversation; everything else does. */
         const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || route === '/leave';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
-        /* Shortcuts are typed into the terminal: none without it. */
-        if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal, 'the terminal'); return send(200, shortcuts.list()); }
+        /* Shortcuts are typed into the terminal, or are the ready answers of the chat: one of the two must be its to write in. */
+        if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
         /* What is dictated goes into the terminal, or into the chat's box: one of the two must be its to write in. */
         const speaks = part.terminal || part.chat === 'write';
         if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined && speaks, engine: speaks ? voice?.model ?? null : null });

@@ -1,7 +1,8 @@
 /* THE EXCHANGE, SHOWN. One file, no framework, for any page.
  *
  *   import { mount } from './parley-ui.js';
- *   mount(element, { load, send, words, open, terminal, remind, view, onView, locale });
+ *   mount(element, { load, send, words, open, terminal, remind, view, onView, locale,
+ *                    voice, autoSend, onAutoSend, replies, enter, touch });
  *
  *   load()                 resolves with what parley-host.mjs read() gives
  *   send(text, answers)    the person wrote; `answers` is the id of the
@@ -16,6 +17,33 @@
  *   view                   'simple' or 'detailed'; onView(view) when changed
  *   locale                 optional: how times and days are written (the
  *                          device's own way when not given)
+ *
+ * SLOTS THE APPLICATION FILLS, each optional; without them, none is shown:
+ *   voice                  { listen(on) }: dictation. listen opens the
+ *                          microphone and resolves with a function that
+ *                          closes it; it calls on.phrase(text) for each
+ *                          phrase understood, on.state(word) with
+ *                          calibrating, listening, hearing or transcribing,
+ *                          on.speech() when speech begins, on.error(message).
+ *                          A button beside Send; what is said goes into the
+ *                          box. Changed later with `handle.voice = ...`.
+ *   autoSend, onAutoSend   "send when I stop": what was said is sent once the
+ *                          person stops talking; the person's choice is told
+ *                          to onAutoSend(on), for the application to keep.
+ *   replies                [{ label, text, send }]: ready answers, above the
+ *                          box, after the choices of the question the agent
+ *                          asks now. `send: true` sends the text at once,
+ *                          otherwise it is put in the box to be completed.
+ *                          Changed later with `handle.replies = [...]`.
+ *   enter                  'auto' (default: Enter sends where there is a fine
+ *                          pointer, a new line on a touch screen), 'send' or
+ *                          'newline'. Shift+Enter is always a new line, and
+ *                          Ctrl+Enter always sends.
+ *   touch                  true on a touch screen (default: any coarse
+ *                          pointer). The box is then never focused by the
+ *                          page, only by the person's finger, so that the
+ *                          keyboard never comes up by itself; and a tap on a
+ *                          button of the box leaves it open.
  *
  * WHILE IT WORKS, WHAT IT DOES NOW. The agent says in one line what it is
  * doing (`parley doing`); the newest line is shown under the last message,
@@ -42,7 +70,8 @@
 export const VIEWS = Object.freeze(['simple', 'detailed']);
 /* The words this screen uses: a dictionary needs these keys. */
 export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simple', 'detailed', 'working', 'waiting', 'done', 'no-status', 'asks', 'open', 'outside',
-    'not-read', 'read', 'remind', 'reminded', 'steps', 'no-steps', 'files', 'no-files', 'terminal', 'not-sent', 'step-one', 'steps-many', 'today', 'yesterday', 'quiet']);
+    'not-read', 'read', 'remind', 'reminded', 'steps', 'no-steps', 'files', 'no-files', 'terminal', 'not-sent', 'step-one', 'steps-many', 'today', 'yesterday', 'quiet',
+    'mic', 'mic-stop', 'auto-send', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less']);
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
 /* Between two messages further apart than this, the time is said. */
@@ -51,6 +80,14 @@ export const GAP_MS = 60 * 60 * 1000;
 export const STALE_MS = 15 * 60 * 1000;
 /* A press this long on a touch screen shows a message's time. */
 export const PRESS_MS = 450;
+/* Dictating with "send when I stop": sent this long after the last phrase was written, unless the person speaks again. */
+export const AUTO_SEND_MS = 1200;
+/* Send pressed while a phrase is still being written: sent once it is, or after this long with what is there. */
+export const WRITE_WAIT_MS = 15_000;
+/* Ready answers: so many at most, each label so long. */
+export const REPLIES_MAX = 40;
+export const LABEL_MAX = 40;
+export const TEXT_MAX = 4000;
 
 const fill = (word, values = {}) => String(word ?? '').replace(/\{([a-z]+)\}/g, (all, key) => (Object.hasOwn(values, key) ? String(values[key]) : all));
 const said = (words, key, values) => fill(typeof words?.[key] === 'string' ? words[key] : key, values);
@@ -165,10 +202,61 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     };
 }
 
+/* THE QUICK ANSWERS ABOVE THE BOX, as plain data: the choices of the
+   question the agent asks now (the newest one not answered), first; then the
+   application's ready answers, as many as are well formed. */
+export function quick(data, replies = []) {
+    const all = Array.isArray(data?.messages) ? data.messages : [];
+    const answered = new Set(all.map((m) => m?.answers).filter(Boolean));
+    const asks = [...all].reverse().find((m) => m?.kind === 'ask' && m.from !== 'person' && !answered.has(m.id) && Array.isArray(m.choices) && m.choices.length > 0);
+    const out = asks ? asks.choices.map((c) => ({ kind: 'choice', label: String(c), text: String(c), send: true, answers: String(asks.id ?? '') })) : [];
+    for (const r of Array.isArray(replies) ? replies.slice(0, REPLIES_MAX) : []) {
+        if (!r || typeof r.label !== 'string' || typeof r.text !== 'string' || !r.label.trim() || !r.text.trim()) continue;
+        out.push({ kind: 'reply', label: r.label.trim().slice(0, LABEL_MAX), text: r.text.slice(0, TEXT_MAX), send: r.send === true });
+    }
+    return out;
+}
+
+/* Does this key, pressed in the box, send? Shift+Enter is a new line and
+   Ctrl+Enter sends, always; Enter alone as `enter` says ('auto': where there
+   is a fine pointer, a keyboard is likely). A key that composes a character
+   (an accent, a syllable) is the composer's. */
+export function sends(event, enter = 'auto', fine = false) {
+    if (event?.key !== 'Enter' || event.isComposing || event.keyCode === 229) return false;
+    if (event.shiftKey || event.altKey) return false;
+    if (event.ctrlKey || event.metaKey) return true;
+    return enter === 'send' || (enter !== 'newline' && fine);
+}
+
+/* What dictation said joins what is in the box, with one space. */
+export const joined = (before, said) => {
+    const add = String(said ?? '').replace(/\s+/g, ' ').trim();
+    if (!add) return String(before ?? '');
+    const was = String(before ?? '');
+    return was === '' || /\s$/.test(was) ? `${was}${add}` : `${was} ${add}`;
+};
+
 const el = (tag, className, text) => { const e = document.createElement(tag); if (className) e.className = className; if (text !== undefined) e.textContent = text; return e; };
 const button = (text, className, act) => { const b = el('button', className, text); b.type = 'button'; b.addEventListener('click', act); return b; };
 
-export function mount(root, { load, send, words = {}, open, terminal, remind, view: first = 'simple', onView, every = 3000, locale } = {}) {
+const SVG = 'http://www.w3.org/2000/svg';
+/* A drawn sign, made here: never markup from anywhere. */
+function sign(kind) {
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', `parley-sign parley-sign-${kind}`);
+    const shapes = kind === 'mic'
+        ? [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7' }]]
+        : [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]];
+    for (const [tag, attributes] of shapes) {
+        const shape = document.createElementNS(SVG, tag);
+        for (const [k, v] of Object.entries(attributes)) shape.setAttribute(k, String(v));
+        svg.append(shape);
+    }
+    return svg;
+}
+
+export function mount(root, { load, send, words = {}, open, terminal, remind, view: first = 'simple', onView, every = 3000, locale,
+    voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch } = {}) {
     let as = VIEWS.includes(first) ? first : 'simple';
     let shown = '';
     let count = 0;
@@ -192,12 +280,26 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const thread = el('div', 'parley-thread'); thread.setAttribute('aria-live', 'polite');
     const aside = el('aside', 'parley-aside');
     main.append(thread, aside);
+    /* Quick answers, above the box: one line, the rest one tap away. */
+    const quickRow = el('div', 'parley-quick'); quickRow.hidden = true; quickRow.dataset.open = 'false';
+    const chips = el('div', 'parley-replies'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', said(words, 'replies'));
+    const moreChips = el('button', 'parley-replies-more'); moreChips.type = 'button'; moreChips.hidden = true; moreChips.setAttribute('aria-expanded', 'false');
+    quickRow.append(chips, moreChips);
     const form = el('form', 'parley-form'); form.autocomplete = 'off';
-    const box = el('textarea', 'parley-box'); box.rows = 2; box.maxLength = 4000; box.placeholder = said(words, 'placeholder'); box.setAttribute('aria-label', said(words, 'placeholder'));
+    const box = el('textarea', 'parley-box'); box.rows = 1; box.maxLength = TEXT_MAX; box.placeholder = said(words, 'placeholder'); box.setAttribute('aria-label', said(words, 'placeholder'));
+    const mic = el('button', 'parley-mic'); mic.type = 'button'; mic.setAttribute('aria-pressed', 'false');
+    /* Listening, it says in a word that a touch stops it. */
+    const micWord = el('span', 'parley-mic-word', said(words, 'mic-stop'));
+    mic.append(sign('mic'), sign('stop'), micWord);
     const go = el('button', 'parley-send', said(words, 'send')); go.type = 'submit';
+    /* While dictating: what the microphone does, and "send when I stop". */
+    const heard = el('div', 'parley-voice'); heard.hidden = true;
+    const heardText = el('span', 'parley-voice-text'); heardText.setAttribute('role', 'status');
+    const autoButton = el('button', 'parley-auto', said(words, 'auto-send')); autoButton.type = 'button';
+    heard.append(heardText, autoButton);
     const problem = el('p', 'parley-problem'); problem.hidden = true; problem.setAttribute('role', 'alert');
-    form.append(box, go);
-    root.replaceChildren(top, main, form, problem);
+    form.append(box, mic, go);
+    root.replaceChildren(top, main, quickRow, form, heard, problem);
     root.dataset.view = as;
     const narrow = () => root.clientWidth > 0 && root.clientWidth < NARROW_PX;
     let wasNarrow = narrow();
@@ -258,7 +360,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             return holder;
         }
         const item = row;
-        const bubble = el('div', 'parley-said'); bubble.dataset.from = item.from; bubble.dataset.kind = item.kind; bubble.dataset.id = item.id; if (item.open) bubble.dataset.open = 'true';
+        const bubble = el('div', 'parley-said'); bubble.dataset.from = item.from; bubble.dataset.kind = item.kind; bubble.dataset.id = item.id; if (item.open) bubble.dataset.asking = 'true';
         if (item.id && item.id === revealed) bubble.dataset.reveal = 'true';
         if (item.when) bubble.title = item.when;
         if (item.label) bubble.append(el('p', 'parley-label', item.label));
@@ -311,6 +413,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     }
     function paint(data) {
         latest = data;
+        paintQuick();
         const v = view(data, { words, view: as, locale });
         const small = narrow();
         const mark = JSON.stringify([v, small]);
@@ -323,6 +426,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         const atBottom = sticky || v.items.length > count;
         count = v.items.length;
         thread.replaceChildren(...v.rows.flatMap((row) => rowOf(row, v)));
+        watchChoices();
         if (v.empty) thread.append(el('p', 'parley-empty', v.empty));
         aside.hidden = v.view !== 'detailed';
         aside.dataset.narrow = String(small);
@@ -360,19 +464,193 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         }, PRESS_MS);
     });
     for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'scroll']) thread.addEventListener(type, unpress, { passive: true });
-    form.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const text = box.value.trim();
-        if (!text) return;
-        box.value = '';
-        void say(text);
-    });
+    /* ---- the box: the keyboard, the ready answers, the voice ---- */
+    const media = (q) => typeof matchMedia === 'function' && matchMedia(q).matches;
+    const touching = typeof touch === 'boolean' ? touch : media('(any-pointer: coarse)');
     /* With a keyboard, Enter sends and Shift+Enter is a new line, as in every
        chat; on a touch screen Enter is a new line and the button sends. */
-    const keyboard = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
-    box.addEventListener('keydown', (event) => { if (keyboard && event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); form.requestSubmit(); } });
+    const keyboard = media('(pointer: fine)');
+    /* The box grows with what is in it, up to a few lines, then scrolls. */
+    const grow = () => { box.style.height = 'auto'; box.style.height = `${box.scrollHeight + 2}px`; };
+    box.addEventListener('input', grow);
+    /* The page puts the cursor in the box only where no keyboard comes up
+       with it; on a touch screen, only the person's finger does. */
+    const focusBox = () => { if (!touching && document.activeElement !== box) box.focus({ preventScroll: true }); };
+    /* A tap on a button of the box does not take the focus from it: the
+       keyboard of a phone, open, stays open after sending; closed, it is not
+       opened. Should a browser move the focus all the same, it is given back
+       in the same gesture. */
+    let typing = false;
+    const keep = (event) => {
+        if (!(event.target instanceof Element) || !event.target.closest('button')) return;
+        typing = document.activeElement === box;
+        if (typing) event.preventDefault();
+    };
+    for (const zone of [form, quickRow, heard, thread]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
+    const stayIn = () => { if (typing && document.activeElement !== box) box.focus({ preventScroll: true }); typing = false; };
+    const sendBox = () => {
+        const text = box.value.trim();
+        if (!text) return;
+        box.value = ''; grow();
+        void say(text);
+    };
+    /* ---- dictation ---- */
+    let voice = speaking?.listen ? speaking : null;
+    let stopping = null;
+    let starting = false;
+    let hearing = '';
+    let auto = autoSend === true;
+    let autoTimer;
+    let writing = null;
+    let hush;
+    let gone = false;
+    const paintVoice = () => {
+        const on = Boolean(stopping);
+        mic.hidden = !voice;
+        mic.setAttribute('aria-pressed', String(on));
+        mic.dataset.state = on ? hearing || 'listening' : '';
+        mic.title = said(words, on ? 'mic-stop' : 'mic'); mic.setAttribute('aria-label', mic.title); micWord.hidden = !on;
+        autoButton.setAttribute('aria-pressed', String(auto));
+        autoButton.hidden = !on;
+        if (on) { heard.hidden = false; heard.dataset.state = hearing || 'listening'; heardText.textContent = writing ? said(words, 'voice-wait') : said(words, `voice-${hearing || 'listening'}`); }
+        else if (!hush) heard.hidden = true;
+    };
+    const sendWritten = () => { clearTimeout(writing); writing = null; sendBox(); paintVoice(); };
+    const quiet = () => {
+        const was = stopping; stopping = null;
+        try { was?.(); } catch { /* the application's business */ }
+        clearTimeout(autoTimer);
+        if (writing) sendWritten();
+        hearing = ''; paintVoice();
+    };
+    const listened = {
+        phrase: (text) => {
+            if (!stopping) return;
+            box.value = joined(box.value, text).slice(0, TEXT_MAX); grow();
+            box.scrollTop = box.scrollHeight;
+            if (writing) { sendWritten(); return; }
+            if (auto) { clearTimeout(autoTimer); autoTimer = setTimeout(sendBox, AUTO_SEND_MS); }
+        },
+        state: (word) => {
+            if (!stopping) return;
+            hearing = ['calibrating', 'listening', 'hearing', 'transcribing'].includes(word) ? word : 'listening';
+            /* Nothing more to write: what is there goes. */
+            if (writing && hearing === 'listening') { sendWritten(); return; }
+            paintVoice();
+        },
+        speech: () => clearTimeout(autoTimer),
+        error: (message) => { if (stopping) { heardText.textContent = String(message ?? ''); heard.dataset.state = 'error'; } },
+    };
+    mic.addEventListener('click', async () => {
+        if (stopping) { quiet(); stayIn(); return; }
+        if (starting || !voice) return;
+        starting = true;
+        clearTimeout(hush); hush = undefined;
+        try {
+            const closing = await voice.listen(listened);
+            /* Taken off the page while the microphone was opening: it is closed at once. */
+            if (gone) { try { closing?.(); } catch { /* as above */ } return; }
+            stopping = typeof closing === 'function' ? closing : () => {};
+            hearing = hearing || 'calibrating';
+        } catch {
+            stopping = null;
+            heard.hidden = false; heard.dataset.state = 'error'; heardText.textContent = said(words, 'voice-off'); autoButton.hidden = true;
+            hush = setTimeout(() => { hush = undefined; paintVoice(); }, 6000);
+        }
+        starting = false;
+        paintVoice();
+        stayIn();
+    });
+    autoButton.addEventListener('click', () => {
+        auto = !auto;
+        if (!auto) clearTimeout(autoTimer);
+        try { onAutoSend?.(auto); } catch { /* the application's business */ }
+        paintVoice(); stayIn();
+    });
+    form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        clearTimeout(autoTimer);
+        /* Send pressed while a phrase is still being heard or written: it goes with it. */
+        if (stopping && (hearing === 'hearing' || hearing === 'transcribing')) {
+            if (!writing) writing = setTimeout(sendWritten, WRITE_WAIT_MS);
+            paintVoice(); stayIn();
+            return;
+        }
+        sendBox();
+        stayIn();
+    });
+    box.addEventListener('keydown', (event) => { if (sends(event, enter, keyboard)) { event.preventDefault(); form.requestSubmit(); } });
+    /* ---- the quick answers ---- */
+    let replies = Array.isArray(ready) ? ready : [];
+    let quickShown = '';
+    let quickOpen = false;
+    const fold = () => {
+        quickRow.dataset.open = String(quickOpen);
+        chips.style.maxHeight = '';
+        /* Those shown: the choices of the question are not, while its own buttons are in sight. */
+        const kids = [...chips.children].filter((k) => !(quickRow.dataset.choices === 'seen' && k.classList.contains('parley-answer')));
+        quickRow.dataset.empty = String(kids.length === 0);
+        if (kids.length === 0) { moreChips.hidden = true; return; }
+        const line = kids[0].getBoundingClientRect();
+        const below = kids.filter((k) => k.getBoundingClientRect().top > line.top + line.height / 2).length;
+        moreChips.hidden = below === 0 && !quickOpen;
+        moreChips.setAttribute('aria-expanded', String(quickOpen));
+        moreChips.textContent = quickOpen ? said(words, 'replies-less') : said(words, 'replies-more', { count: below });
+        /* Folded: the first line alone, measured, so that it follows the size of the text. */
+        if (!quickOpen && below > 0) chips.style.maxHeight = `${Math.ceil(line.height) + 2}px`;
+    };
+    moreChips.addEventListener('click', () => { quickOpen = !quickOpen; fold(); stayIn(); });
+    const use = (q) => {
+        if (q.send) {
+            if (q.kind === 'choice') for (const b of chips.querySelectorAll('.parley-answer')) b.disabled = true;
+            void say(q.text, q.kind === 'choice' ? q.answers : undefined);
+        } else {
+            box.value = joined(box.value, q.text).slice(0, TEXT_MAX); grow();
+            focusBox();
+            box.setSelectionRange?.(box.value.length, box.value.length);
+        }
+        stayIn();
+    };
+    function paintQuick() {
+        const list = quick(latest, replies);
+        const mark = JSON.stringify(list);
+        if (mark === quickShown) return;
+        quickShown = mark;
+        chips.replaceChildren(...list.map((q) => {
+            const b = button(q.label, q.kind === 'choice' ? 'parley-answer' : 'parley-reply', () => use(q));
+            b.dataset.send = String(q.send);
+            if (q.kind === 'reply' && q.text !== q.label) b.title = q.text;
+            return b;
+        }));
+        quickRow.hidden = list.length === 0;
+        if (!quickRow.hidden) fold();
+    }
+    const watchQuick = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (!quickRow.hidden) fold(); }) : null;
+    watchQuick?.observe(quickRow);
+    /* The choices of the question it asks are near the thumb when its own
+       buttons have scrolled away (or a keyboard took the room), and only then:
+       never twice on the screen. */
+    const seeing = typeof IntersectionObserver === 'function'
+        ? new IntersectionObserver((entries) => { for (const e of entries) quickRow.dataset.choices = e.isIntersecting ? 'seen' : ''; if (!quickRow.hidden) fold(); }, { root: thread, threshold: 0.5 })
+        : null;
+    const watchChoices = () => {
+        if (!seeing) return;
+        seeing.disconnect();
+        const asked = [...thread.querySelectorAll('.parley-choices')].at(-1);
+        /* Until it is seen again, as it was: no flicker when the page is drawn again. */
+        if (asked) seeing.observe(asked); else quickRow.dataset.choices = '';
+    };
+    paintVoice();
+    paintQuick();
     /* What it does now stops moving once it is old: looked at again now and then, data or not. */
     const timer = every > 0 ? setInterval(() => { if (!document.hidden) void refresh(); }, every) : null;
     void refresh();
-    return { refresh, get view() { return as; }, set view(v) { if (VIEWS.includes(v)) choose(v); }, destroy() { if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; } };
+    return {
+        refresh,
+        get view() { return as; }, set view(v) { if (VIEWS.includes(v)) choose(v); },
+        get voice() { return voice; }, set voice(v) { if (!v?.listen) quiet(); voice = v?.listen ? v : null; paintVoice(); },
+        get replies() { return replies; }, set replies(list) { replies = Array.isArray(list) ? list : []; paintQuick(); },
+        get listening() { return Boolean(stopping); },
+        destroy() { gone = true; quiet(); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
+    };
 }

@@ -61,6 +61,26 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     await me.sees('command not found', 25_000);
     await me.page.locator('#mic').click();
     await me.until('the microphone is closed', async () => (await me.page.locator('#mic').innerText()) === 'Dictate');
+    /* In the chat: its own button beside Send; what is said fills its box, nothing is typed into the terminal behind it. */
+    await me.api('/api/conversations/by-voice/talk', { on: true });
+    await me.page.reload();
+    const mic = me.page.locator('#simple-thread .parley-mic');
+    const box = me.page.locator('#simple-thread .parley-box');
+    await me.until('the chat has its microphone', async () => mic.isVisible());
+    const typed = (await me.screen()).split('said out loud').length;
+    await mic.click();
+    await me.until('what is said fills the box', async () => (await box.inputValue()).includes('said out loud'), 25_000);
+    const said = async () => (await me.api('/api/conversations/by-voice/talk')).body.messages.filter((m) => m.from === 'person' && m.text.includes('said out loud')).length;
+    /* Send, while it listens: sent, with what is still being written. */
+    await me.page.locator('#simple-thread .parley-send').click();
+    await me.until('sent', async () => (await said()) === 1, 25_000);
+    /* "Send when I stop": spoken, then sent, in one gesture. */
+    await me.page.locator('#simple-thread .parley-auto').click();
+    await me.until('sent by itself', async () => (await said()) >= 2, 30_000);
+    await mic.click();
+    assert.equal(await mic.getAttribute('aria-pressed'), 'false');
+    assert.equal((await me.screen()).split('said out loud').length, typed, 'nothing typed into the terminal');
+    assert.equal(await me.page.evaluate(() => localStorage.getItem('clavarium-chat-auto')), '1', 'kept by this device');
 });
 
 test('folders, from the owner: a read attachment mounts the read-only view, and Files lists, imports and downloads', { skip: SKIP }, async (t) => {

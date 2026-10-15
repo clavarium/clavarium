@@ -28,5 +28,17 @@
   "steps-many": "{count} étapes",
   "today": "Aujourd'hui",
   "yesterday": "Hier",
-  "quiet": "rien de nouveau depuis {time}"
+  "quiet": "rien de nouveau depuis {time}",
+  "mic": "Dicter",
+  "mic-stop": "Arrêter",
+  "auto-send": "Envoyer tout seul quand je me tais",
+  "voice-calibrating": "J'écoute la pièce...",
+  "voice-listening": "J'écoute : ce que vous dites s'écrit dans la case.",
+  "voice-hearing": "Je vous entends...",
+  "voice-transcribing": "J'écris ce que vous avez dit...",
+  "voice-wait": "Envoyé dès que c'est écrit.",
+  "voice-off": "Le micro n'est pas disponible. Autorisez-le pour ce site, puis réessayez.",
+  "replies": "Réponses toutes prêtes",
+  "replies-more": "{count} de plus",
+  "replies-less": "Moins"
 }

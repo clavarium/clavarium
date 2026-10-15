@@ -25,6 +25,16 @@ listed here.
   app; until then it installs it from the archive in `/tools`, read-only in
   every machine.
 
+- **A tool resumes where it was.** After a restart, a tool that can resume its
+  last session (`claude --continue` and the like) is started that way: one
+  line of configuration per tool. Its session can also be kept in the work
+  folder, so it survives a machine rebuilt, a backup and a restore.
+- **Every word of the app in the owner's language.** English by default,
+  French at least, a file per language, the owner's own words over any of them
+  (as the chat already does).
+- **Two servers, two apps that tell themselves apart.** The app installed from
+  a server carries that server's name (and a mark of its own on the icon).
+
 ## Later
 
 - **Lock files in .git with a sticky bit**, as a second belt behind the runner,

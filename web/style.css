@@ -57,7 +57,8 @@ header button { padding: 5px 9px; white-space: nowrap; }
 #state[data-state="waiting"]::before, #state[data-state="ended"]::before { background: var(--warn); }
 main { position: relative; flex: 1; min-height: 0; }
 #terminal { position: absolute; inset: 0; padding: 4px; }
-#notice { position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(15, 20, 26, .92); }
+/* Over the chat screen (a question asked must be seen), under a sheet the person opened (which is shut before any question is asked). */
+#notice { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(15, 20, 26, .92); }
 /* On a light screen the veil is light too: dark text on the dark veil could not be read (seen on the welcome of a device). */
 :root[data-theme="light"] #notice { background: rgba(251, 251, 250, .94); }
 #notice p { margin: 0; max-width: 36ch; font-size: 1rem; }
@@ -88,7 +89,7 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
 .chips { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
 .chip { font-size: .6875rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink2); white-space: nowrap; }
 .chip[data-access="write"] { color: var(--ok); border-color: var(--ok); }
-.sheet { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--panel); overflow-y: auto; }
+.sheet { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--panel); overflow-y: auto; }
 .panel-top { display: flex; align-items: center; justify-content: space-between; }
 #panel-rows { display: flex; flex-direction: column; }
 .folder { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
@@ -342,7 +343,8 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #simple .panel-top { margin-top: 16px; }
 /* Without its terminal, the keys of a terminal are of no use; ready answers and the voice stay. */
 #room[data-simple] #keys > button:not(#mic):not(#auto) { display: none; }
-#room[data-chat] #shortcuts { display: none !important; }
+/* Under the chat, its own box has dictation and the ready answers: the bar's, which type into the terminal, are not shown. */
+#room[data-chat] #shortcuts, #room[data-chat] #keys, #room[data-chat] #voice-line { display: none !important; }
 
 /* The conversation with the tool is drawn by Parley; here, only where it sits and this page's colours. */
 /* The chat takes the whole screen: its box stays at the bottom, the messages scroll above it. */
@@ -352,7 +354,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #chat-off p { margin: 0 0 10px; font-size: 1rem; }
 #chat-off p + p { color: var(--ink2); }
 #simple[data-chat] { display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px 12px; }
-#simple-thread { flex: 1; min-height: 0; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }
+#simple-thread { flex: 1; min-height: 0; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; --parley-live: var(--danger); }
 
 /* Who sees what: the table of rights, drawn. */
 #map-drawing svg { display: block; width: 100%; height: auto; max-width: 60rem; }

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bench, SKIP } from './bench.mjs';
+import { bench, SKIP, wait } from './bench.mjs';
 
 /* The tool here is a plain shell: what an agent would run, the test types. */
 test('the chat screen: the tool installs parley from /tools and asks with choices; its owner answers on a French device; the line that wakes it is typed once; what it does now, gone with its next message; times on hover; steps folded or unfolded; the chat first when opened; the owner\'s own words', { skip: SKIP }, async (t) => {
@@ -37,11 +37,40 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.until('the question is on the chat screen, in French', async () => (await asked.innerText().catch(() => '')).includes('Blue or red cover?') && (await asked.innerText()).includes('Il vous demande'));
     assert.equal(await me.page.locator('#simple-thread .parley-send').innerText(), 'Envoyer');
     assert.equal(await me.page.locator('#simple-says').isVisible(), false, 'what its terminal shows is not on the chat screen');
+    /* Above the box: its choices first, then the owner's ready answers; the bar's, which type into the terminal, are not shown. */
+    const quickly = () => me.page.locator('#simple-thread .parley-replies button').allInnerTexts();
+    await me.until('the quick answers are above the box', async () => (await quickly()).join('|') === 'blue|red|Yes, go on|Run the tests|Summarise');
+    /* Its choices are near the box only when its own buttons scrolled away: never twice on the screen. */
+    const rowChoice = me.page.locator('#simple-thread .parley-replies .parley-answer').first();
+    await me.until('not twice', async () => !(await rowChoice.isVisible()));
+    const threadEl = me.page.locator('#simple-thread .parley-thread');
+    await threadEl.evaluate((e) => { e.style.flex = 'none'; e.style.height = '3em'; });
+    await wait(300);
+    await threadEl.evaluate((e) => { e.scrollTop = 0; });
+    await me.until('near the box once scrolled away', async () => rowChoice.isVisible());
+    await threadEl.evaluate((e) => { e.style.flex = ''; e.style.height = ''; });
+    assert.deepEqual([await me.page.locator('#shortcuts').isVisible(), await me.page.locator('#keys').isVisible()], [false, false]);
     /* The owner answers with one touch; then writes, before the tool has read. */
     await asked.locator('button', { hasText: 'blue' }).click();
     await me.until('the answer is in the thread, and the choices are gone', async () => (await me.page.locator('#simple-thread .parley-said[data-from=person]').first().innerText().catch(() => '')).startsWith('blue') && (await asked.locator('button').count()) === 0);
+    await me.until('its choices left the quick answers', async () => (await quickly())[0] === 'Yes, go on');
+    /* With a keyboard: Shift+Enter is a new line, Enter sends, and the cursor stays in the box. */
+    const chatBox = me.page.locator('#simple-thread .parley-box');
+    await chatBox.click();
+    await chatBox.pressSequentially('Keep it');
+    await me.page.keyboard.press('Shift+Enter');
+    assert.equal(await chatBox.inputValue(), 'Keep it\n', 'a new line, not sent');
     await me.page.fill('#simple-thread .parley-box', 'Keep it under two pages.');
-    await me.page.locator('#simple-thread .parley-send').click();
+    await me.page.keyboard.press('Enter');
+    await me.until('sent with Enter', async () => (await chatBox.inputValue()) === '' && (await me.page.locator('#simple-thread .parley-said[data-from=person]').count()) === 2);
+    assert.equal(await me.page.evaluate(() => document.activeElement?.className), 'parley-box');
+    /* The size of the text, the page's one setting, is the chat's too. */
+    const size = () => me.page.locator('#simple-thread .parley-said .parley-text').first().evaluate((e) => Number.parseFloat(getComputedStyle(e).fontSize));
+    const before = await size();
+    await me.page.keyboard.press('Control+=');
+    await me.until('the chat\'s text grew', async () => (await size()) > before * 1.05);
+    await me.page.keyboard.press('Control+0');
+    await me.until('back to normal', async () => (await size()) === before);
     await me.until('said not read yet', async () => (await me.page.locator('#simple-thread').innerText()).includes('Pas encore lu'));
     /* In its terminal, ONE line, once somebody stopped typing there: that a message arrived, and only that. */
     await me.until('the line was typed to the tool', async () => (await me.screen()).includes('You have a new message: run "parley read".'), 20_000);
@@ -126,12 +155,27 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.page.locator('#settings-close').click();
     await me.page.locator('#simple-toggle').click();
     await me.until('the button says it', async () => (await me.page.locator('#simple-thread .parley-send').innerText().catch(() => '')) === 'Clique ici pour faire <b>taratata</b>');
+    /* A ready answer that presses Enter is sent from the chat at once; the other is put in its box, to be completed. */
+    await me.api('/api/shortcuts', { label: 'Start with', text: 'Start with the cover', enter: false });
+    await me.page.reload();
+    await me.until('the new one is there', async () => (await me.page.locator('#simple-thread .parley-reply', { hasText: 'Start with' }).count()) === 1);
+    await me.page.locator('#simple-thread .parley-reply', { hasText: 'Start with' }).click();
+    assert.equal(await me.page.locator('#simple-thread .parley-box').inputValue(), 'Start with the cover');
+    await me.page.fill('#simple-thread .parley-box', '');
+    await me.page.locator('#simple-thread .parley-reply', { hasText: 'Summarise' }).click();
+    await me.until('sent in one tap', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'Summarise what you did, in five lines.'));
     assert.equal(await me.page.locator('#simple-thread .parley-send b').count(), 0, 'as text, never as markup');
     /* The chat is where it opens, everywhere: from the list on a phone, and on a device it was shared with. */
+    /* Many ready answers, for the shared phone below. */
+    for (const n of [1, 2, 3, 4]) await me.api('/api/shortcuts', { label: `Ready answer ${n}`, text: `Answer ${n}.`, enter: true });
     const pocket = await b.person({ phone: true, locale: 'fr-FR' });
     await pocket.page.locator('#items .item', { hasText: 'helper' }).click();
     await pocket.until('the phone opens on its chat', async () => (await pocket.page.locator('#simple-thread .parley-said[data-kind=ask]').count()) > 0);
     assert.equal(await pocket.page.locator('#simple-toggle').innerText(), 'Terminal', 'its terminal one tap away');
+    /* Its terminal went with it, one screen at a time: the computer says so, and takes it back. */
+    await me.until('the computer is told', async () => /now open on another screen/.test(await me.page.locator('#notice-text').innerText().catch(() => '')) && me.page.locator('#notice').isVisible());
+    await me.page.locator('#notice-action', { hasText: 'Use it here' }).click();
+    await me.until('back here', async () => (await me.state()) === 'live' && !(await me.page.locator('#notice').isVisible()));
     await me.page.locator('#folders').click();
     await me.chapter('sharing');
     await me.page.locator('#share').click();
@@ -152,8 +196,26 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await device.until('the device is welcomed to a chat', async () => /as in a messaging app/.test(await device.page.locator('#notice-text').innerText().catch(() => '')));
     await device.page.locator('#notice-action', { hasText: 'Start' }).click();
     await device.until('the device opens on its chat', async () => (await device.page.locator('#simple-thread .parley-said[data-kind=ask]').count()) > 0);
-    await device.page.fill('#simple-thread .parley-box', 'From the shared phone.');
-    await device.page.locator('#simple-thread .parley-send').click();
+    /* On a phone: the keyboard never comes up by itself; opened by a finger, it stays open after sending. */
+    const phoneBox = device.page.locator('#simple-thread .parley-box');
+    const focused = () => device.page.evaluate(() => document.activeElement?.className ?? '');
+    assert.notEqual(await focused(), 'parley-box', 'not focused by the page');
+    await phoneBox.tap();
+    await phoneBox.fill('From the shared phone.');
+    await device.page.locator('#simple-thread .parley-send').tap();
+    await device.until('sent', async () => (await phoneBox.inputValue()) === '');
+    assert.equal(await focused(), 'parley-box', 'the keyboard stays open');
+    await phoneBox.press('Enter');
+    assert.equal(await phoneBox.inputValue(), '\n', 'on a touch screen Enter is a new line; the button sends');
+    await phoneBox.fill('');
+    /* Many ready answers: one line, the rest one tap away, the keyboard left as it was. */
+    const more = device.page.locator('#simple-thread .parley-replies-more');
+    await device.until('folded, said how many more', async () => /^\d+ de plus$/.test(await more.innerText().catch(() => '')));
+    const shownLine = () => device.page.locator('#simple-thread .parley-replies').evaluate((e) => e.getBoundingClientRect().height);
+    const folded = await shownLine();
+    await more.tap();
+    assert.ok((await shownLine()) > folded * 1.5, 'unfolded on a tap');
+    assert.equal(await focused(), 'parley-box', 'the keyboard, open, stays open');
     await me.until('written from the device, read here', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'From the shared phone.'));
     const pairing = await device.page.evaluate(() => document.documentElement.dataset.pairing);
     assert.equal((await device.api(`/c/api/${pairing}/conversations/helper/talk`, { on: false })).status, 400, 'a device writes; turning it off is not a device\'s');
@@ -162,7 +224,9 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     assert.equal(await device.page.locator('#simple-toggle').isVisible(), false);
     assert.equal(await device.page.locator('#keys button[data-keys]').first().isVisible(), false, 'no keys');
     assert.equal(await device.page.evaluate((d) => new Promise((done) => { const ws = new WebSocket(`ws://${location.host}/c/terminal?d=${d}&c=helper`); ws.onopen = () => { ws.close(); done('opened'); }; ws.onclose = () => done('refused'); }), pairing), 'refused');
-    assert.equal((await device.api(`/c/api/${pairing}/shortcuts`)).status, 403);
+    /* What it may write in, it may dictate into, and it has the owner's ready answers there. */
+    assert.equal((await device.api(`/c/api/${pairing}/shortcuts`)).status, 200);
+    await device.until('dictation and ready answers in its chat', async () => (await device.page.locator('#simple-thread .parley-mic').isVisible()) && (await device.page.locator('#simple-thread .parley-reply').count()) > 0);
     /* A device given its terminal alone, at the same time: the terminal, and nothing of the chat. */
     const typing = await b.person({ phone: true, at: (await me.api('/api/conversations/helper/share', { rights: 'x' })).body.url.replace(/^https?:\/\/[^/]+/, '') });
     await typing.until('welcomed to its terminal', async () => /Tap the dark screen/.test(await typing.page.locator('#notice-text').innerText().catch(() => '')));
@@ -176,6 +240,8 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await pocket.page.reload();
     await pocket.until('the terminal again', async () => (await pocket.state()) === 'live');
     assert.equal(await pocket.page.locator('#simple').isVisible(), false, 'off: nothing changed');
+    await me.until('the computer is told again', async () => /now open on another screen/.test(await me.page.locator('#notice-text').innerText().catch(() => '')) && me.page.locator('#notice').isVisible());
+    await me.page.locator('#notice-action', { hasText: 'Use it here' }).click();
     /* The device given its chat alone says so plainly -- and cannot turn it on. */
     await device.page.reload();
     await device.until('it says the chat is not on', async () => /The chat is not turned on/.test(await device.page.locator('#chat-off').innerText().catch(() => '')) && await device.page.locator('#chat-off').isVisible());

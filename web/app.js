@@ -27,6 +27,9 @@
        chat ('write', 'read' or null). Only those are shown -- and the server
        refuses the others whatever this page does. */
     let deviceParts = { terminal: true, chat: null };
+    /* What Parley mounted for the chat screen, and for which conversation. */
+    let thread = null;
+    let threadOf = '';
     const noTerminal = () => DEVICE && !deviceParts.terminal;
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
@@ -658,6 +661,7 @@
     async function paintShortcuts() {
         let all = [];
         try { const r = await fetch(`${API}/shortcuts`); if (r.ok) all = await r.json(); else return; } catch { return; }
+        if (thread) thread.replies = asReplies(all);
         /* Shown only when the conversation can be typed into: painting it while a
            machine is built made it appear and vanish at each poll, a flicker. */
         const shown = conversations.find((x) => x.name === current);
@@ -686,6 +690,14 @@
             if (all.length > 0) quiet('Remove...', () => { removing = true; void paintShortcuts(); });
         }
     }
+    /* In the chat, the same saved texts are its ready answers: one that
+       presses Enter is sent, the other is put in its box to be completed. */
+    const asReplies = (all) => (Array.isArray(all) ? all : []).map((x) => ({ label: x.label, text: x.text, send: x.enter === true }));
+    /* A device has them when it may type into its terminal, or write in its chat. */
+    async function loadReplies() {
+        if (DEVICE && !deviceParts.terminal && deviceParts.chat !== 'write') return [];
+        try { const r = await fetch(`${API}/shortcuts`); return r.ok ? asReplies(await r.json()) : []; } catch { return []; }
+    }
     $('shortcut-cancel').addEventListener('click', () => { $('shortcut-new').hidden = true; });
     $('shortcut-new').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -699,7 +711,10 @@
     /* ---------- voice ---------- */
     /* The microphone stays open; each phrase is typed into the terminal as it
        is understood, exactly as if typed. With "auto", Enter is pressed once
-       the person has stopped: a new phrase beginning cancels the pending Enter. */
+       the person has stopped: a new phrase beginning cancels the pending Enter.
+       On the chat screen, dictation is the chat's own button, beside Send
+       (Parley's slot, given this page's voice): what is said goes into its
+       box, and nothing is typed into the terminal behind it. */
     const AUTO_ENTER_MS = 900;
     const WORDS = { calibrating: 'Listening to the room...', listening: 'Listening.', hearing: 'Hearing you...', transcribing: 'Writing what you said...' };
     let stopListening = null;
@@ -712,8 +727,6 @@
         $('mic').setAttribute('aria-pressed', 'false'); $('mic').textContent = 'Dictate';
         sayVoice('', '');
     }
-    /* On the chat screen, what is said goes into its box, and "auto" sends it:
-       nothing is typed into the terminal behind it. */
     const chatBox = () => (simple && !$('simple-thread').hidden ? $('simple-thread').querySelector('.parley-box') : null);
     const backTo = () => { if (!chatBox()) focusTerminal(); };
     $('mic').addEventListener('click', async () => {
@@ -723,15 +736,8 @@
                 state: (word) => sayVoice(WORDS[word] ?? word, word),
                 speech: () => clearTimeout(enterTimer),
                 phrase: (text) => {
-                    const box = chatBox();
-                    if (box) {
-                        box.value = `${box.value}${box.value && !box.value.endsWith(' ') ? ' ' : ''}${text}`;
-                        sayVoice(`Written: ${text}`, 'listening');
-                        if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => { box.form?.requestSubmit(); }, AUTO_ENTER_MS); }
-                        return;
-                    }
-                    /* No terminal of its own: what is said has nowhere else to go. */
-                    if (noTerminal()) return;
+                    /* The chat came up meanwhile, or there is no terminal: nothing is typed behind it. */
+                    if (chatBox() || noTerminal()) return;
                     send(`${text} `);
                     sayVoice(`Typed: ${text}`, 'listening');
                     if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => send('\r'), AUTO_ENTER_MS); }
@@ -751,13 +757,17 @@
         if (!autoEnter) clearTimeout(enterTimer);
         backTo();
     });
+    /* The server says whether this page may dictate (a device: into a terminal or a chat it may write in). */
+    let voiceOn = false;
+    const chatVoice = () => (voiceOn && window.clavariumVoice ? window.clavariumVoice : null);
     async function offerVoice() {
-        const available = window.clavariumVoice ? await window.clavariumVoice.available() : false;
-        $('mic').hidden = $('auto').hidden = !available;
+        voiceOn = window.clavariumVoice ? await window.clavariumVoice.available() : false;
+        $('mic').hidden = $('auto').hidden = !voiceOn;
         keysForChat();
+        if (thread) thread.voice = chatVoice();
     }
-    /* The chat alone: the row of keys holds dictation into the chat, or nothing (no chat to write in, no microphone). */
-    function keysForChat() { if (noTerminal()) $('keys').hidden = $('mic').hidden || !(talk.on && talkOf === current) || deviceParts.chat !== 'write'; }
+    /* The chat alone: no row of keys at all; its dictation is the chat's own button. */
+    function keysForChat() { if (noTerminal()) $('keys').hidden = true; }
     window.addEventListener('clavarium-voice-ready', () => { void offerVoice(); });
     void offerVoice();
 
@@ -1187,10 +1197,11 @@
        send, the words of this device's language, and how a file is opened. */
     let talk = { on: false, messages: [] };
     let talkOf = '';
-    let thread = null;          /* what Parley mounted, and for which conversation */
-    let threadOf = '';
     let chatView = 'simple';
     try { chatView = localStorage.getItem('clavarium-chat-view') === 'detailed' ? 'detailed' : 'simple'; } catch { /* a private window */ }
+    /* "Send when I stop", for dictation in the chat: kept by this device. */
+    let chatAuto = false;
+    try { chatAuto = localStorage.getItem('clavarium-chat-auto') === '1'; } catch { /* as above */ }
     const deviceLang = () => (navigator.language || 'en');
     let chatWords = null;
     async function readWords() {
@@ -1218,6 +1229,8 @@
         /* Its chat alone was given, and the owner has not turned it on: said, not left blank. */
         $('chat-off').hidden = !(noTerminal() && !wanted);
         if (noTerminal()) { $('room').setAttribute('data-chat', ''); keysForChat(); say(wanted ? 'chat' : 'chat off', wanted ? 'live' : 'waiting'); }
+        /* The bar's dictation types into the terminal: not while the chat is in front, which has its own. */
+        if (wanted && simple && stopListening) stopVoice();
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
@@ -1237,7 +1250,13 @@
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
             ...(noTerminal() ? {} : { terminal: () => { simple = false; paintSimple(); focusTerminal(); } }),
             remind: () => post(talkPath(name, '/remind'), {}),
+            /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
+            voice: chatVoice(), autoSend: chatAuto,
+            onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
+            touch: touchScreen,
         });
+        const replies = await loadReplies();
+        if (thread && threadOf === name) thread.replies = replies;
     }
     /* Opening a conversation that talks through the app shows its chat first;
        its terminal is one click away. Any other opens as this device chose. */

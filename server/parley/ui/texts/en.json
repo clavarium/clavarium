@@ -28,5 +28,17 @@
   "steps-many": "{count} steps",
   "today": "Today",
   "yesterday": "Yesterday",
-  "quiet": "nothing new since {time}"
+  "quiet": "nothing new since {time}",
+  "mic": "Dictate",
+  "mic-stop": "Stop",
+  "auto-send": "Send by itself when I stop talking",
+  "voice-calibrating": "Listening to the room...",
+  "voice-listening": "Listening: what you say is written in the box.",
+  "voice-hearing": "Hearing you...",
+  "voice-transcribing": "Writing what you said...",
+  "voice-wait": "Sent as soon as it is written.",
+  "voice-off": "The microphone is not available. Allow it for this site, then try again.",
+  "replies": "Ready answers",
+  "replies-more": "{count} more",
+  "replies-less": "Less"
 }
