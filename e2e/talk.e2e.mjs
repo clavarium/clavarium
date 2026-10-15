@@ -136,6 +136,13 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.chapter('sharing');
     await me.page.locator('#share').click();
     await me.until('the basket holds it', async () => (await me.page.locator('#share-basket .folder').count()) === 1);
+    /* It talks through the app: its chat is proposed, not its terminal; the one ticked cannot be unticked. */
+    const part = (where, name) => me.page.locator(`${where} label[data-part=${name}] input`);
+    assert.deepEqual([await part('#share-basket', 'chat').isChecked(), await part('#share-basket', 'terminal').isChecked(), await part('#share-basket', 'chat').getAttribute('aria-disabled')], [true, false, 'true']);
+    await part('#share-basket', 'chat').uncheck({ force: true }).catch(() => {});
+    assert.equal(await part('#share-basket', 'chat').isChecked(), true, 'at least one');
+    assert.equal(await me.page.locator('#share-basket .parts-need').isVisible(), true);
+    assert.match(await me.page.locator('#sharing-summary').innerText(), /will be able to write in the chat of helper, and see its files\./);
     await me.page.fill('#sharing-label', 'A phone');
     await me.page.locator('#sharing-new').click();
     await me.until('a code is shown', async () => me.page.locator('#sharing-qr').isVisible());
@@ -151,10 +158,39 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     const pairing = await device.page.evaluate(() => document.documentElement.dataset.pairing);
     assert.equal((await device.api(`/c/api/${pairing}/conversations/helper/talk`, { on: false })).status, 400, 'a device writes; turning it off is not a device\'s');
     assert.equal((await me.api('/api/conversations/helper/talk')).body.on, true);
+    /* Its chat alone: no way to the terminal on the page, and none on the server either. */
+    assert.equal(await device.page.locator('#simple-toggle').isVisible(), false);
+    assert.equal(await device.page.locator('#keys button[data-keys]').first().isVisible(), false, 'no keys');
+    assert.equal(await device.page.evaluate((d) => new Promise((done) => { const ws = new WebSocket(`ws://${location.host}/c/terminal?d=${d}&c=helper`); ws.onopen = () => { ws.close(); done('opened'); }; ws.onclose = () => done('refused'); }), pairing), 'refused');
+    assert.equal((await device.api(`/c/api/${pairing}/shortcuts`)).status, 403);
+    /* A device given its terminal alone, at the same time: the terminal, and nothing of the chat. */
+    const typing = await b.person({ phone: true, at: (await me.api('/api/conversations/helper/share', { rights: 'x' })).body.url.replace(/^https?:\/\/[^/]+/, '') });
+    await typing.until('welcomed to its terminal', async () => /Tap the dark screen/.test(await typing.page.locator('#notice-text').innerText().catch(() => '')));
+    await typing.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await typing.until('its terminal is live', async () => (await typing.state()) === 'live');
+    assert.deepEqual([await typing.page.locator('#simple').isVisible(), await typing.page.locator('#simple-toggle').isVisible()], [false, false], 'no chat, no way to it');
+    const typingId = await typing.page.evaluate(() => document.documentElement.dataset.pairing);
+    assert.equal((await typing.api(`/c/api/${typingId}/conversations/helper/talk`)).status, 403);
     /* Turned off: it opens on its terminal again, as it did before. */
     await me.api('/api/conversations/helper/talk', { on: false });
     await pocket.page.reload();
     await pocket.until('the terminal again', async () => (await pocket.state()) === 'live');
     assert.equal(await pocket.page.locator('#simple').isVisible(), false, 'off: nothing changed');
-    assert.deepEqual([me.errors, pocket.errors, device.errors], [[], [], []]);
+    /* The device given its chat alone says so plainly -- and cannot turn it on. */
+    await device.page.reload();
+    await device.until('it says the chat is not on', async () => /The chat is not turned on/.test(await device.page.locator('#chat-off').innerText().catch(() => '')) && await device.page.locator('#chat-off').isVisible());
+    assert.equal((await device.api(`/c/api/${pairing}/conversations/helper/talk`, { on: true })).status, 409, 'it is off: nothing to write in, and nothing turns it on');
+    assert.equal((await me.api('/api/conversations/helper/talk')).body.on, false);
+    /* Changed later, in the conversation's Sharing chapter: its terminal is given too, and the device opens on it. */
+    await me.page.locator('#folders').click();
+    await me.chapter('sharing');
+    const row = me.page.locator('#share-here .given-row', { hasText: 'A phone' });
+    await me.until('the device is listed with its parts', async () => (await row.count()) === 1);
+    assert.match(await row.innerText(), /Its chat is off/);
+    await row.locator('label[data-part=terminal] input').check();
+    await me.until('its terminal is given', async () => (await me.api('/api/devices')).body.find((d) => d.id === pairing)?.grants[0].rights === 'rwx');
+    await device.page.reload();
+    await device.until('the device has its terminal now', async () => (await device.state()) === 'live');
+    assert.equal(await device.page.locator('#chat-off').isVisible(), false);
+    assert.deepEqual([me.errors, pocket.errors, device.errors, typing.errors], [[], [], [], []]);
 });

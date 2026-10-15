@@ -22,8 +22,17 @@
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
  *   POST /c/api/<pairing>/conversations/<any>/talk/remind
  *        the chat of its conversation, where it talks through the app (see
- *        talk.mjs): read, written to, reminded -- what typing in its terminal
- *        could do anyway. Turning it on and inviting the tool stay the owner's.
+ *        talk.mjs): read, written to, reminded. Turning it on and inviting
+ *        the tool stay the owner's.
+ *
+ * A conversation is shared in two parts, chosen by the owner (grants.mjs):
+ * its TERMINAL ("x") and its CHAT ("r" to read it, "w" to write there).
+ * What was not given is refused here, not only left out of the page:
+ *   no terminal   no terminal channel (see deviceTerminal), no shortcuts,
+ *                 no dictation unless it may write in the chat
+ *   no chat       none of the talk routes, its words included
+ * Its files go with either part: a file the tool shows in its chat opens
+ * from them.
  */
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
@@ -45,6 +54,14 @@ async function readJson(request) {
 export function deviceConversation(devices, headers, pairing, wanted) {
     if (!isPairingId(pairing)) return undefined;
     return devices.conversationOf(readCookie(headers.cookie, cookieNameOf(pairing)), pairing, wanted);
+}
+/* The conversation whose TERMINAL the pairing asking may open, or undefined:
+   the one it speaks for, only if it was given that conversation's terminal.
+   A pairing given its chat alone gets no terminal channel at all -- no
+   keys, no shortcuts, no dictation typed into it. */
+export function deviceTerminal(devices, headers, pairing, wanted) {
+    const name = deviceConversation(devices, headers, pairing, wanted);
+    return name !== undefined && devices.rightsOn(pairing, name).includes('x') ? name : undefined;
 }
 /* The pairing itself, when its session is good -- it may have been given
    folders and no conversation at all. */
@@ -86,6 +103,10 @@ export async function handleDoor(request, response, { devices, conversations, re
             .map((g) => ({ name: g.name, type: g.type, access: g.rights.includes('w') ? 'write' : 'read' }));
         const name = deviceConversation(devices, request.headers, pairing, url.searchParams.get('c') ?? undefined);
         const mine = name === undefined ? undefined : conversations.list().find((c) => c.name === name);
+        /* The parts of that conversation this pairing was given. */
+        const rights = name === undefined ? '' : devices.rightsOn(pairing, name);
+        const part = { terminal: rights.includes('x'), chat: rights.includes('r') ? (rights.includes('w') ? 'write' : 'read') : null };
+        const need = (ok, what) => { if (!ok) throw new Refusal(403, `This device was not given ${what} of this conversation.`); };
         const attached = (need) => {
             const wanted = url.searchParams.get('r');
             /* Whoever may use a conversation sees ITS files: where its tool
@@ -105,27 +126,36 @@ export async function handleDoor(request, response, { devices, conversations, re
 
         if (request.method === 'GET' && route === '/me') {
             /* `conversations`: all this pairing may use. `shared`: what it was given for itself. */
-            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, error: mine.error, work: mine.work, resources: resources.of(name) } : { name: null, resources: [] };
+            /* `terminal` and `chat`: the parts it was given, for the page to show only those. */
+            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
         const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || route === '/leave';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
-        if (request.method === 'GET' && route === '/shortcuts') return send(200, shortcuts.list());
-        if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null });
+        /* Shortcuts are typed into the terminal: none without it. */
+        if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal, 'the terminal'); return send(200, shortcuts.list()); }
+        /* What is dictated goes into the terminal, or into the chat's box: one of the two must be its to write in. */
+        const speaks = part.terminal || part.chat === 'write';
+        if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined && speaks, engine: speaks ? voice?.model ?? null : null });
         if (request.method === 'POST' && route === '/voice') {
+            need(speaks, 'the terminal or the chat');
             if (request.headers['content-type'] !== 'audio/wav') return send(400, { error: 'A recording is a WAV file.' });
             const parts = []; let size = 0;
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
             return send(200, { text: await transcribe(voice, Buffer.concat(parts)) });
         }
         /* Its conversation's chat, whatever conversation the address names: the device's own. */
+        /* Only for a pairing given its chat: to read it, or to write there too. */
+        const talking = /^\/conversations\/[^/]+\/talk(\/[a-z]+)?$/.exec(route);
+        if (talk && (route === '/talk/words' || talking)) need(part.chat !== null, 'the chat');
         if (talk && request.method === 'GET' && route === '/talk/words') return send(200, talk.words(url.searchParams.get('lang') ?? 'en'));
-        const talking = /^\/conversations\/[^/]+\/talk(\/remind)?$/.exec(route);
         if (talk && talking) {
             if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name));
-            if (request.method === 'POST' && talking[1]) return send(200, await talk.remind(name));
-            if (request.method === 'POST') { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers)); }
+            /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
+            if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind')) need(part.chat === 'write', 'the chat to write in');
+            if (request.method === 'POST' && talking[1] === '/remind') return send(200, await talk.remind(name));
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers)); }
         }
         /* The device takes itself out: this pairing is removed, here and on the server. */
         if (request.method === 'POST' && route === '/leave') { devices.revoke(pairing); return send(200, { ok: true }); }

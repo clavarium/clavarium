@@ -55,7 +55,9 @@ export class Devices {
 
     /* `grants`: the one table of rights. What a code gives a device is lines
        of it: use this conversation, read that folder. */
-    constructor(store, now = () => Date.now(), grants = new Grants()) {
+    /* `chatWas(name)`: whether the chat of that conversation was on before a
+       conversation was shared in two parts (see below). */
+    constructor(store, now = () => Date.now(), grants = new Grants(), { chatWas = () => false } = {}) {
         this.#store = store; this.#now = now; this.#grants = grants;
         /* An earlier version bound a pairing to one conversation, in its own
            record: taken over into the table, once. */
@@ -64,18 +66,33 @@ export class Devices {
             this.#grants.give(pairingSubject(d.name), `conversation:${d.conversation}`, 'x');
             delete d.conversation; store.put(d);
         }
+        /* Before a conversation was shared in two parts, "x" gave its terminal
+           AND its chat, wherever the chat was on. Such a pairing keeps what it
+           had: its terminal, and its chat where it was on. Done once per
+           pairing (`parts`): from then on "x" alone means the terminal alone. */
+        for (const d of store.all()) {
+            if (d.parts === 2) continue;
+            for (const g of this.#grants.of(pairingSubject(d.name), 'conversation')) {
+                if (g.rights === 'x' && chatWas(g.name)) this.#grants.give(pairingSubject(d.name), g.asset, 'rwx');
+            }
+            store.patch(d.name, { parts: 2 });
+        }
     }
 
     /* What one pairing was given: [{ asset, type, name, rights }]. */
     grantsOf(id) { return this.#grants.of(pairingSubject(id)); }
     conversationsOf(id) { return this.#grants.of(pairingSubject(id), 'conversation').map((g) => g.name); }
+    /* What one pairing may do in one conversation: "x" its terminal, "r" read
+       its chat, "w" write there; '' nothing. */
+    rightsOn(id, conversation) { return this.#grants.rightsOf(pairingSubject(id), `conversation:${conversation}`); }
     #shown(d) { return { id: d.name, label: d.label, createdAt: d.createdAt, seenAt: d.seenAt ?? null, grants: this.grantsOf(d.name).map(({ asset, rights }) => ({ asset, rights })) }; }
 
     /* ---- operator side ---- */
 
-    /* A code for ONE device, giving it a chosen list: conversations to use,
-       folders, mailboxes or repositories to read or to write. `what` is that
-       list, [{ asset, rights }] -- or, for short, the name of a conversation. */
+    /* A code for ONE device, giving it a chosen list: conversations (their
+       terminal, their chat, or both), folders, mailboxes or repositories to
+       read or to write. `what` is that list, [{ asset, rights }] -- or, for
+       short, the name of a conversation, whose terminal is given. */
     share(what, label) {
         const asked = typeof what === 'string' ? [{ asset: `conversation:${what}`, rights: 'x' }] : what;
         if (!Array.isArray(asked) || asked.length === 0) throw new Refusal(400, 'A share gives at least one thing.');
@@ -95,9 +112,9 @@ export class Devices {
         return { code, minutes: CODE_MINUTES };
     }
 
-    /* The devices that may use this conversation, each with all it was given. */
+    /* The devices given this conversation (its terminal, its chat, or both), each with all it was given. */
     of(conversation) {
-        return this.#store.all().filter((d) => this.#grants.can(pairingSubject(d.name), `conversation:${conversation}`, 'x')).map((d) => this.#shown(d));
+        return this.#store.all().filter((d) => this.rightsOn(d.name, conversation) !== '').map((d) => this.#shown(d));
     }
     /* Every device, each with all it was given. */
     all() { return this.#store.all().map((d) => this.#shown(d)); }
@@ -153,7 +170,7 @@ export class Devices {
         const publicKey = readPublicKey(key);
         const device = { name: randomUUID(), key: publicKey,
             /* The name the owner chose for whom the code was made, if any: every device otherwise looks the same in the list. */
-            label: entry.label ?? (oneLine(label) ? label.trim() : 'A device'), createdAt: new Date(this.#now()).toISOString() };
+            label: entry.label ?? (oneLine(label) ? label.trim() : 'A device'), createdAt: new Date(this.#now()).toISOString(), parts: 2 };
         this.#store.put(device);
         for (const g of entry.grants) this.#grants.give(pairingSubject(device.name), g.asset, g.rights);
         return { device: device.name };

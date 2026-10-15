@@ -144,7 +144,8 @@ export class Talk {
     brief(name) {
         const r = this.#store.get(name);
         if (r?.on !== true) return null;
-        try { const now = this.#parley(name).read(); return { waiting: now.waiting, state: now.status?.state ?? null }; } catch { return null; }
+        /* On, but unreadable just now: still said to be on (the share sheet offers its chat by that). */
+        try { const now = this.#parley(name).read(); return { waiting: now.waiting, state: now.status?.state ?? null }; } catch { return { waiting: 0, state: null }; }
     }
 
     async set(name, on) {

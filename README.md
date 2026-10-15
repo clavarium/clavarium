@@ -89,8 +89,8 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   until it has read, never while somebody types there, never into a machine
   that does not run (the message waits). Opening the conversation shows
   its chat first, wherever it is opened (the list, a notification, a device
-  it was shared with, which may write there too), its terminal one click
-  away; turned off, nothing changes. The chat, in two views: simple
+  given its chat, which may write there too), its terminal one click
+  away where it was given; turned off, nothing changes. The chat, in two views: simple
   (bubbles, the one moving line of what it does now, gone with its next
   message, the steps before it folded into that message, times on hover or
   a long press, the day and long silences said); detailed (every step
@@ -128,7 +128,12 @@ Who may do what with what is one table (`server/grants.mjs`): a subject (a
 conversation, or a device's pairing), an asset (conversation, folder, mailbox,
 git repository, secret) and rights -- read, write, use. Attaching a folder to
 a conversation and sharing with a device are lines of the same table. A share
-is a chosen list in one code; a secret is never shared with a device.
+is a chosen list in one code; a secret is never shared with a device. A
+conversation is shared in two parts, ticked one by one: its terminal ("use")
+and its chat ("read" and "write"); its chat is proposed where it talks through
+the app, its terminal otherwise, and either is changed later in its Sharing
+chapter. The server refuses what was not given: no terminal, keys, shortcuts
+or dictation into it without the terminal; none of the chat without the chat.
 
 A git repository can be added (Folders, "Add a git repository"): empty, or
 cloned from an https address. It is then a folder like any other. Git is run

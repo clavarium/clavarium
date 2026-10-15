@@ -183,3 +183,25 @@ test('a paired device is given more, has a right changed, and is renamed -- with
     b.devices.cancel(code);
     assert.throws(() => b.devices.pair({ code, key: phone().jwk }), /not valid any more/);
 });
+
+test('a conversation is shared in parts, its terminal and its chat; a pairing made before keeps its chat where it was on, once', (t) => {
+    const b = bench(t);
+    const { device } = b.devices.pair({ code: b.devices.share([{ asset: 'conversation:family', rights: 'rw' }]).code, key: phone().jwk });
+    assert.equal(b.devices.rightsOn(device, 'family'), 'rw', 'the chat, and not the terminal');
+    assert.equal(b.devices.rightsOn(device, 'work'), '');
+    assert.deepEqual(b.devices.of('family').map((d) => d.id), [device], 'given the chat alone, it is still a device of that conversation');
+    assert.deepEqual(b.devices.conversationsOf(device), ['family']);
+    /* Before: "x" gave the terminal, and the chat wherever it was on. */
+    const old = '0f8fad5b-d9cb-469f-a165-70867728950e';
+    new Store(b.path).put({ name: old, key: phone().jwk, label: 'Old phone', createdAt: '2030-01-01T00:00:00.000Z' });
+    const grants = b.grants();
+    grants.give(`pairing:${old}`, 'conversation:family', 'x'); grants.give(`pairing:${old}`, 'conversation:work', 'x');
+    const upgraded = new Devices(new Store(b.path), undefined, b.grants(), { chatWas: (name) => name === 'family' });
+    assert.equal(upgraded.rightsOn(old, 'family'), 'rwx');
+    assert.equal(upgraded.rightsOn(old, 'work'), 'x');
+    assert.equal(upgraded.rightsOn(device, 'family'), 'rw', 'a pairing made since is left as it is');
+    /* Once only: "x" alone is the terminal alone from then on. */
+    upgraded.give(old, 'conversation:family', 'x');
+    const again = new Devices(new Store(b.path), undefined, b.grants(), { chatWas: () => true });
+    assert.equal(again.rightsOn(old, 'family'), 'x');
+});

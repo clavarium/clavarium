@@ -30,7 +30,7 @@ import { Shortcuts } from './shortcuts.mjs';
 import { voiceConfig } from './voice.mjs';
 import QRCode from 'qrcode';
 import { Devices } from './devices.mjs';
-import { handleDoor, deviceConversation } from './door.mjs';
+import { handleDoor, deviceTerminal } from './door.mjs';
 import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
@@ -188,7 +188,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     await all.ensureWork?.();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     const voice = voiceConfig(env);
-    const devices = new Devices(new Store(`${dataDir}/devices.json`), undefined, grants);
+    /* Read here already: a device paired before a conversation was shared in
+       two parts keeps the chat it reached then (see devices.mjs). */
+    const talkStore = new Store(`${dataDir}/talk.json`);
+    const devices = new Devices(new Store(`${dataDir}/devices.json`), undefined, grants, { chatWas: (name) => talkStore.get(name)?.on === true });
     const sharing = {
         devices,
         /* Where a pairing address points: the declared public address, or in
@@ -263,7 +266,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
-    const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), words: new Store(`${dataDir}/talk-words.json`), vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    const talk = new Talk({ store: talkStore, words: new Store(`${dataDir}/talk-words.json`), vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         alert: (payload) => { void alerts.tell(payload); } });
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
@@ -288,7 +291,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         onLeft: (name) => all.left(name),
         onEnded: (name) => all.ended(name),
         gate, originOk,
-        deviceName: (headers, pairing, wanted) => deviceConversation(devices, headers, pairing, wanted),
+        /* Only a pairing given that conversation's terminal opens it. */
+        deviceName: (headers, pairing, wanted) => deviceTerminal(devices, headers, pairing, wanted),
     });
     all.drop = (name) => bridge.drop(name);
     /* The terminal of a running machine is opened before anybody asks: a

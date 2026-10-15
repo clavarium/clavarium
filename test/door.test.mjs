@@ -166,7 +166,7 @@ test('the owner reaches every folder, attached to the conversation shown or not'
 
 test('a paired phone talks in ITS conversation\'s chat, where it is on: read, written to, reminded; never turned on or off from there', async (t) => {
     const b = await bench(t);
-    const phone = await b.pairPhone('family');
+    const phone = await b.pairPhone([{ asset: 'conversation:family', rights: 'rwx' }]);
     const as = { cookie: phone.cookie };
     assert.equal((await (await b.device(`/c/api/${phone.id}/conversations/family/talk`, as)).json()).on, false, 'off: nothing to read');
     assert.equal((await b.operator('/api/conversations/family/talk', { on: true })).status, 200);
@@ -184,4 +184,93 @@ test('a paired phone talks in ITS conversation\'s chat, where it is on: read, wr
     assert.equal((await b.device(`/c/api/${phone.id}/conversations/family/talk/invite`, { ...as, body: {} })).status, 404);
     assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).on, true);
     assert.equal((await b.device('/c/api/0f8fad5b-d9cb-469f-a165-70867728950e/conversations/family/talk')).status, 401, 'no session, no chat');
+});
+
+/* A WebSocket to a device's terminal: 'opened' or 'refused'. */
+const terminalOf = (b, phone, c) => new Promise((done) => {
+    const ws = new WebSocket(`${b.base.replace('http', 'ws')}/c/terminal?d=${phone.id}${c ? `&c=${c}` : ''}`, { headers: { origin: b.origin, cookie: phone.cookie } });
+    ws.on('open', () => { ws.close(); done('opened'); });
+    ws.on('error', () => done('refused'));
+});
+
+test('a conversation shared in parts: what was not given is refused by the server, not only hidden -- the terminal, its shortcuts and dictation; the chat, its words; never turning it on or inviting the tool', async (t) => {
+    const b = await bench(t);
+    assert.equal((await b.operator('/api/conversations/family/talk', { on: true })).status, 200);
+    const chatOnly = await b.pairPhone([{ asset: 'conversation:family', rights: 'rw' }]);
+    const terminalOnly = await b.pairPhone([{ asset: 'conversation:family', rights: 'x' }]);
+    const readOnly = await b.pairPhone([{ asset: 'conversation:family', rights: 'r' }]);
+    const at = (phone, path, body) => b.device(`/c/api/${phone.id}${path}`, { cookie: phone.cookie, ...(body === undefined ? {} : { body }) });
+    const status = async (phone, path, body) => (await at(phone, path, body)).status;
+    /* What each was given, said to its page. */
+    const parts = async (phone) => { const me = await (await at(phone, '/me')).json(); return [me.terminal, me.chat]; };
+    assert.deepEqual([await parts(chatOnly), await parts(terminalOnly), await parts(readOnly)], [[false, 'write'], [true, null], [false, 'read']]);
+
+    /* The chat alone: no terminal channel, no shortcuts; it writes, reminds, and dictates into the chat. */
+    assert.equal(await terminalOf(b, chatOnly), 'refused');
+    assert.equal(await terminalOf(b, chatOnly, 'family'), 'refused');
+    assert.equal(await status(chatOnly, '/shortcuts'), 403);
+    assert.equal(await status(chatOnly, '/conversations/family/talk'), 200);
+    assert.equal(await status(chatOnly, '/conversations/family/talk', { text: 'Hello from Dad.' }), 201);
+    assert.equal(await status(chatOnly, '/conversations/family/talk/remind', {}), 200);
+    assert.equal(await status(chatOnly, '/talk/words?lang=fr'), 200);
+    /* Its files: a file the tool shows in the chat opens from there. */
+    assert.equal(await status(chatOnly, '/files?r=photos&p='), 200);
+    /* Never the owner's switches, whatever it sends. */
+    assert.equal(await status(chatOnly, '/conversations/family/talk', { on: false }), 400);
+    assert.equal(await status(chatOnly, '/conversations/family/talk/invite', { lang: 'en' }), 404);
+    assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).on, true);
+
+    /* The terminal alone: none of the chat, its words included. */
+    assert.equal(await terminalOf(b, terminalOnly), 'opened');
+    assert.equal(await status(terminalOnly, '/shortcuts'), 200);
+    for (const path of ['/conversations/family/talk', '/talk/words?lang=en']) assert.equal(await status(terminalOnly, path), 403, path);
+    assert.equal(await status(terminalOnly, '/conversations/family/talk', { text: 'sneaked in' }), 403);
+    assert.equal(await status(terminalOnly, '/conversations/family/talk/remind', {}), 403);
+    assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).messages.map((m) => m.text).join('|'), 'Hello from Dad.');
+
+    /* The chat to read only: read, and nothing written, typed or dictated. */
+    assert.equal(await status(readOnly, '/conversations/family/talk'), 200);
+    assert.equal(await status(readOnly, '/conversations/family/talk', { text: 'no' }), 403);
+    assert.equal(await status(readOnly, '/conversations/family/talk/remind', {}), 403);
+    assert.equal(await terminalOf(b, readOnly), 'refused');
+    const dictated = await fetch(`${b.base}/c/api/${readOnly.id}/voice`, { method: 'POST', headers: { origin: b.origin, 'content-type': 'audio/wav', cookie: readOnly.cookie }, body: 'RIFF' });
+    assert.equal(dictated.status, 403);
+    assert.equal((await (await at(readOnly, '/voice')).json()).available, false);
+
+    /* Changed later by the owner, without a new code: the terminal is given, the chat taken. */
+    assert.equal((await b.operator(`/api/devices/${chatOnly.id}/give`, { asset: 'conversation:family', rights: 'x' })).status, 200);
+    assert.equal(await terminalOf(b, chatOnly), 'opened');
+    assert.equal(await status(chatOnly, '/conversations/family/talk'), 403);
+    /* At least one part: nothing at all is not a share. */
+    assert.equal((await b.operator(`/api/devices/${chatOnly.id}/give`, { asset: 'conversation:family', rights: '' })).status, 400);
+    assert.equal((await b.operator('/api/conversations/family/share', { rights: '' })).status, 400);
+    assert.equal((await b.operator('/api/conversations/family/share', { rights: 'rw' })).status, 201);
+});
+
+test('a device paired before a conversation was shared in parts keeps what it had: its terminal, and its chat where it was on', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-door-old-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { publicKey } = generateKeyPairSync('ec', { namedCurve: 'P-256' });
+    const key = publicKey.export({ format: 'jwk' });
+    const [one, two] = ['0f8fad5b-d9cb-469f-a165-70867728950e', '1f8fad5b-d9cb-469f-a165-70867728950e'];
+    writeFileSync(join(dir, 'conversations.json'), JSON.stringify([
+        { name: 'family', tool: 'shell', memoryMb: 768, phase: 'ready', work: 'kept' }, { name: 'work', tool: 'shell', memoryMb: 768, phase: 'ready', work: 'kept' }]));
+    writeFileSync(join(dir, 'devices.json'), JSON.stringify([{ name: one, key, label: 'Phone', createdAt: '2030-01-01T00:00:00.000Z' }, { name: two, key, label: 'Tablet', createdAt: '2030-01-01T00:00:00.000Z' }]));
+    writeFileSync(join(dir, 'grants.json'), JSON.stringify([
+        { name: `pairing:${one}|conversation:family`, subject: `pairing:${one}`, asset: 'conversation:family', rights: 'x' },
+        { name: `pairing:${two}|conversation:work`, subject: `pairing:${two}`, asset: 'conversation:work', rights: 'x' }]));
+    writeFileSync(join(dir, 'talk.json'), JSON.stringify([{ name: 'family', on: true }]));
+    const start = async () => startHome({ port: 0, host: ['true'], dataDir: dir, operators: ['owner@example.com'], publicOrigin: 'https://clav.example.com' });
+    const devices = async (server) => {
+        const r = await fetch(`http://127.0.0.1:${server.address().port}/api/devices`, { headers: { 'x-forwarded-email': 'owner@example.com' } });
+        return Object.fromEntries((await r.json()).map((d) => [d.label, d.grants.map((g) => `${g.asset} ${g.rights}`).join()]));
+    };
+    let server = await start();
+    assert.deepEqual(await devices(server), { Phone: 'conversation:family rwx', Tablet: 'conversation:work x' });
+    /* Once: the owner then takes the chat from the phone, and it stays taken after a restart. */
+    await fetch(`http://127.0.0.1:${server.address().port}/api/devices/${one}/give`, { method: 'POST', headers: { 'x-forwarded-email': 'owner@example.com', origin: 'https://clav.example.com', 'content-type': 'application/json' }, body: JSON.stringify({ asset: 'conversation:family', rights: 'x' }) });
+    server.close();
+    server = await start();
+    t.after(() => server.close());
+    assert.deepEqual(await devices(server), { Phone: 'conversation:family x', Tablet: 'conversation:work x' });
 });

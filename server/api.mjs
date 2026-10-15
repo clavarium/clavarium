@@ -28,7 +28,8 @@
  *   POST /api/git/<name>/check              {head, target?}: run the checks in the machine
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
- *   POST /api/conversations/<name>/share    -> {url, minutes, qr}: a one-use pairing code
+ *   POST /api/conversations/<name>/share    {rights?} -> {url, minutes, qr}: a one-use pairing code;
+ *                                           rights "x" its terminal (the default), "rw" its chat, "rwx" both
  *   GET  /api/conversations/<name>/devices
  *   POST /api/devices/<id>/revoke
  *   POST /api/conversations/<name>/network  {online}
@@ -256,7 +257,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (share && sharing) {
             const conversation = decodeURIComponent(share[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
-            const { code, minutes } = sharing.devices.share(conversation);
+            const { code, minutes } = sharing.devices.share(body.rights === undefined ? conversation : [{ asset: `conversation:${conversation}`, rights: body.rights }]);
             /* The code rides in the fragment: it is never sent to a server by
                the browser that opens the address, so it reaches no log. */
             const url = `${sharing.origin(request.headers)}/c/#${code}`;

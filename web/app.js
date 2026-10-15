@@ -23,6 +23,11 @@
     let API = DEVICE ? '/c/api' : '/api';
     let pairing = '';
     let deviceShared = [];
+    /* The parts of its conversation this device was given: its terminal, its
+       chat ('write', 'read' or null). Only those are shown -- and the server
+       refuses the others whatever this page does. */
+    let deviceParts = { terminal: true, chat: null };
+    const noTerminal = () => DEVICE && !deviceParts.terminal;
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
     const $ = (id) => document.getElementById(id) ?? document.createElement('div');
@@ -488,7 +493,7 @@
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         const usable = Boolean(c) && c.phase === 'ready';
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
-        if (home && usable) void paintShortcuts();
+        if (home && usable && !noTerminal()) void paintShortcuts();
         if (c && c.phase === 'building') {
             disconnect(); say('building', 'connecting');
             const minutes = c.buildingSince ? Math.floor((Date.now() - Date.parse(c.buildingSince)) / 60000) : 0;
@@ -499,10 +504,24 @@
         if (c && c.phase === 'restarting') { disconnect(); say('restarting', 'connecting'); show(`${c.step ?? 'Restarting its machine'}... The tool starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
+        /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
+        if (noTerminal()) { chatAlone(); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
         if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
+    }
+    /* A device given the chat alone: no terminal, no keys, no way to it. Its
+       chat if it is on; if it is not, said plainly (only its owner can turn it on). */
+    function chatAlone() {
+        disconnect();
+        say('chat', 'live');
+        notice.hidden = true;
+        for (const id of ['shortcuts', 'copy-open', 'copy', 'simple-toggle']) $(id).hidden = true;
+        $('room').setAttribute('data-no-terminal', '');
+        simple = true;
+        paintSimple();
+        void readTalk().then(paintThread);
     }
     function select(name) {
         if (name !== current) { disconnect(); terminal.reset(); }
@@ -571,6 +590,7 @@
                 const me = await r.json();
                 /* What this device was given for itself, next to its conversations. */
                 deviceShared = me.shared ?? [];
+                if (me.name) deviceParts = { terminal: me.terminal === true, chat: me.chat ?? null };
                 /* The conversation shown was taken back and another remains: the page starts over on it. */
                 if (current && me.name !== current) { location.reload(); return; }
                 conversations = me.name ? [me] : []; current = me.name ?? '';
@@ -710,6 +730,8 @@
                         if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => { box.form?.requestSubmit(); }, AUTO_ENTER_MS); }
                         return;
                     }
+                    /* No terminal of its own: what is said has nowhere else to go. */
+                    if (noTerminal()) return;
                     send(`${text} `);
                     sayVoice(`Typed: ${text}`, 'listening');
                     if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => send('\r'), AUTO_ENTER_MS); }
@@ -732,7 +754,10 @@
     async function offerVoice() {
         const available = window.clavariumVoice ? await window.clavariumVoice.available() : false;
         $('mic').hidden = $('auto').hidden = !available;
+        keysForChat();
     }
+    /* The chat alone: the row of keys holds dictation into the chat, or nothing (no chat to write in, no microphone). */
+    function keysForChat() { if (noTerminal()) $('keys').hidden = $('mic').hidden || !(talk.on && talkOf === current) || deviceParts.chat !== 'write'; }
     window.addEventListener('clavarium-voice-ready', () => { void offerVoice(); });
     void offerVoice();
 
@@ -951,7 +976,7 @@
                     catch (error) { show(error.message, 'Back to the terminal', enter); }
                 }, () => { notice.hidden = true; focusTerminal(); });
         };
-        void paintAnswerer(); paintWakeups(); void paintTalkBox();
+        void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
@@ -1136,7 +1161,7 @@
         $('simple-toggle').setAttribute('aria-pressed', String(simple));
         /* Where the tool talks through the app, the plain screen is its chat. */
         const chatting = talk.on && talkOf === current;
-        $('simple-toggle').hidden = DEVICE && !chatting;
+        $('simple-toggle').hidden = DEVICE && (!chatting || noTerminal());
         $('simple-toggle').textContent = simple ? (chatting ? 'Terminal' : 'Its screen') : chatting ? 'Chat' : 'Simple';
         if (!simple) return;
         const c = conversations.find((x) => x.name === current);
@@ -1175,7 +1200,8 @@
     /* The same on this server's own page and on a device's (which speaks for its own conversation). */
     const talkPath = (name, tail = '') => `${API}/conversations/${encodeURIComponent(name)}/talk${tail}${DEVICE ? `?${new URLSearchParams({ c: name })}` : ''}`;
     async function readTalk() {
-        if (!current) { talk = { on: false, messages: [] }; return talk; }
+        /* A device not given the chat does not ask for it: the server would refuse. */
+        if (!current || (DEVICE && deviceParts.chat === null)) { talk = { on: false, messages: [] }; talkOf = current; return talk; }
         talk = await fetch(talkPath(current)).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
         talkOf = current;
         return talk;
@@ -1189,6 +1215,9 @@
         $('simple').toggleAttribute('data-chat', wanted);
         /* The ready-made answers type into the terminal: not under a chat. */
         $('room').toggleAttribute('data-chat', wanted && simple);
+        /* Its chat alone was given, and the owner has not turned it on: said, not left blank. */
+        $('chat-off').hidden = !(noTerminal() && !wanted);
+        if (noTerminal()) { $('room').setAttribute('data-chat', ''); keysForChat(); say(wanted ? 'chat' : 'chat off', wanted ? 'live' : 'waiting'); }
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
@@ -1203,9 +1232,10 @@
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             load: () => fetch(talkPath(name)).then((r) => r.json()),
             send: (text, answers) => post(talkPath(name), { text, answers }),
+            /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
-            terminal: () => { simple = false; paintSimple(); focusTerminal(); },
+            ...(noTerminal() ? {} : { terminal: () => { simple = false; paintSimple(); focusTerminal(); } }),
             remind: () => post(talkPath(name, '/remind'), {}),
         });
     }
@@ -1218,7 +1248,7 @@
         const mine = ++opening;
         await readTalk();
         if (mine !== opening || name !== current) return;
-        const want = talk.on ? true : simplePref;
+        const want = talk.on || noTerminal() ? true : simplePref;
         if (want !== simple) { simple = want; simpleFilesAt = 0; }
         if (!simple) { paintSimple(); return; }
         await paintThread();
@@ -2706,6 +2736,44 @@
         return group;
     }
     const fixedRight = (type) => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = type === 'conversation' ? 'Use - the whole terminal' : 'Read only'; return s; };
+    /* A CONVERSATION IS GIVEN IN TWO PARTS, ticked one by one: its terminal
+       ("x") and its chat ("rw": read, and write there). At least one: the
+       last one ticked cannot be unticked (taking it all back is "Take back").
+       The server holds the device to it (see server/door.mjs). */
+    const talksHere = (name) => Boolean(conversations.find((c) => c.name === name)?.talk);
+    /* What is proposed when a conversation is added: its chat where it talks through the app, else its terminal. */
+    const partsFor = (name) => (talksHere(name) ? 'rw' : 'x');
+    function partsControl(rights, onChange, name) {
+        const group = document.createElement('div'); group.className = 'parts'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What of ${name} it gets`);
+        const has = { terminal: rights.includes('x'), chat: rights.includes('r') };
+        const boxes = {};
+        for (const [part, text] of [['terminal', 'Terminal'], ['chat', 'Chat']]) {
+            const label = document.createElement('label'); label.className = 'check'; label.dataset.part = part;
+            const box = document.createElement('input'); box.type = 'checkbox'; box.checked = has[part];
+            box.addEventListener('change', () => {
+                const next = { ...has, [part]: box.checked };
+                /* The last one ticked stays ticked, and says why. */
+                if (!next.terminal && !next.chat) { box.checked = true; need.hidden = false; return; }
+                const chat = next.chat ? (has.chat ? rights.replace('x', '') : 'rw') : '';
+                onChange(`${chat}${next.terminal ? 'x' : ''}`);
+            });
+            boxes[part] = box;
+            label.append(box, ` ${text}`); group.append(label);
+        }
+        /* The one left ticked cannot be unticked: marked so, and said when tried. */
+        for (const [part, other] of [['terminal', 'chat'], ['chat', 'terminal']]) if (has[part] && !has[other]) boxes[part].setAttribute('aria-disabled', 'true');
+        const need = document.createElement('small'); need.className = 'hint parts-need'; need.hidden = true; need.textContent = 'At least one. To give nothing, take it back.';
+        group.append(need);
+        /* Its chat, given while it is off: said, so that nobody wonders why the device shows nothing. */
+        if (has.chat && !talksHere(name)) {
+            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Its chat is off: the device sees it once you turn it on (General).';
+            group.append(off);
+        }
+        return group;
+    }
+    /* The right control of a thing given: a conversation in parts, a folder or a repository to read or write. */
+    const rightControl = (type, name, rights, onChange, label) => (type === 'conversation' ? partsControl(rights, onChange, name)
+        : type === 'folder' || type === 'git' ? levelControl(rights, onChange, label) : fixedRight(type));
 
     async function loadCatalog() {
         const things = await (await fetch(`${API}/resources`)).json().catch(() => []);
@@ -2717,9 +2785,12 @@
     }
     function sayChoice() {
         const who = shareTarget ? (sharedDevices.find((d) => d.id === shareTarget)?.label ?? 'This device') : ($('sharing-label').value.trim() || 'The new device');
-        const whole = [...basket].filter(([, r]) => r === 'x').map(([a]) => a.split(':')[1]);
-        const rest = [...basket].filter(([, r]) => r !== 'x').map(([a, r]) => `${r === 'rw' ? 'change' : 'read'} ${a.split(':')[1]}`);
-        const parts = [whole.length ? `use ${whole.join(', ')} - the whole terminal, as root in its machine, with the files of that conversation` : '', rest.join(', ')].filter(Boolean);
+        const talks = [...basket].filter(([a]) => a.startsWith('conversation:'));
+        const whole = talks.filter(([, r]) => r.includes('x')).map(([a]) => a.split(':')[1]);
+        const chats = talks.filter(([, r]) => r.includes('r')).map(([a]) => a.split(':')[1]);
+        const rest = [...basket].filter(([a]) => !a.startsWith('conversation:')).map(([a, r]) => `${r === 'rw' ? 'change' : 'read'} ${a.split(':')[1]}`);
+        const parts = [whole.length ? `use ${whole.join(', ')} - the whole terminal, as root in its machine, with the files of that conversation` : '',
+            chats.length ? `write in the chat of ${chats.join(', ')}${whole.length ? '' : ', and see its files'}` : '', rest.join(', ')].filter(Boolean);
         $('sharing-summary').textContent = basket.size === 0 ? 'Nothing is chosen yet.' : `${who} will be able to ${parts.join('; and ')}.`;
         const named = shareTarget !== '' || $('sharing-label').value.trim() !== '';
         $('sharing-new').disabled = basket.size === 0 || !named;
@@ -2753,7 +2824,7 @@
             const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = asset;
             const label = document.createElement('b'); label.textContent = name;
             const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-            const right = type === 'folder' || type === 'git' ? levelControl(rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`) : fixedRight(type);
+            const right = rightControl(type, name, rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`);
             const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Remove'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
             out.addEventListener('click', () => { basket.delete(asset); paintCompose(); });
             row.append(label, right, out); box.append(row);
@@ -2782,7 +2853,7 @@
             else {
                 plus.textContent = '+ Add'; plus.setAttribute('aria-label', `Add ${c.name}`);
                 /* A conversation is given whole; anything else to read -- writing is asked for, never assumed. */
-                plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? 'x' : 'r'); paintCompose(); });
+                plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r'); paintCompose(); });
             }
             row.append(label, plus); add.append(row);
         }
@@ -2816,9 +2887,7 @@
         const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
         const label = document.createElement('span'); label.textContent = name;
         const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-        const right = type === 'folder' || type === 'git'
-            ? levelControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await paintManage(); }, `What ${device.label} may do with ${name}`)
-            : fixedRight(type);
+        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await paintManage(); }, `What ${device.label} may do with ${name}`);
         const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
         take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
         row.append(label, right, take);
@@ -2879,7 +2948,7 @@
             const row = document.createElement('div'); row.className = 'given-row';
             const label = document.createElement('span'); label.textContent = `${c.name} - ${KIND_WORD[c.type]}`;
             const give = document.createElement('button'); give.type = 'button'; give.textContent = 'Share...';
-            give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? 'x' : 'r']]); });
+            give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r']]); });
             row.append(label, give); rest.append(row);
         }
         things.append(rest);
@@ -2895,7 +2964,30 @@
     $('share-new-device').addEventListener('click', () => { void openCompose(); });
     $('sharing-open').addEventListener('click', () => { void openManage(); });
     /* From a conversation: that conversation, and nothing else, is in the basket. */
-    $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, 'x']]); });
+    $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]]); });
+    /* The Sharing chapter of a conversation: who has it, and which parts -- changed there, at once. */
+    async function paintShareHere() {
+        if (DEVICE) return;
+        await readDevices();
+        const box = $('share-here'); box.replaceChildren();
+        const asset = `conversation:${current}`;
+        for (const device of devicesWith(asset)) {
+            const g = device.grants.find((x) => x.asset === asset);
+            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.device = device.id;
+            const label = document.createElement('span'); label.textContent = device.label;
+            const right = partsControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset, rights: value }).catch(() => {}); await paintShareHere(); }, current);
+            const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
+            take.addEventListener('click', () => {
+                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Take ${current} back from ${device.label}`;
+                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
+                keep.addEventListener('click', () => { void paintShareHere(); });
+                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset }).catch(() => {}); await paintShareHere(); void refresh(); });
+                take.replaceWith(sure, keep);
+            });
+            row.append(label, right, take); box.append(row);
+        }
+        $('share-here-none').hidden = box.children.length > 0;
+    }
     $('sharing-close').addEventListener('click', () => { face('compose'); $('sharing').hidden = true; focusTerminal(); void refresh(); });
 
     $('sharing-new').addEventListener('click', async () => {
@@ -3081,7 +3173,11 @@
                 const c = conversations[0];
                 $('name').textContent = c?.name ?? '';
                 await readTalk();
-                show(`You are connected to "${c?.name}", an assistant that works in writing. ${talk.on ? 'You talk with it here, as in a messaging app: write below, or press Dictate and speak. Its terminal is one tap away.' : 'Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.'}${installOffered ? ' To keep it at hand, "Install the app" at the top puts it on this device like any other app.' : ''}`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); void chatFirst(); });
+                /* Said for what it was given: its chat, its terminal, or both. */
+                const how = noTerminal() && !talk.on ? 'You will talk with it here, as in a messaging app, once the person who shared it turns its chat on.'
+                    : talk.on ? `You talk with it here, as in a messaging app: write below, or press Dictate and speak.${noTerminal() ? '' : ' Its terminal is one tap away.'}`
+                        : 'Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.';
+                show(`You are connected to "${c?.name}", an assistant that works in writing. ${how}${installOffered ? ' To keep it at hand, "Install the app" at the top puts it on this device like any other app.' : ''}`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); void chatFirst(); });
                 return;
             }
             enter();

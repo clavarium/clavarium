@@ -6,6 +6,7 @@
  *      subject            asset              rights
  *      conversation:a     folder:reports     rw      (what used to be "attached, write")
  *      pairing:<id>       conversation:a     x       (what used to be "shared by a code")
+ *      pairing:<id>       conversation:b     rw      (its chat only: no terminal)
  *      pairing:<id>       folder:reports     r
  *      conversation:a     secret:MODEL_KEY   x
  *
@@ -13,7 +14,7 @@
  * those that mean something for it:
  *
  *                     r                       w                        x
- *   conversation      -                       -                        open its terminal
+ *   conversation      read its chat           write in its chat        use its terminal
  *   folder            list, show, download    import, change           -
  *   mailbox           read the messages       (send, file: not built)  -
  *   git               see the files           change them              -
@@ -23,13 +24,24 @@
  * machine) and a PAIRING (what a device was given by a code). The owner is
  * not in the table: the owner may do everything, always.
  *
- * No groups, no inheritance. One rule sits on top, in the door: whoever may
- * use a conversation sees the files of that conversation -- where its tool
- * works, and what is attached to it.
+ * No groups, no inheritance. One rule sits on top, in the door: whoever was
+ * given a conversation, its terminal or its chat, sees the files of that
+ * conversation -- where its tool works, and what is attached to it (a file
+ * the tool shows in its chat is opened from there).
+ */
+/* A CONVERSATION IS SHARED IN TWO PARTS, its terminal and its chat (where
+ * it talks through the app, see talk.mjs), chosen one by one: a father given
+ * the chat and not the terminal. The two parts are letters of the same line,
+ * not a second store beside this table: "x" was already "use its terminal",
+ * and a chat is read and written like a file -- "r", "w". One line per
+ * device and conversation stays the whole truth of what it may do there,
+ * and taking the conversation back is still one line taken away. The page
+ * offers "Terminal" (x) and "Chat" (rw); a chat to read only (r) is a line
+ * the door also honours.
  */
 import { Refusal } from './conversations.mjs';
 
-export const RIGHTS = Object.freeze({ conversation: 'x', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
+export const RIGHTS = Object.freeze({ conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
 const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|pairing:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
 const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$/;
 

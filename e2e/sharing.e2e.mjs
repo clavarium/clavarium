@@ -224,7 +224,10 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.page.locator('#share').click();
     /* Only the conversation the owner came from is in the basket; nothing else was chosen for them. */
     await owner.until('the basket is shown', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
-    assert.match(await owner.page.locator('#share-basket').innerText(), /garden conversation\s+Use - the whole terminal/);
+    assert.match(await owner.page.locator('#share-basket').innerText(), /garden conversation\s+Terminal\s+Chat/);
+    /* It does not talk through the app: its terminal is proposed, not its chat. */
+    const garden = owner.page.locator('#share-basket .folder', { hasText: 'garden' });
+    assert.deepEqual([await garden.locator('label[data-part=terminal] input').isChecked(), await garden.locator('label[data-part=chat] input').isChecked()], [true, false]);
     const add = (name) => owner.page.locator('#share-add .folder', { hasText: name }).locator('button').click();
     await add('family');
     await add('recipes');
@@ -270,7 +273,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     /* ...it is renamed in place... */
     await card.locator('button', { hasText: 'Rename' }).click();
     const only = owner.page.locator('#sharing-devices .device').first();      /* its name is a field now */
-    await only.locator('input').fill('Papa');
+    await only.locator('input[aria-label="Name of this device"]').fill('Papa');
     await only.locator('button', { hasText: 'Save' }).click();
     await owner.until('it is called Papa', async () => (await owner.page.locator('#sharing-devices .device', { hasText: 'Papa' }).count()) === 1);
     /* BY THING: who can see this folder? */

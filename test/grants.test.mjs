@@ -15,14 +15,18 @@ const DEVICE = pairingSubject('0f8fad5b-d9cb-469f-a165-70867728950e');
 const TALK = conversationSubject('family');
 
 test('each type of asset takes only the rights that mean something for it', () => {
-    assert.deepEqual(RIGHTS, { conversation: 'x', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
+    assert.deepEqual(RIGHTS, { conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
     assert.equal(readRights('folder:reports', 'r'), 'r');
     assert.equal(readRights('folder:reports', 'wr'), 'rw', 'one way to write them');
     assert.equal(readRights('folder:reports', 'w'), 'rw', 'writing brings reading');
     assert.equal(readRights('git:site', 'rw'), 'rw');
+    /* A conversation in two parts: its terminal (x), its chat (r, w). */
     assert.equal(readRights('conversation:family', 'x'), 'x');
+    assert.equal(readRights('conversation:family', 'w'), 'rw', 'its chat, to write in');
+    assert.equal(readRights('conversation:family', 'xwr'), 'rwx', 'both');
+    assert.equal(readRights('conversation:family', 'r'), 'r');
     assert.equal(readRights('secret:MODEL_KEY', 'x'), 'x');
-    for (const [asset, rights] of [['conversation:family', 'r'], ['folder:reports', 'x'], ['mailbox:inbox', 'w'], ['secret:MODEL_KEY', 'r'], ['folder:reports', ''], ['folder:reports', 'rwz'], ['shadow:x', 'r'], ['folder:../etc', 'r'], ['folder', 'r']]) {
+    for (const [asset, rights] of [['conversation:family', 't'], ['conversation:family', ''], ['folder:reports', 'x'], ['mailbox:inbox', 'w'], ['secret:MODEL_KEY', 'r'], ['folder:reports', ''], ['folder:reports', 'rwz'], ['shadow:x', 'r'], ['folder:../etc', 'r'], ['folder', 'r']]) {
         assert.throws(() => readRights(asset, rights), /takes these rights|Not an asset/, `${asset} ${rights}`);
     }
 });

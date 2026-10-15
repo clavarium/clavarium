@@ -58,6 +58,8 @@ header button { padding: 5px 9px; white-space: nowrap; }
 main { position: relative; flex: 1; min-height: 0; }
 #terminal { position: absolute; inset: 0; padding: 4px; }
 #notice { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: rgba(15, 20, 26, .92); }
+/* On a light screen the veil is light too: dark text on the dark veil could not be read (seen on the welcome of a device). */
+:root[data-theme="light"] #notice { background: rgba(251, 251, 250, .94); }
 #notice p { margin: 0; max-width: 36ch; font-size: 1rem; }
 /* The wheel while a machine is built or its work moved; still for those who ask for less motion. */
 #notice .spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .18); border-top-color: #d2a94e; }
@@ -263,6 +265,13 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .device .given { display: block; flex-basis: auto; }
 .device > button { align-self: flex-start; }
 .given-row > .hint, .given-row > .levels { flex: 0 0 auto; }
+/* A conversation given in parts: Terminal, Chat -- two boxes to tick, at least one. */
+.parts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; flex: 0 1 auto; }
+.parts label.check { min-height: 40px; font-size: .875rem; color: var(--ink); cursor: pointer; }
+.parts input { width: 18px; height: 18px; accent-color: var(--brass); }
+.parts label.check:has(input[aria-disabled="true"]) { cursor: default; }
+.parts .parts-need { flex-basis: 100%; }
+.parts .parts-off { flex-basis: 100%; color: var(--warn); }
 
 /* The left column: conversations, then the platform's three entries, always in sight. */
 #list #items { flex: 1 1 auto; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -339,6 +348,9 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 /* The chat takes the whole screen: its box stays at the bottom, the messages scroll above it. */
 /* On a light screen, brass text is too pale to read: the words in that colour are darker; the buttons keep it. */
 :root[data-theme="light"] #simple-thread { --parley-ask: #8a5d00; }
+#chat-off { margin: auto; max-width: 36ch; text-align: center; padding: 24px 8px; }
+#chat-off p { margin: 0 0 10px; font-size: 1rem; }
+#chat-off p + p { color: var(--ink2); }
 #simple[data-chat] { display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px 12px; }
 #simple-thread { flex: 1; min-height: 0; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }
 
