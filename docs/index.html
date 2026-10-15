@@ -76,9 +76,19 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
 
 .ask { padding-top: 36px; }
 .ask h2 { margin: 0 0 12px; font-size: 20px; font-weight: 680; }
-.cases { display: flex; flex-wrap: wrap; gap: 8px; }
-.cases button { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 8px 16px; font-size: 15px; line-height: 1.25; text-align: left; }
+.cases { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+.cases button { border: 1px solid var(--line); background: var(--bg); border-radius: 14px; padding: 14px 14px 16px; text-align: left; display: flex; flex-direction: column; gap: 4px; min-height: 100%; }
 .cases button:hover { border-color: var(--dim); }
+.cases .ic { font-family: var(--mono); font-size: 18px; font-weight: 700; color: var(--shell-accent); line-height: 1.2; }
+.cases .ct { font-size: 18px; font-weight: 700; line-height: 1.2; }
+.cases .cs { font-size: 15px; line-height: 1.3; color: var(--dim); }
+.cases button[aria-pressed="true"] .cs, .cases button[aria-pressed="true"] .ic { color: inherit; }
+@media (max-width: 899px) { .cases { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .cases { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } .cases button { padding: 12px; } }
+.open { margin-top: 28px; padding-top: 24px; border-top: 1px solid var(--line); scroll-margin-top: 84px; }
+.open[hidden] { display: none; }
+@media (max-width: 700px) { .open { scroll-margin-top: 136px; } }
+.open-t { margin: 0; font-size: 22px; font-weight: 700; }
 .full { text-align: center; margin: 26px 0 0; font-size: 17px; }
 .full a { color: var(--accent); font-weight: 650; text-decoration: none; }
 .full a:hover { text-decoration: underline; }
@@ -94,10 +104,6 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
   @keyframes go-prev { from { opacity: 0; transform: translateX(-40px); } to { opacity: 1; transform: none; } }
 }
 @media (max-width: 700px) {
-  /* On a phone the cases are one row that scrolls sideways, so the first picture shows at once. */
-  .cases { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
-  .cases::-webkit-scrollbar { display: none; }
-  .cases button { white-space: nowrap; flex: none; }
   .pager { justify-content: center; }
 }
 .cases button[aria-pressed="true"] { background: var(--text); color: var(--bg); border-color: var(--text); }
@@ -322,11 +328,11 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
       <span class="drop">
         <button class="drop-word" type="button">Use cases</button>
         <span class="drop-menu">
-        <a href="cases/family.html">Marcel, 82, tells his story</a>
         <a href="cases/code.html">Your coding agents</a>
+        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
         <a href="cases/office.html">Office: one report per client</a>
         <a href="cases/europe.html">Sensitive data that stays in Europe</a>
-        <a href="cases/home.html">Your assistant: calendar, mail, home</a>
+        <a href="cases/family.html">Marcel, 82, tells his story</a>
         <span class="drop-sep" aria-hidden="true"></span>
         <a href="examples.html">All examples</a>
         </span>
@@ -353,13 +359,16 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
   </section>
 
   <section class="ask wrap" aria-labelledby="ask-h">
-    <h2 id="ask-h">What is your case?</h2>
+    <h2 id="ask-h">What will your AI do for you?</h2>
     <div class="cases" id="cases" role="group" aria-labelledby="ask-h"></div>
     <p class="aside" id="aside" hidden></p>
-    <div class="pager" id="pager-top"></div>
-    <ol class="steps" id="steps" aria-live="polite"></ol>
-    <p class="full"><a id="full-link" href="cases/family.html">See the full case, and download its setup &rarr;</a></p>
-    <div class="pager low" id="pager-low"></div>
+    <div class="open" id="open" hidden>
+      <h3 class="open-t" id="open-t"></h3>
+      <div class="pager" id="pager-top"></div>
+      <ol class="steps" id="steps" aria-live="polite"></ol>
+      <p class="full"><a id="full-link" href="cases/code.html">See the full case, and download its setup &rarr;</a></p>
+      <div class="pager low" id="pager-low"></div>
+    </div>
   </section>
 
   <section class="install wrap" id="install">
@@ -755,47 +764,48 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
   /* ---------- the cases ---------- */
   var USE = "Use", SET = "Set up", HOOD = "Under the hood";
   var CASES = [
-    { id: "family", label: "Marcel, 82, tells his story",
-      steps: [
-        { kind: USE, text: "Marcel speaks. His story writes itself.", pic: phonePic, play: true },
-        { kind: USE, text: "Léa, his granddaughter, reads it and asks questions. Each answer says where it comes from.", pic: leaPic },
-        { kind: HOOD, text: "Each helper sees only what it is given. You choose who runs the models.", pic: famPic }
-      ] },
-    { id: "code", label: "Your coding agents",
+    { id: "code", label: "Your coding agents", icon: "</>", title: "Code", sub: "Several agents on your repositories",
       note: ["Already have Claude Code?", "Keeps your Claude Code login and tools; adds a box per repository and approvals on your phone."],
       steps: [
         { kind: USE, text: "They work all night. Your phone asks only the risky question.", pic: awayPic },
         { kind: USE, text: "All your coding agents in one list, on your phone too.", pic: agentsPic },
         { kind: HOOD, text: "As many Claude Code sessions as you like, each in its own machine: not on the vendor's site, not loose on your computer.", pic: hoodPic }
       ] },
-    { id: "office", label: "Office: one report per client",
+    { id: "home", label: "Your assistant: calendar, mail, home", icon: "✉", title: "Assistant", sub: "Mail, calendar and home",
+      works: ["Home Assistant", "Ollama", "n8n", "Node-RED"],
+      steps: [
+        { kind: USE, text: "It reads your calendar and your mail, and tells you what is missing or clashing.", pic: homeFlowPic },
+        { kind: USE, text: "It sees when people come home, and asks Home Assistant to warm the house in time.", pic: homeAgentsPic },
+        { kind: HOOD, text: "It reads, warns, and acts within what you allow. It cannot pay or send mail.", pic: homeHoodPic }
+      ] },
+    { id: "office", label: "Office: one report per client", icon: "▤", title: "Office", sub: "One report per client",
       steps: [
         { kind: SET, text: "Pick Monthly report: each client gets its own space.", pic: officeSetPic },
         { kind: USE, text: "On the 1st, Inès opens Brun: the report is ready, other clients stay locked.", pic: officeUsePic },
         { kind: HOOD, text: "One space per client: its own folder, key and agent.", pic: officeHoodPic,
           tags: [["Models:", "your choice"], ["Limit:", "an agent can read its key", true]] }
       ] },
-    { id: "europe", label: "Sensitive data that stays in Europe",
+    { id: "europe", label: "Sensitive data that stays in Europe", icon: "EU", title: "Europe", sub: "Sensitive data stays in Europe",
       steps: [
         { kind: SET, text: "Mark the interviews folder Europe only.", pic: euSetPic },
         { kind: USE, text: "Attach it to an agent whose model runs elsewhere: refused.", pic: euUsePic },
         { kind: HOOD, text: "Who runs each model, and where.", pic: euHoodPic,
           tags: [["Limit:", "no log yet of which file went where", true]] }
       ] },
-    { id: "home", label: "Your assistant: calendar, mail, home",
-      works: ["Home Assistant", "Ollama", "n8n", "Node-RED"],
+    { id: "family", label: "Marcel, 82, tells his story", icon: "♥", title: "Family", sub: "Marcel, 82, tells his story",
       steps: [
-        { kind: USE, text: "It reads your calendar and your mail, and tells you what is missing or clashing.", pic: homeFlowPic },
-        { kind: USE, text: "It sees when people come home, and asks Home Assistant to warm the house in time.", pic: homeAgentsPic },
-        { kind: HOOD, text: "It reads, warns, and acts within what you allow. It cannot pay or send mail.", pic: homeHoodPic }
+        { kind: USE, text: "Marcel speaks. His story writes itself.", pic: phonePic, play: true },
+        { kind: USE, text: "Léa, his granddaughter, reads it and asks questions. Each answer says where it comes from.", pic: leaPic },
+        { kind: HOOD, text: "Each helper sees only what it is given. You choose who runs the models.", pic: famPic }
       ] }
   ];
 
   /* ---------- render ---------- */
   var casesEl = document.getElementById("cases"), asideEl = document.getElementById("aside"), stepsEl = document.getElementById("steps"), btns = {};
   CASES.forEach(function (c) {
-    var b = h("button", null, c.label, casesEl);
+    var b = h("button", null, null, casesEl);
     b.type = "button";
+    h("span", "ic", c.icon, b); h("span", "ct", c.title, b); h("span", "cs", c.sub, b);
     b.addEventListener("click", function () { choose(c.id, true); });
     btns[c.id] = b;
   });
@@ -817,7 +827,7 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
     choose(CASES[i].id, true);
     stepsEl.classList.remove("go-next", "go-prev"); void stepsEl.offsetWidth; stepsEl.classList.add(d > 0 ? "go-next" : "go-prev");
     /* From the arrows under the pictures, the visitor is taken back to the top of the new case. */
-    if (fromLow) document.getElementById("pager-top").scrollIntoView({ block: "start", behavior: "smooth" });
+    if (fromLow) document.getElementById("open").scrollIntoView({ block: "start", behavior: "smooth" });
   }
   var touch = null;
   stepsEl.addEventListener("touchstart", function (e) { var t = e.touches[0]; touch = { x: t.clientX, y: t.clientY }; }, { passive: true });
@@ -829,9 +839,11 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
   function choose(id, fromClick) {
     var c = CASES.filter(function (x) { return x.id === id; })[0] || CASES[0];
     current = CASES.indexOf(c);
+    var openEl = document.getElementById("open"), wasHidden = openEl.hidden;
+    openEl.hidden = false;
+    document.getElementById("open-t").textContent = c.label;
     document.getElementById("full-link").href = "cases/" + c.id + ".html";
     pagers();
-    if (btns[c.id] && btns[c.id].scrollIntoView && fromClick) btns[c.id].scrollIntoView({ block: "nearest", inline: "nearest" });
     for (var k in btns) btns[k].setAttribute("aria-pressed", k === c.id ? "true" : "false");
     clearTimeout(marcel.timer);
     marcel.win = null; marcel.rects = {}; marcel.first = true;
@@ -853,10 +865,12 @@ h1 { margin: 0; font-size: clamp(28px, 4.4vw, 46px); line-height: 1.1; letter-sp
     });
     if (marcel.win) { showFrame(HERO); tick(); }
     if (fromClick && history.replaceState) history.replaceState(null, "", "#" + c.id);
+    /* The first time a case is picked, the page goes to it; nothing is open before the visitor asks. */
+    if (fromClick && wasHidden && openEl.scrollIntoView) openEl.scrollIntoView({ block: "start", behavior: "smooth" });
   }
 
   var start = (location.hash || "").slice(1);
-  choose(start || "family", false);
+  if (CASES.some(function (x) { return x.id === start; })) choose(start, false);
 })();
 </script>
 </body>
