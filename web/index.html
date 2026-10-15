@@ -433,13 +433,7 @@
             <label for="gitview-refreshminutes">Refresh the origin every (minutes; 0: only with "Refresh now")</label>
             <input id="gitview-refreshminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
             <p class="hint">Refreshing and automatic sending happen only while a running machine has this repository attached; "Refresh now" works any time.</p>
-            <label for="gitview-autobranches">Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.</label>
-            <textarea id="gitview-autobranches" rows="2" spellcheck="false" autocapitalize="off" placeholder="test, staging, try/*"></textarea>
-            <p class="hint">When one of the tool's branches has commits the remote lacks, then nothing new for the quiet delay, and its name is in this list, it is sent to the branch of the same name, as Send would, never forced, and only after the checks passed.</p>
-            <label for="gitview-quietminutes">Quiet delay, in minutes</label>
-            <input id="gitview-quietminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
-            <label for="gitview-perhour">Automatic sendings an hour, at most</label>
-            <input id="gitview-perhour" type="number" min="1" max="60" step="1" inputmode="numeric">
+            <p class="hint" id="gitview-auto-where">Automatic sending is set for each conversation, under its access to this repository (Write), in the conversation's Access panel.</p>
             <label class="check"><input type="checkbox" id="gitview-alert"> Tell my phone about automatic sendings</label>
             <div class="row"><button type="submit" class="primary">Save</button><span class="hint" id="gitview-keep-said" role="status"></span></div>
           </form>

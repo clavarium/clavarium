@@ -460,10 +460,10 @@ test('attack: one repository whose reads hang holds up every other repository of
         readTips: async (name) => { started[name] = Date.now() - t0; if (name === 'slow') await new Promise((r) => setTimeout(r, 3000)); return {}; },
         tips: () => ({}), runner: null,
     };
-    const list = [{ name: 'slow', type: 'git' }, { name: 'fast', type: 'git' }];
+    const list = [{ name: 'slow', type: 'git', attachments: { alpha: 'write' } }, { name: 'fast', type: 'git', attachments: { alpha: 'write' } }];
     const resources = { get: (n) => list.find((x) => x.name === n), list: () => list, folder: (n) => join(dir, n), hasOrigin: () => false };
-    const keeper = new GitKeeper({ store: new Store(join(dir, 'keep.json')), review, resources, checks: { machineFor: async () => 'alpha', run: async () => ({ status: 'none' }) }, alerts: null });
-    for (const x of list) keeper.set(x.name, { autoBranches: ['main'], refreshMinutes: 0 });
+    const keeper = new GitKeeper({ store: new Store(join(dir, 'keep.json')), review, resources, checks: { machineFor: async () => 'alpha', runs: async () => true, run: async () => ({ status: 'none' }) }, alerts: null });
+    for (const x of list) { keeper.set(x.name, { refreshMinutes: 0 }); keeper.setAuto(x.name, 'alpha', { branches: ['try/*'] }); }
     await keeper.tick();
     assert.ok(started.fast < 1000, `the read of "fast" waited ${started.fast} ms behind "slow"`);
 });

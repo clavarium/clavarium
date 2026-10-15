@@ -165,6 +165,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #mailbox-box summary, #git-box summary { cursor: pointer; min-height: 44px; display: flex; align-items: center; }
 #mailbox-new, #git-new { display: grid; gap: 6px; }
 .folder small.hint { font-weight: normal; }
+/* Under the access buttons of a repository, across the whole row. */
+.folder .auto-send { flex-basis: 100%; }
+.auto-send fieldset { display: flex; flex-direction: column; gap: 6px; margin: 6px 0 0; padding: 0; border: 0; min-width: 0; }
+.auto-send label:not(.check) { display: flex; flex-direction: column; gap: 4px; }
 #mailbox-new input, #git-new input { min-width: 0; min-height: 40px; font: 14px var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #mailbox-new .row input, #git-new .row input { flex: 1; }
 #mailbox-new #mailbox-port { flex: 0 0 90px; }

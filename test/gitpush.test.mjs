@@ -457,3 +457,23 @@ test('the remote\'s tip of a branch is that exact ref, never one git guesses fro
     assert.equal(await b.review.remoteLacks('site', 'feat', feat), false, 'already on the remote, on main');
     assert.equal(await b.review.remoteLacks('site', 'feat', b.commit('g.txt', 'g\n', 'more')), true, 'a new commit is still something to send');
 });
+
+test('an automatic sending makes a branch on the remote only when allowed, asked on the tip just fetched; the remote\'s default branch is learnt', async (t) => {
+    const b = bench(t);
+    const one = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: one });
+    assert.equal(b.review.defaultBranch('site'), 'main', 'learnt at the refresh of the send');
+    git(b.work, 'checkout', '--quiet', '-b', 'try/new');
+    const two = b.commit('b.txt', 'b\n', 'two');
+    await assert.rejects(b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true }), (e) => e.kind === 'no-branch' && /does not exist on the remote/.test(e.message));
+    assert.throws(() => git(b.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/try/new'));
+    const sent = await b.review.send('site', { branch: 'try/new', head: two, target: 'try/new', remoteTip: null, auto: true, create: true });
+    assert.equal(sent.made, true);
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/try/new'), two);
+    /* Asked once a day, not at every refresh: it rarely changes, and each question goes to the remote. */
+    const asked = () => b.calls.filter((c) => c.argv.includes('ls-remote')).length;
+    const before = asked();
+    await b.review.refresh('site');
+    assert.equal(asked(), before);
+});

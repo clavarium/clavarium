@@ -625,6 +625,66 @@
         return group;
     }
 
+    /* AUTOMATIC SENDING, FOR ONE CONVERSATION AND ONE REPOSITORY. Set where
+       the conversation is given the repository for writing, because that is
+       what it is about: what THIS agent may send by itself. Folded by
+       default; the summary says whether it is on. "*" and the remote's
+       default branch are refused by the server until the owner confirms
+       them here, in words, under the form (not a browser dialog: the app
+       also runs installed on a phone). */
+    const autoOpen = new Set();
+    function autoSending(conversation, name) {
+        const where = `${API}/conversations/${encodeURIComponent(conversation)}/git/${name}/auto`;
+        const box = document.createElement('details'); box.className = 'auto-send'; box.dataset.repository = name;
+        box.open = autoOpen.has(`${conversation}/${name}`);
+        box.addEventListener('toggle', () => { if (box.open) autoOpen.add(`${conversation}/${name}`); else autoOpen.delete(`${conversation}/${name}`); });
+        const summary = document.createElement('summary'); summary.textContent = 'Automatic sending';
+        const state = document.createElement('small'); state.className = 'hint auto-state'; summary.append(' ', state);
+        const form = document.createElement('form'); form.autocomplete = 'off';
+        const field = (text, input) => { const label = document.createElement('label'); label.textContent = text; label.append(input); return label; };
+        const check = (text, input) => { const label = document.createElement('label'); label.className = 'check'; label.append(input, ` ${text}`); return label; };
+        const branches = document.createElement('textarea'); branches.name = 'branches'; branches.rows = 2; branches.spellcheck = false; branches.setAttribute('autocapitalize', 'off'); branches.placeholder = 'test, staging, try/*';
+        const number = (named, max) => { const i = document.createElement('input'); i.name = named; i.type = 'number'; i.min = '0'; i.max = String(max); i.step = '1'; i.inputMode = 'numeric'; return i; };
+        const quiet = number('quietSeconds', 86400); const perHour = number('perHour', 1000);
+        const create = document.createElement('input'); create.type = 'checkbox'; create.name = 'create';
+        const checks = document.createElement('input'); checks.type = 'checkbox'; checks.name = 'checks';
+        const hint = document.createElement('p'); hint.className = 'hint';
+        hint.textContent = 'When one of its branches has commits the remote lacks, then nothing new for the quiet delay, and its name is in this list, it is sent to the branch of the same name, as Send would: never forced, only while this conversation\'s machine runs.';
+        const asking = document.createElement('p'); asking.className = 'hint auto-confirm'; asking.hidden = true; asking.setAttribute('role', 'alert');
+        const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger auto-sure'; sure.textContent = 'Confirm and save'; sure.hidden = true;
+        const save = document.createElement('button'); save.type = 'submit'; save.className = 'primary'; save.textContent = 'Save';
+        const said = document.createElement('span'); said.className = 'hint auto-said'; said.setAttribute('role', 'status');
+        const actions = document.createElement('div'); actions.className = 'row'; actions.append(save, sure, said);
+        /* Closed until the settings there are have arrived: a list typed
+           before would be overwritten by them. */
+        const fields = document.createElement('fieldset'); fields.disabled = true;
+        form.append(fields);
+        fields.append(field('Branches it may send to by itself (one per line or comma, "try/*" allowed). Empty: never.', branches), hint,
+            field('Quiet delay, in seconds', quiet), field('Sendings an hour, at most (0: no cap)', perHour),
+            check('It may create a branch the remote does not have', create), check('Only after the checks passed in its machine', checks), asking, actions);
+        box.append(summary, form);
+        const fill = (about) => {
+            const s = about.settings;
+            branches.value = s.branches.join('\n'); quiet.value = String(s.quietSeconds); perHour.value = String(s.perHour);
+            create.checked = s.create; checks.checked = s.checks;
+            state.textContent = s.branches.length ? `on: ${s.branches.join(', ')}` : 'off';
+        };
+        const send = async (confirmed) => {
+            said.textContent = ''; asking.hidden = true; sure.hidden = true;
+            const body = { branches: branches.value, quietSeconds: quiet.value === '' ? '' : Number(quiet.value), perHour: perHour.value === '' ? '' : Number(perHour.value), create: create.checked, checks: checks.checked, ...(confirmed ? { sure: true } : {}) };
+            const r = await fetch(where, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+            const j = await r.json().catch(() => ({}));
+            if (r.ok) { fill(j); said.textContent = 'Saved.'; return; }
+            /* Nothing was saved: the owner reads what it would allow, then confirms or changes the list. */
+            if (j.kind === 'confirm-wide') { asking.textContent = j.error; asking.hidden = false; sure.hidden = false; return; }
+            said.textContent = j.error || 'The request failed.';
+        };
+        form.addEventListener('submit', (event) => { event.preventDefault(); void send(false); });
+        sure.addEventListener('click', () => { void send(true); });
+        void fetch(where).then((r) => (r.ok ? r.json() : null)).then((about) => { if (about) { fill(about); fields.disabled = false; } }).catch(() => {});
+        return box;
+    }
+
     /* ---------- Access: this conversation ---------- */
     async function paintPanel() {
         const here = conversations.find((x) => x.name === current);
@@ -650,6 +710,8 @@
             const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = 'Detach'; detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
             detach.addEventListener('click', async () => { detach.disabled = true; detach.textContent = 'Detaching...'; await attachTo(current, resource.name, 'none'); await paintPanel(); });
             row.append(detach);
+            /* Right under the access it depends on: read-only, the agent has nothing of its own to send. */
+            if (kind === 'git' && mine.get(resource.name) === 'write' && !DEVICE) row.append(autoSending(current, resource.name));
             rows.append(row);
         }
         $('panel-empty').hidden = mine.size > 0;
@@ -1467,8 +1529,10 @@
         gitRequire = s.requireForSend; gitFsck = s.fsck ?? {};
         $('gitview-runhook').checked = s.runHook; $('gitview-checkcommand').value = s.checkCommand; $('gitview-checkseconds').value = String(s.checkSeconds);
         $('gitview-require').checked = s.requireForSend; $('gitview-refreshminutes').value = String(s.refreshMinutes);
-        $('gitview-autobranches').value = s.autoBranches.join('\n'); $('gitview-quietminutes').value = String(s.quietMinutes);
-        $('gitview-perhour').value = String(s.perHour); $('gitview-alert').checked = s.alert;
+        $('gitview-alert').checked = s.alert;
+        /* Which conversations send by themselves: set in each one's Access panel. */
+        const senders = Object.entries(keep.auto ?? {});
+        $('gitview-auto-where').textContent = `Automatic sending is set for each conversation, under its access to this repository (Write), in the conversation's Access panel. ${senders.length ? `Now: ${senders.map(([c, list]) => `${c} (${list.join(', ')})`).join('; ')}.` : 'Now: none.'}`;
         $('gitview-origin').hidden = !keep.origin;
         if (keep.origin) {
             $('gitview-origin-where').textContent = `Its origin, kept up to date by this server, is at ${keep.origin.path} in the agent's machine, read-only, next to the repository. The tool brings it in itself, with no key, by running there:`;
@@ -1627,8 +1691,7 @@
         try {
             await post(`${API}/git/${gitShown}/keep`, {
                 runHook: $('gitview-runhook').checked, checkCommand: $('gitview-checkcommand').value, checkSeconds: Number($('gitview-checkseconds').value),
-                requireForSend: $('gitview-require').checked, refreshMinutes: Number($('gitview-refreshminutes').value), autoBranches: $('gitview-autobranches').value,
-                quietMinutes: Number($('gitview-quietminutes').value), perHour: Number($('gitview-perhour').value), alert: $('gitview-alert').checked,
+                requireForSend: $('gitview-require').checked, refreshMinutes: Number($('gitview-refreshminutes').value), alert: $('gitview-alert').checked,
             });
             $('gitview-keep-said').textContent = 'Saved.';
             await paintKeep();

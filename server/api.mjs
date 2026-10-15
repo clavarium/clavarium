@@ -17,7 +17,9 @@
  *   GET  /api/git/<name>/outgoing?target=<branch>&branch=<branch>   what would go from the agent's branch, to that branch of the remote
  *   POST /api/git/<name>/push               {head, target?, sure?}: exactly that reviewed commit, to exactly that branch
  *   GET  /api/git/<name>/keep               origin kept up to date, checks, automatic sending, log
- *   POST /api/git/<name>/keep               {refreshMinutes?, autoBranches?, quietMinutes?, perHour?, alert?, checkCommand?, checkSeconds?, runHook?, requireForSend?, fsck?}
+ *   POST /api/git/<name>/keep               {refreshMinutes?, alert?, checkCommand?, checkSeconds?, runHook?, requireForSend?, fsck?}
+ *   GET  /api/conversations/<c>/git/<name>/auto   automatic sending for that conversation (attached for writing)
+ *   POST /api/conversations/<c>/git/<name>/auto   {branches?, quietSeconds?, perHour?, create?, checks?, sure?}
  *   POST /api/git/<name>/refresh            fetch the origin into its mirror now
  *   POST /api/git/<name>/check              {head, target?}: run the checks in the machine
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
@@ -164,6 +166,8 @@ export async function handleApi(request, response, conversations, headers, resou
             }
             const paired = /^\/api\/conversations\/([^/]+)\/devices$/.exec(pathname);
             if (paired && sharing) return send(200, sharing.devices.of(decodeURIComponent(paired[1]))), true;
+            const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
+            if (sending && gitKeeper) return send(200, gitKeeper.auto(sending[2], decodeURIComponent(sending[1]))), true;
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
@@ -265,6 +269,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (kept[2] === 'refresh') return send(200, await gitKeeper.refresh(kept[1])), true;
             return send(200, await gitKeeper.check(kept[1], body)), true;
         }
+        /* Automatic sending belongs to the attachment: set in the conversation's panel. */
+        const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
+        if (sending && gitKeeper) return send(200, gitKeeper.setAuto(sending[2], decodeURIComponent(sending[1]), body)), true;
         const pushed = /^\/api\/git\/([a-z0-9-]{1,32})\/(remote|push)$/.exec(pathname);
         if (pushed && gitReview) return send(200, pushed[2] === 'remote' ? gitReview.setRemote(pushed[1], body) : gitKeeper ? await gitKeeper.send(pushed[1], body) : await gitReview.push(pushed[1], body)), true;
         if (pathname === '/api/shares/cancel' && sharing) { sharing.devices.cancel(body.code); return send(200, { ok: true }), true; }
@@ -288,6 +295,8 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(attach[1]);
             if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
             await resources.attach(conversation, String(body.resource ?? ''), String(body.access ?? ''));
+            /* Its automatic sending goes with the write attachment. */
+            if (String(body.access ?? '') !== 'write') gitKeeper?.forgetAttachment(String(body.resource ?? ''), conversation);
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
@@ -298,6 +307,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') gitKeeper?.forgetConversation(decodeURIComponent(action[1]));
         if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') secrets?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') signin?.forget(decodeURIComponent(action[1]));

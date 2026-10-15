@@ -101,3 +101,17 @@ test('a machine that may write in the repository is chosen first', async (t) => 
     const b = bench(t, { attached: { reader: 'read', writer: 'write' } });
     assert.equal(await b.checks.machineFor('site'), 'writer');
 });
+
+test('automatic sending runs the checks in the machine of the conversation whose settings decided, or not at all', async (t) => {
+    const b = bench(t, { attached: { reader: 'read', writer: 'write', other: 'write' } });
+    assert.equal(await b.checks.runs('other', 'site'), true);
+    assert.equal(await b.checks.runs('reader', 'site'), false, 'read-only: not a conversation that sends');
+    assert.equal(await b.checks.runs('nobody', 'site'), false);
+    const r = await b.ask({ command: 'true', machine: 'other' });
+    assert.equal(r.status, 'passed');
+    assert.equal(r.machine, 'other');
+    assert.deepEqual(b.execs.map((e) => e.conversation), ['other'], 'not the first writer found: the one asked for');
+    assert.equal((await b.ask({ command: 'true', machine: 'reader' })).status, 'unavailable');
+    const asleep = bench(t, { running: false });
+    assert.equal(await asleep.checks.runs('alpha', 'site'), false);
+});

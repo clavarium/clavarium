@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitReview } from '../server/gitpush.mjs';
-import { GitKeeper, DEFAULTS, allowed, patternProblem, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
+import { GitKeeper, DEFAULTS, AUTO_DEFAULTS, allowed, patternProblem, readAuto, needsConfirmation, mayAutoSend, migrated, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
 import { GitRunner, runGit } from '../server/gitrunner.mjs';
 import { Resources, originFolder } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
@@ -23,7 +23,8 @@ import { git, standInRead, ENV } from './git-stand-in.mjs';
    undefined). By default one does, so that the clock has a reason to act.
    `readCode`: an exit code every read of the host program gives. `wrap`: around the builder's git.
    `reserve`: free room the runner keeps (huge: every read refused for room). `heard`: what telling the agent resolves to. */
-async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', readCode, wrap, reserve = 0, heard } = {}) {
+/* `attach`: alpha writes in the repository from the start (its automatic sending can be set). `runs(conversation, name)`: does its machine run. */
+async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-keep-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const remote = join(dir, 'remote.git');
@@ -44,6 +45,7 @@ async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', r
         dataDir: dir, uid: 1001, gid: 1002,
     });
     await resources.create({ name: 'site', type: 'git' });
+    if (attach) await resources.attach('alpha', 'site', 'write');
     const work = join(dir, 'resources', 'site');
     let clock = new Date('2026-03-02T10:00:00Z');
     const now = () => clock;
@@ -53,15 +55,22 @@ async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', r
     review.setRemote('site', { url: remote });
     git(work, 'fetch', '--quiet', remote, '+refs/heads/*:refs/remotes/origin/*');
     git(work, 'reset', '--quiet', '--hard', 'origin/main');
-    const ran = []; const told = []; const agent = [];
-    const fakeChecks = { machineFor: (name) => machineFor(name, resources), run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: 'stand-in', head: asked.head, target: asked.target, machine: 'alpha', at: clock.toISOString() }; } };
-    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line) => { agent.push(line); return heard ? heard() : undefined; } });
+    const ran = []; const told = []; const agent = []; const agentTo = [];
+    const fakeChecks = {
+        machineFor: (name) => machineFor(name, resources),
+        runs: runs ? (c, name) => runs(c, name, resources) : async (c, name) => (await machineFor(name, resources)) === c && resources.of(c).some((x) => x.name === name && x.access === 'write'),
+        run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: 'stand-in', head: asked.head, target: asked.target, machine: asked.machine ?? 'alpha', at: clock.toISOString() }; },
+    };
+    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to) => { agent.push(line); agentTo.push([line, to]); return heard ? heard() : undefined; } });
     const commit = (file, text, subject) => { writeFileSync(join(work, file), text); git(work, 'add', file); git(work, 'commit', '--quiet', '-m', subject); return git(work, 'rev-parse', 'HEAD'); };
     /* Time passes; marks written by git have a resolution that a fast test can beat: the clock moves on. */
     const later = (minutes) => { clock = new Date(clock.getTime() + minutes * 60_000); };
     const theirs = (branch, file) => { git(seed, 'fetch', '--quiet', 'origin'); git(seed, 'checkout', '--quiet', '-B', branch, `origin/${branch}`); writeFileSync(join(seed, file), `${file}\n`); git(seed, 'add', file); git(seed, 'commit', '--quiet', '-m', `theirs ${file}`); git(seed, 'push', '--quiet', 'origin', branch); return git(seed, 'rev-parse', 'HEAD'); };
     const log = () => keeper.about('site').log;
-    return { dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, reads, theirs, log, runner };
+    /* Alpha's automatic sending; the tests send to main (the default
+       branch: confirmed) and make branches unless they say otherwise. */
+    const auto = (body, conversation = 'alpha') => keeper.setAuto('site', conversation, { sure: true, create: true, ...body });
+    return { dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto };
 }
 /* Ticks until a read has happened and its tips were weighed: the read waits READ_DELAY_MS after the last change. */
 async function settle(b) { await b.keeper.tick(); b.later(READ_DELAY_MS / 60_000); await b.keeper.tick(); }
@@ -107,34 +116,29 @@ test('nothing of the tool runs here: git is never run in its repository, only it
     writeFileSync(trap, `#!/bin/sh\ntouch ${proof}\nexit 0\n`); chmodSync(trap, 0o755);
     for (const hook of ['pre-push', 'post-checkout', 'reference-transaction', 'post-update', 'pre-receive', 'update', 'post-merge']) { writeFileSync(join(b.work, '.git', 'hooks', hook), `#!/bin/sh\ntouch ${proof}\n`); chmodSync(join(b.work, '.git', 'hooks', hook), 0o755); }
     for (const [key, value] of [['core.fsmonitor', trap], ['core.pager', trap], ['core.sshCommand', trap], ['uploadpack.packObjectsHook', trap], ['core.hooksPath', join(b.work, '.git', 'hooks')]]) git(b.work, 'config', key, value);
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0 });
+    b.auto({ branches: 'main', quietSeconds: 0 });
     execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', 'commit', '--quiet', '--allow-empty', '-m', 'rigged'], { cwd: b.work, env: ENV });
     rmSync(proof, { force: true });
     await b.keeper.refresh('site');
     await b.keeper.tick();
-    assert.match(b.log()[0].what, /Sent automatically: 1 commit\(s\) to main/);
+    assert.match(b.log()[0].what, /Sent automatically for alpha: 1 commit\(s\) to main/);
     assert.equal(existsSync(proof), false, 'nothing of the tool\'s was run here');
 });
 
 test('settings: nothing is sent automatically by default; what is set is checked; a repository with no record loads with the defaults', async (t) => {
     const b = await bench(t);
     assert.deepEqual(b.keeper.settings('site'), { ...DEFAULTS });
-    assert.deepEqual(DEFAULTS.autoBranches, [], 'the list is empty to begin with');
     assert.equal(DEFAULTS.refreshMinutes, 5);
-    assert.equal(DEFAULTS.quietMinutes, 10);
     assert.equal(DEFAULTS.requireForSend, false);
-    const set = b.keeper.set('site', { autoBranches: 'test, staging\ntry/*', refreshMinutes: 0, checkCommand: 'npm test', requireForSend: true });
-    assert.deepEqual(set.settings.autoBranches, ['test', 'staging', 'try/*']);
+    const set = b.keeper.set('site', { refreshMinutes: 0, checkCommand: 'npm test', requireForSend: true });
     assert.equal(set.settings.refreshMinutes, 0);
-    assert.throws(() => b.keeper.set('site', { autoBranches: '-x' }), /not a branch name/);
-    assert.throws(() => b.keeper.set('site', { autoBranches: ['a..b'] }), /not a branch name/);
-    assert.throws(() => b.keeper.set('site', { quietMinutes: -1 }), /quiet minutes/);
     assert.throws(() => b.keeper.set('site', { checkCommand: 'a\nb' }), /one line/);
-    assert.throws(() => b.keeper.set('site', { perHour: 0 }), /1 to 60/);
     assert.throws(() => b.keeper.set('site', { fsck: { hasDotgit: 'ignore' } }), /cannot be waived/);
     assert.deepEqual(b.keeper.set('site', { fsck: { zeroPaddedFilemode: 'warn' } }).settings.fsck, { zeroPaddedFilemode: 'warn' });
     assert.throws(() => b.keeper.set('nope', {}), /No such repository/);
-    assert.equal(readFileSync(join(b.dir, 'git-keep.json'), 'utf8').includes('"autoBranches"'), true);
+    /* A page from before: automatic sending is no longer a setting of the repository. */
+    assert.throws(() => b.keeper.set('site', { autoBranches: 'main' }), /set for each conversation/);
+    assert.throws(() => b.keeper.set('site', { quietMinutes: 1 }), /set for each conversation/);
     assert.equal(allowed(['try/*'], 'try/a'), true);
     assert.equal(allowed(['try/*'], 'try/a/b'), false);
     assert.equal(allowed(['try/*'], 'main'), false);
@@ -143,12 +147,134 @@ test('settings: nothing is sent automatically by default; what is set is checked
     assert.equal(allowed(['v1.0'], 'v1x0'), false, 'a dot is a dot');
     assert.equal(allowed([], 'main'), false);
     assert.equal(patternProblem('release/*'), '');
-    /* Records written by the previous version load unchanged. */
-    writeFileSync(join(b.dir, 'old-keep.json'), JSON.stringify([{ name: 'site', refreshMinutes: 7, autoBranches: ['main'], quietMinutes: 3, perHour: 2, alert: false, mirror: { at: '2026-03-01T00:00:00.000Z', ok: true, message: 'Up to date with the origin.' }, log: [{ at: '2026-03-01T00:00:00.000Z', branch: 'main', head: 'a'.repeat(40), ok: true, what: 'Sent automatically.' }], sent: [] }]));
-    const old = new GitKeeper({ store: new Store(join(b.dir, 'old-keep.json')), review: b.review, resources: b.resources, checks: { machineFor: async () => undefined }, alerts: null });
-    const about = old.about('site');
-    assert.deepEqual([about.settings.refreshMinutes, about.settings.autoBranches, about.settings.fsck, about.log.length, about.origin.ok], [7, ['main'], {}, 1, true]);
 });
+
+test('automatic sending, per conversation: empty by default, checked, "*" and the default branch only once confirmed', async (t) => {
+    const b = await bench(t);
+    await b.resources.attach('beta', 'site', 'read');
+    assert.deepEqual(AUTO_DEFAULTS, { branches: [], confirmed: [], quietSeconds: 5, perHour: 20, create: false, checks: true });
+    assert.deepEqual(b.keeper.auto('site', 'alpha').settings, { ...AUTO_DEFAULTS }, 'nothing is sent unless the owner chose');
+    assert.throws(() => b.keeper.auto('site', 'beta'), /attached for writing/, 'read-only: nothing to set');
+    assert.throws(() => b.keeper.setAuto('site', 'beta', { branches: 'try/*' }), /attached for writing/);
+    assert.throws(() => b.keeper.auto('nope', 'alpha'), /No such repository/);
+    /* The model, on its own. */
+    const plain = readAuto({ branches: 'test, staging\ntry/*', quietSeconds: '30', perHour: 0, create: true, checks: false }, undefined, 'main');
+    assert.deepEqual(plain, { branches: ['test', 'staging', 'try/*'], confirmed: [], quietSeconds: 30, perHour: 0, create: true, checks: false });
+    assert.throws(() => readAuto({ branches: '-x' }), /not a branch name/);
+    assert.throws(() => readAuto({ branches: ['a..b'] }), /not a branch name/);
+    assert.throws(() => readAuto({ branches: Array.from({ length: 21 }, (_, i) => `b${i}`) }), /At most 20/);
+    assert.throws(() => readAuto({ quietSeconds: -1 }), /quiet seconds/);
+    assert.throws(() => readAuto({ quietSeconds: 1.5 }), /quiet seconds/);
+    assert.throws(() => readAuto({ quietSeconds: '' }), /quiet seconds/);
+    assert.throws(() => readAuto({ perHour: 1001 }), /0 \(no cap\)/);
+    for (const wide of ['*', '*/*', 'main', 'ma*']) {
+        assert.throws(() => readAuto({ branches: wide }, undefined, 'main'), (e) => e.kind === 'confirm-wide' && e.status === 409, wide);
+        assert.deepEqual(readAuto({ branches: wide, sure: true }, undefined, 'main').confirmed, [wide]);
+    }
+    assert.equal(needsConfirmation('develop', 'develop'), true, 'the remote\'s default, whatever its name');
+    assert.equal(needsConfirmation('main', 'develop'), false);
+    assert.equal(needsConfirmation('master', null), true, 'unknown: main and master are asked about');
+    assert.equal(needsConfirmation('try/*', null), false);
+    /* The decision. */
+    assert.equal(mayAutoSend({ branches: ['*'], confirmed: [] }, 'x', 'main'), false, 'not confirmed: counts for nothing');
+    assert.equal(mayAutoSend({ branches: ['*'], confirmed: ['*'] }, 'x', 'main'), true);
+    assert.equal(mayAutoSend({ branches: ['*'], confirmed: ['*'] }, 'a/b', 'main'), false, '"*" is one level');
+    assert.equal(mayAutoSend({ branches: ['develop'], confirmed: [] }, 'develop', 'main'), true);
+    assert.equal(mayAutoSend({ branches: ['develop'], confirmed: [] }, 'develop', 'develop'), false, 'became the default since: asked again');
+    assert.equal(mayAutoSend({ branches: [], confirmed: [] }, 'main', 'main'), false);
+    /* Through the keeper: the remote's default branch is learnt at a refresh. */
+    await b.keeper.refresh('site');
+    assert.equal(b.review.defaultBranch('site'), 'main');
+    assert.deepEqual(b.keeper.auto('site', 'alpha').asked, ['main']);
+    assert.throws(() => b.keeper.setAuto('site', 'alpha', { branches: 'main, try/*' }), /Confirm: main would let this conversation send/);
+    assert.deepEqual(b.keeper.auto('site', 'alpha').settings.branches, [], 'refused: nothing saved');
+    const saved = b.keeper.setAuto('site', 'alpha', { branches: 'main, try/*', sure: true, quietSeconds: 0 });
+    assert.deepEqual([saved.settings.branches, saved.settings.confirmed, saved.settings.quietSeconds], [['main', 'try/*'], ['main'], 0]);
+    assert.deepEqual(b.keeper.setAuto('site', 'alpha', { perHour: 3 }).settings.confirmed, ['main'], 'the same list: not asked again');
+    b.keeper.setAuto('site', 'alpha', { branches: 'try/*' });
+    assert.throws(() => b.keeper.setAuto('site', 'alpha', { branches: 'try/*, main' }), /Confirm/, 'removed, then typed again: asked again');
+    assert.deepEqual(b.keeper.about('site').auto, { alpha: ['try/*'] }, 'the review panel says which conversation sends by itself');
+});
+
+test('a file of the previous version loads: its setting for the repository becomes the start of every conversation that writes in it, and is no longer kept', async (t) => {
+    const b = await bench(t);
+    await b.resources.attach('beta', 'site', 'write');
+    await b.resources.attach('gamma', 'site', 'read');
+    const file = join(b.dir, 'old-keep.json');
+    writeFileSync(file, JSON.stringify([
+        { name: 'site', refreshMinutes: 7, autoBranches: ['main', 'try/*'], quietMinutes: 3, perHour: 2, alert: false, mirror: { at: '2026-03-01T00:00:00.000Z', ok: true, message: 'Up to date with the origin.' }, log: [{ at: '2026-03-01T00:00:00.000Z', branch: 'main', head: 'a'.repeat(40), ok: true, what: 'Sent automatically.' }], sent: [] },
+        /* A repository removed since, and a record written by hand, oddly. */
+        { name: 'gone', autoBranches: 'x, -bad', quietMinutes: 'soon', perHour: 99999 },
+        { name: 'quiet' },
+    ]));
+    const old = new GitKeeper({ store: new Store(file), review: b.review, resources: b.resources, checks: { machineFor: async () => undefined }, alerts: null });
+    const about = old.about('site');
+    assert.deepEqual([about.settings.refreshMinutes, about.settings.alert, about.settings.fsck, about.log.length, about.origin.ok], [7, false, {}, 1, true]);
+    const start = { branches: ['main', 'try/*'], confirmed: ['main', 'try/*'], quietSeconds: 180, perHour: 2, create: true, checks: true };
+    assert.deepEqual(old.auto('site', 'alpha').settings, start, 'the owner\'s choice, kept as it was');
+    assert.deepEqual(old.auto('site', 'beta').settings, start, 'for every conversation that writes in it');
+    assert.throws(() => old.auto('site', 'gamma'), /attached for writing/);
+    const text = readFileSync(file, 'utf8');
+    for (const key of ['autoBranches', 'quietMinutes', '"perHour": 99999']) assert.equal(text.includes(key), false, `${key} is no longer kept`);
+    const records = JSON.parse(text);
+    assert.deepEqual(records.find((r) => r.name === 'gone'), { name: 'gone', auto: {} });
+    assert.deepEqual(records.find((r) => r.name === 'quiet'), { name: 'quiet' }, 'nothing to take over: untouched');
+    /* Each conversation then on its own; loaded again, nothing more is taken over. */
+    old.setAuto('site', 'beta', { branches: '' });
+    const again = new GitKeeper({ store: new Store(file), review: b.review, resources: b.resources, checks: { machineFor: async () => undefined }, alerts: null });
+    assert.deepEqual(again.auto('site', 'beta').settings.branches, []);
+    assert.deepEqual(again.auto('site', 'alpha').settings.branches, ['main', 'try/*']);
+    /* The model alone. */
+    assert.equal(migrated({ name: 'x', refreshMinutes: 5 }, ['alpha']), null);
+    assert.deepEqual(migrated({ name: 'x', autoBranches: [], quietMinutes: 10, perHour: 4 }, ['alpha']).auto.alpha.branches, []);
+});
+
+test('automatic sending of a conversation: its settings, its running machine, its checks, its cap; detached or archived, forgotten', async (t) => {
+    const up = new Set(['alpha']);
+    const b = await bench(t, { runs: async (c, name, resources) => up.has(c) && resources.of(c).some((x) => x.name === name && x.access === 'write') });
+    await b.resources.attach('beta', 'site', 'write');
+    b.auto({ branches: 'try/*', quietSeconds: 0, perHour: 1 });
+    b.auto({ branches: 'feat/*', quietSeconds: 0, checks: false }, 'beta');
+    git(b.work, 'checkout', '--quiet', '-b', 'feat/x'); const feat = b.commit('f.txt', 'f\n', 'feat');
+    git(b.work, 'checkout', '--quiet', '-b', 'try/y'); const tryY = b.commit('y.txt', 'y\n', 'try');
+    await settle(b);
+    const remoteOf = (branch) => { try { return git(b.remote, 'rev-parse', `refs/heads/${branch}`); } catch { return ''; } };
+    assert.equal(remoteOf('try/y'), tryY, 'alpha\'s list, alpha\'s machine runs: sent');
+    assert.equal(remoteOf('feat/x'), '', 'only beta names it, and beta\'s machine does not run: it waits');
+    assert.equal(b.log().some((l) => /feat\/x is not in the list/.test(l.what)), false, 'waiting for beta is not "outside every list"');
+    assert.deepEqual(b.ran.map((r) => [r.target, r.machine]), [['try/y', 'alpha']], 'the checks ran in alpha\'s machine');
+    assert.equal(b.log()[0].conversation, 'alpha');
+    assert.match(b.log()[0].what, /Sent automatically for alpha: 2 commit\(s\) to try\/y \(a new branch\), checks passed/);
+    /* Beta's machine runs: its branch goes, with its settings (no checks asked for). */
+    up.add('beta');
+    await b.keeper.tick();
+    assert.equal(remoteOf('feat/x'), feat);
+    assert.equal(b.ran.length, 1, 'beta asked for no checks');
+    assert.match(b.log()[0].what, /Sent automatically for beta: .* to feat\/x .*no checks asked for/);
+    /* Alpha's cap is alpha's: one an hour. */
+    git(b.work, 'checkout', '--quiet', 'try/y'); b.commit('y2.txt', 'y2\n', 'try again');
+    await settle(b);
+    assert.match(b.log()[0].what, /1 automatic sending\(s\) this hour already for alpha/);
+    assert.equal(b.keeper.auto('site', 'alpha').sentThisHour, 1);
+    assert.equal(b.keeper.auto('site', 'beta').sentThisHour, 1);
+    /* Only branches the remote has, unless the owner allowed making them. */
+    b.auto({ branches: 'try/*, new/*', quietSeconds: 0, perHour: 0, create: false });
+    git(b.work, 'checkout', '--quiet', '-b', 'new/z'); b.commit('z.txt', 'z\n', 'new');
+    await settle(b);
+    assert.equal(remoteOf('new/z'), '');
+    assert.ok(b.log().some((l) => l.conversation === 'alpha' && /new\/z does not exist on the remote, and alpha may not create branches/.test(l.what)));
+    assert.ok(b.agentTo.some(([line, to]) => /new\/z was not sent/.test(line) && to === 'alpha'), 'told to alpha\'s agent only');
+    assert.equal(remoteOf('try/y') === tryY, false, 'perHour 0: no cap, the waiting commit went');
+    /* Detached: forgotten; attached again: an empty list. */
+    await b.resources.attach('beta', 'site', 'none'); b.keeper.forgetAttachment('site', 'beta');
+    await b.resources.attach('beta', 'site', 'write');
+    assert.deepEqual(b.keeper.auto('site', 'beta').settings.branches, []);
+    /* Archived: every setting of the conversation goes. */
+    b.keeper.forgetConversation('alpha');
+    assert.deepEqual(b.keeper.auto('site', 'alpha').settings, { ...AUTO_DEFAULTS });
+    assert.deepEqual(b.keeper.about('site').auto, {});
+});
+
 
 test('automatic sending: only to a listed branch, only after the quiet delay, only after passing checks, never forced, capped, logged and told', async (t) => {
     let verdict = 'passed';
@@ -160,7 +286,7 @@ test('automatic sending: only to a listed branch, only after the quiet delay, on
     assert.equal(git(b.remote, 'for-each-ref', '--format=%(refname)'), 'refs/heads/main');
     assert.deepEqual(b.log(), []);
     assert.deepEqual(b.reads, []);
-    b.keeper.set('site', { autoBranches: 'try/*', quietMinutes: 10, perHour: 2 });
+    b.auto({ branches: 'try/*', quietSeconds: 600, perHour: 2 });
     /* The quiet delay starts again at each new tip. */
     await settle(b);
     b.later(5); const second = b.commit('b.txt', 'b\n', 'two'); await settle(b);
@@ -169,7 +295,7 @@ test('automatic sending: only to a listed branch, only after the quiet delay, on
     b.later(5); await b.keeper.tick();
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/try/one'), second, 'sent: exactly the commit, to the branch of the same name');
     assert.equal(b.ran.at(-1).head, second); assert.equal(b.ran.at(-1).target, 'try/one'); assert.equal(b.ran.at(-1).branch, 'try/one');
-    assert.equal(b.log()[0].ok, true); assert.match(b.log()[0].what, /Sent automatically: 2 commit\(s\) to try\/one \(a new branch\), checks passed/);
+    assert.equal(b.log()[0].ok, true); assert.match(b.log()[0].what, /Sent automatically for alpha: 2 commit\(s\) to try\/one \(a new branch\), checks passed/);
     assert.deepEqual(b.told.map((m) => m.title), ['site: sent to try/one']);
     /* Checks that fail: not sent, said once, told; the checks are not run again for that commit. */
     verdict = 'failed';
@@ -205,7 +331,7 @@ test('automatic sending: only to a listed branch, only after the quiet delay, on
 test('reads are paced: a change waits a few seconds, a change during a read asks for one more, a read every ten minutes at least', async (t) => {
     const b = await bench(t);
     /* (A quiet delay longer than the test: a send would read once more.) */
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 120 });
+    b.auto({ branches: 'main', quietSeconds: 7200 });
     await b.keeper.tick();
     assert.equal(b.reads.length, 1, 'one read at start');
     await b.keeper.tick(); await b.keeper.tick();
@@ -221,7 +347,7 @@ test('reads are paced: a change waits a few seconds, a change during a read asks
 
 test('the cap per hour holds, and the sending is tried again once the hour has room', async (t) => {
     const b = await bench(t);
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 1, perHour: 1 });
+    b.auto({ branches: 'main', quietSeconds: 60, perHour: 1 });
     const one = b.commit('a.txt', 'a\n', 'one');
     await settle(b); b.later(2); await b.keeper.tick();
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), one);
@@ -237,7 +363,7 @@ test('the cap per hour holds, and the sending is tried again once the hour has r
 
 test('a branch only behind the remote is no candidate: no checks, no slot of the hour, no "diverged"', async (t) => {
     const b = await bench(t);
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0, perHour: 1 });
+    b.auto({ branches: 'main', quietSeconds: 0, perHour: 1 });
     b.theirs('main', 'ahead.txt');
     await b.keeper.refresh('site');
     await settle(b); b.later(5); await b.keeper.tick();
@@ -274,7 +400,7 @@ test('a push whose outcome is unknown, with the remote silent, holds automatic s
             return real(argv, options);
         },
     });
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0, perHour: 10 });
+    b.auto({ branches: 'main', quietSeconds: 0, perHour: 10 });
     const head = b.commit('a.txt', 'a\n', 'one');
     silent = true;
     await b.keeper.tick();
@@ -300,11 +426,11 @@ test('a repository no running machine uses does nothing by itself: no refresh, n
         awake: () => Object.entries(phases).filter(([, c]) => c.phase === 'ready' && c.asleep !== true).map(([name]) => name),
         running: async (name) => runs.has(name),
     };
-    const b = await bench(t, { machineFor: (name, resources) => new GitChecks({ vms: null, conversations, resources }).machineFor(name) });
+    const b = await bench(t, { attach: false, machineFor: (name, resources) => new GitChecks({ vms: null, conversations, resources }).machineFor(name), runs: (c, name, resources) => new GitChecks({ vms: null, conversations, resources }).runs(c, name) });
     const theirs = git(b.remote, 'rev-parse', 'refs/heads/main');
     const mirror = join(b.dir, 'resources', 'site-origin');
     const mirrored = () => (existsSync(join(mirror, 'HEAD')) ? git(mirror, 'rev-parse', 'refs/heads/main') : '');
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 1, refreshMinutes: 5 });
+    b.keeper.set('site', { refreshMinutes: 5 });
     const mine = b.commit('a.txt', 'a\n', 'mine');
     const remoteMain = () => git(b.remote, 'rev-parse', 'refs/heads/main');
     await b.keeper.tick(); b.later(30); await b.keeper.tick(); b.later(30); await b.keeper.tick();
@@ -315,6 +441,7 @@ test('a repository no running machine uses does nothing by itself: no refresh, n
     assert.deepEqual(b.reads, [], 'nothing was read');
     await b.resources.attach('alpha', 'site', 'write');
     await b.resources.attach('beta', 'site', 'read');
+    b.auto({ branches: 'main', quietSeconds: 60 });
     for (const [alpha, beta, alphaRuns] of [[{ asleep: true }, { phase: 'building' }, true], [{ phase: 'failed' }, { asleep: true }, true], [{}, { phase: 'failed' }, false]]) {
         phases.alpha = { phase: 'ready', ...alpha }; phases.beta = { phase: 'ready', ...beta };
         if (alphaRuns) runs.add('alpha'); else runs.delete('alpha');
@@ -328,6 +455,10 @@ test('a repository no running machine uses does nothing by itself: no refresh, n
     phases.beta = { phase: 'ready', asleep: false };
     b.later(30); await b.keeper.tick();
     assert.equal(git(mirror, 'rev-parse', 'refs/heads/feature'), git(b.seed, 'rev-parse', 'HEAD'), 'refreshed by the clock while a machine uses it');
+    assert.equal(remoteMain(), theirs, 'alpha\'s machine does not run: nothing is sent for it');
+    assert.deepEqual(b.reads, [], 'nor read');
+    runs.add('alpha');
+    b.later(30); await b.keeper.tick();
     assert.equal(remoteMain(), theirs, 'not yet: the quiet delay starts when it is first read');
     b.later(2); await b.keeper.tick();
     assert.equal(remoteMain(), mine, 'sent once a machine used it and it stayed quiet');
@@ -346,7 +477,7 @@ test('every failure is said: in the log once while it lasts, the phone after two
     ];
     for (const [code, said, { phoneAfter, agent, agentAfter = 1 }] of cases) {
         const b = await bench(t, { readCode: code });
-        b.keeper.set('site', { autoBranches: 'main' });
+        b.auto({ branches: 'main' });
         await b.keeper.tick();
         const first = b.log();
         assert.equal(first.length, 1, `${code}: logged`); assert.match(first[0].what, said);
@@ -362,14 +493,14 @@ test('every failure is said: in the log once while it lasts, the phone after two
     const empty = await bench(t);
     rmSync(join(empty.work, '.git'), { recursive: true, force: true });
     git(empty.work, 'init', '--quiet');
-    empty.keeper.set('site', { autoBranches: 'main' });
+    empty.auto({ branches: 'main' });
     await empty.keeper.tick();
     assert.match(empty.log()[0].what, /No branches/);
     assert.match(empty.agent[0], /git switch -c <name>/);
     /* A name that cannot be taken: the agent is told, plainly. */
     const odd = await bench(t);
     writeFileSync(join(odd.work, '.git', 'refs', 'heads', 'f'.repeat(40)), `${git(odd.work, 'rev-parse', 'HEAD')}\n`);
-    odd.keeper.set('site', { autoBranches: 'main' });
+    odd.auto({ branches: 'main' });
     await odd.keeper.tick();
     assert.match(odd.agent[0], /branch f{40} was not taken: .*commit id/);
     /* A rewrite of the remote: the owner alerted, the agent told to fetch again. */
@@ -390,7 +521,7 @@ test('every failure is said: in the log once while it lasts, the phone after two
 
 test('the reference is never what is read, and the workspaces are gone after every read', async (t) => {
     const b = await bench(t);
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0 });
+    b.auto({ branches: 'main', quietSeconds: 0 });
     b.commit('a.txt', 'a\n', 'one');
     /* The check read comes before any reference exists. */
     assert.equal(existsSync(join(b.dir, 'resources', 'site-origin', 'HEAD')), false);
@@ -419,7 +550,7 @@ test('a sending that failed for a passing reason is tried again later; one whose
             return real(argv, options);
         },
     });
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0, perHour: 10 });
+    b.auto({ branches: 'main', quietSeconds: 0, perHour: 10 });
     /* The remote down for a moment: not sent, said once ... */
     down = true;
     const one = b.commit('a.txt', 'a\n', 'one');
@@ -456,7 +587,7 @@ test('a grave failure tells the phone once, whatever the option for routine noti
             return real(argv, options);
         },
     });
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0, perHour: 10, alert: false });
+    b.auto({ branches: 'main', quietSeconds: 0, perHour: 10 }); b.keeper.set('site', { alert: false });
     await b.keeper.refresh('site');
     b.commit('a.txt', 'a\n', 'one');
     silent = true;
@@ -464,13 +595,13 @@ test('a grave failure tells the phone once, whatever the option for routine noti
     assert.deepEqual(b.told.map((m) => m.title), ['site: sending needs a look'], 'told although routine notices are off, and once');
     /* Reading: the host program failing tells the phone once, not at every read. */
     const host = await bench(t, { readCode: 79 });
-    host.keeper.set('site', { autoBranches: 'main' });
+    host.auto({ branches: 'main' });
     for (let i = 0; i < 4; i++) { host.later(11); await host.keeper.tick(); }
     assert.deepEqual(host.told.map((m) => m.title), ['site: the host needs a look']);
     assert.equal(host.log().length, 1);
     /* No room for a read: the same. */
     const room = await bench(t, { reserve: Number.MAX_SAFE_INTEGER });
-    room.keeper.set('site', { autoBranches: 'main' });
+    room.auto({ branches: 'main' });
     for (let i = 0; i < 4; i++) { room.later(11); await room.keeper.tick(); }
     assert.deepEqual(room.told.map((m) => m.title), ['site: the host needs a look']);
     assert.equal(room.log().length, 1);
@@ -479,7 +610,7 @@ test('a grave failure tells the phone once, whatever the option for routine noti
 test('a line for the agent that reached nobody is said again; one that was heard, once', async (t) => {
     let heard = false;
     const b = await bench(t, { readCode: 67, heard: () => heard });
-    b.keeper.set('site', { autoBranches: 'main' });
+    b.auto({ branches: 'main' });
     await b.keeper.tick();
     await new Promise((done) => setTimeout(done, 20));
     b.later(11); await b.keeper.tick();
@@ -495,11 +626,11 @@ test('a line for the agent that reached nobody is said again; one that was heard
 
 test('a first automatic sending with no reference yet (no refresh asked for) is sent, never "the remote moved"', async (t) => {
     const b = await bench(t);
-    b.keeper.set('site', { autoBranches: 'main', quietMinutes: 0, refreshMinutes: 0 });
+    b.auto({ branches: 'main', quietSeconds: 0 }); b.keeper.set('site', { refreshMinutes: 0 });
     const head = b.commit('a.txt', 'a\n', 'one');
     await settle(b);
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), head);
-    assert.match(b.log()[0].what, /Sent automatically: 1 commit\(s\) to main, checks passed/);
+    assert.match(b.log()[0].what, /Sent automatically for alpha: 1 commit\(s\) to main, checks passed/);
 });
 
 test('lock files a stopped server left in a reference are removed at start, under its lock, and said', async (t) => {

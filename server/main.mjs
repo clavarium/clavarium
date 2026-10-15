@@ -245,8 +245,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
-    const tellAgent = async (repository, line) => {
-        const writers = Object.entries(folders.list().find((x) => x.name === repository)?.attachments ?? {}).filter(([, access]) => access === 'write').map(([conversation]) => conversation);
+    /* `only`: the conversation whose automatic sending it is about: its agent alone can act on it. */
+    const tellAgent = async (repository, line, only) => {
+        const writers = Object.entries(folders.list().find((x) => x.name === repository)?.attachments ?? {}).filter(([, access]) => access === 'write').map(([conversation]) => conversation).filter((c) => only === undefined || c === only);
         /* Told: at least one of them had the line typed (see GitKeeper #toAgent). */
         let heard = false;
         for (const conversation of writers) if (await wakeups.say(conversation, line) === true) heard = true;

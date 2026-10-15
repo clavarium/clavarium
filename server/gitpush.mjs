@@ -45,6 +45,9 @@ export const REVIEW_WAIT_MS = 10_000;
 export const SEND_WAIT_MS = 60_000;
 export const FETCH_MS = 300_000;
 export const PUSH_MS = 300_000;
+/* Asking the remote for its default branch: a short question. */
+export const LS_REMOTE_MS = 60_000;
+export const DEFAULT_EVERY_MS = 24 * 3_600_000;
 
 const asBranch = (name) => { const why = branchProblem(name); if (why) throw new Refusal(400, why); return String(name); };
 const lines = (buf) => buf.toString('utf8').split('\n').filter(Boolean);
@@ -241,6 +244,7 @@ export class GitReview {
             else if (now !== was && !await this.#isAncestor(reference, was, now)) rewritten.push({ branch: b, was, now });
         }
         if (made) await this.#resources.shareOrigin(r.name).catch(() => {});
+        await this.#learnDefault(r, remote).catch(() => {});
         return said({ ok: true, message: 'Up to date with the remote.', rewritten, made });
     }
 
@@ -263,6 +267,28 @@ export class GitReview {
             return !await this.#isAncestor(reference, tip, theirs);
         } finally { release(); }
     }
+    /* THE REMOTE'S DEFAULT BRANCH, which automatic sending lets a
+       conversation send to only after the owner confirmed it (gitkeeper.mjs).
+       The fetch above copies branches, not the remote's HEAD, so it is asked
+       for on its own -- when not known yet (an empty remote has none: asked
+       again at the next refresh), then once a day: it rarely changes, and
+       every question is one more trip to the remote. A failure keeps what
+       was known (unknown: automatic sending treats main and
+       master as the default, see gitkeeper.mjs). */
+    async #learnDefault(r, remote) {
+        const record = this.#record(r.name);
+        const at = record.defaultBranchAt ? new Date(record.defaultBranchAt).getTime() : 0;
+        if (record.defaultBranch && this.#now().getTime() - at < DEFAULT_EVERY_MS) return;
+        const asked = await this.#reach(r.name, remote, (env, allow) => this.#runner.in(this.#reference(r.name), ['ls-remote', '--symref', '--end-of-options', remote, 'HEAD'], { env, allow, deadlineMs: LS_REMOTE_MS }));
+        if (asked.code !== 0) return;
+        const found = /^ref: refs\/heads\/(\S+)\tHEAD$/m.exec(asked.stdout.toString('latin1'));
+        const branch = found && !branchProblem(found[1]) ? found[1] : null;
+        if (!branch) return;
+        this.#store.put({ ...this.#record(r.name), name: r.name, defaultBranch: branch, defaultBranchAt: this.#now().toISOString() });
+    }
+    /* The remote's default branch as last learnt, or null when unknown. */
+    defaultBranch(name) { return this.#record(name).defaultBranch ?? null; }
+
     /* The remote's tip of a branch, as the reference has it, or null. */
     async remoteTip(name, b) {
         if (!this.#resources.hasOrigin(name)) return null;
@@ -489,6 +515,10 @@ export class GitReview {
                 const now = (await this.#tipsIn(reference)).get(target) ?? null;
                 if (review.auto === true) remoteTip = now;
                 if (now && (now === head || (await this.#has(reference, head) && await this.#isAncestor(reference, head, now)))) return sent({ already: true, commits: 0, made: false });
+                /* Automatic sending makes a branch on the remote only where the
+                   owner allowed it for that conversation: asked here, on the
+                   tip just fetched under the lock, not on an older reading. */
+                if (review.auto === true && !now && review.create !== true) throw new GitFailure(409, 'no-branch', `Not sent: ${target} does not exist on the remote, and automatic sending may not create branches here.`);
                 /* (3) Exactly what was reviewed, on both sides. */
                 const mine = got.branches.find((b) => b.name === branch);
                 if (!mine || mine.id !== head) throw new GitFailure(409, 'agent-moved', `Not sent: the agent changed ${branch} since you looked. Look again.`);
