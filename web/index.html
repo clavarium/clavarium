@@ -64,9 +64,12 @@
            one: what it says now (read by this page from its own screen), what
            is ready to read, and a box to say what is wanted. Nothing here is
            another way in: what is sent is typed into the same terminal. -->
+      <!-- Where the tool talks through the app, the chat screen takes its place:
+           drawn by Parley, from what the tool posted, never from its screen. -->
       <div id="simple" hidden>
+        <div id="simple-thread" hidden></div>
+        <div id="simple-plain">
         <p id="simple-state" role="status"></p>
-        <div id="simple-thread" hidden aria-live="polite"></div>
         <form id="simple-say" autocomplete="off">
           <label for="simple-text">Say what you want</label>
           <textarea id="simple-text" rows="2" maxlength="2000" placeholder="Write it here, or use Dictate below"></textarea>
@@ -77,6 +80,7 @@
         <p id="simple-files-empty" class="hint" hidden>Nothing yet.</p>
         <div class="panel-top"><b>What it says now</b></div>
         <pre id="simple-says" aria-live="off"></pre>
+        </div>
       </div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <!-- THIS CONVERSATION: its settings, in chapters that fold, as a project's
@@ -90,7 +94,7 @@
             <dl id="general-facts" class="facts"></dl>
             <div id="talk-box">
             <div class="panel-top"><b>Talk through the app</b></div>
-            <p class="hint" id="talk-about">The tool is given a few tools of its own to tell you something, ask you something, show you a file, and read what you answer: a conversation on the simple screen instead of in its terminal. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER. It works as far as the tool agrees to use it.</p>
+            <p class="hint" id="talk-about">A chat screen instead of its terminal: the tool installs a small command, parley, from /tools, to tell you something, ask you something, show you a file and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>
             <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
             <p class="hint" id="talk-declare" hidden></p>
             </div>
@@ -376,6 +380,16 @@
         <div class="panel-top"><b>Shortcuts</b></div>
         <p class="hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
         <div id="settings-shortcuts"></div>
+        <div class="panel-top"><b>Chat screen</b></div>
+        <div class="row"><label for="words-lang">Language</label><select id="words-lang"><option value="device">The language of each device</option></select></div>
+        <details id="words-box">
+          <summary>Your own words</summary>
+          <p class="hint">Replace any word of the chat screen with your own, for every device: <code>{"send": "Go"}</code>. Only the words you give change. They are shown as plain text.</p>
+          <textarea id="words-own" rows="6" spellcheck="false" aria-label="Your own words, as JSON"></textarea>
+          <div class="row"><button type="button" id="words-save" class="primary">Save</button><button type="button" id="words-show">Show all the words</button><span class="hint" id="words-saved" role="status"></span></div>
+          <pre id="words-all" class="hint" hidden></pre>
+          <p id="words-error" class="error" role="alert" hidden></p>
+        </details>
         <div class="panel-top"><b>Dictation</b></div>
         <p id="settings-dictation" class="hint"></p>
         <div class="panel-top"><b>People &amp; address</b></div>

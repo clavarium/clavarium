@@ -77,12 +77,20 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   right given, and what an agent does not see.
 
 - **12 - talk through the app**: a branching on Clavarium Parley, a project
-  of its own (copied unchanged in `server/parley`). The tool is given five
-  verbs through MCP: tell, ask, show, read, status. Nothing waits: the tool
-  posts, and is told in its terminal, in one line, when a message arrived.
-  The simple screen shows it as a conversation, drawn by Parley's library;
-  the owner's phone is alerted when the tool asks. Off by default, per
-  conversation; the terminal stays the default way.
+  of its own (copied unchanged in `server/parley`). Every machine has a
+  read-only folder of tools at hand, `/tools`, with an index; Parley's
+  archive is the first. Asked once, in its terminal, the tool installs it
+  (`npm install -g /tools/...`) and talks through five commands: `parley
+  tell`, `ask`, `show`, `read`, `status`, in the person's language. Parley
+  announces, this server decides: when the person wrote, one line is typed
+  in its terminal ("You have a new message: run "parley read"."), once
+  until it has read, never while somebody types there, never into a machine
+  that does not run (the message waits). The page shows a chat screen, in
+  two views (simple; detailed: status, steps, files, its terminal), in the
+  device's language or one the owner chooses, with the owner's own words if
+  he gives any; a file outside the shared folders is said so; the owner's
+  phone is alerted when the tool asks or waits. Off by default, per
+  conversation; what the tool prints in its terminal is never read.
 
 - **13 - the machine**: each conversation's machine is looked at after a
   start, a wake-up, a restart, and every two minutes while it runs (never one

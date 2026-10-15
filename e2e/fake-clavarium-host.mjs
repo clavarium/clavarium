@@ -66,6 +66,13 @@ if (area === 'view' && verb === 'make') {
     symlinkSync(folderOf(name), viewOf(name)); writeFileSync(marker(name), '');
     process.exit(0);
 }
+/* The tools folder: the server's files, and their "read-only view", a link as views are here. */
+const toolsView = join(DATA, 'toolbox', 'view');
+if (area === 'tools' && verb === 'make') {
+    mkdirSync(join(DATA, 'toolbox', 'files'), { recursive: true });
+    if (!lstatSync(toolsView, { throwIfNoEntry: false })) symlinkSync(join(DATA, 'toolbox', 'files'), toolsView);
+    process.exit(0);
+}
 if (area === 'view' && verb === 'close') { rmSync(viewOf(argv[0]), { force: true }); rmSync(marker(argv[0]), { force: true }); process.exit(0); }
 if (area === 'net') {
     if (verb === 'apply') { writeFileSync(`${DIR}/network-rules`, argv[0]); appendFileSync(`${DIR}/network-log`, `${Date.now()}\n`); process.exit(0); }
@@ -198,14 +205,16 @@ if (area === 'vm') {
         if (kind === 'work') { try { rmdirSync(inVm(vm, '/work')); } catch { /* not there, or not empty: said below */ } }
         /* As the real program: a read attachment meets the view, or nothing. */
         if (kind === 'view' && !existsSync(marker(name))) { console.error(`REFUSED: the read-only view of ${name} is not in place`); process.exit(78); }
-        const source = kind === 'work' ? join(workHome(name), 'work') : kind === 'view' ? viewOf(name) : folderOf(name);
-        const path = kind === 'work' ? '/work' : `/resources/${name}`;
+        if (kind === 'tools' && !existsSync(toolsView)) { console.error('REFUSED: the read-only view of the tools is not in place'); process.exit(78); }
+        const source = kind === 'work' ? join(workHome(name), 'work') : kind === 'view' ? viewOf(name) : kind === 'tools' ? toolsView : folderOf(name);
+        const path = kind === 'work' ? '/work' : kind === 'tools' ? '/tools' : `/resources/${name}`;
         const link = inVm(vm, path);
         if (existsSync(link) || lstatSync(link, { throwIfNoEntry: false })) fail(`mount failed: "${path}" is already mounted in '${vm}'`);
         mkdirSync(dirname(link), { recursive: true });
         symlinkSync(source, link);
         process.exit(0);
     }
+    if (verb === 'untools') { rmSync(inVm(argv[0], '/tools'), { force: true }); heal(argv[0], '/tools'); process.exit(0); }
     if (verb === 'unwork') { rmSync(inVm(argv[0], '/work'), { force: true }); mkdirSync(inVm(argv[0], '/work')); heal(argv[0], '/work'); process.exit(0); }
     if (verb === 'umount') {
         rmSync(inVm(argv[0], `/resources/${argv[1]}`), { force: true });
@@ -262,11 +271,11 @@ if (area === 'vm') {
             const child = spawn('tmux', args, { stdio: 'inherit', env: { ...process.env, TMUX: '', FAKE_VM_ROOT: root(vm) } });
             child.on('exit', (code) => process.exit(code ?? 1));
         } else {
-            const child = spawn(program, rest.map((a) => (a.startsWith('/resources/') || a.startsWith('/work') || a.startsWith('/run/') ? inVm(vm, a) : a)), { stdio: 'inherit', cwd: root(vm) });
+            const child = spawn(program, rest.map((a) => (a.startsWith('/resources/') || a.startsWith('/work') || a.startsWith('/run/') || a.startsWith('/tools') ? inVm(vm, a) : a)), { stdio: 'inherit', cwd: root(vm) });
             child.on('error', () => process.exit(127));
             child.on('exit', (code) => process.exit(code ?? 1));
         }
-    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'size', 'set', 'kill'].includes(verb)) {
+    } else if (!['launch', 'clone', 'info', 'start', 'stop', 'suspend', 'delete', 'mount', 'umount', 'unwork', 'untools', 'size', 'set', 'kill'].includes(verb)) {
         fail(`unknown verb: ${verb}`, 64);
     }
 }

@@ -78,7 +78,7 @@ export const WORK_TAB = 'work';
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Resources {
-    #store; #vms; #host; #mnt; #uid; #gid; #grants; #git; #access;
+    #store; #vms; #host; #mnt; #uid; #gid; #grants; #git; #access; #toolbox;
     /* ONE LOCK PER (conversation, resource). Attaching, repairing and
        mounting again all unmount and mount the same place in the same
        machine; interleaved, a repair that read "write" before an owner
@@ -104,8 +104,10 @@ export class Resources {
        folders live ($MNT of the host program: a chain of directories root
        owns, see deploy/clavarium-host). The data directory when not given
        (development, tests). */
-    constructor({ store, vms, host, dataDir, mntDir = dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit, access = null }) {
-        this.#store = store; this.#vms = vms; this.#host = host; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git; this.#access = access;
+    /* `toolbox`: the tools every machine sees at /tools (toolbox.mjs),
+       mounted, looked at and put back with the other folders. */
+    constructor({ store, vms, host, dataDir, mntDir = dataDir, uid = process.getuid(), gid = process.getgid(), grants = new Grants(), git = runGit, access = null, toolbox = null }) {
+        this.#store = store; this.#vms = vms; this.#host = host; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#grants = grants; this.#git = git; this.#access = access; this.#toolbox = toolbox;
         /* What an earlier version kept inside each folder's own record is
            taken over into the table, once. */
         for (const r of store.all()) {
@@ -282,6 +284,7 @@ export class Resources {
        conversation itself is fine. */
     async remount(conversation) {
         const failed = [];
+        if (this.#toolbox?.ready) await this.#locked(conversation, '\0tools', async () => { if (await this.#toolbox.show(conversation).catch((e) => e.message)) failed.push('tools'); });
         for (const { name } of this.of(conversation)) await this.#locked(conversation, name, async () => {
             /* Read again under the lock: it may have changed meanwhile. */
             const access = this.of(conversation).find((x) => x.name === name)?.access;
@@ -301,6 +304,7 @@ export class Resources {
        origin of each attached repository that has one. */
     expected(conversation, workKept) {
         const paths = workKept ? ['/work'] : [];
+        if (this.#toolbox?.ready) paths.push('/tools');
         for (const { name } of this.of(conversation)) {
             paths.push(`/resources/${name}`);
             if (this.#store.get(name)?.type === 'git' && this.hasOrigin(name)) paths.push(`/resources/${originFolder(name)}`);
@@ -322,6 +326,10 @@ export class Resources {
             if (made.code !== 0) return said(made);
             const r = await this.#vms.workMount(conversation, this.#uid, this.#gid);
             return r.code === 0 ? '' : said(r);
+        }
+        if (path === '/tools') {
+            if (!this.#toolbox) return 'no tools folder here';
+            return this.#locked(conversation, '\0tools', () => this.#toolbox.repair(conversation).catch((e) => e.message));
         }
         const name = path.slice('/resources/'.length);
         const find = () => ({

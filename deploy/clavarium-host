@@ -12,8 +12,8 @@
 # become one: each verb added here is a thing a compromised server can do.
 #
 # WHAT IT WILL NOT DO, whatever is asked:
-#   - mount anything but a shared folder, a view of one or a work folder
-#     into a VM. A mount is served as root: any other path would be a way to
+#   - mount anything but a shared folder, a view of one, a work folder or
+#     the read-only view of the tools folder into a VM. A mount is served as root: any other path would be a way to
 #     read the host's files;
 #   - follow a path the server could have bent. A compromised server could
 #     replace a folder by a link to /etc and ask for it to be mounted, or
@@ -42,7 +42,7 @@
 # the path. So everything that gets mounted, unmounted or moved as root lives
 # under $MNT instead -- resources/ (the folders), views/ (their read-only
 # views), work/ and work-disks/ (the conversations' work disks), removed/
-# (what was put aside) -- a chain of directories that root owns from / down:
+# (what was put aside), toolbox/ (the tools every machine sees at /tools) -- a chain of directories that root owns from / down:
 # no component of it can be swapped by the server (renaming needs write
 # access to the parent). `held` checks that chain before each use. The data
 # directory keeps only the server's own files, which root never touches.
@@ -82,7 +82,7 @@ GIT_READ="/usr/lib/clavarium/git-read"
 LOCKS="/run/clavarium"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|net|git> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -180,12 +180,12 @@ held_check() {
 }
 acl_free() { local mode; mode="$(ls -ld -- "$1" | cut -d' ' -f1)"; [ "${#mode}" -eq 10 ]; }
 # One of the directories under $MNT that only root may arrange (resources,
-# views, work, work-disks, removed): made if missing, refused if it is a link
+# views, work, work-disks, removed, toolbox): made if missing, refused if it is a link
 # or belongs to anyone else -- then its entries cannot be trusted either --
 # and HELD (above), with the whole chain above it.
 kept() {
     [ "$SAY" = "yes" ] && return 0
-    case "$1" in resources|views|work|work-disks|removed) : ;; *) refuse "not one of root's directories: $1" ;; esac
+    case "$1" in resources|views|work|work-disks|removed|toolbox) : ;; *) refuse "not one of root's directories: $1" ;; esac
     local d="$MNT/$1"
     [ -e "$d" ] || [ -L "$d" ] || install -d -o root -g root -m 0755 "$d"
     [ -d "$d" ] && [ ! -L "$d" ] && [ "$(stat -c %u "$d")" = "0" ] \
@@ -306,7 +306,12 @@ case "$AREA $VERB" in
                     # host's own disk, with no limit.
                     [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the work disk of $3 is not in place"
                     target="$1:/work" ;;
-            *) refuse "a mount is of a folder, of a view or of a work folder" ;;
+            tools)  # The tools every machine is given, through their read-only view only.
+                    [ "$3" = "tools" ] || refuse "the tools are mounted by that name only"
+                    kept toolbox; source="$MNT/toolbox/view"; held "$source"
+                    [ "$SAY" = "yes" ] || mountpoint -q "$source" || refuse "the read-only view of the tools is not in place"
+                    target="$1:/tools" ;;
+            *) refuse "a mount is of a folder, of a view, of a work folder or of the tools" ;;
         esac
         run "$MULTIPASS" mount -u "$4:$VM_ID" -g "$5:$VM_ID" "$source" "$target" ;;
     "vm unwork")
@@ -317,6 +322,11 @@ case "$AREA $VERB" in
     "vm umount")
         [ $# -eq 2 ] || usage; vm_of "$1"; is_name "$2" || refuse "not a folder name: $2"
         run "$MULTIPASS" umount "$1:/resources/$2" ;;
+    "vm untools")
+        # The tools are taken out of a machine, to be mounted again (a mount
+        # that came loose: the VM manager may still believe it is there).
+        [ $# -eq 1 ] || usage; vm_of "$1"
+        run "$MULTIPASS" umount "$1:/tools" ;;
     "shelf launch")
         # A new ready-made machine, from the stock image. Refused here too when
         # the disk is short, whatever the server said: a copy of it is made for
@@ -461,6 +471,25 @@ case "$AREA $VERB" in
             mountpoint -q "$MNT/views/$1" && exit 0
         fi
         run bindfs -r -o allow_other "$MNT/resources/$1" "$MNT/views/$1" ;;
+    "tools make")
+        # THE TOOLS FOLDER: what every machine is given to install by itself
+        # (an archive and an index, put there by the server), seen in each
+        # machine at /tools through a READ-ONLY VIEW -- the one way a folder
+        # was proven to stay read-only against root in the machine (see
+        # "view make"). toolbox/files is the server's to fill; toolbox/view
+        # is root's. Asked at each start of the server: what is in place
+        # stays as it is.
+        [ $# -eq 0 ] || usage
+        files="$MNT/toolbox/files"; view="$MNT/toolbox/view"
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "install -d -o OWNER -g GROUP -m 0755 $files" "bindfs -r -o allow_other $files $view"; exit 0; fi
+        kept toolbox
+        [ ! -L "$files" ] && [ ! -L "$view" ] || refuse "the tools folder is not what it should be"
+        if [ ! -e "$files" ]; then owner="$(stat -c %u:%g "$DATA")"; install -d -o "${owner%:*}" -g "${owner#*:}" -m 0755 "$files"; fi
+        held "$files"
+        [ -e "$view" ] || install -d -o root -g root -m 0755 "$view"
+        held "$view"
+        mountpoint -q "$view" && exit 0
+        exec bindfs -r -o allow_other "$files" "$view" ;;
     "view close")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         kept views

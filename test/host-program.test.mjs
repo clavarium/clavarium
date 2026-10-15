@@ -50,6 +50,9 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['vm', 'set', 'clv-demo', 'memory', '2048'], 'multipass set local.clv-demo.memory=2048M'],
         [['vm', 'set', 'clv-demo', 'disk', '16'], 'multipass set local.clv-demo.disk=16G'],
         [['vm', 'size', 'clv-demo'], 'multipass get local.clv-demo.memory\nmultipass get local.clv-demo.disk'],
+        [['tools', 'make'], 'install -d -o OWNER -g GROUP -m 0755 /var/lib/clavarium/toolbox/files\nbindfs -r -o allow_other /var/lib/clavarium/toolbox/files /var/lib/clavarium/toolbox/view'],
+        [['vm', 'mount', 'clv-demo', 'tools', 'tools', '998', '997'], 'multipass mount -u 998:1000 -g 997:1000 /var/lib/clavarium/toolbox/view clv-demo:/tools'],
+        [['vm', 'untools', 'clv-demo'], 'multipass umount clv-demo:/tools'],
     ];
     for (const [args, expected] of cases) assert.deepEqual(host(...args), { code: 0, out: expected, err: '' }, args.join(' '));
 });
@@ -81,7 +84,10 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
         /* Memory and disk only, of our machines only, within bounds; nothing else of the VM manager's settings. */
         ['vm', 'set', 'primary', 'memory', '2048'], ['vm', 'set', 'clv-demo', 'cpus', '8'], ['vm', 'set', 'clv-demo', 'memory', '100'], ['vm', 'set', 'clv-demo', 'memory', '2G'],
         ['vm', 'set', 'clv-demo', 'disk', '2'], ['vm', 'set', 'clv-demo', 'disk', '16G'], ['vm', 'set', 'clv-demo', 'disk', '99999'], ['vm', 'kill', 'primary'], ['vm', 'size', 'clvshelf-20261014-120000'],
+        /* The tools: their read-only view only, under that one name, in our machines only. */
+        ['vm', 'mount', 'clv-demo', 'tools', 'reports', '0', '0'], ['vm', 'mount', 'clv-demo', 'tools', '../toolbox', '0', '0'], ['vm', 'mount', 'primary', 'tools', 'tools', '0', '0'], ['vm', 'untools', 'primary'], ['vm', 'untools', 'clv-demo:/work'], ['tools', 'erase'],
     ]) assert.equal(host(...args).code, 78, args.join(' '));
+    assert.equal(host('tools', 'make', 'reports').code, 64, 'it takes nothing');
     assert.equal(host('vm').code, 64);
     const aside = host('folder', 'aside', 'reports');
     assert.match(aside.out, /^mv -T -n \/var\/lib\/clavarium\/resources\/reports \/var\/lib\/clavarium\/removed\/reports-\d{8}T\d{6}Z-\d+$/, 'moved aside, never erased');
@@ -184,6 +190,8 @@ test('everything root mounts, unmounts or moves is under MNT, never under the da
         [['work', 'make', 'demo'], 'disk /srv/clavarium-mnt/work-disks/demo.img 10240M mounted at /srv/clavarium-mnt/work/demo'],
         [['work', 'room', 'demo'], 'df /srv/clavarium-mnt/work/demo /srv/clavarium-mnt/work-disks'],
         [['work', 'aside', 'demo'], 'disk /srv/clavarium-mnt/work-disks/demo.img put aside in /srv/clavarium-mnt/removed'],
+        [['tools', 'make'], 'install -d -o OWNER -g GROUP -m 0755 /srv/clavarium-mnt/toolbox/files\nbindfs -r -o allow_other /srv/clavarium-mnt/toolbox/files /srv/clavarium-mnt/toolbox/view'],
+        [['vm', 'mount', 'clv-demo', 'tools', 'tools', '1', '2'], 'multipass mount -u 1:1000 -g 2:1000 /srv/clavarium-mnt/toolbox/view clv-demo:/tools'],
     ];
     for (const [args, expected] of cases) assert.deepEqual(withMnt(...args), { code: 0, out: expected, err: '' }, args.join(' '));
     assert.match(withMnt('folder', 'aside', 'site').out, /^mv -T -n \/srv\/clavarium-mnt\/resources\/site \/srv\/clavarium-mnt\/removed\/site-/);
@@ -192,7 +200,7 @@ test('everything root mounts, unmounts or moves is under MNT, never under the da
     const body = text.slice(text.indexOf('kept() {'), text.indexOf('# A folder of ours'));
     assert.match(body, /local d="\$MNT\/\$1"/);
     assert.match(body, /\n {4}held "\$d"\n/, 'kept holds every directory, not only resources');
-    assert.doesNotMatch(text.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n'), /\$DATA\/(views|work|work-disks|removed|resources)/, 'no root path under the data directory');
+    assert.doesNotMatch(text.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n'), /\$DATA\/(views|work|work-disks|removed|resources|toolbox)/, 'no root path under the data directory');
 });
 
 test('held: the check before each use refuses a link, a component of another account, one others may write', { skip: process.getuid() === 0 ? 'run as root: the refusals tried here are of an ordinary account' : false }, () => {

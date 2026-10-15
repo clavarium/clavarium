@@ -83,8 +83,9 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     });
 
     /* A person at a screen. `phone: true` is a small touch screen. */
-    async function person({ phone = false, at = '/', context: given } = {}) {
-        const context = given ?? await browser.newContext(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true });
+    /* `locale`: the language the browser says it reads (a French device: 'fr-FR'). */
+    async function person({ phone = false, at = '/', context: given, locale } = {}) {
+        const context = given ?? await browser.newContext({ ...(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true }), ...(locale ? { locale } : {}) });
         contexts.push(context);
         const page = await context.newPage();
         const errors = [];

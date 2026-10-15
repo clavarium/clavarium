@@ -108,6 +108,12 @@ export class Vms {
     }
     workAside(conversation) { vmName(conversation); return this.run(['work', 'aside', conversation]); }
 
+    /* The tools folder (see toolbox.mjs), shown read-only at /tools. */
+    mountTools(conversation, uid, gid) {
+        return this.run(['vm', 'mount', vmName(conversation), 'tools', 'tools', String(uid), String(gid)], { timeoutMs: 600_000 });
+    }
+    unmountTools(conversation) { return this.run(['vm', 'untools', vmName(conversation)], { timeoutMs: 120_000 }); }
+
     umount(conversation, name) {
         return this.run(['vm', 'umount', vmName(conversation), name], { timeoutMs: 120_000 });
     }

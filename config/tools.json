@@ -28,7 +28,7 @@
           "/dev/stdin",
           ".claude/settings.json"
         ],
-        "input": "{\n  \"theme\": \"dark-ansi\"\n}\n"
+        "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"
       }
     ],
     "signin": {

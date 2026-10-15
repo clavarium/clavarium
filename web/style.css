@@ -333,9 +333,14 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #simple .panel-top { margin-top: 16px; }
 /* Without its terminal, the keys of a terminal are of no use; ready answers and the voice stay. */
 #room[data-simple] #keys > button:not(#mic):not(#auto) { display: none; }
+#room[data-chat] #shortcuts { display: none !important; }
 
 /* The conversation with the tool is drawn by Parley; here, only where it sits and this page's colours. */
-#simple-thread { max-height: 62vh; margin-bottom: 14px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }
+/* The chat takes the whole screen: its box stays at the bottom, the messages scroll above it. */
+/* On a light screen, brass text is too pale to read: the words in that colour are darker; the buttons keep it. */
+:root[data-theme="light"] #simple-thread { --parley-ask: #8a5d00; }
+#simple[data-chat] { display: flex; flex-direction: column; overflow: hidden; padding: 10px 14px 12px; }
+#simple-thread { flex: 1; min-height: 0; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass); --parley-action: var(--brass); --parley-on-action: #1b1405; }
 
 /* Who sees what: the table of rights, drawn. */
 #map-drawing svg { display: block; width: 100%; height: auto; max-width: 60rem; }
@@ -463,3 +468,6 @@ footer button[data-keys="backspace"] { display: none; }
   /* Ready-made answers: when the tool asks, or when asked for. */
   #room:not([data-asking]):has(#keys[data-more="false"]) #shortcuts { display: none; }
 }
+#words-lang { min-height: 40px; min-width: 12rem; max-width: 100%; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; }
+#words-own { width: 100%; font: .8125rem ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px; }
+#words-all { white-space: pre-wrap; max-height: 16rem; overflow: auto; }

@@ -529,6 +529,8 @@
             /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
             const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
             if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
+            /* It talks through the app, and asks or waits for its owner there. */
+            if (c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
             if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
             /* Seen at a glance: this conversation is in other hands too. */
             const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
@@ -681,13 +683,24 @@
         $('mic').setAttribute('aria-pressed', 'false'); $('mic').textContent = 'Dictate';
         sayVoice('', '');
     }
+    /* On the chat screen, what is said goes into its box, and "auto" sends it:
+       nothing is typed into the terminal behind it. */
+    const chatBox = () => (simple && !$('simple-thread').hidden ? $('simple-thread').querySelector('.parley-box') : null);
+    const backTo = () => { if (!chatBox()) focusTerminal(); };
     $('mic').addEventListener('click', async () => {
-        if (stopListening) { stopVoice(); focusTerminal(); return; }
+        if (stopListening) { stopVoice(); backTo(); return; }
         try {
             stopListening = await window.clavariumVoice.listen({
                 state: (word) => sayVoice(WORDS[word] ?? word, word),
                 speech: () => clearTimeout(enterTimer),
                 phrase: (text) => {
+                    const box = chatBox();
+                    if (box) {
+                        box.value = `${box.value}${box.value && !box.value.endsWith(' ') ? ' ' : ''}${text}`;
+                        sayVoice(`Written: ${text}`, 'listening');
+                        if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => { box.form?.requestSubmit(); }, AUTO_ENTER_MS); }
+                        return;
+                    }
                     send(`${text} `);
                     sayVoice(`Typed: ${text}`, 'listening');
                     if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => send('\r'), AUTO_ENTER_MS); }
@@ -699,13 +712,13 @@
             sayVoice('The microphone is not available. Allow it for this site, then try again.', 'calibrating');
             setTimeout(() => { if (!stopListening) sayVoice('', ''); }, 6000);
         }
-        focusTerminal();
+        backTo();
     });
     $('auto').addEventListener('click', () => {
         autoEnter = !autoEnter;
         $('auto').setAttribute('aria-pressed', String(autoEnter));
         if (!autoEnter) clearTimeout(enterTimer);
-        focusTerminal();
+        backTo();
     });
     async function offerVoice() {
         const available = window.clavariumVoice ? await window.clavariumVoice.available() : false;
@@ -1106,8 +1119,11 @@
     function paintSimple() {
         $('simple').hidden = !simple;
         $('room').toggleAttribute('data-simple', simple);
+        if (!simple) $('room').removeAttribute('data-chat');
         $('simple-toggle').setAttribute('aria-pressed', String(simple));
-        $('simple-toggle').textContent = simple ? 'Its screen' : 'Simple';
+        /* Where the tool talks through the app, the plain screen is its chat. */
+        const chatting = talk.on && talkOf === current;
+        $('simple-toggle').textContent = simple ? (chatting ? 'Terminal' : 'Its screen') : chatting ? 'Chat' : 'Simple';
         if (!simple) return;
         const c = conversations.find((x) => x.name === current);
         const state = $('state').textContent;
@@ -1127,12 +1143,20 @@
     });
     /* ---------- talk: a conversation with the tool, shown by Parley ---------- */
     /* The exchange is drawn by Parley's own library (a project of its own,
-       served from /vendor): this page only tells it where to load from, how
-       to send, and how a file is opened here. */
+       served from /vendor): this page tells it where to load from, how to
+       send, the words of this device's language, and how a file is opened. */
     let talk = { on: false, messages: [] };
     let talkOf = '';
     let thread = null;          /* what Parley mounted, and for which conversation */
     let threadOf = '';
+    let chatView = 'simple';
+    try { chatView = localStorage.getItem('clavarium-chat-view') === 'detailed' ? 'detailed' : 'simple'; } catch { /* a private window */ }
+    const deviceLang = () => (navigator.language || 'en');
+    let chatWords = null;
+    async function readWords() {
+        if (!chatWords) chatWords = await fetch(`${API}/talk/words?${new URLSearchParams({ lang: deviceLang() })}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
+        return chatWords;
+    }
     async function readTalk() {
         if (DEVICE || !current) { talk = { on: false, messages: [] }; return talk; }
         talk = await fetch(`${API}/conversations/${encodeURIComponent(current)}/talk`).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
@@ -1143,29 +1167,40 @@
         const box = $('simple-thread');
         const wanted = talk.on && talkOf === current;
         box.hidden = !wanted;
-        /* Where the tool talks through the app, the box of the app is the one to write in. */
-        $('simple-say').hidden = wanted;
+        /* Where the tool talks through the app, the chat is the whole screen: one box to write in. */
+        $('simple-plain').hidden = wanted;
+        $('simple').toggleAttribute('data-chat', wanted);
+        /* The ready-made answers type into the terminal: not under a chat. */
+        $('room').toggleAttribute('data-chat', wanted && simple);
+        paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
         thread?.destroy();
-        const { mount, PROFILES } = await import('/vendor/parley-ui.js');
+        const [{ mount }, words] = await Promise.all([import('/vendor/parley-ui.js'), readWords()]);
         const name = current;
+        if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
         thread = mount(box, {
-            profile: PROFILES.everyday,
+            words, view: chatView,
+            onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             load: () => fetch(`${API}/conversations/${encodeURIComponent(name)}/talk`).then((r) => r.json()),
             send: (text, answers) => post(`${API}/conversations/${encodeURIComponent(name)}/talk`, { text, answers }),
-            /* A file the tool pointed to is opened in the window, when it is in its work folder. */
-            open: (path) => { if (/^\/work\/[^.]/.test(path)) { const inner = path.slice('/work/'.length); void preview('work', inner, inner.split('/').pop(), 0); } },
+            /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
+            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
+            terminal: () => { simple = false; try { localStorage.setItem('clavarium-simple', '0'); } catch { /* as above */ } paintSimple(); focusTerminal(); },
+            remind: () => post(`${API}/conversations/${encodeURIComponent(name)}/talk/remind`, {}),
         });
     }
+    function languageName(tag) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag.split('-')[0]) ?? tag; } catch { return tag; } }
     async function paintTalkBox() {
         if (DEVICE) { $('talk-box').hidden = true; return; }
         await readTalk();
         for (const b of $('talk-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === talk.on));
         $('talk-invite').hidden = !talk.on;
         $('talk-declare').hidden = !talk.on;
-        if (talk.on) $('talk-declare').textContent = `Declare it to the tool once, as an MCP server named "${talk.declare.name}" started by: ${talk.declare.command.join(' ')}. Then "Ask the tool to use it". The conversation shows on the simple screen.`;
+        if (talk.on) $('talk-declare').textContent = talk.tools
+            ? `Then "Ask the tool to use it": it is asked, in its terminal, to install parley from /tools and to write to you in ${languageName(deviceLang())}. The chat shows on the simple screen.`
+            : 'The tools folder (/tools) is not in place on this server yet: the tool cannot be asked to install parley.';
         if (!talk.on && talk.possible === false) $('talk-about').textContent = 'This conversation works on the disk of its machine: talking through the app needs its work folder kept here.';
     }
     for (const b of $('talk-on').children) {
@@ -1176,10 +1211,41 @@
         });
     }
     $('talk-invite').addEventListener('click', async () => {
-        try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/invite`, {}); $('talk-invite').textContent = 'Asked'; setTimeout(() => { $('talk-invite').textContent = 'Ask the tool to use it'; }, 2500); }
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/invite`, { lang: deviceLang() }); $('talk-invite').textContent = 'Asked'; setTimeout(() => { $('talk-invite').textContent = 'Ask the tool to use it'; }, 2500); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
     });
-    setInterval(() => { if (simple && !document.hidden && !DEVICE) void readTalk().then(paintThread); }, 5000);
+    /* Settings: the language of the chat screen, and the owner's own words. */
+    let wordsSettings = null;
+    async function paintWords() {
+        if (DEVICE) return;
+        wordsSettings = await fetch(`${API}/talk/settings`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!wordsSettings) return;
+        const select = $('words-lang');
+        select.replaceChildren(...[['device', `The language of each device (here: ${languageName(deviceLang())})`], ...wordsSettings.languages.map((l) => [l, languageName(l)])].map(([value, label]) => { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }));
+        select.value = wordsSettings.lang;
+        if (document.activeElement !== $('words-own')) $('words-own').value = Object.keys(wordsSettings.own).length ? JSON.stringify(wordsSettings.own, null, 2) : '';
+    }
+    async function saveWords() {
+        $('words-error').hidden = true;
+        let own = {};
+        const text = $('words-own').value.trim();
+        if (text) { try { own = JSON.parse(text); } catch { $('words-error').textContent = 'This is not JSON. Write it like: {"send": "Go"}'; $('words-error').hidden = false; return; } }
+        try {
+            await post(`${API}/talk/settings`, { lang: $('words-lang').value, own });
+            $('words-saved').textContent = 'Saved.'; setTimeout(() => { $('words-saved').textContent = ''; }, 2500);
+            /* The chat screen is drawn again with them. */
+            chatWords = null; thread?.destroy(); thread = null; threadOf = ''; void paintThread();
+            await paintWords();
+        } catch (error) { $('words-error').textContent = error.message; $('words-error').hidden = false; }
+    }
+    $('words-save').addEventListener('click', () => void saveWords());
+    $('words-lang').addEventListener('change', () => void saveWords());
+    $('words-show').addEventListener('click', () => {
+        const all = $('words-all');
+        all.hidden = !all.hidden;
+        if (!all.hidden && wordsSettings) all.textContent = JSON.stringify(Object.fromEntries(Object.entries(wordsSettings.english).filter(([key]) => key !== 'lang')), null, 2);
+    });
+    setInterval(() => { if (!document.hidden && !DEVICE && current) void readTalk().then(() => { if (simple) void paintThread(); paintSimple(); }); }, 5000);
 
     $('simple-say').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1684,6 +1750,7 @@
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings() {
         void paintAlerts().catch(() => {});
+        void paintWords().catch(() => {});
         $('panel').hidden = $('files').hidden = $('sharing').hidden = $('assets').hidden = true;
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();

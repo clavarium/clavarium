@@ -139,7 +139,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
-                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
@@ -154,6 +154,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             const looked = /^\/api\/conversations\/([^/]+)\/health$/.exec(pathname);
             if (looked && health) return send(200, health.of(decodeURIComponent(looked[1]))), true;
+            /* The words of the chat screen, for a screen whose language is `lang`; and the owner's choice of them. */
+            if (pathname === '/api/talk/words' && talk) return send(200, talk.words(query.get('lang') ?? 'en')), true;
+            if (pathname === '/api/talk/settings' && talk) return send(200, talk.settings()), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
             if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
@@ -207,10 +210,12 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
         if (pathname === '/api/alerts/remove' && alerts) return send(200, alerts.remove(String(body.endpoint ?? ''))), true;
         if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
-        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite)?$/.exec(pathname);
+        if (pathname === '/api/talk/settings' && talk) return send(200, talk.setWords({ lang: body.lang, own: body.own })), true;
+        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
-            if (talking[2]) return send(200, await talk.invite(conversation)), true;
+            if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
+            if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
             if (typeof body.on === 'boolean') return send(200, await talk.set(conversation, body.on)), true;
             return send(201, await talk.say(conversation, body.text, body.answers)), true;
         }

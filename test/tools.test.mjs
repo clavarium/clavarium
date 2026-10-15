@@ -35,11 +35,12 @@ test('a malformed catalogue is refused with the name of what is wrong', () => {
     assert.throws(() => readTools('[]'), /empty/);
 });
 
-test('Claude Code is set to take its colours from the terminal, so that the page decides light or dark', () => {
+test('Claude Code is set to take its colours from the terminal, so that the page decides light or dark; and may run parley without asking', () => {
     const steps = loadTools().find((t) => t.id === 'claude-code').steps;
     const settings = steps.find((s) => s.argv.at(-1) === '.claude/settings.json');
     assert.ok(settings, 'a step writes its settings');
-    assert.deepEqual(JSON.parse(settings.input), { theme: 'dark-ansi' });
+    /* parley only writes in its own folder: asking each time would stop the chat on a question only the terminal shows. */
+    assert.deepEqual(JSON.parse(settings.input), { theme: 'dark-ansi', permissions: { allow: ['Bash(parley:*)'] } });
     /* After the tool itself: its own install must not overwrite it. */
     assert.ok(steps.indexOf(settings) > steps.findIndex((s) => s.argv.includes('@anthropic-ai/claude-code')));
 });

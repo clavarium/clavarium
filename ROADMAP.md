@@ -22,7 +22,8 @@ listed here.
 
 - **Parley on npm.** An agent installs Parley itself (`npm install -g
   clavarium-parley`, an exact version) when it is asked to talk through the
-  app; until then the package is dropped next to it, in its work folder.
+  app; until then it installs it from the archive in `/tools`, read-only in
+  every machine.
 
 ## Later
 

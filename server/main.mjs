@@ -38,6 +38,7 @@ import { Answerer, answererConfig } from './answerer.mjs';
 import { Wakeups, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
 import { Talk } from './talk.mjs';
+import { Toolbox } from './toolbox.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
@@ -167,7 +168,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* How private repositories are reached: keys and tokens kept and used here only (gitaccess.mjs).
        `gitSsh`: a stand-in for the ssh program, for tests. */
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
-    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess });
+    /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir });
+    const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
        in the background: see shelf.mjs. Tidied up at start, without making
        the start wait on the VM manager. */
@@ -180,6 +183,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     if (all.shelf) all.shelf = shelf;
     /* Before anything can start a VM: see resources.mjs. */
     await folders.ensureViews();
+    /* Not in place is said, not fatal: no machine is then given /tools. */
+    await toolbox.prepare().catch((error) => console.error(error.message));
     await all.ensureWork?.();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     const voice = voiceConfig(env);
@@ -258,8 +263,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
-    const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
-        alert: (name, message) => { void alerts.tell({ title: message.kind === 'ask' ? `${name} asks you something` : `${name} waits for you`, body: message.text ?? '', url: `/?c=${name}` }); } });
+    const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), words: new Store(`${dataDir}/talk-words.json`), vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+        alert: (payload) => { void alerts.tell(payload); } });
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
     const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
@@ -273,7 +278,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     server.on('close', () => { stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
-        onTyped: (name, data) => answerer.typed(name, data),
+        onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); },
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
             return pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
@@ -292,7 +297,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Then its health is looked at (folders that did not come back are put back). */
     all.ready = (name) => { void (async () => { await folders.remount(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); })(); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
-    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { void health.check(name).catch(() => {}); await bridge.warm(name); } })();
+    /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
+    void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); } })();
     return listening;
 }
 
