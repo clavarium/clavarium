@@ -50,8 +50,12 @@
     </header>
     <div id="health-strip" role="status" hidden>
       <span id="health-text"></span>
-      <button type="button" id="health-restart" class="primary">Restart the machine...</button>
-      <button type="button" id="health-dismiss">Dismiss</button>
+      <span class="health-actions">
+        <button type="button" id="health-memory" class="primary" hidden>More memory...</button>
+        <button type="button" id="health-restart">Restart...</button>
+        <button type="button" id="health-terminal" hidden>See the terminal</button>
+        <button type="button" id="health-dismiss" aria-label="Dismiss" title="Dismiss">&times;</button>
+      </span>
     </div>
     <div id="signin-strip" hidden>
       <span class="tag">sign-in</span>
@@ -110,6 +114,11 @@
             <div class="row" id="machine-actions">
               <button type="button" id="restart" hidden>Restart the machine...</button>
               <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+            </div>
+            <div id="resume-box" hidden>
+            <div class="panel-top"><b>When its tool starts</b></div>
+            <div class="row"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div>
+            <p class="hint" id="resume-hint">Each time its machine starts (a wake after a stop, a restart), the tool takes up the session it had, as it was. Start fresh: it starts a new one, with nothing of before in mind.</p>
             </div>
             <div class="panel-top"><b>Memory and disk</b></div>
             <form id="machine-size" autocomplete="off">

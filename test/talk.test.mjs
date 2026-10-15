@@ -4,13 +4,14 @@
    itself, its verbs and its cleaning are tested where they live, in Parley. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, TYPING_QUIET_MS, RETRY_MS } from '../server/talk.mjs';
-import { WAKE } from '../server/parley/host/parley-host.mjs';
+import { Talk, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS } from '../server/talk.mjs';
+import { Readable } from 'node:stream';
+import { WAKE, REREAD } from '../server/parley/host/parley-host.mjs';
 import { run } from '../server/parley/bin/parley.mjs';
 
 const BRIDGE = fileURLToPath(new URL('../server/parley/server/parley-mcp.mjs', import.meta.url));
@@ -199,4 +200,99 @@ test('the words of the chat screen: each device its language, or one for all; th
     assert.throws(() => b.talk.setWords({ lang: 'device', own: ['send'] }), /JSON/);
     assert.throws(() => b.talk.setWords({ lang: 'device', own: { send: 'x'.repeat(501) } }), /500/);
     assert.equal(b.talk.settings().lang, 'fr', 'a refusal changes nothing');
+});
+
+test('what is wrong with its machine is said in its chat, once, where it happened, with what can be done; and said again only when it comes back', async (t) => {
+    const b = bench(t);
+    /* The lines are dated by this server's clock, the messages by Parley's: the same here. */
+    b.world.clock = Date.now();
+    const memory = { level: 'warn', problems: [{ level: 'warn', kind: 'memory', key: 'memory-low', text: 'Its memory is almost full: 20 MB free of 768 MB.' }] };
+    b.talk.machine('helper', memory);
+    assert.equal(existsSync(join(b.dir, 'talk.json')), false, 'its chat is off: nothing kept');
+    await b.talk.set('helper', true);
+    await b.talk.say('helper', 'Start.');
+    b.world.clock += 1000;
+    b.talk.machine('helper', memory);
+    /* The next look finds the same, with other numbers: not said twice. */
+    b.talk.machine('helper', { level: 'warn', problems: [{ ...memory.problems[0], text: 'Its memory is almost full: 18 MB free of 768 MB.' }] });
+    let lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
+    assert.deepEqual(lines.map((l) => [l.text, l.level, l.actions]), [['Its memory is almost full: 20 MB free of 768 MB.', 'warn', ['memory', 'restart', 'terminal']]]);
+    assert.equal(b.talk.of('helper').messages.at(-1).from, 'system', 'after the message it came after');
+    /* Out of memory, and the machine no longer answers: what is new is said; a problem with no memory in it offers no memory. */
+    b.talk.machine('helper', { level: 'bad', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }] });
+    lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
+    assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'bad', actions: ['restart', 'terminal'] });
+    /* Well again, then short of memory again: said again. Information alone is never said. */
+    b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
+    b.talk.machine('helper', memory);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 3);
+    assert.deepEqual(b.typed.filter((x) => x !== WAKE && x !== 'Enter'), [], 'nothing of it is typed to the tool');
+});
+
+test('after a restart its chat says so, and once the tool had time to start it is told, once, to read the whole thread; a message that waits is not announced on top', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    b.talk.renewed('helper', 'Its machine was restarted.', true);
+    assert.equal(b.talk.of('helper').on, false, 'off: nothing');
+    await b.talk.set('helper', true);
+    b.talk.renewed('helper', 'Its machine was restarted: the tool started again.', true);
+    assert.deepEqual(b.talk.of('helper').messages.map((m) => [m.from, m.text, m.level]), [['system', 'Its machine was restarted: the tool started again.', 'info']]);
+    /* The person writes meanwhile: nothing typed, the line to come tells it to read everything. */
+    assert.equal((await b.talk.say('helper', 'Are you back?')).told, 'restarting');
+    assert.deepEqual(b.talk.of('helper').wake, { waits: true, typed: null, why: 'restarting' });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.deepEqual(b.typed, [], 'the tool is given time to start');
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await until('typed', () => b.typed.length === 2);
+    assert.deepEqual(b.typed, [REREAD, 'Enter']);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(b.typed.length, 2, 'once, and the message that waits is not announced on top');
+    assert.match(b.parley('read', '--all').out, /They wrote: Are you back\? \(new\)/);
+    /* Its restart failed: said, with what can be done, and nothing typed. */
+    b.talk.renewed('helper', 'Its machine was not restarted: it did not stop.', false);
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(b.typed.length, 2);
+    assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['restart', 'terminal']);
+});
+
+test('a file the person attaches is put in the bridge folder, in a folder of its own; the message gives its path; it opens from the chat, as what the tool shows does', async (t) => {
+    const b = bench(t);
+    const body = (text) => Object.assign(Readable.from([Buffer.from(text)]), { headers: {} });
+    await assert.rejects(b.talk.attach('helper', 'a.txt', body('x')), /not turned on/);
+    await b.talk.set('helper', true);
+    const file = await b.talk.attach('helper', 'notes.txt', body('the notes'));
+    assert.match(file.path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/notes\.txt$/);
+    assert.equal(readFileSync(join(b.dir, 'work', 'helper', file.path.slice(6)), 'utf8'), 'the notes');
+    await assert.rejects(b.talk.attach('helper', '../escape.txt', body('x')), /file name/);
+    await b.talk.say('helper', '', undefined, [file.path]);
+    const mine = b.talk.of('helper').messages.at(-1);
+    assert.deepEqual(mine.files, [{ path: file.path, name: 'notes.txt', size: 9, open: `work:${file.path.slice(6)}` }]);
+    assert.match(b.parley('read').out, /Attached file: \/work\/\.parley\/files\/.+\/notes\.txt \(9 bytes\)/);
+    assert.equal(b.talk.shown('helper', `work:${file.path.slice(6)}`), true);
+    assert.equal(b.talk.shown('helper', 'work:.parley/to-agent.jsonl'), false);
+    await assert.rejects(b.talk.say('helper', 'x', undefined, ['/work/.parley/to-agent.jsonl']), /attached here first/);
+    await assert.rejects(b.talk.say('helper', 'x', undefined, Array(11).fill(file.path)), /10 files at most/);
+});
+
+test('a machine put to sleep and woken does not say again what was wrong before: only a look at a running machine that finds it gone does', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    await b.talk.set('helper', true);
+    const memory = { state: 'Running', level: 'warn', problems: [{ level: 'warn', kind: 'memory', key: 'oom:1', text: 'It ran out of memory once.' }] };
+    b.talk.machine('helper', memory);
+    b.talk.machine('helper', { state: 'Suspended', level: 'info', problems: [{ level: 'info', kind: 'state', key: 'asleep', text: 'asleep' }] });
+    b.talk.machine('helper', memory);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 1);
+});
+
+test('a file is not attached when the tool put a link where the chat folders should be', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    const body = (text) => Object.assign(Readable.from([Buffer.from(text)]), { headers: {} });
+    const outside = join(b.dir, 'outside'); mkdirSync(outside);
+    rmSync(join(b.bridge, 'files'), { recursive: true, force: true });
+    symlinkSync(outside, join(b.bridge, 'files'));
+    await assert.rejects(b.talk.attach('helper', 'a.txt', body('x')), /not as it should be/);
+    assert.deepEqual(readdirSync(outside), [], 'nothing was made outside');
 });

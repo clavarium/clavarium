@@ -217,6 +217,7 @@ function checkNode(n, tools) {
         if (!tool) return bad(`Its tool, "${String(n.tool ?? '').slice(0, 40)}", is not one of this Clavarium: refused.`);
         if (n.memoryMb !== undefined && (!Number.isInteger(n.memoryMb) || n.memoryMb < tool.memoryMb || n.memoryMb > 16384)) return bad(`Its memory must be between ${tool.memoryMb} and 16384 MB.`);
         if (n.diskGb !== undefined && (!Number.isInteger(n.diskGb) || n.diskGb < 1 || n.diskGb > 256)) return bad('Its disk must be between 1 and 256 GB.');
+        if (n.resume !== undefined && typeof n.resume !== 'boolean') return bad('When its tool starts is "resume": true or false.');
         return { ok: true };
     }
     if (n.kind === 'git') {
@@ -410,7 +411,7 @@ export class Setup {
     }
     #conversationOut(id, c) {
         const p = this.#p;
-        const out = { id, kind: 'conversation', name: c.name, tool: c.tool, memoryMb: c.memoryMb, diskGb: c.diskGb ?? 8, work: c.work === 'disk' ? 'disk' : 'kept', online: c.offline !== true, chat: Boolean(p.talk?.brief(c.name)) };
+        const out = { id, kind: 'conversation', name: c.name, tool: c.tool, memoryMb: c.memoryMb, diskGb: c.diskGb ?? 8, work: c.work === 'disk' ? 'disk' : 'kept', online: c.offline !== true, chat: Boolean(p.talk?.brief(c.name)), ...(c.resume === false ? { resume: false } : {}) };
         const w = p.wakeups?.of(c.name);
         if (w && (w.items.length > 0 || w.perHour !== 12)) {
             out.wakeups = { perHour: w.perHour, items: w.items.map((i) => ({ kind: i.kind, on: i.on !== false, message: i.message,
@@ -662,6 +663,8 @@ export class Setup {
         if (n.online === false || replace) {
             await this.#try(job, `${name}: ${n.online === false ? 'offline' : 'online'}`, async () => { p.conversations.setOffline(name, n.online === false); if (p.network && !(await p.network.apply())) throw new Refusal(502, 'The network rules could not be applied.'); });
         }
+        /* When its tool starts: its last session (the default), or a new one. */
+        if (n.resume === false || (replace && p.conversations.get(name)?.resume === false)) await this.#try(job, `${name}: its tool ${n.resume === false ? 'starts fresh' : 'takes up its last session'}`, async () => p.conversations.setResume(name, n.resume !== false));
         if ((n.chat === true && n.work !== 'disk') || (replace && n.chat !== true && p.talk?.brief(name))) await this.#try(job, `${name}: chat ${n.chat ? 'on' : 'off'}`, () => p.talk.set(name, n.chat === true));
         if (n.answerer && typeof n.answerer === 'object') {
             if (!p.answerer?.about()) this.#step(job, `${name}: its answerer is not set (this Clavarium has none)`, 'skipped');

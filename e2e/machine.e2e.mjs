@@ -30,8 +30,18 @@ test('folders that came loose while it slept are put back when it wakes; a machi
     assert.match(asleep.body.problems[0].text, /asleep/);
     assert.equal(stateOf(b, 'loose'), 'Suspended');
     assert.deepEqual(reported(b, 'loose').dead, ['/work', '/resources/notes'], 'nothing was remounted');
-    /* Woken: both are unmounted and mounted again, and that is said. */
+    /* Woken: while it wakes, what is known is said under the wait -- and no restart is offered for a start that is merely under way. */
+    await me.page.evaluate(() => { window.clavariumTimes = { look: 300 }; });
+    process.env.FAKE_VM_START_SECONDS = '2';
+    t.after(() => { delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
+    await me.until('the wait is said, with its time so far', async () => /Waking the machine\.\.\. 0:0\d so far; a start usually takes a minute or two\. Its work, its files and its chat are kept\./.test(await me.page.locator('#notice-text').innerText()));
+    /* Its machine looked at meanwhile: what is known is said, never a restart for a start that is merely under way. */
+    await new Promise((r) => setTimeout(r, 900));
+    assert.equal(await me.page.locator('#notice-restart').isVisible(), false, 'no restart offered while it starts');
+    assert.doesNotMatch(await me.page.locator('#notice').innerText(), /asleep/, 'nothing said that the page is undoing');
+    delete process.env.FAKE_VM_START_SECONDS;
+    /* Both folders are unmounted and mounted again, and that is said. */
     await me.until('awake', async () => (await me.state()) === 'live');
     await me.until('both were put back', async () => ((await me.api('/api/conversations/loose/health')).body?.remounted ?? []).length === 2);
     assert.deepEqual(reported(b, 'loose').dead, []);
@@ -52,6 +62,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();
     await me.until('the Machine chapter says it', async () => /Its machine does not answer/.test(await me.page.locator('#machine-health').innerText()));
+    /* Its tool can take up its last session when it starts: the default. */
+    assert.equal(await me.page.locator('#resume-on button[data-on=true]').getAttribute('aria-pressed'), 'true');
     await me.page.locator('#panel-close').click();
     /* Over the terminal, with what can be done. */
     assert.equal(await me.page.locator('#health-strip').isVisible(), true);
@@ -61,9 +73,11 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     assert.match(await me.page.locator('#notice-text').innerText(), /Restart the machine of "silent"\?.*THE TOOL IS STOPPED AND STARTED AGAIN/);
     await me.page.locator('#notice-cancel').click();
     assert.equal(await me.state(), 'live');
-    /* The clean stop will fail: the stop is then forced. */
+    /* The clean stop will fail: the stop is then forced. And once it is started again, its terminal will not come at first. */
     writeFileSync(join(vmHome(b, 'silent'), 'stuck'), '');
     rmSync(join(vmHome(b, 'silent'), 'health.json'));
+    writeFileSync(join(vmHome(b, 'silent'), 'hang-attach'), '');
+    await me.page.evaluate(() => { window.clavariumTimes = { repair: 1500 }; });
     await me.page.locator('#health-restart').click();
     await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
     await me.until('the page says it restarts', async () => /restarting/.test(await me.state()));
@@ -72,14 +86,25 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'silent');
     assert.equal(c.restarted, 'Restarted.');
     assert.equal(c.phase, 'ready');
-    /* The tool came back as on any start: a new shell. */
-    await me.type('echo "mark:${MARK:-gone}"');
-    await me.sees('\nmark:gone');
+    /* Its terminal did not come: the page waited, the server repaired it, by itself. */
+    await me.until('the hung terminal was met', async () => !existsSync(join(vmHome(b, 'silent'), 'hang-attach')), 30_000);
+    await me.sees('ready>', 30_000);
+    /* The tool came back as on any start: a new shell -- on its last session, as it does by default. */
+    await me.type('echo "mark:${MARK:-gone} resumed:${RESUMED:-no}"');
+    await me.sees('\nmark:gone resumed:1');
     /* Looked at again after the start: nothing wrong, nothing said over the terminal. */
     await me.until('looked at after the restart', async () => (await me.api('/api/conversations/silent/health')).body?.level === 'ok');
     await me.page.locator('#folders').click();
     await me.until('the strip is gone', async () => !(await me.page.locator('#health-strip').isVisible()));
     await me.until('the Machine chapter says it was restarted', async () => /Restarted\./.test(await me.page.locator('#machine-restarted').innerText()));
+    await me.page.locator('#panel-close').click();
+    /* A terminal that the repair does not bring back: said plainly, and only then a restart is offered. */
+    writeFileSync(join(vmHome(b, 'silent'), 'hang-attach'), ''); writeFileSync(join(vmHome(b, 'silent'), 'hang-always'), '');
+    assert.equal((await me.api('/api/conversations/silent/terminal/repair', {})).body.session, 'kept', 'its tool answers: kept as it is');
+    await me.context.addInitScript(() => { window.clavariumTimes = { repair: 1500 }; });
+    await me.page.reload();
+    await me.until('said plainly, with the restart', async () => /repairing it did not help/.test(await me.page.locator('#notice-text').innerText().catch(() => '')), 30_000);
+    assert.equal(await me.page.locator('#notice-restart').isVisible(), true);
     assert.deepEqual(me.errors, []);
 });
 
@@ -87,6 +112,8 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     const b = await bench(t);
     const me = await b.person();
     await me.create('roomy');
+    /* It talks through the app: what is wrong with its machine is said in its chat too. */
+    await me.api('/api/conversations/roomy/talk', { on: true });
     report(b, 'roomy', { oom: 2, availableMb: 20, diskLeftMb: 50 });
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();
@@ -99,6 +126,22 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '768');
     assert.equal(await me.page.locator('#machine-disk').inputValue(), '8');
     assert.equal(await me.page.locator('#machine-disk option[value="8"]').innerText(), '8 GB (now)');
+    /* Over its screen: "More memory..." opens its memory, the next size up picked, nothing applied yet. */
+    await me.page.locator('#panel-close').click();
+    assert.match(await me.page.locator('#health-text').innerText(), /ran out of memory 2 times/);
+    await me.page.locator('#health-memory').click();
+    await me.until('its memory, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-memory');
+    assert.equal(await me.page.locator('#machine-memory').inputValue(), '1024');
+    /* Its chat says it too, where it happened, with the same ways out; and the terminal is shown only when asked. */
+    await me.page.locator('#panel-close').click();
+    await me.page.locator('#simple-toggle').click();
+    const line = me.page.locator('#simple-thread .parley-system');
+    await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
+    assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal']);
+    assert.equal(await me.page.locator('#health-terminal').isVisible(), true, 'the strip offers its terminal over the chat');
+    await line.first().locator('button', { hasText: 'See the terminal' }).click();
+    assert.equal(await me.page.locator('#simple').isVisible(), false);
+    await me.page.locator('#folders').click();
     await me.page.selectOption('#machine-memory', '2048');
     await me.page.selectOption('#machine-disk', '16');
     await me.page.locator('#machine-size-apply').click();
@@ -110,6 +153,9 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     const c = (await me.api('/api/conversations')).body[0];
     assert.equal(c.restarted, 'It now has 2048 MB of memory, 16 GB of disk.');
+    /* Its chat says it, and the tool, started again with nothing of the chat in mind, is told once to read it whole. */
+    await me.sees('Your chat with the person is kept: run "parley read --all" before going on.');
+    assert.ok((await me.api('/api/conversations/roomy/talk')).body.messages.some((m) => m.from === 'system' && m.text === 'Its machine was restarted with 2048 MB of memory, 16 GB of disk: the tool started again.'));
     assert.equal(c.memoryMb, 2048); assert.equal(c.diskGb, 16);
     assert.deepEqual(JSON.parse(readFileSync(join(vmHome(b, 'roomy'), 'size.json'), 'utf8')), { memory: 2048, disk: 16 });
     /* A disk never shrinks; a tool's least memory is kept. */

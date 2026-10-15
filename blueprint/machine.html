@@ -54,7 +54,7 @@ ul.plain b { color: var(--text); }
 <h1>A conversation's machine</h1>
 <p class="lead">Looked at, put back when a folder comes loose, restarted on request. A machine asleep is never woken.</p>
 
-<svg viewBox="0 0 400 1150" role="img" aria-label="Health: after a start, a wake, a restart, and every two minutes while it runs, the VM manager is asked for the machine's state. A machine asleep or stopped is only said, never woken. A running one runs one command inside: does it answer, memory left and out-of-memory kills, disk full, each folder mounted and readable. A missing folder is looked at again five seconds later, then unmounted and mounted again, then looked at again. What is wrong is said over the terminal with a Restart button. Restart, or new memory and disk: a clean stop of up to 120 seconds, a forced stop if it hangs, memory and disk set on the stopped machine (a disk only grows), a start, then folders, tmux and the agent, and secrets come back, and its health is looked at.">
+<svg viewBox="0 0 400 1150" role="img" aria-label="Health: after a start, a wake, a restart, and every two minutes while it runs, the VM manager is asked for the machine's state. A machine asleep or stopped is only said, never woken. A running one runs one command inside: does it answer, memory left and out-of-memory kills, disk full, each folder mounted and readable. A missing folder is looked at again five seconds later, then unmounted and mounted again, then looked at again. What is wrong is said over its screen and in its chat, with More memory, Restart and See the terminal. Restart, or new memory and disk: a clean stop of up to 120 seconds, a forced stop if it hangs, memory and disk set on the stopped machine (a disk only grows), a start, then folders, tmux and the agent, and secrets come back, and its health is looked at.">
   <defs>
     <marker id="ha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--dim)"/></marker>
     <marker id="hn" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0 10 5 0 10z" fill="var(--stop)"/></marker>
@@ -76,7 +76,7 @@ ul.plain b { color: var(--text); }
   <path class="a" d="M200 450 V474"/>
   <rect class="fx" x="20" y="476" width="360" height="52" rx="10"/><text class="t" x="34" y="498">umount, then mount</text><text class="s" x="34" y="517">then looked at again</text>
   <path class="a" d="M200 528 V552"/>
-  <rect class="you" x="20" y="554" width="360" height="52" rx="10"/><text class="t" x="34" y="576">Said over the terminal</text><text class="s" x="34" y="595">put back, or not · with a Restart button</text>
+  <rect class="you" x="20" y="554" width="360" height="52" rx="10"/><text class="t" x="34" y="576">Said over its screen, and in its chat</text><text class="s" x="34" y="595">More memory... · Restart... · See the terminal</text>
 
   <text class="h" x="380" y="650" text-anchor="end">RESTART · MEMORY AND DISK</text>
   <path class="a" d="M105 606 V664"/>
@@ -93,7 +93,7 @@ ul.plain b { color: var(--text); }
   <rect class="sv" x="20" y="970" width="360" height="44" rx="10"/><text class="t" x="34" y="997">Start</text>
   <path class="a" d="M200 1014 V1038"/>
   <rect class="vm" x="20" y="1040" width="360" height="94" rx="10"/><text class="t" x="34" y="1064">Back as it was</text>
-  <text class="m" x="34" y="1088">folders · tmux and the agent</text>
+  <text class="m" x="34" y="1088">folders · tmux and the agent, on its last session</text>
   <text class="m" x="34" y="1108">secrets, in memory</text>
   <text class="m" x="34" y="1126">then HEALTH, from the top</text>
 </svg>
@@ -102,6 +102,10 @@ ul.plain b { color: var(--text); }
   <li><b>Asked first.</b> Restart and a new size ask before stopping anything.</li>
   <li><b>Per conversation.</b> Memory and disk are in its settings; the record keeps what multipass says it has.</li>
   <li><b>Untouched:</b> its work folder, its folders, its branches.</li>
+  <li><b>In its chat too.</b> Where the agent talks through the app, what is wrong is also a grey line in the thread, where it happened, kept, with the same buttons; a restart is said there, and the agent, back with nothing of the chat in mind, is told once to read it whole (<code>parley read --all</code>). The page never puts the terminal in front by itself.</li>
+  <li><b>No restart offered while it starts.</b> Only when its machine is not well, or the wait is far longer than a start (3 min).</li>
+  <li><b>A terminal that does not come, though its machine runs:</b> after 30 s the server closes the channel, keeps the agent's tmux if it answers (stops it otherwise) and opens it again; only if it still does not come is a restart offered, in plain words. A machine still starting is waited for, and the page tries again by itself.</li>
+  <li><b>On its last session.</b> Each tool has a <code>resume</code> line in config/tools.json (<code>claude --continue</code>...), used at each start but the first on a disk, unless the owner chose "Start fresh".</li>
   <li><b>/tools, read-only, in every machine.</b> What an agent may install by itself when asked (Parley first): archives and an index (name, version, sha256, one line of usage), kept by the server, shown through a read-only view like a read attachment, looked at and put back like the other folders.</li>
 </ul>
 </main>

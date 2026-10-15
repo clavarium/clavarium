@@ -29,18 +29,21 @@ test('a path is an argument of the probe, never shell text', () => {
 
 test('what is said: the state, a machine that does not answer, memory, disk, folders', () => {
     assert.equal(judge({ state: 'Running', answering: true, oomKills: 0, memory: { totalMb: 2048, availableMb: 1200 }, disks: { '/': { availableMb: 4000, sizeMb: 8000 } } }).level, 'ok');
-    assert.deepEqual(judge({ state: 'Suspended' }), { level: 'info', problems: [{ level: 'info', text: 'Its machine is asleep. It wakes when you open the conversation.' }] });
+    assert.deepEqual(judge({ state: 'Suspended' }), { level: 'info', problems: [{ level: 'info', kind: 'state', key: 'asleep', text: 'Its machine is asleep. It wakes when you open the conversation.' }] });
     assert.equal(judge({ state: 'Unknown' }).level, 'bad');
     assert.equal(judge({ state: undefined }).problems[0].text, 'Its machine no longer exists.');
     assert.equal(judge({ state: 'Running', answering: false }).problems[0].text, 'Its machine does not answer. Restarting it usually helps.');
     const full = judge({ state: 'Running', answering: true, oomKills: 3, memory: { totalMb: 1024, availableMb: 30 }, disks: { '/': { availableMb: 100, sizeMb: 8000 }, '/work': { availableMb: 50, sizeMb: 10000 } } });
     assert.equal(full.level, 'warn');
     assert.deepEqual(full.problems.map((p) => p.text), [
-        'It ran out of memory 3 times since it started: a program was stopped by the system. Give it more memory (Machine).',
+        'It ran out of memory 3 times since it started: a program in it was stopped. Its files are safe.',
         'Its memory is almost full: 30 MB free of 1024 MB.',
         'Its disk is almost full: 100 MB left of 8000 MB.',
         'Its work folder (/work) is almost full: 50 MB left of 10000 MB.',
     ]);
+    /* What each is about, and a name that stays the same whatever its numbers (one more time out of memory is a new one). */
+    assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
+    assert.equal(judge({ state: 'Running', answering: true, memory: { totalMb: 1024, availableMb: 12 } }).problems[0].key, 'memory-low');
     const folders = judge({ state: 'Running', answering: true, remounted: ['/work'], failed: [{ path: '/resources/a', why: 'refused' }], missing: ['/resources/a'] });
     assert.equal(folders.level, 'bad');
     assert.deepEqual(folders.problems.map((p) => p.text), ['/work had come loose in the machine: it was mounted again.', '/resources/a is not reachable in the machine and could not be mounted again: refused.']);
@@ -209,4 +212,14 @@ test('the clock looks at every conversation at once, each within its own time', 
     while (!health.of('quick') && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
     assert.equal(health.of('quick')?.level, 'ok', 'looked at, while the slow one still has not answered');
     assert.deepEqual(probed.filter((n) => n === 'slow').length, 1, 'a look still going is joined, not started again');
+});
+
+test('each judgment is told as it is made (its chat says what is wrong), and a hook that fails stops nothing', async (t) => {
+    const m = machine(t, { silent: true });
+    const told = [];
+    m.health.judged = (name, record) => told.push([name, record.level, record.problems.map((p) => p.key)]);
+    await m.health.check('demo');
+    assert.deepEqual(told, [['demo', 'bad', ['silent']]]);
+    m.health.judged = () => { throw new Error('the chat is gone'); };
+    assert.equal((await m.health.check('demo')).level, 'bad');
 });

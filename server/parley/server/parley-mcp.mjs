@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
 export const TEXT_MAX = 4000;
 /* What it is doing now is one short line: a screen shows it while it works. */
 export const DOING_MAX = 200;
@@ -40,6 +40,14 @@ export const STATES = ['working', 'waiting', 'done'];
 export const FOLDER = '.parley';
 
 const plain = (value, max = TEXT_MAX) => String(value ?? '').slice(0, max);
+/* What `read --all` gives back at most: the newest entries, and so many characters. */
+export const ALL_ENTRIES = 200;
+export const ALL_CHARS = 100_000;
+/* Each line of a file that only grows, as an object, or null where it is not one: counted, and skipped. */
+const lines = (file) => { try { return readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => { try { const j = JSON.parse(l); return j && typeof j === 'object' && !Array.isArray(j) ? j : null; } catch { return null; } }); } catch { return []; } };
+const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+/* The files the person attached to a message, one line each: where they are, for the agent to open. */
+const attached = (m) => (Array.isArray(m.files) ? m.files.slice(0, 10).map((f) => `\n  Attached file: ${plain(f?.path, 1000)}${Number.isInteger(f?.size) ? ` (${size(f.size)})` : ''}`).join('') : '');
 const isFolder = (path) => { try { return statSync(path).isDirectory(); } catch { return false; } };
 
 /* WHICH FOLDER: the one given, else $PARLEY_DIR, else the nearest ".parley"
@@ -100,17 +108,31 @@ export function bridge(dir, { how = 'run `parley read`' } = {}) {
             post({ kind: 'doing', text: line });
             return 'Noted.';
         },
-        read() {
-            let lines = [];
-            try { lines = readFileSync(IN, 'utf8').split('\n').filter(Boolean); } catch { /* nothing was written yet */ }
+        /* What was written since the last read; `all`: the whole exchange,
+           both sides, oldest first -- for an agent that lost its memory (a
+           restart, a new session) and must pick up the thread. Either way,
+           everything is read afterwards. */
+        read({ all = false } = {}) {
+            const written = lines(IN);
             let seen = 0;
             try { seen = Number(JSON.parse(readFileSync(READ, 'utf8')).lines) || 0; } catch { /* nothing was read yet */ }
-            if (seen > lines.length) seen = 0;
-            const fresh = lines.slice(seen).flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } });
+            if (seen > written.length) seen = 0;
             mkdirSync(dir, { recursive: true });
-            writeFileSync(READ, JSON.stringify({ lines: lines.length }));
+            writeFileSync(READ, JSON.stringify({ lines: written.length }));
+            const fromThem = (m) => `${m.answers ? `They answered your question "${plain(m.question, 200)}": ` : 'They wrote: '}${plain(m.text)}${attached(m)}`;
+            if (all) {
+                const theirs = written.flatMap((m, i) => (m ? [{ at: String(m.at ?? ''), text: `${fromThem(m)}${i >= seen ? ' (new)' : ''}` }] : []));
+                const mine = lines(OUT).filter((m) => m && ['say', 'ask', 'show'].includes(m.kind)).map((m) => ({ at: String(m.at ?? ''),
+                    text: m.kind === 'ask' ? `You asked them: ${plain(m.text)}${Array.isArray(m.choices) && m.choices.length ? ` (choices: ${m.choices.map((c) => plain(c, 200)).join(', ')})` : ''}`
+                        : m.kind === 'show' ? `You showed them a file: ${plain(m.path, 1000)}${m.text ? ` (${plain(m.text, 500)})` : ''}` : `You told them: ${plain(m.text)}` }));
+                const both = [...mine, ...theirs].sort((a, b) => a.at.localeCompare(b.at)).slice(-ALL_ENTRIES).map((e) => `[${e.at.slice(0, 16).replace('T', ' ')}] ${e.text}`);
+                while (both.length > 1 && both.join('\n').length > ALL_CHARS) both.shift();
+                if (both.length === 0) return 'Nothing was written yet, on either side.';
+                return `The whole exchange with the person, oldest first (${both.length}):\n${both.join('\n')}\nEnd of the exchange: everything is read now.`;
+            }
+            const fresh = written.slice(seen).filter(Boolean);
             if (fresh.length === 0) return 'No new message.';
-            return fresh.map((m) => `${m.answers ? `Answer to your question "${plain(m.question, 200)}": ` : 'Message: '}${plain(m.text)}`).join('\n');
+            return fresh.map((m) => `${m.answers ? `Answer to your question "${plain(m.question, 200)}": ` : 'Message: '}${plain(m.text)}${attached(m)}`).join('\n');
         },
     };
 }
@@ -123,8 +145,8 @@ export const TOOLS = [
         inputSchema: { type: 'object', properties: { question: { type: 'string' }, choices: { type: 'array', items: { type: 'string' }, description: 'Optional: the answers they can pick from.' } }, required: ['question'] } },
     { name: 'show', description: 'Point the person you work for to a file you made (a report, a picture, a page), so that they can open it from their screen. Put it in a folder you share with them.',
         inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The path of the file.' }, note: { type: 'string', description: 'One line on what it is.' } }, required: ['path'] } },
-    { name: 'read', description: 'Read what was written to you since you last read: new instructions, and answers to your questions. Call it when you are told a message arrived, and before you finish a task.',
-        inputSchema: { type: 'object', properties: {} } },
+    { name: 'read', description: 'Read what was written to you since you last read: new instructions, answers to your questions, files they attached. Call it when you are told a message arrived, and before you finish a task. With all: true, the whole exchange, both sides, oldest first: to pick up the thread after a restart.',
+        inputSchema: { type: 'object', properties: { all: { type: 'boolean', description: 'Optional: the whole exchange, not only what is new.' } } } },
     { name: 'doing', description: 'Say in one short line what you are doing right now ("reading the 12 recordings", "running the tests"), each time you move to something new. Their screen shows it while you work, and keeps what came before. It does not wait.',
         inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'One short line, in their language.' } }, required: ['text'] } },
     { name: 'status', description: 'Say in one word where you are, so that their screen shows it: "working" when you start, "waiting" when you need them, "done" when the task is finished.',
@@ -137,7 +159,7 @@ export function serve(dir, { input = process.stdin, output = process.stdout } = 
         if (name === 'tell') return verbs.tell(args.text);
         if (name === 'ask') return verbs.ask(args.question, args.choices);
         if (name === 'show') return verbs.show(args.path, args.note);
-        if (name === 'read') return verbs.read();
+        if (name === 'read') return verbs.read({ all: args.all === true });
         if (name === 'status') return verbs.status(args.state, args.note);
         if (name === 'doing') return verbs.doing(args.text);
         throw new Error(`unknown tool: ${name}`);

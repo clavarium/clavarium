@@ -25,10 +25,9 @@ listed here.
   app; until then it installs it from the archive in `/tools`, read-only in
   every machine.
 
-- **A tool resumes where it was.** After a restart, a tool that can resume its
-  last session (`claude --continue` and the like) is started that way: one
-  line of configuration per tool. Its session can also be kept in the work
-  folder, so it survives a machine rebuilt, a backup and a restore.
+- **A tool's session outlives its machine.** A tool already starts on its last
+  session; that session is kept in the work folder too, so that it survives a
+  machine built again, a backup and a restore.
 - **Every word of the app in the owner's language.** English by default,
   French at least, a file per language, the owner's own words over any of them
   (as the chat already does).

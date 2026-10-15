@@ -75,6 +75,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     await a.ok('/api/conversations/writer/git/site/auto', { branches: 'test, try/*', quietSeconds: 30, perHour: 4, sure: true });
     await a.ok('/api/conversations/writer/talk', { on: true });
     await a.ok('/api/conversations/helper/network', { online: false }).catch(() => {});
+    await a.ok('/api/conversations/helper/resume', { on: false });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'every', minutes: 60, message: 'Look at the new photos.' });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'arrival', resource: 'photos', message: 'New photos <b>arrived</b>.', quiet: 20 });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'cron', line: '30 7 * * 1-5', message: 'Morning.' });
@@ -91,6 +92,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.deepEqual(doc.nodes.map((n) => n.id), ["device:Dad's tablet", 'conversation:helper', 'conversation:writer', 'folder:book', 'folder:photos', 'git:site', 'mailbox:home-mail', 'secret:MODEL_KEY']);
     assert.deepEqual(doc.links.find((l) => l.to === 'git:site').autoSend, { branches: ['test', 'try/*'], quietSeconds: 30, perHour: 4, create: false, checks: true });
     assert.equal(doc.links.find((l) => l.from === "device:Dad's tablet" && l.to === 'conversation:writer').gives, 'chat');
+    assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:helper').resume, doc.nodes.find((n) => n.id === 'conversation:writer').resume], [false, undefined], 'its tool starts fresh: said; the default is not');
     assert.equal(await exported(a), first, 'the same file twice: nothing in it moves');
 
     const b = await home(t);

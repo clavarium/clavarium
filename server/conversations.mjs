@@ -30,10 +30,19 @@ export const DISK_GB = 8;
 /* Repairs made once on machines built before they were part of the recipe
    (see tools.mjs, "npm-writable"): the number goes up when one is added. */
 export const FIXES = 1;
+/* A machine the VM manager is starting already is waited for this long. */
+export const STARTING_MS = 180_000;
+/* A machine just started is asked to answer for this long before a terminal is opened into it. */
+export const ANSWER_MS = 90_000;
+const POLL_MS = 2000;
+/* Asked of a machine to know that it answers: a command that does nothing (and no install step uses). */
+export const ANSWER_PROBE = Object.freeze(['test', '-d', '/']);
 
-/* An error whose message is meant for the person, and safe to show. */
+/* An error whose message is meant for the person, and safe to show.
+   `retry`: what was refused may work in a moment, by itself (a machine
+   that is starting): the page tries again without being asked. */
 export class Refusal extends Error {
-    constructor(status, message) { super(message); this.status = status; }
+    constructor(status, message, { retry = false } = {}) { super(message); this.status = status; if (retry) this.retry = true; }
 }
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
@@ -55,11 +64,17 @@ export class Conversations {
     /* Set by the server: told when a machine was just started by an opening
        (its folders are then looked at, see health.mjs). */
     started = () => {};
+    /* Set by the server: told when its machine was restarted or built again
+       by this server, in words for its chat, and whether the tool runs again
+       (its chat says it, and the tool is told to read it again: talk.mjs). */
+    renewed = () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
-    constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS, uid = process.getuid(), gid = process.getgid() }) {
+    #startingMs; #answerMs; #pollMs;
+    constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS, uid = process.getuid(), gid = process.getgid(), startingMs = STARTING_MS, answerMs = ANSWER_MS, pollMs = POLL_MS }) {
         this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs; this.#uid = uid; this.#gid = gid;
+        this.#startingMs = startingMs; this.#answerMs = answerMs; this.#pollMs = pollMs;
         /* A build interrupted by a restart of this server cannot be resumed
            blindly: it is marked failed, and says so. */
         for (const c of store.all()) {
@@ -71,7 +86,8 @@ export class Conversations {
         }
     }
 
-    tools() { return this.#tools.map(({ id, label, memoryMb }) => ({ id, label, memoryMb })); }
+    /* `resumes`: the tool can take up its last session when it starts (`resume` in config/tools.json). */
+    tools() { return this.#tools.map(({ id, label, memoryMb, resume }) => ({ id, label, memoryMb, resumes: Boolean(resume) })); }
 
     /* The sign-in rules of a conversation's tool, or undefined. */
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
@@ -79,7 +95,7 @@ export class Conversations {
     list() {
         return this.#store.all().map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
-            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb };
+            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume) };
         });
     }
 
@@ -103,7 +119,8 @@ export class Conversations {
         return conversation;
     }
 
-    async #build(name, tool, memoryMb) {
+    /* `again`: a machine built anew for a conversation that had one. */
+    async #build(name, tool, memoryMb, again = false) {
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
         /* A COPY OF THE READY-MADE MACHINE when there is one that holds this
            tool (see shelf.mjs): it only has to boot. Anything wrong with the
@@ -165,13 +182,15 @@ export class Conversations {
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
-        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined });
+        /* A new disk holds no session of the tool: its first start is a plain one. */
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: undefined });
         /* A machine that has just been built holds nothing of what was put
            in the one before it: the next opening prepares it from nothing.
            (Without this, a machine built again started with no runner, and
            its tool "exited" at once -- caught by an end-to-end test.) */
         this.#fresh.add(name);
         this.ready(name);
+        if (again) this.renewed(name, 'Its machine was built again: what was on its own disk is gone, its work folder and this chat are kept. The tool started again.', true);
         return undefined;
     }
 
@@ -196,7 +215,7 @@ export class Conversations {
         this.built = (async () => {
             /* What a failed build left behind is cleared away first. */
             if (state !== undefined) await this.#vms.remove(name);
-            return this.#build(name, tool, c.memoryMb);
+            return this.#build(name, tool, c.memoryMb, true);
         })();
         return this.#store.get(name);
     }
@@ -210,16 +229,34 @@ export class Conversations {
         /* Opening is the explicit gesture that ends a sleep. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
-        const state = await this.#vms.state(name);
+        let state = await this.#vms.state(name);
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
+        /* STARTED ALREADY BY SOMEBODY ELSE -- the VM manager, after the host
+           restarted: it is waited for, not started a second time (which the
+           VM manager refuses, and the page used to stay on an error). */
+        if (state === 'Starting' || state === 'Restarting') {
+            say('Its machine is starting...');
+            state = await this.#until(name, (s) => s !== 'Starting' && s !== 'Restarting', this.#startingMs);
+            if (state === 'Starting' || state === 'Restarting') { this.left(name); throw new Refusal(504, 'Its machine is still starting.', { retry: true }); }
+        }
         const stopped = state !== 'Running';
-        const woke = this.#fresh.delete(name) || stopped;
+        let woke = this.#fresh.delete(name) || stopped;
         if (stopped) {
             say('Waking the machine...');
             const started = await this.#vms.start(name);
-            if (started.code !== 0) { this.left(name); throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`); }
+            if (started.code !== 0) {
+                this.left(name);
+                /* Starting meanwhile, after all: the page tries again by itself. */
+                const now = await this.#vms.state(name).catch(() => undefined);
+                throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`, { retry: now === 'Starting' || now === 'Running' });
+            }
             this.started(name);
+            woke = true;
         }
+        /* JUST STARTED: it runs before it answers (its system is still coming
+           up). A terminal opened before it answers fails, and the tool would
+           be said to have exited: it is asked first, a few times. */
+        if (woke && !(await this.#answers(name))) { this.left(name); throw new Refusal(504, 'Its machine runs but does not answer yet.', { retry: true }); }
         /* `woke` tells the preparation that the machine has just started:
            whatever was put in its memory before is gone. */
         try { await this.prepare(name, woke); }
@@ -228,7 +265,69 @@ export class Conversations {
         /* A machine built before a repair was part of the recipe gets it
            once, beside the opening, not in its way. */
         if ((c.fixed ?? 0) < FIXES && tool.fixups.length > 0) void this.#fixup(name, tool);
-        return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...tool.command], WORK));
+        return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...this.#command(name, tool)], WORK));
+    }
+
+    /* WHAT STARTS THE TOOL. Its last session is taken up (`resume` in
+       config/tools.json: "claude --continue"...) unless the owner chose to
+       start fresh -- but never at its very first start on a disk: there is no
+       session yet, and not every tool says so quietly. Used only when its tmux
+       session is made: a screen that comes back attaches to the tool as it is. */
+    #command(name, tool) {
+        const c = this.#store.get(name);
+        const resume = tool.resume && c.resume !== false && c.toolStarted === true;
+        if (c.toolStarted !== true) this.#store.patch(name, { toolStarted: true });
+        return resume ? tool.resume : tool.command;
+    }
+
+    /* When its tool starts: its last session taken up (true, the default), or a new one. */
+    setResume(name, on) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (take up its last session) or false (start a new one).');
+        this.#store.patch(name, { resume: on ? undefined : false });
+        return this.#store.get(name);
+    }
+
+    /* The state of its machine once `done(state)` holds, or as it is when the time is up. */
+    async #until(name, done, ms) {
+        const end = Date.now() + ms;
+        for (;;) {
+            const state = await this.#vms.state(name).catch(() => 'Unknown');
+            if (done(state) || Date.now() >= end) return state;
+            await new Promise((r) => setTimeout(r, this.#pollMs));
+        }
+    }
+
+    /* Whether its machine answers a command, asked again for a while. */
+    async #answers(name) {
+        const end = Date.now() + this.#answerMs;
+        for (;;) {
+            if ((await this.#vms.exec(name, [...ANSWER_PROBE], { timeoutMs: 15_000 }).catch(() => ({ code: 1 }))).code === 0) return true;
+            if (Date.now() >= end) return false;
+            await new Promise((r) => setTimeout(r, this.#pollMs));
+        }
+    }
+
+    /* A TERMINAL THAT DOES NOT COME, though its machine runs: asked by the
+       page once it has waited. The channel kept open into it is closed (it
+       is opened again by the next screen); the tool's tmux session is
+       looked at: there and answering, it is kept as it is -- the tool goes on
+       -- otherwise its tmux is stopped, and made again at the next opening.
+       Refused, with why, when that cannot help: a machine that does not run,
+       or does not answer. */
+    async repairTerminal(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (c.phase !== 'ready') throw new Refusal(409, 'Its machine is being changed: the terminal comes back by itself after.', { retry: true });
+        const state = await this.#vms.state(name).catch(() => undefined);
+        if (state !== 'Running') throw new Refusal(409, `Its machine is not running (${state ?? 'gone'}): it is started when the conversation is opened.`, { retry: state === 'Starting' });
+        this.drop(name);
+        const session = await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'list-panes', '-t', `=${SESSION}`], { timeoutMs: 10_000 }).catch(() => ({ code: 1 }));
+        if (session.code === 0) return { session: 'kept' };
+        if ((await this.#vms.exec(name, [...ANSWER_PROBE], { timeoutMs: 10_000 }).catch(() => ({ code: 1 }))).code !== 0) throw new Refusal(502, 'Its machine does not answer: its terminal cannot be repaired from here.');
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        return { session: 'renewed' };
     }
 
     async #fixup(name, tool) {
@@ -254,7 +353,7 @@ export class Conversations {
         this.#cancelStop(name);
         this.#store.patch(name, { phase: 'restarting', step: 'Stopping the machine', restarted: undefined });
         this.restarted = this.#cycle(name, c, async () => undefined, true)
-            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.'));
+            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.'));
         return this.#store.get(name);
     }
 
@@ -301,7 +400,7 @@ export class Conversations {
             await this.reconcile(name);
             const now = this.#store.get(name);
             const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.diskGb ?? disk} GB of disk`;
-            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`);
+            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`);
         });
         return this.#store.get(name);
     }
@@ -370,12 +469,14 @@ export class Conversations {
         } catch { return 'it stopped on an unexpected error.'; }
     }
 
-    async #settle(name, said) {
+    /* `chat`: the same, as its chat says it. */
+    async #settle(name, said, chat) {
         if (!this.#store.get(name)) return;
         const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
         this.#store.patch(name, { phase: 'ready', step: undefined, asleep: false, restarted: said });
         /* The tool is started again in its terminal, as after any start. */
         if (running) this.ready(name);
+        try { this.renewed(name, chat ?? said, running); } catch { /* told, nothing more */ }
     }
 
     /* A screen takes over a terminal that was kept open: the machine is

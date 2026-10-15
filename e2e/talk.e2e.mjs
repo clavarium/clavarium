@@ -218,6 +218,22 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     assert.equal(await focused(), 'parley-box', 'the keyboard, open, stays open');
     await me.until('written from the device, read here', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'From the shared phone.'));
     const pairing = await device.page.evaluate(() => document.documentElement.dataset.pairing);
+    /* Its chat alone: files travel in the chat, both ways -- what the tool showed, and what this phone attaches -- and nothing more. */
+    assert.equal(await device.page.locator('#files-open').isVisible(), false, 'no file browser');
+    assert.equal((await device.api(`/c/api/${pairing}/files?r=work&p=`)).status, 403, 'refused by the server too');
+    await device.page.locator('#simple-thread .parley-said[data-kind=show] .parley-open').first().tap();
+    await device.until('what the tool showed opens', async () => (await device.page.locator('#preview-body pre').innerText().catch(() => '')).includes('38 orders, 3 late'));
+    assert.equal(await device.page.locator('#preview-where').isVisible(), false, 'no way to the folder it sits in');
+    await device.page.locator('#preview-close').tap();
+    await device.page.locator('#simple-thread input[type=file]').setInputFiles({ name: 'dad.txt', mimeType: 'text/plain', buffer: Buffer.from('a photo of dad') });
+    await device.until('shown above the box', async () => (await device.page.locator('#simple-thread .parley-pending').innerText().catch(() => '')).includes('dad.txt'));
+    await phoneBox.fill('The photo.');
+    await device.page.locator('#simple-thread .parley-send').tap();
+    await me.until('the tool is given its path', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'The photo.' && /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/dad\.txt$/.test(m.files?.[0]?.path ?? '')));
+    assert.equal(await device.page.locator('#simple-thread .parley-pending').count(), 0, 'gone from above the box once sent');
+    await device.page.locator('#simple-thread .parley-said[data-from=person]', { hasText: 'The photo.' }).locator('.parley-open').tap();
+    await device.until('it opens from its message', async () => (await device.page.locator('#preview-body pre').innerText().catch(() => '')).includes('a photo of dad'));
+    await device.page.locator('#preview-close').tap();
     assert.equal((await device.api(`/c/api/${pairing}/conversations/helper/talk`, { on: false })).status, 400, 'a device writes; turning it off is not a device\'s');
     assert.equal((await me.api('/api/conversations/helper/talk')).body.on, true);
     /* Its chat alone: no way to the terminal on the page, and none on the server either. */

@@ -36,7 +36,8 @@ export const SKIP = !playwright ? 'no browser: install the "playwright" package,
 
 /* A plain shell with a fixed prompt, so that tests can tell "ready". */
 const TOOLS = readTools(JSON.stringify([
-    { id: 'shell', label: 'Shell', command: ['env', 'PS1=ready> ', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
+    /* Started on its last session (`resume`), it says so in its environment. */
+    { id: 'shell', label: 'Shell', command: ['env', 'PS1=ready> ', 'bash', '--norc', '--noprofile'], resume: ['env', 'PS1=ready> ', 'RESUMED=1', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
     { id: 'other', label: 'Other tool', command: ['env', 'PS1=other> ', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
 ]));
 
@@ -79,6 +80,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         /* Three readers that are not models: what they say is decided by the test. */
         ...(answerFetcher ? { answerFetcher, answerEveryMs: 300 } : {}),
         wakeEveryMs: 300, alertSend, talkEveryMs: 200, gitEveryMs: 300,
+        /* After a restart, the tool is given a moment, not seconds, before it is told to read its chat again. */
+        rereadAfterMs: 500,
         /* The ready-made machine is built only when a test asks for it. */
         shelfEveryMs: 0,
         /* A folder missing in a machine is given a moment, not seconds, before it is mounted again. */

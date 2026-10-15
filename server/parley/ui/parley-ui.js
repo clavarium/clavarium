@@ -2,11 +2,17 @@
  *
  *   import { mount } from './parley-ui.js';
  *   mount(element, { load, send, words, open, terminal, remind, view, onView, locale,
- *                    voice, autoSend, onAutoSend, replies, enter, touch });
+ *                    voice, autoSend, onAutoSend, replies, enter, touch, attach, act });
  *
- *   load()                 resolves with what parley-host.mjs read() gives
- *   send(text, answers)    the person wrote; `answers` is the id of the
- *                          question a choice answers
+ *   load()                 resolves with what parley-host.mjs read() gives;
+ *                          the application may add lines of its own to its
+ *                          messages: { from: 'system', id, at, text, level,
+ *                          actions: [{ id, label }] } (see LINES OF THE
+ *                          APPLICATION, below)
+ *   send(text, answers, files)
+ *                          the person wrote; `answers` is the id of the
+ *                          question a choice answers; `files`, what `attach`
+ *                          gave back for the files they attached
  *   words                  the words of the screen: texts(lang, own) of
  *                          parley-host.mjs, or any object with those keys
  *   open(file)             optional: opens a file the agent showed (`file`
@@ -39,6 +45,14 @@
  *                          pointer, a new line on a touch screen), 'send' or
  *                          'newline'. Shift+Enter is always a new line, and
  *                          Ctrl+Enter always sends.
+ *   attach                 { upload(file, name) }: files the person attaches
+ *                          to a message. A button beside the box picks them;
+ *                          each is shown above the box until it is sent, and
+ *                          on Send each is given to upload (a File), which
+ *                          resolves with { path, name, size }: where the
+ *                          agent will find it. Then the message goes, with
+ *                          them. A message may be files alone.
+ *   act(id, line)          a button of a line of the application was pressed
  *   touch                  true on a touch screen (default: any coarse
  *                          pointer). The box is then never focused by the
  *                          page, only by the person's finger, so that the
@@ -63,6 +77,11 @@
  * every message, where the agent says it is, every file it showed with its
  * path (one that cannot be opened is said so), and a way to its terminal.
  *
+ * LINES OF THE APPLICATION. What happens around the agent (its machine short
+ * of memory, restarted) is said in the thread where it happened, as a grey
+ * line with its time and the application's buttons, not as a bubble of
+ * either side. The application keeps them and gives them with the messages.
+ *
  * EVERYTHING AN AGENT WROTE, AND EVERY WORD OF THE DICTIONARY, IS PUT ON THE
  * PAGE AS TEXT, never as markup: the first is chosen by a program, the
  * second by whoever wrote the dictionary.
@@ -71,7 +90,8 @@ export const VIEWS = Object.freeze(['simple', 'detailed']);
 /* The words this screen uses: a dictionary needs these keys. */
 export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simple', 'detailed', 'working', 'waiting', 'done', 'no-status', 'asks', 'open', 'outside',
     'not-read', 'read', 'remind', 'reminded', 'steps', 'no-steps', 'files', 'no-files', 'terminal', 'not-sent', 'step-one', 'steps-many', 'today', 'yesterday', 'quiet',
-    'mic', 'mic-stop', 'auto-send', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less']);
+    'mic', 'mic-stop', 'auto-send', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less',
+    'attach', 'remove-file', 'sending-files', 'attach-where']);
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
 /* Between two messages further apart than this, the time is said. */
@@ -88,10 +108,15 @@ export const WRITE_WAIT_MS = 15_000;
 export const REPLIES_MAX = 40;
 export const LABEL_MAX = 40;
 export const TEXT_MAX = 4000;
+/* Files attached to one message, at most; buttons on a line of the application. */
+export const FILES_MAX = 10;
+export const ACTIONS_MAX = 4;
 
 const fill = (word, values = {}) => String(word ?? '').replace(/\{([a-z]+)\}/g, (all, key) => (Object.hasOwn(values, key) ? String(values[key]) : all));
 const said = (words, key, values) => fill(typeof words?.[key] === 'string' ? words[key] : key, values);
 const nameOf = (path) => String(path ?? '').split('/').pop();
+/* A size, as a person reads it. */
+export const sizeText = (n) => (!Number.isInteger(n) || n < 0 ? '' : n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} B`);
 const stamp = (at) => { const t = Date.parse(at); return Number.isNaN(t) ? null : t; };
 /* Written the device's way, or the given locale's; a locale that is not one is the device's. */
 const format = (t, locale, options) => { if (t === null) return ''; const d = new Date(t); try { return d.toLocaleString(locale, options); } catch { return d.toLocaleString(undefined, options); } };
@@ -122,11 +147,17 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     const state = (s) => said(words, ['working', 'waiting', 'done'].includes(s) ? s : 'working');
     const asking = messages.some((m) => m.kind === 'ask' && !answered.has(m.id));
     /* "Not read yet" only where it is plainly true: the person's last word, nothing from the agent after it. */
-    const last = messages.at(-1);
+    const last = messages.filter((m) => m.from !== 'system').at(-1);
     const unseen = last?.from === 'person' && last.seen === false ? last.id : undefined;
     const steps = (Array.isArray(data?.steps) ? data.steps : []).filter((s) => s && typeof s === 'object');
     const files = Array.isArray(data?.files) ? data.files : [];
     const items = messages.map((m) => {
+        if (m.from === 'system') {
+            const t = stamp(m.at);
+            return { type: 'message', key: `y:${String(m.id ?? '')}`, id: String(m.id ?? ''), from: 'system', kind: 'system', level: ['info', 'warn', 'bad'].includes(m.level) ? m.level : 'info',
+                text: String(m.text ?? ''), time: clock(t, locale), when: whole(t, locale), at: t, label: '', file: null, files: [], outside: '', choices: [], open: false, mark: '',
+                actions: (Array.isArray(m.actions) ? m.actions : []).filter((a) => a && typeof a.id === 'string' && typeof a.label === 'string' && a.label.trim()).slice(0, ACTIONS_MAX).map((a) => ({ id: a.id, label: a.label.trim().slice(0, LABEL_MAX) })) };
+        }
         const show = m.kind === 'show';
         const open = m.kind === 'ask' && !answered.has(m.id);
         const reach = typeof m.open === 'string' ? m.open : null;
@@ -138,6 +169,9 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
             time: clock(t, locale), when: whole(t, locale), at: t,
             label: open ? said(words, 'asks') : '',
             file: show ? { path: String(m.path ?? ''), open: reach, name: nameOf(m.path), shown: detailed ? String(m.path ?? '') : (m.text ? nameOf(m.path) : '') } : null,
+            /* What the person attached: by name, opened the application's way; its whole path in the detailed view. */
+            files: (Array.isArray(m.files) ? m.files : []).slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => ({ path: String(f.path ?? ''), name: String(f.name || nameOf(f.path)), open: typeof f.open === 'string' ? f.open : null, shown: detailed ? String(f.path ?? '') : '', size: sizeText(f.size) })),
+            actions: [],
             outside: show && reach === null ? said(words, 'outside', { path: String(m.path ?? '') }) : '',
             choices: open ? (m.choices ?? []).map(String) : [],
             open,
@@ -160,6 +194,8 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     const rows = [];
     let next = 0;
     items.forEach((item, i) => {
+        /* A line of the application takes no step: they go to the next message. */
+        if (item.from === 'system') { rows.push({ ...item, trail: null, end: item.at }); return; }
         const before = [];
         while (item.at !== null && next < steps.length && (stamp(steps[next].at) ?? 0) <= item.at) before.push(steps[next++]);
         /* Simple: on the message they led to, no line of their own; detailed: unfolded above it. */
@@ -246,7 +282,8 @@ function sign(kind) {
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', `parley-sign parley-sign-${kind}`);
     const shapes = kind === 'mic'
         ? [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7' }]]
-        : [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]];
+        : kind === 'clip' ? [['path', { d: 'M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6' }]]
+            : [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]];
     for (const [tag, attributes] of shapes) {
         const shape = document.createElementNS(SVG, tag);
         for (const [k, v] of Object.entries(attributes)) shape.setAttribute(k, String(v));
@@ -256,7 +293,7 @@ function sign(kind) {
 }
 
 export function mount(root, { load, send, words = {}, open, terminal, remind, view: first = 'simple', onView, every = 3000, locale,
-    voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch } = {}) {
+    voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch, attach, act } = {}) {
     let as = VIEWS.includes(first) ? first : 'simple';
     let shown = '';
     let count = 0;
@@ -292,22 +329,28 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const micWord = el('span', 'parley-mic-word', said(words, 'mic-stop'));
     mic.append(sign('mic'), sign('stop'), micWord);
     const go = el('button', 'parley-send', said(words, 'send')); go.type = 'submit';
+    /* Files to attach: picked beside the box, shown above it until they are sent. */
+    const clip = el('button', 'parley-attach'); clip.type = 'button'; clip.title = said(words, 'attach'); clip.setAttribute('aria-label', clip.title); clip.append(sign('clip'));
+    clip.hidden = !attach?.upload;
+    const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true; picker.tabIndex = -1;
+    const pendingRow = el('div', 'parley-attached'); pendingRow.hidden = true; pendingRow.setAttribute('aria-live', 'polite');
+    let pending = [];
     /* While dictating: what the microphone does, and "send when I stop". */
     const heard = el('div', 'parley-voice'); heard.hidden = true;
     const heardText = el('span', 'parley-voice-text'); heardText.setAttribute('role', 'status');
     const autoButton = el('button', 'parley-auto', said(words, 'auto-send')); autoButton.type = 'button';
     heard.append(heardText, autoButton);
     const problem = el('p', 'parley-problem'); problem.hidden = true; problem.setAttribute('role', 'alert');
-    form.append(box, mic, go);
-    root.replaceChildren(top, main, quickRow, form, heard, problem);
+    form.append(box, clip, mic, go, picker);
+    root.replaceChildren(top, main, quickRow, pendingRow, form, heard, problem);
     root.dataset.view = as;
     const narrow = () => root.clientWidth > 0 && root.clientWidth < NARROW_PX;
     let wasNarrow = narrow();
     const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (narrow() !== wasNarrow) { wasNarrow = narrow(); repaint(); } }) : null;
     watch?.observe(root);
-    const say = async (text, answers) => {
+    const say = async (text, answers, files) => {
         problem.hidden = true;
-        try { await send(text, answers); await refresh(); } catch (error) { problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; }
+        try { await send(text, answers, ...(files?.length ? [files] : [])); await refresh(); return true; } catch (error) { problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; return false; }
     };
     const fileButton = (file) => (file.open === null || !open ? null : button(said(words, 'open'), 'parley-open', () => open(file)));
     const time = (text, when) => { const t = el('time', 'parley-time', text); if (when) t.title = when; return t; };
@@ -336,6 +379,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         opener.addEventListener('click', (event) => { if (only(event)) flip(); });
         if (opener.tagName !== 'BUTTON') opener.addEventListener('keydown', (event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === opener) { event.preventDefault(); flip(); } });
     }
+    const item0 = (row) => (row.type === 'message' ? row : {});
     function rowOf(row, v) {
         if (row.type === 'day' || row.type === 'gap') { const p = el('p', 'parley-divider'); p.dataset.kind = row.type; p.append(el('span', '', row.text)); return p; }
         if (row.type === 'steps') {
@@ -345,6 +389,18 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             holder.append(chip, list);
             folding(row, holder, chip, list);
             return holder;
+        }
+        if (item0(row).from === 'system') {
+            /* A line of the application: grey, across, with its time and its buttons. */
+            const line = el('div', 'parley-system'); line.dataset.from = 'system'; line.dataset.level = row.level; line.dataset.id = row.id;
+            if (row.when) line.title = row.when;
+            line.append(el('p', 'parley-system-text', row.text), time(row.time, row.when));
+            if (row.actions.length && act) {
+                const buttons = el('div', 'parley-system-actions');
+                for (const a of row.actions) { const b = button(a.label, 'parley-act', () => { try { act(a.id, { id: row.id, text: row.text }); } catch { /* the application's business */ } }); b.dataset.act = a.id; buttons.append(b); }
+                line.append(buttons);
+            }
+            return line;
         }
         if (row.type === 'now') {
             const holder = el('div', 'parley-now'); holder.dataset.live = String(row.live);
@@ -371,6 +427,14 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             const b = fileButton(item.file); if (b) row2.append(b);
             if (row2.childNodes.length) bubble.append(row2);
             if (item.outside) bubble.append(el('p', 'parley-outside', item.outside));
+        }
+        for (const f of item.files ?? []) {
+            const row2 = el('div', 'parley-file'); row2.dataset.attached = 'true';
+            row2.append(el('span', 'parley-name', f.name));
+            if (f.size) row2.append(el('span', 'parley-size', f.size));
+            if (f.shown) row2.append(el('span', 'parley-path', f.shown));
+            const b = fileButton(f); if (b) row2.append(b);
+            bubble.append(row2);
         }
         if (item.choices.length > 0) {
             const choices = el('div', 'parley-choices');
@@ -486,14 +550,47 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         typing = document.activeElement === box;
         if (typing) event.preventDefault();
     };
-    for (const zone of [form, quickRow, heard, thread]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
+    for (const zone of [form, quickRow, heard, thread, pendingRow]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
     const stayIn = () => { if (typing && document.activeElement !== box) box.focus({ preventScroll: true }); typing = false; };
-    const sendBox = () => {
-        const text = box.value.trim();
-        if (!text) return;
-        box.value = ''; grow();
-        void say(text);
+    const paintPending = () => {
+        pendingRow.hidden = pending.length === 0;
+        /* Where they go, and who opens them: said where they are chosen. */
+        const where = el('p', 'parley-where', said(words, 'attach-where'));
+        pendingRow.replaceChildren(where, ...pending.map((file, i) => {
+            const chip = el('span', 'parley-pending'); chip.append(el('span', 'parley-name', file.name), el('span', 'parley-size', sizeText(file.size)));
+            const x = button('\u00d7', 'parley-unattach', () => { pending = pending.filter((_, j) => j !== i); paintPending(); stayIn(); });
+            x.title = said(words, 'remove-file', { name: file.name }); x.setAttribute('aria-label', x.title);
+            chip.append(x);
+            return chip;
+        }));
     };
+    let uploading = false;
+    const sendBox = async () => {
+        const text = box.value.trim();
+        if ((!text && pending.length === 0) || uploading) return;
+        if (pending.length === 0) { box.value = ''; grow(); void say(text); return; }
+        /* The files go first, one after the other; the message only once they all went. */
+        uploading = true; go.disabled = clip.disabled = true;
+        problem.hidden = false; problem.dataset.kind = 'sending'; problem.textContent = said(words, 'sending-files');
+        const files = [];
+        try {
+            for (const file of pending) files.push(await attach.upload(file, file.name));
+        } catch (error) {
+            problem.dataset.kind = ''; problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) });
+            uploading = false; go.disabled = clip.disabled = false;
+            return;
+        }
+        problem.hidden = true; problem.dataset.kind = '';
+        const sent = await say(text, undefined, files);
+        uploading = false; go.disabled = clip.disabled = false;
+        if (sent) { pending = []; paintPending(); if (box.value.trim() === text) { box.value = ''; grow(); } }
+    };
+    clip.addEventListener('click', () => { if (attach?.upload) picker.click(); });
+    picker.addEventListener('change', () => {
+        pending = [...pending, ...picker.files].slice(0, FILES_MAX);
+        picker.value = '';
+        paintPending();
+    });
     /* ---- dictation ---- */
     let voice = speaking?.listen ? speaking : null;
     let stopping = null;
@@ -515,7 +612,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if (on) { heard.hidden = false; heard.dataset.state = hearing || 'listening'; heardText.textContent = writing ? said(words, 'voice-wait') : said(words, `voice-${hearing || 'listening'}`); }
         else if (!hush) heard.hidden = true;
     };
-    const sendWritten = () => { clearTimeout(writing); writing = null; sendBox(); paintVoice(); };
+    const sendWritten = () => { clearTimeout(writing); writing = null; void sendBox(); paintVoice(); };
     const quiet = () => {
         const was = stopping; stopping = null;
         try { was?.(); } catch { /* the application's business */ }
@@ -529,7 +626,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             box.value = joined(box.value, text).slice(0, TEXT_MAX); grow();
             box.scrollTop = box.scrollHeight;
             if (writing) { sendWritten(); return; }
-            if (auto) { clearTimeout(autoTimer); autoTimer = setTimeout(sendBox, AUTO_SEND_MS); }
+            if (auto) { clearTimeout(autoTimer); autoTimer = setTimeout(() => void sendBox(), AUTO_SEND_MS); }
         },
         state: (word) => {
             if (!stopping) return;
@@ -576,7 +673,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             paintVoice(); stayIn();
             return;
         }
-        sendBox();
+        void sendBox();
         stayIn();
     });
     box.addEventListener('keydown', (event) => { if (sends(event, enter, keyboard)) { event.preventDefault(); form.requestSubmit(); } });
@@ -651,6 +748,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         get voice() { return voice; }, set voice(v) { if (!v?.listen) quiet(); voice = v?.listen ? v : null; paintVoice(); },
         get replies() { return replies; }, set replies(list) { replies = Array.isArray(list) ? list : []; paintQuick(); },
         get listening() { return Boolean(stopping); },
+        get attach() { return attach; }, set attach(a) { attach = a?.upload ? a : undefined; clip.hidden = !attach; if (!attach) { pending = []; paintPending(); } },
         destroy() { gone = true; quiet(); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
     };
 }

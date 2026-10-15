@@ -158,3 +158,30 @@
 .parley .parley-replies .parley-reply[data-send="false"] { border-style: dashed; }
 .parley .parley-replies-more { flex: none; margin: 2px; color: var(--parley-dim); background: transparent; }
 .parley .parley-replies-more[hidden] { display: none; }
+
+/* ---- lines of the application: what happened around the agent ---- */
+.parley-system { align-self: stretch; display: flex; flex-wrap: wrap; align-items: baseline; justify-content: center; gap: .3em .7em; padding: .45em .8em; margin: .1em 0; border-top: 1px solid var(--parley-line); border-bottom: 1px solid var(--parley-line); color: var(--parley-dim); font-size: .9em; text-align: center; }
+.parley-system-text { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.parley-system[data-level="warn"] .parley-system-text::before, .parley-system[data-level="bad"] .parley-system-text::before { content: ""; display: inline-block; width: .55em; height: .55em; border-radius: 50%; margin-right: .45em; background: var(--parley-ask); vertical-align: .05em; }
+.parley-system[data-level="bad"] .parley-system-text::before { background: var(--parley-live); }
+.parley-system-actions { flex-basis: 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: .4em; }
+.parley .parley-act { min-height: 2.2em; padding: 0 .85em; border-radius: 999px; font-size: .95em; color: var(--parley-text); }
+.parley .parley-act:first-child { border-color: var(--parley-action); color: var(--parley-action); font-weight: 650; }
+
+/* ---- files the person attaches ---- */
+.parley .parley-attach { flex: none; min-width: 2.9em; padding: 0 .6em; display: inline-flex; align-items: center; justify-content: center; color: var(--parley-text); }
+.parley .parley-attach[hidden] { display: none; }
+.parley-attached { display: flex; flex-wrap: wrap; gap: .4em; margin-bottom: calc(var(--parley-gap) * -.4); }
+.parley-attached[hidden] { display: none; }
+.parley-pending { display: inline-flex; align-items: center; gap: .2em; max-width: 100%; padding: 0 0 0 .8em; border: 1px solid var(--parley-line); border-radius: 999px; background: var(--parley-person); font-size: .9em; }
+.parley-pending .parley-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; font-weight: 600; }
+.parley .parley-unattach { min-height: 2.1em; min-width: 2.3em; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--parley-dim); font-size: 1.1em; }
+.parley-file[data-attached="true"] .parley-name::before { content: "\1F4CE  "; }
+.parley-problem[data-kind="sending"] { color: var(--parley-dim); }
+/* A file of the person: its name cut short before its Open button is pushed below it. */
+.parley-file[data-attached="true"] { flex-wrap: nowrap; }
+.parley-file[data-attached="true"] .parley-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parley-file[data-attached="true"] .parley-open { flex: none; margin-left: auto; }
+.parley-size { flex: none; font-size: .8em; color: var(--parley-dim); white-space: nowrap; }
+.parley-pending .parley-size { margin-left: .4em; }
+.parley-where { flex-basis: 100%; font-size: .8em; color: var(--parley-dim); }

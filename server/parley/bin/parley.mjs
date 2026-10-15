@@ -2,7 +2,7 @@
 /* THE COMMAND: the six verbs for any agent that can run a command. It writes
  * the same files as the MCP server, through the same code (server/).
  *
- *   parley read | tell | ask | show | doing | status | --help
+ *   parley read [--all] | tell | ask | show | doing | status | --help
  *
  * Exit codes: 0 done; 1 refused (said on standard error); 2 no folder found;
  * 64 not understood. */
@@ -12,7 +12,10 @@ import { bridge, findFolder, STATES, VERSION, FOLDER } from '../server/parley-mc
 
 export const HELP = `parley: talk with the person you work for. They read and answer on their own screen, not in this terminal.
 
-  parley read                          read what they wrote since you last read, answers included
+  parley read                          read what they wrote since you last read, answers and the
+                                       files they attached included
+  parley read --all                    the whole exchange, both sides, oldest first: to pick up the
+                                       thread after a restart
   parley tell "text"                   tell them something: where you are, what you did, what you found
   parley ask "question" [choice ...]   ask them something; give the answers they can pick when you can
   parley show path ["note"]            point them to a file you made, so that they can open it
@@ -54,7 +57,7 @@ export function run(argv, { env = process.env, cwd = process.cwd(), stdin = () =
     const verbs = bridge(folder);
     try {
         let said;
-        if (verb === 'read') said = verbs.read();
+        if (verb === 'read') { if (rest.some((a) => a !== '--all')) return { code: 64, out: '', err: 'read takes nothing, or --all.\n' }; said = verbs.read({ all: rest.includes('--all') }); }
         else if (verb === 'tell') said = verbs.tell(text(rest.join(' ')));
         else if (verb === 'ask') said = verbs.ask(text(rest[0]), rest.slice(1));
         else if (verb === 'doing') said = verbs.doing(text(rest.join(' ')));

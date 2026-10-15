@@ -10,6 +10,7 @@ import { readTools } from '../server/tools.mjs';
 
 const TOOLS = readTools(JSON.stringify([
     { id: 'tool', label: 'Tool', command: ['tool', '--go'], memoryMb: 1024, install: [['sudo', 'install-tool']] },
+    { id: 'again', label: 'Again', command: ['again'], resume: ['again', '--continue'], memoryMb: 1024, install: [] },
 ]));
 
 /* A VM manager that records every command and answers what the test decides. */
@@ -89,7 +90,7 @@ test('opening wakes a stopped machine, and the terminal runs the tool alone in t
     b.calls.length = 0;
     const said = [];
     const argv = await all.open('demo', (x) => said.push(x));
-    assert.deepEqual(b.calls, ['info clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls, ['info clv-demo', 'start clv-demo', 'exec clv-demo -- test -d /'], 'started, and asked to answer before a terminal is opened into it');
     assert.deepEqual(said, ['Waking the machine...']);
     assert.deepEqual(argv.slice(0, 14), ['vmm', 'vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'new-session', '-A', '-s', SESSION, '-c', '/work']);
     assert.deepEqual(argv.slice(14, 16), ['tool', '--go']);
@@ -412,4 +413,99 @@ test('without a ready-made machine, the build is exactly what it was', async (t)
     await all.built;
     assert.equal(b.calls[0], 'launch clv-demo 1024');
     assert.ok(!b.calls.some((c) => c.startsWith('clone') || c.includes('cloud-init') || c.includes('which')));
+});
+
+test('a machine the VM manager is starting already is waited for, not started again; one that runs but does not answer yet is said, to be tried again', async (t) => {
+    const b = bench(t, { exec: (argv) => (argv.slice(-3).join(' ') === 'test -d /' && b.silent ? { code: 255, stdout: '', stderr: 'ssh: connect' } : undefined) });
+    const all = b.make({ pollMs: 10, startingMs: 2000, answerMs: 60 });
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    b.states.set(vmName('demo'), 'Starting');
+    setTimeout(() => b.states.set(vmName('demo'), 'Running'), 80);
+    b.calls.length = 0;
+    const said = [];
+    await all.open('demo', (x) => said.push(x));
+    assert.deepEqual(said, ['Its machine is starting...']);
+    assert.equal(b.calls.filter((c) => c.startsWith('start')).length, 0, 'not started a second time');
+    assert.ok(b.calls.filter((c) => c.startsWith('info')).length >= 2, 'its state was asked until it ran');
+    /* Started now, but its system is not up yet: refused, and the page is told it may try again. */
+    b.states.set(vmName('demo'), 'Stopped');
+    b.silent = true;
+    const refused = await all.open('demo').catch((e) => e);
+    assert.equal(refused.status, 504); assert.equal(refused.retry, true);
+    assert.match(refused.message, /runs but does not answer yet/);
+    b.silent = false;
+    /* Still starting after the time it is given: the same. */
+    b.states.set(vmName('demo'), 'Starting');
+    const still = await b.make({ pollMs: 10, startingMs: 50 }).open('demo').catch((e) => e);
+    assert.deepEqual([still.status, still.retry], [504, true]);
+});
+
+test('its tool takes up its last session when it starts -- never at its first start on a disk, and not when the owner chose to start fresh', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'again' });
+    await all.built;
+    const tool = async () => { const argv = await all.open('demo'); all.left('demo'); return argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')); };
+    assert.deepEqual(await tool(), ['again'], 'its first start: no session to take up');
+    assert.deepEqual(await tool(), ['again', '--continue']);
+    assert.equal(all.list()[0].resumes, true);
+    assert.deepEqual(all.tools().map((x) => [x.id, x.resumes]), [['tool', false], ['again', true]]);
+    all.setResume('demo', false);
+    assert.equal(all.get('demo').resume, false);
+    assert.deepEqual(await tool(), ['again'], 'started fresh, as the owner chose');
+    all.setResume('demo', true);
+    assert.equal(all.get('demo').resume, undefined, 'the default is not written');
+    assert.deepEqual(await tool(), ['again', '--continue']);
+    assert.throws(() => all.setResume('demo', 'yes'), /true/);
+    assert.throws(() => all.setResume('nobody', true), /No such conversation/);
+    /* Built again: a new disk, no session on it. */
+    b.states.delete(vmName('demo'));
+    await all.rebuild('demo'); await all.built;
+    assert.deepEqual(await tool(), ['again']);
+    /* A tool without a way to take up its session always starts the same way. */
+    all.create({ name: 'plain', tool: 'tool' });
+    await all.built;
+    for (let i = 0; i < 2; i++) { const argv = await all.open('plain'); all.left('plain'); assert.deepEqual(argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')), ['tool', '--go']); }
+    assert.throws(() => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], resume: 'x --continue', memoryMb: 1024, install: [] }])), /resume must be an argument vector/);
+});
+
+test('a terminal that does not come is repaired: its channel closed, its tmux kept when it answers, made again when it does not; refused when that cannot help', async (t) => {
+    let session = 0; let answers = true;
+    const b = bench(t, { exec: (argv) => (argv.includes('list-panes') ? { code: session, stdout: '', stderr: '' } : argv.slice(-3).join(' ') === 'test -d /' && !answers ? { code: 255, stdout: '', stderr: 'timed out' } : undefined) });
+    const all = b.make();
+    const dropped = [];
+    all.drop = (name) => dropped.push(name);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    b.calls.length = 0;
+    assert.deepEqual(await all.repairTerminal('demo'), { session: 'kept' }, 'the tool goes on');
+    assert.deepEqual(dropped, ['demo']);
+    assert.equal(b.calls.some((c) => c.includes('kill-server')), false);
+    session = 1;
+    assert.deepEqual(await all.repairTerminal('demo'), { session: 'renewed' });
+    assert.ok(b.calls.includes('exec clv-demo -- tmux -L clavarium kill-server'));
+    answers = false;
+    await assert.rejects(all.repairTerminal('demo'), /does not answer: its terminal cannot be repaired from here/);
+    b.states.set(vmName('demo'), 'Stopped');
+    await assert.rejects(all.repairTerminal('demo'), /not running \(Stopped\)/);
+    await assert.rejects(all.repairTerminal('nobody'), /No such conversation/);
+});
+
+test('a restart, a new size or a machine built again is told, in words for its chat, with whether the tool runs again', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    const told = [];
+    all.renewed = (name, text, running) => told.push([name, text, running]);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    assert.deepEqual(told, [], 'a first build is no restart');
+    await all.restart('demo'); await all.restarted;
+    assert.deepEqual(told.at(-1), ['demo', 'Its machine was restarted: the tool started again.', true]);
+    await all.resize('demo', { memoryMb: 2048 }); await all.resized;
+    assert.deepEqual(told.at(-1), ['demo', 'Its machine was restarted with 1024 MB of memory, 8 GB of disk: the tool started again.', true]);
+    b.states.delete(vmName('demo'));
+    await all.rebuild('demo'); await all.built;
+    assert.match(told.at(-1)[1], /^Its machine was built again/);
+    assert.equal(told.at(-1)[2], true);
 });

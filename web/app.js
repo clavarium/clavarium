@@ -246,16 +246,37 @@
     const sendSize = () => {
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
     };
-    const disconnect = () => { wanted = false; clearTimeout(slowTimer); socket?.close(); socket = undefined; stopVoice?.(); };
-    const SLOW_OPEN_MS = 12_000;
-    let slowTimer;
+    /* WAITING FOR A TERMINAL. Some seconds without it: what is known of its
+       machine is said (`look`), never with an offer to restart it while it
+       merely starts. Still nothing though its machine runs (`repair`): the
+       server repairs it by itself, and only if it still does not come is a
+       restart offered, in plain words. A restart is offered too when the
+       wait is far longer than a start takes (`offer`), or its machine is not
+       well. A machine that is starting is tried again by itself (`retry`).
+       The proof that the terminal is there is how much comes through it: tmux
+       draws the whole screen as soon as a screen attaches -- far more than
+       the few bytes a channel that hangs gives back (its own echo of what the
+       page sends) or than the bridge's own word (FOCUS_REPORTS). Nothing of
+       it is read. Times can be shortened by a test (window.clavariumTimes). */
+    const PROOF_BYTES = 32;
+    const FOCUS_REPORTS = '\x1b[?1004h';
+    const times = () => ({ look: 12_000, repair: 30_000, offer: 180_000, retry: 3000, ...(window.clavariumTimes ?? {}) });
+    let slowTimers = [];
+    const clearSlow = () => { for (const timer of slowTimers) clearTimeout(timer); slowTimers = []; };
+    /* When this wait began (kept across the tries made by the page itself), and whether the server repaired it meanwhile. */
+    let waitingSince = 0;
+    let repairedFor = '';
+    const disconnect = () => { wanted = false; clearSlow(); socket?.close(); socket = undefined; stopVoice?.(); };
 
-    function connect() {
+    /* `again`: a try made by the page itself, within the same wait. */
+    function connect(options) {
+        const again = options?.again === true;
         disconnect();
         if (!NAME.test(current)) return;
         const name = current;
+        if (!again || !waitingSince) { waitingSince = Date.now(); repairedFor = ''; }
         wanted = true;
-        notice.hidden = true;
+        if (!again) notice.hidden = true;
         say('connecting', 'connecting');
         fit.fit();
         const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -263,16 +284,26 @@
         const mine = new WebSocket(`${scheme}://${location.host}${where}`);
         socket = mine;
         mine.binaryType = 'arraybuffer';
-        let failure = ''; let machineGone = false;
+        let failure = ''; let machineGone = false; let retry = false;
+        let output = false; let came = 0;
+        const T = times();
+        const waited = Date.now() - waitingSince;
+        const later = (ms, run) => slowTimers.push(setTimeout(() => { if (socket === mine && !output && name === current) run(); }, Math.max(0, ms - waited)));
         /* An opening that takes long: what is known of the machine is said under the wait. */
-        clearTimeout(slowTimer);
-        slowTimer = setTimeout(() => { if (socket === mine && state.dataset.state !== 'live') void explainMachine(true); }, SLOW_OPEN_MS);
+        later(T.look, () => void explainMachine(true));
+        /* Repaired already in this wait, and still nothing: said plainly, with the restart. */
+        if (repairedFor === name) slowTimers.push(setTimeout(() => { if (socket === mine && !output && name === current) stuck(name); }, T.repair));
+        else later(T.repair, () => void repairTerminal(name));
+        later(T.offer, () => void explainMachine(true, true));
         /* Open means the bridge answered, not that the machine is awake yet. */
         mine.onopen = () => { say('opening', 'connecting'); focusTerminal(); };
         mine.onmessage = (event) => {
             /* Binary is terminal output. Text is the bridge talking to the page. */
             if (typeof event.data !== 'string') {
-                /* Output is the proof the terminal is there: "waking" is over. */
+                /* Output is the proof the terminal is there: "waking" is over, and so is the wait. */
+                const bytes = new Uint8Array(event.data);
+                if (!output && !(bytes.length === FOCUS_REPORTS.length && String.fromCharCode(...bytes) === FOCUS_REPORTS)) came += bytes.length;
+                if (!output && came >= PROOF_BYTES) { output = true; clearSlow(); waitingSince = 0; repairedFor = ''; }
                 if (state.dataset.state !== 'live') {
                     say('live', 'live');
                     notice.hidden = true;
@@ -280,7 +311,7 @@
                        after a re-attach the first typed line was misplaced. */
                     setTimeout(() => { fit.fit(); sendSize(); }, 300);
                 }
-                terminal.write(new Uint8Array(event.data));
+                terminal.write(bytes);
                 return;
             }
             let message;
@@ -295,10 +326,19 @@
                 say(String(message.text), 'connecting');
                 /* In the middle of the screen too: a small word in the header is
                    not enough for a wait that can last minutes (a tester waited
-                   three, with nothing else to read). */
-                show(`${message.text} This can take a few minutes: the machine was stopped.`);
+                   three, with nothing else to read). One sentence, with the time
+                   it has taken so far, said again each second. */
+                const said = String(message.text);
+                const since = waitingSince || Date.now();
+                const tell = () => {
+                    const s = Math.floor((Date.now() - since) / 1000);
+                    $('notice-text').textContent = `${said} ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} so far; a start usually takes a minute or two. Its work, its files and its chat are kept.`;
+                };
+                show(''); tell();
+                const ticking = setInterval(() => { if (socket !== mine || output || notice.hidden) { clearInterval(ticking); return; } tell(); }, 1000);
+                slowTimers.push(ticking);
             }
-            if (message.type === 'error') { failure = String(message.text); machineGone = message.gone === true; }
+            if (message.type === 'error') { failure = String(message.text); machineGone = message.gone === true; retry = message.retry === true; }
         };
         mine.onclose = (event) => {
             if (socket !== mine || !wanted) return;       /* we moved on, or closed it ourselves */
@@ -313,7 +353,15 @@
                 /* Its machine is gone (a backup put back elsewhere, a machine
                    deleted by hand): the owner can have it built again. */
                 if (machineGone && !DEVICE) show(`${failure} What was on its disk is lost; its folders are kept.`, 'Build its machine again', () => void rebuild());
-                else { show(failure || 'The terminal could not be opened.', 'Try again', connect); void explainMachine(false); }
+                /* Its machine is starting: tried again by itself, for as long as a start may take. */
+                else if (retry && Date.now() - waitingSince < T.offer) {
+                    say('starting', 'connecting');
+                    show(`${failure} The terminal opens by itself as soon as it is there.`, 'Try now', () => connect({ again: true }));
+                    $('notice-spin').hidden = false;
+                    slowTimers.push(setTimeout(() => { if (name === current && (!socket || socket === mine)) connect({ again: true }); }, T.retry));
+                    socket = undefined; wanted = true;
+                    return;
+                } else { show(failure || 'The terminal could not be opened.', 'Try again', connect); void explainMachine(false, Date.now() - waitingSince >= T.offer); }
                 /* On a device this is often the owner closing the conversation:
                    asking again says so in plain words, instead of an error. */
                 if (DEVICE) void refresh();
@@ -474,6 +522,8 @@
         const usable = Boolean(c) && c.phase === 'ready';
         $('archive').hidden = !c;
         $('files-open').hidden = $('share').hidden = !usable;
+        /* Given its chat alone: the files of the chat open from the chat; Files holds only what was given to the device itself. */
+        if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
         $('sleep').hidden = !usable || c.asleep === true;
         $('restart').hidden = DEVICE || !usable;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
@@ -540,7 +590,7 @@
     const post = async (path, body) => {
         const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
         const j = await r.json().catch(() => ({}));
-        if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind });
+        if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind, retry: j.retry === true });
         return j;
     };
     function paint() {
@@ -1032,27 +1082,85 @@
         const serious = h && (h.level === 'warn' || h.level === 'bad') && c.phase === 'ready' && !c.asleep;
         const key = serious ? `${current}:${h.problems.map((p) => p.text).join('|')}` : '';
         $('health-strip').hidden = !serious || key === healthDismissed;
+        /* Running, but not well: the dot beside "live" says so too. */
+        state.dataset.health = serious ? h.level : '';
         if (!serious) return;
         $('health-strip').dataset.level = h.level;
-        $('health-text').textContent = h.problems.filter((p) => p.level === 'warn' || p.level === 'bad').map((p) => p.text).join(' ');
+        const shown = h.problems.filter((p) => p.level === 'warn' || p.level === 'bad');
+        $('health-text').textContent = shown.map((p) => p.text).join(' ');
+        /* What can be done, from here: more memory where memory is short, a restart, its terminal when the chat is in front. */
+        $('health-memory').hidden = DEVICE || !shown.some((p) => p.kind === 'memory');
         $('health-restart').hidden = DEVICE;
+        $('health-terminal').hidden = !simple || noTerminal();
         $('health-dismiss').onclick = () => { healthDismissed = key; $('health-strip').hidden = true; };
     }
+    /* "More memory...": its memory, ready to be chosen -- the next size up already picked, applied only once asked. */
+    async function openMemory() {
+        if (DEVICE || !current) return;
+        await openAccess(false);
+        openChapter('machine');
+        const memory = $('machine-memory');
+        const now = conversations.find((x) => x.name === current)?.memoryMb ?? 0;
+        const bigger = [...memory.options].map((o) => Number(o.value)).find((mb) => mb > now);
+        if (bigger) memory.value = String(bigger);
+        memory.scrollIntoView({ block: 'center' });
+        memory.focus({ preventScroll: true });
+    }
+    /* Its terminal, asked for: never shown by itself in place of its chat. */
+    function seeTerminal() { simple = false; paintSimple(); paintHealth(); focusTerminal(); }
+    $('health-memory').addEventListener('click', () => { void openMemory(); });
+    $('health-terminal').addEventListener('click', seeTerminal);
     /* The page has waited, or the terminal failed: the machine is looked at
-       (never woken), and what is seen is said under the notice. */
-    async function explainMachine(waiting) {
+       (never woken), and what is seen is said under the notice. A restart is
+       offered only when its machine is not well, or when the wait is far
+       longer than a start takes (`long`): never while it merely starts. */
+    async function explainMachine(waiting, long = false) {
         if (DEVICE || !home || !current) return;
         const name = current;
         let record;
         try { record = await post(`${API}/conversations/${encodeURIComponent(name)}/health`, {}); } catch { return; }
-        if (name !== current || notice.hidden) return;
+        if (name !== current) return;
         const c = conversations.find((x) => x.name === name);
         if (c) c.health = record;
-        const shown = healthLines($('notice-health'), record, { all: true });
-        $('notice-health').hidden = false;
-        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || waiting));
+        /* Nothing over the screen to say it under: a long wait still says so. */
+        if (notice.hidden && !long) return;
+        if (notice.hidden) show('Its terminal still does not come.');
+        /* Waking it is what the page is doing: "it is asleep" would say the opposite. */
+        const said = waiting && record ? { ...record, problems: (record.problems ?? []).filter((p) => p.kind !== 'state') } : record;
+        const shown = healthLines($('notice-health'), said, { all: true });
+        $('notice-health').hidden = $('notice-health').childElementCount === 0;
+        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || long));
         $('notice-restart').onclick = () => restartMachine(false);
-        if (!shown && waiting) $('notice-text').textContent = `${$('notice-text').textContent} Still waiting.`;
+        const text = $('notice-text').textContent.replace(/ This takes much longer than a start usually does\.$/, '');
+        if (long) $('notice-text').textContent = `${text} This takes much longer than a start usually does.`;
+        void shown;
+    }
+    /* ITS TERMINAL DOES NOT COME, THOUGH ITS MACHINE RUNS: the server is asked
+       to repair it (its channel closed, its tmux looked at), then it is
+       opened again. Its machine starting: nothing to repair, the wait goes on. */
+    async function repairTerminal(name) {
+        if (!home || name !== current) return;
+        say('repairing', 'connecting');
+        show('Its terminal does not come, though its machine runs: it is being repaired...');
+        $('notice-spin').hidden = false;
+        try { await post(DEVICE ? `${API}/terminal/repair?${new URLSearchParams({ c: name })}` : `${API}/conversations/${encodeURIComponent(name)}/terminal/repair`, {}); }
+        catch (error) {
+            if (name !== current) return;
+            if (error.retry) { show('Its machine is starting: its terminal comes as soon as it is there.'); $('notice-spin').hidden = false; return; }
+            stuck(name, error.message);
+            return;
+        }
+        if (name !== current) return;
+        repairedFor = name;
+        connect({ again: true });
+    }
+    /* Repaired, and it still does not come: what to do, said plainly. */
+    function stuck(name, why) {
+        if (name !== current) return;
+        say('no terminal', 'ended');
+        show(`${why ? `${why} ` : ''}Its terminal does not come, though its machine runs, and repairing it did not help.${DEVICE ? ' Tell its owner: restarting its machine usually brings it back.' : ' Restarting its machine usually brings it back: the tool is stopped and started again; its files and its chat stay.'}`, 'Try again', connect);
+        $('notice-restart').hidden = DEVICE;
+        $('notice-restart').onclick = () => restartMachine(false);
     }
     /* RESTARTING ITS MACHINE: asked first, in words, over the terminal. */
     async function restartMachine(confirmed) {
@@ -1108,6 +1216,16 @@
             memory.dataset.of = of;
         }
         $('machine-size').hidden = DEVICE || !here || here.phase !== 'ready';
+        /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
+        $('resume-box').hidden = DEVICE || !here?.resumes;
+        for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
+    }
+    for (const b of $('resume-on').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/resume`, { on: b.dataset.on === 'true' }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
     }
     $('machine-size').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1166,6 +1284,7 @@
     }
     function paintSimple() {
         $('simple').hidden = !simple;
+        $('health-terminal').hidden = !simple || noTerminal();
         $('room').toggleAttribute('data-simple', simple);
         if (!simple) $('room').removeAttribute('data-chat');
         $('simple-toggle').setAttribute('aria-pressed', String(simple));
@@ -1243,8 +1362,12 @@
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
-            load: () => fetch(talkPath(name)).then((r) => r.json()),
-            send: (text, answers) => post(talkPath(name), { text, answers }),
+            load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines),
+            send: (text, answers, files) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => f.path) } : {}) }),
+            /* The buttons of a line of the machine: what this screen may do. */
+            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); },
+            /* Files attached to a message: wherever the chat may be written in. */
+            ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
@@ -1257,6 +1380,22 @@
         });
         const replies = await loadReplies();
         if (thread && threadOf === name) thread.replies = replies;
+    }
+    /* THE LINES OF ITS MACHINE in the chat: their buttons, as this screen may
+       use them -- its memory and a restart are the owner's; its terminal, a
+       screen's that was given it. */
+    const ACTIONS = { memory: 'More memory...', restart: 'Restart...', terminal: 'See the terminal' };
+    function machineLines(data) {
+        if (!Array.isArray(data?.messages)) return data;
+        const may = (id) => (id === 'terminal' ? !noTerminal() : (id === 'memory' || id === 'restart') && !DEVICE);
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[id] })) } : m)) };
+    }
+    /* A file the person attaches: sent first, put where the tool finds it; the message then carries its path. */
+    async function attachToChat(name, file) {
+        const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/talk/file?${new URLSearchParams({ name: file.name, ...(DEVICE ? { c: name } : {}) })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.error || 'The file could not be sent.');
+        return j;
     }
     /* Opening a conversation that talks through the app shows its chat first;
        its terminal is one click away. Any other opens as this device chose. */
@@ -2334,7 +2473,7 @@
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const attachedHere = here?.resources ?? [];
-        const mine = [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere,
+        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere,
             /* On a device: what it was given for itself, whatever the conversation. */
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
@@ -2424,7 +2563,7 @@
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
         /* From the terminal, a way to the folder it sits in. */
-        $('preview-where').hidden = Boolean(from) || !$('files').hidden;
+        $('preview-where').hidden = Boolean(from) || !$('files').hidden || noTerminal();
         $('preview-where').onclick = async () => {
             closePreview();
             filesOf = tab; filesAt = inner.split('/').slice(0, -1).join('/');

@@ -1,5 +1,6 @@
 /* THE CATALOGUE OF WHAT A CONVERSATION CAN RUN. Adding a tool is an entry in
-   config/tools.json, not code: a label, the command that starts it, and the
+   config/tools.json, not code: a label, the command that starts it (and,
+   when it has one, the command that starts it on its last session), and the
    steps that install it in a fresh VM.
  *
  * Every step is an argument vector. No step is a shell line: a recipe that
@@ -75,9 +76,13 @@ export function readTools(text) {
             if (!domains(t.signin.senders) || !domains(t.signin.links)) throw new Error(`${t.id}: signin needs "senders" and "links", lists of domain names`);
             signin = Object.freeze({ senders: Object.freeze([...t.signin.senders]), links: Object.freeze([...t.signin.links]) });
         }
+        /* Optional: the command that starts it taking up its last session
+           ("claude --continue"); used instead of `command` once it has run on
+           its disk, unless the owner chose to start it fresh. */
+        if (t.resume !== undefined && (!isArgv(t.resume) || t.resume.includes(';'))) throw new Error(`${t.id}: resume must be an argument vector`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
-        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
+        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

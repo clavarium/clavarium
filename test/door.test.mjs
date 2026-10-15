@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateKeyPairSync, sign } from 'node:crypto';
@@ -36,7 +36,7 @@ async function bench(t) {
         const opened = await device('/c/api/session', { body: { device: id, signature } });
         return { id, cookie: opened.headers.get('set-cookie').split(';')[0], shared, raw: opened.headers.get('set-cookie') };
     }
-    return { base, origin, operator, device, pairPhone };
+    return { base, origin, operator, device, pairPhone, dir };
 }
 
 test('a shared conversation: the pairing address carries the code in its fragment, with a QR code of it', async (t) => {
@@ -213,8 +213,8 @@ test('a conversation shared in parts: what was not given is refused by the serve
     assert.equal(await status(chatOnly, '/conversations/family/talk', { text: 'Hello from Dad.' }), 201);
     assert.equal(await status(chatOnly, '/conversations/family/talk/remind', {}), 200);
     assert.equal(await status(chatOnly, '/talk/words?lang=fr'), 200);
-    /* Its files: a file the tool shows in the chat opens from there. */
-    assert.equal(await status(chatOnly, '/files?r=photos&p='), 200);
+    /* Not its files: those of the chat only (see below). */
+    assert.equal(await status(chatOnly, '/files?r=photos&p='), 403);
     /* Never the owner's switches, whatever it sends. */
     assert.equal(await status(chatOnly, '/conversations/family/talk', { on: false }), 400);
     assert.equal(await status(chatOnly, '/conversations/family/talk/invite', { lang: 'en' }), 404);
@@ -274,4 +274,51 @@ test('a device paired before a conversation was shared in parts keeps what it ha
     server = await start();
     t.after(() => server.close());
     assert.deepEqual(await devices(server), { Phone: 'conversation:family x', Tablet: 'conversation:work x' });
+});
+
+test('a device given the chat alone has the files OF THE CHAT, both ways, and nothing more: no listing, no import, no file of the machine -- refused by the server', async (t) => {
+    const b = await bench(t);
+    assert.equal((await b.operator('/api/conversations/family/talk', { on: true })).status, 200);
+    const work = join(b.dir, 'work', 'family');
+    writeFileSync(join(work, 'report.txt'), '38 orders'); writeFileSync(join(work, 'private.txt'), 'not shown');
+    /* The tool shows two files in the chat: one of its work folder, one of an attached folder. */
+    const at = new Date().toISOString();
+    appendFileSync(join(work, '.parley', 'from-agent.jsonl'), `${JSON.stringify({ id: 's1', at, kind: 'show', path: '/work/report.txt', text: '' })}\n${JSON.stringify({ id: 's2', at, kind: 'show', path: '/resources/photos/beach.txt', text: '' })}\n`);
+    const dad = await b.pairPhone([{ asset: 'conversation:family', rights: 'rw' }]);
+    const both = await b.pairPhone([{ asset: 'conversation:family', rights: 'rwx' }]);
+    const get = (phone, path) => b.device(`/c/api/${phone.id}${path}`, { cookie: phone.cookie });
+    const put = (phone, path, body) => fetch(`${b.base}/c/api/${phone.id}${path}`, { method: 'POST', headers: { origin: b.origin, cookie: phone.cookie, 'content-type': 'application/octet-stream' }, body });
+    /* What the tool showed opens, from the chat. */
+    assert.equal(await (await get(dad, '/files/download?r=work&p=report.txt')).text(), '38 orders');
+    assert.equal((await get(dad, '/files/download?r=photos&p=beach.txt')).status, 200);
+    /* Nothing else: not another file, not a listing, not an import, not a file of the machine's disk. */
+    for (const path of ['/files/download?r=work&p=private.txt', '/files/page?r=work&p=private.txt', '/files?r=work&p=', '/files?r=photos&p=', '/files/machine?p=/work/private.txt']) assert.equal((await get(dad, path)).status, 403, path);
+    assert.equal((await put(dad, '/files/import?r=photos&p=&name=x.txt', 'x')).status, 403);
+    assert.equal(existsSync(join(b.dir, 'resources', 'photos', 'x.txt')), false);
+    /* A device given its terminal too has the conversation's files, as before. */
+    assert.equal((await get(both, '/files?r=work&p=')).status, 200);
+    assert.equal((await get(both, '/files/download?r=work&p=private.txt')).status, 200);
+    /* The other way: a file attached to a message, put where the tool finds it, announced with its path. */
+    const sent = await put(dad, '/conversations/family/talk/file?name=photo%20of%20dad.jpg', 'JPEG');
+    assert.equal(sent.status, 201);
+    const file = await sent.json();
+    assert.match(file.path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/photo of dad\.jpg$/);
+    assert.deepEqual([file.name, file.size], ['photo of dad.jpg', 4]);
+    assert.equal(readFileSync(join(work, file.path.slice('/work/'.length)), 'utf8'), 'JPEG');
+    assert.equal((await b.device(`/c/api/${dad.id}/conversations/family/talk`, { cookie: dad.cookie, body: { text: 'Here is the photo.', files: [file.path] } })).status, 201);
+    const told = readFileSync(join(work, '.parley', 'to-agent.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.deepEqual([told.text, told.files], ['Here is the photo.', [{ path: file.path, name: 'photo of dad.jpg', size: 4 }]]);
+    /* It opens from its message, on the device that sent it; nothing else of the bridge folder does. */
+    const inner = file.path.slice('/work/'.length);
+    assert.equal(await (await get(dad, `/files/download?r=work&p=${encodeURIComponent(inner)}`)).text(), 'JPEG');
+    assert.equal((await get(dad, '/files/download?r=work&p=.parley/to-agent.jsonl')).status, 403);
+    /* Only a file attached here first: no other path, no file that is not there. */
+    for (const files of [['/etc/passwd'], ['/work/report.txt'], [file.path.replace(/[0-9a-f]{8}-/, '00000000-')]]) {
+        assert.equal((await b.device(`/c/api/${dad.id}/conversations/family/talk`, { cookie: dad.cookie, body: { text: 'x', files } })).status, 400, files[0]);
+    }
+    /* A chat to read only attaches nothing. */
+    const reader = await b.pairPhone([{ asset: 'conversation:family', rights: 'r' }]);
+    assert.equal((await put(reader, '/conversations/family/talk/file?name=a.txt', 'a')).status, 403);
+    /* Its terminal is not its to repair. */
+    assert.equal((await b.device(`/c/api/${dad.id}/terminal/repair`, { cookie: dad.cookie, body: {} })).status, 403);
 });

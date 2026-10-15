@@ -97,7 +97,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -130,7 +130,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -158,9 +158,10 @@ const MAIL_EVERY_MS = 120_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs }) {
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
+    let repairTerminal = async () => { throw new Error('not ready'); };
     const asHost = runner(host);
     const vms = new Vms(asHost, host);
     const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
@@ -201,7 +202,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         origin: (headers) => (publicOrigin ? new URL(publicOrigin).origin : `http://${headers.host}`),
         qr: (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }),
     };
-    const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')) };
+    const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')), repair: (name) => repairTerminal(name) };
     const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms, grants });
     const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
@@ -269,12 +270,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     const talk = new Talk({ store: talkStore, words: new Store(`${dataDir}/talk-words.json`), vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+        ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         alert: (payload) => { void alerts.tell(payload); } });
+    /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
+    all.renewed = (name, text, running) => talk.renewed(name, text, running);
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
     const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
+    /* What is wrong with its machine is said in its chat too, where it happened. */
+    health.judged = (name, record) => talk.machine(name, record);
     /* A machine woken by an opening: its folders are looked at once it is up. */
     all.started = (name) => { void health.check(name); };
     /* What the VM manager says each machine has is what is recorded (a record
@@ -283,7 +289,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
     const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair: (name) => repairTerminal(name) });
     server.on('close', () => { stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
@@ -299,6 +305,14 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         deviceName: (headers, pairing, wanted) => deviceTerminal(devices, headers, pairing, wanted),
     });
     all.drop = (name) => bridge.drop(name);
+    /* A TERMINAL THAT DOES NOT COME, though its machine runs (asked by the
+       page once it has waited): repaired (conversations.mjs), then opened
+       again before the page comes back for it. */
+    repairTerminal = async (name) => {
+        const done = await all.repairTerminal(name);
+        await bridge.warm(name);
+        return { ...done, open: bridge.open(name) };
+    };
     /* The terminal of a running machine is opened before anybody asks: a
        conversation just built, and at start every conversation whose machine
        runs. A page then shows its terminal at once. */

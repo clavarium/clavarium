@@ -75,26 +75,29 @@ const PROBLEMS_MAX = 20;
 const TEXT_MAX = 300;
 
 /* The sentences the page shows, and how serious they are: 'ok', 'info',
-   'warn' (something to act on), 'bad' (the machine does not serve). */
+   'warn' (something to act on), 'bad' (the machine does not serve). Each
+   says what it is about (`kind`: state, answer, memory, disk, mount), and
+   `key` names it whatever its numbers: the same problem seen at the next
+   look has the same key (a chat says a problem once: see talk.mjs). */
 export function judge(record) {
     const problems = [];
-    const add = (level, text) => problems.push({ level, text });
+    const add = (level, kind, key, text) => problems.push({ level, kind, key, text });
     const s = record.state;
-    if (s === undefined) add('bad', 'Its machine no longer exists.');
-    else if (s === 'Starting' || s === 'Restarting') add('info', 'Its machine is starting.');
-    else if (s === 'Suspended') add('info', 'Its machine is asleep. It wakes when you open the conversation.');
-    else if (s === 'Stopped') add('info', 'Its machine is stopped. It starts when you open the conversation.');
-    else if (s !== 'Running') add('bad', `The VM manager says its machine is "${s}".`);
+    if (s === undefined) add('bad', 'state', 'gone', 'Its machine no longer exists.');
+    else if (s === 'Starting' || s === 'Restarting') add('info', 'state', 'starting', 'Its machine is starting.');
+    else if (s === 'Suspended') add('info', 'state', 'asleep', 'Its machine is asleep. It wakes when you open the conversation.');
+    else if (s === 'Stopped') add('info', 'state', 'stopped', 'Its machine is stopped. It starts when you open the conversation.');
+    else if (s !== 'Running') add('bad', 'state', `state:${s}`, `The VM manager says its machine is "${s}".`);
     if (s === 'Running') {
-        if (record.answering === false) add('bad', 'Its machine does not answer. Restarting it usually helps.');
-        if (record.oomKills > 0) add('warn', `It ran out of memory ${record.oomKills === 1 ? 'once' : `${record.oomKills} times`} since it started: a program was stopped by the system. Give it more memory (Machine).`);
-        if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
+        if (record.answering === false) add('bad', 'answer', 'silent', 'Its machine does not answer. Restarting it usually helps.');
+        if (record.oomKills > 0) add('warn', 'memory', `oom:${record.oomKills}`, `It ran out of memory${record.oomKills === 1 ? '' : ` ${record.oomKills} times`} since it started: a program in it was stopped. Its files are safe.`);
+        if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
-            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.02)) add('warn', `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.02)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
         }
-        for (const path of record.remounted ?? []) add('info', `${path} had come loose in the machine: it was mounted again.`);
-        for (const { path, why } of record.failed ?? []) add('bad', `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
-        for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', `${path} is not reachable in the machine.`);
+        for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
+        for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
+        for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', 'mount', `missing:${path}`, `${path} is not reachable in the machine.`);
     }
     const order = ['ok', 'info', 'warn', 'bad'];
     const level = problems.reduce((worst, p) => (order.indexOf(p.level) > order.indexOf(worst) ? p.level : worst), 'ok');
@@ -103,6 +106,8 @@ export function judge(record) {
 
 export class Health {
     #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #settleMs; #probeMs; #lookMs;
+    /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
+    judged = () => {};
 
     /* `settleMs`: how long a missing folder is given before it is mounted
        again (a machine that has just started may still be mounting it).
@@ -172,6 +177,7 @@ export class Health {
     #keep(name, record) {
         const kept = { ...record, ...judge(record) };
         this.#records.set(name, kept);
+        try { this.judged(name, kept); } catch { /* told, nothing more */ }
         return kept;
     }
 

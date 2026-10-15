@@ -9,7 +9,7 @@
  * PARLEY ANNOUNCES, THE APPLICATION DECIDES.
  *
  *   events, to `on(event)`          actions, called by the application
- *   person-wrote  {message, unread} say(text, answers)
+ *   person-wrote  {message, unread} say(text, answers, files)
  *   agent-said    {message}         read()
  *   agent-asked   {message}         invite(lang, options)  -> a text
  *   agent-showed  {message}
@@ -36,6 +36,8 @@ export const LISTED_MAX = 50;
 export const STEPS_MAX = 500;
 export const FILE_MAX = 2 * 1024 * 1024;
 export const STATES = ['working', 'waiting', 'done'];
+/* Files the person attaches to one message, at most. */
+export const FILES_MAX = 10;
 const KINDS = ['say', 'ask', 'show', 'status', 'doing'];
 const STEP = new Set(['status', 'doing']);
 const SERVER = fileURLToPath(new URL('../server/parley-mcp.mjs', import.meta.url));
@@ -46,6 +48,9 @@ const TEXTS = fileURLToPath(new URL('../ui/texts/', import.meta.url));
    a terminal, where a shell may be listening instead of an agent: no
    backquote, no single quote, nothing a shell would run or wait on. */
 export const WAKE = 'You have a new message: run "parley read".';
+/* What an application may type after the agent lost its memory (its machine
+   restarted, a new session): the exchange is still there to be read whole. */
+export const REREAD = 'Your chat with the person is kept: run "parley read --all" before going on.';
 const NAMES = { en: 'English', fr: 'French' };
 /* The name of a language, in English, for a sentence an agent reads. */
 export function languageName(lang) {
@@ -143,6 +148,17 @@ export class Parley {
         return entry;
     }
 
+    /* The files of a message of the person, as handed over: each opened by
+       the application's own way (`reach`), like a file the agent showed. */
+    #files(list) {
+        return list.slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => {
+            const path = oneLine(f.path, 1000);
+            let open = null;
+            try { const r = this.#reach(path); open = typeof r === 'string' && r ? r : null; } catch { open = null; }
+            return { path, name: oneLine(f.name, 200) || path.split('/').pop(), size: Number.isInteger(f.size) && f.size >= 0 ? f.size : null, open };
+        });
+    }
+
     /* How many messages of the person the agent has not read. */
     unread() { return Math.max(0, lineCount(`${this.#dir}/to-agent.jsonl`) - readCount(this.#dir)); }
 
@@ -156,7 +172,7 @@ export class Parley {
         const agent = lines(`${this.#dir}/from-agent.jsonl`).map((m) => this.#fromAgent(m));
         const unread = this.unread();
         const written = lines(`${this.#dir}/to-agent.jsonl`);
-        const person = written.map((m, i) => ({ from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen: i < written.length - unread, ...(m.answers ? { answers: String(m.answers) } : {}) }));
+        const person = written.map((m, i) => ({ from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen: i < written.length - unread, ...(m.answers ? { answers: String(m.answers) } : {}), ...(Array.isArray(m.files) && m.files.length ? { files: this.#files(m.files) } : {}) }));
         const answered = new Set(person.map((m) => m.answers).filter(Boolean));
         const messages = [...agent.filter((m) => !STEP.has(m.kind)), ...person].sort((a, b) => a.at.localeCompare(b.at)).slice(-SHOWN_MAX);
         /* Steps older than the first message kept would sit before a conversation that is no longer there. */
@@ -174,12 +190,20 @@ export class Parley {
         };
     }
 
-    /* The person writes. `answers`: the id of the question this answers. The
-       application is told (person-wrote), and decides how to tell the agent. */
-    say(text, answers) {
+    /* The person writes. `answers`: the id of the question this answers.
+       `files`: what they attached, put where the agent can open them by the
+       application ({ path, name?, size? }: `path` as the agent sees it); a
+       message may be files alone. The application is told (person-wrote),
+       and decides how to tell the agent. */
+    say(text, answers, files = []) {
         const said = clean(text).trim();
-        if (!said) throw new RangeError('Write something.');
+        const given = Array.isArray(files) ? files : [];
+        if (given.length > FILES_MAX) throw new RangeError(`${FILES_MAX} files at most in one message.`);
+        const attached = given.map((f) => ({ path: oneLine(f?.path, 1000), name: oneLine(f?.name, 200), size: Number.isInteger(f?.size) && f.size >= 0 ? f.size : undefined }));
+        if (attached.some((f) => !f.path.startsWith('/'))) throw new RangeError('A file is given by its whole path.');
+        if (!said && attached.length === 0) throw new RangeError('Write something.');
         const entry = { id: randomUUID(), at: this.#now().toISOString(), text: said };
+        if (attached.length) entry.files = attached.map((f) => ({ path: f.path, name: f.name || f.path.split('/').pop(), ...(f.size === undefined ? {} : { size: f.size }) }));
         if (typeof answers === 'string' && answers) {
             const asked = this.read().messages.find((m) => m.from === 'agent' && m.kind === 'ask' && m.id === answers);
             if (asked) { entry.answers = asked.id; entry.question = oneLine(asked.text, 300); }

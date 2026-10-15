@@ -40,5 +40,9 @@
   "voice-off": "Le micro n'est pas disponible. Autorisez-le pour ce site, puis réessayez.",
   "replies": "Réponses toutes prêtes",
   "replies-more": "{count} de plus",
-  "replies-less": "Moins"
+  "replies-less": "Moins",
+  "attach": "Joindre un fichier",
+  "remove-file": "Retirer {name}",
+  "sending-files": "Envoi des fichiers...",
+  "attach-where": "Ils vont dans son dossier de travail : il les ouvre là, comme quiconque a ce chat."
 }

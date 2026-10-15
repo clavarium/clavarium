@@ -21,6 +21,8 @@
  *   GET  /c/api/<pairing>/talk/words?lang=
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
  *   POST /c/api/<pairing>/conversations/<any>/talk/remind
+ *   POST /c/api/<pairing>/conversations/<any>/talk/file?name=   a file attached to a message
+ *   POST /c/api/<pairing>/terminal/repair   its terminal does not come (see conversations.mjs)
  *        the chat of its conversation, where it talks through the app (see
  *        talk.mjs): read, written to, reminded. Turning it on and inviting
  *        the tool stay the owner's.
@@ -32,8 +34,13 @@
  *                 and dictation only if it may write in the chat (they are
  *                 then its ready answers, and what is said fills its box)
  *   no chat       none of the talk routes, its words included
- * Its files go with either part: a file the tool shows in its chat opens
- * from them.
+ * ITS FILES. Given its terminal, a device has its files too: the folders
+ * of the conversation, to list, open, and import into where it may write.
+ * Given its chat alone, it has the files OF THE CHAT, and nothing more: those
+ * the tool showed there and those attached to a message, each opened from its
+ * message; no listing, no import, no file of the machine's disk. (Folders
+ * given to the device for itself stay its own, whatever it was given of a
+ * conversation.)
  */
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
@@ -72,7 +79,7 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
@@ -108,19 +115,30 @@ export async function handleDoor(request, response, { devices, conversations, re
         const rights = name === undefined ? '' : devices.rightsOn(pairing, name);
         const part = { terminal: rights.includes('x'), chat: rights.includes('r') ? (rights.includes('w') ? 'write' : 'read') : null };
         const need = (ok, what) => { if (!ok) throw new Refusal(403, `This device was not given ${what} of this conversation.`); };
-        const attached = (need) => {
+        /* Its chat alone: what is reached through the conversation is only what its chat holds. */
+        const chatOnly = mine !== undefined && !part.terminal;
+        /* `how`: 'list', 'open' (download, page) or 'write' (import). */
+        const attached = (need, how = need === 'write' ? 'write' : 'list') => {
             const wanted = url.searchParams.get('r');
+            const throughChat = () => {
+                if (!chatOnly) return;
+                if (how !== 'open') throw new Refusal(403, 'This device was given the chat of this conversation, not its files: only the files of the chat open here.');
+                if (!talk?.shown(name, `${wanted}:${url.searchParams.get('p') ?? ''}`)) throw new Refusal(403, 'This file is not one of the chat: only the files of the chat open on this device.');
+            };
             /* Whoever may use a conversation sees ITS files: where its tool
                works, and what is attached to it. Then what the device was
                given for itself. Nothing else exists for it. */
             if (wanted === WORK_TAB) {
                 if (mine?.work !== 'kept') throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
+                throughChat();
                 return resources.workFolder(name);
             }
             /* Reached both ways -- through the conversation and by a right of
                its own -- the device has the larger of the two. */
             const ways = [(mine ? resources.of(name) : []).find((r) => r.name === wanted), own.find((r) => r.name === wanted)].filter(Boolean);
             if (ways.length === 0) throw new Refusal(404, 'This folder is not attached to this conversation.');
+            /* Given to the device for itself: its own, whatever it was given of the conversation. */
+            if (!own.some((r) => r.name === wanted)) throughChat();
             if (need === 'write' && !ways.some((w) => w.access === 'write')) throw new Refusal(403, 'This folder is attached read-only.');
             return resources.folder(ways[0].name);
         };
@@ -154,13 +172,21 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (talk && talking) {
             if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name));
             /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
-            if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind')) need(part.chat === 'write', 'the chat to write in');
+            if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file')) need(part.chat === 'write', 'the chat to write in');
             if (request.method === 'POST' && talking[1] === '/remind') return send(200, await talk.remind(name));
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers)); }
+            if (request.method === 'POST' && talking[1] === '/file') {
+                if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
+                return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
+            }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files)); }
         }
+        /* Its terminal does not come: only a device given it asks for it to be repaired. */
+        if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }
         /* The device takes itself out: this pairing is removed, here and on the server. */
         if (request.method === 'POST' && route === '/leave') { devices.revoke(pairing); return send(200, { ok: true }); }
         if (request.method === 'GET' && route === '/files/machine') {
+            /* A path on its terminal's screen: a device without the terminal has none to click. */
+            need(!chatOnly, 'the terminal');
             const file = await conversations.machineFile(name ?? '', url.searchParams.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.bytes.length,
                 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
@@ -170,13 +196,13 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/files') return send(200, await list(attached(), url.searchParams.get('p') ?? ''));
         if (request.method === 'GET' && route === '/files/page') {
             if (mine?.offline === true) throw new Refusal(403, 'This conversation is offline: its pages are shown as text, not run.');
-            const file = await page(attached(), url.searchParams.get('p') ?? '');
+            const file = await page(attached('read', 'open'), url.searchParams.get('p') ?? '');
             response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
             file.stream.pipe(response);
             return true;
         }
         if (request.method === 'GET' && route === '/files/download') {
-            const file = await download(attached(), url.searchParams.get('p') ?? '');
+            const file = await download(attached('read', 'open'), url.searchParams.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
                 'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
             file.stream.pipe(response);
@@ -188,7 +214,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
         return send(404, { error: 'Not found.' });
     } catch (error) {
-        if (error instanceof Refusal) return send(error.status, { error: error.message });
+        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.retry ? { retry: true } : {}) });
         return send(500, { error: 'Something failed on the server.' });
     }
 }

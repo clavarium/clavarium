@@ -5,6 +5,10 @@
     "command": [
       "claude"
     ],
+    "resume": [
+      "claude",
+      "--continue"
+    ],
     "memoryMb": 2048,
     "install": [
       "node",
@@ -50,6 +54,10 @@
     "command": [
       "opencode"
     ],
+    "resume": [
+      "opencode",
+      "--continue"
+    ],
     "memoryMb": 2048,
     "install": [
       "node",
@@ -72,6 +80,11 @@
     "command": [
       "codex"
     ],
+    "resume": [
+      "codex",
+      "resume",
+      "--last"
+    ],
     "memoryMb": 2048,
     "install": [
       "node",
@@ -93,6 +106,11 @@
     "label": "Gemini CLI",
     "command": [
       "gemini"
+    ],
+    "resume": [
+      "gemini",
+      "--resume",
+      "latest"
     ],
     "memoryMb": 2048,
     "install": [

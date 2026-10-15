@@ -96,15 +96,27 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   its terminal); in the
   device's language or one the owner chooses, with the owner's own words if
   he gives any; a file outside the shared folders is said so; the owner's
-  phone is alerted when the tool asks or waits. Off by default, per
-  conversation; what the tool prints in its terminal is never read.
+  phone is alerted when the tool asks or waits. Files travel in the chat both
+  ways: what the tool shows, and what the person attaches to a message (put
+  under /work/.parley/files/, the tool given its path). What is wrong with its
+  machine, and its restarts, are grey lines in the thread, with what can be
+  done; after a restart the tool is told once to read the whole thread again
+  (`parley read --all`). Off by default, per conversation; what the tool
+  prints in its terminal is never read.
 
 - **13 - the machine**: each conversation's machine is looked at after a
   start, a wake-up, a restart, and every two minutes while it runs (never one
   that sleeps): its state, whether it answers, its memory, its disk, and
   whether each folder that should be in it really is. A folder that came
-  loose is unmounted and mounted again. What is wrong is said over the
-  terminal, with a Restart button (asked first; a clean stop, then by force).
+  loose is unmounted and mounted again. What is wrong is said over its
+  screen (the terminal or the chat), with "More memory..." where memory is
+  short, "Restart..." (asked first; a clean stop, then by force) and "See the
+  terminal"; no restart is offered while a machine merely starts. A terminal
+  that does not come though its machine runs is repaired by the server
+  itself (its channel opened again, its tmux made again if it does not
+  answer), and only then is a restart offered. A tool that can take up its
+  last session starts on it (`resume` in config/tools.json: `claude
+  --continue`...), unless its owner chose "Start fresh".
   Its memory and disk are set in its settings (a disk only grows); the record
   holds what the VM manager says it has (drawn in `blueprint/machine.html`).
   The page's text has one size per
@@ -151,6 +163,9 @@ and its chat ("read" and "write"); its chat is proposed where it talks through
 the app, its terminal otherwise, and either is changed later in its Sharing
 chapter. The server refuses what was not given: no terminal, keys, shortcuts
 or dictation into it without the terminal; none of the chat without the chat.
+A device given the chat alone has the files of the chat, and nothing more: no
+file browser, no import, only what the tool showed and what was attached to a
+message.
 
 A git repository can be added (Folders, "Add a git repository"): empty, or
 cloned from an https address. It is then a folder like any other. Git is run

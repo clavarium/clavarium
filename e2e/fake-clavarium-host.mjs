@@ -189,6 +189,8 @@ if (area === 'vm') {
     if (verb === 'start' || verb === 'stop' || verb === 'suspend') {
         const vm = argv[0];
         if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
+        /* A start that takes a while, when a test says so: the page's wait is then seen. */
+        if (verb === 'start') spawnSync('sleep', [process.env.FAKE_VM_START_SECONDS ?? '0']);
         /* A stopped machine has lost its processes; a suspended one has not. */
         if (verb === 'stop') killTmux(vm);
         setState(vm, verb === 'start' ? 'Running' : verb === 'stop' ? 'Stopped' : 'Suspended');
@@ -266,7 +268,13 @@ if (area === 'vm') {
             for (const name of existsSync(dir) ? readdirSync(dir) : []) rmSync(join(dir, name), { recursive: true, force: true });
             process.exit(0);
         }
-        if (program === 'tmux') {
+        /* A TERMINAL THAT DOES NOT COME, when a test says so (a file "hang-attach"
+           in the machine's directory): the channel opens, and nothing ever comes
+           through it. Once, unless "hang-always" is there too. */
+        if (program === 'tmux' && rest.includes('new-session') && existsSync(join(home(vm), 'hang-attach'))) {
+            if (!existsSync(join(home(vm), 'hang-always'))) rmSync(join(home(vm), 'hang-attach'), { force: true });
+            setInterval(() => {}, 60_000);
+        } else if (program === 'tmux') {
             /* Each VM has its own tmux server, as each real VM does. */
             const args = rest.map((a, i) => (rest[i - 1] === '-L' ? socket(vm) : rest[i - 1] === '-c' || a.startsWith('/usr/local/bin/') ? inVm(vm, a) : a));
             const child = spawn('tmux', args, { stdio: 'inherit', env: { ...process.env, TMUX: '', FAKE_VM_ROOT: root(vm) } });

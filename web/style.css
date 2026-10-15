@@ -55,6 +55,9 @@ header button { padding: 5px 9px; white-space: nowrap; }
 #state::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink2); }
 #state[data-state="live"]::before { background: var(--ok); }
 #state[data-state="waiting"]::before, #state[data-state="ended"]::before { background: var(--warn); }
+/* Running, but its machine is not well: not green. */
+#state[data-state="live"][data-health="warn"]::before { background: var(--warn); }
+#state[data-state="live"][data-health="bad"]::before { background: var(--danger); }
 main { position: relative; flex: 1; min-height: 0; }
 #terminal { position: absolute; inset: 0; padding: 4px; }
 /* Over the chat screen (a question asked must be seen), under a sheet the person opened (which is shut before any question is asked). */
@@ -405,6 +408,8 @@ textarea.public-key { flex: 1 1 260px; min-width: 0; font: .75rem ui-monospace, 
 #health-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; background: rgba(227, 154, 92, .14); border-bottom: 1px solid var(--warn); font-size: .8125rem; }
 #health-strip[data-level="bad"] { background: rgba(238, 127, 121, .14); border-color: var(--danger); }
 #health-text { flex: 1 1 14rem; min-width: 0; overflow-wrap: anywhere; }
+.health-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.health-actions button[hidden] { display: none; }
 #notice .health-lines { text-align: left; max-width: 36rem; }
 
 /* ---------- text size: one setting of this device ---------- */
@@ -443,7 +448,11 @@ footer button[data-keys="backspace"] { display: none; }
   /* The row is as wide as the screen: its labels grow with the text only as far as they fit. */
   footer#keys > button { font-size: min(.8125rem, 3.4vw); }
   /* What is wrong with the machine: two lines at most, its buttons beside. */
-  #health-strip { flex-wrap: nowrap; padding: 6px 8px; gap: 6px; }
+  #health-strip { flex-wrap: wrap; padding: 6px 8px; gap: 4px 6px; }
+  #health-text { flex-basis: 100%; -webkit-line-clamp: 2; }
+  /* Its buttons on one line. */
+  .health-actions { flex-wrap: nowrap; gap: 4px; min-width: 0; }
+  #health-strip .health-actions button { padding: 4px 7px; white-space: nowrap; }
   #health-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; font-size: .75rem; }
   #health-strip button { min-height: 36px; padding: 4px 8px; font-size: .75rem; }
   footer#keys > button[data-keys="backspace"] { display: none; }

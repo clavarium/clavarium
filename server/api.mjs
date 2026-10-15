@@ -9,6 +9,10 @@
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/archive
+ *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
+ *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
+ *   POST /api/conversations/<name>/talk          {text, answers?, files?}: written in its chat; files from .../talk/file
+ *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
  *   GET  /api/resources
  *   POST /api/resources                     {name} | {name, type: 'git', from?, via?: {method, key?, user?, secret?}}
  *   GET  /api/git-keys                      SSH keys made here: the public half only
@@ -83,7 +87,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -193,6 +197,12 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(404, { error: 'Not found.' }), true;
         }
         if (request.method !== 'POST') return send(405, { error: 'Method not allowed.' }), true;
+        /* A file the person attaches to a message of the chat: the body is the file. */
+        const attaching = /^\/api\/conversations\/([^/]+)\/talk\/file$/.exec(pathname);
+        if (attaching && talk) {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            return send(201, await talk.attach(decodeURIComponent(attaching[1]), query.get('name') ?? '', request)), true;
+        }
         if (!originOk(request.headers) || !String(request.headers['content-type'] ?? '').startsWith('application/json')) {
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
@@ -247,7 +257,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
             if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
             if (typeof body.on === 'boolean') return send(200, await talk.set(conversation, body.on)), true;
-            return send(201, await talk.say(conversation, body.text, body.answers)), true;
+            return send(201, await talk.say(conversation, body.text, body.answers, body.files)), true;
         }
         const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
         if (woken && wakeups) {
@@ -357,6 +367,14 @@ export async function handleApi(request, response, conversations, headers, resou
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
             return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb })), true;
         }
+        const resuming = /^\/api\/conversations\/([^/]+)\/resume$/.exec(pathname);
+        if (resuming) return send(200, conversations.setResume(decodeURIComponent(resuming[1]), body.on)), true;
+        const repairing = /^\/api\/conversations\/([^/]+)\/terminal\/repair$/.exec(pathname);
+        if (repairing && repair) {
+            const conversation = decodeURIComponent(repairing[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            return send(200, await repair(conversation)), true;
+        }
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
         if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
         const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
@@ -374,7 +392,7 @@ export async function handleApi(request, response, conversations, headers, resou
         return send(200, { ok: true }), true;
     } catch (error) {
         /* A git failure also says which (`kind`), and an fsck id the owner may waive (`offer`). */
-        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.offer ? { offer: error.offer } : {}) }), true;
+        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.offer ? { offer: error.offer } : {}), ...(error.retry ? { retry: true } : {}) }), true;
         return send(500, { error: 'Something failed on the server.' }), true;
     }
 }

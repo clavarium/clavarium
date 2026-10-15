@@ -11,7 +11,9 @@
  *                       text frame     {"type":"taken"}  another screen took over
  *                                      {"type":"ready"}  the terminal is attached
  *                                      {"type":"status","text":...}  e.g. waking
- *                                      {"type":"error","text":...}   then close 1011
+ *                                      {"type":"error","text":...,"retry":bool}   then close 1011
+ *                                        (retry: it may work in a moment by itself,
+ *                                        e.g. a machine that is starting: the page tries again)
  *   close 1000  the tool exited, the session is over
  *   close 4001  taken over: do not reconnect by yourself
  */
@@ -193,7 +195,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             catch (error) {
                 /* Only a message written for the person is passed on. */
                 const text = typeof error?.status === 'number' ? error.message : 'The terminal could not be opened.';
-                if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text, gone: error?.status === 410 })); viewer.close(1011, 'cannot open'); }
+                if (viewer.readyState === 1) { viewer.send(JSON.stringify({ type: 'error', text, gone: error?.status === 410, retry: error?.retry === true })); viewer.close(1011, 'cannot open'); }
                 return;
             }
             if (gone) kept.sink = null;
@@ -225,6 +227,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
     server.on('close', () => { for (const name of [...live.keys()]) close(name); });
 
     /* `drop(name)` closes a kept terminal at once: the machine is being put
-       to sleep, stopped or deleted, and a channel into it would hang. */
-    return { seats, drop: close, warm };
+       to sleep, stopped or deleted, and a channel into it would hang.
+       `open(name)`: whether a terminal of it is kept open now. */
+    return { seats, drop: close, warm, open: (name) => live.has(name) };
 }
