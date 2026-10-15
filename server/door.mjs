@@ -18,6 +18,12 @@
  *   GET  /c/api/<pairing>/voice   POST .../voice
  *   GET  /c/api/<pairing>/files   GET .../files/download   GET .../files/machine   POST .../files/import
  *   POST /c/api/<pairing>/leave   the device removes this pairing itself
+ *   GET  /c/api/<pairing>/talk/words?lang=
+ *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
+ *   POST /c/api/<pairing>/conversations/<any>/talk/remind
+ *        the chat of its conversation, where it talks through the app (see
+ *        talk.mjs): read, written to, reminded -- what typing in its terminal
+ *        could do anyway. Turning it on and inviting the tool stay the owner's.
  */
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
@@ -48,7 +54,7 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
@@ -112,6 +118,14 @@ export async function handleDoor(request, response, { devices, conversations, re
             const parts = []; let size = 0;
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
             return send(200, { text: await transcribe(voice, Buffer.concat(parts)) });
+        }
+        /* Its conversation's chat, whatever conversation the address names: the device's own. */
+        if (talk && request.method === 'GET' && route === '/talk/words') return send(200, talk.words(url.searchParams.get('lang') ?? 'en'));
+        const talking = /^\/conversations\/[^/]+\/talk(\/remind)?$/.exec(route);
+        if (talk && talking) {
+            if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name));
+            if (request.method === 'POST' && talking[1]) return send(200, await talk.remind(name));
+            if (request.method === 'POST') { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers)); }
         }
         /* The device takes itself out: this pairing is removed, here and on the server. */
         if (request.method === 'POST' && route === '/leave') { devices.revoke(pairing); return send(200, { ok: true }); }

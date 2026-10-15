@@ -23,5 +23,10 @@
   "terminal": "Ouvrir son terminal",
   "not-sent": "Pas envoyé : {error}",
   "alert-asks": "{name} vous pose une question",
-  "alert-waits": "{name} attend votre réponse"
+  "alert-waits": "{name} attend votre réponse",
+  "step-one": "1 étape",
+  "steps-many": "{count} étapes",
+  "today": "Aujourd'hui",
+  "yesterday": "Hier",
+  "quiet": "rien de nouveau depuis {time}"
 }

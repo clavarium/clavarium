@@ -23,5 +23,10 @@
   "terminal": "Open its terminal",
   "not-sent": "Not sent: {error}",
   "alert-asks": "{name} asks you something",
-  "alert-waits": "{name} waits for you"
+  "alert-waits": "{name} waits for you",
+  "step-one": "1 step",
+  "steps-many": "{count} steps",
+  "today": "Today",
+  "yesterday": "Yesterday",
+  "quiet": "nothing new since {time}"
 }

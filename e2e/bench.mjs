@@ -10,7 +10,7 @@
  * SKIPPED and says so: a suite that passes without having run is worse than
  * one that is absent.
  */
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -41,6 +41,13 @@ const TOOLS = readTools(JSON.stringify([
 ]));
 
 export const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+/* The tmux servers of this computer's user, by name. */
+const tmuxDir = () => join(process.env.TMUX_TMPDIR || '/tmp', `tmux-${process.getuid()}`);
+const tmuxSockets = () => { try { return readdirSync(tmuxDir()); } catch { return []; } };
+/* Taken down, and its socket taken away: a socket left behind would be looked at by every bench after. */
+const tmuxDown = (line) => { spawnSync('tmux', ['-L', line, 'kill-server'], { stdio: 'ignore' }); rmSync(join(tmuxDir(), line), { force: true }); };
+/* The name of a stand-in machine's tmux server, for a conversation. */
+export const tmuxOf = (name) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}clv-${name}`.slice(0, 40);
 
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 /* `tools`: other tools than the two plain shells (the pictures of the site are
@@ -51,6 +58,16 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
     await new Promise((ready) => engine.listen(0, '127.0.0.1', ready));
     process.env.FAKE_VM_DIR = dir;
+    /* The stand-in machines' tmux servers are named after this bench: another
+       run on the same computer (a check in another working tree) does not
+       take them down when it ends, nor they its own. Those of a bench whose
+       folder is gone (one started after it ended) are taken down here. */
+    const id = dir.slice(-6);
+    process.env.FAKE_TMUX_PREFIX = `e2e-${id}-`;
+    for (const line of tmuxSockets()) {
+        const of = /^e2e-([A-Za-z0-9]{6})-/.exec(line)?.[1];
+        if (of && !existsSync(join(tmpdir(), `clv-e2e-${of}`))) tmuxDown(line);
+    }
     /* "The hosting service" of private repositories: reached over a stand-in ssh (fake-ssh.mjs). */
     const sshRoot = join(dir, 'far');
     const gitSsh = installFakeSsh(sshRoot);
@@ -76,9 +93,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     t.after(async () => {
         await browser.close();
         server.closeAllConnections?.(); server.close(); engine.close();
-        for (const line of spawnSync('sh', ['-c', 'ls /tmp/tmux-$(id -u) 2>/dev/null'], { encoding: 'utf8' }).stdout.split('\n')) {
-            if (line.startsWith('e2e-clv-')) spawnSync('tmux', ['-L', line, 'kill-server'], { stdio: 'ignore' });
-        }
+        for (const line of tmuxSockets()) if (line.startsWith(`e2e-${id}-`)) tmuxDown(line);
         rmSync(dir, { recursive: true, force: true });
     });
 
@@ -133,7 +148,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
            "ready>" twice at the end of the copied screen). Typed only once
            the size is final, a test reads only what it typed. */
         async function fullSize(name) {
-            const pane = () => spawnSync('tmux', ['-L', `e2e-clv-${name}`.slice(0, 40), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
+            const pane = () => spawnSync('tmux', ['-L', tmuxOf(name), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
             await until(`the terminal of ${name} has the page's size`, async () => pane() === await page.evaluate(() => `${window.clavariumTerminal.cols}x${window.clavariumTerminal.rows}`));
         }
         /* A folder is made in Assets. */

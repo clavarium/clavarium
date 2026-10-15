@@ -4,9 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { bench, SKIP, wait } from './bench.mjs';
+import { bench, SKIP, wait, tmuxOf } from './bench.mjs';
 
-const pane = (name) => spawnSync('tmux', ['-L', `e2e-clv-${name}`.slice(0, 40), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
+const pane = (name) => spawnSync('tmux', ['-L', tmuxOf(name), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
 const text = (me) => me.page.evaluate(() => window.clavariumText());
 
 test('an arrow held down repeats, as on a keyboard, and stops when let go or when the pointer leaves it', { skip: SKIP }, async (t) => {

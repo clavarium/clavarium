@@ -172,7 +172,15 @@
         $('kbd').textContent = label;
     };
     /* The one way the page gives the terminal its focus back. */
-    const focusTerminal = () => { applyKeyboard(); terminal.focus(); };
+    /* Where the chat is shown, it is the chat's box that takes what is typed:
+       never a terminal out of sight. */
+    const focusTerminal = () => {
+        applyKeyboard();
+        let box = null;
+        try { box = chatBox(); } catch { /* the page is still being set up */ }
+        if (box) { if (!touchScreen) box.focus({ preventScroll: true }); return; }
+        terminal.focus();
+    };
     /* A field the page would like to put the cursor in for the person. With
        the lock on it is only brought into sight: focusing it would raise the
        keyboard the person asked to keep away. A read-only field raises no
@@ -503,6 +511,7 @@
         view(name ? 'room' : 'list');
         paint();
         enter();
+        void chatFirst();
     }
 
     /* ---------- the list ---------- */
@@ -1088,8 +1097,12 @@
        underneath, attached as always: what is written in the box is typed
        into it, and what it shows is read here BY THIS PAGE, from its own
        screen, as plain text. The server reads nothing more than before. */
-    let simple = false;
-    try { const kept = localStorage.getItem('clavarium-simple'); if (kept !== null) simple = kept === '1'; } catch { /* a private window */ }
+    /* `simplePref`: this device's choice for a conversation without a chat;
+       one that talks through the app opens on its chat, whatever it is. */
+    let simplePref = false;
+    /* (A device's page has no plain screen: only the terminal, or a chat.) */
+    try { const kept = localStorage.getItem('clavarium-simple'); if (kept !== null) simplePref = kept === '1' && !DEVICE; } catch { /* a private window */ }
+    let simple = simplePref;
     const saysNow = () => {
         const b = terminal.buffer.active; const lines = [];
         for (let i = Math.max(0, b.length - 200); i < b.length; i++) { const l = b.getLine(i)?.translateToString(true) ?? ''; if (l.trim()) lines.push(l); }
@@ -1123,6 +1136,7 @@
         $('simple-toggle').setAttribute('aria-pressed', String(simple));
         /* Where the tool talks through the app, the plain screen is its chat. */
         const chatting = talk.on && talkOf === current;
+        $('simple-toggle').hidden = DEVICE && !chatting;
         $('simple-toggle').textContent = simple ? (chatting ? 'Terminal' : 'Its screen') : chatting ? 'Chat' : 'Simple';
         if (!simple) return;
         const c = conversations.find((x) => x.name === current);
@@ -1136,7 +1150,8 @@
     }
     $('simple-toggle').addEventListener('click', () => {
         simple = !simple;
-        try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ }
+        /* Its terminal, one click from a chat, for now: the next opening is on the chat again. */
+        if (!(talk.on && talkOf === current)) { simplePref = simple; try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ } }
         simpleFilesAt = 0; paintSimple();
         if (simple) void readTalk().then(paintThread);
         if (!simple) focusTerminal();
@@ -1157,9 +1172,11 @@
         if (!chatWords) chatWords = await fetch(`${API}/talk/words?${new URLSearchParams({ lang: deviceLang() })}`).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
         return chatWords;
     }
+    /* The same on this server's own page and on a device's (which speaks for its own conversation). */
+    const talkPath = (name, tail = '') => `${API}/conversations/${encodeURIComponent(name)}/talk${tail}${DEVICE ? `?${new URLSearchParams({ c: name })}` : ''}`;
     async function readTalk() {
-        if (DEVICE || !current) { talk = { on: false, messages: [] }; return talk; }
-        talk = await fetch(`${API}/conversations/${encodeURIComponent(current)}/talk`).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
+        if (!current) { talk = { on: false, messages: [] }; return talk; }
+        talk = await fetch(talkPath(current)).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
         talkOf = current;
         return talk;
     }
@@ -1176,20 +1193,36 @@
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
         thread?.destroy();
-        const [{ mount }, words] = await Promise.all([import('/vendor/parley-ui.js'), readWords()]);
+        /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
+        const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href), readWords()]);
         const name = current;
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
-            load: () => fetch(`${API}/conversations/${encodeURIComponent(name)}/talk`).then((r) => r.json()),
-            send: (text, answers) => post(`${API}/conversations/${encodeURIComponent(name)}/talk`, { text, answers }),
+            load: () => fetch(talkPath(name)).then((r) => r.json()),
+            send: (text, answers) => post(talkPath(name), { text, answers }),
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
-            terminal: () => { simple = false; try { localStorage.setItem('clavarium-simple', '0'); } catch { /* as above */ } paintSimple(); focusTerminal(); },
-            remind: () => post(`${API}/conversations/${encodeURIComponent(name)}/talk/remind`, {}),
+            terminal: () => { simple = false; paintSimple(); focusTerminal(); },
+            remind: () => post(talkPath(name, '/remind'), {}),
         });
+    }
+    /* Opening a conversation that talks through the app shows its chat first;
+       its terminal is one click away. Any other opens as this device chose. */
+    let opening = 0;
+    async function chatFirst() {
+        if (!current) return;
+        const name = current;
+        const mine = ++opening;
+        await readTalk();
+        if (mine !== opening || name !== current) return;
+        const want = talk.on ? true : simplePref;
+        if (want !== simple) { simple = want; simpleFilesAt = 0; }
+        if (!simple) { paintSimple(); return; }
+        await paintThread();
+        if (talk.on && name === current) focusTerminal();
     }
     function languageName(tag) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag.split('-')[0]) ?? tag; } catch { return tag; } }
     async function paintTalkBox() {
@@ -1199,7 +1232,7 @@
         $('talk-invite').hidden = !talk.on;
         $('talk-declare').hidden = !talk.on;
         if (talk.on) $('talk-declare').textContent = talk.tools
-            ? `Then "Ask the tool to use it": it is asked, in its terminal, to install parley from /tools and to write to you in ${languageName(deviceLang())}. The chat shows on the simple screen.`
+            ? `Then "Ask the tool to use it": it is asked, in its terminal, to install parley from /tools and to write to you in ${languageName(deviceLang())}. From then on, this conversation opens on its chat; its terminal is one click away.`
             : 'The tools folder (/tools) is not in place on this server yet: the tool cannot be asked to install parley.';
         if (!talk.on && talk.possible === false) $('talk-about').textContent = 'This conversation works on the disk of its machine: talking through the app needs its work folder kept here.';
     }
@@ -1245,7 +1278,7 @@
         all.hidden = !all.hidden;
         if (!all.hidden && wordsSettings) all.textContent = JSON.stringify(Object.fromEntries(Object.entries(wordsSettings.english).filter(([key]) => key !== 'lang')), null, 2);
     });
-    setInterval(() => { if (!document.hidden && !DEVICE && current) void readTalk().then(() => { if (simple) void paintThread(); paintSimple(); }); }, 5000);
+    setInterval(() => { if (!document.hidden && current) void readTalk().then(() => { if (simple) void paintThread(); paintSimple(); }); }, 5000);
 
     $('simple-say').addEventListener('submit', (event) => {
         event.preventDefault();
@@ -1259,7 +1292,7 @@
     });
     setInterval(() => { if (simple && !document.hidden) paintSimple(); }, 1500);
     paintSimple();
-    if (simple) void readTalk().then(paintThread);
+    void chatFirst();
 
     /* ---------- alerts: this device is told when a tool waits ---------- */
     const pushKey = (text) => { const b = atob((text + '='.repeat((4 - (text.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
@@ -3047,10 +3080,13 @@
                 /* The one thing a first-time visitor is told, before the dark screen. */
                 const c = conversations[0];
                 $('name').textContent = c?.name ?? '';
-                show(`You are connected to "${c?.name}", an assistant that works in writing. Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.${installOffered ? ' To keep it at hand, "Install the app" at the top puts it on this device like any other app.' : ''}`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); });
+                await readTalk();
+                show(`You are connected to "${c?.name}", an assistant that works in writing. ${talk.on ? 'You talk with it here, as in a messaging app: write below, or press Dictate and speak. Its terminal is one tap away.' : 'Tap the dark screen to type, or press Dictate and speak. The buttons under it send ready-made answers.'}${installOffered ? ' To keep it at hand, "Install the app" at the top puts it on this device like any other app.' : ''}`, 'Start', () => { welcoming = false; notice.hidden = true; enter(); void chatFirst(); });
                 return;
             }
             enter();
+            /* Where it talks through the app, the chat is what this device opens on. */
+            void chatFirst();
             return;
         } else {
             view(current ? 'room' : 'list');

@@ -41,6 +41,7 @@ test('a phone that scans the code is welcomed in plain words, then sees that con
     assert.equal(await phone.page.locator('#notice-action', { hasText: 'Start' }).isVisible(), true);
     await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
     await phone.until('the phone is live', async () => (await phone.state()) === 'live');
+    assert.equal(await phone.page.locator('#simple').isVisible(), false, 'it does not talk through the app: its terminal, as always');
     await phone.type('echo from-the-phone');
     await phone.sees('from-the-phone');
     /* Found by a tester: dictation was missing until the page was reloaded. */

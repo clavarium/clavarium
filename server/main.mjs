@@ -265,6 +265,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     const talk = new Talk({ store: new Store(`${dataDir}/talk.json`), words: new Store(`${dataDir}/talk-words.json`), vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         alert: (payload) => { void alerts.tell(payload); } });
+    /* A device given a conversation that talks through the app talks there too. */
+    door.talk = talk;
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
     const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);

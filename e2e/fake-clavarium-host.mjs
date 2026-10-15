@@ -124,7 +124,8 @@ if (area === 'vm') {
     /* A path of the VM, as a path here. */
     /* ("dir/." and "dir/" mean something to cp: the ending is kept.) */
     const inVm = (vm, path) => (path.startsWith('/') ? join(root(vm), path) + (path.endsWith('/.') ? '/.' : path.endsWith('/') && path !== '/' ? '/' : '') : path);
-    const socket = (vm) => `e2e-${vm}`.slice(0, 40);
+    /* Named after the bench that runs it (FAKE_TMUX_PREFIX), so that two runs on one computer stay apart. */
+    const socket = (vm) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}${vm}`.slice(0, 40);
     const killTmux = (vm) => spawnSync('tmux', ['-L', socket(vm), 'kill-server'], { stdio: 'ignore' });
 
     /* What the VM manager says the machine has: memory in MB, disk in GB. */

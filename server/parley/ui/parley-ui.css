@@ -13,7 +13,8 @@
 .parley p, .parley h3, .parley ol, .parley ul { margin: 0; }
 .parley-top { display: flex; align-items: center; justify-content: space-between; gap: .6em; flex-wrap: wrap; }
 .parley-top { flex-wrap: nowrap; }
-.parley-status { flex: 1; font-weight: 600; color: var(--parley-dim); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.parley-status { flex: 1; font-weight: 600; color: var(--parley-dim); min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.parley-status[hidden] { display: none; }
 .parley-status[data-state="waiting"] { color: var(--parley-ask); }
 .parley-status::before { content: ""; display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .45em; background: var(--parley-dim); vertical-align: .05em; }
 .parley-status[data-state="working"]::before { background: var(--parley-action); }
@@ -45,9 +46,6 @@
 .parley-aside[hidden] { display: none; }
 .parley-aside h3 { font-size: .8em; text-transform: uppercase; letter-spacing: .06em; color: var(--parley-dim); margin-bottom: .3em; }
 .parley-aside ul { padding-left: 1.1em; display: flex; flex-direction: column; gap: .25em; }
-.parley-steps ul { list-style: none; padding-left: 0; }
-.parley-steps li { color: var(--parley-dim); }
-.parley-steps li::before { content: "\2713"; margin-right: .5em; color: #2f8f4e; }
 .parley-fold summary { cursor: pointer; font-weight: 600; color: var(--parley-dim); }
 .parley-fold[open] { display: flex; flex-direction: column; gap: var(--parley-gap); }
 .parley-aside li { overflow-wrap: anywhere; }
@@ -56,6 +54,10 @@
 .parley-name { font-weight: 600; }
 .parley .parley-open { min-height: 2.1em; padding: 0 .8em; }
 .parley .parley-terminal { align-self: flex-start; }
+/* Narrow: the files folded and the way to the terminal, on one line. */
+.parley-aside[data-narrow="true"] { flex-direction: row; flex-wrap: wrap; align-items: center; padding: .35em .6em; }
+.parley-aside[data-narrow="true"] .parley-fold { flex: 1; min-width: 8em; }
+.parley-aside[data-narrow="true"] .parley-terminal { min-height: 2.2em; }
 @container parley (min-width: 46rem) {
   .parley[data-view="detailed"] .parley-main { flex-direction: row; }
   .parley-aside { order: 0; width: 18rem; flex: none; max-height: none; }
@@ -65,3 +67,49 @@
 .parley .parley-send { background: var(--parley-action); border-color: var(--parley-action); color: var(--parley-on-action); font-weight: 650; }
 .parley-empty { color: var(--parley-dim); }
 .parley-problem { color: var(--parley-ask); }
+
+/* ---- times, as a chat shows them ---- */
+.parley-said { position: relative; }
+.parley-time { font-size: .75em; color: var(--parley-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Simple: beside the bubble, on hover or after a long press; it takes no room. */
+.parley[data-view="simple"] .parley-said > .parley-time { position: absolute; bottom: .2em; left: calc(100% + .5em); opacity: 0; transition: opacity .15s; pointer-events: none; }
+.parley[data-view="simple"] .parley-said[data-from="person"] > .parley-time { left: auto; right: calc(100% + .5em); }
+.parley[data-view="simple"] .parley-said:hover > .parley-time, .parley[data-view="simple"] .parley-said[data-reveal="true"] > .parley-time { opacity: 1; }
+/* Detailed: in the bubble, always. */
+.parley[data-view="detailed"] .parley-said > .parley-time { display: block; text-align: right; margin-top: .15em; }
+.parley-divider { align-self: center; text-align: center; font-size: .8em; color: var(--parley-dim); }
+.parley-divider span { display: inline-block; padding: .15em .8em; border-radius: 999px; background: var(--parley-agent); }
+.parley-divider[data-kind="gap"] span { background: transparent; }
+
+/* ---- the steps between two messages, and what it does now ---- */
+.parley-steps, .parley-now { display: flex; flex-direction: column; gap: .3em; align-self: stretch; }
+.parley .parley-chip { align-self: center; min-height: 1.9em; padding: 0 .8em; border-radius: 999px; font-size: .8em; color: var(--parley-dim); border-color: var(--parley-line); background: transparent; }
+.parley .parley-chip::after { content: ""; display: inline-block; width: .4em; height: .4em; margin-left: .5em; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateY(-.15em) rotate(45deg); }
+.parley .parley-chip[aria-expanded="true"]::after { transform: translateY(.05em) rotate(-135deg); }
+.parley-trail { max-width: 40em; list-style: none; padding: 0 0 0 .7em; margin: 0; border-left: 2px solid var(--parley-line); display: flex; flex-direction: column; gap: .2em; font-size: .9em; }
+.parley-trail[hidden] { display: none; }
+.parley-trail li { display: flex; gap: .6em; align-items: baseline; color: var(--parley-dim); }
+.parley-trail li .parley-step { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.parley-trail li[data-kind="status"] .parley-step { font-weight: 600; }
+.parley-trail li[data-state="waiting"] .parley-step { color: var(--parley-ask); }
+.parley-trail li[data-kind="status"][data-state="done"] .parley-step::before { content: "\2713  "; color: #2f8f4e; }
+.parley .parley-doing { display: flex; align-items: baseline; gap: .55em; width: 100%; min-height: 0; padding: .3em .1em; border: 0; border-radius: 8px; background: transparent; color: var(--parley-dim); font-style: italic; text-align: left; cursor: default; }
+.parley button.parley-doing { cursor: pointer; }
+.parley .parley-doing .parley-step { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.parley-more { align-self: center; flex: none; width: .45em; height: .45em; margin: 0 .3em; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-135deg); }
+.parley-now[data-open="false"] .parley-more { transform: translateY(-.15em) rotate(45deg); }
+.parley-unseen { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* Simple: the steps that led to a message are opened by a click on it. */
+.parley-said[data-steps="true"] { cursor: pointer; }
+.parley-said[data-steps="true"]:focus-visible { outline: 2px solid var(--parley-action); outline-offset: 2px; }
+/* Simple: the line alone, without its time. */
+.parley[data-view="simple"] .parley-doing .parley-time { display: none; }
+.parley-quiet { font-size: .8em; font-style: normal; white-space: nowrap; }
+.parley-dots { display: inline-flex; gap: .2em; align-self: center; }
+.parley-dots i { width: .38em; height: .38em; border-radius: 50%; background: var(--parley-action); opacity: .35; }
+.parley-now[data-live="true"] .parley-dots i { animation: parley-dot 1.2s infinite ease-in-out; }
+.parley-now[data-live="true"] .parley-dots i:nth-child(2) { animation-delay: .2s; }
+.parley-now[data-live="true"] .parley-dots i:nth-child(3) { animation-delay: .4s; }
+.parley-now[data-live="false"] .parley-dots i { background: var(--parley-dim); }
+@keyframes parley-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-.18em); } }
+@media (prefers-reduced-motion: reduce) { .parley-now[data-live="true"] .parley-dots i { animation: none; opacity: .9; } }

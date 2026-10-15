@@ -1,7 +1,7 @@
 /* TALK: a conversation with a tool, on a screen that is not its terminal.
  *
  * THIS IS A BRANCHING ON PARLEY (server/parley, a project of its own, copied
- * here unchanged). Parley gives the tool five verbs -- a command, `parley`,
+ * here unchanged). Parley gives the tool six verbs -- a command, `parley`,
  * which the tool installs by itself from /tools (see toolbox.mjs) -- and
  * gives this server the other side. PARLEY ANNOUNCES, THIS SERVER DECIDES:
  *
@@ -10,7 +10,9 @@
  *                            address, no port, nothing new in the machine.
  *   THE INVITATION           typed once in its terminal when the owner asks:
  *                            install the command from /tools, use it, write
- *                            to the person in their language.
+ *                            to the person in their language; and, this
+ *                            server's own sentence, where to check out its
+ *                            branches (BRANCHES).
  *   person-wrote             one line, WAKE, typed in its terminal: once
  *                            until the tool has read, never while somebody
  *                            types there, never into a machine that does not
@@ -20,6 +22,7 @@
  *   agent-showed             a file under /work or in an attached folder is
  *                            opened from the page; any other is said to be
  *                            outside the shared folders.
+ *   agent-doing              nothing: the page shows it, nobody is alerted.
  *
  * Off by default, per conversation. Like the answerer, it is a place where
  * this server reads what a tool wrote: only where the owner turned it on.
@@ -40,6 +43,11 @@ const PANE = `=${SESSION}:`;
 export const TYPING_QUIET_MS = 4000;
 /* A line that waits is tried again this often (a machine that does not run is not touched: only its state is asked). */
 export const RETRY_MS = 10_000;
+/* Added to Parley's invitation, this server's own sentence: a branch can be
+   checked out in one folder only, and /tmp is emptied when the machine
+   restarts, with the work left there. Typed in a terminal: no quote, no
+   backquote, nothing a shell would run. */
+export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts.';
 /* An operator's own dictionary: so many words, so long each, at most. */
 const OWN_MAX = 200;
 const WORD_MAX = 500;
@@ -168,7 +176,7 @@ export class Talk {
         const tool = this.#toolbox?.find('parley');
         if (!tool) throw new Refusal(503, 'The tools folder is not in place on this server yet: try again in a moment, or restart the server.');
         if (!this.#conversations.awake().includes(name)) throw new Refusal(409, 'It is asleep: open it first.');
-        const text = this.#parley(name).invite(lang, { install: `npm install -g ${tool.path}`, shared: c.work === 'kept' ? '/work' : undefined });
+        const text = `${this.#parley(name).invite(lang, { install: `npm install -g ${tool.path}`, shared: c.work === 'kept' ? '/work' : undefined })} ${BRANCHES}`;
         if (!(await this.#type(name, text).catch(() => false))) throw new Refusal(502, 'The invitation could not be typed: is its tool running?');
         return { ...this.of(name), invited: text };
     }

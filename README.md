@@ -80,13 +80,22 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   of its own (copied unchanged in `server/parley`). Every machine has a
   read-only folder of tools at hand, `/tools`, with an index; Parley's
   archive is the first. Asked once, in its terminal, the tool installs it
-  (`npm install -g /tools/...`) and talks through five commands: `parley
-  tell`, `ask`, `show`, `read`, `status`, in the person's language. Parley
+  (`npm install -g /tools/...`) and talks through six commands: `parley
+  tell`, `ask`, `show`, `read`, `status`, `doing`, in the person's language;
+  it is also told to check out its branches in the repository's main folder
+  or under /work, never in /tmp. Parley
   announces, this server decides: when the person wrote, one line is typed
   in its terminal ("You have a new message: run "parley read"."), once
   until it has read, never while somebody types there, never into a machine
-  that does not run (the message waits). The page shows a chat screen, in
-  two views (simple; detailed: status, steps, files, its terminal), in the
+  that does not run (the message waits). Opening the conversation shows
+  its chat first, wherever it is opened (the list, a notification, a device
+  it was shared with, which may write there too), its terminal one click
+  away; turned off, nothing changes. The chat, in two views: simple
+  (bubbles, the one moving line of what it does now, gone with its next
+  message, the steps before it folded into that message, times on hover or
+  a long press, the day and long silences said); detailed (every step
+  unfolded with its time and state, where it is, files with their paths,
+  its terminal); in the
   device's language or one the owner chooses, with the owner's own words if
   he gives any; a file outside the shared folders is said so; the owner's
   phone is alerted when the tool asks or waits. Off by default, per

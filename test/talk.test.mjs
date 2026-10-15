@@ -27,7 +27,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
         exec: async (name, argv) => { if (!world.tmux) return { code: 1 }; const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; },
         state: async () => world.state,
     };
-    const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.2.0.tgz' } : undefined) } : null;
+    const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined) } : null;
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
         resources: { workFolder: (name) => join(dir, 'work', name), of: () => world.attached.map((name) => ({ name, access: 'read' })) },
@@ -62,7 +62,8 @@ test('the invitation: typed once in its terminal, English, the archive in /tools
     assert.equal(b.typed.length, 2); assert.equal(b.typed[1], 'Enter');
     const line = b.typed[0];
     assert.equal(line, asked.invited);
-    for (const part of ['npm install -g /tools/clavarium-parley-0.2.0.tgz', 'parley --help', 'under /work', 'Write to them in French.', 'You have a new message']) assert.ok(line.includes(part), part);
+    for (const part of ['npm install -g /tools/clavarium-parley-0.3.0.tgz', 'parley --help', 'parley doing', 'under /work', 'Write to them in French.', 'You have a new message', 'main folder of the repository or under /work, never in /tmp']) assert.ok(line.includes(part), part);
+    assert.ok(/^[\x20-\x7e]+$/.test(line) && !/[`'$\\]/.test(line), 'one plain line, nothing a shell would run');
     assert.ok(!line.includes('MCP'), 'no server to declare');
     b.world.awake = false;
     await assert.rejects(b.talk.invite('helper', 'en'), /asleep/);
@@ -143,12 +144,13 @@ test('the owner is alerted when the tool asks or says it waits, in the words of 
     await b.talk.set('helper', true);
     b.talk.setWords({ lang: 'fr', own: { 'alert-waits': '{name} : à vous, taratata' } });
     b.talk.words('fr-FR');
-    b.parley('tell', 'Half written.'); b.parley('status', 'working');
+    b.parley('tell', 'Half written.'); b.parley('status', 'working'); b.parley('doing', 'choosing a cover');
     b.parley('ask', 'Blue or red cover?', 'blue', 'red'); b.parley('status', 'waiting', 'on the cover');
     await until('two alerts', () => b.alerted.length === 2);
     assert.deepEqual(b.alerted, [{ title: 'helper vous pose une question', body: 'Blue or red cover?', url: '/?c=helper' }, { title: 'helper : à vous, taratata', body: 'on the cover', url: '/?c=helper' }]);
     const seen = b.talk.of('helper');
     assert.equal(seen.waiting, 1); assert.equal(seen.status.state, 'waiting');
+    assert.deepEqual(seen.steps.map((x) => x.kind), ['status', 'doing', 'status'], 'what it does is on the page, and alerts nobody');
     assert.deepEqual(b.talk.brief('helper'), { waiting: 1, state: 'waiting' });
     assert.equal((await b.talk.say('helper', 'blue', seen.messages.find((m) => m.kind === 'ask').id)).waiting, 0);
     /* After a restart of this server, it listens again without being asked. */

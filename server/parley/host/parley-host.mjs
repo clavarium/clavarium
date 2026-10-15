@@ -14,6 +14,7 @@
  *   agent-asked   {message}         invite(lang, options)  -> a text
  *   agent-showed  {message}
  *   agent-status  {message}
+ *   agent-doing   {message}
  *
  * Nothing is typed anywhere from here: when the person wrote, the
  * application is told so, with how many messages the agent has not read,
@@ -31,9 +32,12 @@ import { fileURLToPath } from 'node:url';
 export const TEXT_MAX = 4000;
 export const SHOWN_MAX = 200;
 export const LISTED_MAX = 50;
+/* Steps (what it said it was doing, and its states) kept for the screen. */
+export const STEPS_MAX = 500;
 export const FILE_MAX = 2 * 1024 * 1024;
 export const STATES = ['working', 'waiting', 'done'];
-const KINDS = ['say', 'ask', 'show', 'status'];
+const KINDS = ['say', 'ask', 'show', 'status', 'doing'];
+const STEP = new Set(['status', 'doing']);
 const SERVER = fileURLToPath(new URL('../server/parley-mcp.mjs', import.meta.url));
 const TEXTS = fileURLToPath(new URL('../ui/texts/', import.meta.url));
 
@@ -58,7 +62,7 @@ export function languageName(lang) {
 export function invitation({ lang = 'en', install, shared } = {}) {
     return [
         install ? `Install Parley, a small command to talk with the person you work for on their screen: run "${install}", then read "parley --help".` : 'Read "parley --help": it is how you talk with the person you work for, on their screen.',
-        'From now on, talk with them through it, not in this terminal: "parley tell" to tell them something, "parley ask" to ask them something (with the choices when you can), "parley show" for a file you made, "parley status" to say where you are.',
+        'From now on, talk with them through it, not in this terminal: "parley tell" to tell them something, "parley ask" to ask them something (with the choices when you can), "parley show" for a file you made, "parley doing" in one short line each time you start something new, "parley status" to say where you are.',
         shared ? `Put any file you show under ${shared}: it is the folder they can open.` : '',
         `Write to them in ${languageName(lang)}.`,
         'When you see "You have a new message", run "parley read".',
@@ -135,6 +139,7 @@ export class Parley {
             entry.open = open;
         }
         if (kind === 'status') entry.state = STATES.includes(m.state) ? m.state : 'working';
+        if (kind === 'doing') { entry.text = oneLine(m.text, 200); entry.state = 'working'; }
         return entry;
     }
 
@@ -142,21 +147,28 @@ export class Parley {
     unread() { return Math.max(0, lineCount(`${this.#dir}/to-agent.jsonl`) - readCount(this.#dir)); }
 
     /* Both sides, in the order they were written; how many questions wait;
-       where the agent says it is, and the steps it said; the files it showed;
-       how many of the person's messages it has not read (each says `seen`). */
+       where the agent says it is; its steps -- every state it said and every
+       line of what it was doing, in order, for the screen to put between the
+       messages; the files it showed; how many of the person's messages it has
+       not read (each says `seen`). Saying what it does means it works: a
+       `doing` after "done" or "waiting" makes the status "working" again. */
     read() {
         const agent = lines(`${this.#dir}/from-agent.jsonl`).map((m) => this.#fromAgent(m));
         const unread = this.unread();
         const written = lines(`${this.#dir}/to-agent.jsonl`);
         const person = written.map((m, i) => ({ from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen: i < written.length - unread, ...(m.answers ? { answers: String(m.answers) } : {}) }));
         const answered = new Set(person.map((m) => m.answers).filter(Boolean));
-        const statuses = agent.filter((m) => m.kind === 'status');
-        const last = statuses.at(-1);
+        const messages = [...agent.filter((m) => !STEP.has(m.kind)), ...person].sort((a, b) => a.at.localeCompare(b.at)).slice(-SHOWN_MAX);
+        /* Steps older than the first message kept would sit before a conversation that is no longer there. */
+        const since = messages.length === SHOWN_MAX ? messages[0].at : '';
+        const steps = agent.filter((m) => STEP.has(m.kind));
+        const last = steps.filter((m) => m.kind === 'status').at(-1);
+        const after = steps.at(-1)?.kind === 'doing' && last?.state !== 'working';
         return {
-            messages: [...agent.filter((m) => m.kind !== 'status'), ...person].sort((a, b) => a.at.localeCompare(b.at)).slice(-SHOWN_MAX),
+            messages,
             waiting: agent.filter((m) => m.kind === 'ask' && !answered.has(m.id)).length,
-            status: last ? { state: last.state, note: last.text, at: last.at } : null,
-            steps: statuses.slice(-LISTED_MAX).map((m) => ({ state: m.state, note: m.text, at: m.at })),
+            status: after ? { state: 'working', note: '', at: steps.at(-1).at } : last ? { state: last.state, note: last.text, at: last.at } : null,
+            steps: steps.filter((m) => m.at >= since).sort((a, b) => a.at.localeCompare(b.at)).slice(-STEPS_MAX).map((m) => ({ id: m.id, kind: m.kind, state: m.state, note: m.text, at: m.at })),
             files: agent.filter((m) => m.kind === 'show').slice(-LISTED_MAX).map((m) => ({ path: m.path, note: m.text, at: m.at, open: m.open })),
             unread,
         };
@@ -184,7 +196,7 @@ export class Parley {
     invite(lang, options = {}) { return invitation({ ...options, lang }); }
 
     /* Starts announcing each thing the agent posts FROM NOW ON: agent-said,
-       agent-asked, agent-showed, agent-status. Resolves with a function that
+       agent-asked, agent-showed, agent-status, agent-doing. Resolves with a function that
        stops it. The file is looked at, nothing is pushed: what was posted
        while nobody listened is still in `read()`. Each line is announced
        once, by where it sits in the file, and only once it is whole. */
@@ -193,7 +205,7 @@ export class Parley {
         const size = () => { try { return lstatSync(file).isSymbolicLink() ? 0 : statSync(file).size; } catch { return 0; } };
         let offset = size();
         let rest = Buffer.alloc(0);
-        const TYPES = { say: 'agent-said', ask: 'agent-asked', show: 'agent-showed', status: 'agent-status' };
+        const TYPES = { say: 'agent-said', ask: 'agent-asked', show: 'agent-showed', status: 'agent-status', doing: 'agent-doing' };
         const look = () => {
             const now = size();
             if (now < offset) { offset = 0; rest = Buffer.alloc(0); }        /* the file was started again */

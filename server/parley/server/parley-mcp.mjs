@@ -3,9 +3,10 @@
  * ITS OWN. One file, no dependency, meant to be lifted out as it is.
  *
  * A command-line agent lives in a terminal: whoever does not read a terminal
- * cannot talk with it. This file gives the agent five verbs -- TELL the
+ * cannot talk with it. This file gives the agent six verbs -- TELL the
  * person it works for something, ASK something, SHOW a file, READ what was
- * written back, say its STATUS -- in two ways that write the same files:
+ * written back, say its STATUS, say what it is DOING now -- in two ways that
+ * write the same files:
  *
  *   a command    `parley tell "..."` (bin/parley.mjs imports this file):
  *                any agent that can run a command can use it;
@@ -30,8 +31,10 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const TEXT_MAX = 4000;
+/* What it is doing now is one short line: a screen shows it while it works. */
+export const DOING_MAX = 200;
 export const CHOICES_MAX = 8;
 export const STATES = ['working', 'waiting', 'done'];
 export const FOLDER = '.parley';
@@ -50,7 +53,7 @@ export function findFolder({ dir, env = process.env, from = process.cwd() } = {}
     }
 }
 
-/* The five verbs on one folder. `how` is what the agent is told to do when a
+/* The six verbs on one folder. `how` is what the agent is told to do when a
    message arrives: run a command, or call a tool. */
 export function bridge(dir, { how = 'run `parley read`' } = {}) {
     const OUT = join(dir, 'from-agent.jsonl');
@@ -88,6 +91,15 @@ export function bridge(dir, { how = 'run `parley read`' } = {}) {
             post({ kind: 'status', state, text: plain(note, 300) });
             return 'Noted.';
         },
+        /* One line, said each time it moves to something new: it is shown while
+           it works, and goes when its next message comes; what came before stays
+           one click away. */
+        doing(text) {
+            const line = plain(text).replace(/\s+/g, ' ').trim().slice(0, DOING_MAX);
+            if (!line) throw new Error('the text is empty');
+            post({ kind: 'doing', text: line });
+            return 'Noted.';
+        },
         read() {
             let lines = [];
             try { lines = readFileSync(IN, 'utf8').split('\n').filter(Boolean); } catch { /* nothing was written yet */ }
@@ -113,6 +125,8 @@ export const TOOLS = [
         inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The path of the file.' }, note: { type: 'string', description: 'One line on what it is.' } }, required: ['path'] } },
     { name: 'read', description: 'Read what was written to you since you last read: new instructions, and answers to your questions. Call it when you are told a message arrived, and before you finish a task.',
         inputSchema: { type: 'object', properties: {} } },
+    { name: 'doing', description: 'Say in one short line what you are doing right now ("reading the 12 recordings", "running the tests"), each time you move to something new. Their screen shows it while you work, and keeps what came before. It does not wait.',
+        inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'One short line, in their language.' } }, required: ['text'] } },
     { name: 'status', description: 'Say in one word where you are, so that their screen shows it: "working" when you start, "waiting" when you need them, "done" when the task is finished.',
         inputSchema: { type: 'object', properties: { state: { type: 'string', enum: STATES }, note: { type: 'string', description: 'Optional: one short line.' } }, required: ['state'] } },
 ];
@@ -125,6 +139,7 @@ export function serve(dir, { input = process.stdin, output = process.stdout } = 
         if (name === 'show') return verbs.show(args.path, args.note);
         if (name === 'read') return verbs.read();
         if (name === 'status') return verbs.status(args.state, args.note);
+        if (name === 'doing') return verbs.doing(args.text);
         throw new Error(`unknown tool: ${name}`);
     };
     const send = (message) => output.write(`${JSON.stringify(message)}\n`);

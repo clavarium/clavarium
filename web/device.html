@@ -9,6 +9,7 @@
 <meta name="theme-color" content="#0f141a">
 <link rel="stylesheet" href="vendor/xterm.css">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/parley-ui.css">
 <div id="app">
   <section id="room">
     <header>
@@ -19,6 +20,7 @@
       <button type="button" id="others" hidden>This device</button>
       <button type="button" id="install" class="primary" hidden>Install the app</button>
       <div id="menu-items">
+        <button type="button" id="simple-toggle" class="in-menu" aria-pressed="false" hidden>Chat</button>
         <button type="button" id="theme" class="in-menu" aria-label="Light or dark screen">Light</button>
         <button type="button" id="copy-open" class="in-menu" hidden>Copy / paste</button>
         <button type="button" id="files-open" class="in-menu" hidden>Files</button>
@@ -28,6 +30,9 @@
     </header>
     <main>
       <div id="terminal"></div>
+      <!-- Where its conversation talks through the app: its chat, drawn by
+           Parley from what the tool posted, in place of the terminal. -->
+      <div id="simple" hidden><div id="simple-thread" hidden></div></div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <div id="copy" class="sheet" hidden>
         <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close">Close</button></div>

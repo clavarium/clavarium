@@ -11,7 +11,7 @@ import { startHome } from '../server/main.mjs';
 async function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-door-'));
     writeFileSync(join(dir, 'conversations.json'), JSON.stringify([
-        { name: 'family', tool: 'shell', memoryMb: 768, phase: 'ready' }, { name: 'work', tool: 'shell', memoryMb: 768, phase: 'ready' }]));
+        { name: 'family', tool: 'shell', memoryMb: 768, phase: 'ready', work: 'kept' }, { name: 'work', tool: 'shell', memoryMb: 768, phase: 'ready', work: 'kept' }]));
     mkdirSync(join(dir, 'resources', 'photos'), { recursive: true }); mkdirSync(join(dir, 'resources', 'accounts'), { recursive: true });
     writeFileSync(join(dir, 'resources', 'photos', 'beach.txt'), 'sea'); writeFileSync(join(dir, 'resources', 'accounts', 'bank.txt'), 'secret');
     writeFileSync(join(dir, 'resources.json'), JSON.stringify([
@@ -162,4 +162,26 @@ test('the owner reaches every folder, attached to the conversation shown or not'
     const put = await fetch(`${b.base}/api/files/import?c=family&r=accounts&p=&name=owner.txt`, { method: 'POST', headers: { 'x-forwarded-email': 'owner@example.com', origin: b.origin, 'content-type': 'application/octet-stream' }, body: 'x' });
     assert.equal(put.status, 201);
     assert.equal((await b.operator('/api/files?c=family&r=nowhere&p=')).status, 404);
+});
+
+test('a paired phone talks in ITS conversation\'s chat, where it is on: read, written to, reminded; never turned on or off from there', async (t) => {
+    const b = await bench(t);
+    const phone = await b.pairPhone('family');
+    const as = { cookie: phone.cookie };
+    assert.equal((await (await b.device(`/c/api/${phone.id}/conversations/family/talk`, as)).json()).on, false, 'off: nothing to read');
+    assert.equal((await b.operator('/api/conversations/family/talk', { on: true })).status, 200);
+    assert.equal((await b.operator('/api/conversations/work/talk', { on: true })).status, 200);
+    assert.equal((await b.operator('/api/conversations/work/talk', { text: 'only for work' })).status, 201);
+    assert.equal((await b.device(`/c/api/${phone.id}/conversations/family/talk`, { ...as, body: { text: 'From the phone.' } })).status, 201);
+    /* Whatever conversation the address names, the answer is for the device's own. */
+    const seen = await (await b.device(`/c/api/${phone.id}/conversations/work/talk`, as)).json();
+    assert.deepEqual([seen.on, seen.messages.map((m) => m.text)], [true, ['From the phone.']]);
+    assert.equal((await (await b.operator('/api/conversations/work/talk')).json()).messages.length, 1, 'nothing written into another conversation');
+    assert.equal((await b.device(`/c/api/${phone.id}/conversations/family/talk/remind`, { ...as, body: {} })).status, 200);
+    assert.equal((await (await b.device(`/c/api/${phone.id}/talk/words?lang=fr`, as)).json()).send, 'Envoyer');
+    /* Turning it off, or inviting the tool, stays the owner's. */
+    assert.equal((await b.device(`/c/api/${phone.id}/conversations/family/talk`, { ...as, body: { on: false } })).status, 400);
+    assert.equal((await b.device(`/c/api/${phone.id}/conversations/family/talk/invite`, { ...as, body: {} })).status, 404);
+    assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).on, true);
+    assert.equal((await b.device('/c/api/0f8fad5b-d9cb-469f-a165-70867728950e/conversations/family/talk')).status, 401, 'no session, no chat');
 });
