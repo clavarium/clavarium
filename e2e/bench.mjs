@@ -97,7 +97,9 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         await browser.close();
         server.closeAllConnections?.(); server.close(); engine.close();
         for (const line of tmuxSockets()) if (line.startsWith(`e2e-${id}-`)) tmuxDown(line);
-        rmSync(dir, { recursive: true, force: true });
+        /* Work still finishing in the closed server (a git read, a store being written) may add a file
+           while the folder is removed: removing is tried again rather than failing the test. */
+        rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     });
 
     /* A person at a screen. `phone: true` is a small touch screen. */
