@@ -13,8 +13,11 @@ test('a conversation is created from the page, built, and its terminal answers',
     await me.until('the page says it is building', async () => (await me.state()) === 'building');
     assert.match(await me.page.locator('#notice-text').innerText(), /a new machine takes a few minutes/i);
     /* A wheel turns and the steps say where it is; the shortcut bar stays away for the whole wait (it used to come and go at each poll). */
-    assert.equal(await me.page.locator('#notice-spin').isVisible(), true);
+    assert.equal(await me.page.locator('#notice-steps li[data-state="now"] .spin').isVisible(), true);
     assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').count(), 1);
+    /* The same panel as a restart or a wake: what it is, and the step of how many. */
+    assert.match(await me.page.locator('#notice-title').innerText(), /building its machine/i);
+    assert.match(await me.page.locator('#notice-count').innerText(), /^Step [1-5] of 5 \u00b7 \d+:\d\d$/);
     for (let i = 0; i < 4; i++) { assert.equal(await me.page.locator('#shortcuts').isVisible(), false); await me.page.waitForTimeout(700); }
     assert.equal(await me.page.locator('#keys').isVisible(), false);
     assert.equal(await me.page.locator('#sleep').isVisible(), false);

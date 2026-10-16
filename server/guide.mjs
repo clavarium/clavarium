@@ -112,6 +112,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
     }
     out.push(!chat ? '- Chat with the person: off. Do not use parley.'
         : '- Chat with the person: on. Parley is installed: run parley --help.');
+    /* How to write there: the chat renders Markdown; what matters stays in sight. */
+    if (chat) out.push('- In the chat, write as in this terminal (Markdown: short lists, a bold label per point, tables); a long message gets --short, a title that holds any action or decision; one key sentence in "> [!IMPORTANT]"; a picture of /work where it belongs: ![before](/work/a.png); close the questions they answered another way (parley close).');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);

@@ -15,6 +15,7 @@
  *   agent-showed  {message}
  *   agent-status  {message}
  *   agent-doing   {message}
+ *   agent-closed  {message}         (a question it closed, answered another way)
  *
  * Nothing is typed anywhere from here: when the person wrote, the
  * application is told so, with how many messages the agent has not read,
@@ -29,7 +30,11 @@ import { appendFileSync, readFileSync, writeFileSync, mkdirSync, copyFileSync, e
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-export const TEXT_MAX = 4000;
+export const TEXT_MAX = 16000;
+/* The short version of a message: a title of one or two lines. */
+export const SHORT_MAX = 200;
+/* Paths a message cites, looked up for the screen, at most. */
+export const REFS_MAX = 20;
 export const SHOWN_MAX = 200;
 export const LISTED_MAX = 50;
 /* Steps (what it said it was doing, and its states) kept for the screen. */
@@ -38,7 +43,7 @@ export const FILE_MAX = 2 * 1024 * 1024;
 export const STATES = ['working', 'waiting', 'done'];
 /* Files the person attaches to one message, at most. */
 export const FILES_MAX = 10;
-const KINDS = ['say', 'ask', 'show', 'status', 'doing'];
+const KINDS = ['say', 'ask', 'show', 'status', 'doing', 'close'];
 const STEP = new Set(['status', 'doing']);
 const SERVER = fileURLToPath(new URL('../server/parley-mcp.mjs', import.meta.url));
 const TEXTS = fileURLToPath(new URL('../ui/texts/', import.meta.url));
@@ -97,6 +102,21 @@ export const fill = (word, values = {}) => String(word ?? '').replace(/\{([a-z]+
 const NOT_SHOWN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu;
 export const clean = (text, max = TEXT_MAX) => String(text ?? '').replace(/\r/g, '').replace(NOT_SHOWN, '').slice(0, max);
 const oneLine = (text, max) => clean(text, max).replace(/\s+/g, ' ').trim();
+/* THE PATHS A MESSAGE CITES: a whole path standing on its own (after a space,
+   a bracket, a quote) or the target of a Markdown link or picture. Each is
+   looked up by the application's `reach`: the screen makes a link (or shows a
+   picture) of those it can open, and of nothing else. */
+const CITED = /(?:^|[\s([<"'`*_])(\/[^\s()[\]<>"'`*]+)/g;
+const TARGET = /\]\((\/[^\s()]+)(?:\s+"[^"]*")?\)/g;
+export function cited(text) {
+    const out = new Set();
+    for (const re of [TARGET, CITED]) for (const m of String(text ?? '').matchAll(re)) {
+        const path = m[1].replace(/[.,;:!?]+$/, '');
+        if (path.length > 1 && path.length <= 1000 && !path.startsWith('//')) out.add(path);
+        if (out.size >= REFS_MAX) return [...out];
+    }
+    return [...out];
+}
 const parsed = (line) => { try { const j = JSON.parse(line); return j && typeof j === 'object' && !Array.isArray(j) ? j : undefined; } catch { return undefined; } };
 
 /* The lines of a file that only grows: the last part of it, never a link,
@@ -110,6 +130,8 @@ function lines(file) {
 }
 /* How many whole lines the agent has read, as it wrote it. */
 function readCount(dir) { try { return Math.max(0, Number(JSON.parse(readFileSync(`${dir}/read.json`, 'utf8')).lines) || 0); } catch { return 0; } }
+/* When the agent read, as it wrote it: [{ lines, at }], oldest first. */
+function readTimes(dir) { try { const r = JSON.parse(readFileSync(`${dir}/read.json`, 'utf8')).reads; return Array.isArray(r) ? r.filter((x) => x && Number.isInteger(x.lines) && typeof x.at === 'string') : []; } catch { return []; } }
 function lineCount(file) { try { if (lstatSync(file).isSymbolicLink()) return 0; return readFileSync(file, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } }
 
 /* Puts the bridge in `dir`: the two files, and the MCP server for an agent
@@ -134,18 +156,23 @@ export class Parley {
 
     #tell(event) { try { this.#on?.(event); } catch { /* a hook that fails stops nothing */ } }
 
+    /* How the person opens a file, or null. */
+    #open(path) { try { const r = this.#reach(path); return typeof r === 'string' && r ? r : null; } catch { return null; } }
+
     /* One line the agent wrote, as it is handed over. */
     #fromAgent(m) {
         const kind = KINDS.includes(m.kind) ? m.kind : 'say';
         const entry = { from: 'agent', id: String(m.id ?? ''), at: String(m.at ?? ''), kind, text: clean(m.text), choices: kind === 'ask' && Array.isArray(m.choices) ? m.choices.slice(0, 8).map((x) => oneLine(x, 200)).filter(Boolean) : [] };
-        if (kind === 'show') {
-            entry.path = oneLine(m.path, 1000);
-            let open = null;
-            try { const r = this.#reach(entry.path); open = typeof r === 'string' && r ? r : null; } catch { open = null; }
-            entry.open = open;
+        if ((kind === 'say' || kind === 'ask') && typeof m.short === 'string' && oneLine(m.short, SHORT_MAX)) entry.short = oneLine(m.short, SHORT_MAX);
+        if (kind === 'say' || kind === 'ask') {
+            /* The paths it cites that the person can open: a link, or a picture, on the screen. */
+            const refs = cited(`${entry.text}\n${entry.short ?? ''}`).map((path) => ({ path, open: this.#open(path) })).filter((r) => r.open !== null);
+            if (refs.length) entry.refs = refs;
         }
+        if (kind === 'show') { entry.path = oneLine(m.path, 1000); entry.open = this.#open(entry.path); }
         if (kind === 'status') entry.state = STATES.includes(m.state) ? m.state : 'working';
         if (kind === 'doing') { entry.text = oneLine(m.text, 200); entry.state = 'working'; }
+        if (kind === 'close') { entry.text = oneLine(m.text, 500); entry.answers = oneLine(m.answers, 100); }
         return entry;
     }
 
@@ -154,8 +181,7 @@ export class Parley {
     #files(list) {
         return list.slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => {
             const path = oneLine(f.path, 1000);
-            let open = null;
-            try { const r = this.#reach(path); open = typeof r === 'string' && r ? r : null; } catch { open = null; }
+            const open = this.#open(path);
             return { path, name: oneLine(f.name, 200) || path.split('/').pop(), size: Number.isInteger(f.size) && f.size >= 0 ? f.size : null, open };
         });
     }
@@ -170,23 +196,38 @@ export class Parley {
        not read (each says `seen`). Saying what it does means it works: a
        `doing` after "done" or "waiting" makes the status "working" again. */
     read() {
-        const agent = lines(`${this.#dir}/from-agent.jsonl`).map((m) => this.#fromAgent(m));
+        const all = lines(`${this.#dir}/from-agent.jsonl`).map((m) => this.#fromAgent(m));
+        const agent = all.filter((m) => m.kind !== 'close');
+        const closes = new Map(all.filter((m) => m.kind === 'close').map((m) => [m.answers, { text: m.text, at: m.at }]));
         const unread = this.unread();
         const written = lines(`${this.#dir}/to-agent.jsonl`);
-        const person = written.map((m, i) => ({ from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen: i < written.length - unread, ...(m.answers ? { answers: String(m.answers) } : {}), ...(Array.isArray(m.files) && m.files.length ? { files: this.#files(m.files) } : {}) }));
+        /* When each of the person's messages was read: the first read that reached it. */
+        const reads = readTimes(this.#dir);
+        const seenAt = (i) => reads.find((r) => r.lines > i)?.at ?? null;
+        const person = written.map((m, i) => {
+            const seen = i < written.length - unread;
+            return { from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen, ...(seen && seenAt(i) ? { seenAt: seenAt(i) } : {}),
+                ...(m.answers ? { answers: String(m.answers), question: oneLine(m.question, 300) } : {}), ...(Array.isArray(m.files) && m.files.length ? { files: this.#files(m.files) } : {}) };
+        });
         const answered = new Set(person.map((m) => m.answers).filter(Boolean));
+        /* A question it closed says the answer it understood; answered with its buttons after that, the answer is the person's. */
+        for (const m of agent) if (m.kind === 'ask' && closes.has(m.id)) m.closed = closes.get(m.id);
         const messages = [...agent.filter((m) => !STEP.has(m.kind)), ...person].sort((a, b) => a.at.localeCompare(b.at)).slice(-SHOWN_MAX);
         /* Steps older than the first message kept would sit before a conversation that is no longer there. */
         const since = messages.length === SHOWN_MAX ? messages[0].at : '';
         const steps = agent.filter((m) => STEP.has(m.kind));
         const last = steps.filter((m) => m.kind === 'status').at(-1);
         const after = steps.at(-1)?.kind === 'doing' && last?.state !== 'working';
+        /* Every file it showed, and every one it cited that can be opened. */
+        const shown = agent.filter((m) => m.kind === 'show').map((m) => ({ path: m.path, note: m.text, at: m.at, open: m.open }));
+        const named = new Set(shown.map((f) => f.path));
+        const cites = agent.flatMap((m) => (m.refs ?? []).map((r) => ({ path: r.path, note: '', at: m.at, open: r.open, cited: true }))).filter((f) => !named.has(f.path) && named.add(f.path));
         return {
             messages,
-            waiting: agent.filter((m) => m.kind === 'ask' && !answered.has(m.id)).length,
+            waiting: agent.filter((m) => m.kind === 'ask' && !answered.has(m.id) && !closes.has(m.id)).length,
             status: after ? { state: 'working', note: '', at: steps.at(-1).at } : last ? { state: last.state, note: last.text, at: last.at } : null,
             steps: steps.filter((m) => m.at >= since).sort((a, b) => a.at.localeCompare(b.at)).slice(-STEPS_MAX).map((m) => ({ id: m.id, kind: m.kind, state: m.state, note: m.text, at: m.at })),
-            files: agent.filter((m) => m.kind === 'show').slice(-LISTED_MAX).map((m) => ({ path: m.path, note: m.text, at: m.at, open: m.open })),
+            files: [...shown, ...cites].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-LISTED_MAX),
             unread,
         };
     }
@@ -230,7 +271,7 @@ export class Parley {
         const size = () => { try { return lstatSync(file).isSymbolicLink() ? 0 : statSync(file).size; } catch { return 0; } };
         let offset = size();
         let rest = Buffer.alloc(0);
-        const TYPES = { say: 'agent-said', ask: 'agent-asked', show: 'agent-showed', status: 'agent-status', doing: 'agent-doing' };
+        const TYPES = { say: 'agent-said', ask: 'agent-asked', show: 'agent-showed', status: 'agent-status', doing: 'agent-doing', close: 'agent-closed' };
         const look = () => {
             const now = size();
             if (now < offset) { offset = 0; rest = Buffer.alloc(0); }        /* the file was started again */

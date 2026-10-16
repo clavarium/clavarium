@@ -126,14 +126,22 @@ export function look(root) {
     return found;
 }
 
+/* So many characters of a wake-up's line are repeated in its chat. */
+const FIRED_SHOWN = 120;
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export class Wakeups {
-    #store; #vms; #conversations; #resources; #warm; #now; #held = new Map(); #busy = false;
+    #store; #vms; #conversations; #resources; #warm; #now; #fired; #held = new Map(); #busy = false;
 
-    /* `warm(name)`: opens the terminal of a machine that runs, if it is not open. */
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date() }) {
-        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now;
+    /* `warm(name)`: opens the terminal of a machine that runs, if it is not open.
+       `fired(name, { text, item })`: a wake-up was typed (its chat says so: Talk.event). */
+    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {} }) {
+        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired;
+    }
+    /* What its chat says of a wake-up that was typed: the line, cut short. Never stops a wake-up. */
+    #said(name, item, line) {
+        const shown = line.length > FIRED_SHOWN ? `${line.slice(0, FIRED_SHOWN - 3)}...` : line;
+        try { this.#fired(name, { text: `Wake-up "${shown}" typed.`, item: { id: item.id, kind: item.kind } }); } catch { /* as said */ }
     }
 
     #record(name) { return this.#store.get(name) ?? { name, perHour: DEFAULT_PER_HOUR, sent: [], items: [] }; }
@@ -274,6 +282,7 @@ export class Wakeups {
             const what = capped ? `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` : typed ? `Typed: ${line}` : 'Could not be typed: is its tool running?';
             const again = this.#record(record.name);
             this.#store.put({ ...again, sent: typed ? [...this.#recent(again), at] : this.#recent(again), items: again.items.map((i) => (i.id === item.id ? { ...i, last: { at, what: what.slice(0, 300), ok: typed } } : i)) });
+            if (typed) this.#said(record.name, item, line);
             return capped ? 'capped' : typed ? 'typed' : 'failed';
         }
         return undefined;
@@ -297,6 +306,7 @@ export class Wakeups {
                     const what = capped ? `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` : typed ? `Typed: ${text}` : 'Could not be typed: is its tool running?';
                     const again = this.#record(record.name);
                     this.#store.put({ ...again, sent: typed ? [...this.#recent(again), at] : this.#recent(again), items: again.items.map((i) => (i.id === item.id ? { ...i, last: { at, what: what.slice(0, 300), ok: typed }, ...(i.kind === 'arrival' ? {} : { fired: at }) } : i)) });
+                    if (typed) this.#said(record.name, item, text);
                 }
             }
         } finally { this.#busy = false; }

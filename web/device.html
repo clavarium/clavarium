@@ -104,12 +104,15 @@
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
         <div id="viewer-card">
-          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
           <p id="preview-note" class="hint" hidden></p>
           <div id="preview-body"></div>
         </div>
       </div>
       <div id="notice" hidden>
+        <!-- A start told step by step: what it is, which step of how many, and the time so far. -->
+        <div id="notice-head" hidden><p id="notice-title"></p><p id="notice-count"></p></div>
+        <ol id="notice-steps" aria-live="polite" hidden></ol>
         <p id="notice-text"></p>
         <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
       </div>

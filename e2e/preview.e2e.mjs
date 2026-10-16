@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { deflateSync } from 'node:zlib';
 import { bench, SKIP } from './bench.mjs';
 
 /* A one-page PDF saying "Hello from a tool", built here with exact offsets. */
@@ -209,4 +210,98 @@ test('the list of conversations folds away with one click and comes back; the te
     assert.equal(await me.page.locator('#list').isVisible(), false, 'kept across a reload');
     await me.page.locator('#fold').click();
     assert.equal(await me.page.locator('#list').isVisible(), true);
+});
+
+/* A whole 3x2 PNG, made here (the one above is cut short: shown, but not decoded strictly). */
+function wholePng(width, height) {
+    const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+    const crc = (buf) => { let c = 0xffffffff; for (const x of buf) c = crcTable[(c ^ x) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const chunk = (type, data) => { const len = Buffer.alloc(4); len.writeUInt32BE(data.length); const body = Buffer.concat([Buffer.from(type, 'latin1'), data]); const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body)); return Buffer.concat([len, body, sum]); };
+    const head = Buffer.alloc(13); head.writeUInt32BE(width, 0); head.writeUInt32BE(height, 4); head[8] = 8; head[9] = 2;
+    const rows = Buffer.concat(Array.from({ length: height }, () => Buffer.concat([Buffer.from([0]), Buffer.alloc(width * 3, 0x80)])));
+    return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', head), chunk('IDAT', deflateSync(rows)), chunk('IEND', Buffer.alloc(0))]);
+}
+/* A 1x1 GIF: a picture of another type than PNG, which goes to the clipboard as PNG. */
+const GIF = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+
+test('Copy in the window: all the text of a text file, the source of a page, a picture as PNG; refused, the text is selected; on a shared device too', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: b.origin });
+    await me.create('copier');
+    const work = join(b.dir, 'kept-work', 'copier', 'work');
+    const notes = '# Notes\n\nLine one, with accents: café été.\n\tIndented line.\n';
+    writeFileSync(join(work, 'notes.md'), notes);
+    writeFileSync(join(work, 'table.csv'), 'a,b\n1,2\n');
+    writeFileSync(join(work, 'page.html'), '<h1>A page</h1>\n');
+    writeFileSync(join(work, 'chart.png'), wholePng(3, 2));
+    writeFileSync(join(work, 'dot.gif'), GIF);
+    writeFileSync(join(work, 'summary.pdf'), smallPdf());
+    const clipboard = () => me.page.evaluate(() => navigator.clipboard.readText());
+    const picture = () => me.page.evaluate(async () => {
+        const [item] = await navigator.clipboard.read();
+        if (!item.types.includes('image/png')) return item.types.join(',');
+        const bitmap = await createImageBitmap(await item.getType('image/png'));
+        return `png ${bitmap.width}x${bitmap.height}`;
+    });
+    await me.page.locator('#files-open').click();
+    const open = async (name) => { await me.page.locator('#files-rows .file', { hasText: name }).click(); await me.until(`${name} is shown`, async () => (await me.page.locator('#preview-name').innerText()) === name && (await me.page.locator('#preview-note').innerText().catch(() => '')) !== 'Loading...'); };
+    const copy = me.page.locator('#preview-copy');
+    /* Text, exactly as it is: every character, tabs and new lines kept. */
+    await open('notes.md');
+    await me.until('Copy is offered', () => copy.isVisible());
+    assert.equal(await copy.innerText(), 'Copy');
+    await copy.click();
+    await me.until('it says it copied', async () => (await copy.innerText()) === 'Copied');
+    assert.equal(await clipboard(), notes);
+    await me.until('and goes back to Copy', async () => (await copy.innerText()) === 'Copy', 5000);
+    await me.page.locator('#preview-close').click();
+    await open('table.csv');
+    await copy.click();
+    await me.until('the table is copied', async () => (await clipboard()) === 'a,b\n1,2\n');
+    await me.page.locator('#preview-close').click();
+    /* A page shown in its frame: its source is what is copied. */
+    await open('page.html');
+    await copy.click();
+    await me.until('the source is copied', async () => (await clipboard()) === '<h1>A page</h1>\n');
+    await me.page.locator('#preview-close').click();
+    /* A picture: "Copy image", as PNG; another type drawn as PNG. */
+    await open('chart.png');
+    await me.until('Copy image is offered', async () => (await copy.isVisible()) && (await copy.innerText()) === 'Copy image');
+    await copy.click();
+    await me.until('the picture is copied', async () => (await copy.innerText()) === 'Copied');
+    assert.equal(await picture(), 'png 3x2');
+    await me.page.locator('#preview-close').click();
+    await open('dot.gif');
+    await copy.click();
+    await me.until('the GIF is copied', async () => (await copy.innerText()) === 'Copied');
+    assert.equal(await picture(), 'png 1x1');
+    await me.page.locator('#preview-close').click();
+    /* A PDF has nothing to copy here. */
+    await open('summary.pdf');
+    await me.until('drawn', async () => /1 page\./.test(await me.page.locator('#preview-note').innerText()), 30_000);
+    assert.equal(await copy.isVisible(), false);
+    await me.page.locator('#preview-close').click();
+    /* The browser refuses: the text is selected instead, for a copy by hand; a page is turned to its source for that. */
+    await me.page.evaluate(() => { navigator.clipboard.writeText = () => Promise.reject(new DOMException('refused', 'NotAllowedError')); });
+    await open('page.html');
+    await copy.click();
+    await me.until('the source is shown and selected', async () => (await me.page.evaluate(() => String(window.getSelection()).trim())) === '<h1>A page</h1>');
+    assert.match(await me.page.locator('#preview-note').innerText(), /the text is selected, copy it yourself/);
+    assert.equal(await copy.innerText(), 'Copy');
+    await me.page.locator('#preview-close').click();
+    assert.deepEqual(me.errors, []);
+    /* On a device the folder is shared with: the same button, the same copy. */
+    await me.api('/api/resources', { name: 'album' });
+    await me.api('/api/conversations/copier/resources', { resource: 'album', access: 'write' });
+    writeFileSync(join(b.dir, 'data', 'resources', 'album', 'one.txt'), 'shared words\n');
+    const shared = await me.api('/api/shares', { grants: [{ asset: 'folder:album', rights: 'r' }] });
+    const viewer = await b.person({ phone: true, at: shared.body.url.replace(/^https?:\/\/[^/]+/, '') });
+    await viewer.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: b.origin });
+    await viewer.until('its files are shown', async () => (await viewer.page.locator('#files-rows').innerText().catch(() => '')).includes('one.txt'));
+    await viewer.page.locator('#files-rows .file', { hasText: 'one.txt' }).click();
+    await viewer.until('the file is shown', async () => (await viewer.page.locator('#preview-body pre').innerText().catch(() => '')).includes('shared words'));
+    await viewer.page.locator('#preview-copy').tap();
+    await viewer.until('copied on the device', async () => (await viewer.page.evaluate(() => navigator.clipboard.readText())) === 'shared words\n');
+    assert.deepEqual(viewer.errors, []);
 });

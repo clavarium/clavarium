@@ -202,8 +202,14 @@ if (area === 'vm') {
     if (verb === 'start' || verb === 'stop' || verb === 'suspend') {
         const vm = argv[0];
         if (!stateOf(vm)) fail(`instance "${vm}" does not exist`);
-        /* A start that takes a while, when a test says so: the page's wait is then seen. */
-        if (verb === 'start') spawnSync('sleep', [process.env.FAKE_VM_START_SECONDS ?? '0']);
+        /* A start or a stop that takes a while, when a test says so: the page's
+           wait is then seen. Meanwhile the machine is said to be starting or
+           stopping, as the VM manager says it. */
+        if (verb === 'start') { setState(vm, 'Starting'); spawnSync('sleep', [process.env.FAKE_VM_START_SECONDS ?? '0']); }
+        if (verb === 'stop') { setState(vm, 'Stopping'); spawnSync('sleep', [process.env.FAKE_VM_STOP_SECONDS ?? '0']); }
+        /* A machine just started does not answer at once while its system
+           comes up: for this long, when a test says so. */
+        if (verb === 'start') writeFileSync(join(home(vm), 'answers-at'), String(Date.now() + Number(process.env.FAKE_VM_BOOT_SECONDS ?? '0') * 1000));
         /* A stopped machine has lost its processes; a suspended one has not. */
         if (verb === 'stop') killTmux(vm);
         setState(vm, verb === 'start' ? 'Running' : verb === 'stop' ? 'Stopped' : 'Suspended');
@@ -240,6 +246,7 @@ if (area === 'vm') {
     if (verb === 'exec') {
         const vm = argv[0];
         if (stateOf(vm) !== 'Running') fail(`exec failed: instance "${vm}" is not running`);
+        if (existsSync(join(home(vm), 'answers-at')) && Date.now() < Number(readFileSync(join(home(vm), 'answers-at'), 'utf8'))) fail('exec failed: the machine does not answer yet', 255);
         let command = argv.slice(argv.indexOf('--') + 1);
         if (command[0] === 'sudo') command = command.slice(command[1] === '-n' ? 2 : 1);
         const [program, ...rest] = command;

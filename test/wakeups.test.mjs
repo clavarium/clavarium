@@ -16,9 +16,10 @@ function bench(t) {
     const conversations = { list: () => [{ name: 'worker' }], awake: () => world.awake };
     const resources = { of: () => world.attached.map((name) => ({ name, access: 'write' })), folder: (name) => join(dir, name), get: (name) => ({ name, type: name === 'site' ? 'git' : name === 'mail' ? 'mailbox' : 'folder' }) };
     const warmed = [];
-    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now) });
+    const fired = [];
+    const wakeups = new Wakeups({ store: new Store(join(dir, 'wakeups.json')), vms, conversations, resources, warm: async (name) => { warmed.push(name); }, now: () => new Date(world.now), fired: (name, what) => fired.push([name, what.text]) });
     const later = (minutes) => { world.now = new Date(world.now.getTime() + minutes * 60_000); };
-    return { dir, typed, world, wakeups, later, warmed };
+    return { dir, typed, world, wakeups, later, warmed, fired };
 }
 
 test('a folder is looked at, not read: names, sizes, dates; nothing hidden, no link followed', (t) => {
@@ -224,4 +225,21 @@ test('a call from outside: an address shown once wakes the tool; a wrong one is 
     b.world.runs = true;
     b.wakeups.turn('worker', b.wakeups.of('worker').items[0].id, false);
     assert.equal(await b.wakeups.call(token, 'x'), undefined, 'turned off, its address is nobody');
+});
+
+test('a wake-up typed is said in its chat, once per wake-up; one capped, asleep or not typed is not', async (t) => {
+    const b = bench(t);
+    b.wakeups.add('worker', { kind: 'every', minutes: 1, message: 'Look at the queue.' });
+    b.wakeups.setLimit('worker', 1);
+    b.later(1); await b.wakeups.tick();
+    b.later(1); await b.wakeups.tick();
+    assert.deepEqual(b.fired, [['worker', 'Wake-up "Look at the queue." typed.']], 'the second was capped: not said');
+    b.wakeups.setLimit('worker', 0); b.world.runs = false;
+    b.later(1); await b.wakeups.tick();
+    assert.equal(b.fired.length, 1, 'not typed: not said');
+    b.world.runs = true;
+    const long = b.wakeups.add('worker', { kind: 'call', message: `Do ${'x'.repeat(200)}` }).address.split('/').pop();
+    assert.equal(await b.wakeups.call(long, ''), 'typed');
+    assert.equal(b.fired.at(-1)[1].length, 'Wake-up "" typed.'.length + 120);
+    assert.match(b.fired.at(-1)[1], /\.\.\." typed\.$/);
 });

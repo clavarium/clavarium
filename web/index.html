@@ -515,6 +515,13 @@
           <pre id="words-all" class="hint" hidden></pre>
           <p id="words-error" class="error" role="alert" hidden></p>
         </details>
+        <!-- WHAT THE THREAD SHOWS of what this server says there: each kind of
+             event at a level (server/talk.mjs EVENT_LEVELS); the owner may move one. -->
+        <div class="panel-top"><b>Chat: what the thread shows</b></div>
+        <p class="hint">Besides the messages, the chat says what happened to its machine and its repositories. <b>Needs you</b>: in both views. <b>News</b>: in the simple view as one short line, several in a row grouped. <b>Trace</b>: in the detailed view only. Never counted as unread.</p>
+        <div id="thread-levels" class="thread-levels"></div>
+        <p class="hint" id="thread-saved" role="status"></p>
+        <p id="thread-error" class="error" role="alert" hidden></p>
         <div class="panel-top"><b>Dictation</b></div>
         <p id="settings-dictation" class="hint"></p>
         <div class="panel-top"><b>People &amp; address</b></div>
@@ -692,15 +699,17 @@
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
         <div id="viewer-card">
-          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
           <p id="preview-note" class="hint" hidden></p>
           <div id="preview-body"></div>
         </div>
       </div>
       <div id="notice" hidden>
         <span id="notice-spin" class="spin" aria-hidden="true" hidden></span>
+        <!-- A start told step by step: what it is, which step of how many, and the time so far. -->
+        <div id="notice-head" hidden><p id="notice-title"></p><p id="notice-count"></p></div>
+        <ol id="notice-steps" aria-live="polite" hidden></ol>
         <p id="notice-text"></p>
-        <ol id="notice-steps" hidden></ol>
         <ul id="notice-health" class="health-lines" hidden></ul>
         <div class="row"><button id="notice-action" type="button" class="primary"></button><button id="notice-restart" type="button" hidden>Restart the machine...</button><button id="notice-cancel" type="button" hidden>Cancel</button></div>
       </div>

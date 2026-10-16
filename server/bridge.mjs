@@ -10,7 +10,8 @@
  *   server -> browser   binary frame   terminal output
  *                       text frame     {"type":"taken"}  another screen took over
  *                                      {"type":"ready"}  the terminal is attached
- *                                      {"type":"status","text":...}  e.g. waking
+ *                                      {"type":"status","text":...,"progress":...}  e.g. waking
+                                        (either may be missing: see conversations.mjs, progress)
  *                                      {"type":"error","text":...,"retry":bool}   then close 1011
  *                                        (retry: it may work in a moment by itself,
  *                                        e.g. a machine that is starting: the page tries again)
@@ -71,8 +72,8 @@ export function answerForAbsentScreen(output) {
 export const sameOrigin = makeOriginCheck();
 
 /* `spawn(name, cols, rows, say)` returns a PTY-like object (write, resize,
-   kill, onData, onExit), or a promise of one; `say(text)` tells the screen
-   what is taking time. Injected, so tests need neither tmux nor a real PTY.
+   kill, onData, onExit), or a promise of one; `say(text, progress)` tells the
+   screen what is taking time. Injected, so tests need neither tmux nor a real PTY.
    `onLeft(name)` is called when a screen goes away; `onEnded(name)` when the
    terminal ended by itself, and answers (a promise of) whether the tool is
    still running, in which case only the channel dropped; `onRejoin(name)`
@@ -183,7 +184,8 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             const kept = live.get(name);
             if (kept?.sink === viewer) kept.sink = null;     /* the terminal stays open */
         });
-        const say = (text) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', text })); };
+        /* `progress`: where a start is, step by step (conversations.mjs); the page draws it. */
+        const say = (text, progress) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', ...(text ? { text } : {}), ...(progress ? { progress } : {}) })); };
 
         let kept = live.get(name);
         if (kept) {

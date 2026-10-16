@@ -58,9 +58,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('the question is on the chat screen, in French', async () => (await asked.innerText().catch(() => '')).includes('Blue or red cover?') && (await asked.innerText()).includes('Il vous demande'));
     assert.equal(await me.page.locator('#simple-thread .parley-send').innerText(), 'Envoyer');
     assert.equal(await me.page.locator('#simple-says').isVisible(), false, 'what its terminal shows is not on the chat screen');
-    /* Above the box: its choices first, then the owner's ready answers; the bar's, which type into the terminal, are not shown. */
+    /* Above the box: its choices first, then the owner's own ready answers -- the first ones, as they came, say nothing of this chat and are not offered. */
     const quickly = () => me.page.locator('#simple-thread .parley-replies button').allInnerTexts();
-    await me.until('the quick answers are above the box', async () => (await quickly()).join('|') === 'blue|red|Yes, go on|Run the tests|Summarise');
+    await me.until('the quick answers are above the box', async () => (await quickly()).join('|') === 'blue|red');
     /* Its choices are near the box only when its own buttons scrolled away: never twice on the screen. */
     const rowChoice = me.page.locator('#simple-thread .parley-replies .parley-answer').first();
     await me.until('not twice', async () => !(await rowChoice.isVisible()));
@@ -78,8 +78,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     process.env.FAKE_VM_LOG = vmLog;
     t.after(() => { delete process.env.FAKE_VM_LOG; });
     await asked.locator('button', { hasText: 'blue' }).click();
-    await me.until('the answer is in the thread, and the choices are gone', async () => (await me.page.locator('#simple-thread .parley-said[data-from=person]').first().innerText().catch(() => '')).startsWith('blue') && (await asked.locator('button').count()) === 0);
-    await me.until('its choices left the quick answers', async () => (await quickly())[0] === 'Yes, go on');
+    await me.until('the answer is in the thread, and the choices are gone', async () => (await me.page.locator('#simple-thread .parley-said[data-from=person] .parley-text').first().innerText().catch(() => '')) === 'blue' && (await asked.locator('.parley-choices button').count()) === 0);
+    assert.match(await me.page.locator('#simple-thread .parley-said[data-from=person] .parley-inreply').first().innerText(), /En réponse à : Blue or red cover\?/, 'the answer says which question');
+    await me.until('its choices left the quick answers', async () => (await quickly()).length === 0);
     /* With a keyboard: Shift+Enter is a new line, Enter sends, and the cursor stays in the box. */
     const chatBox = me.page.locator('#simple-thread .parley-box');
     await chatBox.click();
@@ -97,7 +98,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('the chat\'s text grew', async () => (await size()) > before * 1.05);
     await me.page.keyboard.press('Control+0');
     await me.until('back to normal', async () => (await size()) === before);
-    await me.until('said not read yet', async () => (await me.page.locator('#simple-thread').innerText()).includes('Pas encore lu'));
+    /* Not read yet: a sign in the corner of its bubble, said in words to whoever does not see it. */
+    await me.until('said not read yet', async () => (await me.page.locator('#simple-thread .parley-sign-state[data-state=sent]').count()) > 0);
+    assert.match(await me.page.locator('#simple-thread .parley-sign-state[data-state=sent]').last().getAttribute('aria-label'), /^Envoyé, pas encore lu/);
     /* In its terminal, ONE line, once somebody stopped typing there: that a message arrived, and only that. */
     await me.until('the line was typed to the tool', async () => (await me.screen()).includes('You have a new message: run "parley read".'), 20_000);
     await new Promise((r) => setTimeout(r, 600));
@@ -118,7 +121,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     const now = me.page.locator('#simple-thread .parley-now');
     await me.until('what it does now, under the last message', async () => (await now.innerText().catch(() => '')).includes('counting the late orders'));
     assert.equal(await now.getAttribute('data-live'), 'true');
-    assert.equal(await me.page.locator('#simple-thread .parley-thread > :last-child').getAttribute('class'), 'parley-now', 'the last thing in the thread');
+    assert.equal(await me.page.locator('#simple-thread .parley-thread > :last-child > :first-child').getAttribute('class'), 'parley-now', 'the last thing in the thread');
+    /* Read now, and being worked on: the signs of its messages say so. */
+    await me.until('worked on', async () => (await me.page.locator('#simple-thread .parley-sign-state[data-state=working]').count()) > 0);
     /* It shows two files, one it cannot share, and says it is done. */
     await me.page.locator('#simple-toggle').click();
     await me.type('clear; echo "38 orders, 3 late" > report.txt; printf \'%s\\n\' \'{"id":"s1","at":"2030-01-01T00:00:00.000Z","kind":"show","path":"/work/report.txt","text":"The report."}\' >> .parley/from-agent.jsonl; echo x > /tmp/clv-e2e-secret.txt; parley show /tmp/clv-e2e-secret.txt >/dev/null; parley status done; echo shown');
@@ -131,7 +136,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     assert.equal(await me.page.locator('#simple-thread .parley-chip').count(), 0, 'simple: no line of their own between messages');
     assert.equal(await report.getAttribute('aria-expanded'), 'false', 'simple: folded into the message they led to');
     assert.match(await report.locator('.parley-time').innerText(), / - 2 étapes$/, 'said with its time');
-    await report.locator('.parley-text').click();
+    await report.locator('.parley-md').click();
     assert.equal(await report.getAttribute('aria-expanded'), 'true');
     assert.deepEqual(await me.page.locator('#simple-thread .parley-trail[data-for=s1] .parley-step').allInnerTexts(), ['counting the late orders', 'Terminé'], 'opened above it, as they came');
     /* The day, and the time of a message on hover; on a touch screen, a long press. */
@@ -147,17 +152,20 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await pressed.dispatchEvent('pointerdown', { pointerType: 'touch', bubbles: true });
     await me.until('its time, after a long press', async () => (await pressed.getAttribute('data-reveal')) === 'true');
     assert.equal((await me.page.locator('#simple-thread').innerText()).includes('clv-e2e-secret'), false, 'the simple view shows nothing the person cannot open');
-    await me.until('read now', async () => !(await me.page.locator('#simple-thread').innerText()).includes('Pas encore lu'));
+    await me.until('handled now: no sign left in the simple view', async () => (await me.page.locator('#simple-thread .parley-sign-state').count()) === 0);
     await me.page.locator('#simple-thread .parley-said[data-kind=show] .parley-open').first().click();
     await me.until('the report is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('38 orders, 3 late'));
     await me.page.locator('#preview-close').click();
     /* The detailed view: where it is, the steps it said, every file, a way to its terminal. Remembered on this device. */
+    /* The view is chosen in the one menu of settings of the chat. */
+    await me.page.locator('#simple-thread .parley-prefs-open').click();
     await me.page.locator('#simple-thread .parley-views button[data-view=detailed]').click();
     await me.until('the detailed view', async () => (await me.page.locator('#simple-thread .parley-status').innerText()).startsWith('Terminé'));
     const steps = await me.page.locator('#simple-thread .parley-steps .parley-step').allInnerTexts();
-    assert.deepEqual(steps, ['Au travail - on the cover', 'counting the late orders', 'Terminé'], 'every step unfolded where it came, with its state');
+    assert.deepEqual(steps, ['Au travail - on the cover', 'counting the late orders'], 'every step unfolded where it came, with its state; "done", said at the top, not again');
     assert.equal(await me.page.locator('#simple-thread .parley-steps .parley-trail[hidden]').count(), 0);
-    assert.equal(await me.page.locator('#simple-thread .parley-steps .parley-time').count(), 3, 'each with its time');
+    assert.equal(await me.page.locator('#simple-thread .parley-steps .parley-time').count(), 2, 'each with its time');
+    assert.equal(await me.page.locator('#simple-thread .parley-sign-state[data-state=done]').count(), 2, 'detailed: every message of the person signed, handled ones too');
     assert.equal(await mine.locator('.parley-time').evaluate((e) => getComputedStyle(e).opacity), '1', 'detailed: the time of every message');
     assert.ok((await me.page.locator('#simple-thread .parley-thread').innerText()).includes("Pas dans un dossier partagé : il ne peut pas être ouvert d'ici."), 'the file it cannot share is said to be outside');
     assert.equal(await me.page.locator('#simple-thread .parley-files li').count(), 2);
@@ -191,8 +199,12 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.page.locator('#simple-thread .parley-reply', { hasText: 'Start with' }).click();
     assert.equal(await me.page.locator('#simple-thread .parley-box').inputValue(), 'Start with the cover');
     await me.page.fill('#simple-thread .parley-box', '');
-    await me.page.locator('#simple-thread .parley-reply', { hasText: 'Summarise' }).click();
-    await me.until('sent in one tap', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'Summarise what you did, in five lines.'));
+    await me.api('/api/shortcuts', { label: 'Go on', text: 'Go on, please.', enter: true });
+    await me.page.reload();
+    await me.until('it is there too', async () => (await me.page.locator('#simple-thread .parley-reply', { hasText: 'Go on' }).count()) === 1);
+    assert.equal(await me.page.locator('#simple-thread .parley-reply', { hasText: 'Summarise' }).count(), 0, 'not the first ones');
+    await me.page.locator('#simple-thread .parley-reply', { hasText: 'Go on' }).click();
+    await me.until('sent in one tap', async () => (await me.api('/api/conversations/helper/talk')).body.messages.some((m) => m.text === 'Go on, please.'));
     assert.equal(await me.page.locator('#simple-thread .parley-send b').count(), 0, 'as text, never as markup');
     /* The chat is where it opens, everywhere: from the list on a phone, and on a device it was shared with. */
     /* Many ready answers, for the shared phone below. */

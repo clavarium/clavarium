@@ -89,8 +89,9 @@ test('opening wakes a stopped machine, and the terminal runs the tool alone in t
     await all.built;
     b.states.set(vmName('demo'), 'Stopped');
     b.calls.length = 0;
+    /* Only what is said in words: a step told alone (its progress) is not kept here. */
     const said = [];
-    const argv = await all.open('demo', (x) => said.push(x));
+    const argv = await all.open('demo', (x) => { if (x) said.push(x); });
     assert.deepEqual(b.calls, ['info clv-demo', 'start clv-demo', 'exec clv-demo -- test -d /'], 'started, and asked to answer before a terminal is opened into it');
     assert.deepEqual(said, ['Waking the machine...']);
     assert.deepEqual(argv.slice(0, 14), ['vmm', 'vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'new-session', '-A', '-s', SESSION, '-c', '/work']);
@@ -425,7 +426,7 @@ test('a machine the VM manager is starting already is waited for, not started ag
     setTimeout(() => b.states.set(vmName('demo'), 'Running'), 80);
     b.calls.length = 0;
     const said = [];
-    await all.open('demo', (x) => said.push(x));
+    await all.open('demo', (x) => { if (x) said.push(x); });
     assert.deepEqual(said, ['Its machine is starting...']);
     assert.equal(b.calls.filter((c) => c.startsWith('start')).length, 0, 'not started a second time');
     assert.ok(b.calls.filter((c) => c.startsWith('info')).length >= 2, 'its state was asked until it ran');
@@ -589,4 +590,144 @@ test('the server\'s reserve is asked before a machine is created, started, woken
     assert.deepEqual(asked.at(-1), { kind: 'grow', name: 'demo', memoryMb: 2048, diskMb: 12 * 1024 });
     assert.equal(all.get('demo').phase, 'ready');
     assert.equal(all.get('demo').memoryMb, 1024);
+});
+
+/* WHERE A START IS, TOLD STEP BY STEP (progress): every step a page is shown,
+   in the order it is shown, for a restart (its last session taken up, or a
+   new one), a build, and a wake -- from what the VM manager says and what
+   this server does, never from what the tool prints. */
+function stepping(t) {
+    let b;
+    const slow = (to, during) => (argv) => { b.states.set(argv[2], during); return new Promise((r) => { setTimeout(() => { b.states.set(argv[2], to); r({ code: 0, stdout: '', stderr: '' }); }, 60); }); };
+    b = bench(t, { stop: slow('Stopped', 'Stopping'), start: slow('Running', 'Starting'),
+        exec: (argv) => (argv.includes('has-session') && b.noSession ? { code: 1, stdout: '', stderr: 'no session' } : argv.slice(-3).join(' ') === 'test -d /' && b.silent ? { code: 255, stdout: '', stderr: 'ssh: connect' } : undefined) });
+    const all = b.make({ pollMs: 10 });
+    /* Each step as the page would see it: its name, and where it is. */
+    const seen = [];
+    const patch = b.store.patch.bind(b.store);
+    b.store.patch = (name, changes) => {
+        const done = patch(name, changes);
+        const p = done?.progress;
+        const now = p ? `${p.kind}:${p.steps[p.at]}` : 'over';
+        if (seen.at(-1) !== now) seen.push(now);
+        return done;
+    };
+    const mountedFor = [];
+    all.mounted = async (name, again) => { mountedFor.push(again ? 'again' : 'looked'); };
+    return { b, all, seen, mountedFor };
+}
+const quiet = (seen) => seen.filter((x, i) => !(x === 'over' && i === 0));
+
+test('a restart is told step by step: it stops, starts, answers, its folders are ready, the tool starts, then takes up its last session', async (t) => {
+    const { b, all, seen, mountedFor } = stepping(t);
+    all.create({ name: 'demo', tool: 'again' });
+    await all.built;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    seen.length = 0; mountedFor.length = 0;
+    await all.restart('demo');
+    assert.deepEqual(all.get('demo').progress.steps, ['stopping', 'starting', 'answering', 'folders', 'tool', 'resume']);
+    await all.restarted;
+    assert.equal(all.get('demo').phase, 'ready');
+    /* Ready, but the page still waits: the tool is not there yet. */
+    assert.equal(all.get('demo').progress.steps[all.get('demo').progress.at], 'answering');
+    await all.open('demo');
+    assert.equal(all.get('demo').progress.steps[all.get('demo').progress.at], 'resume', 'its command, given: it takes up its last session');
+    all.attached('demo'); all.left('demo');
+    assert.deepEqual(quiet(seen), ['restart:stopping', 'restart:starting', 'restart:answering', 'restart:folders', 'restart:tool', 'restart:resume', 'over']);
+    assert.deepEqual(mountedFor, ['again'], 'its folders mounted again before its tool starts');
+    assert.equal(all.get('demo').progress, undefined);
+    /* Started fresh, as its owner chose: the last step says so. */
+    all.setResume('demo', false);
+    await all.restart('demo');
+    assert.deepEqual(all.get('demo').progress.steps.slice(-2), ['tool', 'fresh']);
+    await all.restarted; await all.open('demo'); all.attached('demo'); all.left('demo');
+    /* A tool that cannot resume: five steps, the tool's start the last. */
+    all.create({ name: 'plain', tool: 'tool' });
+    await all.built;
+    await all.open('plain'); all.attached('plain'); all.left('plain');
+    await all.restart('plain');
+    assert.deepEqual(all.get('plain').progress.steps, ['stopping', 'starting', 'answering', 'folders', 'tool']);
+    await all.restarted;
+});
+
+test('a build is told in five steps, with no session to take up; a wake in its own, and a machine woken from sleep keeps its tool as it was', async (t) => {
+    const { b, all, seen } = stepping(t);
+    all.create({ name: 'built', tool: 'tool' });
+    assert.deepEqual(all.get('built').progress.steps, ['starting', 'preparing', 'installing', 'folders', 'tool']);
+    await all.built;
+    await all.open('built'); all.attached('built'); all.left('built');
+    assert.deepEqual(quiet(seen), ['build:starting', 'build:preparing', 'build:installing', 'build:folders', 'build:tool', 'over']);
+    /* A tool that can resume is not said to at its first start either: a new disk holds no session. */
+    all.create({ name: 'demo', tool: 'again' });
+    assert.deepEqual(all.get('demo').progress.steps.at(-1), 'tool');
+    await all.built;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    /* Stopped (its tool exited): woken by an opening, its tool started again on its last session. */
+    b.states.set(vmName('demo'), 'Stopped');
+    seen.length = 0;
+    const told = [];
+    await all.open('demo', (text, progress) => told.push(progress?.steps[progress.at]));
+    all.attached('demo'); all.left('demo');
+    assert.deepEqual(quiet(seen), ['wake:starting', 'wake:answering', 'wake:folders', 'wake:tool', 'wake:resume', 'over']);
+    assert.deepEqual(told, ['starting', 'answering', 'folders', 'tool', 'resume'], 'each step told to the screen that opens');
+    /* Asleep, its tmux session still there: it wakes, and its tool is there as it was. */
+    b.states.set(vmName('demo'), 'Suspended');
+    seen.length = 0;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    assert.deepEqual(quiet(seen), ['wake:waking', 'wake:answering', 'wake:folders', 'wake:back', 'over']);
+    /* Asleep, but its tool had gone: started again, as after a stop. */
+    b.noSession = true;
+    b.states.set(vmName('demo'), 'Suspended');
+    seen.length = 0;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    assert.deepEqual(quiet(seen), ['wake:waking', 'wake:answering', 'wake:folders', 'wake:tool', 'wake:resume', 'over']);
+});
+
+test('"No earlier session" is said only when it is known: a disk this server built and whose tool it never started', async (t) => {
+    const { all } = stepping(t);
+    all.create({ name: 'demo', tool: 'again' });
+    await all.built;
+    /* Its terminal never opened (nobody came, and the server did not keep it): no session can be on that disk. */
+    await all.restart('demo');
+    assert.deepEqual(all.get('demo').progress.steps.at(-1), 'first');
+    await all.restarted; await all.open('demo'); all.attached('demo'); all.left('demo');
+    await all.restart('demo');
+    assert.deepEqual(all.get('demo').progress.steps.at(-1), 'resume');
+    await all.restarted; await all.open('demo'); all.attached('demo'); all.left('demo');
+    /* A record from before this was kept: what the tool finds is not known, only that it starts a new one. */
+    const { all: older, b: ob } = stepping(t);
+    ob.store.put({ name: 'old', tool: 'again', memoryMb: 1024, work: 'kept', phase: 'ready', fixed: 1 });
+    ob.states.set(vmName('old'), 'Running');
+    await older.restart('old');
+    assert.deepEqual(older.get('old').progress.steps.at(-1), 'fresh');
+    await older.restarted;
+});
+
+test('a start that fails ends its steps; a server restarted meanwhile forgets them; nothing told names the VM manager or an address', async (t) => {
+    const { b, all } = stepping(t);
+    all.create({ name: 'demo', tool: 'again' });
+    await all.built;
+    await all.open('demo'); all.attached('demo'); all.left('demo');
+    /* Every step of a restart and of a wake, as given to the page. */
+    const told = [];
+    await all.restart('demo');
+    told.push(JSON.stringify(all.list()[0]));
+    await all.restarted;
+    await all.open('demo', (text, progress) => told.push(JSON.stringify({ text, progress })));
+    all.left('demo');
+    told.push(JSON.stringify(all.list()[0]));
+    for (const said of told) {
+        assert.doesNotMatch(said, /multipass/i);
+        assert.doesNotMatch(said, /\b\d{1,3}(\.\d{1,3}){3}\b/);
+    }
+    /* Its tool's screen never drawn: the server restarted meanwhile; the page must not wait for it. */
+    assert.ok(all.get('demo').progress);
+    b.make();
+    assert.equal(b.store.get('demo').progress, undefined);
+    /* A machine that does not answer after its start: the steps end, the page opens the terminal and says why. */
+    b.states.set(vmName('demo'), 'Stopped');
+    b.silent = true;
+    const slowly = b.make({ pollMs: 10, answerMs: 40 });
+    await assert.rejects(slowly.open('demo'), /does not answer yet/);
+    assert.equal(b.store.get('demo').progress, undefined);
 });

@@ -195,14 +195,17 @@ export class GitReview {
 
     /* Fetches the remote's branches into the reference, making it the first
        time. Under the reference's lock. Resolves { ok, message, rewritten,
-       made }; `rewritten`: branches whose tip before is not an ancestor of
-       their tip now, or that are gone. The only writer of the reference. */
+       made, brought }; `rewritten`: branches whose tip before is not an
+       ancestor of their tip now, or that are gone; `brought`: branches that
+       came with commits the reference did not have, { branch, commits }.
+       The only writer of the reference. */
     async refresh(name, { waitMs = SEND_WAIT_MS } = {}) {
         const r = this.#repository(name);
         const release = await this.#runner.lock(this.#reference(r.name), waitMs);
         try { return await this.#refreshLocked(r); } finally { release(); }
     }
-    async #refreshLocked(r) {
+    /* `ours`: { branch, head } just pushed from here: what it brings back is not news from the remote. */
+    async #refreshLocked(r, ours = null) {
         const remote = this.#remoteOf(r);
         const said = (result) => { this.#tell('refresh', r.name, result); return result; };
         if (!remote) return said({ ok: false, message: 'This repository has no remote: it was not cloned and no address is set.', rewritten: [] });
@@ -243,9 +246,22 @@ export class GitReview {
             if (!now) rewritten.push({ branch: b, was, now: null });
             else if (now !== was && !await this.#isAncestor(reference, was, now)) rewritten.push({ branch: b, was, now });
         }
+        /* Counted against everything the reference had before, so a branch
+           made from another one brings only its own commits. The first fetch
+           brings the whole history: that is not news. */
+        const brought = [];
+        if (!made && before.size > 0) {
+            const had = [...before.values()].map((id) => `^${id}`).join('\n');
+            for (const [b, now] of after) {
+                if (before.get(b) === now || rewritten.some((w) => w.branch === b) || (ours && ours.branch === b && ours.head === now)) continue;
+                const counted = await this.#runner.in(reference, ['rev-list', '--count', '--stdin', '--end-of-options'], { input: `${now}\n${had}\n`, deadlineMs: 120_000 }).catch(() => null);
+                const commits = Number(counted?.code === 0 ? counted.stdout.toString('latin1').trim() : 0) || 0;
+                if (commits > 0) brought.push({ branch: b, commits });
+            }
+        }
         if (made) await this.#resources.shareOrigin(r.name).catch(() => {});
         await this.#learnDefault(r, remote).catch(() => {});
-        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made });
+        return said({ ok: true, message: 'Up to date with the remote.', rewritten, made, brought });
     }
 
     /* Is `tip` of the agent's branch `b` something the remote lacks? Not
@@ -551,7 +567,7 @@ export class GitReview {
                     /* Ended by a deadline or a signal, or failed with no word
                        about our ref (a connection dropped after the remote
                        took the pack): the outcome is unknown. The remote says. */
-                    const settle = await this.#refreshLocked(r);
+                    const settle = await this.#refreshLocked(r, { branch: target, head });
                     if (!settle.ok) throw new GitFailure(502, 'unknown-unreachable', `The outcome is unknown, and the remote is unreachable: automatic sending to ${target} waits until a refresh settles it.`, { alert: true });
                     if ((await this.#tipsIn(reference)).get(target) === head) return sent({});
                     throw new GitFailure(502, 'unknown-not-sent', 'The outcome was unknown; refreshed: it is not on the remote.');
@@ -561,7 +577,7 @@ export class GitReview {
                 if (flag === '!' && /stale info|fetch first|non-fast-forward/.test(summary)) throw new GitFailure(409, 'remote-moved', `Not sent: the remote's ${target} moved (the lease was refused). Look again.`, { ai: `origin/${target} moved: pull origin/${target} first` });
                 if (pushed.code !== 0 || !(flag === ' ' || flag === '*')) throw new GitFailure(502, 'refused', `The remote refused: ${explain(pushed.stderr) || firstLine(summary)}`);
                 /* (5) The pushed commits enter the reference only as the remote's history. */
-                const after = await this.#refreshLocked(r);
+                const after = await this.#refreshLocked(r, { branch: target, head });
                 return sent(after.ok ? {} : { refreshed: false, note: 'Sent; the reference was not refreshed.' });
             } finally { release(); }
         } finally { got.remove(); }

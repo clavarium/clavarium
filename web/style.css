@@ -34,7 +34,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .item small { color: var(--ink2); }
 .item .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink2); }
 .item[data-phase="ready"] .dot { background: var(--ok); }
-.item[data-phase="building"] .dot { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.item[data-phase="building"] .dot, .item[data-phase="restarting"] .dot, .item[data-busy="true"] .dot { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
 .item[data-phase="failed"] .dot { background: var(--danger); }
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .item .dot { animation: none !important; } }
@@ -70,14 +70,21 @@ main { position: relative; flex: 1; min-height: 0; }
 /* The wheel while a machine is built or its work moved; still for those who ask for less motion. */
 #notice .spin { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .18); border-top-color: #d2a94e; }
 @media (prefers-reduced-motion: no-preference) { #notice .spin { animation: notice-spin .9s linear infinite; } @keyframes notice-spin { to { transform: rotate(360deg); } } }
-#notice-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; text-align: left; font-size: .9375rem; }
-#notice-steps li { color: #8a97a8; padding-left: 26px; position: relative; }
-#notice-steps li::before { position: absolute; left: 0; width: 18px; text-align: center; }
-#notice-steps li[data-state="done"] { color: #5fc39d; }
-#notice-steps li[data-state="done"]::before { content: "\2713"; }
-#notice-steps li[data-state="now"] { color: #e7edf4; font-weight: 600; }
-#notice-steps li[data-state="now"]::before { content: "\25CF"; color: #d2a94e; }
-#notice-steps li[data-state="later"]::before { content: "\25CB"; }
+/* A START TOLD STEP BY STEP (app.js, progressPanel): what it is and "Step 3
+   of 6" with its clock; the step under way large, with its wheel; those
+   passed on one small line of checks; those to come dimmed. */
+#notice-head { display: grid; gap: 2px; }
+#notice #notice-title { font-size: .8125rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--brass); }
+#notice #notice-count { font-size: .9375rem; color: var(--ink2); font-variant-numeric: tabular-nums; }
+#notice-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 12px; max-width: 34rem; font-size: .9375rem; }
+#notice-steps li { color: var(--ink2); }
+#notice-steps li[data-state="done"] { font-size: .75rem; color: var(--ok); opacity: .85; }
+#notice-steps li[data-state="done"]::before { content: "\2713\00a0"; }
+#notice-steps li[data-state="now"] { flex-basis: 100%; order: 1; display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 14px 0 12px; font-size: 1.375rem; font-weight: 600; color: var(--ink); }
+#notice-steps li[data-state="now"] small { font-size: .8125rem; font-weight: 400; color: var(--ink2); }
+#notice-steps li[data-state="later"] { flex-basis: 100%; order: 2; font-size: .875rem; opacity: .8; }
+#notice-steps li[data-state="later"]::before { content: "\25CB\00a0"; }
+:root[data-theme="light"] #notice .spin { border-color: rgba(23, 32, 43, .14); border-top-color: var(--brass); }
 #notice button { padding: 10px 18px; font-size: .9375rem; }
 footer { display: flex; gap: 6px; padding: 6px 8px; background: var(--bar); border-top: 1px solid var(--line); overflow-x: auto; }
 footer button { flex: 0 0 auto; min-width: 44px; padding: 9px 12px; }
@@ -302,6 +309,12 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #attach-picker { border: 1px solid var(--brass); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 #chips { cursor: pointer; }
 #settings .row { align-items: center; gap: 10px; }
+/* One kind of event a line: its name, then its level, wrapped under it on a narrow screen. */
+.thread-levels { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; align-items: center; }
+.thread-levels label { min-width: 0; }
+.thread-levels small { display: block; color: var(--ink2); font-size: .8125rem; }
+.thread-levels select { min-height: 40px; min-width: 10rem; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+@media (max-width: 420px) { .thread-levels { grid-template-columns: minmax(0, 1fr); } .thread-levels select { justify-self: start; margin-bottom: 6px; } }
 
 /* What is done to the conversation itself sits at the foot of its own sheet. */
 #conversation-actions { align-items: center; gap: 8px; }
@@ -904,6 +917,8 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .diff .del { background: color-mix(in srgb, var(--danger) 18%, transparent); }
 .diff .gap { color: var(--ink2); }
 /* While a text is edited, Save is the main action: Download steps back. */
+/* What is being edited is not what was read: no copy of the old text then. */
+#viewer[data-editing="true"] #preview-copy { display: none; }
 #viewer[data-editing="true"] #preview-download { background: var(--button, #222c38); color: var(--ink); border: 1px solid var(--line); }
 /* Read-only said plainly, where the buttons would be. */
 #files-readonly { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bar); color: var(--ink); font-size: .8125rem; }

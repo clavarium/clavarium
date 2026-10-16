@@ -34,7 +34,12 @@ export const FIXES = 1;
 export const STARTING_MS = 180_000;
 /* A machine just started is asked to answer for this long before a terminal is opened into it. */
 export const ANSWER_MS = 90_000;
+/* What the folders of a machine just started are waited for, at most, before its tool starts. */
+const MOUNTED_MS = 30_000;
 const POLL_MS = 2000;
+/* The tool's screen not drawn this long after its terminal was opened: its
+   start is said to be over all the same (the page then opens it itself). */
+export const DRAWN_MS = 15_000;
 /* Asked of a machine to know that it answers: a command that does nothing (and no install step uses). */
 export const ANSWER_PROBE = Object.freeze(['test', '-d', '/']);
 
@@ -45,10 +50,14 @@ export class Refusal extends Error {
     constructor(status, message, { retry = false } = {}) { super(message); this.status = status; if (retry) this.retry = true; }
 }
 
+/* A machine built: it starts, is prepared, gets its tool, its folders, and
+   the tool starts -- a new disk holds no session to take up. */
+const buildProgress = (since) => ({ kind: 'build', steps: ['starting', 'preparing', 'installing', 'folders', 'tool'], at: 0, since, stepSince: since });
+
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #uid; #gid;
+    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -61,9 +70,11 @@ export class Conversations {
     /* Set by the server: the ready-made machine to copy for a tool, or
        undefined for the long way. See shelf.mjs. */
     shelf = { pick: () => undefined };
-    /* Set by the server: told when a machine was just started by an opening
-       (its folders are then looked at, see health.mjs). */
-    started = () => {};
+    /* Set by the server: makes sure the folders of a machine that has just
+       started are there, and waits for it -- mounted again first (`again`)
+       when it was just built, restarted or its work moved; otherwise only
+       looked at, and put back if they came loose (health.mjs). */
+    mounted = async () => {};
     /* Set by the server: told when its machine was restarted or built again
        by this server, in words for its chat, and whether the tool runs again
        (its chat says it, and the tool is told to read it again: talk.mjs). */
@@ -87,7 +98,73 @@ export class Conversations {
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
             if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
+            /* Nothing of a start is going on any more: a page must not wait for it. */
+            if (store.get(c.name)?.progress) store.patch(c.name, { progress: undefined });
         }
+    }
+
+    /* WHERE A START IS, FOR THE PAGE: a build, a restart (or a new size), a
+     * wake. `progress` on the record: { kind, steps, at, since, stepSince,
+     * detail }. `steps` are names the page puts in words (web/app.js); `at`
+     * only goes forward. The steps run all the way to the tool: its machine
+     * stops, starts, answers, its folders are there, the tool starts -- and
+     * takes up its last session, a step of its own, when it does. What the
+     * VM manager says of the machine moves it on (#watched), never what the
+     * tool prints. It ends when the tool's screen is drawn (`attached`), or
+     * when the start fails. */
+    #begin(name, kind, steps, since = new Date().toISOString()) {
+        this.#store.patch(name, { progress: { kind, steps, at: 0, since, stepSince: new Date().toISOString() } });
+    }
+    #reach(name, id, detail) {
+        const p = this.#store.get(name)?.progress;
+        const at = p ? p.steps.indexOf(id) : -1;
+        if (at < 0 || at < p.at || (at === p.at && detail === p.detail)) return;
+        this.#store.patch(name, { progress: { ...p, at, stepSince: at === p.at ? p.stepSince : new Date().toISOString(), detail } });
+    }
+    /* The steps from the tool's own on, once what the tool will do is known. */
+    #tail(name, tail) {
+        const p = this.#store.get(name)?.progress;
+        const from = p ? p.steps.findIndex((id) => id === 'tool' || id === 'back') : -1;
+        if (from < 0) return;
+        this.#store.patch(name, { progress: { ...p, steps: [...p.steps.slice(0, from), ...tail] } });
+    }
+    #end(name) { if (this.#store.get(name)?.progress) this.#store.patch(name, { progress: undefined }); }
+    /* Told by the server: the tool's screen is being drawn (or did not come
+       in time). Its start is over. */
+    attached(name) { this.#end(name); }
+
+    /* WHAT THE TOOL DOES AT ITS NEXT START, as the step after "The tool
+       starts": takes up its last session ('resume'), starts a new one as its
+       owner chose ('fresh'), or starts one because none was ever made on this
+       disk ('first': known only when this server built the disk and never
+       started the tool on it; a record older than that knowledge is said
+       'fresh', which is what happens). None for a tool that cannot resume.
+       Whether the tool, told to resume, finds a session of its own cannot
+       be known here: it is said 'resume'. Mirrors #command. */
+    #resumeStep(c, tool) {
+        if (!tool?.resume) return [];
+        if (c.resume === false) return ['fresh'];
+        if (c.toolStarted === true) return ['resume'];
+        return [c.toolStarted === false ? 'first' : 'fresh'];
+    }
+
+    /* Polls the VM manager's state while `work` (a start or a stop this
+       server launched: `how`) runs: only questions, which never wake or
+       disturb a machine. What it says moves the steps on: a machine seen
+       running before its start command returned is waited for to answer. */
+    async #watched(name, how, work) {
+        let done = false;
+        void (async () => {
+            while (!done) {
+                await new Promise((r) => { setTimeout(r, this.#pollMs).unref?.(); });
+                if (done) return;
+                const state = await this.#vms.state(name).catch(() => undefined);
+                if (done) return;
+                if (how === 'stop' && (state === 'Stopping' || state === 'Suspending')) this.#reach(name, 'stopping');
+                if (how === 'start' && state === 'Running') this.#reach(name, 'answering');
+            }
+        })();
+        try { return await work; } finally { done = true; }
     }
 
     /* `resumes`: the tool can take up its last session when it starts (`resume` in config/tools.json). */
@@ -129,7 +206,8 @@ export class Conversations {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
-        const conversation = { name, tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: new Date().toISOString(), buildingSince: new Date().toISOString() };
+        const now = new Date().toISOString();
+        const conversation = { name, tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         this.#store.put(conversation);
         this.built = this.#build(name, chosen, memory);
         return conversation;
@@ -137,7 +215,7 @@ export class Conversations {
 
     /* `again`: a machine built anew for a conversation that had one. */
     async #build(name, tool, memoryMb, again = false) {
-        const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
+        const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
         /* A COPY OF THE READY-MADE MACHINE when there is one that holds this
            tool (see shelf.mjs): it only has to boot. Anything wrong with the
            copy -- an older VM manager without "clone", a copy that does not
@@ -157,6 +235,7 @@ export class Conversations {
             if (launched.code !== 0) return fail('The machine did not start', launched);
         }
         this.#store.patch(name, { step: 'Preparing the machine', readyMade: readyMade || undefined });
+        this.#reach(name, 'preparing');
         if (readyMade) {
             /* A copy's first start is a first start: it makes its own identity
                (host keys, network). Waited for, so that nothing below meets a
@@ -190,21 +269,26 @@ export class Conversations {
         let installed = false;
         if (readyMade) {
             this.#store.patch(name, { step: `Installing ${tool.label} (already on the machine)` });
+            this.#reach(name, 'installing', 'came');
             installed = tool.steps.length === 0 || (await this.#vms.exec(name, ['which', tool.command[0]])).code === 0;
         }
         for (const [i, step] of (installed ? [] : tool.steps).entries()) {
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
             this.#store.patch(name, { step: `Installing ${tool.label} (${i + 1}/${tool.steps.length})` });
+            this.#reach(name, 'installing', `${i + 1}/${tool.steps.length}`);
             const r = await this.#vms.exec(name, step.argv, { input: step.input, timeoutMs: STEP_MS });
             if (r.code !== 0) return fail(`Installing ${tool.label} failed at step ${i + 1}`, r);
         }
-        /* A new disk holds no session of the tool: its first start is a plain one. */
-        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: undefined });
+        /* A new disk holds no session of the tool: its first start is a plain
+           one (`false`: known, as opposed to a record made before this was kept). */
+        this.#store.patch(name, { phase: 'ready', step: undefined, buildingSince: undefined, toolStarted: false });
+        this.#reach(name, 'folders');
         /* A machine that has just been built holds nothing of what was put
            in the one before it: the next opening prepares it from nothing.
            (Without this, a machine built again started with no runner, and
            its tool "exited" at once -- caught by an end-to-end test.) */
         this.#fresh.add(name);
+        this.#mountAgain.add(name);
         this.ready(name);
         if (again) this.renewed(name, 'Its machine was built again: what was on its own disk is gone, its work folder and this chat are kept. The tool started again.', true);
         return undefined;
@@ -228,7 +312,8 @@ export class Conversations {
         this.#cancelStop(name);
         this.drop(name);
         /* Marked first: two requests cannot both start a build. */
-        this.#store.patch(name, { phase: 'building', step: 'Starting the machine', error: undefined, asleep: false, buildingSince: new Date().toISOString() });
+        const now = new Date().toISOString();
+        this.#store.patch(name, { phase: 'building', step: 'Starting the machine', error: undefined, asleep: false, buildingSince: now, progress: buildProgress(now) });
         this.built = (async () => {
             /* What a failed build left behind is cleared away first. */
             if (state !== undefined) await this.#vms.remove(name);
@@ -246,44 +331,81 @@ export class Conversations {
         /* Opening is the explicit gesture that ends a sleep. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
+        /* A start that fails here ends what the page was shown of it: the
+           page then opens the terminal itself, and says what went wrong. */
+        try { return await this.#opening(name, c, say); } catch (error) { this.#end(name); throw error; }
+    }
+
+    async #opening(name, c, say) {
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        /* Each step reached is told to the screen that opens, with the steps
+           (the record has them too, for any other page). */
+        const tell = (text) => say(text, this.#store.get(name)?.progress);
         let state = await this.#vms.state(name);
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
+        /* What a wake goes through, unless a build or a restart is already
+           being told. From sleep, its tool is most likely there as it was
+           (sleep is offered while it runs): looked at once it answers. */
+        const waking = (first) => { if (!this.#store.get(name)?.progress) this.#begin(name, 'wake', [first, 'answering', 'folders', ...(first === 'waking' ? ['back'] : ['tool', ...this.#resumeStep(c, tool)])]); };
         /* STARTED ALREADY BY SOMEBODY ELSE -- the VM manager, after the host
            restarted: it is waited for, not started a second time (which the
            VM manager refuses, and the page used to stay on an error). */
         if (state === 'Starting' || state === 'Restarting') {
-            say('Its machine is starting...');
+            waking('starting');
+            tell('Its machine is starting...');
             state = await this.#until(name, (s) => s !== 'Starting' && s !== 'Restarting', this.#startingMs);
             if (state === 'Starting' || state === 'Restarting') { this.left(name); throw new Refusal(504, 'Its machine is still starting.', { retry: true }); }
+            this.#reach(name, 'answering');
         }
         const stopped = state !== 'Running';
+        /* Asleep, its memory was kept: the tool may still be there, as it was. */
+        const asleep = state === 'Suspended';
         let woke = this.#fresh.delete(name) || stopped;
         if (stopped) {
             try { await this.room({ kind: 'start', name, memoryMb: c.memoryMb }); } catch (error) { this.left(name); throw error; }
-            say('Waking the machine...');
-            const started = await this.#vms.start(name);
+            waking(asleep ? 'waking' : 'starting');
+            tell('Waking the machine...');
+            const started = await this.#watched(name, 'start', this.#vms.start(name));
             if (started.code !== 0) {
                 this.left(name);
                 /* Starting meanwhile, after all: the page tries again by itself. */
                 const now = await this.#vms.state(name).catch(() => undefined);
                 throw new Refusal(502, `The machine did not wake: ${firstLine(started.stderr)}`, { retry: now === 'Starting' || now === 'Running' });
             }
-            this.started(name);
             woke = true;
         }
         /* JUST STARTED: it runs before it answers (its system is still coming
            up). A terminal opened before it answers fails, and the tool would
            be said to have exited: it is asked first, a few times. */
-        if (woke && !(await this.#answers(name))) { this.left(name); throw new Refusal(504, 'Its machine runs but does not answer yet.', { retry: true }); }
+        if (woke) {
+            this.#reach(name, 'answering'); tell();
+            if (!(await this.#answers(name))) { this.left(name); throw new Refusal(504, 'Its machine runs but does not answer yet.', { retry: true }); }
+        }
+        /* ITS FOLDERS: mounted again after a build, a restart or a move;
+           after a wake, looked at (and put back if they came loose). Waited
+           for, within a bound: the tool starts in them. */
+        const again = this.#mountAgain.delete(name);
+        if (again || stopped) {
+            this.#reach(name, 'folders'); tell();
+            await Promise.race([Promise.resolve().then(() => this.mounted(name, again)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+        }
+        /* Woken from sleep: its tool is still there when its session is. */
+        if (asleep) {
+            const kept = (await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`], { timeoutMs: 10_000 }).catch(() => ({ code: 1 }))).code === 0;
+            if (!kept) this.#tail(name, ['tool', ...this.#resumeStep(c, tool)]);
+        }
+        this.#reach(name, 'tool'); this.#reach(name, 'back'); tell();
         /* `woke` tells the preparation that the machine has just started:
            whatever was put in its memory before is gone. */
         try { await this.prepare(name, woke); }
         catch (error) { this.left(name); throw error; }
-        const tool = this.#tools.find((t) => t.id === c.tool);
         /* A machine built before a repair was part of the recipe gets it
            once, beside the opening, not in its way. */
         if ((c.fixed ?? 0) < FIXES && tool.fixups.length > 0) void this.#fixup(name, tool);
-        return this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...this.#command(name, tool)], WORK));
+        const argv = this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...this.#command(name, tool)], WORK));
+        for (const id of ['resume', 'fresh', 'first']) this.#reach(name, id);
+        tell();
+        return argv;
     }
 
     /* WHAT STARTS THE TOOL. Its last session is taken up (`resume` in
@@ -379,16 +501,20 @@ export class Conversations {
     async restart(name) {
         const c = this.#busyCheck(name);
         const release = this.#claim(name, 'restarting', 'Looking at the machine');
+        let state;
         try {
-            const state = await this.#vms.state(name);
+            state = await this.#vms.state(name);
             if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
             /* A machine that does not run is started: it takes its memory again. */
             if (state !== 'Running') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
-        this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: 'Stopping the machine', restarted: undefined });
+        const since = new Date().toISOString();
+        this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: 'Stopping the machine', restarted: undefined });
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        this.#begin(name, 'restart', [...(state === 'Stopped' ? [] : ['stopping']), 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
         this.restarted = this.#cycle(name, c, async () => undefined, true)
-            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.'));
+            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.', Boolean(failure)));
         return this.#store.get(name);
     }
 
@@ -419,8 +545,12 @@ export class Conversations {
             await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, memory - c.memoryMb) : 0, diskMb: Math.max(0, disk - (c.diskGb ?? DISK_GB)) * 1024 });
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
-        this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
+        const since = new Date().toISOString();
+        this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
+        /* Started again only when it ran: then the page is told each step to its tool. */
+        if (state === 'Running') this.#begin(name, 'resize', ['stopping', 'setting', 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
         const set = async () => {
+            this.#reach(name, 'setting');
             if (memory !== c.memoryMb) {
                 this.#store.patch(name, { step: `Setting its memory to ${memory} MB` });
                 const r = await this.#vms.setMemory(name, memory);
@@ -437,7 +567,7 @@ export class Conversations {
             await this.reconcile(name);
             const now = this.#store.get(name);
             const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.diskGb ?? disk} GB of disk`;
-            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`);
+            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
         });
         return this.#store.get(name);
     }
@@ -486,11 +616,11 @@ export class Conversations {
             if (state !== 'Stopped') {
                 step('Stopping the machine');
                 /* A machine asleep cannot be stopped cleanly: it is not running. */
-                const clean = state === 'Suspended' ? { code: 1 } : await this.#vms.stop(name, STOP_MS);
+                const clean = state === 'Suspended' ? { code: 1 } : await this.#watched(name, 'stop', this.#vms.stop(name, STOP_MS));
                 state = await this.#vms.state(name);
                 if (clean.code !== 0 || state !== 'Stopped') {
                     step('Stopping the machine by force');
-                    await this.#vms.kill(name);
+                    await this.#watched(name, 'stop', this.#vms.kill(name));
                     state = await this.#vms.state(name);
                 }
                 if (state !== 'Stopped') return `the machine did not stop (it is ${state ?? 'gone'}).`;
@@ -498,19 +628,24 @@ export class Conversations {
             const failed = await between();
             if (!restart) return failed;
             step('Starting the machine');
-            const started = await this.#vms.start(name);
+            this.#reach(name, 'starting');
+            const started = await this.#watched(name, 'start', this.#vms.start(name));
             if (started.code !== 0) return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
-            /* Whatever was put in its memory is gone: the next opening prepares it again. */
+            /* Whatever was put in its memory is gone: the next opening prepares it again, its folders first. */
             this.#fresh.add(name);
+            this.#mountAgain.add(name);
+            this.#reach(name, 'answering');
             return failed;
         } catch { return 'it stopped on an unexpected error.'; }
     }
 
     /* `chat`: the same, as its chat says it. */
-    async #settle(name, said, chat) {
+    async #settle(name, said, chat, failed = false) {
         if (!this.#store.get(name)) return;
         const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
         this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, restarted: said });
+        /* Its steps go on to the tool only when it runs; a failure ends them, said in `restarted`. */
+        if (!running || failed) this.#end(name);
         /* The tool is started again in its terminal, as after any start. */
         if (running) this.ready(name);
         try { this.renewed(name, chat ?? said, running); } catch { /* told, nothing more */ }
@@ -643,7 +778,8 @@ export class Conversations {
                 phase: 'ready', step: undefined, ...(failure ? {} : { work: to }),
                 moved: failure ? `Not moved: ${failure} Its work is where it was.` : to === 'kept' ? 'Its work is now kept here: see it in Files.' : 'It now works on the disk of its machine.',
             });
-            /* The tool is started again, where its work now is. */
+            /* The tool is started again, where its work now is, its folders mounted again first. */
+            this.#mountAgain.add(name);
             this.ready(name);
         })();
     }

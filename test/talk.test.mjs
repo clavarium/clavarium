@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
+import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
 import { WAKE, REREAD } from '../server/parley/host/parley-host.mjs';
 import { run } from '../server/parley/bin/parley.mjs';
@@ -241,12 +241,12 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     /* The next look finds the same, with other numbers: not said twice. */
     b.talk.machine('helper', { level: 'warn', problems: [{ ...memory.problems[0], text: 'Its memory is almost full: 18 MB free of 768 MB.' }] });
     let lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
-    assert.deepEqual(lines.map((l) => [l.text, l.level, l.actions]), [['Its memory is almost full: 20 MB free of 768 MB.', 'warn', ['memory', 'restart', 'terminal']]]);
+    assert.deepEqual(lines.map((l) => [l.text, l.level, l.tone, l.event, l.actions]), [['Its memory is almost full: 20 MB free of 768 MB.', 'needs-you', 'warn', 'machine-problem', ['memory', 'restart', 'terminal']]]);
     assert.equal(b.talk.of('helper').messages.at(-1).from, 'system', 'after the message it came after');
     /* Out of memory, and the machine no longer answers: what is new is said; a problem with no memory in it offers no memory. */
     b.talk.machine('helper', { level: 'bad', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }] });
     lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
-    assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'bad', actions: ['restart', 'terminal'] });
+    assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'needs-you', tone: 'bad', actions: ['restart', 'terminal'] });
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
     b.talk.machine('helper', memory);
@@ -261,7 +261,7 @@ test('after a restart its chat says so, and once the tool had time to start it i
     assert.equal(b.talk.of('helper').on, false, 'off: nothing');
     await b.talk.set('helper', true);
     b.talk.renewed('helper', 'Its machine was restarted: the tool started again.', true);
-    assert.deepEqual(b.talk.of('helper').messages.map((m) => [m.from, m.text, m.level]), [['system', 'Its machine was restarted: the tool started again.', 'info']]);
+    assert.deepEqual(b.talk.of('helper').messages.map((m) => [m.from, m.text, m.level, m.event, m.topic, m.tone]), [['system', 'Its machine was restarted: the tool started again.', 'news', 'restarted', 'Restarted', undefined]]);
     /* The person writes meanwhile: nothing typed, the line to come tells it to read everything. */
     assert.equal((await b.talk.say('helper', 'Are you back?')).told, 'restarting');
     assert.deepEqual(b.talk.of('helper').wake, { waits: true, typed: null, why: 'restarting' });
@@ -278,7 +278,8 @@ test('after a restart its chat says so, and once the tool had time to start it i
     b.world.clock += REREAD_AFTER_MS + 1;
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(b.typed.length, 2);
-    assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['restart', 'terminal']);
+    const failed = b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1);
+    assert.deepEqual([failed.level, failed.tone, failed.event, failed.actions], ['needs-you', 'bad', 'machine-problem', ['restart', 'terminal']]);
 });
 
 test('a file the person attaches is put in the bridge folder, in a folder of its own; the message gives its path; it opens from the chat, as what the tool shows does', async (t) => {
@@ -393,4 +394,42 @@ test('the one tmux command: the line as it is, a pause, Enter; a last ";" kept a
     assert.deepEqual(argv.slice(9), [';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', '=main:', 'Enter']);
     assert.equal(typeCommand('a;')[8], 'a\\;');
     assert.equal(typeCommand('a ; b')[8], 'a ; b');
+});
+
+test('the thread\'s own lines: a level per kind of event, the owner\'s choice over it, only where the chat is on, never unread, bounded', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    assert.equal(b.talk.event('helper', { kind: 'sent', text: 'Sent to dev: 1 commit, no checks asked for.' }), null, 'its chat is off: nothing kept');
+    await b.talk.set('helper', true);
+    const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
+    assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
+    const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
+    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news' });
+    assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
+    assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
+    /* Bounds: topic, brief, text; a tone only of the two. */
+    const long = b.talk.event('helper', { kind: 'refused', text: 'y'.repeat(900), topic: 't'.repeat(90), brief: 'b'.repeat(90), tone: 'pink' });
+    assert.deepEqual([long.text.length, long.topic.length, long.brief.length, long.tone], [500, 40, 60, undefined]);
+    /* The owner moves a kind: what is stored next follows, what was stored stays. */
+    assert.throws(() => b.talk.setThread({ levels: { origin: 'loud' } }), /A level is one of/);
+    assert.throws(() => b.talk.setThread({ levels: { gossip: 'news' } }), /no such kind/);
+    assert.throws(() => b.talk.setThread({ levels: ['news'] }), /pairs/);
+    assert.throws(() => b.talk.setThread({}), /pairs/);
+    const set = b.talk.setThread({ levels: { origin: 'news', sent: 'trace' } });
+    assert.deepEqual([set.levels.origin, set.levels.sent, set.levels.refused], ['news', 'trace', 'needs-you']);
+    assert.equal(b.talk.event('helper', { kind: 'origin', text: 'Origin updated.' }).level, 'news');
+    assert.equal(b.talk.event('helper', { kind: 'sent', text: 'Sent.', level: 'needs-you' }).level, 'trace', 'the owner\'s choice wins over the source\'s');
+    assert.equal(b.talk.event('helper', { kind: 'wakeup', text: 'Wake-up.', level: 'news' }).level, 'news', 'no choice made: the source\'s level');
+    /* Back to the default: nothing kept for it. */
+    b.talk.setThread({ levels: { origin: 'trace' } });
+    assert.deepEqual(b.make().thread().levels, { ...EVENT_LEVELS, sent: 'trace' }, 'kept across a restart of the server');
+    /* Never unread, and the person's own unread count untouched. */
+    assert.equal(b.talk.of('helper').unread, 0);
+    assert.equal(b.talk.brief('helper').waiting, 0);
+    for (let i = 0; i < SYSTEM_MAX + 5; i += 1) b.talk.event('helper', { kind: 'wakeup', text: `Wake-up ${i}` });
+    const lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
+    assert.equal(lines.length, SYSTEM_MAX);
+    assert.equal(lines.at(-1).text, `Wake-up ${SYSTEM_MAX + 4}`);
+    assert.equal(b.talk.of('helper').unread, 0);
+    assert.deepEqual(b.typed, [], 'nothing of it is typed to the tool');
 });

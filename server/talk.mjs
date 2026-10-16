@@ -92,6 +92,30 @@ export const BRANCHES = 'Check out your branches in the main folder of the repos
 export const REREAD_AFTER_MS = 10_000;
 /* Lines of the machine kept for one conversation, at most. */
 export const SYSTEM_MAX = 50;
+/* THE THREAD'S OWN LINES, by kind of event, and how much each matters --
+   said by this server, which knows what happened, never guessed by the page
+   from the words. The page (Parley) shows "needs-you" in every view, "news"
+   in the simple view as a compact line (grouped when several follow), and
+   "trace" in the detailed view only. A successful send is news whatever the
+   branch: the owner allowed each one. The owner may move a kind to another
+   level (Settings); nothing else of a line changes with it. */
+export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
+export const EVENT_LEVELS = Object.freeze({
+    sent: 'news',
+    refused: 'needs-you',
+    'sent-by-hand': 'news',
+    origin: 'trace',
+    wakeup: 'trace',
+    'machine-problem': 'needs-you',
+    restarted: 'news',
+});
+const TONES = ['warn', 'bad'];
+/* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */
+const EVENT_TEXT_MAX = 500;
+const TOPIC_MAX = 40;
+const BRIEF_MAX = 60;
+const ACTIONS_MAX = 4;
+const ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
 /* Where the person's files go, in the bridge folder; one folder per file, named by an id. */
 const FILES = 'files';
 const ATTACHED = new RegExp(`^/work/\\${FOLDER}/${FILES}/([0-9a-f-]{36})/([^/]+)$`);
@@ -146,6 +170,27 @@ export class Talk {
         if (bad.length > 0) throw new Refusal(400, `Each word is a text of ${WORD_MAX} characters at most: ${bad.slice(0, 5).join(', ')}.`);
         this.#words.put({ name: 'words', lang, own: Object.fromEntries(entries) });
         return this.settings();
+    }
+    /* What the thread shows of each kind of event: the level the owner
+       chose for it, or its own. Kept with the words (one more record). */
+    thread() {
+        const own = this.#words?.get('thread')?.levels ?? {};
+        const levels = Object.fromEntries(Object.entries(EVENT_LEVELS).map(([kind, level]) => [kind, LEVELS.includes(own[kind]) ? own[kind] : level]));
+        return { levels, defaults: { ...EVENT_LEVELS }, choices: [...LEVELS] };
+    }
+    /* `levels`: whole or partial, { kind: level }. A kind left out keeps its
+       own level; only what differs from it is kept, so that a later change
+       of a default reaches the owners who never chose. */
+    setThread({ levels } = {}) {
+        if (typeof levels !== 'object' || levels === null || Array.isArray(levels)) throw new Refusal(400, 'The levels are a list of "kind": "level" pairs: {"origin": "news"}.');
+        const entries = Object.entries(levels);
+        const unknown = entries.map(([kind]) => kind).filter((kind) => !Object.hasOwn(EVENT_LEVELS, kind));
+        if (unknown.length > 0) throw new Refusal(400, `There is no such kind of event: ${unknown.slice(0, 5).join(', ')}. The kinds are: ${Object.keys(EVENT_LEVELS).join(', ')}.`);
+        const bad = entries.filter(([, level]) => !LEVELS.includes(level)).map(([kind]) => kind);
+        if (bad.length > 0) throw new Refusal(400, `A level is one of: ${LEVELS.join(', ')} (${bad.slice(0, 5).join(', ')}).`);
+        const merged = { ...this.thread().levels, ...Object.fromEntries(entries) };
+        this.#words.put({ name: 'thread', levels: Object.fromEntries(Object.entries(merged).filter(([kind, level]) => EVENT_LEVELS[kind] !== level)) });
+        return this.thread();
     }
     /* The words for a screen whose own language is `device`. */
     words(device) {
@@ -294,17 +339,45 @@ export class Talk {
     }
 
     /* Whether a file (as the page opens it: "work:report.html") is one of
-       this chat: shown by the tool, or attached by the person. */
+       this chat: shown by the tool, cited in one of its messages (a path, a
+       picture placed in the text), or attached by the person. */
     shown(name, reference) {
         if (!this.of(name).on || typeof reference !== 'string' || !reference) return false;
-        return this.#parley(name).read().messages.some((m) => m.open === reference || (m.files ?? []).some((f) => f.open === reference));
+        return this.#parley(name).read().messages.some((m) => m.open === reference || (m.files ?? []).some((f) => f.open === reference) || (m.refs ?? []).some((r) => r.open === reference));
     }
 
-    /* ---- lines of the machine ---- */
+    /* ---- lines of the machine, and of what happened to its repositories ---- */
     #line(name, line) {
         const r = this.#store.get(name);
-        if (r?.on !== true) return;
-        this.#store.put({ ...r, system: [...(r.system ?? []), { id: randomUUID(), at: new Date(this.#now()).toISOString(), ...line }].slice(-SYSTEM_MAX) });
+        if (r?.on !== true) return null;
+        const kept = { id: randomUUID(), at: new Date(this.#now()).toISOString(), ...line };
+        this.#store.put({ ...r, system: [...(r.system ?? []), kept].slice(-SYSTEM_MAX) });
+        return kept;
+    }
+
+    /* ONE LINE IN THE THREAD for something that happened to this
+       conversation: `kind` one of EVENT_LEVELS, `level` its own unless given,
+       and in either case replaced by the owner's choice for that kind.
+       Only where the chat is on; never counted as unread (the page counts
+       the tool's messages only); at most SYSTEM_MAX kept. Resolves with the
+       line kept, or null. `actions`: ids the page maps to buttons. */
+    event(name, { kind, text, level, tone, topic, brief, actions = [] } = {}) {
+        if (!Object.hasOwn(EVENT_LEVELS, kind)) throw new RangeError(`No such kind of event: ${kind}`);
+        const said = String(text ?? '').trim();
+        if (!said) return null;
+        /* The owner's choice when there is one (stored only where it differs from the kind's own). */
+        const chosen = this.thread().levels[kind];
+        const line = {
+            /* Not `kind`: the page reads that of every message ('system' for these). */
+            event: kind,
+            text: said.slice(0, EVENT_TEXT_MAX),
+            level: chosen !== EVENT_LEVELS[kind] ? chosen : LEVELS.includes(level) ? level : chosen,
+            ...(TONES.includes(tone) ? { tone } : {}),
+            ...(topic ? { topic: String(topic).slice(0, TOPIC_MAX) } : {}),
+            ...(brief ? { brief: String(brief).slice(0, BRIEF_MAX) } : {}),
+            actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && ACTION.test(a)).slice(0, ACTIONS_MAX),
+        };
+        return this.#line(name, line);
     }
 
     /* What the health of its machine says (health.mjs), as it is judged. A
@@ -321,9 +394,11 @@ export class Talk {
         const fresh = serious.filter((p) => !before.has(p.key ?? p.text));
         if (keys.join('|') !== (r.machineKeys ?? []).join('|')) this.#store.put({ ...r, machineKeys: keys });
         if (fresh.length === 0) return;
-        this.#line(name, {
+        this.event(name, {
+            kind: 'machine-problem',
             text: fresh.map((p) => p.text).join(' '),
-            level: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
+            tone: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
+            topic: 'Machine',
             /* What can be done: more memory where memory is short, a restart, its terminal. */
             actions: [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal'],
         });
@@ -335,7 +410,7 @@ export class Talk {
     renewed(name, text, started = true) {
         const r = this.#store.get(name);
         if (r?.on !== true) return;
-        if (text) this.#line(name, { text, level: started ? 'info' : 'bad', actions: started ? [] : ['restart', 'terminal'] });
+        if (text) this.event(name, started ? { kind: 'restarted', text, topic: 'Restarted' } : { kind: 'machine-problem', text, tone: 'bad', topic: 'Machine', actions: ['restart', 'terminal'] });
         if (started) {
             this.#store.put({ ...this.#store.get(name), reread: true });
             this.#nextTry.set(`reread:${name}`, this.#now() + this.#rereadAfter);

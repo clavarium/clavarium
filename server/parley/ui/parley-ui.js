@@ -2,27 +2,64 @@
  *
  *   import { mount } from './parley-ui.js';
  *   mount(element, { load, send, words, open, terminal, remind, view, onView, locale,
- *                    voice, autoSend, onAutoSend, replies, enter, touch, attach, act });
+ *                    voice, autoSend, onAutoSend, replies, enter, touch, attach, act,
+ *                    markdown, picture, diagram, highlight, agentName });
  *
  *   load()                 resolves with what parley-host.mjs read() gives;
  *                          the application may add lines of its own to its
  *                          messages: { from: 'system', id, at, text, level,
- *                          actions: [{ id, label }] } (see LINES OF THE
- *                          APPLICATION, below)
+ *                          tone, topic, brief, actions: [{ id, label }] } (see
+ *                          LINES OF THE APPLICATION, below)
  *   send(text, answers, files)
  *                          the person wrote; `answers` is the id of the
- *                          question a choice answers; `files`, what `attach`
- *                          gave back for the files they attached
+ *                          question it answers (a choice, or a text written
+ *                          in reply); `files`, what `attach` gave back for
+ *                          the files they attached
  *   words                  the words of the screen: texts(lang, own) of
  *                          parley-host.mjs, or any object with those keys
- *   open(file)             optional: opens a file the agent showed (`file`
- *                          is { path, open }: `open` is the application's
- *                          own reference, null when it cannot be opened)
+ *   open(file)             optional: opens a file the agent showed or cited
+ *                          (`file` is { path, open }: `open` is the
+ *                          application's own reference, null when it cannot
+ *                          be opened)
  *   terminal()             optional: shows the agent's terminal
  *   remind()               optional: tells the agent again that a message waits
  *   view                   'simple' or 'detailed'; onView(view) when changed
  *   locale                 optional: how times and days are written (the
  *                          device's own way when not given)
+ *   agentName              optional: the agent's name, said above its messages
+ *
+ * WHAT THE AGENT WRITES, RENDERED (`markdown: true`; without it, plain text).
+ * Its Markdown is read into plain data (markdown(), below), then the page is
+ * built from that data node by node: never a string of markup, from the
+ * agent or from anywhere. Headings, lists, tasks, emphasis, ==highlight==,
+ * tables (wide ones scroll in their message), quotes, the alerts of GitHub
+ * (> [!IMPORTANT] ... as coloured boxes), badges ([ok] [todo] [blocked]
+ * [warn]), code blocks with a Copy button. A link opens only when it is
+ * http or https (in a new tab, sending nothing of this page), or a path the
+ * application can open (`open`); any other is its text. A picture is shown
+ * only from a path the application can open (`picture`): never from
+ * anywhere else, since loading it would tell that place who reads. Slots of
+ * the application, each optional:
+ *   picture(file)          the address of a picture the person may see
+ *                          (`file` as for open), or null; pictures the agent
+ *                          showed, cited, or the person attached are shown
+ *                          in the thread, a click opens them large, to zoom
+ *   diagram(code)          resolves with the SVG text of a ```mermaid block,
+ *                          drawn by the application's own renderer; it is
+ *                          shown as a picture (an <img>: a picture runs
+ *                          nothing and loads nothing); no slot, or a
+ *                          failure: the block is shown as code
+ *   highlight(code, lang)  resolves with a token tree (strings, and
+ *                          { type, alias, content } as Prism.tokenize
+ *                          gives) to colour a code block; spans are made
+ *                          here from it, never its markup
+ *
+ * TWO VERSIONS OF A MESSAGE. An agent may give a long message a short one
+ * (`short`: a title of one or two lines). The simple view shows the short
+ * one, and "See the details" unfolds the rest (kept unfolded for that
+ * message); a long message without one is folded after about twelve lines.
+ * Either way its > [!IMPORTANT] boxes stay in sight. A question is never
+ * folded. The detailed view unfolds everything.
  *
  * SLOTS THE APPLICATION FILLS, each optional; without them, none is shown:
  *   voice                  { listen(on) }: dictation. listen opens the
@@ -54,12 +91,14 @@
  *                          'newline'. Shift+Enter is always a new line, and
  *                          Ctrl+Enter always sends.
  *   attach                 { upload(file, name) }: files the person attaches
- *                          to a message. A button beside the box picks them;
- *                          each is shown above the box until it is sent, and
- *                          on Send each is given to upload (a File), which
- *                          resolves with { path, name, size }: where the
- *                          agent will find it. Then the message goes, with
- *                          them. A message may be files alone.
+ *                          to a message: picked with a button beside the
+ *                          box, pasted into it, or dropped on the chat. Each
+ *                          is shown above the box until it is sent (a
+ *                          picture as a picture), and on Send each is given
+ *                          to upload (a File), which resolves with
+ *                          { path, name, size }: where the agent will find
+ *                          it. Then the message goes, with them. A message
+ *                          may be files alone.
  *   act(id, line)          a button of a line of the application was pressed
  *   touch                  true on a touch screen (default: any coarse
  *                          pointer). The box is then never focused by the
@@ -68,27 +107,40 @@
  *                          button of the box leaves it open.
  *
  * WHILE IT WORKS, WHAT IT DOES NOW. The agent says in one line what it is
- * doing (`parley doing`); the newest line is shown under the last message,
- * moving, until its next message comes: then it goes, and the steps that led
- * there are one click away: on that message in the simple view, unfolded
- * above it in the detailed one.
+ * doing (`parley doing`); the newest line is shown at the end of the thread,
+ * moving, until ITS next message comes (a message of the person does not
+ * take it away): then it goes, and the steps that led there are one click
+ * away: on that message in the simple view, unfolded above it in the
+ * detailed one. When it waits for the person, that is said once, at the end
+ * of the thread, until the person writes: a state is not a step.
+ *
+ * EACH MESSAGE OF THE PERSON says where it is, by a small sign in its corner
+ * (its words on hover): sent, not read yet; read; being worked on; handled
+ * (the agent answered after reading it, or said it was done). The simple
+ * view signs only what is not handled yet; the detailed one signs all.
  *
  * TIMES, as a chat shows them: the day when it changes, the time when long
  * passed between two messages, and the time of each message on hover (a long
  * press on a touch screen).
  *
- * TWO VIEWS OF ONE EXCHANGE. Simple: bubbles, the one line of what it does
+ * TWO VIEWS OF ONE EXCHANGE. Simple: the agent's messages across a reading
+ * column, the person's in bubbles on the right, the one line of what it does
  * now, the choices to answer with, the files that can be opened, times on
  * hover, steps folded into the message they led to (a click on it opens
- * them) -- nothing the person cannot act on. Detailed: every
- * step unfolded between the messages with its time and state, the time of
- * every message, where the agent says it is, every file it showed with its
- * path (one that cannot be opened is said so), and a way to its terminal.
+ * them) -- nothing the person cannot act on. Detailed: every step unfolded
+ * between the messages with its time and state, the time of every message,
+ * where the agent says it is, every file it showed with its path (one that
+ * cannot be opened is said so), and a way to its terminal.
  *
  * LINES OF THE APPLICATION. What happens around the agent (its machine short
- * of memory, restarted) is said in the thread where it happened, as a grey
- * line with its time and the application's buttons, not as a bubble of
- * either side. The application keeps them and gives them with the messages.
+ * of memory, restarted, its work sent somewhere) is said in the thread where
+ * it happened, as a grey line across with its time and the application's
+ * buttons, not as a bubble of either side. The application keeps them, gives
+ * them with the messages, and gives each a neutral LEVEL; nothing else is
+ * decided here: 'needs-you' is shown in both views; 'news' in both, as a
+ * compact line in the simple one where a run of lines of one `topic` is one
+ * line ("Sent (3): dev, preprod, dev", each `brief`); 'trace' in the
+ * detailed view only. ('warn' and 'bad' read as needs-you, 'info' as news.)
  *
  * EVERYTHING AN AGENT WROTE, AND EVERY WORD OF THE DICTIONARY, IS PUT ON THE
  * PAGE AS TEXT, never as markup: the first is chosen by a program, the
@@ -99,13 +151,19 @@ export const VIEWS = Object.freeze(['simple', 'detailed']);
 export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simple', 'detailed', 'working', 'waiting', 'done', 'no-status', 'asks', 'open', 'outside',
     'not-read', 'read', 'remind', 'reminded', 'steps', 'no-steps', 'files', 'no-files', 'terminal', 'not-sent', 'step-one', 'steps-many', 'today', 'yesterday', 'quiet',
     'mic', 'mic-stop', 'auto-send', 'auto-on', 'settings', 'voice-placeholder', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less',
-    'attach', 'remove-file', 'sending-files', 'attach-where']);
+    'attach', 'remove-file', 'sending-files', 'attach-where',
+    'copy', 'copied', 'see-details', 'see-more', 'see-less', 'note', 'tip', 'important', 'warning', 'caution', 'badge-ok', 'badge-todo', 'badge-blocked', 'badge-warn',
+    'waits-you', 'waits-you-note', 'busy', 'state-sent', 'state-read', 'state-working', 'state-done', 'sent-at', 'read-at', 'done-at',
+    'reply', 'replying', 'not-a-reply', 'in-reply', 'closed', 'you', 'agent', 'drop', 'picture', 'diagram', 'not-shown', 'grouped',
+    'zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit', 'close', 'previous', 'next', 'search', 'found', 'newest', 'dictation', 'auto-send-off']);
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
 /* Between two messages further apart than this, the time is said. */
 export const GAP_MS = 60 * 60 * 1000;
 /* What it does now stops moving when nothing came for this long: it may have stopped. */
 export const STALE_MS = 15 * 60 * 1000;
+/* "Remind it" is offered only for a message not read this long, when the agent did nothing for as long. */
+export const IDLE_MS = 2 * 60 * 1000;
 /* A press this long on a touch screen shows a message's time. */
 export const PRESS_MS = 450;
 /* Dictating with "send when I stop": sent this long after the last phrase was written, unless the person speaks again. */
@@ -119,6 +177,14 @@ export const TEXT_MAX = 4000;
 /* Files attached to one message, at most; buttons on a line of the application. */
 export const FILES_MAX = 10;
 export const ACTIONS_MAX = 4;
+/* A message without a short version is folded beyond about so many lines (simple view). */
+export const FOLD_LINES = 12;
+/* Read no deeper than this: quotes in lists in quotes... */
+const DEPTH_MAX = 8;
+export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
+export const ALERTS = Object.freeze(['note', 'tip', 'important', 'warning', 'caution']);
+export const BADGES = Object.freeze(['ok', 'todo', 'blocked', 'warn']);
+const PICTURE = /\.(png|jpe?g|gif|webp)$/i;
 
 const fill = (word, values = {}) => String(word ?? '').replace(/\{([a-z]+)\}/g, (all, key) => (Object.hasOwn(values, key) ? String(values[key]) : all));
 const said = (words, key, values) => fill(typeof words?.[key] === 'string' ? words[key] : key, values);
@@ -137,55 +203,283 @@ function dayText(t, now, words, locale) {
     if (dayKey(t) === dayKey(before.getTime())) return said(words, 'yesterday');
     return format(t, locale, new Date(t).getFullYear() === new Date(now).getFullYear() ? { weekday: 'long', day: 'numeric', month: 'long' } : { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 }
+const cut = (text, n) => { const one = String(text ?? '').replace(/\s+/g, ' ').trim(); return one.length > n ? `${one.slice(0, n - 1)}…` : one; };
+
+/* ---- MARKDOWN, READ INTO PLAIN DATA ----
+   Blocks: { t: 'p'|'h'|'hr'|'code'|'quote'|'alert'|'list'|'table', ... }.
+   Inlines: { t: 'text'|'br'|'code'|'em'|'strong'|'del'|'mark'|'link'|'img'|'badge', ... }.
+   Nothing here is markup: an HTML tag the agent wrote is text, and is shown as such. */
+
+/* A link the page may follow: http or https only, made whole by the URL parser
+   (so that "jav&#x61;script:", " javascript:", "JaVaScRiPt:" and the like are
+   what they are: not http). Anything else: null. */
+export function safeLink(href) {
+    const raw = String(href ?? '').trim();
+    if (!/^https?:\/\//i.test(raw)) return null;
+    try { const u = new URL(raw); return u.protocol === 'http:' || u.protocol === 'https:' ? u.href : null; } catch { return null; }
+}
+
+const ESCAPABLE = /[\\`*_{}[\]()#+\-.!|~=<>"']/;
+const URL_AT = /^https?:\/\/[^\s<>()[\]"'`]+(?:\([^\s<>()]*\)[^\s<>()[\]"'`]*)*/i;
+const PAIRS = [['**', 'strong'], ['__', 'strong'], ['~~', 'del'], ['==', 'mark'], ['*', 'em'], ['_', 'em']];
+
+export function inline(text, depth = 0) {
+    const s = String(text ?? '');
+    const out = [];
+    let buffer = '';
+    const flush = () => { if (buffer) { out.push({ t: 'text', v: buffer }); buffer = ''; } };
+    const word = (ch) => /[\p{L}\p{N}]/u.test(ch ?? '');
+    let i = 0;
+    while (i < s.length) {
+        const c = s[i];
+        if (c === '\\' && ESCAPABLE.test(s[i + 1] ?? '')) { buffer += s[i + 1]; i += 2; continue; }
+        if (c === '\n') { flush(); out.push({ t: 'br' }); i += 1; continue; }
+        if (c === '`') {
+            const run = /^`+/.exec(s.slice(i))[0];
+            const end = s.indexOf(run, i + run.length);
+            if (end > 0) { flush(); let v = s.slice(i + run.length, end).replace(/\n/g, ' '); if (/^ .* $/.test(v)) v = v.slice(1, -1); out.push({ t: 'code', v }); i = end + run.length; continue; }
+            buffer += run; i += run.length; continue;
+        }
+        if (c === '!' && s[i + 1] === '[') {
+            const m = /^!\[([^\]\n]{0,300})\]\(\s*<?([^\s()<>]{1,2000})>?(?:\s+"[^"\n]*")?\s*\)/.exec(s.slice(i));
+            if (m) { flush(); out.push({ t: 'img', alt: m[1], src: m[2] }); i += m[0].length; continue; }
+        }
+        if (c === '[') {
+            const badge = /^\[(ok|todo|blocked|warn)\]/i.exec(s.slice(i));
+            if (badge && s[i + badge[0].length] !== '(') { flush(); out.push({ t: 'badge', kind: badge[1].toLowerCase() }); i += badge[0].length; continue; }
+            const m = /^\[((?:[^[\]\n]|\[[^[\]\n]*\]){0,500})\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\)){1,2000})>?(?:\s+"[^"\n]*")?\s*\)/.exec(s.slice(i));
+            if (m && depth < DEPTH_MAX) { flush(); out.push({ t: 'link', href: m[2], c: inline(m[1], depth + 1) }); i += m[0].length; continue; }
+        }
+        if (c === '<') {
+            const m = /^<(https?:\/\/[^\s<>]{1,2000})>/i.exec(s.slice(i));
+            if (m) { flush(); out.push({ t: 'link', href: m[1], c: [{ t: 'text', v: m[1] }] }); i += m[0].length; continue; }
+        }
+        /* A bare address, not one given to an attribute of a tag written as text. */
+        if ((c === 'h' || c === 'H') && !word(s[i - 1]) && s[i - 1] !== '=' && !(/["']/.test(s[i - 1] ?? '') && s[i - 2] === '=')) {
+            const m = URL_AT.exec(s.slice(i));
+            if (m) { const url = m[0].replace(/[.,;:!?]+$/, ''); flush(); out.push({ t: 'link', href: url, c: [{ t: 'text', v: url }] }); i += url.length; continue; }
+        }
+        const pair = depth < DEPTH_MAX && PAIRS.find(([d]) => s.startsWith(d, i));
+        if (pair) {
+            const [d, t] = pair;
+            const after = s[i + d.length];
+            /* Opens only before a non-space; "_" only at the start of a word; "*" not doubled into the next. */
+            const opens = after && !/\s/.test(after) && !(d.length === 1 && after === d) && !(d.length === 1 && word(s[i - 1]));
+            if (opens) {
+                let end = -1;
+                for (let j = i + d.length + 1; j <= s.length - d.length; j += 1) {
+                    if (s[j] === '\\') { j += 1; continue; }
+                    if (s[j] === '`') { const run = /^`+/.exec(s.slice(j))[0]; const close = s.indexOf(run, j + run.length); if (close > 0) { j = close + run.length - 1; continue; } }
+                    if (s.startsWith(d, j) && !/\s/.test(s[j - 1]) && !(d.length === 1 && (s[j + 1] === d || s[j - 1] === d)) && !(d.length === 1 && word(s[j + d.length]))) { end = j; break; }
+                }
+                if (end > 0) { flush(); out.push({ t, c: inline(s.slice(i + d.length, end), depth + 1) }); i = end + d.length; continue; }
+            }
+            buffer += d; i += d.length; continue;
+        }
+        buffer += c; i += 1;
+    }
+    flush();
+    return out;
+}
+
+const FENCE = /^ {0,3}(`{3,}|~{3,})\s*([^\s`]*)[^`]*$/;
+const HEADING = /^ {0,3}(#{1,6})(?:\s+(.*?))?\s*#*\s*$/;
+const RULE = /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/;
+const QUOTE = /^ {0,3}> ?(.*)$/;
+const ITEM = /^( {0,12})([-*+]|\d{1,9}[.)])(?:\s+(.*)|$)/;
+const DELIMITER = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+/* The cells of a row of a table: a "|" in a code span, or written "\|", is text. */
+function cells(line) {
+    let l = line.trim();
+    if (l.startsWith('|')) l = l.slice(1);
+    const out = [];
+    let cell = '';
+    for (let k = 0; k < l.length; k += 1) {
+        const ch = l[k];
+        if (ch === '\\' && l[k + 1] === '|') { cell += '\\|'; k += 1; continue; }
+        if (ch === '`') { const run = /^`+/.exec(l.slice(k))[0]; const end = l.indexOf(run, k + run.length); if (end > 0) { cell += l.slice(k, end + run.length); k = end + run.length - 1; continue; } }
+        if (ch === '|') { out.push(cell); cell = ''; continue; }
+        cell += ch;
+    }
+    if (cell.trim() || !l.endsWith('|')) out.push(cell);
+    return out.map((x) => x.trim());
+}
+const startsBlock = (line, next) => FENCE.test(line) || HEADING.test(line) || RULE.test(line) || QUOTE.test(line) || ITEM.test(line) || (line.includes('|') && next !== undefined && DELIMITER.test(next) && next.includes('-'));
+
+/* The blocks of a text; each top block says on which line it starts (`line`). */
+export function markdown(text, depth = 0) {
+    const lines = String(text ?? '').replace(/\r\n?/g, '\n').replace(/\t/g, '    ').split('\n');
+    const blocks = [];
+    let i = 0;
+    while (i < lines.length) {
+        const line = lines[i];
+        const at = i;
+        if (!line.trim()) { i += 1; continue; }
+        let m = FENCE.exec(line);
+        if (m) {
+            const fence = m[1];
+            const body = [];
+            i += 1;
+            while (i < lines.length && !(new RegExp(`^ {0,3}${fence[0] === '`' ? '`' : '~'}{${fence.length},}\\s*$`).test(lines[i]))) body.push(lines[i++]);
+            i += 1;
+            blocks.push({ t: 'code', lang: m[2].toLowerCase().replace(/[^a-z0-9+#.-]/g, '').slice(0, 30), text: body.join('\n'), line: at });
+            continue;
+        }
+        if ((m = HEADING.exec(line))) { blocks.push({ t: 'h', level: m[1].length, c: inline(m[2] ?? '', depth), line: at }); i += 1; continue; }
+        if (RULE.test(line) && !ITEM.exec(line)?.[3]) { blocks.push({ t: 'hr', line: at }); i += 1; continue; }
+        if (QUOTE.test(line)) {
+            const inner = [];
+            while (i < lines.length && QUOTE.test(lines[i])) inner.push(QUOTE.exec(lines[i++])[1]);
+            const alert = /^\s*\[!(note|tip|important|warning|caution)\]\s*(.*)$/i.exec(inner[0] ?? '');
+            if (depth >= DEPTH_MAX) { blocks.push({ t: 'p', c: [{ t: 'text', v: inner.join(' ') }], line: at }); continue; }
+            if (alert) blocks.push({ t: 'alert', kind: alert[1].toLowerCase(), c: markdown([alert[2], ...inner.slice(1)].join('\n'), depth + 1), line: at });
+            else blocks.push({ t: 'quote', c: markdown(inner.join('\n'), depth + 1), line: at });
+            continue;
+        }
+        if (line.includes('|') && i + 1 < lines.length && DELIMITER.test(lines[i + 1]) && lines[i + 1].includes('-')) {
+            const head = cells(line);
+            const align = cells(lines[i + 1]).map((d) => (d.startsWith(':') && d.endsWith(':') ? 'center' : d.endsWith(':') ? 'right' : d.startsWith(':') ? 'left' : ''));
+            i += 2;
+            const rows = [];
+            while (i < lines.length && lines[i].trim() && lines[i].includes('|') && rows.length < 500) rows.push(cells(lines[i++]));
+            const width = Math.min(30, head.length);
+            blocks.push({ t: 'table', align: align.slice(0, width), head: head.slice(0, width).map((x) => inline(x, depth)), rows: rows.map((r) => Array.from({ length: width }, (_, k) => inline(r[k] ?? '', depth))), line: at });
+            continue;
+        }
+        if ((m = ITEM.exec(line)) && depth < DEPTH_MAX) {
+            const ordered = /\d/.test(m[2]);
+            const indent = m[1].length;
+            const items = [];
+            const start = ordered ? Number.parseInt(m[2], 10) : undefined;
+            while (i < lines.length) {
+                const it = ITEM.exec(lines[i]);
+                if (!it || it[1].length !== indent || /\d/.test(it[2]) !== ordered) break;
+                const pad = indent + it[2].length + 1;
+                const body = [it[3] ?? ''];
+                i += 1;
+                while (i < lines.length) {
+                    const l = lines[i];
+                    if (!l.trim()) {
+                        /* A blank line stays in the item only when what follows is indented under it. */
+                        const next = lines.slice(i + 1).find((x) => x.trim());
+                        if (next !== undefined && /^\s*/.exec(next)[0].length >= pad) { body.push(''); i += 1; continue; }
+                        break;
+                    }
+                    const lead = /^\s*/.exec(l)[0].length;
+                    if (lead >= pad || (lead > indent && ITEM.test(l))) { body.push(l.slice(Math.min(lead, pad))); i += 1; continue; }
+                    if (lead <= indent && (ITEM.test(l) || startsBlock(l, lines[i + 1]))) break;
+                    /* A line that just goes on: the same paragraph. */
+                    body.push(l.trim()); i += 1;
+                }
+                const task = /^\[([ xX])\]\s+/.exec(body[0]);
+                if (task) body[0] = body[0].slice(task[0].length);
+                items.push({ task: task ? task[1] !== ' ' : null, c: markdown(body.join('\n'), depth + 1) });
+                while (i < lines.length && !lines[i].trim()) {
+                    const next = lines.slice(i).find((x) => x.trim());
+                    const it2 = next === undefined ? null : ITEM.exec(next);
+                    if (it2 && it2[1].length === indent && /\d/.test(it2[2]) === ordered) i += 1; else break;
+                }
+            }
+            blocks.push({ t: 'list', ordered, ...(ordered && start !== 1 ? { start } : {}), items, line: at });
+            continue;
+        }
+        const para = [];
+        while (i < lines.length && lines[i].trim() && !(para.length && startsBlock(lines[i], lines[i + 1]))) para.push(lines[i++].trim());
+        blocks.push({ t: 'p', c: inline(para.join('\n'), depth), line: at });
+    }
+    return blocks;
+}
+/* All the text of a run of inlines, as it reads. */
+export const plainOf = (nodes) => (nodes ?? []).map((n) => (n.t === 'text' || n.t === 'code' ? n.v : n.t === 'br' ? '\n' : n.t === 'img' ? n.alt : n.t === 'badge' ? `[${n.kind}]` : plainOf(n.c))).join('');
+/* About how many lines a text takes in a reading column. */
+export const linesOf = (text) => String(text ?? '').split('\n').reduce((n, l) => n + Math.max(1, Math.ceil(l.length / 90)), 0);
+
+/* A level of a line of the application, as given or as it was once said. */
+const levelOf = (level) => (LEVELS.includes(level) ? level : level === 'warn' || level === 'bad' ? 'needs-you' : 'news');
+/* A question still open: neither answered nor closed. */
+const openQuestion = (m, answered) => m.kind === 'ask' && m.from !== 'person' && m.from !== 'system' && !answered.has(m.id) && !m.closed;
 
 /* WHAT IS SHOWN, as plain data: the page is built from this and from nothing
    else, so it can be checked without a page. `rows`, in order: `day` and
    `gap` (a divider), `message` (in the simple view with `trail`: the steps
    that led to it, folded), `steps` (a group of steps, unfolded in the
    detailed view; in the simple one only those after its last message when
-   it stopped), `now` (what it does now, with the steps of this turn before
-   it). `items`: the messages alone. */
-export function view(data, { words = {}, view: as = 'simple', now = Date.now(), locale } = {}) {
+   it stopped), `group` (lines of the application of one topic, in the simple
+   view), `now` (what it does now, with the steps of this turn before it),
+   `waits` (it waits for the person). `items`: the messages alone. */
+export function view(data, { words = {}, view: as = 'simple', now = Date.now(), locale, agentName } = {}) {
     const detailed = as === 'detailed';
-    const all = Array.isArray(data?.messages) ? data.messages : [];
-    const answered = new Set(all.map((m) => m.answers).filter(Boolean));
-    /* Simple shows nothing the person cannot act on: a file that cannot be opened is in the detailed view only. */
-    const messages = detailed ? all : all.filter((m) => !(m.kind === 'show' && typeof m.open !== 'string'));
+    const all = Array.isArray(data?.messages) ? data.messages.filter((m) => m && typeof m === 'object') : [];
+    const answered = new Set(all.filter((m) => m.from === 'person').map((m) => m.answers).filter(Boolean));
+    /* Simple shows nothing the person cannot act on: a file that cannot be opened, a trace, are in the detailed view only. */
+    const messages = all.filter((m) => detailed || !((m.kind === 'show' && typeof m.open !== 'string') || (m.from === 'system' && levelOf(m.level) === 'trace')));
     const status = data?.status ?? null;
     const state = (s) => said(words, ['working', 'waiting', 'done'].includes(s) ? s : 'working');
-    const asking = messages.some((m) => m.kind === 'ask' && !answered.has(m.id));
-    /* "Not read yet" only where it is plainly true: the person's last word, nothing from the agent after it. */
-    const last = messages.filter((m) => m.from !== 'system').at(-1);
-    const unseen = last?.from === 'person' && last.seen === false ? last.id : undefined;
-    const steps = (Array.isArray(data?.steps) ? data.steps : []).filter((s) => s && typeof s === 'object');
+    /* A state of waiting is not a step: it is said once, at the end. */
+    const steps = (Array.isArray(data?.steps) ? data.steps : []).filter((s) => s && typeof s === 'object' && !(s.kind === 'status' && s.state === 'waiting'));
     const files = Array.isArray(data?.files) ? data.files : [];
+    const agentSaid = (m) => m.from !== 'person' && m.from !== 'system';
+    /* What the agent did after a time: its messages and its steps. */
+    const agentTimes = [...all.filter(agentSaid).map((m) => stamp(m.at)), ...steps.map((s) => stamp(s.at))].filter((t) => t !== null).sort((a, b) => a - b);
+    const lastAgent = agentTimes.at(-1) ?? null;
+    const firstAfter = (list, t) => list.find((x) => x >= t) ?? null;
+    const replies = all.filter(agentSaid).map((m) => stamp(m.at)).filter((t) => t !== null).sort((a, b) => a - b);
+    const doneAt = steps.filter((s) => s.kind === 'status' && s.state === 'done').map((s) => stamp(s.at)).filter((t) => t !== null);
+    const stepTimes = steps.map((s) => stamp(s.at)).filter((t) => t !== null);
+    const unreadIds = all.filter((m) => m.from === 'person' && m.seen === false).map((m) => m.id);
+    const lastUnread = unreadIds.at(-1);
+    const agentName2 = String(agentName || said(words, 'agent'));
     const items = messages.map((m) => {
+        const t = stamp(m.at);
         if (m.from === 'system') {
-            const t = stamp(m.at);
-            return { type: 'message', key: `y:${String(m.id ?? '')}`, id: String(m.id ?? ''), from: 'system', kind: 'system', level: ['info', 'warn', 'bad'].includes(m.level) ? m.level : 'info',
+            return { type: 'message', key: `y:${String(m.id ?? '')}`, id: String(m.id ?? ''), from: 'system', kind: 'system', level: levelOf(m.level), tone: ['warn', 'bad'].includes(m.tone) ? m.tone : ['warn', 'bad'].includes(m.level) ? m.level : '',
+                topic: cut(m.topic, 40), brief: cut(m.brief, 60),
                 text: String(m.text ?? ''), time: clock(t, locale), when: whole(t, locale), at: t, label: '', file: null, files: [], outside: '', choices: [], open: false, mark: '',
                 actions: (Array.isArray(m.actions) ? m.actions : []).filter((a) => a && typeof a.id === 'string' && typeof a.label === 'string' && a.label.trim()).slice(0, ACTIONS_MAX).map((a) => ({ id: a.id, label: a.label.trim().slice(0, LABEL_MAX) })) };
         }
         const show = m.kind === 'show';
-        const open = m.kind === 'ask' && !answered.has(m.id);
+        const open = openQuestion(m, answered);
         const reach = typeof m.open === 'string' ? m.open : null;
-        const t = stamp(m.at);
-        return {
+        const person = m.from === 'person';
+        const item = {
             type: 'message', key: `m:${String(m.id ?? '')}`,
-            id: String(m.id ?? ''), from: m.from === 'person' ? 'person' : 'agent', kind: String(m.kind ?? 'say'),
+            id: String(m.id ?? ''), from: person ? 'person' : 'agent', kind: String(m.kind ?? 'say'),
             text: show ? String(m.text || nameOf(m.path)) : String(m.text ?? ''),
+            short: !person && typeof m.short === 'string' ? cut(m.short, 200) : '',
+            refs: (Array.isArray(m.refs) ? m.refs : []).filter((r) => r && typeof r.path === 'string' && typeof r.open === 'string').slice(0, 20).map((r) => ({ path: r.path, open: r.open })),
             time: clock(t, locale), when: whole(t, locale), at: t,
             label: open ? said(words, 'asks') : '',
-            file: show ? { path: String(m.path ?? ''), open: reach, name: nameOf(m.path), shown: detailed ? String(m.path ?? '') : (m.text ? nameOf(m.path) : '') } : null,
+            file: show ? { path: String(m.path ?? ''), open: reach, name: nameOf(m.path), shown: detailed ? String(m.path ?? '') : (m.text ? nameOf(m.path) : ''), picture: PICTURE.test(String(m.path ?? '')) } : null,
             /* What the person attached: by name, opened the application's way; its whole path in the detailed view. */
-            files: (Array.isArray(m.files) ? m.files : []).slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => ({ path: String(f.path ?? ''), name: String(f.name || nameOf(f.path)), open: typeof f.open === 'string' ? f.open : null, shown: detailed ? String(f.path ?? '') : '', size: sizeText(f.size) })),
+            files: (Array.isArray(m.files) ? m.files : []).slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => ({ path: String(f.path ?? ''), name: String(f.name || nameOf(f.path)), open: typeof f.open === 'string' ? f.open : null, shown: detailed ? String(f.path ?? '') : '', size: sizeText(f.size), picture: PICTURE.test(String(f.name || f.path || '')) })),
             actions: [],
             outside: show && reach === null ? said(words, 'outside', { path: String(m.path ?? '') }) : '',
-            choices: open ? (m.choices ?? []).map(String) : [],
+            choices: m.kind === 'ask' && !answered.has(m.id) ? (m.choices ?? []).map(String) : [],
             open,
-            mark: m.from === 'person' && m.id === unseen ? said(words, 'not-read') : '',
+            closed: m.kind === 'ask' && m.closed && !answered.has(m.id) ? said(words, 'closed', { answer: cut(m.closed.text, 300) }) : '',
+            reply: person && m.answers ? said(words, 'in-reply', { question: cut(m.question, 90) }) : '',
+            mark: '',
         };
+        if (person) {
+            /* Where it is: sent; read; worked on; handled -- each with its time. */
+            const seenAt = m.seen === false ? null : stamp(m.seenAt) ?? t;
+            const handled = seenAt === null ? null : [firstAfter(replies, Math.max(seenAt, t ?? 0)), firstAfter(doneAt, seenAt)].filter((x) => x !== null).sort((a, b) => a - b)[0] ?? null;
+            const working = seenAt !== null && handled === null && firstAfter(stepTimes, seenAt) !== null && status?.state !== 'done';
+            item.state = seenAt === null ? 'sent' : handled !== null ? 'done' : working ? 'working' : 'read';
+            item.sign = detailed || item.state !== 'done' ? item.state : '';
+            item.signText = [said(words, `state-${item.state}`), said(words, 'sent-at', { time: item.time }), seenAt !== null ? said(words, 'read-at', { time: clock(seenAt, locale) }) : '', handled !== null ? said(words, 'done-at', { time: clock(handled, locale) }) : ''].filter(Boolean).join(' · ');
+            /* "Remind it": only for the newest message not read, long unread, while the agent seems idle. */
+            item.remind = m.id === lastUnread && t !== null && now - t >= IDLE_MS && (lastAgent === null || now - lastAgent >= IDLE_MS);
+        }
+        return item;
     });
+    /* Who says it: once above each run of messages of one side. */
+    let side = '';
+    for (const item of items) {
+        const who = item.from === 'system' ? '' : item.from;
+        item.name = who && who !== side ? (who === 'person' ? said(words, 'you') : agentName2) : '';
+        side = who;
+    }
     /* A step, as shown: a state is said with its word, what it does with its own words. */
     const step = (s) => {
         const t = stamp(s.at);
@@ -194,36 +488,58 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
         return { kind: doing ? 'doing' : 'status', state: ['working', 'waiting', 'done'].includes(s.state) ? s.state : 'working',
             text: doing ? note : `${state(s.state)}${note ? ` - ${note}` : ''}`, time: clock(t, locale), when: whole(t, locale), at: t };
     };
-    /* While it works, where it is is what it does now: its newest step, when newer than the state it said. */
-    const doingNow = (st) => { const n = steps.at(-1); return st?.state === 'working' && n?.kind === 'doing' && String(n.at ?? '') >= String(st.at ?? '') ? String(n.note ?? '') : ''; };
     const count = (n) => (n === 1 ? said(words, 'step-one') : said(words, 'steps-many', { count: n }));
     const group = (list, i) => ({ type: 'steps', key: `s:${String(list[0].id ?? i)}`, label: count(list.length), open: detailed, steps: list.map(step), at: stamp(list[0].at), end: stamp(list.at(-1).at) });
-    /* The steps between two messages go between them; those after the last one are this turn's. */
+    /* The newest step, when it says what it does now: the line at the end. */
+    const newest = steps.at(-1);
+    const lastAgentMessage = Math.max(-Infinity, ...items.filter((x) => x.from === 'agent' && x.at !== null).map((x) => x.at));
+    const live = newest && (newest.kind === 'doing' || (newest.kind === 'status' && newest.state === 'working')) && (stamp(newest.at) ?? 0) > lastAgentMessage ? newest : null;
+    /* The state at the top, in the detailed view, is not said again at the end. */
+    const topState = detailed && status && !live && status.state !== 'waiting' ? status : null;
+    const kept = steps.filter((s) => s !== live && !(topState && s === steps.filter((x) => x.kind === 'status').at(-1) && s.at === status.at));
+    /* The steps go to the next message of the AGENT; in the detailed view, between the messages, as they came. */
     const rows = [];
     let next = 0;
     items.forEach((item, i) => {
-        /* A line of the application takes no step: they go to the next message. */
-        if (item.from === 'system') { rows.push({ ...item, trail: null, end: item.at }); return; }
+        if (item.from === 'system' || (item.from === 'person' && !detailed)) { rows.push({ ...item, trail: null, end: item.at }); return; }
         const before = [];
-        while (item.at !== null && next < steps.length && (stamp(steps[next].at) ?? 0) <= item.at) before.push(steps[next++]);
+        while (item.at !== null && next < kept.length && (stamp(kept[next].at) ?? 0) <= item.at) before.push(kept[next++]);
         /* Simple: on the message they led to, no line of their own; detailed: unfolded above it. */
         if (before.length && detailed) rows.push(group(before, i));
         const trail = before.length && !detailed ? (({ type, at: a, end, ...g }) => g)(group(before, i)) : null;
         rows.push({ ...item, trail, end: item.at });
     });
-    const turn = steps.slice(next);
-    const newest = turn.at(-1);
-    if (newest && (newest.kind === 'doing' || (newest.kind === 'status' && newest.state === 'working'))) {
-        const t = stamp(newest.at);
+    const turn = kept.slice(next);
+    const busy = unreadIds.length > 0;
+    if (live) {
+        const t = stamp(live.at);
         const fresh = t !== null && now - t < STALE_MS;
-        const earlier = turn.slice(0, -1);
-        rows.push({ type: 'now', key: `n:${String(turn[0].id ?? '')}`, ...step(newest), text: String(newest.note ?? '') || state('working'), live: fresh, quiet: fresh ? '' : said(words, 'quiet', { time: clock(t, locale) }),
-            label: earlier.length ? count(earlier.length) : '', open: detailed, steps: earlier.map(step), at: stamp(turn[0].at), end: t });
+        const doing = String(live.note ?? '') || state('working');
+        rows.push({ type: 'now', key: `n:${String((turn[0] ?? live).id ?? '')}`, ...step(live), text: busy && fresh ? said(words, 'busy', { doing }) : doing, busy: busy && fresh, live: fresh, quiet: fresh ? '' : said(words, 'quiet', { time: clock(t, locale) }),
+            label: turn.length ? count(turn.length) : '', open: detailed, steps: turn.map(step), at: stamp((turn[0] ?? live).at), end: t });
     } else if (turn.length) rows.push(group(turn, items.length));
+    /* It waits for the person: said once, at the end, until they write; not when its last word is a question, which says so. */
+    const lastSaid = items.filter((x) => x.from !== 'system').at(-1);
+    const waitsAt = status?.state === 'waiting' ? stamp(status.at) : null;
+    if (waitsAt !== null && !all.some((m) => m.from === 'person' && (stamp(m.at) ?? 0) >= waitsAt) && !(lastSaid?.open)) {
+        const note = String(status.note ?? '').trim();
+        rows.push({ type: 'waits', key: 'w', text: note ? said(words, 'waits-you-note', { note }) : said(words, 'waits-you'), time: clock(waitsAt, locale), when: whole(waitsAt, locale), at: null, end: null });
+    }
+    /* Simple: a run of news of one topic is one compact line. */
+    const packed = [];
+    for (const row of rows) {
+        const prev = packed.at(-1);
+        if (!detailed && row.from === 'system' && row.level === 'news' && row.topic) {
+            if (prev?.type === 'group' && prev.topic === row.topic) { prev.lines.push(row); prev.end = row.at; continue; }
+            if (prev?.from === 'system' && prev.level === 'news' && prev.topic === row.topic && prev.type === 'message') { packed[packed.length - 1] = { type: 'group', key: `G:${prev.id}`, topic: row.topic, lines: [prev, row], at: prev.at, end: row.at }; continue; }
+        }
+        packed.push(row);
+    }
+    for (const row of packed) if (row.type === 'group') { row.text = said(words, 'grouped', { topic: row.topic, count: row.lines.length, briefs: row.lines.map((l) => l.brief || l.text).join(', ') }); row.time = row.lines.at(-1).time; row.lines = row.lines.map(({ at, end, trail, ...l }) => l); }
     /* The day when it changes, the time when long passed. */
     const shown = [];
     let previous = null;
-    for (const row of rows) {
+    for (const row of packed) {
         if (row.at !== null && row.at !== undefined) {
             if (previous === null || dayKey(row.at) !== dayKey(previous)) shown.push({ type: 'day', key: `d:${dayKey(row.at)}`, text: dayText(row.at, now, words, locale) });
             else if (row.at - previous > GAP_MS) shown.push({ type: 'gap', key: `g:${row.key}`, text: clock(row.at, locale) });
@@ -231,28 +547,32 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
         shown.push(row);
         if (row.end !== null && row.end !== undefined) previous = row.end;
     }
+    const doingNow = live ? String(live.note ?? '') : '';
     return {
         view: detailed ? 'detailed' : 'simple',
-        /* Simple says only what asks for the person, and not twice: that it waits, when no question already says so. */
-        status: detailed
-            ? { state: status?.state ?? 'none', text: status ? `${state(status.state)}${(doingNow(status) || status.note) ? ` - ${doingNow(status) || status.note}` : ''}` : said(words, 'no-status'), when: status ? whole(stamp(status.at), locale) : '' }
-            : status?.state === 'waiting' && !asking ? { state: 'waiting', text: `${state('waiting')}${status.note ? ` - ${status.note}` : ''}`, when: '' } : null,
-        empty: messages.length === 0 && rows.length === 0 ? said(words, 'empty') : null,
+        /* Detailed only, and only what the end of the thread does not say already. */
+        status: !detailed ? null
+            : topState ? { state: topState.state, text: `${state(topState.state)}${topState.note ? ` - ${topState.note}` : ''}`, when: whole(stamp(topState.at), locale) }
+                : live ? { state: 'working', text: `${state('working')}${doingNow ? ` - ${doingNow}` : ''}`, when: whole(stamp(live.at), locale) }
+                    : status ? null : { state: 'none', text: said(words, 'no-status'), when: '' },
+        empty: messages.length === 0 && shown.length === 0 ? said(words, 'empty') : null,
         rows: shown.map(({ at, end, ...row }) => row),
         items: items.map(({ at, type, key, ...item }) => item),
         unread: Number(data?.unread) || 0,
+        /* The one question that waits, for what is typed to answer by default. */
+        asking: (() => { const open = all.filter((m) => openQuestion(m, answered)); return open.length === 1 ? { id: String(open[0].id ?? ''), text: cut(open[0].short || open[0].text, 90) } : null; })(),
         files: detailed ? files.map((f) => ({ path: String(f.path ?? ''), name: nameOf(f.path), note: String(f.note ?? ''), open: typeof f.open === 'string' ? f.open : null, when: whole(stamp(f.at), locale) })) : [],
         summary: detailed ? `${said(words, 'files')} (${files.length})` : '',
     };
 }
 
 /* THE QUICK ANSWERS ABOVE THE BOX, as plain data: the choices of the
-   question the agent asks now (the newest one not answered), first; then the
-   application's ready answers, as many as are well formed. */
+   question the agent asks now (the newest one not answered nor closed),
+   first; then the application's ready answers, as many as are well formed. */
 export function quick(data, replies = []) {
     const all = Array.isArray(data?.messages) ? data.messages : [];
     const answered = new Set(all.map((m) => m?.answers).filter(Boolean));
-    const asks = [...all].reverse().find((m) => m?.kind === 'ask' && m.from !== 'person' && !answered.has(m.id) && Array.isArray(m.choices) && m.choices.length > 0);
+    const asks = [...all].reverse().find((m) => m && openQuestion(m, answered) && Array.isArray(m.choices) && m.choices.length > 0);
     const out = asks ? asks.choices.map((c) => ({ kind: 'choice', label: String(c), text: String(c), send: true, answers: String(asks.id ?? '') })) : [];
     for (const r of Array.isArray(replies) ? replies.slice(0, REPLIES_MAX) : []) {
         if (!r || typeof r.label !== 'string' || typeof r.text !== 'string' || !r.label.trim() || !r.text.trim()) continue;
@@ -273,27 +593,56 @@ export function sends(event, enter = 'auto', fine = false) {
 }
 
 /* What dictation said joins what is in the box, with one space. */
-export const joined = (before, said) => {
-    const add = String(said ?? '').replace(/\s+/g, ' ').trim();
+export const joined = (before, said2) => {
+    const add = String(said2 ?? '').replace(/\s+/g, ' ').trim();
     if (!add) return String(before ?? '');
     const was = String(before ?? '');
     return was === '' || /\s$/.test(was) ? `${was}${add}` : `${was} ${add}`;
 };
 
+/* A picture pasted without a name of its own is named by its time. */
+export function pastedName(file, now = new Date()) {
+    const name = String(file?.name ?? '');
+    if (name && !/^image\.(png|jpe?g|gif|webp)$/i.test(name)) return name;
+    const p = (n) => String(n).padStart(2, '0');
+    const ext = /\/(png|jpeg|gif|webp)$/.exec(String(file?.type ?? ''))?.[1]?.replace('jpeg', 'jpg') ?? 'png';
+    return `screenshot-${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}.${ext}`;
+}
+
 const el = (tag, className, text) => { const e = document.createElement(tag); if (className) e.className = className; if (text !== undefined) e.textContent = text; return e; };
 const button = (text, className, act) => { const b = el('button', className, text); b.type = 'button'; b.addEventListener('click', act); return b; };
 
 const SVG = 'http://www.w3.org/2000/svg';
-/* A drawn sign, made here: never markup from anywhere. */
+/* The drawn signs, made here: never markup from anywhere. */
+const SIGNS = {
+    mic: [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7' }]],
+    prefs: [['path', { d: 'M4 7h9M17 7h3M4 17h3M11 17h9' }], ['circle', { cx: 15, cy: 7, r: 2 }], ['circle', { cx: 9, cy: 17, r: 2 }]],
+    clip: [['path', { d: 'M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6' }]],
+    stop: [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]],
+    copy: [['rect', { x: 8, y: 8, width: 12, height: 12, rx: 2 }], ['path', { d: 'M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8' }]],
+    sent: [['circle', { cx: 12, cy: 12, r: 8 }], ['path', { d: 'M12 12V7.5', class: 'parley-hand' }], ['path', { d: 'M12 12h3' }]],
+    read: [['path', { d: 'M5 12.5l4.5 4.5L19 7.5' }]],
+    working: [['path', { d: 'M12 4a8 8 0 1 1-8 8', class: 'parley-turn' }]],
+    done: [['path', { d: 'M2.5 12.5L7 17l9.5-9.5M11.5 16l1 1L22 7.5' }]],
+    note: [['circle', { cx: 12, cy: 12, r: 9 }], ['path', { d: 'M12 11v6M12 7.5v.5' }]],
+    tip: [['path', { d: 'M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2.1h5c0-.9.4-1.6 1-2.1A6 6 0 0 0 12 3z' }]],
+    important: [['path', { d: 'M4 5h16v11H9l-5 4z' }], ['path', { d: 'M12 8v4M12 14.5v.5' }]],
+    warning: [['path', { d: 'M12 3.5l9.5 16.5h-19z' }], ['path', { d: 'M12 10v4.5M12 17v.5' }]],
+    caution: [['path', { d: 'M8 3h8l5 5v8l-5 5H8l-5-5V8z' }], ['path', { d: 'M12 8v5M12 15.5v.5' }]],
+    down: [['path', { d: 'M12 5v14M6 13l6 6 6-6' }]],
+    search: [['circle', { cx: 11, cy: 11, r: 6.5 }], ['path', { d: 'M16 16l4.5 4.5' }]],
+    close: [['path', { d: 'M6 6l12 12M18 6L6 18' }]],
+    plus: [['path', { d: 'M12 5v14M5 12h14' }]],
+    minus: [['path', { d: 'M5 12h14' }]],
+    left: [['path', { d: 'M15 5l-7 7 7 7' }]],
+    right: [['path', { d: 'M9 5l7 7-7 7' }]],
+    up: [['path', { d: 'M6 15l6-6 6 6' }]],
+    file: [['path', { d: 'M6 3h8l5 5v13H6z' }], ['path', { d: 'M14 3v5h5' }]],
+};
 function sign(kind) {
     const svg = document.createElementNS(SVG, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', `parley-sign parley-sign-${kind}`);
-    const shapes = kind === 'mic'
-        ? [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7' }]]
-        : kind === 'prefs' ? [['path', { d: 'M4 7h9M17 7h3M4 17h3M11 17h9' }], ['circle', { cx: 15, cy: 7, r: 2 }], ['circle', { cx: 9, cy: 17, r: 2 }]]
-        : kind === 'clip' ? [['path', { d: 'M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6' }]]
-            : [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]];
-    for (const [tag, attributes] of shapes) {
+    for (const [tag, attributes] of SIGNS[kind] ?? SIGNS.stop) {
         const shape = document.createElementNS(SVG, tag);
         for (const [k, v] of Object.entries(attributes)) shape.setAttribute(k, String(v));
         svg.append(shape);
@@ -301,50 +650,351 @@ function sign(kind) {
     return svg;
 }
 
+/* Puts a text in the clipboard, within the click that asked: said "Copied" a
+   moment. Refused: what was to be copied is selected, for the person to copy. */
+function copying(b, text, words, select) {
+    const done = () => { const was = b.dataset.label ?? b.textContent; b.dataset.label = was; b.dataset.copied = 'true'; b.lastChild.textContent = said(words, 'copied'); setTimeout(() => { b.lastChild.textContent = said(words, 'copy'); delete b.dataset.copied; }, 1500); };
+    const fallback = () => { try { const range = document.createRange(); range.selectNodeContents(select); const s = globalThis.getSelection(); s.removeAllRanges(); s.addRange(range); } catch { /* nothing more to do */ } };
+    try {
+        const w = globalThis.navigator?.clipboard?.writeText?.(text);
+        if (w && typeof w.then === 'function') w.then(done, fallback); else fallback();
+    } catch { fallback(); }
+}
+
+/* THE PAGE, MADE FROM THE DATA OF markdown(): element by element, text as text. */
+function painter(ctx) {
+    const { words, refs, open, picture, diagram, highlight, cache } = ctx;
+    const fileOf = (path) => (refs.has(path) ? { path, open: refs.get(path) } : null);
+    const pathLink = (file, text) => { const b = button('', 'parley-pathlink', () => open?.(file)); b.append(text ?? file.path); b.title = file.path; return b; };
+    function inlines(nodes, into) {
+        for (const n of nodes) {
+            if (n.t === 'text') into.append(...splitPaths(n.v));
+            else if (n.t === 'br') into.append(el('br'));
+            else if (n.t === 'code') { const f = fileOf(n.v.trim()); const c = el('code', '', n.v); into.append(f && open ? pathLink(f, c) : c); }
+            else if (n.t === 'em' || n.t === 'strong' || n.t === 'del' || n.t === 'mark') { const e = el(n.t === 'del' ? 's' : n.t); inlines(n.c, e); into.append(e); }
+            else if (n.t === 'badge') { const b = el('span', 'parley-badge', said(words, `badge-${n.kind}`)); b.dataset.kind = n.kind; into.append(b); }
+            else if (n.t === 'link') {
+                const href = safeLink(n.href);
+                const f = n.href.startsWith('/') ? fileOf(n.href) : null;
+                if (href) { const a = el('a', 'parley-link'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow'; a.title = href; inlines(n.c, a); into.append(a); }
+                else if (f && open) { const holder = el('span'); inlines(n.c, holder); into.append(pathLink(f, holder)); }
+                else inlines(n.c, into);
+            } else if (n.t === 'img') into.append(imageOf(n));
+        }
+        return into;
+    }
+    /* The paths it cited that can be opened, in a run of text: each a link. */
+    function splitPaths(text) {
+        if (!refs.size || !open) return [text];
+        const out = [];
+        let rest = text;
+        for (;;) {
+            let best = null;
+            for (const path of refs.keys()) { const at = rest.indexOf(path); if (at >= 0 && (best === null || at < best.at || (at === best.at && path.length > best.path.length))) best = { at, path }; }
+            if (!best) break;
+            const end = best.at + best.path.length;
+            /* A path is whole: not the start of a longer one. */
+            if (/[^\s.,;:!?)\]'"]/.test(rest[end] ?? ' ')) { out.push(rest.slice(0, end)); rest = rest.slice(end); continue; }
+            if (best.at) out.push(rest.slice(0, best.at));
+            out.push(pathLink({ path: best.path, open: refs.get(best.path) }));
+            rest = rest.slice(end);
+        }
+        if (rest) out.push(rest);
+        return out;
+    }
+    function imageOf(n) {
+        const f = n.src.startsWith('/') ? fileOf(n.src) : null;
+        const url = f && picture && PICTURE.test(n.src) ? ctx.pictureUrl(f) : null;
+        if (url) return thumb(f, url, n.alt);
+        /* Never loaded from anywhere else: its caption, said not shown. */
+        const off = el('span', 'parley-noimg', n.alt || nameOf(n.src)); off.title = said(words, 'not-shown');
+        return off;
+    }
+    function thumb(file, url, alt) {
+        const b = el('button', 'parley-thumb'); b.type = 'button';
+        const img = el('img'); img.src = url; img.alt = alt || file.path.split('/').pop(); img.loading = 'lazy'; img.decoding = 'async'; img.dataset.zoom = url; img.dataset.name = img.alt;
+        b.title = alt || file.path; b.append(img);
+        if (alt) { const fig = el('span', 'parley-figure'); fig.append(b, el('span', 'parley-caption', alt)); b.addEventListener('click', () => ctx.zoom(img)); return fig; }
+        b.addEventListener('click', () => ctx.zoom(img));
+        return b;
+    }
+    function code(block) {
+        const holder = el('div', 'parley-code');
+        const bar = el('div', 'parley-code-bar');
+        bar.append(el('span', 'parley-code-lang', block.lang));
+        const pre = el('pre');
+        const c = el('code', '', block.text);
+        pre.append(c);
+        const b = el('button', 'parley-copy'); b.type = 'button'; b.append(sign('copy'), el('span', '', said(words, 'copy')));
+        b.addEventListener('click', () => copying(b, block.text, words, c));
+        bar.append(b);
+        holder.append(bar, pre);
+        if (highlight && block.lang && block.text.length <= 40_000) {
+            const key = `h:${block.lang}:${block.text}`;
+            const paint = (tree) => { if (Array.isArray(tree)) c.replaceChildren(...tokens(tree, 0)); };
+            if (cache.has(key)) paint(cache.get(key));
+            else Promise.resolve().then(() => highlight(block.text, block.lang)).then((tree) => { if (Array.isArray(tree)) { cache.set(key, tree); paint(tree); } }, () => {});
+        }
+        return holder;
+    }
+    /* A token tree, as spans: its type a class, its text text. */
+    function tokens(list, depth) {
+        const out = [];
+        for (const t of list) {
+            if (typeof t === 'string') { out.push(t); continue; }
+            if (!t || typeof t !== 'object' || depth > 12) continue;
+            const span = el('span', 'parley-tok');
+            for (const name of [t.type, ...(Array.isArray(t.alias) ? t.alias : [t.alias])]) if (typeof name === 'string' && /^[a-z][a-z-]{0,30}$/.test(name)) span.classList.add(`parley-tok-${name}`);
+            span.append(...(Array.isArray(t.content) ? tokens(t.content, depth + 1) : [String(t.content ?? '')]));
+            out.push(span);
+        }
+        return out;
+    }
+    function drawing(block) {
+        if (!diagram || block.text.length > 20_000) return code(block);
+        const fig = el('figure', 'parley-diagram');
+        fig.append(el('span', 'parley-diagram-wait', said(words, 'diagram')));
+        const key = `d:${block.text}`;
+        const show = (url) => { const img = el('img'); img.src = url; img.alt = said(words, 'diagram'); img.dataset.zoom = url; img.dataset.name = said(words, 'diagram'); const b = el('button', 'parley-thumb'); b.type = 'button'; b.append(img); b.addEventListener('click', () => ctx.zoom(img)); fig.replaceChildren(b); };
+        const failed = () => fig.replaceWith(code({ ...block, lang: block.lang }));
+        if (cache.has(key)) { const u = cache.get(key); if (u) show(u); else return code(block); }
+        else {
+            Promise.resolve().then(() => diagram(block.text)).then((svg) => {
+                if (typeof svg !== 'string' || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(svg)) throw new Error('not a drawing');
+                /* A picture runs nothing and loads nothing: the drawing is shown as one. */
+                const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+                cache.set(key, url); ctx.urls.add(url); show(url);
+            }).catch(() => { cache.set(key, null); failed(); });
+        }
+        return fig;
+    }
+    function blocks(list, into) {
+        for (const b of list) into.append(block(b));
+        return into;
+    }
+    function block(b) {
+        if (b.t === 'p') {
+            const p = inlines(b.c, el('p'));
+            /* Pictures alone on a line: side by side. */
+            if (b.c.some((n) => n.t === 'img') && b.c.every((n) => n.t === 'img' || n.t === 'br' || (n.t === 'text' && !n.v.trim()))) p.className = 'parley-pictures';
+            return p;
+        }
+        if (b.t === 'h') { const h = el(`h${Math.min(6, b.level + 2)}`, `parley-h parley-h${b.level}`); return inlines(b.c, h); }
+        if (b.t === 'hr') return el('hr');
+        if (b.t === 'code') return b.lang === 'mermaid' ? drawing(b) : code(b);
+        if (b.t === 'quote') return blocks(b.c, el('blockquote'));
+        if (b.t === 'alert') {
+            const box = el('div', 'parley-callout'); box.dataset.kind = b.kind; box.setAttribute('role', 'note');
+            const head = el('p', 'parley-callout-head'); head.append(sign(b.kind), el('span', '', said(words, b.kind)));
+            box.append(head);
+            return blocks(b.c, box);
+        }
+        if (b.t === 'list') {
+            const list = el(b.ordered ? 'ol' : 'ul');
+            if (b.start !== undefined && Number.isInteger(b.start)) list.start = b.start;
+            for (const item of b.items) {
+                const li = el('li');
+                if (item.task !== null) { li.className = 'parley-task'; const box = el('span', 'parley-check', item.task ? '☑' : '☐'); box.dataset.done = String(item.task); li.append(box); }
+                /* A list of single lines stays tight. */
+                if (item.c.length === 1 && item.c[0].t === 'p') inlines(item.c[0].c, li); else blocks(item.c, li);
+                list.append(li);
+            }
+            return list;
+        }
+        if (b.t === 'table') {
+            const wrap = el('div', 'parley-table'); wrap.tabIndex = 0;
+            const table = el('table');
+            const head = el('thead'); const tr = el('tr');
+            b.head.forEach((cell, k) => { const th = el('th'); if (b.align[k]) th.style.textAlign = b.align[k]; tr.append(inlines(cell, th)); });
+            head.append(tr);
+            const body = el('tbody');
+            for (const row of b.rows) { const r = el('tr'); row.forEach((cell, k) => { const td = el('td'); if (b.align[k]) td.style.textAlign = b.align[k]; r.append(inlines(cell, td)); }); body.append(r); }
+            table.append(head, body); wrap.append(table);
+            return wrap;
+        }
+        return el('span');
+    }
+    return { blocks, inlines, thumb };
+}
+
+/* A PICTURE, LARGE: over the page, to zoom (pinch, double tap, the wheel,
+   + - "actual size" "fit"), to move when zoomed (drag), to go to the next
+   picture of the thread (arrows, a swipe), closed with Escape or its button. */
+const ZOOM_MAX = 8;
+function zoomer(root, words) {
+    const box = el('div', 'parley-zoom'); box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.tabIndex = -1;
+    const bar = el('div', 'parley-zoom-bar');
+    const title = el('span', 'parley-zoom-name');
+    const tool = (kind, key, act) => { const b = el('button', `parley-zoom-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title); b.append(sign(kind === 'actual' ? 'stop' : kind === 'fit' ? 'up' : kind)); b.addEventListener('click', act); return b; };
+    const stage = el('div', 'parley-zoom-stage');
+    const img = el('img'); img.alt = ''; img.draggable = false;
+    stage.append(img);
+    let list = [];
+    let at = 0;
+    let s = 1; let tx = 0; let ty = 0; let fit = 1;
+    let back = null;
+    const size = () => { const r = stage.getBoundingClientRect(); return { w: r.width || 1, h: r.height || 1 }; };
+    const natural = () => ({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+    const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`; box.dataset.zoomed = String(s > fit * 1.01); };
+    const clamp = () => {
+        const { w, h } = size(); const n = natural();
+        const iw = n.w * s; const ih = n.h * s;
+        tx = iw <= w ? (w - iw) / 2 : Math.min(0, Math.max(w - iw, tx));
+        ty = ih <= h ? (h - ih) / 2 : Math.min(0, Math.max(h - ih, ty));
+    };
+    const zoomTo = (next, px, py) => {
+        const { w, h } = size();
+        const x = px ?? w / 2; const y = py ?? h / 2;
+        const to = Math.min(ZOOM_MAX, Math.max(fit * 0.5, next));
+        tx = x - (x - tx) * (to / s); ty = y - (y - ty) * (to / s); s = to;
+        clamp(); apply();
+    };
+    const fitIn = () => { const { w, h } = size(); const n = natural(); fit = Math.min(1, w / n.w, h / n.h); s = fit; tx = 0; ty = 0; clamp(); apply(); };
+    img.addEventListener('load', fitIn);
+    const go = (step) => { if (list.length < 2) return; at = (at + step + list.length) % list.length; load(); };
+    const prev = tool('left', 'previous', () => go(-1));
+    const next = tool('right', 'next', () => go(1));
+    bar.append(title, tool('minus', 'zoom-out', () => zoomTo(s / 1.5)), tool('plus', 'zoom-in', () => zoomTo(s * 1.5)), tool('actual', 'zoom-actual', () => zoomTo(1)), tool('fit', 'zoom-fit', fitIn), prev, next, tool('close', 'close', () => close()));
+    box.append(stage, bar);
+    function load() {
+        const item = list[at];
+        title.textContent = `${item.name}${list.length > 1 ? ` (${at + 1}/${list.length})` : ''}`;
+        prev.hidden = next.hidden = list.length < 2;
+        img.src = item.url; img.alt = item.name;
+        if (img.complete && img.naturalWidth) fitIn();
+    }
+    function close() { box.hidden = true; img.removeAttribute('src'); try { back?.focus?.({ preventScroll: true }); } catch { /* gone */ } }
+    box.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') { event.preventDefault(); close(); }
+        else if (event.key === 'ArrowLeft') go(-1);
+        else if (event.key === 'ArrowRight') go(1);
+        else if (event.key === '+' || event.key === '=') zoomTo(s * 1.5);
+        else if (event.key === '-') zoomTo(s / 1.5);
+        else if (event.key === '0') fitIn();
+    });
+    stage.addEventListener('wheel', (event) => { event.preventDefault(); const r = stage.getBoundingClientRect(); zoomTo(s * Math.exp(-event.deltaY * 0.0015), event.clientX - r.left, event.clientY - r.top); }, { passive: false });
+    /* Fingers and a mouse: one moves (or swipes), two pinch, a double tap zooms. */
+    const pointers = new Map();
+    let pinch = null; let start = null; let lastTap = 0;
+    stage.addEventListener('pointerdown', (event) => {
+        stage.setPointerCapture?.(event.pointerId);
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        if (pointers.size === 1) start = { x: event.clientX, y: event.clientY, tx, ty, t: Date.now() };
+        if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s }; }
+    });
+    stage.addEventListener('pointermove', (event) => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+        const r = stage.getBoundingClientRect();
+        if (pointers.size === 2 && pinch) { const [a, b] = [...pointers.values()]; zoomTo(pinch.s * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top); return; }
+        if (pointers.size === 1 && start && s > fit * 1.01) { tx = start.tx + event.clientX - start.x; ty = start.ty + event.clientY - start.y; clamp(); apply(); }
+    });
+    const up = (event) => {
+        if (!pointers.has(event.pointerId)) return;
+        pointers.delete(event.pointerId);
+        if (pointers.size < 2) pinch = null;
+        if (pointers.size > 0 || !start) return;
+        const dx = event.clientX - start.x; const dy = event.clientY - start.y;
+        if (s <= fit * 1.01 && Math.abs(dx) > 60 && Math.abs(dy) < 80) go(dx < 0 ? 1 : -1);
+        else if (Math.hypot(dx, dy) < 10 && Date.now() - start.t < 300) {
+            const now = Date.now();
+            if (now - lastTap < 320) { const r = stage.getBoundingClientRect(); if (s > fit * 1.01) fitIn(); else zoomTo(Math.max(fit * 2.5, 1), event.clientX - r.left, event.clientY - r.top); lastTap = 0; } else lastTap = now;
+        }
+        start = null;
+    };
+    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+    return {
+        box,
+        show(all, index) { if (!all.length) return; back = document.activeElement; list = all; at = Math.max(0, Math.min(all.length - 1, index)); box.hidden = false; load(); box.focus?.({ preventScroll: true }); },
+        get open() { return !box.hidden; },
+        close,
+    };
+}
+
+/* The kind of a file, as a short tag on its card. */
+const extOf = (name) => { const m = /\.([a-z0-9]{1,5})$/i.exec(String(name ?? '')); return m ? m[1].toUpperCase() : ''; };
+function card(file, words, open, size) {
+    const c = el('span', 'parley-card');
+    const icon = el('span', 'parley-card-icon'); icon.append(sign('file'), el('span', 'parley-card-ext', extOf(file.name)));
+    const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', file.name));
+    if (size) about.append(el('span', 'parley-size', size));
+    c.append(icon, about);
+    if (open && file.open !== null) c.append(button(said(words, 'open'), 'parley-open', () => open(file)));
+    return c;
+}
+
 export function mount(root, { load, send, words = {}, open, terminal, remind, view: first = 'simple', onView, every = 3000, locale,
-    voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch, attach, act } = {}) {
+    voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch, attach, act,
+    markdown: rich = false, picture, diagram, highlight, agentName } = {}) {
     let as = VIEWS.includes(first) ? first : 'simple';
     let shown = '';
     let count = 0;
     let latest;
     let folded = true;
-    /* Steps the person opened or closed, by group: kept while the page is drawn again. */
+    /* Steps the person opened or closed, by group; messages unfolded: kept while the page is drawn again. */
     const unfolded = new Map();
+    const expanded = new Set();
+    /* Drawings and coloured code, made once each; the addresses of drawings, let go at the end. */
+    const cache = new Map();
+    const urls = new Set();
     let revealed = '';
     /* Kept at the newest, as a chat is, until the reader scrolls up; and again once back down. */
     let sticky = true;
+    let awayCount = 0;
     root.classList.add('parley');
     const top = el('div', 'parley-top');
     const status = el('p', 'parley-status'); status.setAttribute('role', 'status');
-    const switcher = el('div', 'parley-views'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', said(words, 'view'));
     const repaint = () => { shown = ''; if (latest) paint(latest); };
-    const choose = (v) => { if (v === as) return; as = v; root.dataset.view = as; unfolded.clear(); try { onView?.(as); } catch { /* the page's business */ } repaint(); void refresh(); };
-    const toggles = VIEWS.map((v) => { const b = button(said(words, v), '', () => choose(v)); b.dataset.view = v; return b; });
-    switcher.append(...toggles);
-    /* The choices of this device, beside the view: a small menu, over the page, taking no room. */
-    const prefs = el('div', 'parley-prefs'); prefs.hidden = true;
+    /* ONE button of settings, beside the state: the view, "send when I stop", the search. */
+    const prefs = el('div', 'parley-prefs');
     const prefsButton = el('button', 'parley-prefs-open'); prefsButton.type = 'button'; prefsButton.title = said(words, 'settings'); prefsButton.setAttribute('aria-label', prefsButton.title);
-    prefsButton.setAttribute('aria-expanded', 'false'); prefsButton.append(sign('prefs'));
+    prefsButton.setAttribute('aria-expanded', 'false'); prefsButton.setAttribute('aria-haspopup', 'true'); prefsButton.append(sign('prefs'));
     const prefsMenu = el('div', 'parley-prefs-menu'); prefsMenu.hidden = true; prefsMenu.setAttribute('role', 'group'); prefsMenu.setAttribute('aria-label', said(words, 'settings'));
-    /* "Send when I stop", a switch: on, what is said is sent by itself. */
-    const autoButton = el('button', 'parley-auto', said(words, 'auto-send')); autoButton.type = 'button';
-    prefsMenu.append(autoButton);
-    prefs.append(prefsButton, prefsMenu);
     const showPrefs = (on) => { prefsMenu.hidden = !on; prefsButton.setAttribute('aria-expanded', String(on)); };
+    const switcher = el('div', 'parley-views'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', said(words, 'view'));
+    const choose = (v) => { if (v === as) return; as = v; root.dataset.view = as; unfolded.clear(); try { onView?.(as); } catch { /* the page's business */ } repaint(); void refresh(); };
+    const toggles = VIEWS.map((v) => { const b = button(said(words, v), '', () => { choose(v); showPrefs(false); }); b.dataset.view = v; return b; });
+    switcher.append(...toggles);
+    /* "Send when I stop", a switch: on, what is said is sent by itself. */
+    const autoButton = el('button', 'parley-auto'); autoButton.type = 'button';
+    const autoWord = el('span', 'parley-auto-word', said(words, 'auto-send'));
+    const autoOff = el('span', 'parley-auto-off', said(words, 'auto-send-off'));
+    autoButton.append(autoWord, autoOff);
+    /* Under a heading of its own: it is about dictation. */
+    const dictation = el('div', 'parley-dictation'); dictation.append(el('p', 'parley-menu-head', said(words, 'dictation')), autoButton);
+    const searchButton = el('button', 'parley-search-open'); searchButton.type = 'button'; searchButton.append(sign('search'), el('span', '', said(words, 'search')));
+    prefsMenu.append(switcher, searchButton, dictation);
+    prefs.append(prefsButton, prefsMenu);
     prefsButton.addEventListener('click', () => showPrefs(prefsMenu.hidden));
     prefs.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !prefsMenu.hidden) { showPrefs(false); prefsButton.focus(); } });
     const away = (event) => { if (!prefsMenu.hidden && !(event.target instanceof Node && prefs.contains(event.target))) showPrefs(false); };
     document.addEventListener('pointerdown', away);
-    top.append(status, switcher, prefs);
+    top.append(status, prefs);
+    /* SEARCH IN THE THREAD: plain text, both sides; "n of m", previous, next. */
+    const finder = el('div', 'parley-search'); finder.hidden = true; finder.setAttribute('role', 'search');
+    const query = el('input', 'parley-search-box'); query.type = 'search'; query.placeholder = said(words, 'search'); query.setAttribute('aria-label', said(words, 'search'));
+    const found = el('span', 'parley-search-count'); found.setAttribute('aria-live', 'polite');
+    const findTool = (kind, key, act2) => { const b = el('button', `parley-search-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title); b.append(sign(kind === 'prev' ? 'up' : kind === 'next' ? 'down' : 'close')); b.addEventListener('click', act2); return b; };
+    let matches = [];
+    let current = 0;
+    finder.append(sign('search'), query, found, findTool('prev', 'previous', () => step(-1)), findTool('next', 'next', () => step(1)), findTool('close', 'close', () => closeSearch()));
     const main = el('div', 'parley-main');
-    const thread = el('div', 'parley-thread'); thread.setAttribute('aria-live', 'polite');
+    const thread = el('div', 'parley-thread'); thread.setAttribute('aria-live', 'polite'); thread.tabIndex = -1;
     const aside = el('aside', 'parley-aside');
-    main.append(thread, aside);
+    /* Back to the newest, when the reader scrolled up: with how many came meanwhile. */
+    const jump = el('button', 'parley-jump'); jump.type = 'button'; jump.hidden = true; jump.title = said(words, 'newest'); jump.setAttribute('aria-label', jump.title);
+    const jumpCount = el('span', 'parley-jump-count'); jump.append(sign('down'), jumpCount);
+    const column = el('div', 'parley-column'); column.append(thread, jump);
+    main.append(column, aside);
     /* Quick answers, above the box: one line, the rest one tap away. */
     const quickRow = el('div', 'parley-quick'); quickRow.hidden = true; quickRow.dataset.open = 'false';
     const chips = el('div', 'parley-replies'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', said(words, 'replies'));
     const moreChips = el('button', 'parley-replies-more'); moreChips.type = 'button'; moreChips.hidden = true; moreChips.setAttribute('aria-expanded', 'false');
     quickRow.append(chips, moreChips);
+    /* What is typed answers this question: said above the box, one click to take away. */
+    const replyRow = el('div', 'parley-replying'); replyRow.hidden = true;
+    let replyTo = null;
+    const dismissed = new Set();
     const form = el('form', 'parley-form'); form.autocomplete = 'off';
     /* The box, and on its frame what the microphone does: over it, taking no room. */
     const field = el('div', 'parley-field');
@@ -356,7 +1006,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const micAuto = el('span', 'parley-mic-auto'); micAuto.setAttribute('aria-hidden', 'true');
     mic.append(sign('mic'), sign('stop'), micWord, micAuto);
     const go = el('button', 'parley-send', said(words, 'send')); go.type = 'submit';
-    /* Files to attach: picked beside the box, shown above it until they are sent. */
+    /* Files to attach: picked beside the box, pasted, dropped; shown above it until they are sent. */
     const clip = el('button', 'parley-attach'); clip.type = 'button'; clip.title = said(words, 'attach'); clip.setAttribute('aria-label', clip.title); clip.append(sign('clip'));
     clip.hidden = !attach?.upload;
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true; picker.tabIndex = -1;
@@ -371,7 +1021,10 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     field.append(box, heard, heardSaid);
     const problem = el('p', 'parley-problem'); problem.hidden = true; problem.setAttribute('role', 'alert');
     form.append(field, clip, mic, go, picker);
-    root.replaceChildren(top, main, quickRow, pendingRow, form, problem);
+    const dropZone = el('div', 'parley-drop', said(words, 'drop')); dropZone.hidden = true;
+    const zoom = zoomer(root, words);
+    /* What floats over the chat first; then the chat, top to bottom. */
+    root.replaceChildren(zoom.box, dropZone, top, finder, main, quickRow, replyRow, pendingRow, form, problem);
     root.dataset.view = as;
     const narrow = () => root.clientWidth > 0 && root.clientWidth < NARROW_PX;
     let wasNarrow = narrow();
@@ -383,6 +1036,11 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     };
     const fileButton = (file) => (file.open === null || !open ? null : button(said(words, 'open'), 'parley-open', () => open(file)));
     const time = (text, when) => { const t = el('time', 'parley-time', text); if (when) t.title = when; return t; };
+    const pictureUrl = (file) => { try { const u = picture?.(file); return typeof u === 'string' && u ? u : null; } catch { return null; } };
+    const zoomFrom = (img) => {
+        const all = [...thread.querySelectorAll('img[data-zoom]')];
+        zoom.show(all.map((i) => ({ url: i.dataset.zoom, name: i.dataset.name || i.alt || '' })), Math.max(0, all.indexOf(img)));
+    };
     /* A list of steps, each with its time. */
     function trail(list) {
         const ol = el('ol', 'parley-trail');
@@ -408,7 +1066,50 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         opener.addEventListener('click', (event) => { if (only(event)) flip(); });
         if (opener.tagName !== 'BUTTON') opener.addEventListener('keydown', (event) => { if ((event.key === 'Enter' || event.key === ' ') && event.target === opener) { event.preventDefault(); flip(); } });
     }
+    /* What the agent wrote: rendered, or as plain text. */
+    function body(item, v) {
+        if (!rich) return [el('p', 'parley-text', item.text)];
+        const refs = new Map(item.refs.map((r) => [r.path, r.open]));
+        const paint2 = painter({ words, refs, open, picture: picture ? pictureUrl : null, pictureUrl, diagram, highlight, cache, urls, zoom: zoomFrom });
+        const blocks = markdown(item.text);
+        const whole2 = () => paint2.blocks(blocks, el('div', 'parley-md'));
+        const shortLine = () => paint2.inlines(inline(item.short), el('p', 'parley-short'));
+        const important = (list) => list.filter((b) => b.t === 'alert' && b.kind === 'important');
+        const more = (key, open2) => { const b = button(said(words, open2 ? 'see-less' : key), 'parley-unfold', () => { if (open2) expanded.delete(item.id); else expanded.add(item.id); repaint(); }); b.setAttribute('aria-expanded', String(open2)); return b; };
+        /* A question is never folded; the detailed view and a search unfold everything. */
+        if (item.kind === 'ask' || v.view === 'detailed' || searching) return item.short ? [shortLine(), whole2()] : [whole2()];
+        const isOpen = expanded.has(item.id);
+        if (item.short) {
+            if (isOpen) return [shortLine(), whole2(), more('see-details', true)];
+            return [shortLine(), ...important(blocks).map((b) => paint2.blocks([b], el('div', 'parley-md'))), more('see-details', false)];
+        }
+        if (linesOf(item.text) > FOLD_LINES + 2) {
+            if (isOpen) return [whole2(), more('see-more', true)];
+            const md = whole2(); md.dataset.clip = 'true';
+            /* Its IMPORTANT boxes below the fold stay in sight. */
+            const below = important(blocks).filter((b) => b.line >= FOLD_LINES);
+            return [md, ...below.map((b) => paint2.blocks([b], el('div', 'parley-md'))), more('see-more', false)];
+        }
+        return [whole2()];
+    }
+    /* A picture the person may see, large on a click; else a card. */
+    function fileView(f, size) {
+        const url = f.picture && f.open !== null ? pictureUrl(f) : null;
+        if (url) return painter({ words, refs: new Map(), open, cache, urls, zoom: zoomFrom }).thumb(f, url, '');
+        return card(f, words, open, size);
+    }
     const item0 = (row) => (row.type === 'message' ? row : {});
+    function systemLine(row) {
+        const line = el('div', 'parley-system'); line.dataset.from = 'system'; line.dataset.level = row.level; if (row.tone) line.dataset.tone = row.tone; line.dataset.id = row.id;
+        if (row.when) line.title = row.when;
+        line.append(el('p', 'parley-system-text', row.text), time(row.time, row.when));
+        if (row.actions.length && act) {
+            const buttons = el('div', 'parley-system-actions');
+            for (const a of row.actions) { const b = button(a.label, 'parley-act', () => { try { act(a.id, { id: row.id, text: row.text }); } catch { /* the application's business */ } }); b.dataset.act = a.id; buttons.append(b); }
+            line.append(buttons);
+        }
+        return line;
+    }
     function rowOf(row, v) {
         if (row.type === 'day' || row.type === 'gap') { const p = el('p', 'parley-divider'); p.dataset.kind = row.type; p.append(el('span', '', row.text)); return p; }
         if (row.type === 'steps') {
@@ -419,20 +1120,21 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             folding(row, holder, chip, list);
             return holder;
         }
-        if (item0(row).from === 'system') {
-            /* A line of the application: grey, across, with its time and its buttons. */
-            const line = el('div', 'parley-system'); line.dataset.from = 'system'; line.dataset.level = row.level; line.dataset.id = row.id;
-            if (row.when) line.title = row.when;
-            line.append(el('p', 'parley-system-text', row.text), time(row.time, row.when));
-            if (row.actions.length && act) {
-                const buttons = el('div', 'parley-system-actions');
-                for (const a of row.actions) { const b = button(a.label, 'parley-act', () => { try { act(a.id, { id: row.id, text: row.text }); } catch { /* the application's business */ } }); b.dataset.act = a.id; buttons.append(b); }
-                line.append(buttons);
-            }
-            return line;
+        if (row.type === 'waits') { const p = el('p', 'parley-waits', row.text); p.title = row.when; p.setAttribute('role', 'status'); return p; }
+        if (row.type === 'group') {
+            /* A run of news of one topic: one line, unfolded on a click. */
+            const holder = el('div', 'parley-group'); holder.dataset.level = 'news';
+            const line = button('', 'parley-group-line', () => {});
+            line.append(el('span', 'parley-system-text', row.text), time(row.time, ''));
+            const list = el('div', 'parley-group-lines');
+            for (const l of row.lines) list.append(systemLine(l));
+            holder.append(line, list);
+            folding({ key: row.key, open: false }, holder, line, list);
+            return holder;
         }
+        if (item0(row).from === 'system') return systemLine(row);
         if (row.type === 'now') {
-            const holder = el('div', 'parley-now'); holder.dataset.live = String(row.live);
+            const holder = el('div', 'parley-now'); holder.dataset.live = String(row.live); if (row.busy) holder.dataset.busy = 'true';
             const line = el(row.steps.length ? 'button' : 'p', 'parley-doing');
             if (row.steps.length) line.type = 'button';
             const dots = el('span', 'parley-dots'); dots.setAttribute('aria-hidden', 'true'); dots.append(el('i'), el('i'), el('i'));
@@ -445,45 +1147,66 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             return holder;
         }
         const item = row;
-        const bubble = el('div', 'parley-said'); bubble.dataset.from = item.from; bubble.dataset.kind = item.kind; bubble.dataset.id = item.id; if (item.open) bubble.dataset.asking = 'true';
+        const bubble = el('div', 'parley-said'); bubble.dataset.from = item.from; bubble.dataset.kind = item.kind; bubble.dataset.id = item.id; if (item.open) bubble.dataset.asking = 'true'; if (item.closed) bubble.dataset.closed = 'true';
         if (item.id && item.id === revealed) bubble.dataset.reveal = 'true';
         if (item.when) bubble.title = item.when;
+        if (item.from === 'agent') {
+            const head = el('p', 'parley-who');
+            if (item.name) head.append(el('span', 'parley-name', item.name));
+            if (item.time) head.append(time(item.trail ? `${item.time} - ${item.trail.label}` : item.time, item.when));
+            bubble.append(head);
+        } else if (item.name) bubble.append(el('p', 'parley-who-person', item.name));
         if (item.label) bubble.append(el('p', 'parley-label', item.label));
-        bubble.append(el('p', 'parley-text', item.text));
+        if (item.reply) bubble.append(el('p', 'parley-inreply', item.reply));
+        if (item.closed) bubble.append(el('p', 'parley-closed', item.closed));
+        if (item.from === 'agent') bubble.append(...body(item, v)); else if (item.text) bubble.append(el('p', 'parley-text', item.text));
         if (item.file) {
-            const row2 = el('div', 'parley-file');
-            if (item.file.shown) row2.append(el('span', 'parley-path', item.file.shown));
-            const b = fileButton(item.file); if (b) row2.append(b);
-            if (row2.childNodes.length) bubble.append(row2);
+            if (item.file.open !== null && item.file.picture && pictureUrl(item.file)) bubble.append(fileView(item.file));
+            else {
+                const row2 = el('div', 'parley-file');
+                row2.append(card({ ...item.file, name: item.file.name }, words, open));
+                if (item.file.shown && v.view === 'detailed') row2.append(el('span', 'parley-path', item.file.shown));
+                bubble.append(row2);
+            }
             if (item.outside) bubble.append(el('p', 'parley-outside', item.outside));
         }
-        for (const f of item.files ?? []) {
-            const row2 = el('div', 'parley-file'); row2.dataset.attached = 'true';
-            row2.append(el('span', 'parley-name', f.name));
-            if (f.size) row2.append(el('span', 'parley-size', f.size));
-            if (f.shown) row2.append(el('span', 'parley-path', f.shown));
-            const b = fileButton(f); if (b) row2.append(b);
-            bubble.append(row2);
+        if (item.files?.length) {
+            const pictures = el('div', 'parley-pictures');
+            for (const f of item.files) {
+                const url = f.picture && f.open !== null ? pictureUrl(f) : null;
+                if (url) { pictures.append(fileView(f)); continue; }
+                const row2 = el('div', 'parley-file'); row2.dataset.attached = 'true';
+                row2.append(card(f, words, open, f.size));
+                if (f.shown) row2.append(el('span', 'parley-path', f.shown));
+                bubble.append(row2);
+            }
+            if (pictures.childNodes.length) bubble.append(pictures);
         }
         if (item.choices.length > 0) {
             const choices = el('div', 'parley-choices');
             for (const choice of item.choices) choices.append(button(choice, '', () => { for (const x of choices.children) x.disabled = true; void say(choice, item.id); }));
             bubble.append(choices);
         }
-        if (item.mark) {
-            const foot = el('p', 'parley-foot', item.mark);
-            if (remind && v.view === 'detailed') {
-                foot.append(' ', button(said(words, 'remind'), 'parley-remind', async (event) => { event.target.disabled = true; try { await remind(); event.target.textContent = said(words, 'reminded'); } catch { event.target.disabled = false; } }));
-            }
-            bubble.append(foot);
+        /* A question: answered by what is typed, once Reply is pressed. */
+        if ((item.open || item.closed) && send) {
+            const r = button(said(words, 'reply'), 'parley-reply-to', () => { replyTo = { id: item.id, text: cut(item.short || item.text, 90), auto: false }; dismissed.delete(item.id); paintReply(); focusBox(); });
+            bubble.append(r);
         }
-        if (item.time) bubble.append(time(item.trail ? `${item.time} - ${item.trail.label}` : item.time, item.when));
+        if (item.sign) {
+            const s = el('span', 'parley-sign-state'); s.dataset.state = item.sign; s.title = item.signText; s.setAttribute('role', 'img'); s.setAttribute('aria-label', item.signText);
+            s.append(sign(item.sign));
+            bubble.append(s);
+        }
+        if (item.remind && remind) {
+            bubble.append(button(said(words, 'remind'), 'parley-remind', async (event) => { event.target.disabled = true; try { await remind(); event.target.textContent = said(words, 'reminded'); } catch { event.target.disabled = false; } }));
+        }
+        if (item.from === 'person' && item.time) bubble.append(time(item.time, item.when));
         if (!item.trail) return bubble;
         /* The steps that led to it, opened by a click on it: above it, as they came. */
         const list = trail(item.trail.steps);
         list.dataset.for = item.id;
         bubble.dataset.steps = 'true'; bubble.tabIndex = 0;
-        folding(item.trail, bubble, bubble, list, { only: (event) => !(event.target instanceof Element && event.target.closest('button, a')) && !String(globalThis.getSelection?.() ?? '') });
+        folding(item.trail, bubble, bubble, list, { only: (event) => !(event.target instanceof Element && event.target.closest('button, a, img, pre, table, .parley-md code')) && !String(globalThis.getSelection?.() ?? '') });
         return [list, bubble];
     }
     function sideOf(v) {
@@ -504,21 +1227,31 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         }
         return files;
     }
+    const wrap = (row, made) => {
+        const r = el('div', 'parley-row'); r.dataset.type = row.type;
+        if (row.type === 'message') r.dataset.from = row.from;
+        r.append(...(Array.isArray(made) ? made : [made]));
+        return r;
+    };
     function paint(data) {
         latest = data;
         paintQuick();
-        const v = view(data, { words, view: as, locale });
+        const v = view(data, { words, view: as, locale, agentName });
+        paintReply(v);
         const small = narrow();
-        const mark = JSON.stringify([v, small]);
+        const mark = JSON.stringify([v, small, [...expanded], searching ? query.value : '']);
         if (mark === shown) return;
         shown = mark;
         for (const b of toggles) b.setAttribute('aria-pressed', String(b.dataset.view === v.view));
         status.hidden = !v.status;
         if (v.status) { status.dataset.state = v.status.state; status.textContent = v.status.text; status.title = [v.status.text, v.status.when].filter(Boolean).join(' - '); }
-        /* The newest is shown: when something new came, and when the reader was at the bottom already. */
-        const atBottom = sticky || v.items.length > count;
+        /* The newest is shown: when the reader was at the bottom already, or when they wrote. */
+        const wrote = v.items.length > count && v.items.at(-1)?.from === 'person';
+        const atBottom = sticky || wrote;
+        const keep = atBottom ? 0 : thread.scrollTop;
+        if (!atBottom && v.items.length > count) { awayCount += v.items.length - count; paintJump(); }
         count = v.items.length;
-        thread.replaceChildren(...v.rows.flatMap((row) => rowOf(row, v)));
+        thread.replaceChildren(...v.rows.map((row) => wrap(row, rowOf(row, v))));
         watchChoices();
         if (v.empty) thread.append(el('p', 'parley-empty', v.empty));
         aside.hidden = v.view !== 'detailed';
@@ -534,13 +1267,57 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
                 aside.replaceChildren(fold, ...way);
             } else aside.replaceChildren(sideOf(v), ...way);
         }
-        if (atBottom) { bottom(); sticky = true; requestAnimationFrame(bottom); }
+        if (searching) { mark2(moveToLast); moveToLast = false; }
+        if (atBottom && !searching) { bottom(); sticky = true; awayCount = 0; paintJump(); requestAnimationFrame(bottom); } else if (!searching) thread.scrollTop = keep;
     }
-    thread.addEventListener('scroll', () => { sticky = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40; }, { passive: true });
+    const paintJump = () => { jump.hidden = sticky; jumpCount.textContent = awayCount > 0 ? String(awayCount) : ''; jumpCount.hidden = awayCount === 0; };
+    jump.addEventListener('click', () => { sticky = true; awayCount = 0; bottom(); paintJump(); });
+    thread.addEventListener('scroll', () => { const was = sticky; sticky = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 40; if (sticky) awayCount = 0; if (was !== sticky || sticky) paintJump(); }, { passive: true });
     /* The page around it settles (fonts, a keyboard, a turned phone): the newest stays in sight. */
     const settle = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (sticky) bottom(); }) : null;
     settle?.observe(thread);
     async function refresh() { try { paint(await load()); } catch { /* shown again at the next look */ } }
+    /* ---- the search ---- */
+    let searching = false;
+    let moveToLast = false;
+    /* Every place the words sought are, in what was said: each marked. */
+    function mark2(move) {
+        const q = query.value.trim().toLowerCase();
+        matches = [];
+        if (q) {
+            const walk = (node) => {
+                for (const child of [...node.childNodes]) {
+                    if (child.nodeType === 3 || (child.childNodes.length === 0 && typeof child.data === 'string')) {
+                        const text = child.textContent; const low = text.toLowerCase();
+                        if (!low.includes(q)) continue;
+                        const parts = [];
+                        let from = 0; let at;
+                        while ((at = low.indexOf(q, from)) >= 0) { if (at > from) parts.push(text.slice(from, at)); const m = el('mark', 'parley-found', text.slice(at, at + q.length)); parts.push(m); matches.push(m); from = at + q.length; }
+                        if (from < text.length) parts.push(text.slice(from));
+                        const holder = document.createDocumentFragment ? document.createDocumentFragment() : null;
+                        if (holder) { holder.append(...parts); child.replaceWith(holder); } else { const s = el('span'); s.append(...parts); child.replaceWith?.(s); }
+                    } else if (child.nodeType === 1 && !['BUTTON', 'svg', 'SVG', 'TIME', 'MARK'].includes(child.tagName)) walk(child);
+                }
+            };
+            for (const said2 of thread.querySelectorAll('.parley-said, .parley-system')) walk(said2);
+        }
+        if (move) current = matches.length ? matches.length - 1 : 0;
+        current = Math.min(current, Math.max(0, matches.length - 1));
+        found.textContent = q ? said(words, 'found', { n: matches.length ? current + 1 : 0, m: matches.length }) : '';
+        matches.forEach((m, i) => { if (i === current) m.dataset.now = 'true'; });
+        matches[current]?.scrollIntoView?.({ block: 'center' });
+    }
+    const step = (n) => { if (!matches.length) return; matches[current].dataset.now = 'false'; current = (current + n + matches.length) % matches.length; matches[current].dataset.now = 'true'; found.textContent = said(words, 'found', { n: current + 1, m: matches.length }); matches[current].scrollIntoView?.({ block: 'center' }); };
+    function openSearch() { searching = true; finder.hidden = false; showPrefs(false); query.focus(); query.select?.(); repaint(); }
+    function closeSearch() { searching = false; finder.hidden = true; query.value = ''; matches = []; repaint(); sticky = true; bottom(); paintJump(); }
+    searchButton.addEventListener('click', openSearch);
+    let typing2;
+    query.addEventListener('input', () => { clearTimeout(typing2); typing2 = setTimeout(() => { moveToLast = true; repaint(); }, 150); });
+    query.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); closeSearch(); } else if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1); } });
+    root.addEventListener('keydown', (event) => {
+        if ((event.ctrlKey || event.metaKey) && !event.altKey && String(event.key).toLowerCase() === 'f') { event.preventDefault(); openSearch(); }
+        else if (event.key === 'Escape' && searching && !zoom.open) closeSearch();
+    });
     /* A long press on a touch screen shows a message's time, as hovering does with a mouse. */
     let pressing;
     let hiding;
@@ -557,6 +1334,20 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         }, PRESS_MS);
     });
     for (const type of ['pointerup', 'pointercancel', 'pointerleave', 'scroll']) thread.addEventListener(type, unpress, { passive: true });
+    /* ---- the reply to a question ---- */
+    function paintReply(v) {
+        if (v) {
+            const asking = v.asking;
+            if (replyTo?.auto && (!asking || asking.id !== replyTo.id)) replyTo = null;
+            if (replyTo && !replyTo.auto && !v.items.some((i) => i.id === replyTo.id && (i.open || i.closed))) replyTo = null;
+            if (!replyTo && asking && !dismissed.has(asking.id) && send) replyTo = { ...asking, auto: true };
+        }
+        replyRow.hidden = !replyTo;
+        if (!replyTo) { replyRow.replaceChildren(); return; }
+        const x = button('×', 'parley-unreply', () => { dismissed.add(replyTo.id); replyTo = null; paintReply(); stayIn(); });
+        x.title = said(words, 'not-a-reply'); x.setAttribute('aria-label', x.title);
+        replyRow.replaceChildren(el('span', 'parley-replying-text', said(words, 'replying', { question: replyTo.text })), x);
+    }
     /* ---- the box: the keyboard, the ready answers, the voice ---- */
     const media = (q) => typeof matchMedia === 'function' && matchMedia(q).matches;
     const touching = typeof touch === 'boolean' ? touch : media('(any-pointer: coarse)');
@@ -584,25 +1375,40 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         typing = document.activeElement === box;
         if (typing) event.preventDefault();
     };
-    for (const zone of [form, quickRow, prefs, thread, pendingRow]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
+    for (const zone of [form, quickRow, prefs, thread, pendingRow, replyRow]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
     const stayIn = () => { if (typing && document.activeElement !== box) box.focus({ preventScroll: true }); typing = false; };
+    /* What is about to go with the message: pictures as pictures, other files as cards; each can be taken away. */
+    const previews = new Map();
+    const previewOf = (file) => {
+        if (!previews.has(file)) { let url = null; try { if (/^image\/(png|jpeg|gif|webp)$/.test(file.type) && typeof URL?.createObjectURL === 'function') url = URL.createObjectURL(file); } catch { url = null; } previews.set(file, url); }
+        return previews.get(file);
+    };
+    const letGo = (keep2) => { for (const [file, url] of previews) if (!keep2.includes(file)) { if (url) try { URL.revokeObjectURL(url); } catch { /* gone */ } previews.delete(file); } };
     const paintPending = () => {
+        letGo(pending);
         pendingRow.hidden = pending.length === 0;
         /* Where they go, and who opens them: said where they are chosen. */
         const where = el('p', 'parley-where', said(words, 'attach-where'));
         pendingRow.replaceChildren(where, ...pending.map((file, i) => {
-            const chip = el('span', 'parley-pending'); chip.append(el('span', 'parley-name', file.name), el('span', 'parley-size', sizeText(file.size)));
+            const url = previewOf(file);
+            const chip = el('span', url ? 'parley-pending parley-pending-picture' : 'parley-pending');
+            if (url) { const img = el('img'); img.src = url; img.alt = file.name; chip.append(img); chip.title = `${file.name} (${sizeText(file.size)})`; }
+            else { const icon = el('span', 'parley-card-icon'); icon.append(sign('file'), el('span', 'parley-card-ext', extOf(file.name))); const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', file.name), el('span', 'parley-size', sizeText(file.size))); chip.append(icon, about); }
             const x = button('\u00d7', 'parley-unattach', () => { pending = pending.filter((_, j) => j !== i); paintPending(); stayIn(); });
             x.title = said(words, 'remove-file', { name: file.name }); x.setAttribute('aria-label', x.title);
             chip.append(x);
             return chip;
         }));
     };
+    /* Files from the button, pasted, or dropped: the same way, the same limits. */
+    const add = (files) => { if (!attach?.upload) return; const list = [...files].filter((f) => f && typeof f.name === 'string'); if (!list.length) return; pending = [...pending, ...list].slice(0, FILES_MAX); paintPending(); };
     let uploading = false;
     const sendBox = async () => {
         const text = box.value.trim();
         if ((!text && pending.length === 0) || uploading) return;
-        if (pending.length === 0) { box.value = ''; grow(); void say(text); return; }
+        const answers = replyTo?.id;
+        const answered = () => { if (replyTo && replyTo.id === answers) { dismissed.add(answers); replyTo = null; paintReply(); } };
+        if (pending.length === 0) { box.value = ''; grow(); if (await say(text, answers)) answered(); return; }
         /* The files go first, one after the other; the message only once they all went. */
         uploading = true; go.disabled = clip.disabled = true;
         problem.hidden = false; problem.dataset.kind = 'sending'; problem.textContent = said(words, 'sending-files');
@@ -615,16 +1421,29 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             return;
         }
         problem.hidden = true; problem.dataset.kind = '';
-        const sent = await say(text, undefined, files);
+        const sent = await say(text, answers, files);
         uploading = false; go.disabled = clip.disabled = false;
-        if (sent) { pending = []; paintPending(); if (box.value.trim() === text) { box.value = ''; grow(); } }
+        if (sent) { answered(); pending = []; paintPending(); if (box.value.trim() === text) { box.value = ''; grow(); } }
     };
     clip.addEventListener('click', () => { if (attach?.upload) picker.click(); });
-    picker.addEventListener('change', () => {
-        pending = [...pending, ...picker.files].slice(0, FILES_MAX);
-        picker.value = '';
-        paintPending();
+    picker.addEventListener('change', () => { add(picker.files); picker.value = ''; });
+    /* A picture pasted in the box (a screenshot) is attached, named by its time. */
+    box.addEventListener('paste', (event) => {
+        if (!attach?.upload) return;
+        const data = event.clipboardData;
+        const files = [...(data?.files ?? [])];
+        if (!files.length) for (const item of data?.items ?? []) if (item.kind === 'file') { const f = item.getAsFile?.(); if (f) files.push(f); }
+        if (!files.length) return;
+        event.preventDefault();
+        add(files.map((f) => { const name = pastedName(f); return name === f.name || typeof File !== 'function' ? f : new File([f], name, { type: f.type }); }));
     });
+    /* Files dropped anywhere on the chat; where they can be dropped is said while they are carried. */
+    let carried = 0;
+    const carrying = (event) => attach?.upload && [...(event.dataTransfer?.types ?? [])].includes('Files');
+    root.addEventListener('dragenter', (event) => { if (!carrying(event)) return; event.preventDefault(); carried += 1; dropZone.hidden = false; });
+    root.addEventListener('dragover', (event) => { if (!carrying(event)) return; event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'; });
+    root.addEventListener('dragleave', (event) => { if (!carrying(event)) return; carried = Math.max(0, carried - 1); if (carried === 0) dropZone.hidden = true; });
+    root.addEventListener('drop', (event) => { if (!carrying(event)) return; event.preventDefault(); carried = 0; dropZone.hidden = true; add(event.dataTransfer.files); });
     /* ---- dictation ---- */
     let voice = speaking?.listen ? speaking : null;
     let stopping = null;
@@ -640,7 +1459,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const paintVoice = () => {
         const on = Boolean(stopping);
         mic.hidden = !voice;
-        prefs.hidden = !voice; if (!voice) showPrefs(false);
+        dictation.hidden = !voice;
+        autoOff.hidden = auto;
         mic.setAttribute('aria-pressed', String(on));
         mic.dataset.state = on ? hearing || 'listening' : '';
         mic.dataset.auto = String(auto);
@@ -786,9 +1606,10 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         refresh,
         get view() { return as; }, set view(v) { if (VIEWS.includes(v)) choose(v); },
         get voice() { return voice; }, set voice(v) { if (!v?.listen) quiet(); voice = v?.listen ? v : null; paintVoice(); },
+        search: openSearch,
         get replies() { return replies; }, set replies(list) { replies = Array.isArray(list) ? list : []; paintQuick(); },
         get listening() { return Boolean(stopping); },
         get attach() { return attach; }, set attach(a) { attach = a?.upload ? a : undefined; clip.hidden = !attach; if (!attach) { pending = []; paintPending(); } },
-        destroy() { gone = true; quiet(); document.removeEventListener('pointerdown', away); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
+        destroy() { gone = true; quiet(); letGo([]); for (const u of urls) try { URL.revokeObjectURL(u); } catch { /* gone */ } document.removeEventListener('pointerdown', away); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
     };
 }

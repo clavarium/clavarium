@@ -184,16 +184,33 @@ export function withoutOldSetting(record) {
     return rest;
 }
 
+/* WHAT TO DO about a refused automatic sending, said after it in the chat;
+   by the reason #once is given (its first word when not listed whole). */
+const TODO = Object.freeze({
+    cap: 'Raise the cap of this conversation, or send it from the review.',
+    create: 'Make the branch on the remote, send it from the review, or let this conversation create branches.',
+    'checks-failed': 'The agent was told; see the checks in the review.',
+    'checks-none': 'Set a check command or a pre-push hook, or stop asking for checks for this conversation.',
+    'checks-unavailable': 'It is tried again once its machine runs.',
+    diverged: 'The agent was told to take the remote\'s commits first; it is sent again after that.',
+    refused: 'Look at the review: it says what the remote answered.',
+});
+/* Reasons whose sending stays stuck until somebody looks. */
+const GRAVE_WHY = new Set(['refused-forced', 'refused-unknown-unreachable', 'refused-workspace']);
+const commitsOf = (n) => `${n} commit${n === 1 ? '' : 's'}`;
+
 export class GitKeeper {
-    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
+    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
 
     /* `review`: GitReview (reads, the reference, Send). `checks`: GitChecks.
        `alerts`: what tells the owner's phone. `tellAgent(repository, line,
        conversation?)`: what types one line to the agents that write in the
        repository (only to that conversation's, when one is named); it
-       resolves false when nobody could be told (then it is tried again). */
-    constructor({ store, review, resources, checks, alerts, now = () => new Date(), tellAgent = async () => {} }) {
-        this.#store = store; this.#review = review; this.#resources = resources; this.#checks = checks; this.#alerts = alerts; this.#now = now; this.#tellAgent = tellAgent;
+       resolves false when nobody could be told (then it is tried again).
+       `thread(conversation, event)`: one line in that conversation's chat
+       (Talk.event: kept only where its chat is on). */
+    constructor({ store, review, resources, checks, alerts, now = () => new Date(), tellAgent = async () => {}, thread = () => {} }) {
+        this.#store = store; this.#review = review; this.#resources = resources; this.#checks = checks; this.#alerts = alerts; this.#now = now; this.#tellAgent = tellAgent; this.#thread = thread;
         review.listen({ read: (name, failure, got) => this.#readOutcome(name, failure, got), refresh: (name, result) => this.#refreshOutcome(name, result) });
         review.useWaivers?.((name) => this.settings(name).fsck);
         /* The previous version's per-repository setting, dropped (see withoutOldSetting). */
@@ -344,6 +361,14 @@ export class GitKeeper {
     /* ---------- what every read and every refresh says ---------- */
 
     #tell(title, body) { if (this.#alerts) void this.#alerts.tell({ title, body, url: '/' }).catch(() => {}); }
+    /* A line in the chat of each conversation named: never one the
+       repository is not attached to, whatever access it was given. */
+    #say(name, conversations, event) {
+        let attached;
+        try { attached = Object.keys(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}); } catch { return; }
+        for (const c of conversations) if (attached.includes(c)) { try { this.#thread(c, { ...event, actions: [`review:${name}`] }); } catch { /* a chat never stops git */ } }
+    }
+    #attached(name) { try { return Object.entries(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}).filter(([, access]) => access && access !== 'none').map(([c]) => c).sort(); } catch { return []; } }
     /* Marked as told only once somebody was: a line typed to no machine
        (all asleep, a terminal that failed) is said again the next time. */
     #toAgent(name, line, conversation) {
@@ -397,6 +422,13 @@ export class GitKeeper {
             this.#log(name, { ok: false, branch: w.branch, what });
             this.#tell(`${name}: ${w.branch} ${w.now ? 'rewritten' : 'deleted'} on the remote`, what);
             if (w.now) this.#toAgent(name, `origin/${plain(w.branch)} was rewritten; fetch again`);
+        }
+        /* What came from the remote: said where the repository is attached, for the record (the detailed view). */
+        const brought = result.ok ? (result.brought ?? []) : [];
+        if (brought.length) {
+            const total = brought.reduce((n, x) => n + x.commits, 0);
+            const where = brought.slice(0, 4).map((x) => `${x.commits} on ${x.branch}`).join(', ') + (brought.length > 4 ? `, and ${brought.length - 4} more branch(es)` : '');
+            this.#say(name, this.#attached(name), { kind: 'origin', text: `Origin of ${name} updated: ${total} new commit${total === 1 ? '' : 's'} (${where}).`, topic: 'Origin updated', brief: name });
         }
         if (result.ok && Object.keys(record.blocked ?? {}).length > 0) void this.#settle(name).catch(() => {});
     }
@@ -457,7 +489,9 @@ export class GitKeeper {
             }
         }
         try {
-            return await this.#review.push(r.name, body);
+            const sent = await this.#review.push(r.name, body);
+            if (!sent.already) this.#say(r.name, this.#attached(r.name), { kind: 'sent-by-hand', text: `Sent by hand to ${sent.branch} of ${r.name}: ${commitsOf(sent.commits)}${sent.made ? ' (a new branch)' : ''}.`, topic: 'Sent', brief: sent.branch });
+            return sent;
         } catch (error) {
             if (error instanceof GitFailure) this.#sendFailed(r.name, error, { branch: body?.target, head: body?.head });
             throw error;
@@ -501,6 +535,11 @@ export class GitKeeper {
         this.#log(name, { branch: b, head: tip.id, ok: false, ...(conversation ? { conversation } : {}), ...rest });
         if (tell && this.settings(name).alert) this.#tell(`${name}: not sent`, entry.what);
         if (ai) this.#toAgent(name, ai, conversation || undefined);
+        /* A sending that the owner asked for, refused: said in that
+           conversation's chat with what to do. Not a branch outside every
+           list -- nothing was asked for it -- nor what is the repository's
+           alone (an earlier outcome unknown: said when it happened). */
+        if (conversation) this.#say(name, [conversation], { kind: 'refused', text: `Not sent to ${b} of ${name}: ${String(entry.what).replace(/^Not sent: /, '').replace(/\.$/, '')}. ${TODO[why] ?? TODO[why.replace(/-.*/, '')] ?? 'Look at the review.'}`, tone: GRAVE_WHY.has(why) ? 'bad' : 'warn', topic: 'Not sent', brief: b });
     }
 
     /* One branch of the last read: what the remote already has is left
@@ -565,6 +604,7 @@ export class GitKeeper {
             if (sent.already) { this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Already on the remote: ${b}.` }, { sent: true, by: conversation }); return true; }
             this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Sent automatically for ${conversation}: ${sent.commits} commit(s) to ${sent.branch}${sent.made ? ' (a new branch)' : ''}, ${checked}.${sent.note ? ` ${sent.note}` : ''}` }, { sent: true, by: conversation });
             if (alert) this.#tell(`${name}: sent to ${sent.branch}`, `${sent.commits} commit(s), automatically for ${conversation}, ${checked}.`);
+            this.#say(name, [conversation], { kind: 'sent', text: `Sent to ${sent.branch} of ${name}: ${commitsOf(sent.commits)}${sent.made ? ' (a new branch)' : ''}, ${checked}.`, topic: 'Sent', brief: sent.branch });
             return true;
         } catch (error) {
             const kind = error instanceof GitFailure ? error.kind : 'error';

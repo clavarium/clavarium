@@ -147,7 +147,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/me') {
             /* `conversations`: all this pairing may use. `shared`: what it was given for itself. */
             /* `terminal` and `chat`: the parts it was given, for the page to show only those. */
-            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
+            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
@@ -217,7 +217,8 @@ export async function handleDoor(request, response, { devices, conversations, re
         /* Thumbnails, editing, making, renaming, moving, removing: as listing
            and importing are. A device given the chat alone has none of them
            (`attached` refuses all but opening a file of the chat). */
-        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => attached(need));
+        /* A thumbnail is the file read, as opening it is: a device given the chat alone sees the pictures of its chat. */
+        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => attached(need, route === '/files/thumb' ? 'open' : undefined));
         if (answer?.picture) {
             response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length });
             response.end(answer.picture.bytes);

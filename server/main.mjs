@@ -20,7 +20,7 @@ import pty from 'node-pty';
 import { attachBridge } from './bridge.mjs';
 import { attachCommand } from './tmux.mjs';
 import { handleApi } from './api.mjs';
-import { Conversations } from './conversations.mjs';
+import { Conversations, DRAWN_MS } from './conversations.mjs';
 import { Store } from './store.mjs';
 import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
@@ -74,6 +74,11 @@ const FILES = {
     '/vendor/parley-ui.css': ['server/parley/ui/parley-ui.css', 'text/css; charset=utf-8'],
     '/vendor/pdf.mjs': ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'text/javascript; charset=utf-8'],
     '/vendor/pdf.worker.mjs': ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'text/javascript; charset=utf-8'],
+    /* Drawings in the chat (```mermaid), at the version package.json fixes: asked for only when one is shown. */
+    '/vendor/mermaid.js': ['node_modules/mermaid/dist/mermaid.min.js', 'text/javascript; charset=utf-8'],
+    /* Code coloured in the chat: Prism and the languages it is given, one file; asked for only when code is shown. */
+    '/vendor/prism.js': [['web/prism-manual.js', ...['core', 'clike', 'markup', 'css', 'javascript', 'typescript', 'json', 'python', 'bash', 'markup-templating', 'php', 'sql', 'yaml', 'diff', 'markdown', 'ini', 'apacheconf']
+        .map((l) => `node_modules/prismjs/components/prism-${l}.min.js`)], 'text/javascript; charset=utf-8'],
 };
 /* The device door serves the same files under /c/: that prefix is the only
    one the edge lets through without sign-on. Its page differs; nothing else. */
@@ -101,7 +106,9 @@ const REFUSED = 'This Clavarium belongs to someone else: your account is not one
 
 function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity } = {}) {
     const sendFile = async (response, file) => {
-        response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
+        /* Several files are one, in their order. */
+        const body = Array.isArray(file[0]) ? Buffer.concat((await Promise.all(file[0].map((f) => readFile(ROOT + f)))).flatMap((b) => [b, Buffer.from('\n;\n')])) : await readFile(ROOT + file[0]);
+        response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(body);
     };
     const server = createServer(async (request, response) => {
         const { pathname } = new URL(request.url ?? '/', 'http://local');
@@ -271,7 +278,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const answerTimer = answerer.start(answerEveryMs);
     /* A tool is told to get to work when something arrives, or by the clock: see wakeups.mjs. */
     let bridge;
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name) });
+    /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name),
+        fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
@@ -284,7 +293,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         for (const conversation of writers) if (await wakeups.say(conversation, line) === true) heard = true;
         return heard;
     };
+    /* What happened to a repository is said in the chat of the conversations it is attached to (talk.mjs). */
     const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), review: gitReview, resources: folders, alerts, tellAgent,
+        thread: (conversation, event) => talk.event(conversation, event),
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
@@ -304,8 +315,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const stopHealth = health.start(healthEveryMs);
     /* What is wrong with its machine is said in its chat too, where it happened. */
     health.judged = (name, record) => talk.machine(name, record);
-    /* A machine woken by an opening: its folders are looked at once it is up. */
-    all.started = (name) => { void health.check(name); };
+    /* A machine just started: its folders are mounted again (after a build,
+       a restart, a move) or looked at and put back if they came loose (after
+       a wake), before its tool starts in them. */
+    all.mounted = async (name, again) => { if (again) await folders.remount(name).catch(() => {}); await health.check(name).catch(() => {}); };
     /* What the VM manager says each machine has is what is recorded (a record
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
@@ -316,13 +329,24 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }) });
     all.room = (ask) => capacity.check(ask);
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, repair: (name) => repairTerminal(name) });
-    server.on('close', () => { stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); },
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
-            return pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
+            const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });
+            /* Its start is over once something is drawn (nothing of it is
+               read), once it ends, or after a while whatever happens. Not
+               written once this server is closing: a terminal killed by the
+               closing is no news, and the next start forgets the steps anyway. */
+            let over = false;
+            const end = () => { if (over) return; over = true; clearTimeout(late); drawn.dispose?.(); if (!closing) all.attached(name); };
+            const drawn = started.onData(end);
+            const late = setTimeout(end, DRAWN_MS); late.unref?.();
+            started.onExit(end);
+            return started;
         },
         onLeft: (name) => all.left(name),
         onEnded: (name) => all.ended(name),
@@ -342,10 +366,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* The terminal of a running machine is opened before anybody asks: a
        conversation just built, and at start every conversation whose machine
        runs. A page then shows its terminal at once. */
-    /* A machine is ready: its folders are shown in it (after a rebuild there
-       are some), then its terminal is opened and kept. */
-    /* Then its health is looked at (folders that did not come back are put back). */
-    all.ready = (name) => { toolbox.forget(name); void (async () => { await folders.remount(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); })(); };
+    /* A machine is ready: its terminal is opened and kept. Its folders are
+       shown in it first (after a rebuild there are some), and its health is
+       looked at (folders that did not come back are put back): both on the
+       way, as steps of its start (`mounted` above, conversations.mjs). */
+    all.ready = (name) => { toolbox.forget(name); void bridge.warm(name); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
     void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); } })();

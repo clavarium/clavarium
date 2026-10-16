@@ -55,22 +55,76 @@
         $('notice-health').hidden = true; $('notice-restart').hidden = true;
         notice.hidden = false;
         $('notice-spin').hidden = true; $('notice-steps').hidden = true;
+        $('notice-head').hidden = true; delete notice.dataset.progress;
     };
-    /* WHILE A MACHINE IS BUILT: a wheel that turns, and the three steps with the
-       one in progress marked, so a wait of several minutes reads as progress. */
-    const BUILD_STEPS = ['Starting the machine', 'Preparing the machine', 'Installing the tool'];
     /* A restart: when the page first saw it (when the server did not say), and the clock that tells it. */
     const restartSeen = new Map(); let restartTicking = 0;
-    const building = (step) => {
-        $('notice-spin').hidden = false;
-        const at = step?.startsWith('Installing') ? 2 : BUILD_STEPS.indexOf(step);
-        const list = $('notice-steps'); list.hidden = at < 0; list.replaceChildren();
-        BUILD_STEPS.forEach((label, i) => {
-            const li = document.createElement('li');
-            li.dataset.state = i < at ? 'done' : i === at ? 'now' : 'later';
-            li.textContent = i === 2 && at === 2 && step ? step : label;
-            list.append(li);
-        });
+    /* A START TOLD STEP BY STEP (a build, a restart, a wake: `progress`, see
+       server/conversations.mjs): what it is, "Step 3 of 6" with the time so
+       far, the step under way large with a wheel, those passed as one small
+       line, those to come dimmed. The server gives each step a name; its
+       words are here. The same panel for the three, so a wait of minutes
+       reads as progress, whichever it is. */
+    const STEP_WORDS = {
+        stopping: 'The machine stops', setting: 'Its memory and disk are set', starting: 'The machine starts', waking: 'The machine wakes',
+        preparing: 'The machine is prepared', installing: 'The tool is installed', answering: 'The machine answers', folders: 'Its folders are ready',
+        tool: 'The tool starts', back: 'The tool is there, as it was',
+        resume: 'The tool resumes its last session', fresh: 'The tool starts a new session', first: 'No earlier session: a new one',
+    };
+    const PROGRESS_TITLES = { build: 'Building its machine', restart: 'Restarting its machine', resize: 'Changing its machine', wake: 'Waking it up' };
+    /* A build or a restart holds the page until its tool is there; a wake is the page's own opening. */
+    const holds = (c) => Boolean(c?.progress) && (c.phase === 'building' || c.phase === 'restarting' || (c.phase === 'ready' && c.progress.kind !== 'wake'));
+    const clockOf = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    const usualFor = (kind, s) => {
+        if (kind === 'build') return 'A new machine takes a few minutes. Nothing to do meanwhile: its terminal comes by itself.';
+        if (kind === 'wake') return `${s < 180 ? 'A start usually takes a minute or two.' : 'This takes much longer than a start usually does.'} Its work, its files and its chat are kept.`;
+        return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.'} Its files and its chat are kept.`;
+    };
+    /* `source()`: the latest word of the server (its list, or the terminal opening). */
+    const panel = { source: () => undefined, of: '', key: '', timer: 0 };
+    const paintProgress = () => {
+        const p = panel.source();
+        if (!p || !Array.isArray(p.steps) || notice.hidden || notice.dataset.progress === undefined) return false;
+        const at = Math.min(Math.max(0, p.at ?? 0), p.steps.length - 1);
+        const key = `${p.kind}|${p.steps.join(',')}|${at}|${p.detail ?? ''}`;
+        if (key !== panel.key) {
+            panel.key = key;
+            const list = $('notice-steps'); list.replaceChildren(); list.hidden = false;
+            p.steps.forEach((id, i) => {
+                const li = document.createElement('li');
+                li.dataset.state = i < at ? 'done' : i === at ? 'now' : 'later';
+                li.dataset.step = id;
+                const words = STEP_WORDS[id] ?? id;
+                if (i === at) {
+                    const spin = document.createElement('span'); spin.className = 'spin'; spin.setAttribute('aria-hidden', 'true');
+                    const label = document.createElement('span'); label.textContent = words;
+                    li.append(spin, label);
+                    /* Installing a tool: which part of it, or that it came with the machine. */
+                    if (id === 'installing' && p.detail) {
+                        const part = /^(\d+)\/(\d+)$/.exec(p.detail);
+                        const small = document.createElement('small'); small.textContent = part ? `part ${part[1]} of ${part[2]}` : 'it came with the machine';
+                        li.append(small);
+                    }
+                } else li.textContent = words;
+                list.append(li);
+            });
+        }
+        const s = Math.max(0, Math.floor((Date.now() - (Date.parse(p.since ?? '') || Date.now())) / 1000));
+        $('notice-title').textContent = PROGRESS_TITLES[p.kind] ?? 'Starting';
+        $('notice-count').textContent = `Step ${at + 1} of ${p.steps.length} \u00b7 ${clockOf(s)}`;
+        $('notice-text').textContent = usualFor(p.kind, s);
+        return true;
+    };
+    /* Shown, or brought up to date when it is shown already (its wheel keeps turning). */
+    const progressPanel = (of, source) => {
+        panel.source = source;
+        if (notice.hidden || notice.dataset.progress === undefined || panel.of !== of) {
+            show(''); panel.of = of; panel.key = '';
+            notice.dataset.progress = 'on'; $('notice-head').hidden = false;
+        }
+        paintProgress();
+        clearInterval(panel.timer);
+        panel.timer = setInterval(() => { if (!paintProgress()) clearInterval(panel.timer); }, 1000);
     };
     const view = (which) => { app.dataset.view = which; };
 
@@ -122,6 +176,8 @@
     };
     const applyTheme = (light) => {
         document.documentElement.dataset.theme = light ? 'light' : 'dark';
+        /* The chat's colours of meaning (notes, warnings, code) follow the page's theme, not the device's. */
+        $('simple-thread').dataset.theme = light ? 'light' : 'dark';
         terminal.options.theme = light ? LIGHT : DARK;
         document.querySelector('meta[name=theme-color]')?.setAttribute('content', light ? LIGHT.background : DARK.background);
         $('theme').textContent = light ? 'Dark' : 'Light';
@@ -324,7 +380,12 @@
                from "ready" on. Until it hears, the tool draws for the old size
                and whatever is typed meanwhile lands in a garbled screen. */
             if (message.type === 'ready') { say('live', 'live'); notice.hidden = true; fit.fit(); sendSize(); setTimeout(() => { fit.fit(); sendSize(); }, 300); }
-            if (message.type === 'status') {
+            /* A start told step by step: the same panel as a build or a restart. */
+            if (message.type === 'status' && message.progress) {
+                if (message.text) say(String(message.text), 'connecting');
+                const told = message.progress;
+                progressPanel(`${name}/open`, () => (socket === mine && !output ? told : undefined));
+            } else if (message.type === 'status') {
                 say(String(message.text), 'connecting');
                 /* In the middle of the screen too: a small word in the header is
                    not enough for a wait that can last minutes (a tester waited
@@ -521,7 +582,7 @@
     /* What can be done to the conversation shown, from what is known of it now. */
     function paintActions() {
         const c = conversations.find((x) => x.name === current);
-        const usable = Boolean(c) && c.phase === 'ready';
+        const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('archive').hidden = !c;
         $('files-open').hidden = $('share').hidden = !usable;
         /* Given its chat alone: the files of the chat open from the chat; Files holds only what was given to the device itself. */
@@ -546,14 +607,18 @@
         $('keys').hidden = !current;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
-        const usable = Boolean(c) && c.phase === 'ready';
+        const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
         if (home && usable && !noTerminal()) void paintShortcuts();
+        /* A build or a restart, told step by step until its tool is there: the terminal is opened only then. */
+        if (holds(c)) {
+            disconnect(); say(c.progress.kind === 'build' ? 'building' : 'restarting', 'connecting');
+            progressPanel(c.name, () => conversations.find((x) => x.name === c.name)?.progress);
+            return;
+        }
         if (c && c.phase === 'building') {
             disconnect(); say('building', 'connecting');
-            const minutes = c.buildingSince ? Math.floor((Date.now() - Date.parse(c.buildingSince)) / 60000) : 0;
-            show(`${minutes < 1 ? 'Started less than a minute ago' : `${minutes} min so far`}. A new machine takes a few minutes.`);
-            building(c.step);
+            show(`${c.step ?? 'Building its machine'}... A new machine takes a few minutes.`); $('notice-spin').hidden = false;
             return;
         }
         if (c && c.phase === 'restarting') {
@@ -619,12 +684,14 @@
         for (const c of conversations) {
             const b = document.createElement('button');
             b.type = 'button'; b.className = 'item'; b.dataset.phase = c.phase;
+            /* Ready, but its tool not there yet: it still reads as under way. */
+            if (holds(c)) b.dataset.busy = 'true';
             if (c.name === current) b.setAttribute('aria-current', 'true');
             const title = document.createElement('b');
             const dot = document.createElement('span'); dot.className = 'dot';
             title.append(dot, c.name);
             const sub = document.createElement('small');
-            sub.textContent = c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : `${c.toolLabel} - failed`;
+            sub.textContent = holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
             /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
@@ -645,7 +712,7 @@
     async function refresh() {
         clearTimeout(pollTimer);
         try {
-            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}` : '');
+            const mark = (x) => (x ? `${x.phase}/${x.asleep === true}/${holds(x)}` : '');
             const before = mark(conversations.find((x) => x.name === current));
             if (DEVICE) {
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
@@ -685,7 +752,8 @@
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
         if (!DEVICE && !$('panel').hidden) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
-        if (home) pollTimer = setTimeout(refresh, conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
+        /* A start told step by step is asked about more often: its tool appears soon after its last step. */
+        if (home) pollTimer = setTimeout(refresh, conversations.some(holds) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
 
     /* ---------- creating ---------- */
@@ -761,8 +829,10 @@
         }
     }
     /* In the chat, the same saved texts are its ready answers: one that
-       presses Enter is sent, the other is put in its box to be completed. */
-    const asReplies = (all) => (Array.isArray(all) ? all : []).map((x) => ({ label: x.label, text: x.text, send: x.enter === true }));
+       presses Enter is sent, the other is put in its box to be completed.
+       Only the owner's own: the first ones, as they came, say nothing of
+       this conversation, and are not offered under a chat. */
+    const asReplies = (all) => (Array.isArray(all) ? all : []).filter((x) => x.starter !== true).map((x) => ({ label: x.label, text: x.text, send: x.enter === true }));
     /* A device has them when it may type into its terminal, or write in its chat. */
     async function loadReplies() {
         if (DEVICE && !deviceParts.terminal && deviceParts.chat !== 'write') return [];
@@ -1467,13 +1537,18 @@
             load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines),
             send: (text, answers, files) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => f.path) } : {}) }),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); },
+            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); },
             /* Files attached to a message: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
             ...(noTerminal() ? {} : { terminal: () => { simple = false; paintSimple(); focusTerminal(); } }),
+            /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
+            markdown: true, agentName: conversations.find((x) => x.name === name)?.toolLabel ?? '',
+            /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
+            picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
+            diagram: drawDiagram, highlight: colourCode,
             remind: () => post(talkPath(name, '/remind'), {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
             voice: chatVoice(), autoSend: chatAuto,
@@ -1483,14 +1558,53 @@
         const replies = await loadReplies();
         if (thread && threadOf === name) thread.replies = replies;
     }
+    /* DRAWINGS AND CODE IN THE CHAT, by libraries served here at fixed
+       versions (package.json), loaded only when one is shown. A drawing is
+       made by Mermaid in its strict mode (no script, no click, no HTML in its
+       labels) and handed to the chat as SVG text, which shows it as a picture:
+       a picture runs nothing and loads nothing. Code is coloured from Prism's
+       token tree, never from its HTML. */
+    const loaded = new Map();
+    const script = (path) => {
+        if (!loaded.has(path)) loaded.set(path, new Promise((done, fail) => { const s2 = document.createElement('script'); s2.src = new URL(path, new URL(DEVICE ? '/c/' : '/', location.href)).href; s2.onload = done; s2.onerror = () => { loaded.delete(path); fail(new Error('not loaded')); }; document.head.append(s2); }));
+        return loaded.get(path);
+    };
+    let drawn = 0;
+    let drawing = Promise.resolve();
+    function drawDiagram(code) {
+        /* One at a time: Mermaid draws in the page, and its settings are global. */
+        const run = drawing.then(async () => {
+            await script('vendor/mermaid.js');
+            /* Drawn on a light ground in both themes: the chat shows it as a picture on white. */
+            window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false, flowchart: { htmlLabels: false }, fontFamily: 'system-ui, sans-serif', suppressErrorRendering: true });
+            const { svg } = await window.mermaid.render(`clv-diagram-${drawn += 1}`, String(code));
+            return svg;
+        });
+        drawing = run.catch(() => {});
+        return run;
+    }
+    const LANGS = { js: 'javascript', javascript: 'javascript', mjs: 'javascript', jsx: 'javascript', ts: 'typescript', typescript: 'typescript', tsx: 'typescript', json: 'json', python: 'python', py: 'python', bash: 'bash', sh: 'bash', shell: 'bash', zsh: 'bash', console: 'bash',
+        php: 'php', sql: 'sql', html: 'markup', xml: 'markup', svg: 'markup', markup: 'markup', css: 'css', yaml: 'yaml', yml: 'yaml', diff: 'diff', patch: 'diff', markdown: 'markdown', md: 'markdown', ini: 'ini', conf: 'apacheconf', apache: 'apacheconf', apacheconf: 'apacheconf', htaccess: 'apacheconf' };
+    async function colourCode(code, lang) {
+        const known = LANGS[String(lang).toLowerCase()];
+        if (!known) return null;
+        await script('vendor/prism.js');
+        const grammar = window.Prism?.languages?.[known];
+        if (!grammar) return null;
+        /* Plain data, as Parley takes it: strings, and {type, alias, content}. */
+        const plain = (list) => list.map((t) => (typeof t === 'string' ? t : { type: t.type, alias: t.alias, content: Array.isArray(t.content) ? plain(t.content) : typeof t.content === 'string' ? t.content : plain([t.content]) }));
+        return plain(window.Prism.tokenize(String(code), grammar));
+    }
     /* THE LINES OF ITS MACHINE in the chat: their buttons, as this screen may
        use them -- its memory and a restart are the owner's; its terminal, a
        screen's that was given it. */
-    const ACTIONS = { memory: 'More memory...', restart: 'Restart...', terminal: 'See the terminal' };
+    /* "review:<repository>": the git review of a repository the line is about (the owner's). */
+    const ACTIONS = { memory: 'More memory...', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review' };
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
-        const may = (id) => (id === 'terminal' ? !noTerminal() : (id === 'memory' || id === 'restart') && !DEVICE);
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[id] })) } : m)) };
+        const kindOf = (id) => String(id).split(':')[0];
+        const may = (id) => (id === 'terminal' ? !noTerminal() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id)) && !DEVICE);
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[kindOf(id)] })) } : m)) };
     }
     /* A file the person attaches: sent first, put where the tool finds it; the message then carries its path. */
     async function attachToChat(name, file) {
@@ -1560,6 +1674,40 @@
             chatWords = null; thread?.destroy(); thread = null; threadOf = ''; void paintThread();
             await paintWords();
         } catch (error) { $('words-error').textContent = error.message; $('words-error').hidden = false; }
+    }
+    /* Settings: what the chat's thread shows of each kind of event (server/talk.mjs EVENT_LEVELS). */
+    const THREAD_KINDS = [
+        ['sent', 'Sent automatically', 'A branch went to the remote by itself'],
+        ['sent-by-hand', 'Sent by hand', 'Sent from the review'],
+        ['refused', 'Not sent', 'An automatic sending was refused: what to do'],
+        ['origin', 'Origin updated', 'The remote brought commits'],
+        ['wakeup', 'Wake-up', 'A wake-up was typed'],
+        ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
+        ['restarted', 'Machine restarted', 'Restarted or built again'],
+    ];
+    const THREAD_LEVELS = [['needs-you', 'Needs you'], ['news', 'News'], ['trace', 'Trace']];
+    async function paintThreadLevels() {
+        if (DEVICE) return;
+        const now = await fetch(`${API}/talk/thread`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!now) return;
+        const box = $('thread-levels');
+        box.replaceChildren(...THREAD_KINDS.flatMap(([kind, name, about]) => {
+            const label = document.createElement('label'); label.htmlFor = `thread-level-${kind}`; label.textContent = name;
+            const small = document.createElement('small'); small.textContent = about; label.append(small);
+            const select = document.createElement('select'); select.id = `thread-level-${kind}`; select.dataset.kind = kind;
+            select.append(...THREAD_LEVELS.map(([value, text]) => { const o = document.createElement('option'); o.value = value; o.textContent = value === now.defaults?.[kind] ? `${text} (default)` : text; return o; }));
+            select.value = now.levels?.[kind] ?? now.defaults?.[kind];
+            select.addEventListener('change', () => void saveThreadLevel(kind, select.value));
+            return [label, select];
+        }));
+    }
+    async function saveThreadLevel(kind, level) {
+        $('thread-error').hidden = true;
+        try {
+            await post(`${API}/talk/thread`, { levels: { [kind]: level } });
+            $('thread-saved').textContent = 'Saved: what happens from now on.'; setTimeout(() => { $('thread-saved').textContent = ''; }, 2500);
+        } catch (error) { $('thread-error').textContent = error.message; $('thread-error').hidden = false; }
+        await paintThreadLevels();
     }
     $('words-save').addEventListener('click', () => void saveWords());
     $('words-lang').addEventListener('change', () => void saveWords());
@@ -2148,6 +2296,7 @@
         enterPlace('settings', push);
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
+        void paintThreadLevels().catch(() => {});
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();
         for (const shortcut of saved) {
@@ -3413,10 +3562,63 @@
         delete $('viewer').dataset.editing;
         $('preview-body').replaceChildren();
         $('preview-edit').hidden = true;
+        offerCopy(null);
         const was = !$('viewer').hidden;
         $('viewer').hidden = true;
         if ($('files').hidden && $('panel').hidden) focusTerminal();
         if (was && filesChanged && !$('files').hidden) { filesChanged = false; void paintFiles(); }
+    }
+    /* COPY, in the window: all the text of a text file, or the picture.
+       The clipboard is written INSIDE the click (a browser refuses it
+       otherwise, Safari first). Text refused: the text is selected instead,
+       for the person's own copy. A picture goes as PNG -- the one type every
+       browser takes -- drawn on a canvas when it is another; the button is
+       offered only where the browser can put a picture on the clipboard.
+       `what`: { text } or { picture: Blob }, or null for no button. */
+    let copyLabel = 'Copy';
+    function offerCopy(what, { select } = {}) {
+        const button = $('preview-copy');
+        const pictures = typeof ClipboardItem === 'function' && typeof navigator.clipboard?.write === 'function' && (typeof ClipboardItem.supports !== 'function' || ClipboardItem.supports('image/png'));
+        const can = what && (what.text !== undefined || (what.picture && pictures));
+        button.hidden = !can;
+        copyLabel = what?.picture ? 'Copy image' : 'Copy';
+        button.textContent = copyLabel;
+        button.onclick = !can ? null : () => {
+            const done = (ok, why) => {
+                button.textContent = ok ? 'Copied' : copyLabel;
+                if (!ok && why) { $('preview-note').textContent = why; $('preview-note').hidden = false; }
+                if (ok) setTimeout(() => { if (button.textContent === 'Copied') button.textContent = copyLabel; }, 1800);
+            };
+            if (what.text !== undefined) {
+                const fallback = () => { const at = select?.(); done(false, at ? 'The browser did not let this page copy: the text is selected, copy it yourself (Ctrl+C, or a long press).' : 'The browser did not let this page copy.'); };
+                try { void navigator.clipboard.writeText(what.text).then(() => done(true), fallback); } catch { fallback(); }
+                return;
+            }
+            /* A PNG goes as it is; one the clipboard will not decode (Chrome
+               is stricter there than in an <img>) is drawn again, once. */
+            const refused = () => done(false, 'The browser did not let this page copy the picture: download it instead.');
+            const write = (png) => navigator.clipboard.write([new ClipboardItem({ 'image/png': png })]);
+            try {
+                const first = what.picture.type === 'image/png' ? write(Promise.resolve(what.picture)).catch(() => write(asPng(what.picture))) : write(asPng(what.picture));
+                void first.then(() => done(true), refused);
+            } catch { refused(); }
+        };
+    }
+    /* A picture of another type, drawn and given back as PNG. */
+    async function asPng(blob) {
+        const bitmap = await createImageBitmap(blob);
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        bitmap.close?.();
+        return new Promise((resolve, reject) => canvas.toBlob((png) => (png ? resolve(png) : reject(new Error('not drawn'))), 'image/png'));
+    }
+    /* Selects all of an element's text, for a copy by hand. */
+    function selectAll(node) {
+        if (!node) return false;
+        const range = document.createRange(); range.selectNodeContents(node);
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        return true;
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
@@ -3456,6 +3658,7 @@
             shownUrl = URL.createObjectURL(new Blob([bytes], { type: PICTURES[kind] }));
             const img = document.createElement('img'); img.alt = name; img.src = shownUrl;
             body.append(img); note('');
+            offerCopy({ picture: new Blob([bytes], { type: PICTURES[kind] }) });
         } else if (kind === 'pdf') {
             try {
                 const base = DEVICE ? '/c/vendor' : '/vendor';
@@ -3480,7 +3683,10 @@
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
         } else {
-            const source = () => { const pre = document.createElement('pre'); pre.textContent = new TextDecoder('utf-8', { fatal: false }).decode(bytes); return pre; };
+            const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+            const source = () => { const pre = document.createElement('pre'); pre.textContent = text; return pre; };
+            /* Copy: all its text, the source of a page too. Refused, the text is shown and selected. */
+            offerCopy({ text }, { select: () => { if (!body.querySelector('pre')) body.querySelector('button')?.click(); return selectAll(body.querySelector('pre')); } });
             /* A page written by the tool is SHOWN AS A PAGE -- in a frame that is
                nobody: no session, no network, nothing of this site (the server
                answers it with those rules; see files.mjs). Its source is one

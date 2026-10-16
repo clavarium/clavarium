@@ -42,7 +42,8 @@ export class Shortcuts {
 
     #items() { return this.#store.all().filter((s) => s.name !== MARKER); }
 
-    list() { return this.#items().map(({ name, label, text, enter }) => ({ id: name, label, text, enter })); }
+    /* `starter`: one of the first ones, as they came, not the owner's own words. */
+    list() { return this.#items().map(({ name, label, text, enter }) => ({ id: name, label, text, enter, ...(DEFAULTS.some((d) => d.label === label && d.text === text) ? { starter: true } : {}) })); }
 
     add({ label, text, enter }) {
         if (!oneLine(label, LABEL_MAX)) throw new Refusal(400, `A label is one line of at most ${LABEL_MAX} characters.`);

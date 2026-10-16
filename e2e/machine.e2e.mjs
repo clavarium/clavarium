@@ -35,7 +35,12 @@ test('folders that came loose while it slept are put back when it wakes; a machi
     process.env.FAKE_VM_START_SECONDS = '2';
     t.after(() => { delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
-    await me.until('the wait is said, with its time so far', async () => /Waking the machine\.\.\. 0:0\d so far; a start usually takes a minute or two\. Its work, its files and its chat are kept\./.test(await me.page.locator('#notice-text').innerText()));
+    /* Told step by step: what it is, the step of how many with its time so far, the step under way, and what is usual. */
+    await me.until('the wait is said, with its time so far', async () => /^Step 1 of \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    assert.equal(await me.page.locator('#state').innerText(), 'Waking the machine...');
+    assert.match(await me.page.locator('#notice-title').innerText(), /waking it up/i);
+    assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').innerText(), 'The machine wakes');
+    assert.match(await me.page.locator('#notice-text').innerText(), /^A start usually takes a minute or two\. Its work, its files and its chat are kept\.$/);
     /* Its machine looked at meanwhile: what is known is said, never a restart for a start that is merely under way. */
     await new Promise((r) => setTimeout(r, 900));
     assert.equal(await me.page.locator('#notice-restart').isVisible(), false, 'no restart offered while it starts');
@@ -91,7 +96,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
     await me.until('the page says it restarts', async () => /restarting/.test(await me.state()));
     /* While it restarts, the page says the step, the time so far and what is usual. */
-    await me.until('a clock while it restarts', async () => /\d+:\d\d so far\. A restart usually takes one to two minutes/.test(await me.page.locator('#notice-text').innerText().catch(() => '')));
+    await me.until('a clock while it restarts', async () => /^Step \d of 6 \u00b7 \d+:\d\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    assert.match(await me.page.locator('#notice-text').innerText(), /A restart usually takes one to two minutes/);
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     assert.equal(existsSync(join(vmHome(b, 'silent'), 'killed')), true, 'stopped by force');
     const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'silent');

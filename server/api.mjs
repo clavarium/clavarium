@@ -14,6 +14,8 @@
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
  *   POST /api/conversations/<name>/talk          {text, answers?, files?}: written in its chat; files from .../talk/file
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
+ *   GET  /api/talk/thread                        what a chat shows of each kind of event: {levels, defaults, choices}
+ *   POST /api/talk/thread                        {levels: {kind: 'needs-you'|'news'|'trace'}}: the owner's choice, whole or partial
  *   GET  /api/conversations/<name>/guide         what its tool is told about where it is: the exact texts, the owner's lines
  *   POST /api/conversations/<name>/guide         {lines}: the owner's own lines for it (short, plain text)
  *   POST /api/conversations/<name>/guide/tell    its guide written again, and one line typed in its terminal to read it
@@ -194,6 +196,7 @@ export async function handleApi(request, response, conversations, headers, resou
             /* The words of the chat screen, for a screen whose language is `lang`; and the owner's choice of them. */
             if (pathname === '/api/talk/words' && talk) return send(200, talk.words(query.get('lang') ?? 'en')), true;
             if (pathname === '/api/talk/settings' && talk) return send(200, talk.settings()), true;
+            if (pathname === '/api/talk/thread' && talk) return send(200, talk.thread()), true;
             const guided = /^\/api\/conversations\/([^/]+)\/guide$/.exec(pathname);
             if (guided && guide) return send(200, guide.about(decodeURIComponent(guided[1]))), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
@@ -274,6 +277,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/alerts/remove' && alerts) return send(200, alerts.remove(String(body.endpoint ?? ''))), true;
         if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
         if (pathname === '/api/talk/settings' && talk) return send(200, talk.setWords({ lang: body.lang, own: body.own })), true;
+        if (pathname === '/api/talk/thread' && talk) return send(200, talk.setThread({ levels: body.levels })), true;
         const guiding = /^\/api\/conversations\/([^/]+)\/guide(\/tell)?$/.exec(pathname);
         if (guiding && guide) {
             const conversation = decodeURIComponent(guiding[1]);
