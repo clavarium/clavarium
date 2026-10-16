@@ -42,7 +42,7 @@ const PROBE_MS = 15_000;
 const LOOK_MS = 60_000;
 /* Below this, memory or disk is said to be almost full. */
 const MEMORY_LOW_MB = 120;
-const DISK_LOW_MB = 300;
+const DISK_LOW_MB = 1024;
 
 /* WHAT THE PROBE PRINTS IS THE AGENT'S TO WRITE: it is root in its machine,
    and awk, df or sh there are whatever it put there. So only what was asked
@@ -93,7 +93,7 @@ export function judge(record) {
         if (record.oomKills > 0) add('warn', 'memory', `oom:${record.oomKills}`, `It ran out of memory${record.oomKills === 1 ? '' : ` ${record.oomKills} times`} since it started: a program in it was stopped. Its files are safe.`);
         if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
-            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.02)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB. Give it more disk (This conversation, Machine).`);
         }
         for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);

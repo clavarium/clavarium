@@ -1079,12 +1079,14 @@
 
     /* ---------- the machine: its health, its size, a restart ---------- */
     const sizeWords = (mb) => (mb >= 1024 ? `${Number.isInteger(mb / 1024) ? mb / 1024 : (mb / 1024).toFixed(1)} GB` : `${mb} MB`);
-    function healthLines(list, record, { all = true } = {}) {
+    /* `brief`: over a wait, only what to know -- figures stay in the Machine chapter. */
+    function healthLines(list, record, { all = true, brief = false } = {}) {
         list.replaceChildren();
         const problems = (record?.problems ?? []).filter((p) => all || p.level === 'warn' || p.level === 'bad');
         for (const p of problems) { const li = document.createElement('li'); li.dataset.level = p.level; li.textContent = p.text; list.append(li); }
         if (all && record && record.state === 'Running' && record.answering) {
             const li = document.createElement('li'); li.dataset.level = problems.length ? 'info' : 'ok';
+            if (brief) { li.textContent = problems.length ? 'Its machine runs; see above what is wrong.' : 'Its machine runs and looks well: the terminal is being opened again.'; list.prepend(li); return problems.length; }
             const parts = [problems.length ? 'Running' : 'Running, and nothing wrong was seen'];
             if (record.memory) parts.push(`memory: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB`);
             if (record.disks?.['/']) parts.push(`disk: ${record.disks['/'].availableMb} MB left`);
@@ -1142,12 +1144,14 @@
         if (name !== current) return;
         const c = conversations.find((x) => x.name === name);
         if (c) c.health = record;
+        /* The terminal may have come while the machine was being looked at: then the wait is over, nothing to say. */
+        if (waiting && !waitingSince) return;
         /* Nothing over the screen to say it under: a long wait still says so. */
         if (notice.hidden && !long) return;
         if (notice.hidden) show('Its terminal still does not come.');
         /* Waking it is what the page is doing: "it is asleep" would say the opposite. */
         const said = waiting && record ? { ...record, problems: (record.problems ?? []).filter((p) => p.kind !== 'state') } : record;
-        const shown = healthLines($('notice-health'), said, { all: true });
+        const shown = healthLines($('notice-health'), said, { all: true, brief: true });
         $('notice-health').hidden = $('notice-health').childElementCount === 0;
         $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || long));
         $('notice-restart').onclick = () => restartMachine(false);
