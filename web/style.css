@@ -502,7 +502,7 @@ footer button[data-keys="backspace"] { display: none; }
 .lk-board { position: relative; display: grid; gap: 0 clamp(56px, 10vw, 150px); padding: 0 14px 30px; height: clamp(320px, calc(100dvh - 250px), 900px); }
 .lk-board.two { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 .lk-board.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.lk-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 14px 0; margin-right: -12px; scrollbar-width: thin; position: relative; z-index: 2; }
+.lk-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; padding: 0 18px 14px 0; margin-right: -18px; scrollbar-width: thin; position: relative; z-index: 2; }
 .lk-col h3 { position: sticky; top: 0; z-index: 3; margin: 0; padding: 10px 0 6px; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); background: var(--bg); }
 .lk-gap { height: 12px; flex: none; }
 .lk-node { position: relative; flex: none; display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--line); border-radius: 10px; padding: 7px 10px; background: var(--panel); cursor: pointer; user-select: none; min-width: 0; }

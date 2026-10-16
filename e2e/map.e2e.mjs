@@ -21,6 +21,8 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await page.locator('#links-tabs [data-view=convs]').click();
     const node = (id) => page.locator(`#links-board .lk-node[data-id="${id}"]`);
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 6);
+    /* No column scrolls sideways: the dots to draw from stay inside their column. */
+    assert.deepEqual(await page.locator('#links-board .lk-col').evaluateAll((cols) => cols.filter((c) => c.scrollWidth > c.clientWidth).length), 0);
     /* At rest every link is drawn, a line for each right given; this device may hide them, a count staying on each box. */
     const kinds = () => page.locator('#links-svg path[data-kind]').evaluateAll((l) => l.filter((x) => getComputedStyle(x).display !== 'none').map((x) => x.dataset.kind).sort().join());
     await me.until('every link is drawn at rest', async () => (await kinds()) === 'read,use,write,write');
