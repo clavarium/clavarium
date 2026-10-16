@@ -370,10 +370,23 @@ mark.parley-found[data-now="true"] { outline: 2px solid var(--parley-ask); }
 .parley-zoom[data-zoomed="true"] .parley-zoom-stage { cursor: grab; }
 .parley-zoom-stage img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; user-select: none; -webkit-user-drag: none; }
 .parley-zoom-bar { display: flex; align-items: center; gap: .3em; padding: calc(.4em + env(safe-area-inset-top)) .6em .4em; flex-wrap: wrap; justify-content: center; background: rgba(0, 0, 0, .4); }
-.parley-zoom-name { flex: 1 1 100%; text-align: center; font-size: .85em; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.parley .parley-zoom-bar button { min-height: 2.6em; min-width: 2.6em; padding: 0; border-color: rgba(255, 255, 255, .25); background: transparent; color: #f2f3f5; display: inline-flex; align-items: center; justify-content: center; }
+/* Narrow: the name and Close on the first line, the tools centred on the second; wide: one line, Close last and apart. */
+.parley-zoom-name { flex: 1 1 0; min-width: 0; font-size: .85em; opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parley-zoom-tools { order: 2; flex: 1 1 100%; display: flex; flex-wrap: wrap; justify-content: center; gap: .3em; }
+.parley .parley-zoom-bar button { min-height: 2.6em; min-width: 2.6em; padding: 0 .55em; gap: .35em; border-color: rgba(255, 255, 255, .25); background: transparent; color: #f2f3f5; display: inline-flex; align-items: center; justify-content: center; font-size: .9em; }
+.parley .parley-zoom-bar .parley-zoom-minus, .parley .parley-zoom-bar .parley-zoom-plus, .parley .parley-zoom-bar .parley-zoom-left, .parley .parley-zoom-bar .parley-zoom-right { padding: 0; }
+.parley-zoom-word { display: none; }
+.parley-zoom-short { font-weight: 600; }
+.parley .parley-zoom-bar .parley-zoom-close { order: 1; padding: 0 .8em 0 .6em; border-color: transparent; background: rgba(255, 255, 255, .16); font-weight: 600; }
+.parley .parley-zoom-bar .parley-zoom-close:hover { background: rgba(255, 255, 255, .26); }
 .parley .parley-zoom-bar button[hidden] { display: none; }
-@container parley (min-width: 46rem) { .parley-zoom-name { flex: 0 1 auto; margin-right: auto; text-align: left; } }
+@container parley (min-width: 46rem) {
+  .parley-zoom-name { flex: 0 1 auto; margin-right: auto; text-align: left; }
+  .parley-zoom-tools { order: 0; flex: none; }
+  .parley .parley-zoom-bar .parley-zoom-minus, .parley .parley-zoom-bar .parley-zoom-plus, .parley .parley-zoom-bar .parley-zoom-left, .parley .parley-zoom-bar .parley-zoom-right { padding: 0 .65em 0 .45em; }
+  .parley-zoom-word { display: inline; }
+  .parley .parley-zoom-bar .parley-zoom-close { margin-left: .9em; }
+}
 /* ---- the composer, in the same column ---- */
 .parley-top, .parley-quick, .parley-attached, .parley-form, .parley-problem, .parley-replying { width: 100%; max-width: var(--parley-column); margin-inline: auto; box-sizing: border-box; }
 .parley-replying { width: auto; margin-inline: 0; }
@@ -424,6 +437,13 @@ mark.parley-found[data-now="true"] { outline: 2px solid var(--parley-ask); }
 .parley-reaction .parley-sign { width: 1.1em; height: 1.1em; }
 .parley-react { position: absolute; z-index: 6; width: max-content; max-width: min(26rem, calc(100% - 1rem)); padding: .5em; border: 1px solid var(--parley-line); border-radius: 14px; background: var(--parley-bg); box-shadow: 0 8px 28px rgba(0, 0, 0, .22); display: flex; flex-direction: column; gap: .4em; }
 .parley-react[hidden] { display: none; }
+/* On a narrow screen: a panel that rises from the bottom; the message it is about stays in sight above it, marked. */
+.parley-react[data-sheet="true"] { position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: auto; max-width: none; padding: .5em .75em calc(.75em + env(safe-area-inset-bottom)); border-width: 1px 0 0; border-radius: 16px 16px 0 0; box-shadow: 0 -10px 30px rgba(0, 0, 0, .25); animation: parley-sheet-up .2s cubic-bezier(.2, .8, .2, 1); }
+.parley-react[data-sheet="true"]::before { content: ""; align-self: center; width: 2.4em; height: 4px; margin-bottom: .2em; border-radius: 2px; background: var(--parley-line); }
+.parley-react[data-sheet="true"] .parley-react-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@keyframes parley-sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+@media (prefers-reduced-motion: reduce) { .parley-react[data-sheet="true"] { animation: none; } }
+.parley-said[data-reacting="true"] { outline: 2px solid var(--parley-action); outline-offset: 3px; }
 .parley-react:focus { outline: none; }
 .parley-react-grid { display: grid; grid-template-columns: repeat(4, minmax(4.6em, 1fr)); gap: .25em; }
 .parley .parley-react-choice { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .25em; min-height: 4em; padding: .4em .3em; border-color: transparent; border-radius: 10px; background: transparent; font-size: .82em; line-height: 1.15; text-align: center; }
@@ -493,3 +513,9 @@ mark.parley-found[data-now="true"] { outline: 2px solid var(--parley-ask); }
 /* Detailed, with its side: the box under the thread, not under the side. */
 @container parley (min-width: 46rem) { .parley[data-view="detailed"] .parley-composer { padding-right: calc(18rem + var(--parley-gap)); } }
 @container parley (min-width: 60rem) { .parley[data-view="detailed"] .parley-composer { padding-right: calc(20rem + var(--parley-gap)); } }
+/* A decision it waits for: Go ahead and Disagree under the message, in sight. */
+.parley-decide { display: flex; flex-wrap: wrap; gap: .5em; margin-top: .6em; }
+.parley .parley-decide-choice { display: inline-flex; align-items: center; gap: .45em; min-height: 2.5em; padding: 0 1em; border-radius: 999px; font-weight: 600; background: var(--parley-bg); }
+.parley .parley-decide-choice[data-reaction="go"] { border-color: var(--parley-react-go); }
+.parley-decide-choice .parley-sign { width: 1.15em; height: 1.15em; }
+.parley-decide-choice[data-reaction="go"] .parley-sign { color: var(--parley-react-go); }

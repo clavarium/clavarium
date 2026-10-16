@@ -63,13 +63,37 @@
        server/conversations.mjs): what it is, "Step 3 of 6" with the time so
        far, the step under way large with a wheel, those passed as one small
        line, those to come dimmed. The server gives each step a name; its
-       words are here. The same panel for the three, so a wait of minutes
-       reads as progress, whichever it is. */
+       words are here, three for each, so that a step never reads as done
+       before it is: passed, a short past participle after a check mark
+       ("Machine started"); under way, what is being done ("Starting the
+       machine"); to come, the same words, grey, after an empty circle. The
+       line of the list says what the panel says. `{tool}` is the tool's name. */
     const STEP_WORDS = {
-        stopping: 'The machine stops', setting: 'Its memory and disk are set', starting: 'The machine starts', waking: 'The machine wakes',
-        preparing: 'The machine is prepared', installing: 'The tool is installed', answering: 'The machine answers', folders: 'Its folders are ready',
-        tool: 'The tool starts', back: 'The tool is there, as it was',
-        resume: 'The tool resumes its last session', fresh: 'The tool starts a new session', first: 'No earlier session: a new one',
+        stopping: ['Machine stopped', 'Stopping the machine'],
+        setting: ['Memory and disk set', 'Setting its memory and disk'],
+        starting: ['Machine started', 'Starting the machine'],
+        waking: ['Machine awake', 'Waking the machine'],
+        preparing: ['Machine prepared', 'Preparing the machine'],
+        installing: ['{tool} installed', 'Installing {tool}'],
+        answering: ['Machine reached', 'Reaching the machine'],
+        folders: ['Folders ready', 'Preparing its folders', 'Folders'],
+        tool: ['{tool} started', 'Starting {tool}'],
+        back: ['{tool} back as it was', 'Finding {tool} as it was'],
+        resume: ['Last session resumed', 'Resuming its last session'],
+        fresh: ['New session started', 'Starting a new session'],
+        first: ['New session started', 'No earlier session: starting a new one', 'Starting a new session'],
+    };
+    const stepWords = (id, state, tool) => {
+        const w = STEP_WORDS[id];
+        const text = !w ? id : state === 'done' ? w[0] : state === 'later' ? (w[2] ?? w[1]) : w[1];
+        return text.replaceAll('{tool}', tool || 'the tool');
+    };
+    /* The step under way, in the same words as the panel: for the line of the list. */
+    const stepNow = (p, tool) => {
+        if (!p || !Array.isArray(p.steps) || !p.steps.length) return '';
+        const at = Math.min(Math.max(0, p.at ?? 0), p.steps.length - 1);
+        const part = p.steps[at] === 'installing' ? /^(\d+)\/(\d+)$/.exec(p.detail ?? '') : null;
+        return `${stepWords(p.steps[at], 'now', tool)}${part ? ` (${part[1]} of ${part[2]})` : ''}`;
     };
     const PROGRESS_TITLES = { build: 'Building its machine', restart: 'Restarting its machine', resize: 'Changing its machine', wake: 'Waking it up' };
     /* A build or a restart holds the page until its tool is there; a wake is the page's own opening. */
@@ -86,23 +110,30 @@
         const p = panel.source();
         if (!p || !Array.isArray(p.steps) || notice.hidden || notice.dataset.progress === undefined) return false;
         const at = Math.min(Math.max(0, p.at ?? 0), p.steps.length - 1);
-        const key = `${p.kind}|${p.steps.join(',')}|${at}|${p.detail ?? ''}`;
+        const tool = conversations.find((x) => x.name === panel.of.split('/')[0])?.toolLabel ?? '';
+        const key = `${p.kind}|${p.steps.join(',')}|${at}|${p.detail ?? ''}|${tool}`;
         if (key !== panel.key) {
             panel.key = key;
             const list = $('notice-steps'); list.replaceChildren(); list.hidden = false;
             p.steps.forEach((id, i) => {
                 const li = document.createElement('li');
-                li.dataset.state = i < at ? 'done' : i === at ? 'now' : 'later';
+                const state = i < at ? 'done' : i === at ? 'now' : 'later';
+                li.dataset.state = state;
                 li.dataset.step = id;
-                const words = STEP_WORDS[id] ?? id;
+                const words = stepWords(id, state, tool);
                 if (i === at) {
                     const spin = document.createElement('span'); spin.className = 'spin'; spin.setAttribute('aria-hidden', 'true');
                     const label = document.createElement('span'); label.textContent = words;
                     li.append(spin, label);
-                    /* Installing a tool: which part of it, or that it came with the machine. */
+                    /* Installing a tool: how far, as a small bar and "2 of 10", or that it came with the machine. */
                     if (id === 'installing' && p.detail) {
                         const part = /^(\d+)\/(\d+)$/.exec(p.detail);
-                        const small = document.createElement('small'); small.textContent = part ? `part ${part[1]} of ${part[2]}` : 'it came with the machine';
+                        const small = document.createElement('small');
+                        if (part) {
+                            const bar = document.createElement('progress'); bar.max = Number(part[2]); bar.value = Number(part[1]);
+                            bar.setAttribute('aria-label', `${words}: ${part[1]} of ${part[2]}`);
+                            small.append(bar, document.createTextNode(`${part[1]} of ${part[2]}`));
+                        } else small.textContent = 'It came with the machine';
                         li.append(small);
                     }
                 } else li.textContent = words;
@@ -693,7 +724,9 @@
             const dot = document.createElement('span'); dot.className = 'dot';
             title.append(dot, c.name);
             const sub = document.createElement('small');
-            sub.textContent = holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
+            /* Under way: the step the panel shows, in its words (the tool named once). */
+            const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
+            sub.textContent = under ? (c.toolLabel && under.includes(c.toolLabel) ? under : `${c.toolLabel} - ${under}`) : holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
             if (c.asleep) b.dataset.asleep = 'true';
             b.append(title, sub);
             /* Several models answer its simple questions; or they stopped, and it waits for its owner. */

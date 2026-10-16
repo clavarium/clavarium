@@ -39,7 +39,7 @@ test('folders that came loose while it slept are put back when it wakes; a machi
     await me.until('the wait is said, with its time so far', async () => /^Step 1 of \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
     assert.equal(await me.page.locator('#state').innerText(), 'Waking the machine...');
     assert.match(await me.page.locator('#notice-title').innerText(), /waking it up/i);
-    assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').innerText(), 'The machine wakes');
+    assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').innerText(), 'Waking the machine');
     assert.match(await me.page.locator('#notice-text').innerText(), /^A start usually takes a minute or two\. Its work, its files and its chat are kept\.$/);
     /* Its machine looked at meanwhile: what is known is said, never a restart for a start that is merely under way. */
     await new Promise((r) => setTimeout(r, 900));

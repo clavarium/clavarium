@@ -166,10 +166,10 @@ export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simp
     'copy', 'copied', 'see-details', 'see-more', 'see-less', 'note', 'tip', 'important', 'warning', 'caution', 'badge-ok', 'badge-todo', 'badge-blocked', 'badge-warn',
     'waits-you', 'waits-you-note', 'busy', 'state-sent', 'state-read', 'state-working', 'state-done', 'sent-at', 'read-at', 'done-at',
     'reply', 'replying', 'not-a-reply', 'in-reply', 'closed', 'you', 'agent', 'drop', 'picture', 'diagram', 'not-shown', 'grouped',
-    'zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit', 'close', 'previous', 'next', 'search', 'found', 'newest', 'dictation', 'auto-send-off',
+    'zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit', 'zoom-actual-short', 'zoom-fit-short', 'close', 'previous', 'next', 'search', 'found', 'newest', 'dictation', 'auto-send-off',
     'react', 'react-remove', 'react-agree', 'react-go', 'react-disagree', 'react-unclear', 'react-stop', 'react-redo', 'react-later', 'react-love',
     'react-agree-hint', 'react-go-hint', 'react-disagree-hint', 'react-unclear-hint', 'react-stop-hint', 'react-redo-hint', 'react-later-hint', 'react-love-hint',
-    'media', 'media-pictures', 'media-files', 'media-none', 'see-in-thread', 'done-end', 'done-end-note', 'dictated', 'side-now', 'side-machine', 'side-nothing']);
+    'decide', 'media', 'media-pictures', 'media-files', 'media-none', 'see-in-thread', 'done-end', 'done-end-note', 'dictated', 'side-now', 'side-machine', 'side-nothing']);
 /* THE REACTIONS offered by default, each with its Lucide icon; their words
    are "react-<id>" (shown under the icon) and "react-<id>-hint" (on hover).
    The same ids as REACTIONS of parley-host.mjs, which says which wake. */
@@ -177,6 +177,10 @@ export const REACTIONS = Object.freeze([
     { id: 'agree', icon: 'thumbs-up' }, { id: 'go', icon: 'circle-check' }, { id: 'disagree', icon: 'thumbs-down' }, { id: 'unclear', icon: 'circle-question-mark' },
     { id: 'stop', icon: 'octagon-x' }, { id: 'redo', icon: 'refresh-ccw' }, { id: 'later', icon: 'hourglass' }, { id: 'love', icon: 'heart' },
 ].map(Object.freeze));
+/* The order of the reactions in their choice: "Go ahead" first, "Stop" always last, far from it. */
+const PICKER_ORDER = Object.freeze(['go', 'agree', 'unclear', 'love', 'later', 'redo', 'disagree']);
+/* Narrower than this, the choice of reactions is a panel that rises from the bottom. */
+export const SHEET_PX = 600;
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
 /* Between two messages further apart than this, the time is said. */
@@ -484,6 +488,7 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
             gallery: show && Array.isArray(m.files) ? m.files.slice(0, 12).filter((f) => f && typeof f.path === 'string' && (detailed || typeof f.open === 'string')).map((f) => ({ path: f.path, open: typeof f.open === 'string' ? f.open : null, name: nameOf(f.path), title: String(f.title || '') || titleOf(f.path), picture: PICTURE.test(f.path), shown: detailed ? f.path : '' })) : [],
             reaction: !person && m.reaction && typeof m.reaction.id === 'string' ? m.reaction.id : '',
             last: !person && m.id === newestAgent,
+            decide: false,
             dictated: person && m.via === 'voice',
             tool: detailed && !person && agentTool ? String(agentTool) : '',
             /* What the person attached: by name, opened the application's way; its whole path in the detailed view. */
@@ -516,6 +521,13 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
         item.name = who && who !== side ? (who === 'person' ? said(words, 'you') : agentName2) : '';
         side = who;
     }
+    /* It waits, its last word a message that is not a question with choices: a
+       decision on that message, offered under it (Go ahead / Disagree) until
+       the person reacts or writes. */
+    const waitsSince = status?.state === 'waiting' ? stamp(status.at) : null;
+    const lastTalk = items.filter((x) => x.from !== 'system').at(-1);
+    if (waitsSince !== null && lastTalk?.from === 'agent' && (lastTalk.kind === 'say' || lastTalk.kind === 'show') && !lastTalk.reaction
+        && !all.some((m) => m.from === 'person' && (stamp(m.at) ?? 0) >= waitsSince)) lastTalk.decide = true;
     /* A step, as shown: a state is said with its word, what it does with its own words. */
     const step = (s) => {
         const t = stamp(s.at);
@@ -900,7 +912,18 @@ function zoomer(root, words) {
     const box = el('div', 'parley-zoom'); box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.tabIndex = -1;
     const bar = el('div', 'parley-zoom-bar');
     const title = el('span', 'parley-zoom-name');
-    const tool = (kind, key, act) => { const b = el('button', `parley-zoom-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title); b.append(kind === 'left' ? icon('chevron-left', 'parley-sign') : kind === 'right' ? icon('chevron-right', 'parley-sign') : kind === 'close' ? icon('x', 'parley-sign') : sign(kind === 'actual' ? 'stop' : kind === 'fit' ? 'up' : kind)); b.addEventListener('click', act); return b; };
+    /* Each button says what it does: an icon only where it is plain (- + < >), and
+       its word next to it where there is room; "1:1" and "Fit" in words; Close
+       apart, at the end, with its word always. */
+    const tool = (kind, key, act, short) => {
+        const b = el('button', `parley-zoom-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title);
+        if (kind === 'left') b.append(icon('chevron-left', 'parley-sign'));
+        else if (kind === 'right') b.append(icon('chevron-right', 'parley-sign'));
+        else if (kind === 'close') b.append(icon('x', 'parley-sign'));
+        else if (kind === 'minus' || kind === 'plus') b.append(sign(kind));
+        b.append(el('span', short ? 'parley-zoom-short' : 'parley-zoom-word', short ? said(words, short) : said(words, key)));
+        b.addEventListener('click', act); return b;
+    };
     const stage = el('div', 'parley-zoom-stage');
     const img = el('img'); img.alt = ''; img.draggable = false;
     stage.append(img);
@@ -948,7 +971,10 @@ function zoomer(root, words) {
     const go = (step) => { if (list.length < 2) return; at = (at + step + list.length) % list.length; load(); };
     const prev = tool('left', 'previous', () => go(-1));
     const next = tool('right', 'next', () => go(1));
-    bar.append(title, tool('minus', 'zoom-out', () => zoomTo(s / 1.5)), tool('plus', 'zoom-in', () => zoomTo(s * 1.5)), tool('actual', 'zoom-actual', () => zoomTo(1)), tool('fit', 'zoom-fit', fitIn), prev, next, tool('close', 'close', () => close()));
+    const tools = el('div', 'parley-zoom-tools'); tools.setAttribute('role', 'group');
+    tools.append(tool('minus', 'zoom-out', () => zoomTo(s / 1.5)), tool('plus', 'zoom-in', () => zoomTo(s * 1.5)), tool('actual', 'zoom-actual', () => zoomTo(1), 'zoom-actual-short'), tool('fit', 'zoom-fit', fitIn, 'zoom-fit-short'), prev, next);
+    const shut = tool('close', 'close', () => close(), 'close');
+    bar.append(title, tools, shut);
     box.append(bar, stage, strip);
     function paintStrip() {
         strip.hidden = list.length < 2;
@@ -1180,9 +1206,12 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const fileButton = (file) => (file.open === null || !open ? null : button(said(words, 'open'), 'parley-open', () => open(file)));
     const time = (text, when) => { const t = el('time', 'parley-time', text); if (when) t.title = when; return t; };
     const pictureUrl = (file) => { try { const u = picture?.(file); return typeof u === 'string' && u ? u : null; } catch { return null; } };
+    /* The pictures of the thread, each once: one shown in a gallery and cited in a text is one picture, as in the media. */
     const zoomFrom = (img) => {
-        const all = [...thread.querySelectorAll('img[data-zoom]')];
-        zoom.show(all.map((i) => ({ url: i.dataset.zoom, name: i.dataset.name || i.alt || '', title: i.dataset.title || '' })), Math.max(0, all.indexOf(img)), img);
+        const seen = new Map();
+        for (const i of thread.querySelectorAll('img[data-zoom]')) if (!seen.has(i.dataset.zoom)) seen.set(i.dataset.zoom, { url: i.dataset.zoom, name: i.dataset.name || i.alt || '', title: i.dataset.title || '' });
+        const all = [...seen.values()];
+        zoom.show(all, Math.max(0, all.findIndex((x) => x.url === img.dataset.zoom)), img);
     };
     /* A list of steps, each with its time. */
     function trail(list) {
@@ -1378,6 +1407,25 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             if (react) chip.addEventListener('click', (event) => { event.stopPropagation(); reacting.open(item, bubble); }); else chip.disabled = true;
             bubble.append(chip);
         }
+        /* A decision it waits for on this message: the two answers in sight, under it. */
+        if (item.decide && react) {
+            const two = ['go', 'disagree'].map((id) => reactions.find((r) => r.id === id)).filter(Boolean);
+            if (two.length === 2) {
+                const row2 = el('div', 'parley-decide'); row2.setAttribute('role', 'group'); row2.setAttribute('aria-label', said(words, 'decide'));
+                for (const r of two) {
+                    const b = el('button', 'parley-decide-choice'); b.type = 'button'; b.dataset.reaction = r.id; b.title = said(words, `react-${r.id}-hint`);
+                    b.append(icon(r.icon, 'parley-sign'), el('span', '', said(words, `react-${r.id}`)));
+                    b.addEventListener('click', async (event) => {
+                        event.stopPropagation();
+                        for (const x of row2.querySelectorAll('button')) x.disabled = true;
+                        problem.hidden = true;
+                        try { await react(item.id, r.id); await refresh(); } catch (error) { for (const x of row2.querySelectorAll('button')) x.disabled = false; problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; }
+                    });
+                    row2.append(b);
+                }
+                bubble.append(row2);
+            }
+        }
         /* Dictated: a small microphone, said in words to whoever does not see it. */
         if (item.dictated) { const d = el('span', 'parley-dictated'); d.title = said(words, 'dictated'); d.setAttribute('role', 'img'); d.setAttribute('aria-label', d.title); d.append(icon('mic', 'parley-sign')); bubble.append(d); }
         if (item.from === 'person' && item.time) bubble.append(time(item.time, item.when));
@@ -1400,7 +1448,12 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         const replyB = el('button', 'parley-react-reply'); replyB.type = 'button'; replyB.append(icon('reply', 'parley-sign'), el('span', '', said(words, 'reply')));
         box.append(grid, replyB);
         let target = null;
-        const close = () => { box.hidden = true; target = null; };
+        let marked = null;
+        const close = () => {
+            box.hidden = true; target = null;
+            if (marked) { delete marked.dataset.reacting; marked = null; }
+            if (box.dataset.sheet === 'true') { thread.style.paddingBottom = ''; delete box.dataset.sheet; }
+        };
         const choose2 = async (id) => {
             const t = target; close();
             if (!t || !react) return;
@@ -1414,8 +1467,12 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             box,
             open(item, bubble) {
                 if (!react || !reactions.length) return;
-                target = item;
-                grid.replaceChildren(...reactions.map((r) => {
+                if (marked) delete marked.dataset.reacting;
+                target = item; marked = bubble; bubble.dataset.reacting = 'true';
+                /* "Go ahead" first, "Stop" last: the two never side by side. */
+                const rank = (r, i) => { const k = PICKER_ORDER.indexOf(r.id); return r.id === 'stop' ? 1e6 : k < 0 ? 100 + i : k; };
+                const ordered = reactions.map((r, i) => ({ r, k: rank(r, i) })).sort((x, y) => x.k - y.k).map((x) => x.r);
+                grid.replaceChildren(...ordered.map((r) => {
                     const b = el('button', 'parley-react-choice'); b.type = 'button'; b.dataset.reaction = r.id;
                     b.title = said(words, `react-${r.id}-hint`);
                     b.setAttribute('aria-pressed', String(item.reaction === r.id));
@@ -1425,7 +1482,21 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
                     return b;
                 }));
                 replyB.hidden = !send;
+                box.style.left = ''; box.style.top = '';
+                /* On a narrow screen: a panel that rises from the bottom, the message kept in sight above it. */
+                const sheet = root.getBoundingClientRect().width < SHEET_PX;
+                if (sheet) box.dataset.sheet = 'true'; else delete box.dataset.sheet;
                 box.hidden = false;
+                if (sheet) {
+                    /* Where it ends up, not where its rising starts. */
+                    const top2 = root.getBoundingClientRect().bottom - box.offsetHeight; const area2 = thread.getBoundingClientRect();
+                    thread.style.paddingBottom = `${Math.max(0, area2.bottom - top2) + 32}px`;
+                    const at2 = bubble.getBoundingClientRect(); const room = top2 - 12 - area2.top;
+                    const by = at2.height > room ? at2.top - area2.top - 8 : at2.bottom - (top2 - 12);
+                    if (by > 0 || at2.height > room) thread.scrollTop += by;
+                    box.focus?.({ preventScroll: true });
+                    return;
+                }
                 /* Near the message, inside the chat. */
                 const area = root.getBoundingClientRect(); const at = bubble.getBoundingClientRect(); const me = box.getBoundingClientRect();
                 const left = Math.max(8, Math.min(area.width - me.width - 8, at.right - area.left - me.width));

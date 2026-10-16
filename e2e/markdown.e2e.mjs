@@ -194,7 +194,12 @@ test('pictures shown together are one gallery with their titles, large one after
     writeFileSync(join(work, 'home-before.png'), png(320, 200, [200, 80, 60]));
     writeFileSync(join(work, 'home-after.png'), png(320, 200, [60, 160, 90]));
     /* The tool shows both at once, each with its title (as "parley show a.png=title b.png=title" posts it; its paths as the machine sees them). */
-    writeFileSync(join(work, '.parley', 'from-agent.jsonl'), line('g1', 0, { kind: 'show', path: '/work/home-before.png', text: 'The new header', files: [{ path: '/work/home-before.png', title: 'Home, before' }, { path: '/work/home-after.png', title: 'Home, after' }] }));
+    writeFileSync(join(work, '.parley', 'from-agent.jsonl'), line('g1', 0, { kind: 'show', path: '/work/home-before.png', text: 'The new header', files: [{ path: '/work/home-before.png', title: 'Home, before' }, { path: '/work/home-after.png', title: 'Home, after' }] })
+        /* The same picture cited in a message after it: one picture still, in the viewer as in the media. */
+        + line('g2', 1, { kind: 'say', text: 'The header, as it is now:\n\n![Home, after](/work/home-after.png)' })
+        /* A message it waits on for a decision: Go ahead and Disagree under it, in sight. */
+        + line('g3', 2, { kind: 'say', text: 'I propose to keep the new header. Shall I?' })
+        + line('g4', 3, { kind: 'status', state: 'waiting', text: 'your decision on the header' }));
     await me.page.goto(`${b.origin}/?c=pages`);
     const thread = me.page.locator('#simple-thread');
     await me.until('one gallery, titled', async () => (await thread.locator('.parley-gallery .parley-caption').allInnerTexts()).join('|') === 'Home, before|Home, after');
@@ -203,7 +208,10 @@ test('pictures shown together are one gallery with their titles, large one after
     const zoom = thread.locator('.parley-zoom');
     await me.until('large', async () => zoom.isVisible());
     assert.match(await zoom.locator('.parley-zoom-name').innerText(), /^Home, before \(1\/2\)$/);
-    assert.equal(await zoom.locator('.parley-zoom-thumb').count(), 2);
+    assert.equal(await zoom.locator('.parley-zoom-thumb').count(), 2, 'a picture shown and cited is one picture');
+    /* Each button says what it does; Close apart, with its word. */
+    assert.deepEqual(await zoom.locator('.parley-zoom-tools button:visible').evaluateAll((all) => all.map((x) => x.getAttribute('aria-label'))), ['Zoom out', 'Zoom in', 'Actual size', 'Fit to the screen', 'Previous', 'Next']);
+    assert.equal((await zoom.locator('.parley-zoom-close').innerText()).trim(), 'Close');
     await zoom.locator('.parley-zoom-thumb').nth(1).click();
     await me.until('the other one', async () => /^Home, after/.test(await zoom.locator('.parley-zoom-name').innerText()));
     await me.page.mouse.click(5, 450);
@@ -211,14 +219,14 @@ test('pictures shown together are one gallery with their titles, large one after
     /* The media of the thread, from the menu: both, and back to where they were shown. */
     await thread.locator('.parley-prefs-open').click();
     await thread.locator('.parley-media-open').click();
-    assert.deepEqual(await thread.locator('.parley-media-item figcaption').allInnerTexts(), ['Home, before', 'Home, after']);
+    assert.deepEqual(await thread.locator('.parley-media-item figcaption').allInnerTexts(), ['Home, after', 'Home, before']);
     await thread.locator('.parley-media-where').first().click();
     assert.equal(await thread.locator('.parley-media').isVisible(), false);
     /* A reaction: on hover, the choice with its words; "Stop" types the line in its terminal at once. */
     const shown = thread.locator('.parley-said[data-kind=show]');
     await shown.hover();
     await shown.locator('.parley-react-open').click();
-    assert.deepEqual(await thread.locator('.parley-react-choice').allInnerTexts(), ['Agree', 'Go ahead', 'Disagree', 'Not clear', 'Stop', 'Another way', 'Later', 'Love it']);
+    assert.deepEqual(await thread.locator('.parley-react-choice').allInnerTexts(), ['Go ahead', 'Agree', 'Not clear', 'Love it', 'Later', 'Another way', 'Disagree', 'Stop']);
     await thread.locator('.parley-react-choice[data-reaction=agree]').click();
     await me.until('noted on the message', async () => (await shown.locator('.parley-reaction').getAttribute('data-reaction').catch(() => '')) === 'agree');
     await new Promise((r) => setTimeout(r, 800));
@@ -229,5 +237,12 @@ test('pictures shown together are one gallery with their titles, large one after
     /* What the tool will read: the reaction, with the words and the time of the message it is about. */
     const last = readFileSync(join(work, '.parley', 'to-agent.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.deepEqual([last.reaction, last.to, last.quote, typeof last.toAt], ['stop', 'g1-0000-4000-8000-000000000000'.slice(0, 36), 'The new header', 'string']);
+    /* The decision it waits for, answered from under the message. */
+    const asked = thread.locator('.parley-said[data-id^="g3"]');
+    assert.deepEqual(await asked.locator('.parley-decide-choice').allInnerTexts(), ['Go ahead', 'Disagree']);
+    await asked.locator('.parley-decide-choice[data-reaction=go]').click();
+    await me.until('its reaction in place of the two', async () => (await asked.locator('.parley-reaction').getAttribute('data-reaction').catch(() => '')) === 'go' && (await asked.locator('.parley-decide').count()) === 0);
+    const went = readFileSync(join(work, '.parley', 'to-agent.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.deepEqual([went.reaction, went.to], ['go', 'g3-0000-4000-8000-000000000000'.slice(0, 36)]);
     assert.deepEqual(me.errors, []);
 });
