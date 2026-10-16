@@ -81,6 +81,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#health-restart').click();
     await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
     await me.until('the page says it restarts', async () => /restarting/.test(await me.state()));
+    /* While it restarts, the page says the step, the time so far and what is usual. */
+    await me.until('a clock while it restarts', async () => /\d+:\d\d so far\. A restart usually takes one to two minutes/.test(await me.page.locator('#notice-text').innerText().catch(() => '')));
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     assert.equal(existsSync(join(vmHome(b, 'silent'), 'killed')), true, 'stopped by force');
     const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'silent');

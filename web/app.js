@@ -59,6 +59,8 @@
     /* WHILE A MACHINE IS BUILT: a wheel that turns, and the three steps with the
        one in progress marked, so a wait of several minutes reads as progress. */
     const BUILD_STEPS = ['Starting the machine', 'Preparing the machine', 'Installing the tool'];
+    /* A restart: when the page first saw it (when the server did not say), and the clock that tells it. */
+    const restartSeen = new Map(); let restartTicking = 0;
     const building = (step) => {
         $('notice-spin').hidden = false;
         const at = step?.startsWith('Installing') ? 2 : BUILD_STEPS.indexOf(step);
@@ -554,7 +556,23 @@
             building(c.step);
             return;
         }
-        if (c && c.phase === 'restarting') { disconnect(); say('restarting', 'connecting'); show(`${c.step ?? 'Restarting its machine'}... The tool starts again by itself.`); $('notice-spin').hidden = false; return; }
+        if (c && c.phase === 'restarting') {
+            disconnect(); say('restarting', 'connecting');
+            /* The step the server is at, the time it has taken so far (said again each second), and what is usual. */
+            const since = Date.parse(c.restartingSince ?? '') || restartSeen.get(c.name) || Date.now();
+            restartSeen.set(c.name, since);
+            const tell = () => {
+                const s = Math.max(0, Math.floor((Date.now() - since) / 1000));
+                const clock = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+                const now = conversations.find((x) => x.name === c.name);
+                const usual = s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.';
+                $('notice-text').textContent = `${now?.step ?? c.step ?? 'Restarting its machine'}... ${clock} so far. ${usual} The tool starts again by itself; its files and its chat are kept.`;
+            };
+            show(''); tell(); $('notice-spin').hidden = false;
+            clearInterval(restartTicking);
+            restartTicking = setInterval(() => { const now = conversations.find((x) => x.name === c.name); if (current !== c.name || now?.phase !== 'restarting' || notice.hidden) { clearInterval(restartTicking); return; } tell(); }, 1000);
+            return;
+        }
         if (c && c.phase === 'moving') { disconnect(); say('moving', 'connecting'); show(`Moving its work: ${c.step ?? 'working'}... The tool is stopped meanwhile and starts again by itself.`); $('notice-spin').hidden = false; return; }
         if (c && c.phase === 'failed') { disconnect(); say('failed', 'ended'); show(c.error ?? 'This conversation could not be built.', DEVICE ? undefined : 'Build it again', () => void rebuild()); return; }
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */

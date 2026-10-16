@@ -82,7 +82,7 @@ export class Conversations {
                it is said, with where to look, rather than guessed at. */
             if (c.phase === 'moving') store.patch(c.name, { phase: 'ready', step: undefined, moved: 'The server restarted while the work folder was being moved. The files are safe, in the machine: look at /work, /work.before-move and /work.moving.' });
             if (c.phase === 'building') store.patch(c.name, { phase: 'failed', error: 'The server restarted while this conversation was being built. Build it again, or archive it.' });
-            if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
+            if (c.phase === 'restarting') store.patch(c.name, { phase: 'ready', step: undefined, restartingSince: undefined, restarted: 'The server restarted while this machine was being restarted: look at its state, and restart it again if needed.' });
         }
     }
 
@@ -351,7 +351,7 @@ export class Conversations {
             if (await this.#vms.state(name) === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
-        this.#store.patch(name, { phase: 'restarting', step: 'Stopping the machine', restarted: undefined });
+        this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: 'Stopping the machine', restarted: undefined });
         this.restarted = this.#cycle(name, c, async () => undefined, true)
             .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.'));
         return this.#store.get(name);
@@ -382,7 +382,7 @@ export class Conversations {
             if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
-        this.#store.patch(name, { phase: 'restarting', step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
+        this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
         const set = async () => {
             if (memory !== c.memoryMb) {
                 this.#store.patch(name, { step: `Setting its memory to ${memory} MB` });
@@ -473,7 +473,7 @@ export class Conversations {
     async #settle(name, said, chat) {
         if (!this.#store.get(name)) return;
         const running = (await this.#vms.state(name).catch(() => undefined)) === 'Running';
-        this.#store.patch(name, { phase: 'ready', step: undefined, asleep: false, restarted: said });
+        this.#store.patch(name, { phase: 'ready', step: undefined, restartingSince: undefined, asleep: false, restarted: said });
         /* The tool is started again in its terminal, as after any start. */
         if (running) this.ready(name);
         try { this.renewed(name, chat ?? said, running); } catch { /* told, nothing more */ }
