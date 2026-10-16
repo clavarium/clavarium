@@ -39,6 +39,7 @@ import { Wakeups, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
 import { Talk } from './talk.mjs';
 import { Toolbox } from './toolbox.mjs';
+import { Guide, commonText } from './guide.mjs';
 import { SignInMailboxes } from './signin.mjs';
 import { Mailboxes, recentMessages } from './mailbox.mjs';
 import { Grants } from './grants.mjs';
@@ -97,7 +98,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair } = {}) {
     const sendFile = async (response, file) => {
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(await readFile(ROOT + file[0]));
     };
@@ -130,7 +131,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -172,7 +173,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        `gitSsh`: a stand-in for the ssh program, for tests. */
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
     /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
-    const toolbox = new Toolbox({ host: asHost, vms, mntDir });
+    /* With /tools/CLAVARIUM.md in it: where a tool is, the same for all (guide.mjs). */
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: (find) => commonText({ parley: find('parley')?.path }) });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
        in the background: see shelf.mjs. Tidied up at start, without making
@@ -218,6 +220,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        has just started, or when what is attached to it has changed. The
        network rules, cheap, are still refreshed every time, alongside. */
     const delivered = new Map();
+    /* Where its tool is, said to it in a few lines (guide.mjs): written into
+       its machine at a start and when a setting changes. `talk` and
+       `wakeups` are made below; only asked once the server runs. */
+    const guide = new Guide({ store: new Store(`${dataDir}/guide.json`), vms, conversations: all, resources: folders, secrets, toolbox, tools,
+        chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line) });
     all.prepare = async (name, woke) => {
         const wanted = secrets.signature(name);
         const rules = network.apply();
@@ -226,6 +233,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             await secrets.deliver(name);
             delivered.set(name, wanted);
         }
+        /* Before the tool starts: it reads its instruction file then. */
+        await guide.prepared(name, woke);
         await rules;
     };
     all.through = [RUNNER];
@@ -288,8 +297,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     void all.reconcileAll?.().catch(() => {});
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
-    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair: (name) => repairTerminal(name) });
+    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair: (name) => repairTerminal(name) });
     server.on('close', () => { stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

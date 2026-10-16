@@ -43,6 +43,7 @@ export const NPM_WRITABLE = [
 
 const isArgv = (x) => Array.isArray(x) && x.length > 0 && x.every((a) => typeof a === 'string' && a !== '');
 const ID = /^[a-z][a-z0-9-]{0,30}$/;
+const INSTRUCTIONS = /^(?!.*(?:^|\/)\.\.?(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+){0,7}$/;
 
 export function readTools(text) {
     const raw = JSON.parse(text);
@@ -80,9 +81,13 @@ export function readTools(text) {
            ("claude --continue"); used instead of `command` once it has run on
            its disk, unless the owner chose to start it fresh. */
         if (t.resume !== undefined && (!isArgv(t.resume) || t.resume.includes(';'))) throw new Error(`${t.id}: resume must be an argument vector`);
+        /* Optional: the tool's own instruction file, in the home of the
+           machine's user (".claude/CLAUDE.md"): a marked block in it points
+           the tool to its guide (see guide.mjs). A plain relative path. */
+        if (t.instructions !== undefined && !INSTRUCTIONS.test(t.instructions)) throw new Error(`${t.id}: instructions is a relative path in the home, without ".."`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
-        return Object.freeze({ id: t.id, label: t.label, command: Object.freeze([...t.command]), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
+        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), command: Object.freeze([...t.command]), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

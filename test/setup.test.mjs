@@ -83,6 +83,8 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     await a.ok('/api/conversations/writer/wakeups', { perHour: 5 });
     await a.ok('/api/conversations/writer/answerer', { on: false, objectives: 'Finish the book.', charter: 'Never delete a chapter.', limit: 3 });
     await a.ok('/api/shortcuts', { label: 'Go on', text: 'Go on, please.', enter: true });
+    /* The owner's own lines in its guide (guide.mjs): exported with the setup. */
+    await a.ok('/api/conversations/writer/guide', { lines: 'Answer me in French.\n\nRun npm test before each commit.' });
     await a.pair([{ asset: 'conversation:writer', rights: 'rw' }, { asset: 'folder:photos', rights: 'r' }], "Dad's tablet");
     const first = await exported(a);
     /* Nothing that is data or a secret, no time. */
@@ -93,6 +95,8 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.deepEqual(doc.links.find((l) => l.to === 'git:site').autoSend, { branches: ['test', 'try/*'], quietSeconds: 30, perHour: 4, create: false, checks: true });
     assert.equal(doc.links.find((l) => l.from === "device:Dad's tablet" && l.to === 'conversation:writer').gives, 'chat');
     assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:helper').resume, doc.nodes.find((n) => n.id === 'conversation:writer').resume], [false, undefined], 'its tool starts fresh: said; the default is not');
+    assert.deepEqual(doc.nodes.find((n) => n.id === 'conversation:writer').guide, ['Answer me in French.', 'Run npm test before each commit.']);
+    assert.equal(doc.nodes.find((n) => n.id === 'conversation:helper').guide, undefined, 'no lines: nothing said');
     assert.equal(await exported(a), first, 'the same file twice: nothing in it moves');
 
     const b = await home(t);
@@ -101,10 +105,12 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.deepEqual(plan.missing, { secrets: ['MODEL_KEY'], connect: ['home-mail'], pair: ["Dad's tablet"] });
     /* The texts a tool will be typed, shown whole, HTML and all, as text. */
     assert.ok(plan.items.find((i) => i.id === 'conversation:writer').texts.some((x) => x.text === 'New photos <b>arrived</b>.'));
+    assert.ok(plan.items.find((i) => i.id === 'conversation:writer').texts.some((x) => /read by its tool/.test(x.label) && x.text === 'Answer me in French.\nRun npm test before each commit.'));
     assert.ok(plan.links.find((l) => l.to === 'git:site').confirm);
     const job = await imported(b, first, { confirm: { 'conversation:writer|git:site': true } });
     assert.equal(job.failed, 0, JSON.stringify(job.steps.filter((s) => s.state === 'failed')));
     assert.ok(job.steps.some((s) => /its new address: \/c\/wake\//.test(s.why ?? '')), 'a call from outside gets a new address, said once');
+    assert.deepEqual((await b.ok('/api/conversations/writer/guide')).lines, ['Answer me in French.', 'Run npm test before each commit.']);
     assert.equal(await exported(b), first);
     /* What was missing, added since: done by itself. */
     await b.ok('/api/secrets', { name: 'MODEL_KEY', value: 'mine' });

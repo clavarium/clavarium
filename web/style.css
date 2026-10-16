@@ -906,3 +906,13 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 #viewer[data-editing="true"] #preview-download { background: var(--button, #222c38); color: var(--ink); border: 1px solid var(--line); }
 /* Read-only said plainly, where the buttons would be. */
 #files-readonly { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bar); color: var(--ink); font-size: .8125rem; }
+/* What its tool is told about where it is: one quiet line, the text behind "see". */
+#guide-box { margin: 8px 0 4px; }
+.guide-line { margin: 0; color: var(--ink2); font-size: .8125rem; }
+button.inline { background: none; border: 0; padding: 4px 2px; min-height: 0; color: var(--ink); font: inherit; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+button.inline:hover { color: var(--brass); }
+#guide-shown { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+#guide-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: .75rem/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; max-height: 22rem; overflow: auto; }
+#guide-shown label { font-size: .75rem; color: var(--ink2); }
+#guide-lines { width: 100%; min-height: 4.5rem; resize: vertical; font: inherit; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+#guide-said:empty { display: none; }

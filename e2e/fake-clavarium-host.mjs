@@ -258,6 +258,8 @@ if (area === 'vm') {
             const target = inVm(vm, rest.at(-1));
             if (rest.includes('-d')) { mkdirSync(target, { recursive: true }); process.exit(0); }
             mkdirSync(dirname(target), { recursive: true });
+            /* As install does: a file put in place, whatever mode the one before had (a guide is 0444). */
+            rmSync(target, { force: true });
             /* The runner names /run/secrets: here that is a directory of this VM. */
             writeFileSync(target, stdin().toString('utf8').replaceAll('/run/secrets', inVm(vm, '/run/secrets')));
             chmodSync(target, Number.parseInt(rest[rest.indexOf('-m') + 1], 8));

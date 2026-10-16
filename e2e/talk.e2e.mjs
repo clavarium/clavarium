@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { bench, SKIP, wait } from './bench.mjs';
 
 /* The tool here is a plain shell: what an agent would run, the test types. */
@@ -15,9 +17,24 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     assert.equal(await me.page.locator('#talk-invite').isVisible(), false);
     await me.page.locator('#talk-on button[data-on=true]').click();
     await me.until('it says what the tool will be asked', async () => /install parley from \/tools and to write to you in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
+    /* What its tool is told about where it is (guide.mjs): the exact text behind "see", made from these
+       settings; the owner's lines, as text; in its machine, and pointed to from its own instruction file. */
+    await me.page.locator('#guide-see').click();
+    await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. If parley is not installed yet: npm install -g /m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
+    await me.page.fill('#guide-lines', 'Answer in <b>French</b>.');
+    await me.page.locator('#guide-save').click();
+    await me.until('the line is in what it is told, as text', async () => (await me.page.locator('#guide-text').innerText()).includes('- Answer in \u2039b\u203aFrench\u2039/b\u203a.'));
+    const vm = join(process.env.FAKE_VM_DIR, 'vms', 'clv-helper', 'root');
+    await me.until('its machine has it', async () => existsSync(join(vm, 'etc/clavarium/conversation.md')) && readFileSync(join(vm, 'etc/clavarium/conversation.md'), 'utf8').includes('- Answer in'));
+    assert.match(readFileSync(join(vm, '.tool/RULES.md'), 'utf8'), /^<!-- clavarium -->\nRead \/tools\/CLAVARIUM\.md and \/etc\/clavarium\/conversation\.md first/m);
+    assert.match(readFileSync(join(vm, 'tools/CLAVARIUM.md'), 'utf8'), /^# Where you are \(Clavarium\)$/m);
+    /* Told again only on a click: one line typed in its terminal. */
+    await me.page.locator('#guide-tell').click();
+    await me.until('it says what was typed', async () => /Typed in its terminal/.test(await me.page.locator('#guide-said').innerText()));
     /* Asked: one line typed in its terminal. A shell takes it for a command, and runs nothing of it. */
     await me.page.locator('#talk-invite').click();
     await me.page.locator('#panel-close').click();
+    await me.sees('/etc/clavarium/conversation.md again: your setup changed.');
     await me.sees('Write to them in French.');
     const invited = (await me.screen()).replace(/\n/g, '');
     assert.match(invited, /run "npm install -g \/tools\/clavarium-parley-\d+\.\d+\.\d+\.tgz"/);

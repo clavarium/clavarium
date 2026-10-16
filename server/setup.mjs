@@ -43,6 +43,7 @@ import { Refusal } from './conversations.mjs';
 import { isConversationName } from './names.mjs';
 import { isSecretName } from './secrets.mjs';
 import { cleanMessage, cron } from './wakeups.mjs';
+import { readLines, plain } from './guide.mjs';
 
 export const FORMAT = 2;
 export const FILE_MAX = 512 * 1024;
@@ -218,6 +219,7 @@ function checkNode(n, tools) {
         if (n.memoryMb !== undefined && (!Number.isInteger(n.memoryMb) || n.memoryMb < tool.memoryMb || n.memoryMb > 16384)) return bad(`Its memory must be between ${tool.memoryMb} and 16384 MB.`);
         if (n.diskGb !== undefined && (!Number.isInteger(n.diskGb) || n.diskGb < 1 || n.diskGb > 256)) return bad('Its disk must be between 1 and 256 GB.');
         if (n.resume !== undefined && typeof n.resume !== 'boolean') return bad('When its tool starts is "resume": true or false.');
+        if (n.guide !== undefined) { try { readLines(n.guide); } catch (error) { return bad(`What its tool is told, its owner's lines: ${error.message}`); } }
         return { ok: true };
     }
     if (n.kind === 'git') {
@@ -240,6 +242,7 @@ function textsOf(n) {
     if (typeof n.does === 'string') out.push({ label: 'What it does, in the file', text: n.does.slice(0, TEXT_MAX) });
     if (typeof n.wakeInWords === 'string') out.push({ label: 'When it wakes, in the file (not set: set it yourself)', text: n.wakeInWords.slice(0, TEXT_MAX) });
     for (const w of Array.isArray(n.wakeups?.items) ? n.wakeups.items : []) out.push({ label: `Wake-up (${wakeWords(w)}): typed to its tool exactly so`, text: cleanMessage(w?.message) });
+    if (n.kind === 'conversation' && n.guide !== undefined) out.push({ label: 'Your lines in its guide: read by its tool', text: (Array.isArray(n.guide) ? n.guide : [n.guide]).map((l) => plain(l, Infinity)).filter(Boolean).join('\n').slice(0, TEXT_MAX) });
     if (n.answerer && typeof n.answerer === 'object') {
         out.push({ label: 'Answerer objectives: read by models', text: String(n.answerer.objectives ?? '').slice(0, TEXT_MAX) });
         out.push({ label: 'Answerer charter: read by models', text: String(n.answerer.charter ?? '').slice(0, TEXT_MAX) });
@@ -418,6 +421,9 @@ export class Setup {
                 ...(i.kind === 'arrival' ? { resource: i.resource, onlyNew: i.onlyNew !== false, quiet: i.quiet ?? 10 } : {}),
                 ...(i.kind === 'every' ? { minutes: i.minutes } : {}), ...(i.kind === 'daily' ? { at: i.at } : {}), ...(i.kind === 'cron' ? { line: i.line } : {}) })) };
         }
+        /* The owner's own lines in its guide (guide.mjs): added in format 2, read by older ones as unknown. */
+        const lines = p.guide?.lines(c.name) ?? [];
+        if (lines.length) out.guide = lines;
         const a = p.answerer?.of(c.name);
         if (a && (a.on || a.objectives || a.charter)) out.answerer = { on: a.on, objectives: a.objectives, charter: a.charter, limit: a.limit };
         const s = p.signin?.settings(c.name);
@@ -666,6 +672,7 @@ export class Setup {
         /* When its tool starts: its last session (the default), or a new one. */
         if (n.resume === false || (replace && p.conversations.get(name)?.resume === false)) await this.#try(job, `${name}: its tool ${n.resume === false ? 'starts fresh' : 'takes up its last session'}`, async () => p.conversations.setResume(name, n.resume !== false));
         if ((n.chat === true && n.work !== 'disk') || (replace && n.chat !== true && p.talk?.brief(name))) await this.#try(job, `${name}: chat ${n.chat ? 'on' : 'off'}`, () => p.talk.set(name, n.chat === true));
+        if (p.guide && (n.guide !== undefined || (replace && p.guide.lines(name).length))) await this.#try(job, `${name}: your lines in its guide`, () => p.guide.setLines(name, n.guide ?? []));
         if (n.answerer && typeof n.answerer === 'object') {
             if (!p.answerer?.about()) this.#step(job, `${name}: its answerer is not set (this Clavarium has none)`, 'skipped');
             else await this.#try(job, `${name}: its answerer${n.answerer.on ? ' (on)' : ''}`, () => p.answerer.set(name, { on: n.answerer.on === true, objectives: String(n.answerer.objectives ?? ''), charter: String(n.answerer.charter ?? ''), limit: Number.isInteger(n.answerer.limit) ? n.answerer.limit : undefined }));

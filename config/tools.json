@@ -1,6 +1,7 @@
 [
   {
     "id": "claude-code",
+    "instructions": ".claude/CLAUDE.md",
     "label": "Claude Code",
     "command": [
       "claude"
@@ -50,6 +51,7 @@
   },
   {
     "id": "opencode",
+    "instructions": ".config/opencode/AGENTS.md",
     "label": "OpenCode",
     "command": [
       "opencode"
@@ -76,6 +78,7 @@
   },
   {
     "id": "codex",
+    "instructions": ".codex/AGENTS.md",
     "label": "Codex CLI",
     "command": [
       "codex"
@@ -103,6 +106,7 @@
   },
   {
     "id": "gemini",
+    "instructions": ".gemini/GEMINI.md",
     "label": "Gemini CLI",
     "command": [
       "gemini"

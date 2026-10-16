@@ -100,6 +100,21 @@
           <summary><span class="chapter-title">General</span><span class="chapter-about">What it is, and how you talk with it.</span></summary>
           <div class="chapter-body">
             <dl id="general-facts" class="facts"></dl>
+            <!-- WHAT ITS TOOL IS TOLD ABOUT WHERE IT IS: the exact text, made by the
+                 server from these settings; the owner's own lines; told again on a click. -->
+            <div id="guide-box">
+            <p class="guide-line"><span>What its tool is told about where it is</span> · <button type="button" id="guide-see" class="inline" aria-expanded="false" aria-controls="guide-shown">see</button></p>
+            <div id="guide-shown" hidden>
+              <label for="guide-lines">Your own lines for it</label>
+              <textarea id="guide-lines" rows="3" maxlength="1200" spellcheck="true" placeholder="Write to me in French.&#10;Never change the photos in family-archive."></textarea>
+              <p class="hint" id="guide-limits">What you want it to keep in mind: your language, what not to touch, how to work. Plain text, 12 short lines at most; never a password or a key.</p>
+              <div class="row"><button type="button" id="guide-save">Save my lines</button><button type="button" id="guide-tell">Tell it again</button></div>
+              <p class="hint" id="guide-tell-hint">Saved, it is in its machine for its next start. Tell it again: it is already working, and should read it now (one line is typed in its terminal).</p>
+              <p class="hint" id="guide-said" role="status"></p>
+              <p class="hint" id="guide-where"></p>
+              <pre id="guide-text" tabindex="0" aria-label="What its tool is told"></pre>
+            </div>
+            </div>
             <div id="talk-box">
             <div class="panel-top"><b>Talk through the app</b></div>
             <p class="hint" id="talk-about">A chat screen instead of its terminal: the tool installs a small command, parley, from /tools, to tell you something, ask you something, show you a file, say what it is doing and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>

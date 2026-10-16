@@ -7,6 +7,8 @@
  *
  *   /tools/index.json                  { tools: [{ name, version, file, sha256, usage }] }
  *   /tools/clavarium-parley-0.5.0.tgz  Parley, the first of them (npm pack)
+ *   /tools/CLAVARIUM.md                where a tool is, the same for every
+ *                                      machine (see guide.mjs): `notes`
  *
  * Adding a tool is putting its archive in SOURCES with one line of usage.
  *
@@ -21,6 +23,7 @@ import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSyn
 import { fileURLToPath } from 'node:url';
 
 export const TOOLS_PATH = '/tools';
+export const NOTES = 'CLAVARIUM.md';
 const PARLEY = fileURLToPath(new URL('./parley/', import.meta.url));
 
 /* What is put there: { name, archive (a path here), usage(file) }. */
@@ -33,11 +36,14 @@ export function parleySource(dir = PARLEY) {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Toolbox {
-    #host; #vms; #mnt; #uid; #gid; #sources; #index = null;
+    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #index = null;
 
-    /* `host(argv)`: the host program. `mntDir`: where it keeps the folder. */
-    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource() }) {
-        this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources;
+    /* `host(argv)`: the host program. `mntDir`: where it keeps the folder.
+       `notes(find)`: the text of /tools/CLAVARIUM.md, given how to find a
+       tool of the index; none when not given. Nothing of one conversation
+       may be in it: every machine reads it. */
+    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null }) {
+        this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes;
     }
 
     folder() { return `${this.#mnt}/toolbox/files`; }
@@ -66,12 +72,16 @@ export class Toolbox {
             const version = /-(\d+\.\d+\.\d+)\.tgz$/.exec(file)?.[1] ?? '';
             tools.push({ name: source.name, version, file, sha256, usage: source.usage(`${TOOLS_PATH}/${file}`) });
         }
-        const kept = new Set([...tools.map((t) => t.file), 'index.json']);
+        const kept = new Set([...tools.map((t) => t.file), 'index.json', ...(this.#notes ? [NOTES] : [])]);
         for (const name of readdirSync(dir)) if (!kept.has(name)) rmSync(`${dir}/${name}`, { recursive: true, force: true });
         const index = { tools };
         writeFileSync(`${dir}/.index.json.new`, `${JSON.stringify(index, null, 2)}\n`);
         renameSync(`${dir}/.index.json.new`, `${dir}/index.json`);
         this.#index = index;
+        if (this.#notes) {
+            writeFileSync(`${dir}/.${NOTES}.new`, this.#notes((name) => this.find(name)));
+            renameSync(`${dir}/.${NOTES}.new`, `${dir}/${NOTES}`);
+        }
         return index;
     }
 

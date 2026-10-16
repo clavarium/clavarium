@@ -13,6 +13,9 @@
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
  *   POST /api/conversations/<name>/talk          {text, answers?, files?}: written in its chat; files from .../talk/file
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
+ *   GET  /api/conversations/<name>/guide         what its tool is told about where it is: the exact texts, the owner's lines
+ *   POST /api/conversations/<name>/guide         {lines}: the owner's own lines for it (short, plain text)
+ *   POST /api/conversations/<name>/guide/tell    its guide written again, and one line typed in its terminal to read it
  *   GET  /api/resources
  *   POST /api/resources                     {name} | {name, type: 'git', from?, via?: {method, key?, user?, secret?}}
  *   GET  /api/git-keys                      SSH keys made here: the public half only
@@ -88,7 +91,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -187,6 +190,8 @@ export async function handleApi(request, response, conversations, headers, resou
             /* The words of the chat screen, for a screen whose language is `lang`; and the owner's choice of them. */
             if (pathname === '/api/talk/words' && talk) return send(200, talk.words(query.get('lang') ?? 'en')), true;
             if (pathname === '/api/talk/settings' && talk) return send(200, talk.settings()), true;
+            const guided = /^\/api\/conversations\/([^/]+)\/guide$/.exec(pathname);
+            if (guided && guide) return send(200, guide.about(decodeURIComponent(guided[1]))), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
             if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
@@ -264,12 +269,20 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/alerts/remove' && alerts) return send(200, alerts.remove(String(body.endpoint ?? ''))), true;
         if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
         if (pathname === '/api/talk/settings' && talk) return send(200, talk.setWords({ lang: body.lang, own: body.own })), true;
+        const guiding = /^\/api\/conversations\/([^/]+)\/guide(\/tell)?$/.exec(pathname);
+        if (guiding && guide) {
+            const conversation = decodeURIComponent(guiding[1]);
+            if (guiding[2]) return send(200, await guide.tellAgain(conversation)), true;
+            return send(200, await guide.setLines(conversation, body.lines)), true;
+        }
+        /* A setting its tool is told about changed: its guide follows (never waking a machine). */
+        const retell = (conversation) => { void guide?.changed(conversation).catch(() => {}); };
         const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
             if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
-            if (typeof body.on === 'boolean') return send(200, await talk.set(conversation, body.on)), true;
+            if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             return send(201, await talk.say(conversation, body.text, body.answers, body.files)), true;
         }
         const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
@@ -290,6 +303,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (wired && network) {
             conversations.setOffline(decodeURIComponent(wired[1]), body.online !== true);
             if (!(await network.apply())) throw new Refusal(502, 'The network rules could not be applied on the host.');
+            retell(decodeURIComponent(wired[1]));
             return send(200, { ok: true, online: body.online === true }), true;
         }
         const mailbox = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
@@ -303,6 +317,7 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(handed[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
+            retell(conversation);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
         }
         const share = /^\/api\/conversations\/([^/]+)\/share$/.exec(pathname);
@@ -366,6 +381,7 @@ export async function handleApi(request, response, conversations, headers, resou
                not mounted again) never leaves settings to come back later. */
             if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
             await resources.attach(conversation, name, access);
+            retell(conversation);
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
@@ -401,6 +417,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (action[2] === 'archive') answerer?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') wakeups?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') talk?.forget(decodeURIComponent(action[1]));
+        if (action[2] === 'archive') guide?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') health?.forget(decodeURIComponent(action[1]));
         return send(200, { ok: true }), true;
     } catch (error) {

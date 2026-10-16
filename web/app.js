@@ -1039,6 +1039,7 @@
         };
         void paintAnswerer(); paintWakeups(); void paintTalkBox(); void paintShareHere();
         paintMachine(here);
+        void paintGuide(here);
         const offline = here?.offline === true;
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
@@ -1246,6 +1247,73 @@
             }, resume);
     });
 
+    /* ---------- what its tool is told about where it is (server/guide.mjs) ---------- */
+    /* One quiet line; behind "see", the exact text its tool reads, made by
+       the server from these settings, the owner's own lines, and "Tell it
+       again", which types one line in its terminal -- only when clicked. */
+    let guideOf = '';
+    function guideOpen(open) {
+        $('guide-shown').hidden = !open;
+        $('guide-see').setAttribute('aria-expanded', String(open));
+        $('guide-see').textContent = open ? 'hide' : 'see';
+    }
+    async function paintGuide(here) {
+        $('guide-box').hidden = DEVICE || !here;
+        if (DEVICE || !here) return;
+        if (guideOf !== here.name) { guideOf = here.name; guideOpen(false); $('guide-said').textContent = ''; delete $('guide-lines').dataset.edited; }
+        if (!$('guide-shown').hidden) await readGuide();
+    }
+    async function readGuide() {
+        const name = current;
+        let g;
+        try { const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/guide`); g = r.ok ? await r.json() : null; } catch { g = null; }
+        if (name !== current) return;
+        if (!g) { $('guide-said').textContent = 'It could not be read just now.'; return; }
+        paintGuideText(g);
+    }
+    function paintGuideText(g) {
+        $('guide-where').textContent = g.pointer
+            ? `Two files in its machine, read-only: ${g.paths.common}, the same for every machine, and ${g.paths.own}, for this conversation only. One line in ${g.pointer.file} tells its tool to read them.`
+            : `Two files in its machine, read-only: ${g.paths.common}, the same for every machine, and ${g.paths.own}, for this conversation only.`;
+        $('guide-text').textContent = `${g.common}\n${g.own}`;
+        const field = $('guide-lines');
+        if (document.activeElement !== field && !field.dataset.edited) field.value = g.lines.join('\n');
+        const c = conversations.find((x) => x.name === current);
+        const awake = c?.phase === 'ready' && !c?.asleep;
+        $('guide-tell').disabled = !awake;
+        $('guide-tell').title = awake ? `Types in its terminal: ${g.tellAgain}` : 'It is asleep: open it first.';
+    }
+    $('guide-see').addEventListener('click', () => {
+        const open = $('guide-shown').hidden;
+        guideOpen(open);
+        if (open) void readGuide();
+    });
+    $('guide-lines').addEventListener('input', () => { $('guide-lines').dataset.edited = '1'; $('guide-said').textContent = ''; });
+    $('guide-save').addEventListener('click', async () => {
+        const name = current;
+        $('guide-save').disabled = true;
+        try {
+            const g = await post(`${API}/conversations/${encodeURIComponent(name)}/guide`, { lines: $('guide-lines').value });
+            if (name !== current) return;
+            delete $('guide-lines').dataset.edited;
+            $('guide-lines').value = g.lines.join('\n');
+            paintGuideText(g);
+            $('guide-said').textContent = 'Saved. A machine that runs has it now, one asleep at its next start; "Tell it again" asks its tool to read it.';
+        } catch (error) { $('guide-said').textContent = error.message; }
+        finally { $('guide-save').disabled = false; }
+    });
+    $('guide-tell').addEventListener('click', async () => {
+        const name = current;
+        $('guide-tell').disabled = true;
+        try {
+            const g = await post(`${API}/conversations/${encodeURIComponent(name)}/guide/tell`, {});
+            if (name !== current) return;
+            paintGuideText(g);
+            $('guide-said').textContent = `Typed in its terminal: ${g.told}`;
+        } catch (error) { $('guide-said').textContent = error.message; }
+        finally { const c = conversations.find((x) => x.name === current); $('guide-tell').disabled = !(c?.phase === 'ready' && !c?.asleep); }
+    });
+
     /* ---------- the simple screen: the same conversation, without its terminal ---------- */
     /* For whoever does not read a terminal. The terminal stays where it is,
        underneath, attached as always: what is written in the box is typed
@@ -1428,7 +1496,7 @@
     for (const b of $('talk-on').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
-            try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); void paintThread(); }
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); void paintThread(); void paintGuide(conversations.find((x) => x.name === current)); }
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }

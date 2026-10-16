@@ -25,6 +25,12 @@ listed here.
   app; until then it installs it from the archive in `/tools`, read-only in
   every machine.
 
+- **Lines for a whole installation in the guide.** The owner's lines are set
+  per conversation; house rules shared by every conversation (and carried once
+  in an exported setup) would save copying them.
+- **"Tell it again" only when the tool is idle.** The line is typed when the
+  owner clicks, even if the tool is in the middle of something.
+
 - **A tool's session outlives its machine.** A tool already starts on its last
   session; that session is kept in the work folder too, so that it survives a
   machine built again, a backup and a restore.
