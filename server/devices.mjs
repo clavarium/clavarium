@@ -31,6 +31,7 @@ export const CHALLENGE_SECONDS = 60;
 export const DEVICES_MAX = 20;       /* per conversation */
 export const SHARE_MAX = 30;         /* things given by one code */
 export const LABEL_MAX = 40;
+export const SESSIONS_KEPT = 5;  /* per pairing: a phone, its app, a second browser... */
 
 const token = () => randomBytes(32).toString('base64url');
 const digest = (text) => createHash('sha256').update(text).digest();
@@ -59,6 +60,11 @@ export class Devices {
        conversation was shared in two parts (see below). */
     constructor(store, now = () => Date.now(), grants = new Grants(), { chatWas = () => false } = {}) {
         this.#store = store; this.#now = now; this.#grants = grants;
+        /* Sessions outlive a restart of this server (a new version put in place): what is kept is
+           only their sha256 and their end, on the device's record, never the session itself. */
+        for (const d of store.all()) for (const k of Array.isArray(d.sessions) ? d.sessions : []) {
+            if (typeof k?.hash === 'string' && /^[0-9a-f]{64}$/.test(k.hash) && Number.isFinite(k.expires) && k.expires > now()) this.#sessions.set(k.hash, { device: d.name, expires: k.expires });
+        }
         /* An earlier version bound a pairing to one conversation, in its own
            record: taken over into the table, once. */
         for (const d of store.all()) {
@@ -196,8 +202,12 @@ export class Devices {
         } catch { good = false; }
         if (!good) throw refused;
         const session = token();
-        this.#sessions.set(digest(session).toString('hex'), { device: id, expires: this.#now() + SESSION_HOURS * 3_600_000 });
-        this.#store.patch(id, { seenAt: new Date(this.#now()).toISOString() });
+        const hash = digest(session).toString('hex'); const expires = this.#now() + SESSION_HOURS * 3_600_000;
+        this.#sessions.set(hash, { device: id, expires });
+        /* Kept on its record: the live ones, the newest few. */
+        const kept = [...this.#sessions].filter(([, x]) => x.device === id && x.expires > this.#now()).map(([h, x]) => ({ hash: h, expires: x.expires })).sort((a, b) => b.expires - a.expires).slice(0, SESSIONS_KEPT);
+        for (const [h, x] of this.#sessions) if (x.device === id && !kept.some((k) => k.hash === h)) this.#sessions.delete(h);
+        this.#store.patch(id, { seenAt: new Date(this.#now()).toISOString(), sessions: kept });
         return { session, hours: SESSION_HOURS };
     }
 

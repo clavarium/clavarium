@@ -97,15 +97,21 @@ test('a session ends after twelve hours; the device, still paired, opens a new o
     assert.equal(b.devices.conversationOf(one.openSession()), 'family');
 });
 
-test('pairings survive a restart; sessions and codes do not, and neither is written to disk', (t) => {
+test('pairings and live sessions survive a restart (a new version put in place); codes do not; only the sha256 of a session is on disk', async (t) => {
     const b = bench(t);
     const one = paired(b);
     const session = one.openSession();
     const code = b.devices.share('family').code;
     const again = new Devices(new Store(b.path), undefined, b.grants());
     assert.deepEqual(again.of('family').map((d) => d.id), [one.device]);
-    assert.equal(again.conversationOf(session), undefined);
+    assert.equal(again.conversationOf(session), 'family', 'still signed in after the restart');
     assert.throws(() => again.pair({ code, key: phone().jwk }), /not valid any more/);
+    const { readFileSync } = await import('node:fs');
+    assert.equal(readFileSync(b.path, 'utf8').includes(session), false, 'the session itself is never written');
+    /* Removed: its sessions end, also after a restart. */
+    again.revoke(one.device);
+    const later = new Devices(new Store(b.path), undefined, b.grants());
+    assert.equal(later.conversationOf(session), undefined);
 });
 
 test('archiving a conversation removes its devices; the private half of a key is never accepted', (t) => {
