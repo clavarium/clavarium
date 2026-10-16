@@ -57,14 +57,15 @@
  *   POST /api/setup/pair                    {label}: what a device to pair will get (the code is made by /api/shares)
  *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
- *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>  the body IS the file
+ *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
+ *   GET  /api/files/thumb|text   POST /api/files/save|make|rename|move|remove|taken   ?c=...&r=...&p=...   (see files.mjs)
  *
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
-import { list, download, importFile, page, PAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
@@ -110,6 +111,8 @@ export async function handleApi(request, response, conversations, headers, resou
         const any = resources?.get(query.get('r') ?? '');
         if (!any) throw new Refusal(404, 'No such folder.');
         if (need === 'write' && any.type === 'mailbox') throw new Refusal(403, 'A mailbox is a copy of the mail: nothing can be added to it here.');
+        /* Shown through a conversation that has it READ-ONLY, it is read-only here too: the page says so, and offers nothing that writes. */
+        if (need === 'write' && resources.of(query.get('c') ?? '').some((r) => r.name === any.name && r.access === 'read')) throw new Refusal(403, 'This folder is attached read-only to this conversation: nothing is changed in it from here.');
         return resources.folder(any.name);
     };
     try {
@@ -149,7 +152,17 @@ export async function handleApi(request, response, conversations, headers, resou
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') {
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
-            return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request)), true;
+            return send(201, await importFile(attached('write'), query.get('p') ?? '', query.get('name') ?? '', request, { exists: query.get('exists') ?? 'keep', dir: query.get('dir') ?? '', batch: query.get('batch') ?? undefined })), true;
+        }
+        if (pathname.startsWith('/api/files/')) {
+            if (request.method === 'POST' && !originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' }), true;
+            const answer = await changeRoute(request.method, pathname.slice('/api'.length), query, request, attached);
+            if (answer?.picture) {
+                response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length, etag: `"${answer.picture.version}"` });
+                response.end(answer.picture.bytes);
+                return true;
+            }
+            if (answer) return send(answer[0], answer[1]), true;
         }
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;

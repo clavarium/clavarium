@@ -2599,80 +2599,560 @@
     area.addEventListener('touchend', () => { touchY = null; });
 
     /* ---------- files ---------- */
-    /* The folders kept by the server and attached here: listed, downloaded,
-       imported into. A file name is shown as text and never interpreted. */
+    /* The folders kept by the server and attached here: listed, shown as a
+       list or as icons, downloaded, uploaded into, and -- only where this
+       conversation may write -- changed by hand: made, renamed, moved,
+       removed, edited. A file name is shown as text and never interpreted.
+       Every change is checked again by the server (files.mjs): this page
+       only offers what is allowed, it is not what allows it. */
     let filesOf = '';            /* the attached folder being shown */
     let filesAt = '';            /* the path inside it */
-    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n} bytes`);
+    let filesTabs = [];          /* the folders offered, with their access */
+    let filesWritable = false;   /* may the folder shown be changed from here? */
+    let filesEntries = [];       /* what it holds, as last listed */
+    let editing = null;          /* the text file being edited: { tab, inner, name, version, saved, area } */
+    let filesChanged = false;    /* edited: the list behind shows the new size and time */
+    const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : n === 1 ? '1 byte' : `${n} bytes`);
     const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
-    async function paintFiles() {
+    /* When it was last changed, short: the time today, the day otherwise. */
+    const whenOf = (iso) => {
+        const d = new Date(iso); if (Number.isNaN(d.getTime())) return '';
+        const now = new Date();
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        return d.toLocaleDateString([], { day: 'numeric', month: 'short', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
+    };
+    const innerOf = (name) => (filesAt ? `${filesAt}/${name}` : name);
+    const extOf = (name) => (name.includes('.') ? name.split('.').pop().toLowerCase() : '');
+    /* The limits the server holds (files.mjs), said here before a long upload is begun. */
+    const IMPORT_MAX = 50 * 1024 * 1024;
+    const DROP_FILES = 2000;
+    const DROP_BYTES = 2 * 1024 * 1024 * 1024;
+    const DROP_DEPTH = 16;
+    const THUMB_MAX = 8 * 1024 * 1024;
+    const EDIT_MAX = 1024 * 1024;
+    const THUMBS = ['png', 'jpg', 'jpeg', 'gif', 'webp'];
+    const MOVE_TYPE = 'application/x-clavarium-path';
+
+    /* LIST or ICONS, kept on this device. */
+    let filesView = 'list';
+    try { if (localStorage.getItem('clavarium-files-view') === 'icons') filesView = 'icons'; } catch { /* a private window */ }
+    for (const b of $('files-views').querySelectorAll('button')) {
+        b.addEventListener('click', () => {
+            filesView = b.dataset.view === 'icons' ? 'icons' : 'list';
+            try { localStorage.setItem('clavarium-files-view', filesView); } catch { /* as above */ }
+            void paintFiles();
+        });
+    }
+
+    /* What a file is, for its icon. */
+    const TYPES = {
+        image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'tif', 'tiff', 'avif'],
+        pdf: ['pdf'],
+        text: ['txt', 'md', 'csv', 'tsv', 'log', 'eml', 'tex', 'rtf', 'srt', 'vtt'],
+        code: ['json', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'htm', 'css', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'py', 'sh', 'sql', 'c', 'h', 'cpp', 'go', 'rs', 'java', 'rb', 'php', 'kt', 'swift', 'lua', 'pl', 'r', 'vue', 'conf', 'cfg', 'env'],
+        sheet: ['xls', 'xlsx', 'ods', 'numbers'],
+        doc: ['doc', 'docx', 'odt', 'pages', 'ppt', 'pptx', 'odp', 'key', 'epub'],
+        archive: ['zip', 'tar', 'gz', 'tgz', 'bz2', 'xz', '7z', 'rar', 'zst'],
+        audio: ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'flac', 'aac', 'opus'],
+        video: ['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'],
+    };
+    const typeOf = (entry) => (entry.folder ? 'folder' : Object.keys(TYPES).find((t) => TYPES[t].includes(extOf(entry.name))) ?? 'other');
+    /* Text that may be edited here: what the viewer shows as text, and a file without an extension. */
+    const editable = (name, size) => size <= EDIT_MAX && (TEXTS.includes(extOf(name)) || ['svg', 'conf', 'cfg', 'env', 'cjs', 'tsx', 'jsx', 'vue', 'kt', 'swift', 'lua', 'pl', 'r', 'srt', 'vtt', 'cpp', 'htm', ''].includes(extOf(name)));
+    const SVG = 'http://www.w3.org/2000/svg';
+    /* A drawn icon: a folder, or a page with its kind written on it. Never the file's own content. */
+    function iconFor(entry) {
+        const box = document.createElement('span'); box.className = 'icon'; box.dataset.type = typeOf(entry);
+        const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('aria-hidden', 'true');
+        const path = (d, cls) => { const p = document.createElementNS(SVG, 'path'); p.setAttribute('d', d); p.setAttribute('class', cls); svg.append(p); };
+        if (entry.folder) {
+            svg.setAttribute('viewBox', '0 0 48 40');
+            path('M2 8a4 4 0 0 1 4-4h11.5a3 3 0 0 1 2.3 1.1L23 9h19a4 4 0 0 1 4 4v21a4 4 0 0 1-4 4H6a4 4 0 0 1-4-4z', 'body');
+            path('M2 14h44', 'line');
+        } else {
+            svg.setAttribute('viewBox', '0 0 40 48');
+            path('M7 2h19l11 11v31a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z', 'body');
+            path('M26 2v9a2 2 0 0 0 2 2h9', 'line');
+        }
+        box.append(svg);
+        if (!entry.folder) { const ext = document.createElement('span'); ext.className = 'ext'; ext.textContent = (extOf(entry.name) || 'file').slice(0, 4).toUpperCase(); box.append(ext); }
+        return box;
+    }
+
+    /* `keep`: an error just said stays (painted after a change that failed in part). */
+    async function paintFiles({ keep = false } = {}) {
         const ownerOthers = DEVICE ? [] : (await (await fetch(`${API}/resources`)).json().catch(() => [])).map((r) => ({ name: r.name, access: r.type === 'mailbox' ? 'read' : 'write', yours: true }));
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const attachedHere = here?.resources ?? [];
-        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere,
+        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
             /* On a device: what it was given for itself, whatever the conversation. */
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
             ...ownerOthers.filter((o) => !attachedHere.some((r) => r.name === o.name))];
         /* Given to the device to write, attached to the conversation to read: the larger of the two holds. */
         for (const r of mine) if (deviceShared.some((s) => s.name === r.name && s.access === 'write')) r.access = 'write';
+        filesTabs = mine;
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
         for (const r of mine) {
             const b = document.createElement('button');
-            b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access}${r.given ? ' (given to this device)' : r.yours ? ' (not attached here)' : ''}`; b.setAttribute('role', 'tab');
+            b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access === 'write' ? 'read-write' : 'read-only'}${r.given ? ' (given to this device)' : r.yours ? ' (not attached here)' : ''}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
             b.addEventListener('click', () => { filesOf = r.name; filesAt = ''; void paintFiles(); });
             tabs.append(b);
         }
         const rows = $('files-rows'); const path = $('files-path');
-        rows.replaceChildren(); path.replaceChildren();
         $('files-none').hidden = mine.length > 0;
-        $('files-error').hidden = true;
-        const writable = mine.find((r) => r.name === filesOf)?.access === 'write';
-        $('files-actions').hidden = !filesOf || !writable;
-        $('files-readonly').hidden = !filesOf || writable;
-        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Given to this device to read: nothing can be added here.' : 'Attached read-only: nothing can be imported here.';
-        $('files-empty').hidden = true;
-        if (!filesOf) return;
+        if (!keep) $('files-error').hidden = true;
+        filesWritable = mine.find((r) => r.name === filesOf)?.access === 'write';
+        $('files-actions').hidden = !filesOf || !filesWritable;
+        $('files-readonly').hidden = !filesOf || filesWritable;
+        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.' : 'Read-only: attached to this conversation to read. Nothing can be added or changed here.';
+        $('files-views').hidden = !filesOf;
+        for (const b of $('files-views').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.view === filesView));
+        if (!filesOf) { rows.replaceChildren(); path.replaceChildren(); $('files-empty').hidden = true; return; }
         let listing;
         try {
             const r = await fetch(`${API}/files?${filesQuery()}`);
             listing = await r.json();
             if (!r.ok) throw new Error(listing.error || 'The folder could not be read.');
-        } catch (error) { $('files-error').textContent = error.message; $('files-error').hidden = false; return; }
+        } catch (error) { rows.replaceChildren(); path.replaceChildren(); $('files-error').textContent = error.message; $('files-error').hidden = false; return; }
+        /* Painted only once the listing is here: the old one stays until then, no blink. */
+        rows.replaceChildren(); path.replaceChildren();
+        hideNameForm();
         filesAt = listing.path;
-        /* The trail: the folder, then each level, each one a way back. */
+        filesEntries = listing.entries;
+        rows.dataset.view = filesView;
+        /* The trail: the folder, then each level, each one a way back -- and a place to drop what is moved. */
         const parts = filesAt ? filesAt.split('/') : [];
         const crumb = (text, to) => {
             const b = document.createElement('button'); b.type = 'button'; b.textContent = text;
             b.addEventListener('click', () => { filesAt = to; void paintFiles(); });
+            if (to !== filesAt) moveTarget(b, to);
             path.append(b);
         };
         crumb(filesOf, '');
         parts.forEach((part, i) => { path.append('/'); crumb(part, parts.slice(0, i + 1).join('/')); });
-        for (const entry of listing.entries) {
-            const inner = filesAt ? `${filesAt}/${entry.name}` : entry.name;
-            const row = document.createElement(entry.folder ? 'button' : 'a');
-            row.className = 'file'; row.dataset.folder = String(entry.folder);
+        /* At the top of the folder the trail would only repeat its tab. */
+        path.hidden = parts.length === 0;
+        for (const entry of listing.entries) rows.append(entryOf(entry));
+        $('files-empty').hidden = listing.entries.length > 0;
+        $('files-empty').textContent = filesWritable ? (FINE_POINTER ? 'This folder is empty. Drop files or folders here, or use Upload.' : 'This folder is empty. Add files with Upload.') : 'This folder is empty.';
+    }
+    /* A mouse: dragging and dropping is offered; a finger: the buttons are. */
+    const FINE_POINTER = window.matchMedia?.('(pointer: fine)').matches ?? true;
+    $('files-drop-hint').hidden = !FINE_POINTER;
+    /* An entry's actions close when something else is touched, or with Escape. */
+    /* (The path of the click, as it was dispatched: a button the click itself replaced is no longer in the page.) */
+    document.addEventListener('click', (event) => { if (!event.composedPath().some((el) => el.classList?.contains('entry') && el.classList.contains('open'))) closeActions(); });
+    $('files').addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || !$('files-rows').querySelector('.entry.open')) return;
+        event.preventDefault(); event.stopPropagation();
+        const more = $('files-rows').querySelector('.entry.open > .more');
+        closeActions(); more?.focus();
+    });
+
+    /* One file or folder: its row (or tile), and, where it may be changed, its actions. */
+    function entryOf(entry) {
+        const inner = innerOf(entry.name);
+        const wrap = document.createElement('div'); wrap.className = 'entry'; wrap.dataset.name = entry.name;
+        const row = document.createElement(entry.folder ? 'button' : 'a');
+        row.className = 'file'; row.dataset.folder = String(entry.folder); row.dataset.type = typeOf(entry);
+        if (filesView === 'icons') {
+            const look = document.createElement('span'); look.className = 'look';
+            if (!entry.folder && THUMBS.includes(extOf(entry.name)) && entry.size > 0 && entry.size <= THUMB_MAX) {
+                /* A picture is shown as a picture, fetched only when it comes into sight; the server proves it is one. */
+                const img = document.createElement('img');
+                img.loading = 'lazy'; img.decoding = 'async'; img.alt = ''; img.draggable = false;
+                img.addEventListener('error', () => img.replaceWith(iconFor(entry)));
+                img.src = `${API}/files/thumb?${filesQuery({ p: inner, v: entry.modified })}`;
+                look.append(img);
+            } else look.append(iconFor(entry));
+            row.append(look);
+        } else {
             const kind = document.createElement('span'); kind.className = 'kind';
             kind.textContent = entry.folder ? 'DIR' : (entry.name.includes('.') ? entry.name.split('.').pop().slice(0, 4).toUpperCase() : 'FILE');
-            const label = document.createElement('span'); label.className = 'label'; label.textContent = entry.name;
-            const detail = document.createElement('small');
-            detail.textContent = entry.folder ? 'open' : `${sizeOf(entry.size)} - view`;
-            row.append(kind, label, detail);
-            if (entry.folder) { row.type = 'button'; row.addEventListener('click', () => { filesAt = inner; void paintFiles(); }); }
-            else {
-                /* A click shows the file here; the address stays a plain download for "open in a new tab". */
-                row.href = `${API}/files/download?${filesQuery({ p: inner })}`;
-                row.addEventListener('click', (event) => { event.preventDefault(); void preview(filesOf, inner, entry.name, entry.size); });
-            }
-            rows.append(row);
+            row.append(kind);
         }
-        $('files-empty').hidden = listing.entries.length > 0;
+        const label = document.createElement('span'); label.className = 'label'; label.textContent = entry.name; label.title = entry.name;
+        const detail = document.createElement('small');
+        detail.textContent = filesView === 'icons' ? (entry.folder ? 'folder' : sizeOf(entry.size)) : entry.folder ? `open - ${whenOf(entry.modified)}` : `${sizeOf(entry.size)} - ${whenOf(entry.modified)}`;
+        detail.title = new Date(entry.modified).toLocaleString();
+        row.append(label, detail);
+        if (entry.folder) { row.type = 'button'; row.addEventListener('click', () => { filesAt = inner; void paintFiles(); }); }
+        else {
+            /* A click shows the file here; the address stays a plain download for "open in a new tab". */
+            row.href = `${API}/files/download?${filesQuery({ p: inner })}`;
+            row.addEventListener('click', (event) => { event.preventDefault(); void preview(filesOf, inner, entry.name, entry.size); });
+        }
+        wrap.append(row);
+        if (!filesWritable) { row.draggable = false; return wrap; }
+        /* Moved by dragging it onto a folder, or onto a level of the trail above. */
+        row.draggable = true;
+        row.addEventListener('dragstart', (event) => {
+            movingPath = inner;
+            event.dataTransfer.setData(MOVE_TYPE, inner);
+            event.dataTransfer.setData('text/plain', entry.name);
+            event.dataTransfer.effectAllowed = 'move';
+            wrap.classList.add('dragging');
+        });
+        row.addEventListener('dragend', () => { movingPath = ''; wrap.classList.remove('dragging'); });
+        if (entry.folder) moveTarget(row, inner);
+        const more = document.createElement('button');
+        more.type = 'button'; more.className = 'more'; more.textContent = '⋯';
+        more.setAttribute('aria-label', `Change ${entry.name}`); more.title = 'Rename, move, delete';
+        more.setAttribute('aria-expanded', 'false');
+        more.addEventListener('click', () => actionsOf(wrap, entry, more));
+        wrap.append(more);
+        return wrap;
     }
+
+    /* The actions of one entry, under it: one entry's at a time. */
+    function closeActions() {
+        for (const open of $('files-rows').querySelectorAll('.acts')) open.remove();
+        for (const b of $('files-rows').querySelectorAll('.more[aria-expanded="true"]')) b.setAttribute('aria-expanded', 'false');
+        for (const w of $('files-rows').querySelectorAll('.entry.open')) w.classList.remove('open');
+    }
+    function actionsOf(wrap, entry, more) {
+        const wasOpen = more.getAttribute('aria-expanded') === 'true';
+        closeActions(); hideNameForm();
+        if (wasOpen) return;
+        more.setAttribute('aria-expanded', 'true'); wrap.classList.add('open');
+        const inner = innerOf(entry.name);
+        const acts = document.createElement('div'); acts.className = 'acts';
+        const button = (text, run, cls) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; if (cls) b.className = cls; b.addEventListener('click', run); return b; };
+        const menu = () => {
+            acts.replaceChildren();
+            /* Which file the actions are for, said: on a phone the sheet hides the tile. */
+            const what = document.createElement('b'); what.className = 'acts-name'; what.textContent = entry.name; acts.append(what);
+            if (!entry.folder && editable(entry.name, entry.size)) acts.append(button('Edit', () => { closeActions(); void editFile(filesOf, inner, entry.name); }));
+            acts.append(button('Rename', () => { closeActions(); showNameForm('rename', entry, wrap); }));
+            acts.append(button('Move to...', moveMenu));
+            acts.append(button('Delete', confirmDelete, 'danger'));
+        };
+        /* Where it can go: the levels above, and the folders beside it. */
+        function moveMenu() {
+            const parts = filesAt ? filesAt.split('/') : [];
+            const places = [...parts.map((_, i) => parts.slice(0, i).join('/')).map((to) => ({ to, label: to ? `${filesOf}/${to}` : `${filesOf} (the top)` })),
+                ...filesEntries.filter((e) => e.folder && e.name !== entry.name).map((e) => ({ to: innerOf(e.name), label: `${e.name} (in this folder)` }))];
+            acts.replaceChildren();
+            if (places.length === 0) {
+                const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'There is no other folder here to move it into. Make one with "New folder", or open a folder and come back.';
+                acts.append(p, button('Back', menu));
+                return;
+            }
+            const label = document.createElement('label'); label.textContent = `Move "${entry.name}" to`;
+            const select = document.createElement('select'); select.id = 'files-move-to'; label.htmlFor = select.id;
+            for (const place of places) { const o = document.createElement('option'); o.value = place.to; o.textContent = place.label; select.append(o); }
+            acts.append(label, select, button('Move', () => { void moveTo(inner, select.value); }, 'primary'), button('Cancel', menu));
+            select.focus();
+        }
+        function confirmDelete() {
+            acts.replaceChildren();
+            const p = document.createElement('p'); p.className = 'sure';
+            p.textContent = entry.folder ? `Delete the folder "${entry.name}" and everything in it? This cannot be undone.` : `Delete "${entry.name}"? This cannot be undone.`;
+            const yes = button(entry.folder ? 'Delete the folder' : 'Delete', async () => {
+                yes.disabled = true;
+                try { await post(`${API}/files/remove?${filesQuery({ p: inner })}`, {}); filesSaid(`Deleted "${entry.name}".`); await paintFiles(); }
+                catch (error) { yes.disabled = false; filesFailed(error.message); }
+            }, 'danger');
+            acts.append(p, yes, button('Cancel', menu));
+            yes.focus();
+        }
+        menu();
+        wrap.append(acts);
+        /* As icons, the actions open over the tiles, under this one -- toward the inside of the grid. */
+        if (filesView === 'icons') acts.classList.toggle('toward-left', wrap.offsetLeft + 240 > $('files-rows').clientWidth);
+        acts.querySelector('button')?.focus();
+    }
+    const filesSaid = (text) => { $('files-status').textContent = text; };
+    const filesFailed = (text) => { $('files-error').textContent = text; $('files-error').hidden = false; $('files-error').scrollIntoView?.({ block: 'nearest' }); };
+
+    /* Moved into a folder (by the menu, or dropped onto a folder or the trail). */
+    let movingPath = '';
+    async function moveTo(from, to) {
+        $('files-error').hidden = true;
+        const name = from.split('/').pop();
+        try { await post(`${API}/files/move?${filesQuery({ p: from })}`, { to }); filesSaid(`Moved "${name}" to ${to ? `${filesOf}/${to}` : filesOf}.`); }
+        catch (error) { filesFailed(error.message); }
+        await paintFiles({ keep: true });
+    }
+    /* A place a dragged entry can be dropped on: not itself, not inside itself, not where it already is. */
+    function moveTarget(element, to) {
+        const fits = () => movingPath && movingPath !== to && !to.startsWith(`${movingPath}/`) && movingPath.split('/').slice(0, -1).join('/') !== to;
+        element.addEventListener('dragover', (event) => {
+            if (!event.dataTransfer.types.includes(MOVE_TYPE) || !fits()) return;
+            event.preventDefault(); event.dataTransfer.dropEffect = 'move'; element.classList.add('drop-on');
+        });
+        element.addEventListener('dragleave', () => element.classList.remove('drop-on'));
+        element.addEventListener('drop', (event) => {
+            element.classList.remove('drop-on');
+            if (!event.dataTransfer.types.includes(MOVE_TYPE) || !fits()) return;
+            event.preventDefault(); event.stopPropagation();
+            const from = movingPath; movingPath = '';
+            void moveTo(from, to);
+        });
+    }
+
+    /* ---------- a name: a new file, a new folder, or a new name ---------- */
+    let naming = null;           /* { kind: 'file' | 'folder' | 'rename', entry? } */
+    function showNameForm(kind, entry, wrap) {
+        closeActions();
+        naming = { kind, entry };
+        const form = $('files-name');
+        $('files-name-label').textContent = kind === 'folder' ? 'Name of the new folder' : kind === 'file' ? 'Name of the new file' : `New name for "${entry.name}"`;
+        $('files-name-go').textContent = kind === 'rename' ? 'Rename' : 'Create';
+        $('files-name-error').hidden = true;
+        const input = $('files-name-input');
+        input.value = kind === 'rename' ? entry.name : kind === 'file' ? 'notes.txt' : '';
+        /* Renaming happens under its row (as icons, above them); making, at the top of the list. */
+        if (wrap && filesView === 'list') wrap.after(form); else $('files-rows').before(form);
+        form.hidden = false;
+        input.focus();
+        /* The name without its extension is selected: what one usually changes. */
+        const dot = input.value.lastIndexOf('.');
+        input.setSelectionRange(0, kind !== 'folder' && dot > 0 ? dot : input.value.length);
+        form.scrollIntoView?.({ block: 'nearest' });
+    }
+    function hideNameForm() {
+        const form = $('files-name');
+        form.hidden = true; naming = null;
+        if (form.parentElement !== $('files')) $('files-rows').before(form);
+    }
+    $('files-name-cancel').addEventListener('click', hideNameForm);
+    $('files-name').addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); hideNameForm(); } });
+    $('files-name').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!naming) return;
+        const name = $('files-name-input').value.trim();
+        const fail = (text) => { $('files-name-error').textContent = text; $('files-name-error').hidden = false; };
+        if (!name) return fail('A name is needed.');
+        if (name.includes('/') || name.includes('\\')) return fail('A name has no slash.');
+        if (name.startsWith('.')) return fail('A name does not start with a dot here: such files are hidden.');
+        const { kind, entry } = naming;
+        try {
+            if (kind === 'rename') {
+                if (name !== entry.name) await post(`${API}/files/rename?${filesQuery({ p: innerOf(entry.name) })}`, { name });
+                filesSaid(name === entry.name ? '' : `Renamed to "${name}".`);
+            } else {
+                await post(`${API}/files/make?${filesQuery()}`, { name, folder: kind === 'folder' });
+                filesSaid(kind === 'folder' ? `Folder "${name}" made.` : `File "${name}" made.`);
+            }
+        } catch (error) { fail(error.message); return; }
+        hideNameForm();
+        await paintFiles();
+        /* A new text file opens at once in the editor: it was made to be written. */
+        if (kind === 'file' && editable(name, 0)) void editFile(filesOf, innerOf(name), name);
+    });
+    $('files-new-file').addEventListener('click', () => showNameForm('file'));
+    $('files-new-folder').addEventListener('click', () => showNameForm('folder'));
+
+    /* ---------- uploads: by the buttons, or dropped from the computer ---------- */
+    let uploading = null;        /* { stopped, xhr } while one runs */
+    const pathOf = (item) => (item.dir ? `${item.dir}/${item.file.name}` : item.file.name);
+    const dropId = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`);
+    /* "A name already exists": asked, once per name, or once for all. */
+    function askTaken(name, as, others) {
+        return new Promise((done) => {
+            const box = $('files-ask');
+            $('files-ask-text').textContent = as === 'folder' ? `A folder named "${name}" is already here.` : `"${name}" already exists here.`;
+            $('files-ask-replace').hidden = as === 'folder';
+            $('files-ask-all').checked = false;
+            $('files-ask-all-line').hidden = others === 0;
+            $('files-ask-all-text').textContent = others === 1 ? 'Do the same for the 1 other name already taken' : `Do the same for the ${others} other names already taken`;
+            box.hidden = false;
+            box.scrollIntoView?.({ block: 'nearest' });
+            $('files-ask-keep').focus();
+            const answer = (choice) => () => {
+                box.hidden = true;
+                for (const id of ['files-ask-keep', 'files-ask-replace', 'files-ask-skip']) $(id).onclick = null;
+                done({ choice, all: $('files-ask-all').checked });
+            };
+            $('files-ask-keep').onclick = answer('keep'); $('files-ask-replace').onclick = answer('replace'); $('files-ask-skip').onclick = answer('skip');
+        });
+    }
+    function sendFile(address, file, progress) {
+        return new Promise((resolve, reject) => {
+            const x = new XMLHttpRequest();
+            uploading.xhr = x;
+            x.open('POST', address);
+            x.setRequestHeader('content-type', 'application/octet-stream');
+            x.upload.onprogress = (event) => progress(event.loaded);
+            x.onload = () => {
+                let j = {}; try { j = JSON.parse(x.responseText); } catch { /* not JSON */ }
+                if (x.status >= 200 && x.status < 300) resolve(j); else reject(new Error(j.error || 'The upload failed.'));
+            };
+            x.onerror = () => reject(new Error('The connection was lost.'));
+            x.onabort = () => reject(Object.assign(new Error('Stopped.'), { stopped: true }));
+            x.send(file);
+        });
+    }
+    /* `items`: [{ file, dir }] -- dir: the subfolders it goes in, for a folder dropped whole. `folders`: empty folders of the drop, made too. */
+    async function upload(items, { folders = [], hidden = 0, deep = 0 } = {}) {
+        $('files-error').hidden = true; filesSaid('');
+        if (uploading) { filesFailed('An upload is already running: wait for it, or stop it.'); return; }
+        if (!filesWritable) { filesFailed('Nothing can be added here.'); return; }
+        const notes = [];
+        if (hidden) notes.push(`${hidden} hidden file${hidden > 1 ? 's' : ''} or folder${hidden > 1 ? 's' : ''} (a name starting with a dot) left out`);
+        if (deep) notes.push(`${deep} folder${deep > 1 ? 's' : ''} deeper than ${DROP_DEPTH} levels left out`);
+        const large = items.filter((i) => i.file.size > IMPORT_MAX);
+        if (large.length) notes.push(`${large.length === 1 ? `"${large[0].file.name}" is` : `${large.length} files are`} over ${IMPORT_MAX / 1048576} MB, left out`);
+        items = items.filter((i) => i.file.size <= IMPORT_MAX);
+        if (items.length > DROP_FILES) { filesFailed(`At most ${DROP_FILES} files at a time: this was ${items.length}. Upload fewer at once.`); return; }
+        const total = items.reduce((n, i) => n + i.file.size, 0);
+        if (total > DROP_BYTES) { filesFailed(`At most ${DROP_BYTES / 1073741824} GB at a time: this was ${sizeOf(total)}.`); return; }
+        if (items.length === 0 && folders.length === 0) { filesFailed(notes.length ? `Nothing to upload: ${notes.join('; ')}.` : 'Nothing to upload.'); return; }
+        /* Where it goes is fixed now: moving elsewhere meanwhile does not move the upload. */
+        const where = { c: current, r: filesOf, p: filesAt };
+        const at = (route, extra = {}) => `${API}/files/${route}?${new URLSearchParams({ ...where, ...extra })}`;
+        uploading = { stopped: false, xhr: null };
+        try {
+            /* Names already taken: asked before anything is sent. */
+            let taken = [];
+            try { taken = (await post(at('taken'), { names: items.map(pathOf) })).taken; } catch (error) { filesFailed(error.message); return; }
+            const as = new Map(taken.map((x) => [x.name, x.as]));
+            const blocked = items.filter((i) => as.get(pathOf(i)) === 'blocked');
+            if (blocked.length) notes.push(`${blocked.length} left out: a file is where ${blocked.length > 1 ? 'their folder goes' : 'its folder goes'}`);
+            items = items.filter((i) => as.get(pathOf(i)) !== 'blocked');
+            const clashes = items.filter((i) => as.has(pathOf(i)));
+            let always = null;
+            for (const [k, item] of clashes.entries()) {
+                const kind = as.get(pathOf(item));
+                let choice = always && !(always === 'replace' && kind === 'folder') ? always : null;
+                if (!choice) { const a = await askTaken(pathOf(item), kind, clashes.length - k - 1); choice = a.choice; if (a.all) always = choice; }
+                item.exists = choice;
+            }
+            const sending = items.filter((i) => i.exists !== 'skip');
+            const skipped = items.length - sending.length;
+            const bytes = sending.reduce((n, i) => n + i.file.size, 0);
+            const bar = $('files-progress');
+            bar.hidden = false;
+            let done = 0; let sent = 0; let failed = 0; const errors = [];
+            const draw = (part, name, n) => {
+                const pct = bytes ? Math.min(100, Math.round(((done + part) / bytes) * 100)) : 100;
+                $('files-progress-text').textContent = `Uploading ${n} of ${sending.length}: ${name}`;
+                $('files-progress-bar').firstElementChild.style.width = `${pct}%`;
+                $('files-progress-bar').setAttribute('aria-valuenow', String(pct));
+                $('files-progress-bytes').textContent = `${sizeOf(done + part)} of ${sizeOf(bytes)}`;
+            };
+            const id = dropId();
+            for (const [k, item] of sending.entries()) {
+                if (uploading.stopped) break;
+                draw(0, pathOf(item), k + 1);
+                try {
+                    await sendFile(at('import', { name: item.file.name, dir: item.dir, exists: item.exists ?? 'keep', batch: id }), item.file, (n) => draw(n, pathOf(item), k + 1));
+                    sent++;
+                } catch (error) {
+                    if (error.stopped) break;
+                    failed++; errors.push(`${pathOf(item)}: ${error.message}`);
+                }
+                done += item.file.size;
+            }
+            /* Empty folders of a folder dropped whole: made too, the shallow first. */
+            for (const folder of folders.sort((a, b) => a.split('/').length - b.split('/').length)) {
+                if (uploading.stopped) break;
+                const parent = folder.split('/').slice(0, -1).join('/');
+                await post(`${API}/files/make?${new URLSearchParams({ ...where, p: [where.p, parent].filter(Boolean).join('/') })}`, { name: folder.split('/').pop(), folder: true }).catch(() => {});
+            }
+            bar.hidden = true;
+            const said = [uploading.stopped ? `Stopped: ${sent} of ${sending.length} uploaded` : `${sent} file${sent === 1 ? '' : 's'} uploaded`];
+            if (skipped) said.push(`${skipped} skipped`);
+            filesSaid(`${said.join(', ')}.${notes.length ? ` ${notes.join('; ')}.` : ''}`);
+            if (failed) filesFailed(`${failed} could not be uploaded. ${errors.slice(0, 4).join(' ')}${errors.length > 4 ? ' ...' : ''}`);
+        } finally {
+            uploading = null;
+            $('files-progress').hidden = true; $('files-ask').hidden = true;
+            if (where.r === filesOf && current === where.c) await paintFiles({ keep: true });
+        }
+    }
+    $('files-progress-stop').addEventListener('click', () => { if (uploading) { uploading.stopped = true; uploading.xhr?.abort(); } });
+
+    /* By the buttons: files, or a whole folder where the browser can pick one. */
+    const FOLDER_PICK = 'webkitdirectory' in document.createElement('input') && !/iPhone|iPad|iPod/.test(navigator.userAgent);
+    $('files-import-folder').hidden = !FOLDER_PICK;
+    $('files-pick-folder').webkitdirectory = FOLDER_PICK;
+    $('files-import').addEventListener('click', () => $('files-pick').click());
+    $('files-import-folder').addEventListener('click', () => $('files-pick-folder').click());
+    $('files-pick').addEventListener('change', async () => {
+        const items = [...$('files-pick').files].map((file) => ({ file, dir: '' }));
+        $('files-pick').value = '';
+        await upload(items);
+    });
+    $('files-pick-folder').addEventListener('change', async () => {
+        let hidden = 0; let deep = 0;
+        const items = [];
+        for (const file of $('files-pick-folder').files) {
+            const parts = (file.webkitRelativePath || file.name).split('/');
+            if (parts.some((p) => p.startsWith('.'))) { hidden++; continue; }
+            if (parts.length - 1 > DROP_DEPTH) { deep++; continue; }
+            items.push({ file, dir: parts.slice(0, -1).join('/') });
+        }
+        $('files-pick-folder').value = '';
+        await upload(items, { hidden, deep });
+    });
+
+    /* Dropped from the computer: files, and folders with all they hold. */
+    async function droppedItems(transfer) {
+        const entries = [...(transfer.items ?? [])].filter((i) => i.kind === 'file').map((i) => i.webkitGetAsEntry?.()).filter(Boolean);
+        if (entries.length === 0) return { items: [...transfer.files].map((file) => ({ file, dir: '' })), folders: [], hidden: 0, deep: 0 };
+        const items = []; const folders = []; let hidden = 0; let deep = 0;
+        async function walk(entry, dir, depth) {
+            if (items.length > DROP_FILES) return;
+            if (entry.name.startsWith('.')) { hidden++; return; }
+            if (entry.isFile) { items.push({ file: await new Promise((ok, no) => entry.file(ok, no)), dir }); return; }
+            if (depth >= DROP_DEPTH) { deep++; return; }
+            const inside = dir ? `${dir}/${entry.name}` : entry.name;
+            const reader = entry.createReader();
+            let any = false;
+            /* A folder is read in pieces until a piece comes back empty. */
+            for (;;) {
+                const piece = await new Promise((ok, no) => reader.readEntries(ok, no));
+                if (piece.length === 0) break;
+                for (const e of piece) { any = true; await walk(e, inside, depth + 1); }
+            }
+            if (!any) folders.push(inside);
+        }
+        for (const entry of entries) await walk(entry, '', 0);
+        return { items, folders, hidden, deep };
+    }
+    const carriesFiles = (event) => [...(event.dataTransfer?.types ?? [])].includes('Files') && ![...(event.dataTransfer?.types ?? [])].includes(MOVE_TYPE);
+    let dragDepth = 0;
+    const dropZone = $('files-drop');
+    $('files').addEventListener('dragenter', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        dragDepth++;
+        $('files-drop-text').textContent = !filesOf ? 'There is no folder here to upload into.' : filesWritable ? `Drop to upload into ${[filesOf, filesAt].filter(Boolean).join('/')}${DEVICE ? '' : `, in ${current}`}` : 'This folder is read-only: nothing can be added here.';
+        dropZone.dataset.allowed = String(Boolean(filesOf && filesWritable));
+        /* Over the part of the sheet in sight, wherever it was scrolled to. */
+        dropZone.style.top = `${$('files').scrollTop + 8}px`; dropZone.style.height = `${$('files').clientHeight - 16}px`;
+        dropZone.hidden = false;
+    });
+    $('files').addEventListener('dragover', (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = filesOf && filesWritable ? 'copy' : 'none';
+    });
+    $('files').addEventListener('dragleave', (event) => {
+        if (!carriesFiles(event)) return;
+        dragDepth = Math.max(0, dragDepth - 1);
+        if (dragDepth === 0) dropZone.hidden = true;
+    });
+    $('files').addEventListener('drop', async (event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        dragDepth = 0; dropZone.hidden = true;
+        if (!filesOf || !filesWritable) return;
+        let found;
+        try { found = await droppedItems(event.dataTransfer); } catch { filesFailed('What was dropped could not be read.'); return; }
+        await upload(found.items, found);
+    });
+    /* A file dropped anywhere else is not opened by the browser in place of this page. */
+    window.addEventListener('dragover', (event) => { if (carriesFiles(event)) event.preventDefault(); });
+    window.addEventListener('drop', (event) => { if (carriesFiles(event)) event.preventDefault(); });
+
     /* ---------- a file, shown here ---------- */
     /* WHAT IS SHOWN MAY HAVE BEEN WRITTEN BY A TOOL. So a file is never
        opened as a page of this site: a picture is drawn as a picture, text is
@@ -2688,9 +3168,14 @@
        from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
+        editing = null;
+        delete $('viewer').dataset.editing;
         $('preview-body').replaceChildren();
+        $('preview-edit').hidden = true;
+        const was = !$('viewer').hidden;
         $('viewer').hidden = true;
         if ($('files').hidden && $('panel').hidden) focusTerminal();
+        if (was && filesChanged && !$('files').hidden) { filesChanged = false; void paintFiles(); }
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
@@ -2707,6 +3192,9 @@
             $('panel').hidden = true; await paintFiles(); $('files').hidden = false;
         };
         $('viewer').hidden = false;
+        /* Text in a folder this conversation may write in: editable here. */
+        $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
+        $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
@@ -2776,10 +3264,185 @@
             } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
     }
-    $('preview-close').addEventListener('click', closePreview);
-    /* Outside the window, or Escape: closed too. */
-    $('viewer').addEventListener('click', (event) => { if (event.target === $('viewer')) closePreview(); });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('viewer').hidden) { event.preventDefault(); event.stopPropagation(); closePreview(); } }, true);
+    $('preview-close').addEventListener('click', () => leavePreview());
+    /* Outside the window, or Escape: closed too -- unless what is edited is not saved. */
+    $('viewer').addEventListener('click', (event) => { if (event.target === $('viewer')) leavePreview(); });
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('viewer').hidden) { event.preventDefault(); event.stopPropagation(); leavePreview(); } }, true);
+
+    /* ---------- a text file, edited here ---------- */
+    /* A plain editor: the text, its lines, Save and Cancel. It is saved at the
+       version it was read at; if the tool wrote the file meanwhile, the server
+       refuses (files.mjs) and the person chooses: take the tool's version,
+       write over it, or keep both. */
+    const canWrite = (tab) => {
+        const known = filesTabs.find((r) => r.name === tab);
+        if (known) return known.access === 'write';
+        const here = conversations.find((x) => x.name === current);
+        if (tab === 'work') return here?.work === 'kept' && !noTerminal();
+        return (here?.resources ?? []).some((r) => r.name === tab && r.access === 'write') || deviceShared.some((s) => s.name === tab && s.access === 'write');
+    };
+    const dirty = () => editing !== null && editing.area.value !== editing.saved;
+    /* Leaving the window: unsaved changes are asked about first, never lost by a stray tap. */
+    function leavePreview() {
+        if (dirty()) { askDiscard(); return; }
+        closePreview();
+    }
+    function askDiscard(then = closePreview) {
+        const box = $('preview-body').querySelector('.edit-ask');
+        if (!box) return;
+        box.replaceChildren();
+        const p = document.createElement('b'); p.textContent = 'Your changes are not saved.';
+        const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save them';
+        save.addEventListener('click', () => { box.hidden = true; void saveEdit(); });
+        const drop = document.createElement('button'); drop.type = 'button'; drop.className = 'danger'; drop.textContent = 'Discard them';
+        drop.addEventListener('click', () => { editing.saved = editing.area.value; then(); });
+        const stay = document.createElement('button'); stay.type = 'button'; stay.textContent = 'Keep editing';
+        stay.addEventListener('click', () => { box.hidden = true; editing.area.focus(); });
+        const row = document.createElement('div'); row.className = 'row'; row.append(save, drop, stay);
+        box.append(p, row); box.hidden = false;
+        save.focus();
+    }
+    async function editFile(tab, inner, name) {
+        closePreview();
+        const query = new URLSearchParams({ c: current, r: tab, p: inner });
+        $('preview-name').textContent = name;
+        $('preview-download').href = `${API}/files/download?${query}`; $('preview-download').setAttribute('download', name);
+        $('preview-where').hidden = true; $('preview-edit').hidden = true;
+        $('preview-note').textContent = 'Loading...'; $('preview-note').hidden = false;
+        $('viewer').hidden = false;
+        let read;
+        try {
+            const r = await fetch(`${API}/files/text?${query}`);
+            read = await r.json();
+            if (!r.ok) throw new Error(read.error || 'The file could not be read.');
+        } catch (error) { $('preview-note').textContent = error.message; return; }
+        if ($('viewer').hidden || $('preview-name').textContent !== name) return;
+        $('preview-note').hidden = true;
+        $('viewer').dataset.editing = 'true';
+        const body = $('preview-body');
+        const area = document.createElement('textarea');
+        area.className = 'editor'; area.value = read.text; area.spellcheck = false;
+        area.setAttribute('autocapitalize', 'off'); area.setAttribute('autocomplete', 'off'); area.setAttribute('wrap', 'off');
+        area.setAttribute('aria-label', `Text of ${name}`);
+        const ask = document.createElement('div'); ask.className = 'edit-ask files-card'; ask.hidden = true; ask.setAttribute('role', 'alertdialog');
+        const bar = document.createElement('div'); bar.className = 'row edit-bar';
+        const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save'; save.id = 'edit-save';
+        const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.id = 'edit-cancel';
+        const info = document.createElement('small'); info.className = 'hint'; info.id = 'edit-info'; info.setAttribute('role', 'status');
+        bar.append(save, cancel, info);
+        body.replaceChildren(ask, area, bar);
+        editing = { tab, inner, name, version: read.version, saved: read.text, area, info, ask };
+        let told = '';
+        const count = () => {
+            let lines = 1; const text = area.value;
+            for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) lines++;
+            const bytes = new TextEncoder().encode(text).length;
+            info.textContent = `${lines} line${lines === 1 ? '' : 's'}, ${sizeOf(bytes)}${bytes > EDIT_MAX ? ` - over ${EDIT_MAX / 1048576} MB, too large to save here` : ''}${dirty() ? ' - not saved' : told ? ` - ${told}` : ''}`;
+            save.disabled = bytes > EDIT_MAX;
+        };
+        editing.count = count; editing.tell = (text) => { told = text; count(); };
+        let pending = 0;
+        area.addEventListener('input', () => { told = ''; cancelAnimationFrame(pending); pending = requestAnimationFrame(count); });
+        area.addEventListener('keydown', (event) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveEdit(); }
+            /* Tab writes a tab, as in any editor; Escape (handled above) still leaves. */
+            if (event.key === 'Tab' && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey) { event.preventDefault(); area.setRangeText('\t', area.selectionStart, area.selectionEnd, 'end'); area.dispatchEvent(new Event('input')); }
+        });
+        save.addEventListener('click', () => { void saveEdit(); });
+        cancel.addEventListener('click', () => {
+            const back = () => { const e = editing; editing = null; void preview(e.tab, e.inner, e.name, new TextEncoder().encode(e.saved).length); };
+            if (dirty()) askDiscard(back); else back();
+        });
+        count();
+        area.focus();
+        area.setSelectionRange(0, 0); area.scrollTop = 0;
+    }
+    /* `how`: undefined (at the version read), 'any' (over whatever is there), 'copy' (beside it). */
+    async function saveEdit(how) {
+        if (!editing) return;
+        const e = editing;
+        const text = e.area.value;
+        const query = new URLSearchParams({ c: current, r: e.tab, p: e.inner, ...(how === 'copy' ? { copy: '1' } : { version: how === 'any' ? 'any' : e.version }) });
+        e.ask.hidden = true;
+        let j;
+        try {
+            const r = await fetch(`${API}/files/save?${query}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: new Blob([text]) });
+            j = await r.json().catch(() => ({}));
+            if (r.status === 409 && j.kind === 'changed') { changedMeanwhile(); return; }
+            if (!r.ok) throw new Error(j.error || 'It could not be saved.');
+        } catch (error) { e.tell(`not saved: ${error.message}`); return; }
+        if (editing !== e) return;
+        filesChanged = true;
+        if (how === 'copy') {
+            /* Saved beside it: what is edited from now on is the copy. */
+            e.inner = [...e.inner.split('/').slice(0, -1), j.name].join('/'); e.name = j.name;
+            $('preview-name').textContent = j.name;
+            $('preview-download').href = `${API}/files/download?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`; $('preview-download').setAttribute('download', j.name);
+        }
+        e.version = j.version; e.saved = text;
+        e.tell(how === 'copy' ? `saved as "${j.name}"; the file the tool wrote is left as it was` : `saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
+    }
+    /* The tool wrote the file after it was opened here: nothing was written; the person chooses. */
+    function changedMeanwhile() {
+        const e = editing; const box = e.ask;
+        box.replaceChildren();
+        const p = document.createElement('b'); p.textContent = 'This file changed since you opened it: the tool may have written it. Your text was not saved.';
+        /* What changed, and when: read again, compared line by line with what is in the editor. */
+        const look = document.createElement('button'); look.type = 'button'; look.textContent = 'Show what is different';
+        look.addEventListener('click', async () => {
+            look.disabled = true;
+            try {
+                const r = await fetch(`${API}/files/text?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`);
+                const theirs = await r.json();
+                if (!r.ok) throw new Error(theirs.error || 'Its new version could not be read.');
+                const when = document.createElement('small'); when.className = 'hint';
+                when.textContent = `Changed at ${new Date(theirs.modified).toLocaleString()}. Lines with - are only in its new version, lines with + only in yours.`;
+                look.replaceWith(when, differences(theirs.text, e.area.value));
+            } catch (error) { look.disabled = false; look.textContent = error.message; }
+        });
+        const reload = document.createElement('button'); reload.type = 'button'; reload.textContent = 'Load its new version (your changes are lost)';
+        reload.addEventListener('click', async () => {
+            const keep = e.area.value; e.saved = keep;     /* not "dirty" while it is replaced */
+            editing = null;
+            await editFile(e.tab, e.inner, e.name);
+        });
+        const over = document.createElement('button'); over.type = 'button'; over.className = 'danger'; over.textContent = 'Overwrite it with mine';
+        over.addEventListener('click', () => { void saveEdit('any'); });
+        const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'primary'; copy.textContent = 'Save mine as a copy';
+        copy.addEventListener('click', () => { void saveEdit('copy'); });
+        const row = document.createElement('div'); row.className = 'row'; row.append(copy, over, reload);
+        box.append(p, look, row); box.hidden = false;
+        copy.focus();
+        e.tell('not saved: changed meanwhile');
+    }
+    /* Two texts, line by line: what only one has, with three lines around each change. */
+    function differences(a, b) {
+        const pre = document.createElement('pre'); pre.className = 'diff';
+        const x = a.split('\n'); const y = b.split('\n');
+        const line = (cls, text) => { const s = document.createElement('span'); s.className = cls; s.textContent = text; pre.append(s); };
+        if (x.length * y.length > 4_000_000) { line('gap', 'These texts are too long to be compared here.'); return pre; }
+        /* The longest run of lines both share (LCS), then walked from the top. */
+        const n = x.length; const m = y.length; const w = m + 1;
+        const len = new Uint32Array((n + 1) * w);
+        for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) len[i * w + j] = x[i] === y[j] ? len[(i + 1) * w + j + 1] + 1 : Math.max(len[(i + 1) * w + j], len[i * w + j + 1]);
+        const out = [];
+        let i = 0; let j = 0;
+        while (i < n || j < m) {
+            if (i < n && j < m && x[i] === y[j]) { out.push([' ', x[i]]); i++; j++; }
+            else if (j < m && (i >= n || len[i * w + j + 1] >= len[(i + 1) * w + j])) { out.push(['+', y[j]]); j++; }
+            else { out.push(['-', x[i]]); i++; }
+        }
+        if (!out.some(([k]) => k !== ' ')) { line('gap', 'The texts are the same.'); return pre; }
+        const near = out.map((_, k) => out.slice(Math.max(0, k - 3), k + 4).some(([kind]) => kind !== ' '));
+        let skipped = false;
+        out.forEach(([kind, text], k) => {
+            if (!near[k]) { if (!skipped) line('gap', '...'); skipped = true; return; }
+            skipped = false;
+            line(kind === '+' ? 'add' : kind === '-' ? 'del' : '', `${kind} ${text}`);
+        });
+        return pre;
+    }
+
 
     /* ---------- a path the tool printed, opened here ---------- */
     /* THE PAGE reads its own screen for this, never the server: a path under
@@ -2869,22 +3532,6 @@
 
     $('files-open').addEventListener('click', async () => { for (const id of ['panel', 'gitview']) $(id).hidden = true; leavePlace({ keepView: true, panel: false }); await paintFiles(); $('files').hidden = false; });
     $('files-close').addEventListener('click', () => { $('files').hidden = true; focusTerminal(); });
-    $('files-import').addEventListener('click', () => $('files-pick').click());
-    $('files-pick').addEventListener('change', async () => {
-        const status = $('files-status');
-        $('files-error').hidden = true;
-        for (const file of $('files-pick').files) {
-            status.textContent = `Importing ${file.name}...`;
-            try {
-                const r = await fetch(`${API}/files/import?${filesQuery({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
-                const j = await r.json().catch(() => ({}));
-                if (!r.ok) throw new Error(j.error || 'The import failed.');
-                status.textContent = `Imported as ${j.name}.`;
-            } catch (error) { status.textContent = ''; $('files-error').textContent = `${file.name}: ${error.message}`; $('files-error').hidden = false; }
-        }
-        $('files-pick').value = '';
-        await paintFiles();
-    });
 
     /* ---------- sign-in mailbox ---------- */
     /* While a conversation with a mailbox is open, the page asks every few

@@ -63,21 +63,48 @@
         <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
         <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
         <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
-        <div id="files-path" class="path"></div>
-        <div id="files-rows"></div>
-        <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        <div class="files-bar">
+          <div id="files-path" class="path"></div>
+          <div id="files-views" class="levels" role="group" aria-label="Show as">
+            <button type="button" data-view="list" aria-pressed="true" title="Show as a list">List</button><button type="button" data-view="icons" aria-pressed="false" title="Show as icons, with pictures">Icons</button>
+          </div>
+        </div>
         <div class="row" id="files-actions" hidden>
-          <button type="button" id="files-import" class="primary">Import a file or a photo</button>
+          <button type="button" id="files-import" class="primary"><span class="long">Upload files</span><span class="short">Upload</span></button>
+          <button type="button" id="files-import-folder" hidden><span class="long">Upload a folder</span><span class="short">Folder</span></button>
+          <button type="button" id="files-new-file"><span class="long">New file</span><span class="short">+ File</span></button>
+          <button type="button" id="files-new-folder"><span class="long">New folder</span><span class="short">+ Folder</span></button>
+          <span id="files-drop-hint" class="hint" hidden>or drop files and folders here</span>
           <input type="file" id="files-pick" multiple hidden>
+          <input type="file" id="files-pick-folder" multiple hidden>
           <span id="files-status" class="hint" role="status"></span>
         </div>
         <p id="files-readonly" class="hint" hidden>Attached read-only: nothing can be imported here.</p>
         <p id="files-error" class="error" role="alert" hidden></p>
+        <div id="files-progress" class="files-card" hidden>
+          <div class="row"><b id="files-progress-text">Uploading...</b><span class="sp"></span><button type="button" id="files-progress-stop">Stop</button></div>
+          <div class="bar" role="progressbar" aria-labelledby="files-progress-text" aria-valuemin="0" aria-valuemax="100" id="files-progress-bar"><span></span></div>
+          <small id="files-progress-bytes" class="hint"></small>
+        </div>
+        <div id="files-ask" class="files-card" role="alertdialog" aria-labelledby="files-ask-text" hidden>
+          <b id="files-ask-text"></b>
+          <div class="row"><button type="button" id="files-ask-keep" class="primary">Keep both</button><button type="button" id="files-ask-replace">Replace</button><button type="button" id="files-ask-skip">Skip</button></div>
+          <label class="check" id="files-ask-all-line"><input type="checkbox" id="files-ask-all"> <span id="files-ask-all-text">Do the same for the others</span></label>
+        </div>
+        <form id="files-name" class="files-card" autocomplete="off" hidden>
+          <label for="files-name-input" id="files-name-label">Name</label>
+          <input id="files-name-input" maxlength="120" spellcheck="false" autocapitalize="none" required>
+          <p id="files-name-error" class="error" role="alert" hidden></p>
+          <div class="row"><button type="submit" class="primary" id="files-name-go">Create</button><button type="button" id="files-name-cancel">Cancel</button></div>
+        </form>
+        <div id="files-rows" data-view="list"></div>
+        <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        <div id="files-drop" hidden><p id="files-drop-text">Drop to upload here</p></div>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
         <div id="viewer-card">
-          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
           <p id="preview-note" class="hint" hidden></p>
           <div id="preview-body"></div>
         </div>

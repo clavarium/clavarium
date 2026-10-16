@@ -254,7 +254,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await tablet.menu();
     await tablet.page.locator('#files-open').click();
     const tab = tablet.page.locator('#files-tabs button', { hasText: 'recipes' });
-    assert.match(await tab.innerText(), /recipes - read \(given to this device\)/);
+    assert.match(await tab.innerText(), /recipes - read-only \(given to this device\)/);
     await tablet.page.locator('#files-close').click();
 
     /* WHO HAS WHAT, by device: a card with a name, what it has, each thing with its way back. */

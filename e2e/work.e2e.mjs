@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
 
 test('what the tool makes where it works is seen in Files, at once, and can be downloaded', { skip: SKIP }, async (t) => {
@@ -21,6 +23,32 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     /* Closing the window leaves the list as it was. */
     await me.page.locator('#preview-close').click();
     assert.equal(await me.page.locator('#files-rows').isVisible(), true);
+    /* Changed by hand where it may write: a file made and edited; written by the tool meanwhile, nothing is lost. */
+    const work = join(b.dir, 'data', 'work', 'writer');
+    await me.page.locator('#files-new-file').click();
+    await me.page.fill('#files-name-input', 'plan.txt');
+    await me.page.locator('#files-name-go').click();
+    await me.until('the editor opens on it', async () => me.page.locator('.editor').isVisible());
+    await me.page.locator('.editor').fill('step one\n');
+    await me.page.locator('#edit-save').click();
+    await me.until('it is saved', async () => existsSync(join(work, 'plan.txt')) && readFileSync(join(work, 'plan.txt'), 'utf8') === 'step one\n');
+    writeFileSync(join(work, 'plan.txt'), 'the tool wrote this\n');
+    await me.page.locator('.editor').fill('step two\n');
+    await me.page.locator('#edit-save').click();
+    await me.until('the change meanwhile is said', async () => me.page.locator('.edit-ask').isVisible());
+    assert.equal(readFileSync(join(work, 'plan.txt'), 'utf8'), 'the tool wrote this\n');
+    await me.page.locator('.edit-ask button', { hasText: 'Save mine as a copy' }).click();
+    await me.until('mine is kept beside it', async () => existsSync(join(work, 'plan (2).txt')));
+    await me.page.locator('#preview-close').click();
+    /* Shown as icons, kept on this device; a folder is deleted after a confirmation in the page. */
+    await me.page.locator('#files-views button[data-view=icons]').click();
+    await me.until('as icons', async () => (await me.page.locator('#files-rows').getAttribute('data-view')) === 'icons');
+    assert.equal(await me.page.evaluate(() => localStorage.getItem('clavarium-files-view')), 'icons');
+    await me.page.locator('.entry[data-name="drafts"] .more').click();
+    await me.page.locator('.entry.open .acts button', { hasText: 'Delete' }).click();
+    await me.page.locator('.entry.open .acts button', { hasText: 'Delete the folder' }).click();
+    await me.until('the folder is gone', async () => !existsSync(join(work, 'drafts')));
+    await me.page.locator('#files-views button[data-view=list]').click();
     await me.page.locator('#files-close').click();
     /* Archived: its work is put aside on the server, not erased. */
     assert.equal((await me.api('/api/conversations/writer/archive', {})).status, 200);

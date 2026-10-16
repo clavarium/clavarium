@@ -780,3 +780,129 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
    resized under the page) but cannot be touched by mistake. With no conversation, its bar says nothing: gone. */
 #app:is([data-place="access"], [data-place="settings"]) #room > :is(#keys, #shortcuts) { visibility: hidden; }
 #app[data-current=""]:is([data-place="access"], [data-place="settings"]) #room > header { display: none; }
+
+/* The form that makes a conversation keeps its height, and the conversations
+   under it keep theirs: on a phone the whole column scrolls (seen: rows
+   squashed under the open form). */
+#create { flex: 0 0 auto; }
+.item { flex-shrink: 0; }
+#list:has(> #create:not([hidden])) #items { flex: 0 0 auto; overflow: visible; }
+
+/* ---------- Files: list or icons, changes by hand, uploads, the editor ---------- */
+#files { --t: var(--ink2); }
+.files-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.files-bar .path { flex: 1 1 200px; min-width: 0; }
+.path button { overflow-wrap: anywhere; text-align: left; }
+#files-views button { padding: 5px 12px; font-weight: 600; }
+#files-actions { gap: 6px; }
+#files-status { flex-basis: 100%; }
+#files-status:empty { display: none; }
+.files-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--bar); border: 1px solid var(--line); border-radius: 10px; }
+.files-card .sp { flex: 1; }
+.files-card b { overflow-wrap: anywhere; }
+#files-ask, #files-progress { position: sticky; top: 0; z-index: 2; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
+#files-ask { border-color: var(--brass); }
+#files-name input { font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; width: min(100%, 420px); }
+#files-name label { font-size: .75rem; color: var(--ink2); }
+.bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.bar > span { display: block; height: 100%; width: 0; background: var(--brass); transition: width .2s; }
+@media (prefers-reduced-motion: reduce) { .bar > span { transition: none; } }
+
+/* One entry: its row (or tile), its "..." button, and its actions when opened. */
+.entry { position: relative; display: flex; flex-wrap: wrap; align-items: center; min-width: 0; }
+#files-rows[data-view="list"] .entry { border-top: 1px solid var(--line); }
+#files-rows[data-view="list"] .entry .file { flex: 1 1 0; border-top: 0; }
+.entry .more { flex: 0 0 auto; min-width: 40px; padding: 4px 8px; font-size: 1.125rem; line-height: 1; background: transparent; border-color: transparent; color: var(--ink2); }
+.entry .more:hover, .entry .more[aria-expanded="true"] { border-color: var(--line); background: var(--button, #222c38); color: var(--ink); }
+.entry .acts { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0 10px 44px; }
+.entry .acts label { font-size: .75rem; color: var(--ink2); flex-basis: 100%; }
+.entry .acts select { font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-height: 36px; max-width: 100%; }
+.entry .acts .sure { margin: 0; flex-basis: 100%; color: var(--ink); font-weight: 600; }
+.entry .acts .hint { flex-basis: 100%; }
+.entry.dragging { opacity: .45; }
+.drop-on, .path button.drop-on { outline: 2px dashed var(--brass); outline-offset: -2px; background: rgba(210, 169, 78, .16) !important; }
+#files-rows > form { flex-basis: 100%; }
+
+/* ICONS: a grid of tiles; a picture is its own thumbnail. */
+#files-rows[data-view="icons"] { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; align-items: start; }
+#files-rows[data-view="icons"] > form { grid-column: 1 / -1; }
+#files-rows[data-view="icons"] .entry { display: block; }
+#files-rows[data-view="icons"] .entry.open { z-index: 3; }
+#files-rows[data-view="icons"] .entry .acts { position: absolute; top: calc(100% - 4px); left: 0; z-index: 3; width: 240px; padding: 8px; flex-direction: column; align-items: stretch; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px rgba(0, 0, 0, .35); }
+#files-rows[data-view="icons"] .entry .acts.toward-left { left: auto; right: 0; }
+#files-rows[data-view="icons"] .entry .acts button { text-align: left; }
+/* A mouse: the "..." of a tile shows on the tile pointed at, or when it has the focus. */
+@media (pointer: fine) {
+  #files-rows[data-view="icons"] .entry:not(:hover):not(:focus-within):not(.open) > .more { opacity: 0; }
+}
+#files-rows[data-view="icons"] .file { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 100%; padding: 8px 6px; border: 1px solid transparent; border-radius: 10px; text-align: center; min-height: 0; }
+#files-rows[data-view="icons"] .file:hover, #files-rows[data-view="icons"] .file:focus-visible { border-color: var(--line); background: var(--bar); }
+#files-rows[data-view="icons"] .look { display: flex; align-items: center; justify-content: center; width: 100%; height: 92px; border-radius: 8px; overflow: hidden; }
+#files-rows[data-view="icons"] .look img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; background: repeating-conic-gradient(var(--bar) 0 25%, var(--panel) 0 50%) 0 0 / 14px 14px; }
+#files-rows[data-view="icons"] .label { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; font-size: .8125rem; line-height: 1.3; width: 100%; }
+#files-rows[data-view="icons"] .file small { font-size: .6875rem; }
+#files-rows[data-view="icons"] .entry > .more { position: absolute; top: 4px; right: 4px; min-width: 34px; min-height: 34px; padding: 2px 6px; background: var(--panel); border-color: var(--line); }
+.icon { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 58px; height: 68px; color: var(--t); }
+.file[data-folder="true"] .icon { width: 72px; height: 60px; }
+.icon svg { width: 100%; height: 100%; overflow: visible; }
+.icon .body { fill: color-mix(in srgb, currentColor 16%, var(--panel)); stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.icon .line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
+.icon .ext { position: absolute; left: 0; right: 0; bottom: 12px; font: 700 .625rem var(--sans); letter-spacing: .04em; text-align: center; color: currentColor; }
+.icon[data-type="folder"] { color: var(--brass); }
+.icon[data-type="image"] { color: #4fa3e0; }
+.icon[data-type="pdf"] { color: #e5605a; }
+.icon[data-type="code"] { color: #9a86f0; }
+.icon[data-type="sheet"] { color: #3fb27f; }
+.icon[data-type="doc"] { color: #5b8ff0; }
+.icon[data-type="archive"] { color: #c9a227; }
+.icon[data-type="audio"] { color: #de7fb7; }
+.icon[data-type="video"] { color: #e08a4f; }
+:root[data-theme="light"] .icon[data-type="image"] { color: #1f6fb2; }
+:root[data-theme="light"] .icon[data-type="pdf"] { color: #b3261e; }
+:root[data-theme="light"] .icon[data-type="code"] { color: #6247c9; }
+:root[data-theme="light"] .icon[data-type="sheet"] { color: #1f7a5a; }
+:root[data-theme="light"] .icon[data-type="doc"] { color: #2a5fc9; }
+:root[data-theme="light"] .icon[data-type="archive"] { color: #8a6d0b; }
+:root[data-theme="light"] .icon[data-type="audio"] { color: #a83c7a; }
+:root[data-theme="light"] .icon[data-type="video"] { color: #a3581a; }
+:root[data-theme="light"] .icon[data-type="folder"] { color: #9a7220; }
+
+/* Dropped from the computer: the whole sheet says where it goes. */
+#files-drop { position: absolute; left: 8px; right: 8px; z-index: 4; display: flex; align-items: center; justify-content: center; padding: 20px; border: 3px dashed var(--brass); border-radius: 14px; background: color-mix(in srgb, var(--panel) 82%, transparent); pointer-events: none; }
+#files-drop[data-allowed="false"] { border-color: var(--ink2); }
+#files-drop p { margin: 0; font-size: 1.125rem; font-weight: 600; text-align: center; overflow-wrap: anywhere; max-width: 32ch; }
+
+/* The editor: the text, its lines, Save and Cancel. */
+#preview-body:has(> .editor) { display: flex; flex-direction: column; gap: 8px; overflow: hidden; }
+.editor { flex: 1 1 auto; min-height: 200px; width: 100%; resize: none; font: .8125rem/1.5 ui-monospace, Menlo, Consolas, monospace; tab-size: 4; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; white-space: pre; overflow: auto; }
+.editor:focus-visible { outline: 2px solid var(--brass); outline-offset: 0; }
+.edit-bar { gap: 8px; }
+.edit-bar small { flex: 1 1 160px; }
+.edit-ask { border-color: var(--warn); }
+@media (max-width: 700px) {
+  #files-rows[data-view="icons"] { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+  #files-rows[data-view="icons"] .look { height: 78px; }
+  #files-rows[data-view="icons"] .entry .acts { width: min(240px, calc(100vw - 40px)); }
+  .entry .acts { padding-left: 0; }
+  .entry .more { min-height: 44px; min-width: 44px; }
+  #files-actions { gap: 6px 6px; }
+}
+
+.entry .acts .acts-name { display: none; overflow-wrap: anywhere; font-size: .8125rem; }
+#files-rows[data-view="icons"] .entry .acts .acts-name { display: block; padding: 2px 4px 4px; }
+#files-actions .short { display: none; }
+@media (max-width: 700px) {
+  /* One row of short labels on a phone: the files come first. */
+  #files-actions button { flex: 1 1 0; min-width: 0; padding-inline: 6px; }
+  #files-actions .long { display: none; }
+  #files-actions .short { display: inline; }
+}
+.diff { margin: 0; max-height: 40vh; overflow: auto; font: .75rem/1.45 ui-monospace, Menlo, Consolas, monospace; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.diff span { display: block; padding: 0 10px; }
+.diff .add { background: color-mix(in srgb, var(--ok) 18%, transparent); }
+.diff .del { background: color-mix(in srgb, var(--danger) 18%, transparent); }
+.diff .gap { color: var(--ink2); }
+/* While a text is edited, Save is the main action: Download steps back. */
+#viewer[data-editing="true"] #preview-download { background: var(--button, #222c38); color: var(--ink); border: 1px solid var(--line); }
+/* Read-only said plainly, where the buttons would be. */
+#files-readonly { padding: 8px 10px; border: 1px dashed var(--line); border-radius: 8px; background: var(--bar); color: var(--ink); font-size: .8125rem; }

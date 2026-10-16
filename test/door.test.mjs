@@ -322,3 +322,69 @@ test('a device given the chat alone has the files OF THE CHAT, both ways, and no
     /* Its terminal is not its to repair. */
     assert.equal((await b.device(`/c/api/${dad.id}/terminal/repair`, { cookie: dad.cookie, body: {} })).status, 403);
 });
+
+test('changes by hand in Files: the owner where it may write; a folder attached read-only refuses them, to the owner too; only from this site', async (t) => {
+    const b = await bench(t);
+    const own = (path, { body, type = 'application/json', origin = b.origin } = {}) => fetch(b.base + path, { method: body === undefined ? 'GET' : 'POST',
+        headers: { 'x-forwarded-email': 'owner@example.com', origin, 'content-type': type }, body: type === 'application/json' && body !== undefined ? JSON.stringify(body) : body });
+    const work = join(b.dir, 'work', 'family');
+    mkdirSync(work, { recursive: true }); writeFileSync(join(work, 'notes.md'), 'one');
+    assert.equal((await own('/api/files/make?c=family&r=work&p=', { body: { name: 'drafts', folder: true } })).status, 201);
+    assert.equal((await own('/api/files/move?c=family&r=work&p=notes.md', { body: { to: 'drafts' } })).status, 200);
+    const read = await (await own('/api/files/text?c=family&r=work&p=drafts/notes.md')).json();
+    assert.equal(read.text, 'one');
+    assert.equal((await own(`/api/files/save?c=family&r=work&p=drafts/notes.md&version=${read.version}`, { body: 'two', type: 'application/octet-stream' })).status, 200);
+    /* Saved again at the old version: the file changed meanwhile, nothing written. */
+    const stale = await own(`/api/files/save?c=family&r=work&p=drafts/notes.md&version=${read.version}`, { body: 'three', type: 'application/octet-stream' });
+    assert.deepEqual([stale.status, (await stale.json()).kind], [409, 'changed']);
+    assert.equal(readFileSync(join(work, 'drafts', 'notes.md'), 'utf8'), 'two');
+    /* Not from this site: refused, whatever the route. */
+    assert.equal((await own('/api/files/remove?c=family&r=work&p=drafts', { body: {}, origin: 'https://evil.example.com' })).status, 403);
+    assert.equal((await own('/api/files/make?c=family&r=work&p=', { body: 'name=x', type: 'text/plain' })).status, 400);
+    /* A thumbnail: only a proven picture, answered with rules that run nothing. */
+    writeFileSync(join(work, 'red.png'), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFklEQVR4nGP8z8Dwn4GBgYGJAQoYQQwAHhYCAPmBfFgAAAAASUVORK5CYII=', 'base64'));
+    const thumb = await own('/api/files/thumb?c=family&r=work&p=red.png');
+    assert.deepEqual([thumb.status, thumb.headers.get('content-type'), thumb.headers.get('x-content-type-options')], [200, 'image/png', 'nosniff']);
+    assert.match(thumb.headers.get('content-security-policy'), /sandbox/);
+    writeFileSync(join(work, 'logo.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+    assert.equal((await own('/api/files/thumb?c=family&r=work&p=logo.svg')).status, 415);
+    /* `photos` attached to `family` read-only: read, and nothing changed in it from there -- by the owner either. */
+    assert.equal((await b.operator('/api/conversations/family/resources', { resource: 'photos', access: 'read' })).status, 200);
+    for (const [path, body] of [['/api/files/make?c=family&r=photos&p=', { name: 'x.txt' }], ['/api/files/rename?c=family&r=photos&p=beach.txt', { name: 'sea.txt' }],
+        ['/api/files/remove?c=family&r=photos&p=beach.txt', {}], ['/api/files/taken?c=family&r=photos&p=', { names: ['a'] }]]) assert.equal((await own(path, { body })).status, 403, path);
+    assert.equal((await own('/api/files/save?c=family&r=photos&p=beach.txt&version=any', { body: 'x', type: 'application/octet-stream' })).status, 403);
+    assert.equal((await own('/api/files/import?c=family&r=photos&p=&name=x.txt', { body: 'x', type: 'application/octet-stream' })).status, 403);
+    assert.equal((await own('/api/files/text?c=family&r=photos&p=beach.txt')).status, 200, 'still read');
+    assert.equal(readFileSync(join(b.dir, 'resources', 'photos', 'beach.txt'), 'utf8'), 'sea');
+});
+
+test('changes by hand from a device: where it may write; never in a folder attached read-only; and a device given the chat alone has none of them', async (t) => {
+    const b = await bench(t);
+    const work = join(b.dir, 'work', 'family');
+    mkdirSync(work, { recursive: true }); writeFileSync(join(work, 'report.txt'), 'draft');
+    const both = await b.pairPhone([{ asset: 'conversation:family', rights: 'rwx' }]);
+    const dad = await b.pairPhone([{ asset: 'conversation:family', rights: 'rw' }]);
+    const go = (phone, path, body, type = 'application/json') => fetch(`${b.base}/c/api/${phone.id}${path}`, { method: body === undefined ? 'GET' : 'POST',
+        headers: { origin: b.origin, cookie: phone.cookie, 'content-type': type }, body: body === undefined ? undefined : type === 'application/json' ? JSON.stringify(body) : body });
+    assert.equal((await go(both, '/files/make?r=work&p=', { name: 'drafts', folder: true })).status, 201);
+    assert.equal((await go(both, '/files/rename?r=work&p=report.txt', { name: 'report v2.txt' })).status, 200);
+    const read = await (await go(both, '/files/text?r=work&p=report v2.txt')).json();
+    assert.equal((await go(both, `/files/save?r=work&p=report v2.txt&version=${read.version}`, 'final', 'application/octet-stream')).status, 200);
+    assert.equal(readFileSync(join(work, 'report v2.txt'), 'utf8'), 'final');
+    /* Its chat alone: none of it, refused by the server -- not even a thumbnail or a text to read. */
+    for (const [path, body, type] of [['/files/thumb?r=work&p=report v2.txt'], ['/files/text?r=work&p=report v2.txt'], ['/files/make?r=work&p=', { name: 'x.txt' }],
+        ['/files/rename?r=work&p=drafts', { name: 'y' }], ['/files/move?r=work&p=report v2.txt', { to: 'drafts' }], ['/files/remove?r=work&p=drafts', {}],
+        ['/files/taken?r=work&p=', { names: ['a'] }], ['/files/save?r=work&p=report v2.txt&version=any', 'x', 'application/octet-stream'],
+        ['/files/make?r=photos&p=', { name: 'x.txt' }]]) assert.equal((await go(dad, path, body, type)).status, 403, path);
+    assert.equal(readFileSync(join(work, 'report v2.txt'), 'utf8'), 'final');
+    assert.equal(existsSync(join(work, 'drafts')), true);
+    /* Attached read-only: read, never changed. */
+    assert.equal((await b.operator('/api/conversations/family/resources', { resource: 'photos', access: 'read' })).status, 200);
+    assert.equal((await go(both, '/files/text?r=photos&p=beach.txt')).status, 200);
+    assert.equal((await go(both, '/files/remove?r=photos&p=beach.txt', {})).status, 403);
+    assert.equal((await go(both, '/files/make?r=photos&p=', { name: 'x', folder: true })).status, 403);
+    assert.equal(existsSync(join(b.dir, 'resources', 'photos', 'beach.txt')), true);
+    /* Not from this site. */
+    const foreign = await fetch(`${b.base}/c/api/${both.id}/files/remove?r=work&p=drafts`, { method: 'POST', headers: { origin: 'https://evil.example.com', cookie: both.cookie, 'content-type': 'application/json' }, body: '{}' });
+    assert.equal(foreign.status, 403);
+});

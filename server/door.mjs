@@ -17,6 +17,7 @@
  *   GET  /c/api/<pairing>/shortcuts
  *   GET  /c/api/<pairing>/voice   POST .../voice
  *   GET  /c/api/<pairing>/files   GET .../files/download   GET .../files/machine   POST .../files/import
+ *   GET  .../files/thumb|text   POST .../files/save|make|rename|move|remove|taken   (see files.mjs)
  *   POST /c/api/<pairing>/leave   the device removes this pairing itself
  *   GET  /c/api/<pairing>/talk/words?lang=
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
@@ -45,7 +46,7 @@
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
 import { WORK_TAB } from './resources.mjs';
-import { list, download, importFile, page, PAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
 const BODY_MAX = 16 * 1024;
@@ -150,7 +151,7 @@ export async function handleDoor(request, response, { devices, conversations, re
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
-        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || route === '/leave';
+        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
         /* Shortcuts are typed into the terminal, or are the ready answers of the chat: one of the two must be its to write in. */
         if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
@@ -210,11 +211,22 @@ export async function handleDoor(request, response, { devices, conversations, re
         }
         if (request.method === 'POST' && route === '/files/import') {
             if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An import is a file.' });
-            return send(201, await importFile(attached('write'), url.searchParams.get('p') ?? '', url.searchParams.get('name') ?? '', request));
+            return send(201, await importFile(attached('write'), url.searchParams.get('p') ?? '', url.searchParams.get('name') ?? '', request,
+                { exists: url.searchParams.get('exists') ?? 'keep', dir: url.searchParams.get('dir') ?? '', batch: url.searchParams.get('batch') ?? undefined }));
         }
+        /* Thumbnails, editing, making, renaming, moving, removing: as listing
+           and importing are. A device given the chat alone has none of them
+           (`attached` refuses all but opening a file of the chat). */
+        const answer = await changeRoute(request.method, route, url.searchParams, request, (need) => attached(need));
+        if (answer?.picture) {
+            response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length });
+            response.end(answer.picture.bytes);
+            return true;
+        }
+        if (answer) return send(answer[0], answer[1]);
         return send(404, { error: 'Not found.' });
     } catch (error) {
-        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.retry ? { retry: true } : {}) });
+        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.retry ? { retry: true } : {}) });
         return send(500, { error: 'Something failed on the server.' });
     }
 }
