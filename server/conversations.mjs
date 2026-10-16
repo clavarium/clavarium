@@ -87,7 +87,8 @@ export class Conversations {
     }
 
     /* `resumes`: the tool can take up its last session when it starts (`resume` in config/tools.json). */
-    tools() { return this.#tools.map(({ id, label, memoryMb, resume }) => ({ id, label, memoryMb, resumes: Boolean(resume) })); }
+    /* `rights`: it can be started with every right in its machine (`rights` in config/tools.json). */
+    tools() { return this.#tools.map(({ id, label, memoryMb, resume, rights }) => ({ id, label, memoryMb, resumes: Boolean(resume), rights: Boolean(rights) })); }
 
     /* The sign-in rules of a conversation's tool, or undefined. */
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
@@ -95,7 +96,7 @@ export class Conversations {
     list() {
         return this.#store.all().map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
-            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume) };
+            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights) };
         });
     }
 
@@ -277,7 +278,21 @@ export class Conversations {
         const c = this.#store.get(name);
         const resume = tool.resume && c.resume !== false && c.toolStarted === true;
         if (c.toolStarted !== true) this.#store.patch(name, { toolStarted: true });
-        return resume ? tool.resume : tool.command;
+        /* Every right in its own machine, unless the owner chose to be asked
+           first: added at EVERY start, a resume included (a tool does not
+           keep it from its last session). */
+        const rights = tool.rights ? (c.askFirst === true ? tool.rights.ask : tool.rights.full) : [];
+        return [...(resume ? tool.resume : tool.command), ...rights];
+    }
+
+    /* Whether its tool asks before acting (true), or acts without asking in
+       its machine (false, the default). From its next start. */
+    setAskFirst(name, on) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (it asks before acting) or false (it acts without asking, in its machine).');
+        this.#store.patch(name, { askFirst: on ? true : undefined });
+        return this.#store.get(name);
     }
 
     /* When its tool starts: its last session taken up (true, the default), or a new one. */

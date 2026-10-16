@@ -64,7 +64,8 @@
   .parley-aside { order: 0; width: 18rem; flex: none; max-height: none; }
 }
 .parley-form { display: flex; gap: .5em; align-items: stretch; }
-.parley-box { flex: 1; min-width: 0; font: inherit; line-height: 1.4; padding: .6em .75em; min-height: 2.65em; max-height: 9.5em; overflow-y: auto; border-radius: 12px; border: 1px solid var(--parley-line); background: var(--parley-bg); color: var(--parley-text); resize: none; }
+/* Measured border to border, as its buttons are: one line of text is the height of the empty box, so the first word moves nothing. */
+.parley-box { flex: 1; min-width: 0; box-sizing: border-box; font: inherit; line-height: 1.4; padding: .6em .75em; min-height: calc(2.6em + 2px); max-height: calc(10.7em + 2px); overflow-y: auto; border-radius: 12px; border: 1px solid var(--parley-line); background: var(--parley-bg); color: var(--parley-text); resize: none; }
 .parley .parley-send { background: var(--parley-action); border-color: var(--parley-action); color: var(--parley-on-action); font-weight: 650; }
 .parley-empty { color: var(--parley-dim); }
 .parley-problem { color: var(--parley-ask); }
@@ -131,21 +132,37 @@
 .parley .parley-mic[aria-pressed="true"] { background: var(--parley-bg); border: 2px solid var(--parley-live); color: var(--parley-live); }
 .parley-mic[data-state="hearing"] { animation: parley-heard 1.1s infinite ease-in-out; }
 @keyframes parley-heard { 50% { box-shadow: 0 0 0 .3em color-mix(in srgb, var(--parley-live) 30%, transparent); } }
-.parley-voice { display: flex; align-items: center; gap: .4em .7em; flex-wrap: wrap; margin-top: calc(var(--parley-gap) * -.5); font-size: .9em; color: var(--parley-dim); }
+/* "Send when I stop" is on: a dot on the microphone. */
+.parley .parley-mic { position: relative; }
+.parley-mic-auto { display: none; position: absolute; top: .22em; right: .22em; width: .45em; height: .45em; border-radius: 50%; background: var(--parley-action); box-shadow: 0 0 0 2px var(--parley-bg); }
+.parley-mic[data-auto="true"] .parley-mic-auto { display: block; }
+/* The box and, on its frame, what the microphone does: over the page, taking
+   no room, so that nothing moves when dictation starts, changes or stops. */
+.parley-field { flex: 1; min-width: 0; position: relative; display: flex; }
+.parley-field .parley-box { width: 100%; }
+.parley-field[data-voice] .parley-box { transition: border-color .15s; }
+.parley-field[data-voice="listening"] .parley-box, .parley-field[data-voice="calibrating"] .parley-box, .parley-field[data-voice="transcribing"] .parley-box { border-color: color-mix(in srgb, var(--parley-live) 45%, var(--parley-line)); }
+.parley-field[data-voice="hearing"] .parley-box { border-color: var(--parley-live); }
+.parley-voice { position: absolute; left: .6em; bottom: calc(100% - .55em); z-index: 1; max-width: calc(100% - 1.2em); box-sizing: border-box; padding: .1em .6em; border: 1px solid var(--parley-line); border-radius: .8em; background: var(--parley-bg); color: var(--parley-dim); font-size: .78em; line-height: 1.3; pointer-events: none; overflow-wrap: anywhere; }
 .parley-voice[hidden] { display: none; }
-.parley-voice-text { flex: 1; min-width: 10em; overflow-wrap: anywhere; }
-.parley-voice-text::before { content: ""; display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .5em; background: #2f8f4e; vertical-align: .05em; }
+.parley-voice-text::before { content: ""; display: inline-block; width: .6em; height: .6em; border-radius: 50%; margin-right: .45em; background: #2f8f4e; vertical-align: .02em; }
 .parley-voice[data-state="hearing"] .parley-voice-text::before { background: var(--parley-live); }
 .parley-voice[data-state="transcribing"] .parley-voice-text::before, .parley-voice[data-state="calibrating"] .parley-voice-text::before { background: var(--parley-ask); }
-.parley-voice[data-state="error"] { color: var(--parley-ask); }
+.parley-voice[data-state="error"] { color: var(--parley-ask); border-color: var(--parley-ask); }
 .parley-voice[data-state="error"] .parley-voice-text::before { background: var(--parley-ask); }
-.parley .parley-auto { min-height: 2.5em; padding: 0 .9em; border-radius: 999px; font-size: inherit; color: var(--parley-text); border-color: var(--parley-action); }
-.parley .parley-auto[hidden] { display: none; }
+.parley-voice-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+/* The choices of this device, beside the view: a menu over the page. */
+.parley-prefs { position: relative; flex: none; }
+.parley-prefs[hidden] { display: none; }
+.parley .parley-prefs-open { min-height: 2.1em; min-width: 2.4em; padding: 0 .5em; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; color: var(--parley-dim); background: transparent; }
+.parley .parley-prefs-open[aria-expanded="true"] { color: var(--parley-text); background: var(--parley-agent); }
+.parley-prefs-menu { position: absolute; right: 0; top: calc(100% + .35em); z-index: 3; width: max-content; max-width: min(22em, calc(100vw - 2em)); padding: .45em; border: 1px solid var(--parley-line); border-radius: 12px; background: var(--parley-bg); box-shadow: 0 6px 24px rgba(0, 0, 0, .18); }
+.parley-prefs-menu[hidden] { display: none; }
+.parley .parley-auto { min-height: 2.5em; padding: .35em .9em; border-radius: 999px; font-size: .95em; color: var(--parley-text); border-color: transparent; background: transparent; text-align: left; line-height: 1.3; }
 /* A switch: on, what is said is sent by itself. */
 .parley .parley-auto { position: relative; padding-left: 3.4em; }
 .parley .parley-auto::before { content: ""; position: absolute; left: .7em; top: 50%; width: 2.1em; height: 1.2em; margin-top: -.6em; border-radius: 999px; background: var(--parley-line); transition: background .15s; }
 .parley .parley-auto::after { content: ""; position: absolute; left: .85em; top: 50%; width: .9em; height: .9em; margin-top: -.45em; border-radius: 50%; background: var(--parley-bg); transition: transform .15s; }
-.parley .parley-auto[aria-pressed="true"] { font-weight: 650; }
 .parley .parley-auto[aria-pressed="true"]::before { background: var(--parley-action); }
 .parley .parley-auto[aria-pressed="true"]::after { transform: translateX(.9em); }
 .parley-quick { display: flex; align-items: flex-start; gap: .4em; margin-bottom: calc(var(--parley-gap) * -.4); }

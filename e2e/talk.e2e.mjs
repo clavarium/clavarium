@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { bench, SKIP, wait } from './bench.mjs';
 
 /* The tool here is a plain shell: what an agent would run, the test types. */
-test('the chat screen: the tool installs parley from /tools and asks with choices; its owner answers on a French device; the line that wakes it is typed once; what it does now, gone with its next message; times on hover; steps folded or unfolded; the chat first when opened; the owner\'s own words', { skip: SKIP }, async (t) => {
+test('the chat screen: parley installed by the server from /tools, the tool asks with choices; its owner answers on a French device; the line that wakes it is typed once; what it does now, gone with its next message; times on hover; steps folded or unfolded; the chat first when opened; the owner\'s own words', { skip: SKIP }, async (t) => {
     const alerted = [];
     const b = await bench(t, { alertSend: async (subscription, payload) => { alerted.push(JSON.parse(payload)); } });
     const me = await b.person({ locale: 'fr-FR' });
@@ -16,11 +16,11 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.until('it says what it is', async () => /WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER/.test(await me.page.locator('#talk-about').innerText()));
     assert.equal(await me.page.locator('#talk-invite').isVisible(), false);
     await me.page.locator('#talk-on button[data-on=true]').click();
-    await me.until('it says what the tool will be asked', async () => /install parley from \/tools and to write to you in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
+    await me.until('it says what the tool will be asked', async () => /parley is installed in its machine, to use it and to write to you in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
     /* What its tool is told about where it is (guide.mjs): the exact text behind "see", made from these
        settings; the owner's lines, as text; in its machine, and pointed to from its own instruction file. */
     await me.page.locator('#guide-see').click();
-    await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. If parley is not installed yet: npm install -g /m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
+    await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. Parley is installed: run parley --help\.$/m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
     await me.page.fill('#guide-lines', 'Answer in <b>French</b>.');
     await me.page.locator('#guide-save').click();
     await me.until('the line is in what it is told, as text', async () => (await me.page.locator('#guide-text').innerText()).includes('- Answer in \u2039b\u203aFrench\u2039/b\u203a.'));
@@ -37,10 +37,12 @@ test('the chat screen: the tool installs parley from /tools and asks with choice
     await me.sees('/etc/clavarium/conversation.md again: your setup changed.');
     await me.sees('Write to them in French.');
     const invited = (await me.screen()).replace(/\n/g, '');
-    assert.match(invited, /run "npm install -g \/tools\/clavarium-parley-\d+\.\d+\.\d+\.tgz"/);
+    assert.match(invited, /Parley is installed: run "parley --help"\./);
+    assert.doesNotMatch(invited, /npm|install -g|\.tgz/, 'the tool is never asked to install anything');
     assert.match(invited, /under \/work, never in \/tmp/, 'where to check out its branches');
-    /* The tool installs it, from the read-only /tools of its machine (here, under the stand-in machine's root). */
-    await me.type('clear; P=$(mktemp -d); npm install -g --offline --no-audit --no-fund --prefix $P "$FAKE_VM_ROOT"/tools/clavarium-parley-*.tgz >/dev/null 2>&1 && export PATH=$P/bin:$PATH; grep -c sha256 "$FAKE_VM_ROOT"/tools/index.json');
+    /* Installed by the server, before: in the machine's /usr/local (here, under the stand-in machine's root, whose PATH the shell is given). */
+    assert.match(readFileSync(join(process.env.FAKE_VM_DIR, 'vms', 'clv-helper', 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+\.tgz\n$/);
+    await me.type('clear; export PATH="$FAKE_VM_ROOT"/usr/local/bin:$PATH; grep -c sha256 "$FAKE_VM_ROOT"/tools/index.json');
     await me.printed('1', 30_000);
     /* It says where it is, and asks, with choices; it does not wait. */
     await me.type('clear; parley status working "on the cover" && parley ask "Blue or red cover?" blue red >/dev/null && echo posted');

@@ -36,9 +36,11 @@ export const SKIP = !playwright ? 'no browser: install the "playwright" package,
 
 /* A plain shell with a fixed prompt, so that tests can tell "ready". */
 const TOOLS = readTools(JSON.stringify([
-    /* Started on its last session (`resume`), it says so in its environment.
+    /* Started on its last session (`resume`), it says so in its environment;
+       so does what its rights add to every start (RIGHTS=full, or ask): the
+       arguments after the script are variables of the shell it becomes.
        Its own instruction file gets the line that points to its guide (guide.mjs). */
-    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', command: ['env', 'PS1=ready> ', 'bash', '--norc', '--noprofile'], resume: ['env', 'PS1=ready> ', 'RESUMED=1', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
+    { id: 'shell', label: 'Shell', instructions: '.tool/RULES.md', command: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> '], resume: ['bash', '--norc', '--noprofile', '-c', 'exec env "$@" bash --norc --noprofile', 'tool', 'PS1=ready> ', 'RESUMED=1'], rights: { full: ['RIGHTS=full'], ask: ['RIGHTS=ask'] }, memoryMb: 768, install: [] },
     { id: 'other', label: 'Other tool', command: ['env', 'PS1=other> ', 'bash', '--norc', '--noprofile'], memoryMb: 768, install: [] },
 ]));
 

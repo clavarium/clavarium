@@ -68,16 +68,17 @@ function bench(t, { conversations = { writer: { name: 'writer', tool: 'claude-co
 }
 
 test('the part every machine reads: facts and exact commands, a pointer to its own part, nothing of a conversation', () => {
-    const text = commonText({ parley: '/tools/clavarium-parley-0.5.0.tgz' });
+    const text = commonText();
     const lines = text.trim().split('\n');
     assert.ok(lines.length >= 8 && lines.length <= 20, `${lines.length} lines`);
     assert.equal(lines[0], '# Where you are (Clavarium)');
-    for (const fact of ['you are root (sudo works)', '/work', '/resources/<name>', '/tools/index.json', OWN_PATH, 'You have no push key: never push', 'never in /tmp', 'environment variables: never print them', 'npm install -g /tools/clavarium-parley-0.5.0.tgz, then parley --help']) assert.ok(text.includes(fact), fact);
+    for (const fact of ['you are root (sudo works)', '/work', '/resources/<name>', '/tools/index.json', OWN_PATH, 'You have no push key: never push', 'never in /tmp', 'environment variables: never print them', 'To talk to the person, when their chat is on: parley --help.']) assert.ok(text.includes(fact), fact);
     assert.ok(text.length < 1600, 'short');
     /* Plain ASCII, no address of any kind. */
     assert.match(text, /^[\x20-\x7e\n]*$/);
     assert.doesNotMatch(text, /https?:|\d+\.\d+\.\d+\.\d+|:\d{2,5}\b|ssh-|BEGIN|password|token/i);
-    assert.ok(commonText().includes('parley --help'), 'said without the archive too');
+    /* Parley is installed by the server: the tool is never asked to install anything. */
+    assert.doesNotMatch(text, /npm install|\.tgz/);
 });
 
 test('the part of one conversation: read-only and read-write right, the chat on or off, names of secrets only, no address', async (t) => {
@@ -94,7 +95,8 @@ test('the part of one conversation: read-only and read-write right, the chat on 
     assert.match(own, /^- Read-only: \/resources\/photos, \/resources\/home-mail \(mail\)\.$/m);
     assert.ok(own.includes("git -C /resources/site fetch /resources/site-origin '+refs/heads/*:refs/remotes/origin/*'"));
     assert.match(own, /^- \/work is kept by the server/m);
-    assert.match(own, /^- Chat with the person: on\. If parley is not installed yet: npm install -g \/tools\/clavarium-parley-0\.5\.0\.tgz; then parley --help\.$/m);
+    assert.match(own, /^- Chat with the person: on\. Parley is installed: run parley --help\.$/m);
+    assert.doesNotMatch(own, /npm install|\.tgz/);
     assert.match(own, /^- Internet: on\.$/m);
     assert.match(own, /^- Secrets given, by name only: MODEL_KEY\.$/m);
     for (const never of ['sk-the-value-itself', 'example.com', 'ssh:', 'imap', '@']) assert.ok(!own.includes(never), `never: ${never}`);

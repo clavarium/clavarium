@@ -1,9 +1,13 @@
 /* THE TOOLS AT HAND: one folder every machine sees at /tools, read-only.
  *
- * What an agent may install by itself, when it is asked to: an archive, and
- * an index that says what each one is. Nothing is installed from here, and
- * nothing in a machine is changed: the agent is told where the archive is
- * (see talk.mjs) and installs it, as it would install anything.
+ * An archive per tool, and an index that says what each one is.
+ *
+ * PARLEY IS INSTALLED BY THIS SERVER, never by the agent (decided after an
+ * agent rightly refused to install "code it had not checked"): in every
+ * machine, at each start of its tool when it is missing or not the version
+ * of the index, chat on or off. Its archive's sha256, as the machine reads
+ * it in /tools, is compared with the index first; then npm installs it
+ * offline, as root (no script of the package runs: it has none).
  *
  *   /tools/index.json                  { tools: [{ name, version, file, sha256, usage }] }
  *   /tools/clavarium-parley-0.5.0.tgz  Parley, the first of them (npm pack)
@@ -30,13 +34,17 @@ const PARLEY = fileURLToPath(new URL('./parley/', import.meta.url));
 export function parleySource(dir = PARLEY) {
     const file = readdirSync(dir).find((f) => /^clavarium-parley-\d+\.\d+\.\d+\.tgz$/.test(f));
     if (!file) return [];
-    return [{ name: 'parley', archive: `${dir}${file}`, usage: (at) => `npm install -g ${at}, then parley --help: talk with the person you work for, on their screen.` }];
+    return [{ name: 'parley', archive: `${dir}${file}`, usage: () => 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }];
 }
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Toolbox {
     #host; #vms; #mnt; #uid; #gid; #sources; #notes; #index = null;
+    /* What is known of Parley in each machine, as the index is now:
+       conversation -> { sha256, why } (why: '' installed, or why it cannot be,
+       such as a machine without npm: not asked again at each opening). */
+    #installed = new Map(); #installing = new Map();
 
     /* `host(argv)`: the host program. `mntDir`: where it keeps the folder.
        `notes(find)`: the text of /tools/CLAVARIUM.md, given how to find a
@@ -91,6 +99,48 @@ export class Toolbox {
         if (!this.ready) return 'the tools folder is not in place';
         const r = await this.#vms.mountTools(conversation, this.#uid, this.#gid);
         return r.code === 0 || /already mounted/i.test(`${r.stderr}${r.stdout}`) ? '' : firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`;
+    }
+
+    /* PARLEY IN ITS MACHINE (one that runs), installed if it is not there
+       as the index has it. Resolves with '' or why it could not be. Asked
+       at each opening: once it is known to be there, nothing is asked of
+       the machine (forget() when its disk may have changed). */
+    installIn(conversation) {
+        const going = this.#installing.get(conversation);
+        if (going) return going;
+        const run = this.#install(conversation).catch((error) => error.message || 'failed').finally(() => this.#installing.delete(conversation));
+        this.#installing.set(conversation, run);
+        return run;
+    }
+
+    /* Its machine was built again, or restarted: looked at again at its next opening. */
+    forget(conversation) { this.#installed.delete(conversation); }
+
+    async #install(conversation) {
+        const tool = this.find('parley');
+        if (!tool) return 'the tools folder is not in place';
+        const known = this.#installed.get(conversation);
+        if (known?.sha256 === tool.sha256) return known.why;
+        const exec = (argv, timeoutMs = 30_000) => this.#vms.exec(conversation, argv, { timeoutMs }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
+        const there = async () => { const v = await exec(['parley', '--version']); return v.code === 0 && v.stdout.trim() === tool.version; };
+        if (await there()) { this.#installed.set(conversation, { sha256: tool.sha256, why: '' }); return ''; }
+        if ((await exec(['which', 'npm'])).code !== 0) {
+            /* A machine without node (a plain shell): said once, until it is built again or restarted. */
+            const why = 'there is no npm in this machine';
+            this.#installed.set(conversation, { sha256: tool.sha256, why });
+            return why;
+        }
+        /* The archive as the machine reads it, against the index; /tools mounted again once if it is not there. */
+        const sum = async () => /^([0-9a-f]{64})\s/.exec((await exec(['sha256sum', '--', tool.path], 60_000)).stdout ?? '')?.[1];
+        let seen = await sum();
+        if (seen === undefined && (await this.show(conversation)) === '') seen = await sum();
+        if (seen === undefined) return `${tool.path} cannot be read in the machine`;
+        if (seen !== tool.sha256) return `${tool.path} in the machine is not the archive of the index (sha256 differs): not installed`;
+        const r = await exec(['sudo', '-n', 'npm', 'install', '-g', '--offline', '--no-audit', '--no-fund', tool.path], 180_000);
+        if (r.code !== 0) return `npm: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
+        if (!(await there())) return 'installed, but "parley --version" does not say the version of the index';
+        this.#installed.set(conversation, { sha256: tool.sha256, why: '' });
+        return '';
     }
 
     /* It came loose: unmounted whatever the VM manager believes, its view

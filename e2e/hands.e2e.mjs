@@ -74,8 +74,10 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     /* Send, while it listens: sent, with what is still being written. */
     await me.page.locator('#simple-thread .parley-send').click();
     await me.until('sent', async () => (await said()) === 1, 25_000);
-    /* "Send when I stop": spoken, then sent, in one gesture. */
+    /* "Send when I stop": a choice of the device, beside the view; spoken, then sent, in one gesture. */
+    await me.page.locator('#simple-thread .parley-prefs-open').click();
     await me.page.locator('#simple-thread .parley-auto').click();
+    assert.equal(await me.page.locator('#simple-thread .parley-auto').getAttribute('aria-pressed'), 'true');
     await me.until('sent by itself', async () => (await said()) >= 2, 30_000);
     await mic.click();
     assert.equal(await mic.getAttribute('aria-pressed'), 'false');

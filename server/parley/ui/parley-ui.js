@@ -33,9 +33,17 @@
  *                          on.speech() when speech begins, on.error(message).
  *                          A button beside Send; what is said goes into the
  *                          box. Changed later with `handle.voice = ...`.
+ *                          Dictating moves nothing on the screen: what the
+ *                          microphone does is said inside the box (its
+ *                          placeholder, and a small label on its frame that
+ *                          takes no room), never on a line of its own.
  *   autoSend, onAutoSend   "send when I stop": what was said is sent once the
- *                          person stops talking; the person's choice is told
- *                          to onAutoSend(on), for the application to keep.
+ *                          person stops talking. A choice of the device, not
+ *                          of the moment: it is in the small menu of settings
+ *                          beside the view, shown only with `voice`, and the
+ *                          microphone wears a dot while it is on. The
+ *                          person's choice is told to onAutoSend(on), for the
+ *                          application to keep.
  *   replies                [{ label, text, send }]: ready answers, above the
  *                          box, after the choices of the question the agent
  *                          asks now. `send: true` sends the text at once,
@@ -90,7 +98,7 @@ export const VIEWS = Object.freeze(['simple', 'detailed']);
 /* The words this screen uses: a dictionary needs these keys. */
 export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simple', 'detailed', 'working', 'waiting', 'done', 'no-status', 'asks', 'open', 'outside',
     'not-read', 'read', 'remind', 'reminded', 'steps', 'no-steps', 'files', 'no-files', 'terminal', 'not-sent', 'step-one', 'steps-many', 'today', 'yesterday', 'quiet',
-    'mic', 'mic-stop', 'auto-send', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less',
+    'mic', 'mic-stop', 'auto-send', 'auto-on', 'settings', 'voice-placeholder', 'voice-calibrating', 'voice-listening', 'voice-hearing', 'voice-transcribing', 'voice-wait', 'voice-off', 'replies', 'replies-more', 'replies-less',
     'attach', 'remove-file', 'sending-files', 'attach-where']);
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
@@ -282,6 +290,7 @@ function sign(kind) {
     svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', `parley-sign parley-sign-${kind}`);
     const shapes = kind === 'mic'
         ? [['rect', { x: 9, y: 3, width: 6, height: 11, rx: 3 }], ['path', { d: 'M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7' }]]
+        : kind === 'prefs' ? [['path', { d: 'M4 7h9M17 7h3M4 17h3M11 17h9' }], ['circle', { cx: 15, cy: 7, r: 2 }], ['circle', { cx: 9, cy: 17, r: 2 }]]
         : kind === 'clip' ? [['path', { d: 'M20 11.5l-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.4 3.4 0 0 1 4.8 4.8l-8.4 8.4a1.7 1.7 0 0 1-2.4-2.4l7.6-7.6' }]]
             : [['rect', { x: 7, y: 7, width: 10, height: 10, rx: 1.5 }]];
     for (const [tag, attributes] of shapes) {
@@ -312,7 +321,21 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const choose = (v) => { if (v === as) return; as = v; root.dataset.view = as; unfolded.clear(); try { onView?.(as); } catch { /* the page's business */ } repaint(); void refresh(); };
     const toggles = VIEWS.map((v) => { const b = button(said(words, v), '', () => choose(v)); b.dataset.view = v; return b; });
     switcher.append(...toggles);
-    top.append(status, switcher);
+    /* The choices of this device, beside the view: a small menu, over the page, taking no room. */
+    const prefs = el('div', 'parley-prefs'); prefs.hidden = true;
+    const prefsButton = el('button', 'parley-prefs-open'); prefsButton.type = 'button'; prefsButton.title = said(words, 'settings'); prefsButton.setAttribute('aria-label', prefsButton.title);
+    prefsButton.setAttribute('aria-expanded', 'false'); prefsButton.append(sign('prefs'));
+    const prefsMenu = el('div', 'parley-prefs-menu'); prefsMenu.hidden = true; prefsMenu.setAttribute('role', 'group'); prefsMenu.setAttribute('aria-label', said(words, 'settings'));
+    /* "Send when I stop", a switch: on, what is said is sent by itself. */
+    const autoButton = el('button', 'parley-auto', said(words, 'auto-send')); autoButton.type = 'button';
+    prefsMenu.append(autoButton);
+    prefs.append(prefsButton, prefsMenu);
+    const showPrefs = (on) => { prefsMenu.hidden = !on; prefsButton.setAttribute('aria-expanded', String(on)); };
+    prefsButton.addEventListener('click', () => showPrefs(prefsMenu.hidden));
+    prefs.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !prefsMenu.hidden) { showPrefs(false); prefsButton.focus(); } });
+    const away = (event) => { if (!prefsMenu.hidden && !(event.target instanceof Node && prefs.contains(event.target))) showPrefs(false); };
+    document.addEventListener('pointerdown', away);
+    top.append(status, switcher, prefs);
     const main = el('div', 'parley-main');
     const thread = el('div', 'parley-thread'); thread.setAttribute('aria-live', 'polite');
     const aside = el('aside', 'parley-aside');
@@ -323,11 +346,15 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const moreChips = el('button', 'parley-replies-more'); moreChips.type = 'button'; moreChips.hidden = true; moreChips.setAttribute('aria-expanded', 'false');
     quickRow.append(chips, moreChips);
     const form = el('form', 'parley-form'); form.autocomplete = 'off';
+    /* The box, and on its frame what the microphone does: over it, taking no room. */
+    const field = el('div', 'parley-field');
     const box = el('textarea', 'parley-box'); box.rows = 1; box.maxLength = TEXT_MAX; box.placeholder = said(words, 'placeholder'); box.setAttribute('aria-label', said(words, 'placeholder'));
     const mic = el('button', 'parley-mic'); mic.type = 'button'; mic.setAttribute('aria-pressed', 'false');
     /* Listening, it says in a word that a touch stops it. */
     const micWord = el('span', 'parley-mic-word', said(words, 'mic-stop'));
-    mic.append(sign('mic'), sign('stop'), micWord);
+    /* "Send when I stop" is on: a dot on the microphone, said in its label. */
+    const micAuto = el('span', 'parley-mic-auto'); micAuto.setAttribute('aria-hidden', 'true');
+    mic.append(sign('mic'), sign('stop'), micWord, micAuto);
     const go = el('button', 'parley-send', said(words, 'send')); go.type = 'submit';
     /* Files to attach: picked beside the box, shown above it until they are sent. */
     const clip = el('button', 'parley-attach'); clip.type = 'button'; clip.title = said(words, 'attach'); clip.setAttribute('aria-label', clip.title); clip.append(sign('clip'));
@@ -335,14 +362,16 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const picker = el('input'); picker.type = 'file'; picker.multiple = true; picker.hidden = true; picker.tabIndex = -1;
     const pendingRow = el('div', 'parley-attached'); pendingRow.hidden = true; pendingRow.setAttribute('aria-live', 'polite');
     let pending = [];
-    /* While dictating: what the microphone does, and "send when I stop". */
-    const heard = el('div', 'parley-voice'); heard.hidden = true;
-    const heardText = el('span', 'parley-voice-text'); heardText.setAttribute('role', 'status');
-    const autoButton = el('button', 'parley-auto', said(words, 'auto-send')); autoButton.type = 'button';
-    heard.append(heardText, autoButton);
+    /* While dictating, what the microphone does: a label on the box's frame,
+       seen; the same words in a status for whoever does not see it. */
+    const heard = el('div', 'parley-voice'); heard.hidden = true; heard.setAttribute('aria-hidden', 'true');
+    const heardText = el('span', 'parley-voice-text');
+    heard.append(heardText);
+    const heardSaid = el('span', 'parley-voice-said'); heardSaid.setAttribute('role', 'status');
+    field.append(box, heard, heardSaid);
     const problem = el('p', 'parley-problem'); problem.hidden = true; problem.setAttribute('role', 'alert');
-    form.append(box, clip, mic, go, picker);
-    root.replaceChildren(top, main, quickRow, pendingRow, form, heard, problem);
+    form.append(field, clip, mic, go, picker);
+    root.replaceChildren(top, main, quickRow, pendingRow, form, problem);
     root.dataset.view = as;
     const narrow = () => root.clientWidth > 0 && root.clientWidth < NARROW_PX;
     let wasNarrow = narrow();
@@ -535,7 +564,12 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
        chat; on a touch screen Enter is a new line and the button sends. */
     const keyboard = media('(pointer: fine)');
     /* The box grows with what is in it, up to a few lines, then scrolls. */
-    const grow = () => { box.style.height = 'auto'; box.style.height = `${box.scrollHeight + 2}px`; };
+    const grow = () => {
+        box.style.height = '';
+        /* No higher than it is while what it holds fits: no pixel won or lost by rounding. */
+        const full = box.scrollHeight + 2;
+        if (full > box.getBoundingClientRect().height + 1) box.style.height = `${full}px`;
+    };
     box.addEventListener('input', grow);
     /* The page puts the cursor in the box only where no keyboard comes up
        with it; on a touch screen, only the person's finger does. */
@@ -550,7 +584,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         typing = document.activeElement === box;
         if (typing) event.preventDefault();
     };
-    for (const zone of [form, quickRow, heard, thread, pendingRow]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
+    for (const zone of [form, quickRow, prefs, thread, pendingRow]) { zone.addEventListener('pointerdown', keep); zone.addEventListener('mousedown', keep); }
     const stayIn = () => { if (typing && document.activeElement !== box) box.focus({ preventScroll: true }); typing = false; };
     const paintPending = () => {
         pendingRow.hidden = pending.length === 0;
@@ -601,16 +635,22 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     let writing = null;
     let hush;
     let gone = false;
+    /* What the microphone does, said in the box: shown, and told. */
+    const tell = (state, text) => { heard.hidden = false; heard.dataset.state = state; heardText.textContent = text; heardSaid.textContent = text; };
     const paintVoice = () => {
         const on = Boolean(stopping);
         mic.hidden = !voice;
+        prefs.hidden = !voice; if (!voice) showPrefs(false);
         mic.setAttribute('aria-pressed', String(on));
         mic.dataset.state = on ? hearing || 'listening' : '';
-        mic.title = said(words, on ? 'mic-stop' : 'mic'); mic.setAttribute('aria-label', mic.title); micWord.hidden = !on;
+        mic.dataset.auto = String(auto);
+        const label = said(words, on ? 'mic-stop' : 'mic');
+        mic.title = auto ? `${label} - ${said(words, 'auto-on')}` : label; mic.setAttribute('aria-label', mic.title); micWord.hidden = !on;
         autoButton.setAttribute('aria-pressed', String(auto));
-        autoButton.hidden = !on;
-        if (on) { heard.hidden = false; heard.dataset.state = hearing || 'listening'; heardText.textContent = writing ? said(words, 'voice-wait') : said(words, `voice-${hearing || 'listening'}`); }
-        else if (!hush) heard.hidden = true;
+        field.dataset.voice = on ? hearing || 'listening' : '';
+        box.placeholder = said(words, on ? 'voice-placeholder' : 'placeholder');
+        if (on) tell(hearing || 'listening', writing ? said(words, 'voice-wait') : said(words, `voice-${hearing || 'listening'}`));
+        else if (!hush) { heard.hidden = true; heard.dataset.state = ''; heardSaid.textContent = ''; }
     };
     const sendWritten = () => { clearTimeout(writing); writing = null; void sendBox(); paintVoice(); };
     const quiet = () => {
@@ -636,7 +676,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             paintVoice();
         },
         speech: () => clearTimeout(autoTimer),
-        error: (message) => { if (stopping) { heardText.textContent = String(message ?? ''); heard.dataset.state = 'error'; } },
+        error: (message) => { if (stopping) tell('error', String(message ?? '')); },
     };
     mic.addEventListener('click', async () => {
         if (stopping) { quiet(); stayIn(); return; }
@@ -651,7 +691,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             hearing = hearing || 'calibrating';
         } catch {
             stopping = null;
-            heard.hidden = false; heard.dataset.state = 'error'; heardText.textContent = said(words, 'voice-off'); autoButton.hidden = true;
+            tell('error', said(words, 'voice-off'));
             hush = setTimeout(() => { hush = undefined; paintVoice(); }, 6000);
         }
         starting = false;
@@ -749,6 +789,6 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         get replies() { return replies; }, set replies(list) { replies = Array.isArray(list) ? list : []; paintQuick(); },
         get listening() { return Boolean(stopping); },
         get attach() { return attach; }, set attach(a) { attach = a?.upload ? a : undefined; clip.hidden = !attach; if (!attach) { pending = []; paintPending(); } },
-        destroy() { gone = true; quiet(); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
+        destroy() { gone = true; quiet(); document.removeEventListener('pointerdown', away); clearTimeout(hush); if (timer) clearInterval(timer); clearTimeout(hiding); unpress(); watch?.disconnect(); settle?.disconnect(); watchQuick?.disconnect(); seeing?.disconnect(); root.replaceChildren(); root.classList.remove('parley'); delete root.dataset.view; },
     };
 }

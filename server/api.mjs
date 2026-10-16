@@ -9,6 +9,7 @@
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/archive
+ *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
  *   POST /api/conversations/<name>/talk          {text, answers?, files?}: written in its chat; files from .../talk/file
@@ -396,6 +397,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
             return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb })), true;
         }
+        const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
+        if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const resuming = /^\/api\/conversations\/([^/]+)\/resume$/.exec(pathname);
         if (resuming) return send(200, conversations.setResume(decodeURIComponent(resuming[1]), body.on)), true;
         const repairing = /^\/api\/conversations\/([^/]+)\/terminal\/repair$/.exec(pathname);

@@ -53,3 +53,21 @@ test('a step with input is a small file handed over apart, and nothing else', ()
         assert.throws(() => readTools(JSON.stringify([{ ...base, install: [bad] }])));
     }
 });
+
+test('every tool but the shell is started with every right in its own machine, by the flag its own --help names; Claude Code also skips the one-time warning, and may run parley in either choice', () => {
+    const rights = Object.fromEntries(loadTools().map((t) => [t.id, t.rights]));
+    /* Checked against each tool's --help and source (P4): the flag that removes every approval. */
+    assert.deepEqual(rights.codex.full, ['--dangerously-bypass-approvals-and-sandbox']);
+    /* --yolo alone is turned back to "default" in a folder Gemini does not trust: --skip-trust trusts it for the session. */
+    assert.deepEqual(rights.gemini.full, ['--yolo', '--skip-trust']);
+    assert.deepEqual(rights.opencode.full, ['--auto']);
+    const claude = rights['claude-code'];
+    assert.equal(claude.full[0], '--dangerously-skip-permissions');
+    /* Given on the command line, not written in its settings file: the owner's file is never rewritten. */
+    assert.equal(claude.full[1], '--settings');
+    assert.deepEqual(JSON.parse(claude.full[2]), { skipDangerousModePermissionPrompt: true, permissions: { allow: ['Bash(parley:*)'] } });
+    assert.deepEqual(claude.ask[0], '--settings');
+    assert.deepEqual(JSON.parse(claude.ask[1]), { permissions: { allow: ['Bash(parley:*)'] } });
+    for (const id of ['codex', 'gemini', 'opencode']) assert.deepEqual(rights[id].ask, [], `${id}: asks as it does by itself`);
+    assert.equal(rights.shell, undefined);
+});

@@ -56,14 +56,23 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     const b = await bench(t);
     const me = await b.person();
     await me.create('silent');
-    await me.type('MARK=before-restart; echo set');
-    await me.sees('\nset');
+    await me.type('MARK=before-restart; echo set rights:$RIGHTS');
+    /* Every right in its machine: the default, given at its first start. */
+    await me.sees('\nset rights:full');
+    /* Parley was installed in it by the server (never by the tool), from /tools, offline. */
+    assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+\.tgz\n$/);
     report(b, 'silent', { silent: true });
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();
     await me.until('the Machine chapter says it', async () => /Its machine does not answer/.test(await me.page.locator('#machine-health').innerText()));
     /* Its tool can take up its last session when it starts: the default. */
     assert.equal(await me.page.locator('#resume-on button[data-on=true]').getAttribute('aria-pressed'), 'true');
+    /* Ask before acting: off by default, and the page says plainly what that means; turned on, from its next start. */
+    assert.equal(await me.page.locator('#ask-first button[data-on=false]').getAttribute('aria-pressed'), 'true');
+    assert.match(await me.page.locator('#rights-hint').innerText(), /the tool acts without asking you, with every right inside its own machine/);
+    await me.page.locator('#ask-first button[data-on=true]').click();
+    await me.until('it asks before acting', async () => (await me.page.locator('#ask-first button[data-on=true]').getAttribute('aria-pressed')) === 'true');
+    assert.equal((await me.api('/api/conversations')).body.find((x) => x.name === 'silent').askFirst, true);
     await me.page.locator('#panel-close').click();
     /* Over the terminal, with what can be done. */
     assert.equal(await me.page.locator('#health-strip').isVisible(), true);
@@ -92,8 +101,11 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.until('the hung terminal was met', async () => !existsSync(join(vmHome(b, 'silent'), 'hang-attach')), 30_000);
     await me.sees('ready>', 30_000);
     /* The tool came back as on any start: a new shell -- on its last session, as it does by default. */
-    await me.type('echo "mark:${MARK:-gone} resumed:${RESUMED:-no}"');
-    await me.sees('\nmark:gone resumed:1');
+    await me.type('echo "mark:${MARK:-gone} resumed:${RESUMED:-no} rights:${RIGHTS:-none}"');
+    /* ... asking before acting now, as the owner chose before the restart. */
+    await me.sees('\nmark:gone resumed:1 rights:ask');
+    /* Known there already: not installed again. */
+    assert.equal(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8').split('\n').filter(Boolean).length, 1);
     /* Looked at again after the start: nothing wrong, nothing said over the terminal. */
     await me.until('looked at after the restart', async () => (await me.api('/api/conversations/silent/health')).body?.level === 'ok');
     await me.page.locator('#folders').click();

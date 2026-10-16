@@ -74,8 +74,8 @@ export function readLines(input) {
     return lines;
 }
 
-/* THE PART EVERY MACHINE READS. `parley`: where its archive is in /tools. */
-export function commonText({ parley } = {}) {
+/* THE PART EVERY MACHINE READS. */
+export function commonText() {
     return [
         '# Where you are (Clavarium)',
         '',
@@ -85,9 +85,8 @@ export function commonText({ parley } = {}) {
         '- Git: commit your work. The person reviews it and sends it from their screen, or the server sends it by itself where they allowed it. You have no push key: never push.',
         '- Check out branches in the main folder of the repository or under /work, never in /tmp: /tmp is emptied when the machine restarts.',
         '- Secrets are environment variables: never print them, never write them to a file or a commit.',
-        parley
-            ? `- To talk to the person, only when their chat is on: npm install -g ${plain(parley)}, then parley --help.`
-            : '- To talk to the person, only when their chat is on: parley --help.',
+        /* Installed by the server in every machine (toolbox.mjs): the tool is never asked to install it. */
+        '- To talk to the person, when their chat is on: parley --help.',
         '- The rest is yours to explore (ls, --help).',
         '',
     ].join('\n');
@@ -96,8 +95,8 @@ export function commonText({ parley } = {}) {
 const list = (items) => items.join(', ');
 
 /* THE PART OF ONE CONVERSATION, from its facts:
-   { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines, parley } */
-export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [], parley }) {
+   { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines } */
+export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [] }) {
     const out = [`# This conversation: ${plain(name, 40)}`, ''];
     if (tool) out.push(`- Tool running here: ${plain(tool, 40)}.`);
     out.push(workKept ? '- /work is kept by the server: the person sees it in Files, and it outlives the machine.' : '- /work is on this machine\'s own disk: it goes with the machine.');
@@ -112,7 +111,7 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         out.push(`- ${repo}: its origin, read-only and kept up to date, is ${origin}. Its branches: git -C ${repo} fetch ${origin} '+refs/heads/*:refs/remotes/origin/*'`);
     }
     out.push(!chat ? '- Chat with the person: off. Do not use parley.'
-        : parley ? `- Chat with the person: on. If parley is not installed yet: npm install -g ${plain(parley)}; then parley --help.` : '- Chat with the person: on. Use parley (parley --help).');
+        : '- Chat with the person: on. Parley is installed: run parley --help.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);
@@ -192,7 +191,7 @@ export class Guide {
 
     lines(name) { return [...(this.#store.get(name)?.lines ?? [])]; }
 
-    common() { return commonText({ parley: this.#toolbox?.find?.('parley')?.path }); }
+    common() { return commonText(); }
 
     own(name) {
         const c = this.#known(name);
@@ -200,7 +199,7 @@ export class Guide {
             const type = this.#resources.get(r.name)?.type ?? 'folder';
             return { name: r.name, access: r.access, type, origin: type === 'git' && this.#resources.hasOrigin?.(r.name) ? originFolder(r.name) : undefined };
         });
-        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: this.#secrets?.of(name) ?? [], lines: this.lines(name), parley: this.#toolbox?.find?.('parley')?.path });
+        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: this.#secrets?.of(name) ?? [], lines: this.lines(name) });
     }
 
     /* What the page shows: the exact texts, where each is, and the line in the tool's own file. */

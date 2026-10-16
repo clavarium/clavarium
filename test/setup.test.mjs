@@ -14,7 +14,7 @@ import { Vms } from '../server/vm.mjs';
 
 const TOOLS = readTools(JSON.stringify([
     { id: 'shell', label: 'Shell', command: ['bash'], memoryMb: 768, install: [] },
-    { id: 'writer', label: 'Writer', command: ['bash'], memoryMb: 1024, install: [] },
+    { id: 'writer', label: 'Writer', command: ['bash'], rights: { full: ['--every-right'] }, memoryMb: 1024, install: [] },
 ]));
 
 /* A whole Clavarium on a stand-in host that only makes the folders it is
@@ -76,6 +76,9 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     await a.ok('/api/conversations/writer/talk', { on: true });
     await a.ok('/api/conversations/helper/network', { online: false }).catch(() => {});
     await a.ok('/api/conversations/helper/resume', { on: false });
+    /* Its tool asks before acting: exported; the default (every right in its machine) is not written. */
+    await a.ok('/api/conversations/writer/ask-first', { on: true });
+    assert.equal((await a.api('/api/conversations/writer/ask-first', { on: 'yes' })).status, 400);
     await a.ok('/api/conversations/writer/wakeups', { kind: 'every', minutes: 60, message: 'Look at the new photos.' });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'arrival', resource: 'photos', message: 'New photos <b>arrived</b>.', quiet: 20 });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'cron', line: '30 7 * * 1-5', message: 'Morning.' });
@@ -95,6 +98,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.deepEqual(doc.links.find((l) => l.to === 'git:site').autoSend, { branches: ['test', 'try/*'], quietSeconds: 30, perHour: 4, create: false, checks: true });
     assert.equal(doc.links.find((l) => l.from === "device:Dad's tablet" && l.to === 'conversation:writer').gives, 'chat');
     assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:helper').resume, doc.nodes.find((n) => n.id === 'conversation:writer').resume], [false, undefined], 'its tool starts fresh: said; the default is not');
+    assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:writer').askFirst, doc.nodes.find((n) => n.id === 'conversation:helper').askFirst], [true, undefined]);
     assert.deepEqual(doc.nodes.find((n) => n.id === 'conversation:writer').guide, ['Answer me in French.', 'Run npm test before each commit.']);
     assert.equal(doc.nodes.find((n) => n.id === 'conversation:helper').guide, undefined, 'no lines: nothing said');
     assert.equal(await exported(a), first, 'the same file twice: nothing in it moves');
@@ -107,10 +111,12 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.ok(plan.items.find((i) => i.id === 'conversation:writer').texts.some((x) => x.text === 'New photos <b>arrived</b>.'));
     assert.ok(plan.items.find((i) => i.id === 'conversation:writer').texts.some((x) => /read by its tool/.test(x.label) && x.text === 'Answer me in French.\nRun npm test before each commit.'));
     assert.ok(plan.links.find((l) => l.to === 'git:site').confirm);
+    assert.match(plan.items.find((i) => i.id === 'conversation:writer').sub, /asks before acting/);
     const job = await imported(b, first, { confirm: { 'conversation:writer|git:site': true } });
     assert.equal(job.failed, 0, JSON.stringify(job.steps.filter((s) => s.state === 'failed')));
     assert.ok(job.steps.some((s) => /its new address: \/c\/wake\//.test(s.why ?? '')), 'a call from outside gets a new address, said once');
     assert.deepEqual((await b.ok('/api/conversations/writer/guide')).lines, ['Answer me in French.', 'Run npm test before each commit.']);
+    assert.equal((await b.ok('/api/conversations')).find((c) => c.name === 'writer').askFirst, true, 'imported: it asks before acting');
     assert.equal(await exported(b), first);
     /* What was missing, added since: done by itself. */
     await b.ok('/api/secrets', { name: 'MODEL_KEY', value: 'mine' });

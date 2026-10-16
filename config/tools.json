@@ -11,6 +11,17 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "rights": {
+      "full": [
+        "--dangerously-skip-permissions",
+        "--settings",
+        "{\"skipDangerousModePermissionPrompt\":true,\"permissions\":{\"allow\":[\"Bash(parley:*)\"]}}"
+      ],
+      "ask": [
+        "--settings",
+        "{\"permissions\":{\"allow\":[\"Bash(parley:*)\"]}}"
+      ]
+    },
     "install": [
       "node",
       [
@@ -61,6 +72,11 @@
       "--continue"
     ],
     "memoryMb": 2048,
+    "rights": {
+      "full": [
+        "--auto"
+      ]
+    },
     "install": [
       "node",
       [
@@ -89,6 +105,11 @@
       "--last"
     ],
     "memoryMb": 2048,
+    "rights": {
+      "full": [
+        "--dangerously-bypass-approvals-and-sandbox"
+      ]
+    },
     "install": [
       "node",
       [
@@ -117,6 +138,12 @@
       "latest"
     ],
     "memoryMb": 2048,
+    "rights": {
+      "full": [
+        "--yolo",
+        "--skip-trust"
+      ]
+    },
     "install": [
       "node",
       [

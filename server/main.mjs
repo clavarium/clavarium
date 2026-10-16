@@ -155,6 +155,8 @@ export function start({ port, command, cwd, env = process.env }) {
 }
 
 const MAIL_EVERY_MS = 120_000;
+/* An opening waits this long at most for Parley to be installed in its machine (toolbox.mjs). */
+const PARLEY_WAIT_MS = 20_000;
 
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
@@ -174,7 +176,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
     /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
     /* With /tools/CLAVARIUM.md in it: where a tool is, the same for all (guide.mjs). */
-    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: (find) => commonText({ parley: find('parley')?.path }) });
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText() });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
        in the background: see shelf.mjs. Tidied up at start, without making
@@ -225,6 +227,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        `wakeups` are made below; only asked once the server runs. */
     const guide = new Guide({ store: new Store(`${dataDir}/guide.json`), vms, conversations: all, resources: folders, secrets, toolbox, tools,
         chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line) });
+    /* Why Parley is not in a machine, said once in the log, not at each opening. */
+    const parleySaid = new Map();
     all.prepare = async (name, woke) => {
         const wanted = secrets.signature(name);
         const rules = network.apply();
@@ -235,6 +239,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         }
         /* Before the tool starts: it reads its instruction file then. */
         await guide.prepared(name, woke);
+        /* Parley, installed by this server in every machine (toolbox.mjs):
+           known there, nothing is asked; otherwise looked at, and installed
+           if missing or not as the index has it. Waited for, but never long:
+           the tool still starts, and it is tried again at the next opening. */
+        await Promise.race([toolbox.installIn(name).then((why) => { if (why && parleySaid.get(name) !== why) console.error(`${name}: Parley not installed: ${why}`); parleySaid.set(name, why); }), new Promise((r) => { setTimeout(r, PARLEY_WAIT_MS).unref?.(); })]);
         await rules;
     };
     all.through = [RUNNER];
@@ -328,7 +337,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A machine is ready: its folders are shown in it (after a rebuild there
        are some), then its terminal is opened and kept. */
     /* Then its health is looked at (folders that did not come back are put back). */
-    all.ready = (name) => { void (async () => { await folders.remount(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); })(); };
+    all.ready = (name) => { toolbox.forget(name); void (async () => { await folders.remount(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); })(); };
     /* Their health too: after a restart of the host, a folder may not have come back. */
     /* The tools are shown in them first: a machine made before /tools existed gets it now, not as "a folder that came loose". */
     void (async () => { for (const name of all.awake()) if (await all.running(name).catch(() => false)) { await toolbox.show(name).catch(() => {}); void health.check(name).catch(() => {}); await bridge.warm(name); } })();

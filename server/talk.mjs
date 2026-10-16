@@ -2,14 +2,14 @@
  *
  * THIS IS A BRANCHING ON PARLEY (server/parley, a project of its own, copied
  * here unchanged). Parley gives the tool six verbs -- a command, `parley`,
- * which the tool installs by itself from /tools (see toolbox.mjs) -- and
+ * which this server installs in every machine from /tools (toolbox.mjs) -- and
  * gives this server the other side. PARLEY ANNOUNCES, THIS SERVER DECIDES:
  *
  *   WHERE THE BRIDGE LIVES   in the conversation's own work folder, kept by
  *                            this server: /work/.parley in its machine. No
  *                            address, no port, nothing new in the machine.
  *   THE INVITATION           typed once in its terminal when the owner asks:
- *                            install the command from /tools, use it, write
+ *                            Parley is installed, use it, write
  *                            to the person in their language; and, this
  *                            server's own sentence, where to check out its
  *                            branches (BRANCHES).
@@ -198,15 +198,18 @@ export class Talk {
         return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
     }
 
-    /* The tool is asked, in its terminal, to install the command and use it,
-       writing to the person in `lang`. Typed once, when the owner asks. */
+    /* The tool is asked, in its terminal, to use the command -- installed in
+       its machine by this server, never by the tool (toolbox.mjs) -- writing
+       to the person in `lang`. Typed once, when the owner asks. */
     async invite(name, lang) {
         const c = this.#known(name);
         if (!this.of(name).on) throw new Refusal(409, 'Turn it on first.');
         const tool = this.#toolbox?.find('parley');
         if (!tool) throw new Refusal(503, 'The tools folder is not in place on this server yet: try again in a moment, or restart the server.');
         if (!this.#conversations.awake().includes(name)) throw new Refusal(409, 'It is asleep: open it first.');
-        const text = `${this.#parley(name).invite(lang, { install: `npm install -g ${tool.path}`, shared: c.work === 'kept' ? '/work' : undefined })} ${BRANCHES}`;
+        const why = await this.#toolbox.installIn(name);
+        if (why) throw new Refusal(502, `Parley could not be installed in its machine: ${why}.`);
+        const text = `${this.#parley(name).invite(lang, { shared: c.work === 'kept' ? '/work' : undefined })} ${BRANCHES}`;
         if (!(await this.#type(name, text).catch(() => false))) throw new Refusal(502, 'The invitation could not be typed: is its tool running?');
         return { ...this.of(name), invited: text };
     }

@@ -61,12 +61,13 @@ export function languageName(lang) {
     try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(base) ?? 'English'; } catch { return 'English'; }
 }
 /* What an agent is asked once, to use Parley. `install`: how it gets the
-   command, when it does not have it yet (a command line of the
-   application's: it is put in double quotes as it is); `shared`: the folder
+   command, when the application has not installed it itself (a command
+   line of the application's: it is put in double quotes as it is); without
+   it, the agent is told Parley is installed. `shared`: the folder
    whose files the person can open. */
 export function invitation({ lang = 'en', install, shared } = {}) {
     return [
-        install ? `Install Parley, a small command to talk with the person you work for on their screen: run "${install}", then read "parley --help".` : 'Read "parley --help": it is how you talk with the person you work for, on their screen.',
+        install ? `Install Parley, a small command to talk with the person you work for on their screen: run "${install}", then read "parley --help".` : 'Parley is installed: run "parley --help". It is how you talk with the person you work for, on their screen.',
         'From now on, talk with them through it, not in this terminal: "parley tell" to tell them something, "parley ask" to ask them something (with the choices when you can), "parley show" for a file you made, "parley doing" in one short line each time you start something new, "parley status" to say where you are.',
         shared ? `Put any file you show under ${shared}: it is the folder they can open.` : '',
         `Write to them in ${languageName(lang)}.`,

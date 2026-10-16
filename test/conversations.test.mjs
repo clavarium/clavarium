@@ -11,6 +11,7 @@ import { readTools } from '../server/tools.mjs';
 const TOOLS = readTools(JSON.stringify([
     { id: 'tool', label: 'Tool', command: ['tool', '--go'], memoryMb: 1024, install: [['sudo', 'install-tool']] },
     { id: 'again', label: 'Again', command: ['again'], resume: ['again', '--continue'], memoryMb: 1024, install: [] },
+    { id: 'bold', label: 'Bold', command: ['bold'], resume: ['bold', '--continue'], rights: { full: ['--every-right', '--settings', '{"a": [1]}'], ask: ['--asks'] }, memoryMb: 1024, install: [] },
 ]));
 
 /* A VM manager that records every command and answers what the test decides. */
@@ -450,7 +451,7 @@ test('its tool takes up its last session when it starts -- never at its first st
     assert.deepEqual(await tool(), ['again'], 'its first start: no session to take up');
     assert.deepEqual(await tool(), ['again', '--continue']);
     assert.equal(all.list()[0].resumes, true);
-    assert.deepEqual(all.tools().map((x) => [x.id, x.resumes]), [['tool', false], ['again', true]]);
+    assert.deepEqual(all.tools().map((x) => [x.id, x.resumes]), [['tool', false], ['again', true], ['bold', true]]);
     all.setResume('demo', false);
     assert.equal(all.get('demo').resume, false);
     assert.deepEqual(await tool(), ['again'], 'started fresh, as the owner chose');
@@ -468,6 +469,44 @@ test('its tool takes up its last session when it starts -- never at its first st
     await all.built;
     for (let i = 0; i < 2; i++) { const argv = await all.open('plain'); all.left('plain'); assert.deepEqual(argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')), ['tool', '--go']); }
     assert.throws(() => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], resume: 'x --continue', memoryMb: 1024, install: [] }])), /resume must be an argument vector/);
+});
+
+test('every right in its own machine by default, at EVERY start of its tool (first, resume, fresh, after a rebuild); "Ask before acting" from its next start', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    const tool = async () => { const argv = await all.open('demo'); all.left('demo'); return argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')); };
+    const FULL = ['--every-right', '--settings', '{"a": [1]}'];
+    assert.deepEqual(await tool(), ['bold', ...FULL], 'its first start');
+    assert.deepEqual(await tool(), ['bold', '--continue', ...FULL], 'a resume: the tool does not keep it from its last session');
+    assert.equal(all.list()[0].rights, true);
+    assert.equal(all.list()[0].askFirst, undefined, 'the default is not written');
+    assert.deepEqual(all.tools().map((x) => [x.id, x.rights]), [['tool', false], ['again', false], ['bold', true]]);
+    all.setResume('demo', false);
+    assert.deepEqual(await tool(), ['bold', ...FULL], 'started fresh');
+    all.setResume('demo', true);
+    all.setAskFirst('demo', true);
+    assert.equal(all.get('demo').askFirst, true);
+    assert.deepEqual(await tool(), ['bold', '--continue', '--asks']);
+    all.setAskFirst('demo', false);
+    assert.equal(all.get('demo').askFirst, undefined);
+    assert.deepEqual(await tool(), ['bold', '--continue', ...FULL]);
+    assert.throws(() => all.setAskFirst('demo', 'yes'), /true/);
+    assert.throws(() => all.setAskFirst('nobody', true), /No such conversation/);
+    /* Built again: a new disk; still every right. */
+    b.states.delete(vmName('demo'));
+    await all.rebuild('demo'); await all.built;
+    assert.deepEqual(await tool(), ['bold', ...FULL]);
+    /* A tool without that line starts as it is, whatever is chosen. */
+    all.create({ name: 'plain', tool: 'again' });
+    await all.built;
+    all.setAskFirst('plain', true);
+    const plain = await all.open('plain'); all.left('plain');
+    assert.deepEqual(plain.slice(plain.indexOf('/work') + 1, plain.indexOf(';')), ['again']);
+    for (const rights of [{}, { full: [] }, { full: 'x --yolo' }, { full: ['--yolo', ';'] }, { full: ['--yolo'], ask: [''] }, 'yolo']) {
+        assert.throws(() => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], rights, memoryMb: 1024, install: [] }])), /rights needs "full"/);
+    }
 });
 
 test('a terminal that does not come is repaired: its channel closed, its tmux kept when it answers, made again when it does not; refused when that cannot help', async (t) => {

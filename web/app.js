@@ -1243,6 +1243,16 @@
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
+        /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
+        $('rights-box').hidden = DEVICE || !here?.rights;
+        for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
+    }
+    for (const b of $('ask-first').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/ask-first`, { on: b.dataset.on === 'true' }); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
     }
     for (const b of $('resume-on').children) {
         b.addEventListener('click', async () => {
@@ -1511,7 +1521,7 @@
         $('talk-invite').hidden = !talk.on;
         $('talk-declare').hidden = !talk.on;
         if (talk.on) $('talk-declare').textContent = talk.tools
-            ? `Then "Ask the tool to use it": it is asked, in its terminal, to install parley from /tools and to write to you in ${languageName(deviceLang())}. From then on, this conversation opens on its chat; its terminal is one click away.`
+            ? `Then "Ask the tool to use it": it is told, in its terminal, that parley is installed in its machine, to use it and to write to you in ${languageName(deviceLang())}. From then on, this conversation opens on its chat; its terminal is one click away.`
             : 'The tools folder (/tools) is not in place on this server yet: the tool cannot be asked to install parley.';
         if (!talk.on && talk.possible === false) $('talk-about').textContent = 'This conversation works on the disk of its machine: talking through the app needs its work folder kept here.';
     }

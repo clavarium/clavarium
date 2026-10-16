@@ -81,13 +81,26 @@ export function readTools(text) {
            ("claude --continue"); used instead of `command` once it has run on
            its disk, unless the owner chose to start it fresh. */
         if (t.resume !== undefined && (!isArgv(t.resume) || t.resume.includes(';'))) throw new Error(`${t.id}: resume must be an argument vector`);
+        /* Optional: FULL RIGHTS IN ITS OWN MACHINE. `full`: what is added to
+           the command that starts it (the first start, a resume, a fresh
+           start: every start goes through one place, conversations.mjs) for
+           it to act without asking -- the default; `ask`: what is added
+           instead when the owner chose "Ask before acting" (often nothing).
+           The machine is its own and disposable: its user is root there by
+           sudo already; what it may reach outside is what was attached. */
+        let rights;
+        if (t.rights !== undefined) {
+            const extra = (list) => Array.isArray(list) && list.every((a) => typeof a === 'string' && a !== '' && a !== ';');
+            if (!t.rights || typeof t.rights !== 'object' || !extra(t.rights.full) || t.rights.full.length === 0 || (t.rights.ask !== undefined && !extra(t.rights.ask))) throw new Error(`${t.id}: rights needs "full", a list of arguments, and may have "ask"`);
+            rights = Object.freeze({ full: Object.freeze([...t.rights.full]), ask: Object.freeze([...(t.rights.ask ?? [])]) });
+        }
         /* Optional: the tool's own instruction file, in the home of the
            machine's user (".claude/CLAUDE.md"): a marked block in it points
            the tool to its guide (see guide.mjs). A plain relative path. */
         if (t.instructions !== undefined && !INSTRUCTIONS.test(t.instructions)) throw new Error(`${t.id}: instructions is a relative path in the home, without ".."`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
-        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), command: Object.freeze([...t.command]), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
+        return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), command: Object.freeze([...t.command]), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });
     });
 }
 

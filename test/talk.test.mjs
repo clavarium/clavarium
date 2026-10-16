@@ -28,7 +28,9 @@ function bench(t, { work = 'kept', tools = true } = {}) {
         exec: async (name, argv) => { if (!world.tmux) return { code: 1 }; const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; },
         state: async () => world.state,
     };
-    const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined) } : null;
+    /* Parley is installed by the server before the invitation (toolbox.mjs); `world.install` says why it could not be. */
+    const installs = [];
+    const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined), installIn: async (name) => { installs.push(name); return world.install ?? ''; } } : null;
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
         resources: { workFolder: (name) => join(dir, 'work', name), of: () => world.attached.map((name) => ({ name, access: 'read' })) },
@@ -38,7 +40,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const bridge = join(dir, 'work', 'helper', '.parley');
     /* The tool runs the command, from its work folder. */
     const parley = (...args) => run(args, { cwd: join(dir, 'work', 'helper'), env: {} });
-    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley };
+    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley, installs };
 }
 
 test('off until the owner turns it on; turned on, the bridge is put in the work folder and nothing is typed', async (t) => {
@@ -55,7 +57,7 @@ test('off until the owner turns it on; turned on, the bridge is put in the work 
     assert.equal(disk.talk.of('helper').possible, false);
 });
 
-test('the invitation: typed once in its terminal, English, the archive in /tools to install, the person\'s language', async (t) => {
+test('the invitation: typed once in its terminal, English, Parley installed by the server first (never by the tool), the person\'s language', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);
     const asked = await b.talk.invite('helper', 'fr-FR');
@@ -63,13 +65,21 @@ test('the invitation: typed once in its terminal, English, the archive in /tools
     assert.equal(b.typed.length, 2); assert.equal(b.typed[1], 'Enter');
     const line = b.typed[0];
     assert.equal(line, asked.invited);
-    for (const part of ['npm install -g /tools/clavarium-parley-0.3.0.tgz', 'parley --help', 'parley doing', 'under /work', 'Write to them in French.', 'You have a new message', 'main folder of the repository or under /work, never in /tmp']) assert.ok(line.includes(part), part);
+    assert.deepEqual(b.installs, ['helper'], 'installed by the server, before');
+    assert.ok(line.startsWith('Parley is installed: run "parley --help".'), line);
+    assert.ok(!/npm|install -g|\.tgz/.test(line), 'the tool is not asked to install anything');
+    for (const part of ['parley --help', 'parley doing', 'under /work', 'Write to them in French.', 'You have a new message', 'main folder of the repository or under /work, never in /tmp']) assert.ok(line.includes(part), part);
     assert.ok(/^[\x20-\x7e]+$/.test(line) && !/[`'$\\]/.test(line), 'one plain line, nothing a shell would run');
     assert.ok(!line.includes('MCP'), 'no server to declare');
     b.world.awake = false;
     await assert.rejects(b.talk.invite('helper', 'en'), /asleep/);
     b.world.awake = true; b.world.tmux = false;
     await assert.rejects(b.talk.invite('helper', 'en'), /could not be typed/);
+    /* Not installed: said, and nothing typed. */
+    b.world.tmux = true; b.world.install = 'there is no npm in this machine';
+    const before = b.typed.length;
+    await assert.rejects(b.talk.invite('helper', 'en'), /Parley could not be installed in its machine: there is no npm in this machine/);
+    assert.equal(b.typed.length, before);
     const bare = bench(t, { tools: false });
     await bare.talk.set('helper', true);
     await assert.rejects(bare.talk.invite('helper', 'en'), /tools folder is not in place/);

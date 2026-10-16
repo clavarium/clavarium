@@ -253,6 +253,26 @@ if (area === 'vm') {
             spawnSync('sleep', [process.env.FAKE_VM_STEP_SECONDS ?? '0']);
             if (program === 'cloud-init') process.exit(0);
         }
+        /* PARLEY INSTALLED BY THE SERVER (toolbox.mjs): installed for real,
+           offline, but into the machine's /usr/local here (its root is a
+           directory), never into this computer's. Only that install, from
+           where the machine sees /tools; each one written down for the tests
+           that count them. `parley` is then the one of the machine. */
+        if (program === 'npm') {
+            const archive = rest.at(-1);
+            if (rest[0] !== 'install' || !rest.includes('-g') || !rest.includes('--offline') || !archive.startsWith('/tools/') || !existsSync(inVm(vm, archive))) fail(`npm: refused here: ${rest.join(' ')}`);
+            const r = spawnSync('npm', ['install', '-g', '--offline', '--no-audit', '--no-fund', '--prefix', inVm(vm, '/usr/local'), inVm(vm, archive)], { encoding: 'utf8' });
+            if (r.status !== 0) fail(r.stderr || 'npm failed', r.status ?? 1);
+            appendFileSync(join(home(vm), 'npm-installs'), `${archive}\n`);
+            process.exit(0);
+        }
+        if (program === 'parley') {
+            const bin = inVm(vm, '/usr/local/bin/parley');
+            if (!existsSync(bin)) { console.error('parley: command not found'); process.exit(127); }
+            const r = spawnSync(bin, rest, { encoding: 'utf8', cwd: root(vm) });
+            process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? '');
+            process.exit(r.status ?? 1);
+        }
         if (program === 'mkdir') { mkdirSync(inVm(vm, rest.at(-1)), { recursive: true }); process.exit(0); }
         if (program === 'install') {
             const target = inVm(vm, rest.at(-1));

@@ -117,7 +117,7 @@
             </div>
             <div id="talk-box">
             <div class="panel-top"><b>Talk through the app</b></div>
-            <p class="hint" id="talk-about">A chat screen instead of its terminal: the tool installs a small command, parley, from /tools, to tell you something, ask you something, show you a file, say what it is doing and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>
+            <p class="hint" id="talk-about">A chat screen instead of its terminal: a small command, parley, installed in its machine by Clavarium, lets the tool tell you something, ask you something, show you a file, say what it is doing and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>
             <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
             <p class="hint" id="talk-declare" hidden></p>
             </div>
@@ -137,6 +137,12 @@
             <div class="panel-top"><b>When its tool starts</b></div>
             <div class="row"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div>
             <p class="hint" id="resume-hint">Each time its machine starts (a wake after a stop, a restart), the tool takes up the session it had, as it was. Start fresh: it starts a new one, with nothing of before in mind.</p>
+            </div>
+            <!-- FULL RIGHTS IN ITS OWN MACHINE: the default, said plainly where it is changed. -->
+            <div id="rights-box" hidden>
+            <div class="panel-top"><b>Ask before acting</b></div>
+            <div class="row"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div>
+            <p class="hint" id="rights-hint">Off (the default): <b>the tool acts without asking you</b>, with every right inside its own machine: it installs, changes and deletes there as it sees fit. Outside its machine it reaches only what you attached to it, as you attached it. On: it asks you before it acts, as it does by itself. Taken into account the next time the tool starts: restart the machine to apply it now.</p>
             </div>
             <div class="panel-top"><b>Memory and disk</b></div>
             <form id="machine-size" autocomplete="off">
