@@ -561,6 +561,7 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .lk-pop .lk-note[role="alert"] { color: var(--danger); }
 .lk-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .lk-pop .lk-row { justify-content: space-between; margin-top: 8px; }
+.lk-ask { margin: 10px 0 0; font-weight: 600; }
 .lk-rm { color: var(--danger); }
 .lk-pop .auto-send { margin-top: 6px; }
 .lk-card { flex: none; max-height: 32vh; overflow-y: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); font-size: .8125rem; }

@@ -47,7 +47,9 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await page.locator('.lk-pop input[value=rw]').check();
     await me.until('brand is written by client-b', async () => (await brandOf()) === 'write');
     await page.locator('.lk-pop .lk-rm').click();
-    await page.locator('.lk-pop button', { hasText: 'Detach brand from client-b' }).click();
+    /* Asked in words, then two short buttons. */
+    assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Detach brand from client-b?');
+    await page.locator('.lk-pop button', { hasText: /^Remove$/ }).click();
     await me.until('brand is detached from client-b', async () => (await brandOf()) === undefined);
     /* Traced: what reaches it, what it reaches. */
     await node('conversation:client-a').click();

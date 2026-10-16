@@ -553,13 +553,16 @@
             const rm = h('button', { type: 'button', class: 'lk-rm', text: 'Remove link' });
             rm.addEventListener('click', () => {
                 const last = a.kind === 'device' && graph.links.filter((x) => x.from === a.id).length === 1;
-                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}${last ? ': it has nothing else, so the device is removed' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}` : `Detach ${b.name} from ${a.name}`;
-                const sure = h('button', { type: 'button', class: 'danger', text: question });
-                const keep = h('button', { type: 'button', text: 'Keep', onclick: () => openPop(l) });
+                /* The question in words above, two short buttons side by side below. */
+                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}?${last ? ' It has nothing else: the device is removed too.' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}?` : `Detach ${b.name} from ${a.name}?`;
+                const ask = h('p', { class: 'lk-ask', text: question });
+                const sure = h('button', { type: 'button', class: 'danger', text: 'Remove' });
+                const keep = h('button', { type: 'button', text: 'Cancel', onclick: () => openPop(l) });
                 sure.addEventListener('click', async () => {
                     sure.disabled = true;
                     try { await takeAway(l); closePop(); await changed(); if (b.kind === 'secret') err(`${b.name} will no longer be handed to ${a.name}'s tool the next time it starts.`); } catch (e) { fail(e); }
                 });
+                row.before(ask);
                 row.replaceChildren(sure, keep);
             });
             if (l.pending) rm.hidden = true;
