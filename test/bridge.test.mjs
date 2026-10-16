@@ -183,3 +183,25 @@ test('another site, a bad name or another path never reaches a terminal', async 
     assert.equal(sameOrigin({ origin: 'https://host.example.evil.example', host: 'host.example' }), false);
     assert.equal(sameOrigin({ host: 'host.example' }), false, 'no Origin header is not a browser we know');
 });
+
+test('a line of the server goes down the terminal kept open, Enter apart; not after a screen pressed tmux\'s prefix; and when the terminal closed for its machine\'s sake, it is said when', async (t) => {
+    const b = await bench(t);
+    assert.equal(await b.bridge.type('demo', 'hello', 0), false, 'no terminal open: the caller uses its other way');
+    await b.bridge.warm('demo');
+    const started = Date.now();
+    assert.equal(await b.bridge.type('demo', 'Read your messages.', 80), true);
+    assert.ok(Date.now() - started >= 70, 'Enter waited for');
+    assert.deepEqual(b.terminals.made[0].written, ['Read your messages.', '\r'], 'the line, then Enter, apart');
+    /* A screen pressed Ctrl-B: what follows may be a tmux command. */
+    const ws = b.open('c=demo');
+    await once(ws, 'open');
+    await b.until(() => b.terminals.made[0].sizes.length === 2);
+    ws.send(Buffer.from('\x02'));
+    await b.until(() => b.terminals.made[0].written.includes('\x02'));
+    assert.equal(await b.bridge.type('demo', 'later', 0), false);
+    assert.equal(b.bridge.droppedAt('demo'), undefined);
+    b.bridge.drop('demo');
+    assert.ok(b.bridge.droppedAt('demo') >= started);
+    assert.equal(await b.bridge.type('demo', 'gone', 0), false);
+    ws.close();
+});

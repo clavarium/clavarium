@@ -82,7 +82,7 @@ GIT_READ="/usr/lib/clavarium/git-read"
 LOCKS="/run/clavarium"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git|server> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -381,6 +381,64 @@ case "$AREA $VERB" in
         [ $# -eq 0 ] || usage
         if [ "$SAY" = "yes" ]; then printf '%s\n' "$MULTIPASS list --format csv (ready-made machines only)"; exit 0; fi
         "$MULTIPASS" list --format csv | cut -d, -f1 | grep -E '^clvshelf-[0-9]{8}-[0-9]{6}$' || true
+        exit 0 ;;
+    "server room")
+        # WHAT THE SERVER HAS LEFT, for Settings (This server) and for the
+        # reserve that creating, starting, waking or growing a machine must
+        # leave. Read-only, no argument, nothing asked of any machine (a
+        # machine asleep stays asleep). Numbers and our own names only:
+        #   place <machines|data|folders> <device> <size MB> <free MB>
+        #   memory <total MB> <available MB>
+        #   machine <one of our VMs> <resident MB>
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "df $SHELF_STORE $DATA $MNT" "/proc/meminfo" "resident memory of the processes of our machines"; exit 0; fi
+        store="$SHELF_STORE"; [ -d "$store" ] || store="/var"
+        for place in "machines:$store" "data:$DATA" "folders:$MNT"; do
+            what="${place%%:*}"; at="${place#*:}"
+            [ -d "$at" ] || continue
+            sizes="$(df -Pm -- "$at" | awk 'NR==2 && $2 ~ /^[0-9]+$/ && $4 ~ /^[0-9]+$/ {print $2, $4}')" || sizes=""
+            [ -n "$sizes" ] && printf 'place %s %s %s\n' "$what" "$(stat -c %d -- "$at")" "$sizes"
+        done
+        awk '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{printf "memory %d %d\n", t/1024, a/1024}' /proc/meminfo
+        # A machine is a qemu process whose disk is in one of our instances.
+        for pid in $(pgrep qemu-system || true); do
+            vm="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE '/instances/clv(shelf)?-[a-z0-9-]+/' | head -1 | cut -d/ -f3)" || vm=""
+            [ -n "$vm" ] || continue
+            rss="$(awk '/^VmRSS:/{print int($2/1024)}' "/proc/$pid/status" 2>/dev/null)" || rss=""
+            [ -n "$rss" ] && printf 'machine %s %s\n' "$vm" "$rss"
+        done
+        exit 0 ;;
+    "server usage")
+        # WHAT TAKES THE ROOM, for Settings: this server's own data, the
+        # folders given to machines, their work disks, what was put aside,
+        # the tools; the disks of the machines, the ready-made machine and
+        # the images the VM manager keeps. Read-only, no argument; each
+        # measure bounded in time (slow: the server asks it now and then).
+        #   used <data|folders|work|removed|tools|shelf|images|others> <MB>
+        #   used machine <one of our VMs> <MB>
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "du $DATA $MNT/resources $MNT/work-disks $MNT/removed $MNT/toolbox/files" "du $SHELF_INSTANCES $SHELF_STORE/cache"; exit 0; fi
+        mb() { { timeout 60 du -smx "$@" 2>/dev/null || true; } | awk '$1 ~ /^[0-9]+$/ {s+=$1} END{print s+0}'; }
+        # The data directory may hold the shared folders (MNT the same, or
+        # under it): they are counted once, in their own lines.
+        printf 'used data %s\n' "$(mb --exclude="$MNT/resources" --exclude="$MNT/views" --exclude="$MNT/work" --exclude="$MNT/work-disks" --exclude="$MNT/removed" --exclude="$MNT/toolbox" -- "$DATA")"
+        for part in "folders:resources" "work:work-disks" "removed:removed" "tools:toolbox/files"; do
+            at="$MNT/${part#*:}"
+            if [ -d "$at" ] && [ ! -L "$at" ]; then printf 'used %s %s\n' "${part%%:*}" "$(mb -- "$at")"; fi
+        done
+        ours=0; shelf=0
+        if [ -d "$SHELF_INSTANCES" ]; then
+            for at in "$SHELF_INSTANCES"/clv-* "$SHELF_INSTANCES"/clvshelf-*; do
+                [ -d "$at" ] && [ ! -L "$at" ] || continue
+                vm="${at##*/}"; size="$(mb -- "$at")"
+                if [[ "$vm" =~ ^clvshelf-[0-9]{8}-[0-9]{6}$ ]]; then shelf=$((shelf + size)); ours=$((ours + size))
+                elif is_name "${vm#clv-}"; then printf 'used machine %s %s\n' "$vm" "$size"; ours=$((ours + size)); fi
+            done
+            all="$(mb -- "$SHELF_INSTANCES")"
+            printf 'used shelf %s\n' "$shelf"
+            printf 'used others %s\n' "$(( all > ours ? all - ours : 0 ))"
+        fi
+        [ -d "$SHELF_STORE/cache" ] && printf 'used images %s\n' "$(mb -- "$SHELF_STORE/cache")"
         exit 0 ;;
     "folder make")
         # The folder is made here, and given to the account that owns the data

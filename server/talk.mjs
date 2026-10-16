@@ -60,6 +60,29 @@ const PANE = `=${SESSION}:`;
 export const TYPING_QUIET_MS = 4000;
 /* A line that waits is tried again this often (a machine that does not run is not touched: only its state is asked). */
 export const RETRY_MS = 10_000;
+/* THE LINE AND ITS ENTER ARE TYPED APART, this long apart. Arriving in one
+   read, "text" and Enter look like a paste to a tool that guesses pastes from
+   how fast the keys come (measured in tmux: send-keys of both in one command
+   gives the program one read, "text\r"): the Enter is then a new line in its
+   input, not a send. Waited inside the same tmux command (run-shell -d) or
+   by the terminal bridge: no second call into the machine. */
+export const ENTER_AFTER_MS = 200;
+/* WHAT IS KNOWN, NOT ASKED. Asking the VM manager whether the machine runs
+   costs half a second for every message (measured on a real server). The
+   machine is known to run when its terminal is kept open (it is closed before
+   any sleep or stop), when a line was typed into it this recently, or when
+   its health was looked at this recently and found it running -- in both
+   cases only if its terminal was not closed since. Anything else is asked. */
+export const TYPED_KNOWN_MS = 60_000;
+export const HEALTH_KNOWN_MS = 150_000;
+/* The one tmux command that types a line, waits, and presses Enter: an
+   argument vector, no shell. tmux reads an argument that ENDS with ";" as the
+   end of a command: such a last ";" is written "\;", which tmux gives back
+   as ";" (tried). */
+export function typeCommand(line) {
+    const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
+    return ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
+}
 /* Added to Parley's invitation, this server's own sentence: a branch can be
    checked out in one folder only, and /tmp is emptied when the machine
    restarts, with the work left there. Typed in a terminal: no quote, no
@@ -81,10 +104,15 @@ const WORDS = Object.freeze([...KEYS, 'alert-asks', 'alert-waits']);
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
+    #terminal; #health; #ranAt = new Map();
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS }) {
+    /* `terminal`: the terminals the bridge keeps open (bridge.mjs): `open(name)`,
+       `type(name, line, enterAfterMs)`, `droppedAt(name)`. `health`: what was
+       last seen of each machine (health.mjs), `of(name)`. Both optional. */
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null }) {
+        this.#terminal = terminal; this.#health = health;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
@@ -191,11 +219,28 @@ export class Talk {
         return this.of(name);
     }
 
+    /* Types a line and Enter in the tool's terminal. Through the terminal the
+       bridge keeps open into the same tmux pane when there is one (nothing
+       sent into the machine: the bytes go down a channel already open), or
+       else one command in the machine. */
     async #type(name, line) {
         await this.#warm(name);
-        const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE];
-        if ((await this.#vms.exec(name, [...tmux, '-l', '--', line], { timeoutMs: 30_000 })).code !== 0) return false;
-        return (await this.#vms.exec(name, [...tmux, 'Enter'], { timeoutMs: 30_000 })).code === 0;
+        if (this.#terminal?.open(name) && await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false)) { this.#ranAt.set(name, this.#now()); return true; }
+        const ok = (await this.#vms.exec(name, typeCommand(line), { timeoutMs: 30_000 })).code === 0;
+        if (ok) this.#ranAt.set(name, this.#now());
+        return ok;
+    }
+
+    /* Whether its machine runs: true when known without asking (see
+       HEALTH_KNOWN_MS), else asked of the VM manager. */
+    async #runs(name) {
+        if (this.#terminal?.open(name)) return true;
+        const since = this.#terminal?.droppedAt?.(name) ?? -Infinity;
+        const fresh = (at, ms) => Number.isFinite(at) && at > since && this.#now() - at < ms;
+        if (fresh(this.#ranAt.get(name), TYPED_KNOWN_MS)) return true;
+        const seen = this.#health?.of(name);
+        if (seen?.state === 'Running' && seen.answering !== false && fresh(Date.parse(seen.at), HEALTH_KNOWN_MS)) return true;
+        return (await this.#vms.state(name).catch(() => undefined)) === 'Running';
     }
 
     /* The tool is asked, in its terminal, to use the command -- installed in
@@ -305,7 +350,7 @@ export class Talk {
         if (!this.#conversations.awake().includes(name)) return later(RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);
-        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') return later(RETRY_MS);
+        if (!(await this.#runs(name))) return later(RETRY_MS);
         if (!(await this.#type(name, REREAD).catch(() => false))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
         const waits = this.#parley(name).unread() > 0;
@@ -344,7 +389,7 @@ export class Talk {
         if (!this.#conversations.awake().includes(name)) return waits('asleep', RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
-        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') return waits('asleep', RETRY_MS);
+        if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
         if (!(await this.#type(name, WAKE).catch(() => false))) return waits('failed', RETRY_MS);
         this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, typedAt: new Date(this.#now()).toISOString() });
         return 'typed';
@@ -368,6 +413,6 @@ export class Talk {
         }
     }
 
-    forget(name) { this.#deaf(name); this.#store.remove(name); this.#typedAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }
+    forget(name) { this.#deaf(name); this.#store.remove(name); this.#typedAt.delete(name); this.#ranAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }
     stop() { clearInterval(this.#timer); for (const name of [...this.#listening.keys()]) this.#deaf(name); }
 }

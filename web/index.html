@@ -26,6 +26,8 @@
     </form>
     <div id="items"></div>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
+    <!-- Shown only when this server is short of disk or memory: opens Settings, This server. -->
+    <button type="button" id="server-gauge" hidden></button>
   </aside>
   <!-- THE THREE PLACES of the owner's page: its conversations, who gets what
        (Access), and its settings. Bottom left on a wide screen; a bar along
@@ -517,6 +519,30 @@
         <p id="settings-dictation" class="hint"></p>
         <div class="panel-top"><b>People &amp; address</b></div>
         <p id="settings-people" class="hint"></p>
+        <!-- THIS SERVER: its disk and memory, what takes them, and the reserve
+             no machine may eat into (server/capacity.mjs). Nothing here wakes a machine. -->
+        <div class="panel-top" id="settings-server-top"><b>This server</b></div>
+        <div id="settings-server" tabindex="-1">
+          <p id="server-unknown" class="hint" hidden>This server's disk and memory cannot be read just now. Nothing is refused for lack of room while they cannot.</p>
+          <div id="server-disks"></div>
+          <div class="server-block" id="server-memory" hidden>
+            <div class="server-head"><b>Memory</b><span id="server-memory-state" class="server-state"></span><span id="server-memory-figures" class="server-figures"></span></div>
+            <div class="server-meter" id="server-memory-meter" role="meter" aria-label="Memory taken" aria-valuemin="0" aria-valuemax="100"><span class="fill"></span><span class="zone"></span><span class="mark"></span></div>
+            <p id="server-memory-note" class="server-note"></p>
+            <dl id="server-memory-parts" class="server-parts"></dl>
+          </div>
+          <div class="server-block">
+            <div class="server-head"><b>Reserve</b><span class="server-figures">always left free</span></div>
+            <div class="reserve-row">
+              <label>Disk <input type="number" id="reserve-disk" min="0" max="1024" step="0.5" inputmode="decimal"> GB</label>
+              <label>Memory <input type="number" id="reserve-memory" min="0" max="256" step="0.25" inputmode="decimal"> GB</label>
+              <button type="button" id="reserve-save" class="primary">Save</button>
+              <span class="hint" id="reserve-saved" role="status"></span>
+            </div>
+            <p class="hint">Creating, starting or waking a machine, or giving a machine more memory or disk, is refused if it would leave less than this free; you are told what to free instead. Waking is never refused for lack of disk, so you can always get in to clean up. The striped end of each bar is the reserve.</p>
+            <p id="reserve-error" class="error" role="alert" hidden></p>
+          </div>
+        </div>
         <div class="panel-top"><b>Storage &amp; backup</b></div>
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
         <details id="settings-advanced">

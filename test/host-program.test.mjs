@@ -365,3 +365,12 @@ test('a disk grows only within the server\'s bound, and only when the host has t
     const sizes = spawnSync('/bin/bash', ['-c', `source <(sed -n '/^size_gb()/,/^}/p' "$0"); for v in 8.0GiB 16G 20480M 10737418240 1T bad; do printf '%s=%s\\n' "$v" "$(size_gb "$v")"; done`, PROGRAM], { encoding: 'utf8' });
     assert.equal(sizes.stdout, '8.0GiB=8\n16G=16\n20480M=20\n10737418240=10\n1T=1024\nbad=\n');
 });
+
+test('what the server has left and what takes the room: two read-only verbs that take no argument at all', () => {
+    assert.deepEqual(host('server', 'room'), { code: 0, out: 'df /var/snap/multipass/common /var/lib/clavarium /var/lib/clavarium\n/proc/meminfo\nresident memory of the processes of our machines', err: '' });
+    assert.match(host('server', 'usage').out, /^du \/var\/lib\/clavarium \/var\/lib\/clavarium\/resources .*\ndu \/var\/snap\/multipass\/common\/data\/multipassd\/vault\/instances \/var\/snap\/multipass\/common\/cache$/);
+    for (const verb of ['room', 'usage']) {
+        for (const extra of [['/etc'], ['clv-demo'], ['--', 'sh']]) assert.equal(host('server', verb, ...extra).code, 64, `${verb} ${extra.join(' ')}`);
+    }
+    assert.equal(host('server', 'clean').code, 78, 'nothing but these two');
+});

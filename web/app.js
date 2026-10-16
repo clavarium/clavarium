@@ -678,6 +678,7 @@
             paint();
             paintChips();
             paintHealth();
+            if (!DEVICE) void paintGauge();
             const now = mark(conversations.find((x) => x.name === current));
             paintActions();
             if (before !== now || now.startsWith('building') || now.startsWith('restarting') || now.startsWith('moving')) enter(true);
@@ -2162,8 +2163,148 @@
             ? `Who may sign in: ${platform.operators.join(', ')}. Address: ${platform.address ?? 'not declared'}. Both were set when this was installed.`
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
-        await Promise.all([paintHosts(), paintShelf()]);
+        await Promise.all([paintHosts(), paintShelf(), paintServer()]);
     }
+
+    /* ---------- This server: its disk and memory, and the reserve ---------- */
+    const GB = (mb) => `${(mb / 1024).toFixed(mb >= 10 * 1024 ? 0 : 1)} GB`;
+    const PLACE_WORDS = { machines: "the machines' disks", data: "this server's data", folders: 'the folders given to machines' };
+    let serverTimer;
+    /* A meter: what is taken, and the reserve as a striped end (a machine
+       that would reach into it is refused). `level`: ok, warn, bad. */
+    function meter(m, usedPercent, reserveMb, sizeMb, level) {
+        m.setAttribute('aria-valuenow', String(usedPercent));
+        m.setAttribute('aria-valuetext', `${usedPercent}% taken`);
+        m.dataset.level = level;
+        m.querySelector('.fill').style.width = `${Math.min(100, usedPercent)}%`;
+        const shown = reserveMb !== null && sizeMb > 0;
+        const at = shown ? Math.max(0, Math.min(100, 100 - (reserveMb / sizeMb) * 100)) : 100;
+        m.querySelector('.mark').hidden = !shown; m.querySelector('.zone').hidden = !shown;
+        m.querySelector('.mark').style.left = `${at}%`;
+        m.querySelector('.zone').style.left = `${at}%`;
+    }
+    const levelOf = (high, usedPercent, aboveMb, reserveMb) => (!high ? 'ok' : usedPercent > 95 || aboveMb < reserveMb / 2 ? 'bad' : 'warn');
+    /* How far from the reserve, in words: why "Short" is said. */
+    const aboveWords = (aboveMb, reserveMb) => (aboveMb >= 0 ? `${GB(aboveMb)} above the ${GB(reserveMb)} reserve` : `${GB(-aboveMb)} into the ${GB(reserveMb)} reserve: new machines are refused`);
+    function parts(dl, rows) {
+        dl.replaceChildren();
+        for (const [label, value, sub] of rows) {
+            if (value === null || value === undefined) continue;
+            const dt = document.createElement('dt'); dt.textContent = label; if (sub) dt.className = 'sub';
+            const dd = document.createElement('dd'); dd.textContent = typeof value === 'number' ? GB(value) : value; if (sub) dd.className = 'sub';
+            dl.append(dt, dd);
+        }
+    }
+    const TITLES = { machines: "Disk of the machines", data: "Disk of this server's data", folders: 'Disk of the shared folders' };
+    /* One block per disk of the server, with what it holds. */
+    function paintDisks(r) {
+        const box = $('server-disks'); box.replaceChildren();
+        const u = r.usage; const c = u?.clavarium; const m = u?.machines;
+        const sum = (rows) => rows.reduce((a, [, v]) => a + (typeof v === 'number' ? v : 0), 0);
+        for (const d of r.disk.disks) {
+            const block = document.createElement('div'); block.className = 'server-block';
+            const head = document.createElement('div'); head.className = 'server-head';
+            const title = document.createElement('b'); title.textContent = r.disk.disks.length > 1 ? TITLES[['machines', 'data', 'folders'].find((h) => d.holds.includes(h))] : 'Disk';
+            const machines = d.holds.includes('machines');
+            const reserve = machines ? r.reserve.diskMb : null;
+            /* As the server judges it (capacity.mjs): fuller than 85 %, or less free than 1.5 times the reserve. */
+            const high = d.usedPercent > 85 || d.freeMb < 1.5 * r.reserve.diskMb;
+            const state = document.createElement('span'); state.className = 'server-state'; state.textContent = 'Short'; state.hidden = !high;
+            const figures = document.createElement('span'); figures.className = 'server-figures'; figures.textContent = `${GB(d.freeMb)} free of ${GB(d.sizeMb)}`;
+            head.append(title, state, figures);
+            const bar = document.createElement('div'); bar.className = 'server-meter'; bar.setAttribute('role', 'meter'); bar.setAttribute('aria-label', `${title.textContent}: taken`); bar.setAttribute('aria-valuemin', '0'); bar.setAttribute('aria-valuemax', '100');
+            for (const k of ['fill', 'zone', 'mark']) { const x = document.createElement('span'); x.className = k; bar.append(x); }
+            meter(bar, d.usedPercent, reserve, d.sizeMb, levelOf(high, d.usedPercent, d.freeMb - (reserve ?? 0), reserve ?? Infinity));
+            const note = document.createElement('p'); note.className = 'server-note';
+            note.textContent = machines ? aboveWords(d.freeMb - r.reserve.diskMb, r.reserve.diskMb) : 'No reserve here: the machines are not on this disk.';
+            const dl = document.createElement('dl'); dl.className = 'server-parts';
+            const rows = [];
+            if (u) {
+                if (d.holds.includes('data')) rows.push(["This server's data", c.dataMb]);
+                if (d.holds.includes('folders')) {
+                    const shared = [['folders given to machines', c.foldersMb, true], ['work folders', c.workMb, true], ...(c.removedMb ? [['put aside (archived)', c.removedMb, true]] : []), ...(c.toolsMb >= 100 ? [['tools given to machines', c.toolsMb, true]] : [])];
+                    rows.push(['Shared folders', sum(shared)], ...shared);
+                }
+                if (machines) {
+                    const each = [...m.each.slice(0, 8).map((x) => [x.name, x.mb, true]), ...(m.each.length > 8 ? [[`${m.each.length - 8} more`, m.each.slice(8).reduce((a, x) => a + x.mb, 0), true]] : []), ...(m.shelfMb ? [['ready-made machine', m.shelfMb, true]] : []), ['images', m.imagesMb, true]];
+                    rows.push(['Machines', sum(each)], ...each);
+                    if (m.othersMb) rows.push(['Other machines', m.othersMb]);
+                }
+                const known = sum(rows.filter(([, , sub]) => !sub));
+                const rest = d.sizeMb - d.freeMb - known;
+                if (rest > 50) rows.push(['The system and other programs', rest]);
+            } else rows.push(['What takes it', r.measuring ? 'measuring...' : 'not measured yet']);
+            parts(dl, rows);
+            block.append(head, bar, note, dl);
+            box.append(block);
+        }
+    }
+    async function paintServer() {
+        clearTimeout(serverTimer);
+        const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r;
+        if (!r) return;
+        const editing = [$('reserve-disk'), $('reserve-memory')].includes(document.activeElement);
+        if (!editing) { $('reserve-disk').value = String(Math.round((r.reserve.diskMb / 1024) * 100) / 100); $('reserve-memory').value = String(Math.round((r.reserve.memoryMb / 1024) * 100) / 100); }
+        $('server-unknown').hidden = r.known;
+        $('server-disks').hidden = !r.disk; $('server-memory').hidden = !r.memory;
+        if (r.disk) paintDisks(r);
+        if (r.memory) {
+            const mem = r.memory;
+            $('server-memory-figures').textContent = `${GB(mem.spareMb)} free of ${GB(mem.totalMb)}`;
+            meter($('server-memory-meter'), mem.usedPercent, r.reserve.memoryMb, mem.totalMb, levelOf(r.high.memory, mem.usedPercent, mem.spareMb - r.reserve.memoryMb, r.reserve.memoryMb));
+            $('server-memory-state').textContent = 'Short'; $('server-memory-state').hidden = !r.high.memory;
+            $('server-memory-note').textContent = aboveWords(mem.spareMb - r.reserve.memoryMb, r.reserve.memoryMb);
+            const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
+            parts($('server-memory-parts'), [
+                [`Running machines (${r.machines.length})`, held],
+                ...r.machines.map((x) => [x.shelf ? 'ready-made machine (being made)' : (x.name ?? 'another machine'), x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true]),
+                ...(mem.promisedMb > 0 ? [['given to them, not used yet', mem.promisedMb, true]] : []),
+                ['The system and other programs', Math.max(0, mem.totalMb - mem.freeMb - held)],
+            ]);
+        }
+        /* Still measuring: looked at again in a moment, while Settings is open. */
+        if ((r.measuring || !r.usage) && !$('settings').hidden) serverTimer = setTimeout(() => { void paintServer(); }, 4000);
+    }
+    $('reserve-save').addEventListener('click', async () => {
+        $('reserve-error').hidden = true; $('reserve-saved').textContent = '';
+        const mb = (id) => { const v = Number.parseFloat($(id).value.replace(',', '.')); return Number.isFinite(v) ? Math.round(v * 1024) : NaN; };
+        const diskMb = mb('reserve-disk'); const memoryMb = mb('reserve-memory');
+        if (!(diskMb >= 0) || !(memoryMb >= 0)) { $('reserve-error').textContent = 'Write a number of gigabytes, 0 or more.'; $('reserve-error').hidden = false; return; }
+        try { await post(`${API}/server/reserve`, { diskMb, memoryMb }); $('reserve-saved').textContent = 'Saved.'; } catch (error) { $('reserve-error').textContent = error.message; $('reserve-error').hidden = false; return; }
+        await paintServer(); void paintGauge();
+    });
+    /* THE SMALL GAUGE at the bottom of the list: only when disk or memory is
+       short. A click opens Settings, at This server. */
+    async function paintGauge() {
+        if (DEVICE) return;
+        const r = await fetch(`${API}/server/brief`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        const g = $('server-gauge');
+        if (!r?.high) { g.hidden = true; return; }
+        g.replaceChildren();
+        const row = (label, f) => {
+            const line = document.createElement('span'); line.className = 'gauge-line'; line.dataset.level = f.level;
+            const word = document.createElement('span'); word.className = 'gauge-word'; word.textContent = label;
+            const bar = document.createElement('span'); bar.className = 'gauge-bar'; const fill = document.createElement('span'); fill.style.width = `${Math.min(100, f.usedPercent)}%`; bar.append(fill);
+            /* What is left before the reserve: what decides whether a machine is refused. */
+            const n = document.createElement('span'); n.className = 'gauge-n'; n.textContent = f.aboveMb >= 0 ? `${GB(f.aboveMb)} left` : 'reserve reached';
+            line.append(word, bar, n); return line;
+        };
+        const title = document.createElement('span'); title.className = 'gauge-title'; title.textContent = 'This server is short of room';
+        g.append(title);
+        if (r.disk) g.append(row('Disk', r.disk));
+        if (r.memory) g.append(row('Memory', r.memory));
+        const more = document.createElement('span'); more.className = 'gauge-more'; more.textContent = 'See what takes room \u203a';
+        g.append(more);
+        g.setAttribute('aria-label', `This server is short of room: ${[r.disk?.high ? `disk, ${GB(r.disk.aboveMb)} left before the reserve` : '', r.memory?.high ? `memory, ${GB(r.memory.aboveMb)} left before the reserve` : ''].filter(Boolean).join('; ')}. Open Settings, This server.`);
+        g.hidden = false;
+    }
+    $('server-gauge').addEventListener('click', async () => {
+        if (place !== 'settings') await openSettings(); else await paintServer();
+        const top = $('settings-server-top');
+        top.scrollIntoView({ block: 'start' });
+        $('settings-server').focus({ preventScroll: true });
+    });
     /* The ready-made machine: when it was made, how large, what it holds,
        and a rebuild on demand. Why a rebuild was refused is said here. */
     const day = (iso) => new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });

@@ -68,6 +68,10 @@ export class Conversations {
        by this server, in words for its chat, and whether the tool runs again
        (its chat says it, and the tool is told to read it again: talk.mjs). */
     renewed = () => {};
+    /* Set by the server: throws a Refusal, in words, when creating, starting
+       or growing a machine would leave this server less than its reserve
+       (capacity.mjs). `{ kind: 'create'|'start'|'grow', name, memoryMb, diskMb }`. */
+    room = async () => {};
 
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
@@ -101,6 +105,17 @@ export class Conversations {
     }
 
     get(name) { return this.#store.get(name); }
+
+    /* Whether a new machine may be made for this request: what `create`
+       checks, and the server's room (capacity.mjs). Asked before `create`. */
+    async admit({ name, tool, memoryMb } = {}) {
+        const chosen = this.#tools.find((t) => t.id === tool);
+        /* What `create` refuses anyway is said by `create`. */
+        if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
+        const memory = memoryMb ?? chosen.memoryMb;
+        if (!Number.isInteger(memory)) return;
+        await this.room({ kind: 'create', memoryMb: memory });
+    }
 
     /* `workOnDisk`: the tool works on its machine's own disk instead of in a
        folder kept by the server. Faster for a large code project; but what
@@ -209,6 +224,7 @@ export class Conversations {
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
         const state = await this.#vms.state(name);
         if (state !== undefined && c.phase !== 'failed') throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
+        await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
         this.#cancelStop(name);
         this.drop(name);
         /* Marked first: two requests cannot both start a build. */
@@ -243,6 +259,7 @@ export class Conversations {
         const stopped = state !== 'Running';
         let woke = this.#fresh.delete(name) || stopped;
         if (stopped) {
+            try { await this.room({ kind: 'start', name, memoryMb: c.memoryMb }); } catch (error) { this.left(name); throw error; }
             say('Waking the machine...');
             const started = await this.#vms.start(name);
             if (started.code !== 0) {
@@ -363,7 +380,10 @@ export class Conversations {
         const c = this.#busyCheck(name);
         const release = this.#claim(name, 'restarting', 'Looking at the machine');
         try {
-            if (await this.#vms.state(name) === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+            const state = await this.#vms.state(name);
+            if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+            /* A machine that does not run is started: it takes its memory again. */
+            if (state !== 'Running') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
         this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: 'Stopping the machine', restarted: undefined });
@@ -395,6 +415,8 @@ export class Conversations {
         try {
             state = await this.#vms.state(name);
             if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
+            /* More memory is taken only by a machine started again; a disk grows on the host whatever. */
+            await this.room({ kind: 'grow', name, memoryMb: state === 'Running' ? Math.max(0, memory - c.memoryMb) : 0, diskMb: Math.max(0, disk - (c.diskGb ?? DISK_GB)) * 1024 });
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
         this.#store.patch(name, { phase: 'restarting', restartingSince: new Date().toISOString(), step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });

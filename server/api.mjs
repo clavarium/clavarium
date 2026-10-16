@@ -92,7 +92,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -183,6 +183,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
+            /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
+            if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
+            if (pathname === '/api/server/brief' && capacity) return send(200, await capacity.brief()), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
             if (pathname === '/api/setup/import' && setup) return send(200, setup.job()), true;
@@ -226,7 +229,7 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
-        if (pathname === '/api/conversations') return send(201, conversations.create(body)), true;
+        if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
         /* Who gets what, and a whole setup in one file: see setup.mjs. */
         if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
             if (!setup) return send(404, { error: 'Not found.' }), true;
@@ -248,6 +251,7 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
         if (pathname === '/api/shelf/rebuild' && shelf) return send(202, await shelf.rebuild()), true;
+        if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, memoryMb: body.memoryMb }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unkeyed && gitAccess) { gitAccess.removeKey(unkeyed[1]); return send(200, { ok: true }), true; }

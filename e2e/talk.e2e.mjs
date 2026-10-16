@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bench, SKIP, wait } from './bench.mjs';
 
@@ -36,6 +36,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.page.locator('#panel-close').click();
     await me.sees('/etc/clavarium/conversation.md again: your setup changed.');
     await me.sees('Write to them in French.');
+    /* Its Enter comes a moment after the line (talk.mjs, ENTER_AFTER_MS): the shell has run it once its prompt is back. */
+    await me.until('the line was entered', async () => { const rows = (await me.screen()).split('\n').map((r) => r.trimEnd()).filter(Boolean); return /^[a-z]+>$/.test(rows.at(-1) ?? '') && rows.join('').includes('Write to them in French.'); });
     const invited = (await me.screen()).replace(/\n/g, '');
     assert.match(invited, /Parley is installed: run "parley --help"\./);
     assert.doesNotMatch(invited, /npm|install -g|\.tgz/, 'the tool is never asked to install anything');
@@ -70,6 +72,11 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await threadEl.evaluate((e) => { e.style.flex = ''; e.style.height = ''; });
     assert.deepEqual([await me.page.locator('#shortcuts').isVisible(), await me.page.locator('#keys').isVisible()], [false, false]);
     /* The owner answers with one touch; then writes, before the tool has read. */
+    /* What is sent to the VM manager from now on is counted: the line that wakes the tool goes down the terminal already open. */
+    const vmLog = join(b.dir, 'vm-log-wake');
+    writeFileSync(vmLog, '');
+    process.env.FAKE_VM_LOG = vmLog;
+    t.after(() => { delete process.env.FAKE_VM_LOG; });
     await asked.locator('button', { hasText: 'blue' }).click();
     await me.until('the answer is in the thread, and the choices are gone', async () => (await me.page.locator('#simple-thread .parley-said[data-from=person]').first().innerText().catch(() => '')).startsWith('blue') && (await asked.locator('button').count()) === 0);
     await me.until('its choices left the quick answers', async () => (await quickly())[0] === 'Yes, go on');
@@ -97,6 +104,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     const screen = await me.screen();
     assert.equal(screen.split('You have a new message').length - 1, 1, 'once, though two messages wait');
     assert.equal(screen.includes('Keep it under two pages'), false, 'what was written is not typed');
+    const sent = readFileSync(vmLog, 'utf8').split('\n').filter((l) => /^(info|exec) clv-helper/.test(l));
+    delete process.env.FAKE_VM_LOG;
+    assert.deepEqual(sent, [], 'the machine is not asked about, and nothing is sent into it, to type that line');
     /* The tool reads: the answer to its question, and the message; then says what it does now. */
     await me.page.locator('#simple-toggle').click();
     await me.type('clear; parley read; parley doing "counting the late orders"; echo doing');

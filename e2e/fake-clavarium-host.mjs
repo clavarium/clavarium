@@ -74,6 +74,19 @@ if (area === 'tools' && verb === 'make') {
     process.exit(0);
 }
 if (area === 'view' && verb === 'close') { rmSync(viewOf(argv[0]), { force: true }); rmSync(marker(argv[0]), { force: true }); process.exit(0); }
+/* What the server has left, and what takes the room: plenty, unless a test
+   says otherwise (FAKE_SERVER_ROOM, FAKE_SERVER_USAGE: the lines the real
+   verbs print). The machines that run here are given a little memory each. */
+if (area === 'server' && verb === 'room') {
+    const running = existsSync(join(DIR, 'vms')) ? readdirSync(join(DIR, 'vms')).filter((vm) => { try { return readFileSync(join(DIR, 'vms', vm, 'state'), 'utf8').trim() === 'Running'; } catch { return false; } }) : [];
+    console.log(process.env.FAKE_SERVER_ROOM ?? ['place machines 2049 102400 61440', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288', ...running.map((vm) => `machine ${vm} 900`)].join('\n'));
+    process.exit(0);
+}
+if (area === 'server' && verb === 'usage') {
+    const made = existsSync(join(DIR, 'vms')) ? readdirSync(join(DIR, 'vms')).filter((vm) => vm.startsWith('clv-')) : [];
+    console.log(process.env.FAKE_SERVER_USAGE ?? ['used data 120', 'used folders 2300', 'used work 1800', 'used removed 0', 'used tools 3', ...made.map((vm) => `used machine ${vm} 1500`), 'used shelf 0', 'used others 0', 'used images 650'].join('\n'));
+    process.exit(0);
+}
 if (area === 'net') {
     if (verb === 'apply') { writeFileSync(`${DIR}/network-rules`, argv[0]); appendFileSync(`${DIR}/network-log`, `${Date.now()}\n`); process.exit(0); }
     /* taps, bridge: no VM runs here, so there is nothing to list. */

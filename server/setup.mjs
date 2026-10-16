@@ -621,6 +621,7 @@ export class Setup {
             const n = node.get(i.id); const name = nm(i.id);
             if (i.status !== 'exists' || i.act === 'rename') {
                 const made = await this.#try(job, `Conversation ${name}: its machine is built`, async () => {
+                    await p.conversations.admit?.({ name, tool: n.tool, ...(n.memoryMb ? { memoryMb: n.memoryMb } : {}) });
                     p.conversations.create({ name, tool: n.tool, ...(n.memoryMb ? { memoryMb: n.memoryMb } : {}), workOnDisk: n.work === 'disk' });
                     const end = Date.now() + BUILD_MS;
                     for (;;) {

@@ -32,6 +32,10 @@ export const CLOSE_TAKEN = 4001;
 export const REOPEN_AFTER_MS = 1000;
 export const REDRAW_AFTER_MS = 250;
 export const REOPEN_MAX = 5;
+/* tmux's prefix key, and how long after a screen pressed it nothing of this
+   server is typed down that screen's channel. */
+const PREFIX = '\x02';
+export const PREFIX_QUIET_MS = 60_000;
 const COLS = [2, 500];
 const ROWS = [2, 300];
 
@@ -110,8 +114,12 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
      * itself. It is closed on purpose only when the machine is put to sleep,
      * stopped or deleted (`drop`), or when this server stops.
      */
-    const live = new Map();          /* name -> { terminal, sink, cols, rows } */
+    const live = new Map();          /* name -> { terminal, sink, cols, rows, prefixAt } */
     const reopened = new Map();      /* name -> times of recent automatic reopenings */
+    /* name -> when its terminal was last closed for its machine's sake (put
+       to sleep, stopped, deleted) or ended by itself: what was known of its
+       machine before that is not known any more (talk.mjs). */
+    const dropped = new Map();
 
     /* A terminal that has just closed refuses a new size with an error that
        would take the whole server down: a size nobody will see is not worth that. */
@@ -145,6 +153,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
             /* Asked, not guessed: is the tool still running in there? */
             const stillRunning = await onEnded(name);
             const recent = (reopened.get(name) ?? []).filter((at) => Date.now() - at < 60_000);
+            if (!stillRunning) dropped.set(name, Date.now());
             if (stillRunning && recent.length < REOPEN_MAX && !live.has(name)) {
                 /* Only the channel dropped: it is reopened, for whoever is there or will come. */
                 reopened.set(name, [...recent, Date.now()]);
@@ -207,7 +216,14 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         viewer.on('message', (data, binary) => {
             if (mine.sink !== viewer) return;
             /* `onTyped`: told THAT something came from a screen (the owner is there), which is not reading what the tool prints. */
-            if (binary) { const typed = data.toString(); mine.terminal.write(typed); onTyped(name, typed); return; }
+            if (binary) {
+                const typed = data.toString();
+                /* tmux's prefix key (Ctrl-B): what comes next may be read as
+                   a tmux command, not by the tool. A line of this server is
+                   then not typed through this channel for a while (`type`). */
+                if (typed.includes(PREFIX)) mine.prefixAt = Date.now();
+                mine.terminal.write(typed); onTyped(name, typed); return;
+            }
             let message;
             try { message = JSON.parse(data.toString()); } catch { return; }
             if (message?.type === 'resize' && within(message.cols, COLS) && within(message.rows, ROWS)) {
@@ -224,10 +240,30 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         try { await open(name, 120, 40, null); onLeft(name); } catch { /* it will be opened when a screen asks */ }
     }
 
+    /* A LINE OF THIS SERVER, TYPED DOWN THE CHANNEL ALREADY OPEN (talk.mjs):
+       the terminal kept here is attached to the tool's own tmux pane, so
+       writing to it is typing there -- with no command sent into the machine.
+       The line, then Enter `enterAfterMs` later (apart: see ENTER_AFTER_MS in
+       talk.mjs). Resolves false when there is no such channel, or when a
+       screen pressed tmux's prefix key lately; the caller then uses its
+       other way. Nothing of it is told to `onTyped`: nobody typed. */
+    async function type(name, line, enterAfterMs = 0) {
+        const kept = live.get(name);
+        if (!kept || Date.now() - (kept.prefixAt ?? -Infinity) < PREFIX_QUIET_MS) return false;
+        try { kept.terminal.write(String(line)); } catch { return false; }
+        if (enterAfterMs > 0) await new Promise((r) => { setTimeout(r, enterAfterMs).unref?.(); });
+        if (live.get(name) !== kept) return false;
+        try { kept.terminal.write('\r'); } catch { return false; }
+        return true;
+    }
+
     server.on('close', () => { for (const name of [...live.keys()]) close(name); });
 
     /* `drop(name)` closes a kept terminal at once: the machine is being put
        to sleep, stopped or deleted, and a channel into it would hang.
        `open(name)`: whether a terminal of it is kept open now. */
-    return { seats, drop: close, warm, open: (name) => live.has(name) };
+    /* `type(name, line, ms)`: see above. `droppedAt(name)`: when it was last
+       closed for its machine's sake, or undefined. */
+    const drop = (name) => { dropped.set(name, Date.now()); close(name); };
+    return { seats, drop, warm, type, open: (name) => live.has(name), droppedAt: (name) => dropped.get(name) };
 }

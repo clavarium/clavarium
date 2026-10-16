@@ -35,3 +35,23 @@ test('a real program in a real tmux: typed text reaches it, and a second screen 
     assert.equal(sessions.split('\n').filter((s) => s === NAME).length, 1, 'one session, not two');
     second.close();
 });
+
+test('the line the server types and its Enter reach the program in two reads, in one tmux command, and a last ";" stays', { skip: !hasTmux && 'tmux is not installed' }, async (t) => {
+    const { typeCommand } = await import('../server/talk.mjs');
+    const { mkdtempSync, readFileSync, rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-type-'));
+    const socket = `clvtype-${process.pid}`;
+    t.after(() => { spawnSync('tmux', ['-L', socket, 'kill-server']); rmSync(dir, { recursive: true, force: true }); });
+    /* A program that writes each read it gets on a line of its own, raw. */
+    const program = `stty raw -echo; while true; do dd bs=4096 count=1 status=none | od -An -c | tr -s ' ' >> ${dir}/reads; done`;
+    assert.equal(spawnSync('tmux', ['-L', socket, 'new-session', '-d', '-s', 'main', 'sh', '-c', program]).status, 0);
+    await new Promise((r) => setTimeout(r, 300));
+    const argv = typeCommand('Read it;').map((a) => (a === 'clavarium' ? socket : a));
+    assert.equal(spawnSync(argv[0], argv.slice(1)).status, 0);
+    let reads = '';
+    for (let i = 0; i < 100 && !reads.includes('\\r'); i++) { await new Promise((r) => setTimeout(r, 20)); try { reads = readFileSync(join(dir, 'reads'), 'utf8'); } catch { /* not yet */ } }
+    const lines = reads.trim().split('\n').map((l) => l.trim());
+    assert.deepEqual(lines, ['R e a d i t ;', '\\r'], 'the line in one read, Enter in another, the ";" kept');
+});

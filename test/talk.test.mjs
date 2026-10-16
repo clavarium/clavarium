@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS } from '../server/talk.mjs';
+import { Talk, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
 import { WAKE, REREAD } from '../server/parley/host/parley-host.mjs';
 import { run } from '../server/parley/bin/parley.mjs';
@@ -24,14 +24,27 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     mkdirSync(join(dir, 'work', 'helper'), { recursive: true });
     const typed = []; const alerted = []; const warmed = [];
     const world = { state: 'Running', awake: true, tmux: true, clock: 1_000_000, attached: ['notes'] };
+    /* Every question to the VM manager and every command in the machine, in order. */
+    const calls = [];
     const vms = {
-        exec: async (name, argv) => { if (!world.tmux) return { code: 1 }; const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; },
-        state: async () => world.state,
+        /* A line is typed by ONE tmux command: the line, a pause, Enter. */
+        exec: async (name, argv) => {
+            calls.push('exec');
+            if (!world.tmux) return { code: 1 };
+            assert.deepEqual(argv, typeCommand(argv[8]), 'one command: the line, a pause, Enter');
+            typed.push(argv[8], 'Enter');
+            return { code: 0 };
+        },
+        state: async () => { calls.push('state'); return world.state; },
     };
     /* Parley is installed by the server before the invitation (toolbox.mjs); `world.install` says why it could not be. */
     const installs = [];
     const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined), installIn: async (name) => { installs.push(name); return world.install ?? ''; } } : null;
-    const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox,
+    /* The terminal the bridge keeps open (`world.open`), and what health last saw (`world.seen`). */
+    const channel = [];
+    const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
+    const health = { of: () => world.seen ?? null };
+    const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox, terminal, health,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
         resources: { workFolder: (name) => join(dir, 'work', name), of: () => world.attached.map((name) => ({ name, access: 'read' })) },
         warm: async (name) => { warmed.push(name); }, alert: (payload) => alerted.push(payload), listenEveryMs: 30, now: () => world.clock });
@@ -40,7 +53,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const bridge = join(dir, 'work', 'helper', '.parley');
     /* The tool runs the command, from its work folder. */
     const parley = (...args) => run(args, { cwd: join(dir, 'work', 'helper'), env: {} });
-    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley, installs };
+    return { dir, typed, alerted, warmed, world, talk, make, bridge, parley, installs, calls, channel };
 }
 
 test('off until the owner turns it on; turned on, the bridge is put in the work folder and nothing is typed', async (t) => {
@@ -125,10 +138,12 @@ test('the line waits: while somebody types in its terminal, while it sleeps, whi
     b.world.clock += RETRY_MS + 1;
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(b.typed.length, 2);
-    /* Awake, but its machine stopped (its tool exited): still waiting. */
-    b.world.awake = true; b.world.state = 'Stopped';
+    /* Awake, but its machine stopped (its tool exited, its terminal closed): still waiting. */
+    b.world.awake = true; b.world.state = 'Stopped'; b.world.droppedAt = b.world.clock;
     b.world.clock += RETRY_MS + 1;
-    await until('looked at again', () => b.talk.of('helper').wake.why === 'asleep');
+    const asked = b.calls.filter((c) => c === 'state').length;
+    await until('its machine asked about, since what was known of it went with its terminal', () => b.calls.filter((c) => c === 'state').length > asked);
+    assert.equal(b.talk.of('helper').wake.why, 'asleep');
     assert.equal(b.typed.length, 2);
     /* Its machine runs, its tool does not answer: tried again later. */
     b.world.state = 'Running'; b.world.tmux = false;
@@ -305,4 +320,77 @@ test('a file is not attached when the tool put a link where the chat folders sho
     symlinkSync(outside, join(b.bridge, 'files'));
     await assert.rejects(b.talk.attach('helper', 'a.txt', body('x')), /not as it should be/);
     assert.deepEqual(readdirSync(outside), [], 'nothing was made outside');
+});
+
+test('the line is typed fast: one command, and the machine asked about only when nothing is known of it', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    /* Nothing known: asked, then one command (before: asked, then two). */
+    assert.equal((await b.talk.say('helper', 'one')).told, 'typed');
+    assert.deepEqual(b.calls, ['state', 'exec']);
+    b.parley('read');
+    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    /* Typed into it a moment ago: not asked again. */
+    b.world.clock += 1000;
+    assert.equal((await b.talk.say('helper', 'two')).told, 'typed');
+    assert.deepEqual(b.calls, ['state', 'exec', 'exec']);
+    b.parley('read');
+    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    /* Long ago, but its health was looked at lately and found it running: not asked. */
+    b.world.clock += TYPED_KNOWN_MS + 1;
+    b.world.seen = { state: 'Running', answering: true, at: new Date(b.world.clock - 1000).toISOString() };
+    assert.equal((await b.talk.say('helper', 'three')).told, 'typed');
+    assert.deepEqual(b.calls.slice(3), ['exec']);
+    b.parley('read');
+    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    /* Its terminal closed since (put to sleep, stopped): what was known is not any more. */
+    b.world.droppedAt = b.world.clock;
+    b.world.clock += 1000;
+    b.world.state = 'Suspended';
+    assert.equal((await b.talk.say('helper', 'four')).told, 'asleep');
+    assert.deepEqual(b.calls.slice(4), ['state'], 'asked, and nothing typed into a machine that does not run');
+    b.world.state = 'Running';
+    b.parley('read');
+    /* A health look too old, a machine that does not answer: asked. */
+    for (const seen of [{ state: 'Running', answering: true, at: new Date(b.world.clock - HEALTH_KNOWN_MS - 1).toISOString() }, { state: 'Running', answering: false, at: new Date(b.world.clock).toISOString() }]) {
+        b.world.clock += TYPED_KNOWN_MS + 1; b.world.droppedAt = undefined;
+        b.world.seen = { ...seen, at: seen.answering ? new Date(b.world.clock - HEALTH_KNOWN_MS - 1).toISOString() : new Date(b.world.clock).toISOString() };
+        const before = b.calls.length;
+        assert.equal((await b.talk.say('helper', 'again')).told, 'typed');
+        assert.deepEqual(b.calls.slice(before), ['state', 'exec']);
+        b.parley('read');
+        await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    }
+});
+
+test('the line goes down the terminal already open when there is one: nothing sent into the machine; the command in the machine when that fails', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.world.open = true;
+    assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
+    assert.deepEqual(b.calls, ['channel'], 'no question, no command');
+    assert.deepEqual(b.channel, [[WAKE, ENTER_AFTER_MS]], 'the line, and Enter apart');
+    assert.deepEqual(b.typed, [WAKE, 'Enter']);
+    b.parley('read');
+    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    /* The channel refuses (a screen pressed the tmux prefix, it closed meanwhile): the command, once. */
+    b.world.channelFails = true;
+    assert.equal((await b.talk.say('helper', 'again')).told, 'typed');
+    assert.deepEqual(b.calls, ['channel', 'channel', 'exec']);
+    assert.deepEqual(b.typed, [WAKE, 'Enter', WAKE, 'Enter']);
+    /* Still never while somebody types in the terminal. */
+    b.parley('read');
+    await until('read', () => JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
+    b.world.channelFails = false;
+    b.talk.typed('helper');
+    assert.equal((await b.talk.say('helper', 'wait')).told, 'typing');
+    assert.equal(b.typed.length, 4);
+});
+
+test('the one tmux command: the line as it is, a pause, Enter; a last ";" kept as text', () => {
+    const argv = typeCommand('Read this.');
+    assert.deepEqual(argv.slice(0, 9), ['tmux', '-L', 'clavarium', 'send-keys', '-t', '=main:', '-l', '--', 'Read this.']);
+    assert.deepEqual(argv.slice(9), [';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', '=main:', 'Enter']);
+    assert.equal(typeCommand('a;')[8], 'a\\;');
+    assert.equal(typeCommand('a ; b')[8], 'a ; b');
 });

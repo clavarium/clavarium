@@ -548,3 +548,45 @@ test('a restart, a new size or a machine built again is told, in words for its c
     assert.match(told.at(-1)[1], /^Its machine was built again/);
     assert.equal(told.at(-1)[2], true);
 });
+
+test('the server\'s reserve is asked before a machine is created, started, woken or grown; refused, nothing is touched', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    const asked = [];
+    let refuse = false;
+    all.room = async (ask) => { asked.push(ask); if (refuse) throw new Refusal(409, 'Not enough room.'); };
+    await all.admit({ name: 'demo', tool: 'tool' });
+    assert.deepEqual(asked, [{ kind: 'create', memoryMb: 1024 }]);
+    await all.admit({ name: 'Bad name', tool: 'tool' });
+    await all.admit({ name: 'other', tool: 'nope' });
+    assert.equal(asked.length, 1, 'what create refuses anyway is not asked');
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.admit({ name: 'demo', tool: 'tool' });
+    assert.equal(asked.length, 1, 'a name already taken: create says so');
+    /* Woken: asked, with its memory. Refused: not started, said. */
+    b.states.set('clv-demo', 'Suspended');
+    refuse = true;
+    const before = b.calls.length;
+    await assert.rejects(all.open('demo'), /Not enough room/);
+    assert.deepEqual(asked.at(-1), { kind: 'start', name: 'demo', memoryMb: 1024 });
+    assert.ok(!b.calls.slice(before).some((c) => c.startsWith('start')), 'not started');
+    refuse = false;
+    await all.open('demo');
+    all.left('demo');
+    /* Restarted while stopped: asked; while running: not (it gives back what it takes). */
+    b.states.set('clv-demo', 'Stopped');
+    refuse = true;
+    await assert.rejects(all.restart('demo'), /Not enough room/);
+    assert.equal(all.get('demo').phase, 'ready', 'given back as it was');
+    b.states.set('clv-demo', 'Running');
+    const n = asked.length;
+    await all.restart('demo');
+    await all.restarted;
+    assert.equal(asked.length, n);
+    /* Grown: what it grows by. */
+    await assert.rejects(all.resize('demo', { memoryMb: 3072, diskGb: 20 }), /Not enough room/);
+    assert.deepEqual(asked.at(-1), { kind: 'grow', name: 'demo', memoryMb: 2048, diskMb: 12 * 1024 });
+    assert.equal(all.get('demo').phase, 'ready');
+    assert.equal(all.get('demo').memoryMb, 1024);
+});
