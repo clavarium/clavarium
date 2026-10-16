@@ -87,6 +87,8 @@ export function commonText() {
         '- Secrets are environment variables: never print them, never write them to a file or a commit.',
         /* Installed by the server in every machine (toolbox.mjs): the tool is never asked to install it. */
         '- To talk to the person, when their chat is on: parley --help.',
+        /* Dictation into the terminal is marked once per message (app.js); in the chat, parley read says it. */
+        '- A message in your terminal that starts with a microphone sign (U+1F3A4), or that parley read says was dictated, came by voice: a word may be misheard; when a key word seems wrong, ask rather than guess.',
         '- The rest is yours to explore (ls, --help).',
         '',
     ].join('\n');

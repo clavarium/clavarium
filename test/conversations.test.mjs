@@ -731,3 +731,24 @@ test('a start that fails ends its steps; a server restarted meanwhile forgets th
     await assert.rejects(slowly.open('demo'), /does not answer yet/);
     assert.equal(b.store.get('demo').progress, undefined);
 });
+
+test('its name in the chat, and whether what is dictated into its terminal is marked: the neutral word and the mark by default, never a mark for a tool that is no AI', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    assert.equal(all.list()[0].chatName, undefined, 'no name: the dictionary gives a neutral one');
+    all.setChatName('demo', '  Arthur <b>  ');
+    assert.equal(all.get('demo').chatName, 'Arthur b', 'one plain line');
+    all.setChatName('demo', '');
+    assert.equal(all.get('demo').chatName, undefined);
+    assert.throws(() => all.setChatName('demo', 'x'.repeat(41)), /40 characters/);
+    assert.throws(() => all.setChatName('demo', 3), /Give a name/);
+    const ai = all.list()[0].ai;
+    assert.equal(all.list()[0].voiceMark, ai, 'marked by default where its tool is an AI');
+    all.setVoiceMark('demo', false);
+    assert.equal(all.get('demo').voiceMark, false); assert.equal(all.list()[0].voiceMark, false);
+    all.setVoiceMark('demo', true);
+    assert.equal(all.get('demo').voiceMark, undefined, 'the default is not written');
+    assert.throws(() => all.setVoiceMark('demo', 'yes'), /true/);
+});

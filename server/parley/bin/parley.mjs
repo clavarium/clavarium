@@ -6,9 +6,10 @@
  *
  * Exit codes: 0 done; 1 refused (said on standard error); 2 no folder found;
  * 64 not understood. */
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bridge, findFolder, STATES, VERSION, FOLDER, WRITING, SHORTER } from '../server/parley-mcp.mjs';
+import { bridge, findFolder, STATES, VERSION, FOLDER, WRITING, SHORTER, GALLERY } from '../server/parley-mcp.mjs';
 
 export const HELP = `parley: talk with the person you work for. They read and answer on their own screen, not in this terminal.
 
@@ -22,6 +23,8 @@ export const HELP = `parley: talk with the person you work for. They read and an
   parley close ID "answer"             close a question of yours they answered another way (a message
                                        typed later), saying the answer you understood; ID as read shows it
   parley show path ["note"]            point them to a file you made, so that they can open it
+  parley show a.png="title" b.png="title" ["note"]
+                                       several files at once, one gallery, each with its title
   parley doing "text"                  say in one short line what you are doing now, each time you
                                        move to something new: "reading the 12 recordings"
   parley status ${STATES.join('|')} ["note"]
@@ -31,6 +34,13 @@ export const HELP = `parley: talk with the person you work for. They read and an
 ${wrap(WRITING)}
 
 ${wrap(SHORTER)}
+
+${wrap(GALLERY)}
+  parley show before.png="Home page, before" after.png="Home page, after" "The new header"
+
+Their reactions to your messages come with "parley read": only "go ahead" authorizes what a message
+proposes (a thumbs up does not); "stop" means stop now. A message marked dictated may hold
+recognition mistakes: ask when a key word seems wrong rather than guess.
   parley tell --short "Disk full: 3 things to do on your side" - <<'EOF'
   ...the long text, in Markdown...
   EOF
@@ -60,6 +70,23 @@ function wrap(text) {
     return out.join('\n');
 }
 
+/* The words of "show": first the files, each a path or path="title" (a path
+   that is there, as written or before its first "="), then the note. */
+export function showing(words, cwd = process.cwd()) {
+    const files = [];
+    let i = 0;
+    for (; i < words.length; i += 1) {
+        const w = String(words[i]);
+        const cut = w.indexOf('=');
+        if (w && existsSync(resolve(cwd, w))) files.push({ path: w, title: '' });
+        else if (cut > 0 && existsSync(resolve(cwd, w.slice(0, cut)))) files.push({ path: w.slice(0, cut), title: w.slice(cut + 1) });
+        else break;
+    }
+    /* None there: the first word is the path, and is refused as such. */
+    if (files.length === 0 && words.length) { files.push({ path: String(words[0]), title: '' }); i = 1; }
+    return { files, note: words.slice(i).join(' ') };
+}
+
 /* Runs one command line. Resolves with { code, out, err }: nothing is printed
    here, so that it can be tested without a terminal. */
 export function run(argv, { env = process.env, cwd = process.cwd(), stdin = () => readFileSync(0, 'utf8') } = {}) {
@@ -87,7 +114,7 @@ export function run(argv, { env = process.env, cwd = process.cwd(), stdin = () =
         }
         else if (verb === 'close') said = verbs.close(rest[0], text(rest.slice(1).join(' ')));
         else if (verb === 'doing') said = verbs.doing(text(rest.join(' ')));
-        else if (verb === 'show') said = verbs.show(rest[0], rest.slice(1).join(' '), { from: cwd });
+        else if (verb === 'show') { const { files, note } = showing(rest, cwd); said = verbs.show(files.length === 1 && !files[0].title ? files[0].path : files, note, { from: cwd }); }
         else said = verbs.status(rest[0], rest.slice(1).join(' '));
         return { code: 0, out: `${said}\n`, err: '' };
     } catch (error) {

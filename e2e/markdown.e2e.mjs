@@ -184,3 +184,50 @@ test('the chat renders what the tool writes: Markdown built element by element, 
         }
     }
 });
+
+test('pictures shown together are one gallery with their titles, large one after the other and closed with a tap; a reaction is put on a message, and "stop" wakes the tool at once', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('pages');
+    assert.equal((await me.api('/api/conversations/pages/talk', { on: true })).status, 200);
+    const work = join(b.dir, 'data', 'work', 'pages');
+    writeFileSync(join(work, 'home-before.png'), png(320, 200, [200, 80, 60]));
+    writeFileSync(join(work, 'home-after.png'), png(320, 200, [60, 160, 90]));
+    /* The tool shows both at once, each with its title (as "parley show a.png=title b.png=title" posts it; its paths as the machine sees them). */
+    writeFileSync(join(work, '.parley', 'from-agent.jsonl'), line('g1', 0, { kind: 'show', path: '/work/home-before.png', text: 'The new header', files: [{ path: '/work/home-before.png', title: 'Home, before' }, { path: '/work/home-after.png', title: 'Home, after' }] }));
+    await me.page.goto(`${b.origin}/?c=pages`);
+    const thread = me.page.locator('#simple-thread');
+    await me.until('one gallery, titled', async () => (await thread.locator('.parley-gallery .parley-caption').allInnerTexts()).join('|') === 'Home, before|Home, after');
+    /* Large, from its thumbnail: the strip of the others, the title; a tap on the ground closes it. */
+    await thread.locator('.parley-gallery img').first().click();
+    const zoom = thread.locator('.parley-zoom');
+    await me.until('large', async () => zoom.isVisible());
+    assert.match(await zoom.locator('.parley-zoom-name').innerText(), /^Home, before \(1\/2\)$/);
+    assert.equal(await zoom.locator('.parley-zoom-thumb').count(), 2);
+    await zoom.locator('.parley-zoom-thumb').nth(1).click();
+    await me.until('the other one', async () => /^Home, after/.test(await zoom.locator('.parley-zoom-name').innerText()));
+    await me.page.mouse.click(5, 450);
+    await me.until('closed with a tap beside it', async () => !(await zoom.isVisible()));
+    /* The media of the thread, from the menu: both, and back to where they were shown. */
+    await thread.locator('.parley-prefs-open').click();
+    await thread.locator('.parley-media-open').click();
+    assert.deepEqual(await thread.locator('.parley-media-item figcaption').allInnerTexts(), ['Home, before', 'Home, after']);
+    await thread.locator('.parley-media-where').first().click();
+    assert.equal(await thread.locator('.parley-media').isVisible(), false);
+    /* A reaction: on hover, the choice with its words; "Stop" types the line in its terminal at once. */
+    const shown = thread.locator('.parley-said[data-kind=show]');
+    await shown.hover();
+    await shown.locator('.parley-react-open').click();
+    assert.deepEqual(await thread.locator('.parley-react-choice').allInnerTexts(), ['Agree', 'Go ahead', 'Disagree', 'Not clear', 'Stop', 'Another way', 'Later', 'Love it']);
+    await thread.locator('.parley-react-choice[data-reaction=agree]').click();
+    await me.until('noted on the message', async () => (await shown.locator('.parley-reaction').getAttribute('data-reaction').catch(() => '')) === 'agree');
+    await new Promise((r) => setTimeout(r, 800));
+    assert.equal((await me.screen()).includes('You have a new message'), false, 'a thumbs up wakes nobody');
+    await shown.locator('.parley-reaction').click();
+    await thread.locator('.parley-react-choice[data-reaction=stop]').click();
+    await me.until('stop: the line typed at once', async () => (await me.screen()).includes('You have a new message: run "parley read".'), 20_000);
+    /* What the tool will read: the reaction, with the words and the time of the message it is about. */
+    const last = readFileSync(join(work, '.parley', 'to-agent.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
+    assert.deepEqual([last.reaction, last.to, last.quote, typeof last.toAt], ['stop', 'g1-0000-4000-8000-000000000000'.slice(0, 36), 'The new header', 'string']);
+    assert.deepEqual(me.errors, []);
+});

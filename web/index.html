@@ -33,9 +33,9 @@
        (Access), and its settings. Bottom left on a wide screen; a bar along
        the bottom on a phone. -->
   <nav id="nav" aria-label="Places" hidden>
-    <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10H9l-5 4z"/></svg><span>Conversations</span></button>
-    <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8.3 7.2 15.7 10.8M8.3 16.8l7.4-3.6"/></svg><span>Access</span></button>
-    <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1M16.4 16.4l2.1 2.1M5.5 18.5l2.1-2.1M16.4 7.6l2.1-2.1"/></svg><span>Settings</span></button>
+    <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="message-square"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Conversations</span></button>
+    <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/></svg><span>Access</span></button>
+    <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="settings"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
   </nav>
   <section id="room">
     <header>
@@ -122,6 +122,14 @@
             <p class="hint" id="talk-about">A chat screen instead of its terminal: a small command, parley, installed in its machine by Clavarium, lets the tool tell you something, ask you something, show you a file, say what it is doing and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>
             <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
             <p class="hint" id="talk-declare" hidden></p>
+            <form id="chat-name-form" class="row" autocomplete="off"><label for="chat-name">Its name in the chat</label><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></form>
+            <p class="hint" id="chat-name-hint">Shown above its messages. Empty: a neutral word, "Assistant" in your language. Its tool is named, small, in the detailed view.</p>
+            </div>
+            <!-- DICTATION INTO ITS TERMINAL: marked once per message, so that the tool knows it may hold recognition mistakes. -->
+            <div id="voice-mark-box" hidden>
+            <div class="panel-top"><b>Mark what I dictate</b></div>
+            <div class="row"><div class="levels" id="voice-mark" role="group" aria-label="Mark what I dictate"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div></div>
+            <p class="hint">On: what you dictate into its terminal starts with a microphone sign, once per message, so that the tool knows a word may have been misheard. Never in a shell.</p>
             </div>
           </div>
         </details>
@@ -750,4 +758,5 @@
 <script src="/links.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>
+<script type="module" src="/icons.js"></script>
 </html>

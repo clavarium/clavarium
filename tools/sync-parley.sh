@@ -12,7 +12,8 @@ install -d "$here/server/parley/server" "$here/server/parley/host" "$here/server
 cp "$from/server/parley-mcp.mjs" "$here/server/parley/server/"
 cp "$from/bin/parley.mjs" "$here/server/parley/bin/"
 cp "$from/host/parley-host.mjs" "$here/server/parley/host/"
-cp "$from/ui/parley-ui.js" "$from/ui/parley-ui.css" "$here/server/parley/ui/"
+rm -f "$here/server/parley/ui/"*.js
+cp "$from/ui/"*.js "$from/ui/parley-ui.css" "$here/server/parley/ui/"
 rm -f "$here/server/parley/ui/texts/"*.json
 cp "$from/ui/texts/"*.json "$here/server/parley/ui/texts/"
 cp "$from/LICENSE" "$here/server/parley/LICENSE"

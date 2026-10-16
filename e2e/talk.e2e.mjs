@@ -135,10 +135,10 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     const report = me.page.locator('#simple-thread .parley-said[data-kind=show]');
     assert.equal(await me.page.locator('#simple-thread .parley-chip').count(), 0, 'simple: no line of their own between messages');
     assert.equal(await report.getAttribute('aria-expanded'), 'false', 'simple: folded into the message they led to');
-    assert.match(await report.locator('.parley-time').innerText(), / - 2 étapes$/, 'said with its time');
+    assert.match(await report.locator('.parley-time').innerText(), / - 1 étape$/, 'said with its time; "done" is no step');
     await report.locator('.parley-md').click();
     assert.equal(await report.getAttribute('aria-expanded'), 'true');
-    assert.deepEqual(await me.page.locator('#simple-thread .parley-trail[data-for=s1] .parley-step').allInnerTexts(), ['counting the late orders', 'Terminé'], 'opened above it, as they came');
+    assert.deepEqual(await me.page.locator('#simple-thread .parley-trail[data-for=s1] .parley-step').allInnerTexts(), ['counting the late orders'], 'opened above it, as they came');
     /* The day, and the time of a message on hover; on a touch screen, a long press. */
     assert.ok((await me.page.locator('#simple-thread .parley-divider').allInnerTexts()).includes("Aujourd'hui"));
     const mine = me.page.locator('#simple-thread .parley-said[data-from=person]').first();

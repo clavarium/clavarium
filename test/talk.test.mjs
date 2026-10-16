@@ -433,3 +433,23 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     assert.equal(b.talk.of('helper').unread, 0);
     assert.deepEqual(b.typed, [], 'nothing of it is typed to the tool');
 });
+
+test('reactions: "stop" wakes it at once, even told already; "go" as a message does; a thumbs up wakes nobody; a dictated message is said so', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.parley('tell', 'I can delete the old logs.');
+    const id = b.talk.of('helper').messages.find((m) => m.from === 'agent').id;
+    const kept = await b.talk.react('helper', id, 'agree');
+    assert.equal(kept.told, 'kept'); assert.deepEqual(b.typed, [], 'a thumbs up wakes nobody');
+    assert.equal(kept.messages.find((m) => m.id === id).reaction.id, 'agree');
+    assert.equal((await b.talk.react('helper', id, 'go')).told, 'typed');
+    assert.deepEqual(b.typed, [WAKE, 'Enter']);
+    assert.equal((await b.talk.react('helper', id, 'stop')).told, 'typed', 'stop: typed again though it was told');
+    assert.equal(b.typed.length, 4);
+    assert.match(b.parley('read').out, /STOP: stop what you are doing now/);
+    await assert.rejects(b.talk.react('helper', id, 'party'), /A reaction is one of/);
+    await assert.rejects(b.talk.react('helper', 'nope', 'go'), /No such message/);
+    assert.equal((await b.talk.react('helper', id, null)).messages.find((m) => m.id === id).reaction, undefined, 'taken back');
+    await b.talk.say('helper', 'delete them', undefined, undefined, 'voice');
+    assert.match(b.parley('read').out, /Message \(dictated: may hold recognition mistakes/);
+});

@@ -220,6 +220,8 @@ function checkNode(n, tools) {
         if (n.diskGb !== undefined && (!Number.isInteger(n.diskGb) || n.diskGb < 1 || n.diskGb > 256)) return bad('Its disk must be between 1 and 256 GB.');
         if (n.resume !== undefined && typeof n.resume !== 'boolean') return bad('When its tool starts is "resume": true or false.');
         if (n.askFirst !== undefined && typeof n.askFirst !== 'boolean') return bad('Whether its tool asks before acting is "askFirst": true or false.');
+        if (n.chatName !== undefined && (typeof n.chatName !== 'string' || n.chatName.length > 40)) return bad('The name its chat gives its tool is "chatName": a text of 40 characters at most.');
+        if (n.voiceMark !== undefined && typeof n.voiceMark !== 'boolean') return bad('Whether what is dictated into its terminal is marked is "voiceMark": true or false.');
         if (n.guide !== undefined) { try { readLines(n.guide); } catch (error) { return bad(`What its tool is told, its owner's lines: ${error.message}`); } }
         return { ok: true };
     }
@@ -415,7 +417,8 @@ export class Setup {
     }
     #conversationOut(id, c) {
         const p = this.#p;
-        const out = { id, kind: 'conversation', name: c.name, tool: c.tool, memoryMb: c.memoryMb, diskGb: c.diskGb ?? 8, work: c.work === 'disk' ? 'disk' : 'kept', online: c.offline !== true, chat: Boolean(p.talk?.brief(c.name)), ...(c.resume === false ? { resume: false } : {}), ...(c.askFirst === true ? { askFirst: true } : {}) };
+        const out = { id, kind: 'conversation', name: c.name, tool: c.tool, memoryMb: c.memoryMb, diskGb: c.diskGb ?? 8, work: c.work === 'disk' ? 'disk' : 'kept', online: c.offline !== true, chat: Boolean(p.talk?.brief(c.name)), ...(c.resume === false ? { resume: false } : {}), ...(c.askFirst === true ? { askFirst: true } : {}),
+            ...(c.chatName ? { chatName: c.chatName } : {}), ...(p.conversations.get?.(c.name)?.voiceMark === false ? { voiceMark: false } : {}) };
         const w = p.wakeups?.of(c.name);
         if (w && (w.items.length > 0 || w.perHour !== 12)) {
             out.wakeups = { perHour: w.perHour, items: w.items.map((i) => ({ kind: i.kind, on: i.on !== false, message: i.message,
@@ -675,6 +678,9 @@ export class Setup {
         if (n.resume === false || (replace && p.conversations.get(name)?.resume === false)) await this.#try(job, `${name}: its tool ${n.resume === false ? 'starts fresh' : 'takes up its last session'}`, async () => p.conversations.setResume(name, n.resume !== false));
         /* Its tool acts without asking in its machine (the default), or asks first. */
         if (n.askFirst === true || (replace && p.conversations.get(name)?.askFirst === true)) await this.#try(job, `${name}: its tool ${n.askFirst === true ? 'asks before acting' : 'acts without asking, in its machine'}`, async () => p.conversations.setAskFirst(name, n.askFirst === true));
+        /* The name its chat gives its tool; whether what is dictated into its terminal is marked. */
+        if (n.chatName || (replace && p.conversations.get(name)?.chatName)) await this.#try(job, `${name}: its chat calls its tool ${n.chatName ? `"${n.chatName}"` : 'by the neutral name'}`, async () => p.conversations.setChatName(name, n.chatName ?? ''));
+        if (n.voiceMark === false || (replace && p.conversations.get(name)?.voiceMark === false)) await this.#try(job, `${name}: dictation into its terminal ${n.voiceMark === false ? 'not marked' : 'marked'}`, async () => p.conversations.setVoiceMark(name, n.voiceMark !== false));
         if ((n.chat === true && n.work !== 'disk') || (replace && n.chat !== true && p.talk?.brief(name))) await this.#try(job, `${name}: chat ${n.chat ? 'on' : 'off'}`, () => p.talk.set(name, n.chat === true));
         if (p.guide && (n.guide !== undefined || (replace && p.guide.lines(name).length))) await this.#try(job, `${name}: your lines in its guide`, () => p.guide.setLines(name, n.guide ?? []));
         if (n.answerer && typeof n.answerer === 'object') {

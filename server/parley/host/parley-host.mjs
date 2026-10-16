@@ -16,6 +16,7 @@
  *   agent-status  {message}
  *   agent-doing   {message}
  *   agent-closed  {message}         (a question it closed, answered another way)
+ *   person-reacted {message, reaction, wakes, unread}   react(to, reaction)
  *
  * Nothing is typed anywhere from here: when the person wrote, the
  * application is told so, with how many messages the agent has not read,
@@ -43,6 +44,18 @@ export const FILE_MAX = 2 * 1024 * 1024;
 export const STATES = ['working', 'waiting', 'done'];
 /* Files the person attaches to one message, at most. */
 export const FILES_MAX = 10;
+/* Files the agent shows at once, as one gallery. */
+export const SHOW_MAX = 12;
+/* THE REACTIONS a person may put on a message of the agent, by default: an
+   id each (its words are in the dictionaries, "react-<id>"), and whether it
+   should wake the agent -- a hint for the application, which decides:
+   false (noted, read with the next message), true, or 'now' (even while it
+   works). The screen draws each with its icon (ui/parley-ui.js). */
+export const REACTIONS = Object.freeze([
+    { id: 'agree', wakes: false }, { id: 'go', wakes: true }, { id: 'disagree', wakes: true }, { id: 'unclear', wakes: true },
+    { id: 'stop', wakes: 'now' }, { id: 'redo', wakes: true }, { id: 'later', wakes: false }, { id: 'love', wakes: false },
+].map(Object.freeze));
+const REACTION_ID = /^[a-z][a-z0-9-]{0,29}$/;
 const KINDS = ['say', 'ask', 'show', 'status', 'doing', 'close'];
 const STEP = new Set(['status', 'doing']);
 const SERVER = fileURLToPath(new URL('../server/parley-mcp.mjs', import.meta.url));
@@ -146,13 +159,17 @@ export function install(dir, { as = dir } = {}) {
 }
 
 export class Parley {
-    #dir; #on; #reach; #now;
+    #dir; #on; #reach; #now; #reactions;
 
     /* `on(event)`: told what happens (see the top of this file).
        `reach(path)`: how the person opens a file the agent showed -- a
        reference of the application's (a link, a path) or null when it
        cannot be opened from their screen. Every path, by default. */
-    constructor(dir, { on, reach = (path) => path, now = () => new Date() } = {}) { this.#dir = dir; this.#on = on; this.#reach = reach; this.#now = now; }
+    /* `reactions`: the set offered, [{ id, wakes }] (REACTIONS by default). */
+    constructor(dir, { on, reach = (path) => path, now = () => new Date(), reactions = REACTIONS } = {}) {
+        this.#dir = dir; this.#on = on; this.#reach = reach; this.#now = now;
+        this.#reactions = (Array.isArray(reactions) ? reactions : REACTIONS).filter((r) => r && REACTION_ID.test(r.id));
+    }
 
     #tell(event) { try { this.#on?.(event); } catch { /* a hook that fails stops nothing */ } }
 
@@ -169,7 +186,11 @@ export class Parley {
             const refs = cited(`${entry.text}\n${entry.short ?? ''}`).map((path) => ({ path, open: this.#open(path) })).filter((r) => r.open !== null);
             if (refs.length) entry.refs = refs;
         }
-        if (kind === 'show') { entry.path = oneLine(m.path, 1000); entry.open = this.#open(entry.path); }
+        if (kind === 'show') {
+            entry.path = oneLine(m.path, 1000); entry.open = this.#open(entry.path);
+            /* Several at once: one gallery, each with its title. */
+            if (Array.isArray(m.files) && m.files.length) entry.files = m.files.slice(0, SHOW_MAX).filter((f) => f && typeof f === 'object').map((f) => { const path = oneLine(f.path, 1000); return { path, title: oneLine(f.title, 120), open: this.#open(path) }; }).filter((f) => f.path);
+        }
         if (kind === 'status') entry.state = STATES.includes(m.state) ? m.state : 'working';
         if (kind === 'doing') { entry.text = oneLine(m.text, 200); entry.state = 'working'; }
         if (kind === 'close') { entry.text = oneLine(m.text, 500); entry.answers = oneLine(m.answers, 100); }
@@ -204,11 +225,19 @@ export class Parley {
         /* When each of the person's messages was read: the first read that reached it. */
         const reads = readTimes(this.#dir);
         const seenAt = (i) => reads.find((r) => r.lines > i)?.at ?? null;
-        const person = written.map((m, i) => {
+        /* A reaction is no message: it is put on the message it is about, the newest one standing. */
+        const reactions = new Map();
+        written.forEach((m, i) => {
+            if (typeof m.reaction !== 'string' || typeof m.to !== 'string') return;
+            if (m.removed === true) { if (reactions.get(m.to)?.id === m.reaction) reactions.delete(m.to); return; }
+            reactions.set(m.to, { id: oneLine(m.reaction, 30), at: String(m.at ?? ''), seen: i < written.length - unread });
+        });
+        const person = written.map((m, i) => (typeof m.reaction === 'string' ? null : (() => {
             const seen = i < written.length - unread;
             return { from: 'person', id: String(m.id ?? ''), at: String(m.at ?? ''), kind: 'say', text: clean(m.text), choices: [], seen, ...(seen && seenAt(i) ? { seenAt: seenAt(i) } : {}),
-                ...(m.answers ? { answers: String(m.answers), question: oneLine(m.question, 300) } : {}), ...(Array.isArray(m.files) && m.files.length ? { files: this.#files(m.files) } : {}) };
-        });
+                ...(m.answers ? { answers: String(m.answers), question: oneLine(m.question, 300) } : {}), ...(m.re ? { re: String(m.re), quote: oneLine(m.quote, 300) } : {}), ...(Array.isArray(m.files) && m.files.length ? { files: this.#files(m.files) } : {}), ...(m.via === 'voice' ? { via: 'voice' } : {}) };
+        })())).filter(Boolean);
+        for (const m of agent) if (reactions.has(m.id)) m.reaction = reactions.get(m.id);
         const answered = new Set(person.map((m) => m.answers).filter(Boolean));
         /* A question it closed says the answer it understood; answered with its buttons after that, the answer is the person's. */
         for (const m of agent) if (m.kind === 'ask' && closes.has(m.id)) m.closed = closes.get(m.id);
@@ -219,7 +248,7 @@ export class Parley {
         const last = steps.filter((m) => m.kind === 'status').at(-1);
         const after = steps.at(-1)?.kind === 'doing' && last?.state !== 'working';
         /* Every file it showed, and every one it cited that can be opened. */
-        const shown = agent.filter((m) => m.kind === 'show').map((m) => ({ path: m.path, note: m.text, at: m.at, open: m.open }));
+        const shown = agent.filter((m) => m.kind === 'show').flatMap((m) => (m.files?.length ? m.files.map((f) => ({ path: f.path, note: f.title || m.text, at: m.at, open: f.open })) : [{ path: m.path, note: m.text, at: m.at, open: m.open }]));
         const named = new Set(shown.map((f) => f.path));
         const cites = agent.flatMap((m) => (m.refs ?? []).map((r) => ({ path: r.path, note: '', at: m.at, open: r.open, cited: true }))).filter((f) => !named.has(f.path) && named.add(f.path));
         return {
@@ -237,7 +266,7 @@ export class Parley {
        application ({ path, name?, size? }: `path` as the agent sees it); a
        message may be files alone. The application is told (person-wrote),
        and decides how to tell the agent. */
-    say(text, answers, files = []) {
+    say(text, answers, files = [], { via } = {}) {
         const said = clean(text).trim();
         const given = Array.isArray(files) ? files : [];
         if (given.length > FILES_MAX) throw new RangeError(`${FILES_MAX} files at most in one message.`);
@@ -245,15 +274,43 @@ export class Parley {
         if (attached.some((f) => !f.path.startsWith('/'))) throw new RangeError('A file is given by its whole path.');
         if (!said && attached.length === 0) throw new RangeError('Write something.');
         const entry = { id: randomUUID(), at: this.#now().toISOString(), text: said };
+        if (via === 'voice') entry.via = 'voice';
         if (attached.length) entry.files = attached.map((f) => ({ path: f.path, name: f.name || f.path.split('/').pop(), ...(f.size === undefined ? {} : { size: f.size }) }));
         if (typeof answers === 'string' && answers) {
-            const asked = this.read().messages.find((m) => m.from === 'agent' && m.kind === 'ask' && m.id === answers);
-            if (asked) { entry.answers = asked.id; entry.question = oneLine(asked.text, 300); }
+            const asked = this.read().messages.find((m) => m.from === 'agent' && ['say', 'ask', 'show'].includes(m.kind) && m.id === answers);
+            /* A question is answered; any other message of the agent is replied to, quoted. */
+            if (asked?.kind === 'ask') { entry.answers = asked.id; entry.question = oneLine(asked.text, 300); }
+            else if (asked) { entry.re = asked.id; entry.quote = oneLine(asked.text || asked.path, 300); }
         }
         mkdirSync(this.#dir, { recursive: true });
         appendFileSync(`${this.#dir}/to-agent.jsonl`, `${JSON.stringify(entry)}\n`);
         const now = this.read();
         this.#tell({ type: 'person-wrote', message: now.messages.find((m) => m.id === entry.id) ?? { from: 'person', ...entry }, unread: now.unread });
+        return now;
+    }
+
+    /* THE PERSON REACTS to a message of the agent: `reaction` one id of the
+       set, or null to take back the one standing. Written to the agent with
+       the words and the time of that message, so that it knows which one; the
+       application is told (person-reacted, with `wakes`: the set's hint) and
+       decides whether to tell the agent now. Resolves with read(). */
+    react(to, reaction) {
+        const target = this.read().messages.find((m) => m.from === 'agent' && m.id === to && ['say', 'ask', 'show'].includes(m.kind));
+        if (!target) throw new RangeError('No such message of the agent.');
+        const standing = target.reaction?.id ?? null;
+        const kind = reaction === null || reaction === undefined || reaction === '' ? null : String(reaction);
+        if (kind !== null && !this.#reactions.some((r) => r.id === kind)) throw new RangeError(`A reaction is one of: ${this.#reactions.map((r) => r.id).join(', ')}.`);
+        if (kind === standing) return this.read();
+        const base = { at: this.#now().toISOString(), text: '', to: target.id, quote: oneLine(target.text || target.path || '', 200), toAt: target.at };
+        const lines2 = [];
+        /* Another one replaces it: the one standing is taken back first, said so. */
+        if (standing !== null && kind === null) lines2.push({ id: randomUUID(), ...base, reaction: standing, removed: true });
+        if (kind !== null) lines2.push({ id: randomUUID(), ...base, reaction: kind });
+        mkdirSync(this.#dir, { recursive: true });
+        appendFileSync(`${this.#dir}/to-agent.jsonl`, lines2.map((l) => `${JSON.stringify(l)}\n`).join(''));
+        const now = this.read();
+        const set = this.#reactions.find((r) => r.id === (kind ?? standing));
+        this.#tell({ type: 'person-reacted', message: lines2.at(-1), reaction: kind, wakes: kind === null ? false : set?.wakes ?? false, unread: now.unread });
         return now;
     }
 

@@ -602,6 +602,11 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .lk-dots { display: flex; gap: 3px; flex: none; }
 .lk-dots i { width: 9px; height: 9px; border-radius: 50%; display: block; }
 .lk-chev { color: var(--ink2); flex: none; font-size: 1.1rem; }
+/* The icons of the map: the chat's set (Lucide), drawn the same whatever the fonts. */
+.lk-ic .lk-svg { width: 1.05rem; height: 1.05rem; }
+.lk-chev .lk-svg { width: 1.1rem; height: 1.1rem; display: block; }
+.lk-hook, .lk-edge { display: inline-flex; align-items: center; gap: 3px; }
+.lk-arrow { width: 1em; height: 1em; flex: none; }
 .lk-bar { margin: 4px 0; }
 .lk-bar button { border-radius: 999px; }
 .lk-ptitle { margin: 6px 0 0; font-size: 1.25rem; overflow-wrap: anywhere; }
@@ -862,6 +867,13 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .icon .body { fill: color-mix(in srgb, currentColor 16%, var(--panel)); stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
 .icon .line { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; }
 .icon .ext { position: absolute; left: 0; right: 0; bottom: 12px; font: 700 .625rem var(--sans); letter-spacing: .04em; text-align: center; color: currentColor; }
+/* Drawn with the chat's icons (Lucide): the icon, its kind written under it. */
+.icon[data-drawn="lucide"] { flex-direction: column; gap: 2px; }
+.icon[data-drawn="lucide"] svg { width: 46px; height: 46px; stroke-width: 1.5; fill: color-mix(in srgb, currentColor 10%, transparent); }
+.file[data-folder="true"] .icon[data-drawn="lucide"] svg { width: 60px; height: 52px; }
+.icon[data-drawn="lucide"] .ext { position: static; }
+.icon.file-ic { width: 22px; height: 22px; flex: none; }
+.icon.file-ic svg { width: 22px; height: 22px; stroke-width: 1.8; fill: none; }
 .icon[data-type="folder"] { color: var(--brass); }
 .icon[data-type="image"] { color: #4fa3e0; }
 .icon[data-type="pdf"] { color: #e5605a; }

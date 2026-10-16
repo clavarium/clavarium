@@ -12,7 +12,10 @@
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
- *   POST /api/conversations/<name>/talk          {text, answers?, files?}: written in its chat; files from .../talk/file
+ *   POST /api/conversations/<name>/talk          {text, answers?, files?, via?}: written in its chat; files from .../talk/file; via 'voice': dictated
+ *   POST /api/conversations/<name>/talk/react    {to, reaction}: the owner's reaction to a message of the tool (null: taken back)
+ *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
+ *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
  *   GET  /api/talk/thread                        what a chat shows of each kind of event: {levels, defaults, choices}
  *   POST /api/talk/thread                        {levels: {kind: 'needs-you'|'news'|'trace'}}: the owner's choice, whole or partial
@@ -286,13 +289,14 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         /* A setting its tool is told about changed: its guide follows (never waking a machine). */
         const retell = (conversation) => { void guide?.changed(conversation).catch(() => {}); };
-        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind)?$/.exec(pathname);
+        const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
             if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
+            if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
-            return send(201, await talk.say(conversation, body.text, body.answers, body.files)), true;
+            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via)), true;
         }
         const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
         if (woken && wakeups) {
@@ -407,6 +411,10 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
+        const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
+        if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
+        const marking = /^\/api\/conversations\/([^/]+)\/voice-mark$/.exec(pathname);
+        if (marking) return send(200, conversations.setVoiceMark(decodeURIComponent(marking[1]), body.on)), true;
         const resuming = /^\/api\/conversations\/([^/]+)\/resume$/.exec(pathname);
         if (resuming) return send(200, conversations.setResume(decodeURIComponent(resuming[1]), body.on)), true;
         const repairing = /^\/api\/conversations\/([^/]+)\/terminal\/repair$/.exec(pathname);

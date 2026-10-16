@@ -296,10 +296,12 @@
     });
 
     const encoder = new TextEncoder();
+    /* A message dictated into an AI tool's terminal starts with a microphone, once: before its first piece since the last Enter. */
+    let markedSinceEnter = false;
     const send = (text) => {
         if (socket?.readyState === 1) socket.send(encoder.encode(text));
         /* Something was sent: the tool has its answer. */
-        if (String(text).includes('\r')) $('room').removeAttribute('data-asking');
+        if (String(text).includes('\r')) { $('room').removeAttribute('data-asking'); markedSinceEnter = false; }
     };
     const sendSize = () => {
         if (socket?.readyState === 1) socket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
@@ -878,7 +880,10 @@
                 phrase: (text) => {
                     /* The chat came up meanwhile, or there is no terminal: nothing is typed behind it. */
                     if (chatBox() || noTerminal()) return;
-                    send(`${text} `);
+                    /* Its tool is told it was dictated (it may hold recognition mistakes): never in a shell, where it would break a command. */
+                    const mark = conversations.find((x) => x.name === current)?.voiceMark === true && !markedSinceEnter ? '\u{1F3A4} ' : '';
+                    send(`${mark}${text} `);
+                    if (mark) markedSinceEnter = true;
                     sayVoice(`Typed: ${text}`, 'listening');
                     if (autoEnter) { clearTimeout(enterTimer); enterTimer = setTimeout(() => send('\r'), AUTO_ENTER_MS); }
                 },
@@ -909,6 +914,8 @@
     /* The chat alone: no row of keys at all; its dictation is the chat's own button. */
     function keysForChat() { if (noTerminal()) $('keys').hidden = true; }
     window.addEventListener('clavarium-voice-ready', () => { void offerVoice(); });
+    /* The icons came after the files were drawn: drawn again with them. */
+    window.addEventListener('clavarium-icons-ready', () => { if (document.querySelector('.icon:not([data-drawn])')) void paintFiles({ keep: true }).catch(() => {}); });
     void offerVoice();
 
     /* ---------- folders ---------- */
@@ -1534,8 +1541,11 @@
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
-            load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines),
-            send: (text, answers, files) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => f.path) } : {}) }),
+            load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines).then((data) => withMachine(data, name)),
+            /* `via: 'voice'`: part of it was dictated, said to the tool. */
+            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => f.path) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}) }),
+            /* A reaction to one of its messages: wherever the chat may be written in. */
+            ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
             act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -1545,7 +1555,8 @@
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
             ...(noTerminal() ? {} : { terminal: () => { simple = false; paintSimple(); focusTerminal(); } }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
-            markdown: true, agentName: conversations.find((x) => x.name === name)?.toolLabel ?? '',
+            /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
+            markdown: true, agentName: conversations.find((x) => x.name === name)?.chatName ?? '', agentTool: conversations.find((x) => x.name === name)?.toolLabel ?? '',
             /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
             picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
             diagram: drawDiagram, highlight: colourCode,
@@ -1606,6 +1617,17 @@
         const may = (id) => (id === 'terminal' ? !noTerminal() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id)) && !DEVICE);
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[kindOf(id)] })) } : m)) };
     }
+    /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
+    function withMachine(data, name) {
+        const c = conversations.find((x) => x.name === name);
+        if (!c || !data || typeof data !== 'object') return data;
+        const h = c.health ?? null;
+        const state = c.asleep === true ? ['Asleep', ''] : h?.state === 'Running' ? (h.answering === false ? ['Not answering', 'bad'] : ['Running', 'ok']) : h?.state ? [h.state, 'warn'] : c.phase ? [String(c.phase), ''] : null;
+        const about = [...(state ? [{ label: 'State', text: state[0], tone: state[1] }] : []),
+            ...(c.memoryMb ? [{ label: 'Memory', text: sizeWords(c.memoryMb) }] : []), ...(c.diskGb ? [{ label: 'Disk', text: `${c.diskGb} GB` }] : []),
+            ...(h?.problems ?? []).filter((x) => x && (x.level === 'warn' || x.level === 'bad')).slice(0, 3).map((x) => ({ label: 'Problem', text: String(x.text ?? ''), tone: x.level }))];
+        return { ...data, about };
+    }
     /* A file the person attaches: sent first, put where the tool finds it; the message then carries its path. */
     async function attachToChat(name, file) {
         const r = await fetch(`${API}/conversations/${encodeURIComponent(name)}/talk/file?${new URLSearchParams({ name: file.name, ...(DEVICE ? { c: name } : {}) })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
@@ -1630,7 +1652,11 @@
     }
     function languageName(tag) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag.split('-')[0]) ?? tag; } catch { return tag; } }
     async function paintTalkBox() {
-        if (DEVICE) { $('talk-box').hidden = true; return; }
+        if (DEVICE) { $('talk-box').hidden = true; $('voice-mark-box').hidden = true; return; }
+        const here = conversations.find((x) => x.name === current);
+        if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
+        $('voice-mark-box').hidden = !here?.ai;
+        for (const b of $('voice-mark').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.voiceMark === true)));
         await readTalk();
         for (const b of $('talk-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === talk.on));
         $('talk-invite').hidden = !talk.on;
@@ -1644,6 +1670,19 @@
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
             try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); void paintThread(); void paintGuide(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
+    }
+    $('chat-name-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/chat-name`, { name: $('chat-name').value }); await refresh(); thread?.destroy(); thread = null; threadOf = ''; void paintThread(); $('chat-name').blur(); await paintTalkBox(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+    for (const b of $('voice-mark').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/voice-mark`, { on: b.dataset.on === 'true' }); await refresh(); await paintTalkBox(); }
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
@@ -3050,9 +3089,17 @@
     /* Text that may be edited here: what the viewer shows as text, and a file without an extension. */
     const editable = (name, size) => size <= EDIT_MAX && (TEXTS.includes(extOf(name)) || ['svg', 'conf', 'cfg', 'env', 'cjs', 'tsx', 'jsx', 'vue', 'kt', 'swift', 'lua', 'pl', 'r', 'srt', 'vtt', 'cpp', 'htm', ''].includes(extOf(name)));
     const SVG = 'http://www.w3.org/2000/svg';
-    /* A drawn icon: a folder, or a page with its kind written on it. Never the file's own content. */
+    /* The icon of each kind, from the set of the chat (Lucide, see icons.js). */
+    const KIND_ICONS = { folder: 'folder', image: 'file-image', pdf: 'file-text', text: 'file-text', doc: 'file-text', code: 'file-code', sheet: 'file-spreadsheet', archive: 'file-archive', audio: 'file-music', video: 'file-play', other: 'file' };
+    /* A drawn icon: a folder, or a page of its kind, its kind written under it. Never the file's own content. */
     function iconFor(entry) {
         const box = document.createElement('span'); box.className = 'icon'; box.dataset.type = typeOf(entry);
+        const drawn = window.clavariumIcons?.icon(KIND_ICONS[box.dataset.type] ?? 'file');
+        if (drawn) {
+            box.dataset.drawn = 'lucide'; box.append(drawn);
+            if (!entry.folder) { const ext = document.createElement('span'); ext.className = 'ext'; ext.textContent = (extOf(entry.name) || 'file').slice(0, 4).toUpperCase(); box.append(ext); }
+            return box;
+        }
         const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('aria-hidden', 'true');
         const path = (d, cls) => { const p = document.createElementNS(SVG, 'path'); p.setAttribute('d', d); p.setAttribute('class', cls); svg.append(p); };
         if (entry.folder) {
@@ -3162,6 +3209,9 @@
             } else look.append(iconFor(entry));
             row.append(look);
         } else {
+            /* Its kind as an icon of the same set, and in a word. */
+            const drawn = window.clavariumIcons?.icon(KIND_ICONS[typeOf(entry)] ?? 'file');
+            if (drawn) { const ic = document.createElement('span'); ic.className = 'icon file-ic'; ic.dataset.type = typeOf(entry); ic.dataset.drawn = 'lucide'; ic.append(drawn); row.append(ic); }
             const kind = document.createElement('span'); kind.className = 'kind';
             kind.textContent = entry.folder ? 'DIR' : (entry.name.includes('.') ? entry.name.split('.').pop().slice(0, 4).toUpperCase() : 'FILE');
             row.append(kind);

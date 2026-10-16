@@ -46,6 +46,8 @@ export const ANSWER_PROBE = Object.freeze(['test', '-d', '/']);
 /* An error whose message is meant for the person, and safe to show.
    `retry`: what was refused may work in a moment, by itself (a machine
    that is starting): the page tries again without being asked. */
+/* The name a chat gives its tool, at most. */
+export const CHAT_NAME_MAX = 40;
 export class Refusal extends Error {
     constructor(status, message, { retry = false } = {}) { super(message); this.status = status; if (retry) this.retry = true; }
 }
@@ -177,7 +179,8 @@ export class Conversations {
     list() {
         return this.#store.all().map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
-            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights) };
+            /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
+            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false };
         });
     }
 
@@ -431,6 +434,28 @@ export class Conversations {
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (it asks before acting) or false (it acts without asking, in its machine).');
         this.#store.patch(name, { askFirst: on ? true : undefined });
+        return this.#store.get(name);
+    }
+
+    /* THE NAME ITS CHAT GIVES ITS TOOL, above its messages: '' (none) for the
+       neutral word of the dictionary ("Assistant"); never the tool's brand. */
+    setChatName(name, given) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof given !== 'string') throw new Refusal(400, 'Give a name, or nothing for the neutral one.');
+        const said = given.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069<>]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (said.length > CHAT_NAME_MAX) throw new Refusal(400, `${CHAT_NAME_MAX} characters at most.`);
+        this.#store.patch(name, { chatName: said || undefined });
+        return this.#store.get(name);
+    }
+
+    /* What is dictated into its terminal starts with a microphone sign, once
+       per message (true, the default for a tool that is an AI), or not. */
+    setVoiceMark(name, on) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (a microphone sign before what is dictated) or false.');
+        this.#store.patch(name, { voiceMark: on ? undefined : false });
         return this.#store.get(name);
     }
 

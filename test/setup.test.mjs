@@ -79,6 +79,9 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     /* Its tool asks before acting: exported; the default (every right in its machine) is not written. */
     await a.ok('/api/conversations/writer/ask-first', { on: true });
     assert.equal((await a.api('/api/conversations/writer/ask-first', { on: 'yes' })).status, 400);
+    /* The name its chat gives it, and whether what is dictated into its terminal is marked: exported with the setup. */
+    await a.ok('/api/conversations/writer/chat-name', { name: 'Arthur' });
+    await a.ok('/api/conversations/writer/voice-mark', { on: false });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'every', minutes: 60, message: 'Look at the new photos.' });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'arrival', resource: 'photos', message: 'New photos <b>arrived</b>.', quiet: 20 });
     await a.ok('/api/conversations/writer/wakeups', { kind: 'cron', line: '30 7 * * 1-5', message: 'Morning.' });
@@ -100,6 +103,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:helper').resume, doc.nodes.find((n) => n.id === 'conversation:writer').resume], [false, undefined], 'its tool starts fresh: said; the default is not');
     assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:writer').askFirst, doc.nodes.find((n) => n.id === 'conversation:helper').askFirst], [true, undefined]);
     assert.deepEqual(doc.nodes.find((n) => n.id === 'conversation:writer').guide, ['Answer me in French.', 'Run npm test before each commit.']);
+    assert.deepEqual([doc.nodes.find((n) => n.id === 'conversation:writer').chatName, doc.nodes.find((n) => n.id === 'conversation:writer').voiceMark, doc.nodes.find((n) => n.id === 'conversation:helper').chatName], ['Arthur', false, undefined]);
     assert.equal(doc.nodes.find((n) => n.id === 'conversation:helper').guide, undefined, 'no lines: nothing said');
     assert.equal(await exported(a), first, 'the same file twice: nothing in it moves');
 
@@ -117,6 +121,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     assert.ok(job.steps.some((s) => /its new address: \/c\/wake\//.test(s.why ?? '')), 'a call from outside gets a new address, said once');
     assert.deepEqual((await b.ok('/api/conversations/writer/guide')).lines, ['Answer me in French.', 'Run npm test before each commit.']);
     assert.equal((await b.ok('/api/conversations')).find((c) => c.name === 'writer').askFirst, true, 'imported: it asks before acting');
+    assert.equal((await b.ok('/api/conversations')).find((c) => c.name === 'writer').chatName, 'Arthur', 'imported: its name in the chat');
     assert.equal(await exported(b), first);
     /* What was missing, added since: done by itself. */
     await b.ok('/api/secrets', { name: 'MODEL_KEY', value: 'mine' });

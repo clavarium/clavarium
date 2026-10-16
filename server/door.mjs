@@ -22,6 +22,7 @@
  *   GET  /c/api/<pairing>/talk/words?lang=
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
  *   POST /c/api/<pairing>/conversations/<any>/talk/remind
+ *   POST /c/api/<pairing>/conversations/<any>/talk/react        {to, reaction}: a reaction to a message of the tool (null: taken back)
  *   POST /c/api/<pairing>/conversations/<any>/talk/file?name=   a file attached to a message
  *   POST /c/api/<pairing>/terminal/repair   its terminal does not come (see conversations.mjs)
  *        the chat of its conversation, where it talks through the app (see
@@ -147,7 +148,7 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/me') {
             /* `conversations`: all this pairing may use. `shared`: what it was given for itself. */
             /* `terminal` and `chat`: the parts it was given, for the page to show only those. */
-            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
+            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, chatName: mine.chatName, voiceMark: mine.voiceMark, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
@@ -173,13 +174,14 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (talk && talking) {
             if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name));
             /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
-            if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file')) need(part.chat === 'write', 'the chat to write in');
+            if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file' || talking[1] === '/react')) need(part.chat === 'write', 'the chat to write in');
+            if (request.method === 'POST' && talking[1] === '/react') { const body = await readJson(request); return send(200, await talk.react(name, body.to, body.reaction ?? null)); }
             if (request.method === 'POST' && talking[1] === '/remind') return send(200, await talk.remind(name));
             if (request.method === 'POST' && talking[1] === '/file') {
                 if (request.headers['content-type'] !== 'application/octet-stream') return send(400, { error: 'An attachment is a file.' });
                 return send(201, await talk.attach(name, url.searchParams.get('name') ?? '', request));
             }
-            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files)); }
+            if (request.method === 'POST' && talking[1] === undefined) { const body = await readJson(request); return send(201, await talk.say(name, body.text, body.answers, body.files, body.via)); }
         }
         /* Its terminal does not come: only a device given it asks for it to be repaired. */
         if (request.method === 'POST' && route === '/terminal/repair') { need(part.terminal, 'the terminal'); return send(200, await repair(name)); }

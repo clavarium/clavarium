@@ -3,7 +3,7 @@
  *   import { mount } from './parley-ui.js';
  *   mount(element, { load, send, words, open, terminal, remind, view, onView, locale,
  *                    voice, autoSend, onAutoSend, replies, enter, touch, attach, act,
- *                    markdown, picture, diagram, highlight, agentName });
+ *                    markdown, picture, diagram, highlight, agentName, agentTool, react, reactions });
  *
  *   load()                 resolves with what parley-host.mjs read() gives;
  *                          the application may add lines of its own to its
@@ -27,6 +27,15 @@
  *   locale                 optional: how times and days are written (the
  *                          device's own way when not given)
  *   agentName              optional: the agent's name, said above its messages
+ *                          (default: the neutral word of the dictionary)
+ *   agentTool              optional: which tool it is, said small beside its
+ *                          name in the detailed view
+ *   react(to, reaction)    optional: puts a reaction of the set on a message
+ *                          of the agent (null: takes it back); `reactions`
+ *                          replaces the set, [{ id, icon }] (REACTIONS)
+ *   (data.about)           optional, given with the data: [{ label, text,
+ *                          tone }], its machine, on the side of the detailed
+ *                          view
  *
  * WHAT THE AGENT WRITES, RENDERED (`markdown: true`; without it, plain text).
  * Its Markdown is read into plain data (markdown(), below), then the page is
@@ -146,6 +155,8 @@
  * PAGE AS TEXT, never as markup: the first is chosen by a program, the
  * second by whoever wrote the dictionary.
  */
+import { icon, fileIcon } from './parley-icons.js';
+
 export const VIEWS = Object.freeze(['simple', 'detailed']);
 /* The words this screen uses: a dictionary needs these keys. */
 export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simple', 'detailed', 'working', 'waiting', 'done', 'no-status', 'asks', 'open', 'outside',
@@ -155,7 +166,17 @@ export const KEYS = Object.freeze(['send', 'placeholder', 'empty', 'view', 'simp
     'copy', 'copied', 'see-details', 'see-more', 'see-less', 'note', 'tip', 'important', 'warning', 'caution', 'badge-ok', 'badge-todo', 'badge-blocked', 'badge-warn',
     'waits-you', 'waits-you-note', 'busy', 'state-sent', 'state-read', 'state-working', 'state-done', 'sent-at', 'read-at', 'done-at',
     'reply', 'replying', 'not-a-reply', 'in-reply', 'closed', 'you', 'agent', 'drop', 'picture', 'diagram', 'not-shown', 'grouped',
-    'zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit', 'close', 'previous', 'next', 'search', 'found', 'newest', 'dictation', 'auto-send-off']);
+    'zoom-in', 'zoom-out', 'zoom-actual', 'zoom-fit', 'close', 'previous', 'next', 'search', 'found', 'newest', 'dictation', 'auto-send-off',
+    'react', 'react-remove', 'react-agree', 'react-go', 'react-disagree', 'react-unclear', 'react-stop', 'react-redo', 'react-later', 'react-love',
+    'react-agree-hint', 'react-go-hint', 'react-disagree-hint', 'react-unclear-hint', 'react-stop-hint', 'react-redo-hint', 'react-later-hint', 'react-love-hint',
+    'media', 'media-pictures', 'media-files', 'media-none', 'see-in-thread', 'done-end', 'done-end-note', 'dictated', 'side-now', 'side-machine', 'side-nothing']);
+/* THE REACTIONS offered by default, each with its Lucide icon; their words
+   are "react-<id>" (shown under the icon) and "react-<id>-hint" (on hover).
+   The same ids as REACTIONS of parley-host.mjs, which says which wake. */
+export const REACTIONS = Object.freeze([
+    { id: 'agree', icon: 'thumbs-up' }, { id: 'go', icon: 'circle-check' }, { id: 'disagree', icon: 'thumbs-down' }, { id: 'unclear', icon: 'circle-question-mark' },
+    { id: 'stop', icon: 'octagon-x' }, { id: 'redo', icon: 'refresh-ccw' }, { id: 'later', icon: 'hourglass' }, { id: 'love', icon: 'heart' },
+].map(Object.freeze));
 /* Narrower than this, the detailed view folds its files into one line. */
 export const NARROW_PX = 736;
 /* Between two messages further apart than this, the time is said. */
@@ -185,6 +206,8 @@ export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
 export const ALERTS = Object.freeze(['note', 'tip', 'important', 'warning', 'caution']);
 export const BADGES = Object.freeze(['ok', 'todo', 'blocked', 'warn']);
 const PICTURE = /\.(png|jpe?g|gif|webp)$/i;
+/* A file's name as a title, when it was given none: no extension, no dashes. */
+export const titleOf = (name) => { const t = String(name ?? '').split('/').pop().replace(/\.[a-z0-9]{1,8}$/i, '').replace(/[-_.]+/g, ' ').replace(/\s+/g, ' ').trim(); return t ? t[0].toUpperCase() + t.slice(1) : String(name ?? ''); };
 
 const fill = (word, values = {}) => String(word ?? '').replace(/\{([a-z]+)\}/g, (all, key) => (Object.hasOwn(values, key) ? String(values[key]) : all));
 const said = (words, key, values) => fill(typeof words?.[key] === 'string' ? words[key] : key, values);
@@ -407,16 +430,17 @@ const openQuestion = (m, answered) => m.kind === 'ask' && m.from !== 'person' &&
    it stopped), `group` (lines of the application of one topic, in the simple
    view), `now` (what it does now, with the steps of this turn before it),
    `waits` (it waits for the person). `items`: the messages alone. */
-export function view(data, { words = {}, view: as = 'simple', now = Date.now(), locale, agentName } = {}) {
+export function view(data, { words = {}, view: as = 'simple', now = Date.now(), locale, agentName, agentTool } = {}) {
     const detailed = as === 'detailed';
     const all = Array.isArray(data?.messages) ? data.messages.filter((m) => m && typeof m === 'object') : [];
     const answered = new Set(all.filter((m) => m.from === 'person').map((m) => m.answers).filter(Boolean));
     /* Simple shows nothing the person cannot act on: a file that cannot be opened, a trace, are in the detailed view only. */
-    const messages = all.filter((m) => detailed || !((m.kind === 'show' && typeof m.open !== 'string') || (m.from === 'system' && levelOf(m.level) === 'trace')));
+    const messages = all.filter((m) => detailed || !((m.kind === 'show' && (Array.isArray(m.files) && m.files.length ? !m.files.some((f) => f && typeof f.open === 'string') : typeof m.open !== 'string')) || (m.from === 'system' && levelOf(m.level) === 'trace')));
     const status = data?.status ?? null;
     const state = (s) => said(words, ['working', 'waiting', 'done'].includes(s) ? s : 'working');
-    /* A state of waiting is not a step: it is said once, at the end. */
-    const steps = (Array.isArray(data?.steps) ? data.steps : []).filter((s) => s && typeof s === 'object' && !(s.kind === 'status' && s.state === 'waiting'));
+    /* A state of waiting, or done, is not a step: it is said once, at the end. */
+    const allSteps = (Array.isArray(data?.steps) ? data.steps : []).filter((s) => s && typeof s === 'object');
+    const steps = allSteps.filter((s) => !(s.kind === 'status' && (s.state === 'waiting' || s.state === 'done')));
     const files = Array.isArray(data?.files) ? data.files : [];
     const agentSaid = (m) => m.from !== 'person' && m.from !== 'system';
     /* What the agent did after a time: its messages and its steps. */
@@ -424,11 +448,17 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     const lastAgent = agentTimes.at(-1) ?? null;
     const firstAfter = (list, t) => list.find((x) => x >= t) ?? null;
     const replies = all.filter(agentSaid).map((m) => stamp(m.at)).filter((t) => t !== null).sort((a, b) => a - b);
-    const doneAt = steps.filter((s) => s.kind === 'status' && s.state === 'done').map((s) => stamp(s.at)).filter((t) => t !== null);
+    const doneAt = allSteps.filter((s) => s.kind === 'status' && s.state === 'done').map((s) => stamp(s.at)).filter((t) => t !== null);
     const stepTimes = steps.map((s) => stamp(s.at)).filter((t) => t !== null);
     const unreadIds = all.filter((m) => m.from === 'person' && m.seen === false).map((m) => m.id);
     const lastUnread = unreadIds.at(-1);
     const agentName2 = String(agentName || said(words, 'agent'));
+    /* It said it is done: said once, at the end, while it is the last thing that happened (a message of either side, or a step, after it: gone). */
+    const doneStatus = status?.state === 'done' ? stamp(status.at) : null;
+    const lastEvent = Math.max(-Infinity, ...all.filter((m) => m.from !== 'system').map((m) => stamp(m.at) ?? -Infinity), ...allSteps.filter((s) => !(s.kind === 'status' && s.state === 'done')).map((s) => stamp(s.at) ?? -Infinity));
+    const doneEnd = doneStatus !== null && lastEvent <= doneStatus;
+    /* The newest message of the agent: never folded, so that nothing seems left below it. */
+    const newestAgent = [...messages].reverse().find((m) => m.from !== 'person' && m.from !== 'system')?.id;
     const items = messages.map((m) => {
         const t = stamp(m.at);
         if (m.from === 'system') {
@@ -449,15 +479,21 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
             refs: (Array.isArray(m.refs) ? m.refs : []).filter((r) => r && typeof r.path === 'string' && typeof r.open === 'string').slice(0, 20).map((r) => ({ path: r.path, open: r.open })),
             time: clock(t, locale), when: whole(t, locale), at: t,
             label: open ? said(words, 'asks') : '',
-            file: show ? { path: String(m.path ?? ''), open: reach, name: nameOf(m.path), shown: detailed ? String(m.path ?? '') : (m.text ? nameOf(m.path) : ''), picture: PICTURE.test(String(m.path ?? '')) } : null,
+            file: show && !(Array.isArray(m.files) && m.files.length) ? { path: String(m.path ?? ''), open: reach, name: nameOf(m.path), shown: detailed ? String(m.path ?? '') : (m.text ? nameOf(m.path) : ''), picture: PICTURE.test(String(m.path ?? '')) } : null,
+            /* Several files shown at once (or one with a title): one gallery, each with its title; simple shows those that open. */
+            gallery: show && Array.isArray(m.files) ? m.files.slice(0, 12).filter((f) => f && typeof f.path === 'string' && (detailed || typeof f.open === 'string')).map((f) => ({ path: f.path, open: typeof f.open === 'string' ? f.open : null, name: nameOf(f.path), title: String(f.title || '') || titleOf(f.path), picture: PICTURE.test(f.path), shown: detailed ? f.path : '' })) : [],
+            reaction: !person && m.reaction && typeof m.reaction.id === 'string' ? m.reaction.id : '',
+            last: !person && m.id === newestAgent,
+            dictated: person && m.via === 'voice',
+            tool: detailed && !person && agentTool ? String(agentTool) : '',
             /* What the person attached: by name, opened the application's way; its whole path in the detailed view. */
-            files: (Array.isArray(m.files) ? m.files : []).slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => ({ path: String(f.path ?? ''), name: String(f.name || nameOf(f.path)), open: typeof f.open === 'string' ? f.open : null, shown: detailed ? String(f.path ?? '') : '', size: sizeText(f.size), picture: PICTURE.test(String(f.name || f.path || '')) })),
+            files: (person && Array.isArray(m.files) ? m.files : []).slice(0, FILES_MAX).filter((f) => f && typeof f === 'object').map((f) => ({ path: String(f.path ?? ''), name: String(f.name || nameOf(f.path)), open: typeof f.open === 'string' ? f.open : null, shown: detailed ? String(f.path ?? '') : '', size: sizeText(f.size), picture: PICTURE.test(String(f.name || f.path || '')) })),
             actions: [],
-            outside: show && reach === null ? said(words, 'outside', { path: String(m.path ?? '') }) : '',
+            outside: show && !(Array.isArray(m.files) && m.files.length) && reach === null ? said(words, 'outside', { path: String(m.path ?? '') }) : show && Array.isArray(m.files) && m.files.some((f) => f && typeof f.open !== 'string') && detailed ? said(words, 'outside', { path: m.files.filter((f) => f && typeof f.open !== 'string').map((f) => f.path).join(', ') }) : '',
             choices: m.kind === 'ask' && !answered.has(m.id) ? (m.choices ?? []).map(String) : [],
             open,
             closed: m.kind === 'ask' && m.closed && !answered.has(m.id) ? said(words, 'closed', { answer: cut(m.closed.text, 300) }) : '',
-            reply: person && m.answers ? said(words, 'in-reply', { question: cut(m.question, 90) }) : '',
+            reply: person && (m.answers || m.re) ? said(words, 'in-reply', { question: cut(m.question || m.quote, 90) }) : '',
             mark: '',
         };
         if (person) {
@@ -491,11 +527,11 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     const count = (n) => (n === 1 ? said(words, 'step-one') : said(words, 'steps-many', { count: n }));
     const group = (list, i) => ({ type: 'steps', key: `s:${String(list[0].id ?? i)}`, label: count(list.length), open: detailed, steps: list.map(step), at: stamp(list[0].at), end: stamp(list.at(-1).at) });
     /* The newest step, when it says what it does now: the line at the end. */
-    const newest = steps.at(-1);
+    const newest = allSteps.at(-1);
     const lastAgentMessage = Math.max(-Infinity, ...items.filter((x) => x.from === 'agent' && x.at !== null).map((x) => x.at));
     const live = newest && (newest.kind === 'doing' || (newest.kind === 'status' && newest.state === 'working')) && (stamp(newest.at) ?? 0) > lastAgentMessage ? newest : null;
     /* The state at the top, in the detailed view, is not said again at the end. */
-    const topState = detailed && status && !live && status.state !== 'waiting' ? status : null;
+    const topState = detailed && status && !live && status.state !== 'waiting' && !(status.state === 'done' && doneEnd) ? status : null;
     const kept = steps.filter((s) => s !== live && !(topState && s === steps.filter((x) => x.kind === 'status').at(-1) && s.at === status.at));
     /* The steps go to the next message of the AGENT; in the detailed view, between the messages, as they came. */
     const rows = [];
@@ -524,6 +560,10 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
     if (waitsAt !== null && !all.some((m) => m.from === 'person' && (stamp(m.at) ?? 0) >= waitsAt) && !(lastSaid?.open)) {
         const note = String(status.note ?? '').trim();
         rows.push({ type: 'waits', key: 'w', text: note ? said(words, 'waits-you-note', { note }) : said(words, 'waits-you'), time: clock(waitsAt, locale), when: whole(waitsAt, locale), at: null, end: null });
+    }
+    if (doneEnd) {
+        const note = String(status.note ?? '').trim();
+        rows.push({ type: 'done', key: 'D', text: note ? said(words, 'done-end-note', { note }) : said(words, 'done-end'), time: clock(doneStatus, locale), when: whole(doneStatus, locale), at: null, end: null });
     }
     /* Simple: a run of news of one topic is one compact line. */
     const packed = [];
@@ -563,7 +603,35 @@ export function view(data, { words = {}, view: as = 'simple', now = Date.now(), 
         asking: (() => { const open = all.filter((m) => openQuestion(m, answered)); return open.length === 1 ? { id: String(open[0].id ?? ''), text: cut(open[0].short || open[0].text, 90) } : null; })(),
         files: detailed ? files.map((f) => ({ path: String(f.path ?? ''), name: nameOf(f.path), note: String(f.note ?? ''), open: typeof f.open === 'string' ? f.open : null, when: whole(stamp(f.at), locale) })) : [],
         summary: detailed ? `${said(words, 'files')} (${files.length})` : '',
+        /* Detailed, on the side: what it does now and the steps of this turn; what the application says of its machine. */
+        side: detailed ? { now: live ? { text: String(live.note ?? '') || state('working'), steps: turn.map(step) } : null,
+            about: (Array.isArray(data?.about) ? data.about : []).filter((a) => a && typeof a.label === 'string' && typeof a.text === 'string').slice(0, 8).map((a) => ({ label: cut(a.label, 40), text: cut(a.text, 200), tone: ['warn', 'bad', 'ok'].includes(a.tone) ? a.tone : '' })) } : null,
     };
+}
+
+/* THE MEDIA OF THE THREAD, as plain data: every picture and every other file
+   the person can open -- shown by the agent, placed or cited in its messages,
+   attached by the person --, once each (where it came last), newest first.
+   Each says the message it came with (`id`), to find it in the thread. */
+export function media(data, { locale } = {}) {
+    const all = (Array.isArray(data?.messages) ? data.messages : []).filter((m) => m && typeof m === 'object' && m.from !== 'system');
+    const found = new Map();
+    const put = (f, m, title) => {
+        if (!f || typeof f.path !== 'string' || typeof f.open !== 'string') return;
+        const t = stamp(m.at);
+        found.delete(f.path);
+        found.set(f.path, { path: f.path, open: f.open, name: nameOf(f.path), title: String(title || '') || titleOf(f.path), picture: PICTURE.test(f.path), id: String(m.id ?? ''), when: whole(t, locale), at: t });
+    };
+    for (const m of [...all].sort((a, b) => String(a.at).localeCompare(String(b.at)))) {
+        if (m.kind === 'show') { if (Array.isArray(m.files) && m.files.length) for (const f of m.files) put(f, m, f?.title); else put({ path: m.path, open: m.open }, m, ''); }
+        /* A picture placed in a message: its caption is its title. */
+        const alts = new Map([...String(m.text ?? '').matchAll(/!\[([^\]\n]{0,300})\]\(\s*<?([^\s()<>]{1,2000})/g)].map((x) => [x[2], x[1]]));
+        for (const r of Array.isArray(m.refs) ? m.refs : []) put(r, m, alts.get(r?.path));
+        for (const f of Array.isArray(m.files) && m.from === 'person' ? m.files : []) put(f, m, '');
+    }
+    /* Newest message first; within one, in the order it gave them. */
+    const list = [...found.values()].map((x, i) => ({ x, i })).sort((a, b) => (b.x.at ?? 0) - (a.x.at ?? 0) || a.i - b.i).map(({ x: { at, ...x } }) => x);
+    return { pictures: list.filter((x) => x.picture), files: list.filter((x) => !x.picture) };
 }
 
 /* THE QUICK ANSWERS ABOVE THE BOX, as plain data: the choices of the
@@ -710,12 +778,14 @@ function painter(ctx) {
         const off = el('span', 'parley-noimg', n.alt || nameOf(n.src)); off.title = said(words, 'not-shown');
         return off;
     }
+    /* A picture, its title under it (the caption it was given), its file's name on hover. */
     function thumb(file, url, alt) {
         const b = el('button', 'parley-thumb'); b.type = 'button';
-        const img = el('img'); img.src = url; img.alt = alt || file.path.split('/').pop(); img.loading = 'lazy'; img.decoding = 'async'; img.dataset.zoom = url; img.dataset.name = img.alt;
-        b.title = alt || file.path; b.append(img);
-        if (alt) { const fig = el('span', 'parley-figure'); fig.append(b, el('span', 'parley-caption', alt)); b.addEventListener('click', () => ctx.zoom(img)); return fig; }
+        const name = file.path.split('/').pop();
+        const img = el('img'); img.src = url; img.alt = alt || name; img.loading = 'lazy'; img.decoding = 'async'; img.dataset.zoom = url; img.dataset.name = name; img.dataset.title = alt || '';
+        b.title = alt ? `${alt} - ${name}` : file.path; b.append(img);
         b.addEventListener('click', () => ctx.zoom(img));
+        if (alt) { const fig = el('span', 'parley-figure'); fig.append(b, el('span', 'parley-caption', alt)); return fig; }
         return b;
     }
     function code(block) {
@@ -755,7 +825,7 @@ function painter(ctx) {
         const fig = el('figure', 'parley-diagram');
         fig.append(el('span', 'parley-diagram-wait', said(words, 'diagram')));
         const key = `d:${block.text}`;
-        const show = (url) => { const img = el('img'); img.src = url; img.alt = said(words, 'diagram'); img.dataset.zoom = url; img.dataset.name = said(words, 'diagram'); const b = el('button', 'parley-thumb'); b.type = 'button'; b.append(img); b.addEventListener('click', () => ctx.zoom(img)); fig.replaceChildren(b); };
+        const show = (url) => { const img = el('img'); img.src = url; img.alt = said(words, 'diagram'); img.dataset.zoom = url; img.dataset.name = said(words, 'diagram'); img.dataset.title = said(words, 'diagram'); const b = el('button', 'parley-thumb'); b.type = 'button'; b.append(img); b.addEventListener('click', () => ctx.zoom(img)); fig.replaceChildren(b); };
         const failed = () => fig.replaceWith(code({ ...block, lang: block.lang }));
         if (cache.has(key)) { const u = cache.get(key); if (u) show(u); else return code(block); }
         else {
@@ -817,24 +887,33 @@ function painter(ctx) {
     return { blocks, inlines, thumb };
 }
 
-/* A PICTURE, LARGE: over the page, to zoom (pinch, double tap, the wheel,
-   + - "actual size" "fit"), to move when zoomed (drag), to go to the next
-   picture of the thread (arrows, a swipe), closed with Escape or its button. */
+/* A PICTURE, LARGE, as a chat app shows it: it grows out of its thumbnail
+   (briefly; not at all for whoever asked for less motion); zoomed with a
+   pinch, a double tap, the wheel, + and - (up to ZOOM_MAX times the fitted
+   size), moved when zoomed (drag); the previous or next picture with the
+   arrows, a swipe, or the strip of small pictures at the bottom; closed
+   simply: a tap on the picture not zoomed, or on the ground around it, a
+   swipe down on a touch screen, Escape, or its button. */
 const ZOOM_MAX = 8;
+const OPEN_MS = 220;
 function zoomer(root, words) {
     const box = el('div', 'parley-zoom'); box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.tabIndex = -1;
     const bar = el('div', 'parley-zoom-bar');
     const title = el('span', 'parley-zoom-name');
-    const tool = (kind, key, act) => { const b = el('button', `parley-zoom-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title); b.append(sign(kind === 'actual' ? 'stop' : kind === 'fit' ? 'up' : kind)); b.addEventListener('click', act); return b; };
+    const tool = (kind, key, act) => { const b = el('button', `parley-zoom-${kind}`); b.type = 'button'; b.title = said(words, key); b.setAttribute('aria-label', b.title); b.append(kind === 'left' ? icon('chevron-left', 'parley-sign') : kind === 'right' ? icon('chevron-right', 'parley-sign') : kind === 'close' ? icon('x', 'parley-sign') : sign(kind === 'actual' ? 'stop' : kind === 'fit' ? 'up' : kind)); b.addEventListener('click', act); return b; };
     const stage = el('div', 'parley-zoom-stage');
     const img = el('img'); img.alt = ''; img.draggable = false;
     stage.append(img);
+    const strip = el('div', 'parley-zoom-strip'); strip.setAttribute('role', 'group');
     let list = [];
     let at = 0;
     let s = 1; let tx = 0; let ty = 0; let fit = 1;
     let back = null;
+    let from = null;
+    const still = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const size = () => { const r = stage.getBoundingClientRect(); return { w: r.width || 1, h: r.height || 1 }; };
     const natural = () => ({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
+    const max = () => Math.max(fit * ZOOM_MAX, 2);
     const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`; box.dataset.zoomed = String(s > fit * 1.01); };
     const clamp = () => {
         const { w, h } = size(); const n = natural();
@@ -845,25 +924,55 @@ function zoomer(root, words) {
     const zoomTo = (next, px, py) => {
         const { w, h } = size();
         const x = px ?? w / 2; const y = py ?? h / 2;
-        const to = Math.min(ZOOM_MAX, Math.max(fit * 0.5, next));
+        const to = Math.min(max(), Math.max(fit * 0.5, next));
         tx = x - (x - tx) * (to / s); ty = y - (y - ty) * (to / s); s = to;
         clamp(); apply();
     };
     const fitIn = () => { const { w, h } = size(); const n = natural(); fit = Math.min(1, w / n.w, h / n.h); s = fit; tx = 0; ty = 0; clamp(); apply(); };
-    img.addEventListener('load', fitIn);
+    /* Grows out of the thumbnail it was opened from: from its place and size to the fitted ones. */
+    const grow = () => {
+        const r = from; from = null;
+        if (!r || still() || !r.width) return;
+        const st = stage.getBoundingClientRect(); const n = natural();
+        const k = r.width / (n.w * s);
+        const fx = tx; const fy = ty; const fs = s;
+        img.style.transition = 'none';
+        img.style.transform = `translate(${r.left - st.left}px, ${r.top - st.top}px) scale(${fs * k})`;
+        box.dataset.opening = 'true';
+        void img.getBoundingClientRect();
+        img.style.transition = `transform ${OPEN_MS}ms cubic-bezier(.2,.8,.2,1)`;
+        img.style.transform = `translate(${fx}px, ${fy}px) scale(${fs})`;
+        setTimeout(() => { img.style.transition = ''; delete box.dataset.opening; }, OPEN_MS + 30);
+    };
+    img.addEventListener('load', () => { fitIn(); grow(); });
     const go = (step) => { if (list.length < 2) return; at = (at + step + list.length) % list.length; load(); };
     const prev = tool('left', 'previous', () => go(-1));
     const next = tool('right', 'next', () => go(1));
     bar.append(title, tool('minus', 'zoom-out', () => zoomTo(s / 1.5)), tool('plus', 'zoom-in', () => zoomTo(s * 1.5)), tool('actual', 'zoom-actual', () => zoomTo(1)), tool('fit', 'zoom-fit', fitIn), prev, next, tool('close', 'close', () => close()));
-    box.append(stage, bar);
+    box.append(bar, stage, strip);
+    function paintStrip() {
+        strip.hidden = list.length < 2;
+        if (strip.hidden) { strip.replaceChildren(); return; }
+        strip.replaceChildren(...list.map((item, i) => {
+            const b = el('button', 'parley-zoom-thumb'); b.type = 'button'; b.title = item.title || item.name; b.setAttribute('aria-label', b.title);
+            if (i === at) b.setAttribute('aria-current', 'true');
+            const small = el('img'); small.src = item.url; small.alt = ''; small.loading = 'lazy'; b.append(small);
+            b.addEventListener('click', () => { at = i; load(); });
+            return b;
+        }));
+        strip.querySelector('[aria-current]')?.scrollIntoView?.({ block: 'nearest', inline: 'center' });
+    }
     function load() {
         const item = list[at];
-        title.textContent = `${item.name}${list.length > 1 ? ` (${at + 1}/${list.length})` : ''}`;
+        title.textContent = `${item.title || item.name}${list.length > 1 ? ` (${at + 1}/${list.length})` : ''}`;
+        title.title = item.name;
         prev.hidden = next.hidden = list.length < 2;
-        img.src = item.url; img.alt = item.name;
-        if (img.complete && img.naturalWidth) fitIn();
+        img.style.transition = ''; box.style.opacity = ''; delete box.dataset.dragging;
+        img.src = item.url; img.alt = item.title || item.name;
+        paintStrip();
+        if (img.complete && img.naturalWidth) { fitIn(); grow(); }
     }
-    function close() { box.hidden = true; img.removeAttribute('src'); try { back?.focus?.({ preventScroll: true }); } catch { /* gone */ } }
+    function close() { clearTimeout(tapping); box.hidden = true; box.style.opacity = ''; img.removeAttribute('src'); try { back?.focus?.({ preventScroll: true }); } catch { /* gone */ } }
     box.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.preventDefault(); close(); }
         else if (event.key === 'ArrowLeft') go(-1);
@@ -873,21 +982,26 @@ function zoomer(root, words) {
         else if (event.key === '0') fitIn();
     });
     stage.addEventListener('wheel', (event) => { event.preventDefault(); const r = stage.getBoundingClientRect(); zoomTo(s * Math.exp(-event.deltaY * 0.0015), event.clientX - r.left, event.clientY - r.top); }, { passive: false });
-    /* Fingers and a mouse: one moves (or swipes), two pinch, a double tap zooms. */
+    /* Fingers and a mouse: one moves (or swipes), two pinch, a double tap zooms, one tap closes. */
     const pointers = new Map();
-    let pinch = null; let start = null; let lastTap = 0;
+    let pinch = null; let start = null; let lastTap = 0; let tapping;
+    const onPicture = (x, y) => { const r = img.getBoundingClientRect(); return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom; };
     stage.addEventListener('pointerdown', (event) => {
         stage.setPointerCapture?.(event.pointerId);
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        if (pointers.size === 1) start = { x: event.clientX, y: event.clientY, tx, ty, t: Date.now() };
-        if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s }; }
+        if (pointers.size === 1) start = { x: event.clientX, y: event.clientY, tx, ty, t: Date.now(), touch: event.pointerType !== 'mouse' };
+        if (pointers.size === 2) { const [a, b] = [...pointers.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, s }; start = null; }
     });
     stage.addEventListener('pointermove', (event) => {
         if (!pointers.has(event.pointerId)) return;
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
         const r = stage.getBoundingClientRect();
         if (pointers.size === 2 && pinch) { const [a, b] = [...pointers.values()]; zoomTo(pinch.s * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top); return; }
-        if (pointers.size === 1 && start && s > fit * 1.01) { tx = start.tx + event.clientX - start.x; ty = start.ty + event.clientY - start.y; clamp(); apply(); }
+        if (pointers.size !== 1 || !start) return;
+        if (s > fit * 1.01) { tx = start.tx + event.clientX - start.x; ty = start.ty + event.clientY - start.y; clamp(); apply(); return; }
+        /* Not zoomed, pulled down by a finger: it follows, and fades. */
+        const dy = event.clientY - start.y;
+        if (start.touch && dy > 10 && Math.abs(dy) > Math.abs(event.clientX - start.x)) { box.dataset.dragging = 'true'; img.style.transform = `translate(${start.tx}px, ${start.ty + dy}px) scale(${s})`; box.style.opacity = String(Math.max(0.35, 1 - dy / 600)); }
     });
     const up = (event) => {
         if (!pointers.has(event.pointerId)) return;
@@ -895,17 +1009,32 @@ function zoomer(root, words) {
         if (pointers.size < 2) pinch = null;
         if (pointers.size > 0 || !start) return;
         const dx = event.clientX - start.x; const dy = event.clientY - start.y;
-        if (s <= fit * 1.01 && Math.abs(dx) > 60 && Math.abs(dy) < 80) go(dx < 0 ? 1 : -1);
-        else if (Math.hypot(dx, dy) < 10 && Date.now() - start.t < 300) {
-            const now = Date.now();
-            if (now - lastTap < 320) { const r = stage.getBoundingClientRect(); if (s > fit * 1.01) fitIn(); else zoomTo(Math.max(fit * 2.5, 1), event.clientX - r.left, event.clientY - r.top); lastTap = 0; } else lastTap = now;
+        const was = start; start = null;
+        if (box.dataset.dragging) { delete box.dataset.dragging; if (dy > 90) { close(); return; } box.style.opacity = ''; apply(); return; }
+        if (s <= fit * 1.01 && Math.abs(dx) > 60 && Math.abs(dy) < 80) { go(dx < 0 ? 1 : -1); return; }
+        if (Math.hypot(dx, dy) >= 10 || Date.now() - was.t >= 300) return;
+        const now = Date.now();
+        const r = stage.getBoundingClientRect();
+        if (now - lastTap < 320) {
+            clearTimeout(tapping); lastTap = 0;
+            if (s > fit * 1.01) fitIn(); else zoomTo(Math.max(fit * 2.5, 1), event.clientX - r.left, event.clientY - r.top);
+            return;
         }
-        start = null;
+        lastTap = now;
+        /* One tap: on the ground, or on the picture not zoomed, it closes -- once it is sure no second tap follows. */
+        const ground = !onPicture(event.clientX, event.clientY);
+        if (ground || s <= fit * 1.01) { clearTimeout(tapping); tapping = setTimeout(() => { if (!box.hidden) close(); }, 330); }
     };
-    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', up);
+    stage.addEventListener('pointerup', up); stage.addEventListener('pointercancel', (event) => { pointers.delete(event.pointerId); start = null; pinch = null; delete box.dataset.dragging; box.style.opacity = ''; apply(); });
     return {
         box,
-        show(all, index) { if (!all.length) return; back = document.activeElement; list = all; at = Math.max(0, Math.min(all.length - 1, index)); box.hidden = false; load(); box.focus?.({ preventScroll: true }); },
+        /* `all`: [{ url, name, title }]; `thumb`: the element it was opened from, to grow out of. */
+        show(all, index, thumb) {
+            if (!all.length) return;
+            back = document.activeElement; list = all; at = Math.max(0, Math.min(all.length - 1, index));
+            try { from = thumb?.getBoundingClientRect?.() ?? null; } catch { from = null; }
+            box.hidden = false; load(); box.focus?.({ preventScroll: true });
+        },
         get open() { return !box.hidden; },
         close,
     };
@@ -913,19 +1042,24 @@ function zoomer(root, words) {
 
 /* The kind of a file, as a short tag on its card. */
 const extOf = (name) => { const m = /\.([a-z0-9]{1,5})$/i.exec(String(name ?? '')); return m ? m[1].toUpperCase() : ''; };
-function card(file, words, open, size) {
+/* The icon of a file's kind, and its kind and size in a word under its name. */
+const fileGlyph = (name) => { const holder = el('span', 'parley-card-icon'); holder.dataset.kind = fileIcon(name); holder.append(icon(fileIcon(name), 'parley-sign')); return holder; };
+const kindLine = (name, size) => el('span', 'parley-size', [extOf(name), size].filter(Boolean).join(' · '));
+function card(file, words, open, size, title) {
     const c = el('span', 'parley-card');
-    const icon = el('span', 'parley-card-icon'); icon.append(sign('file'), el('span', 'parley-card-ext', extOf(file.name)));
-    const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', file.name));
-    if (size) about.append(el('span', 'parley-size', size));
-    c.append(icon, about);
+    const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', title || file.name));
+    if (title && title !== file.name) about.title = file.name;
+    about.append(kindLine(file.name, size));
+    c.append(fileGlyph(file.name), about);
     if (open && file.open !== null) c.append(button(said(words, 'open'), 'parley-open', () => open(file)));
     return c;
 }
 
 export function mount(root, { load, send, words = {}, open, terminal, remind, view: first = 'simple', onView, every = 3000, locale,
     voice: speaking, autoSend = false, onAutoSend, replies: ready = [], enter = 'auto', touch, attach, act,
-    markdown: rich = false, picture, diagram, highlight, agentName } = {}) {
+    markdown: rich = false, picture, diagram, highlight, agentName, agentTool, react, reactions: offered = REACTIONS } = {}) {
+    /* The set of reactions offered: well formed, each with an icon this file has. */
+    const reactions = (Array.isArray(offered) ? offered : REACTIONS).filter((r) => r && /^[a-z][a-z0-9-]{0,29}$/.test(r.id) && typeof r.icon === 'string').slice(0, 12);
     let as = VIEWS.includes(first) ? first : 'simple';
     let shown = '';
     let count = 0;
@@ -952,7 +1086,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const prefsMenu = el('div', 'parley-prefs-menu'); prefsMenu.hidden = true; prefsMenu.setAttribute('role', 'group'); prefsMenu.setAttribute('aria-label', said(words, 'settings'));
     const showPrefs = (on) => { prefsMenu.hidden = !on; prefsButton.setAttribute('aria-expanded', String(on)); };
     const switcher = el('div', 'parley-views'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', said(words, 'view'));
-    const choose = (v) => { if (v === as) return; as = v; root.dataset.view = as; unfolded.clear(); try { onView?.(as); } catch { /* the page's business */ } repaint(); void refresh(); };
+    const choose = (v) => { if (v === as) return; as = v; root.dataset.view = as; unfolded.clear(); seenKeys = null; try { onView?.(as); } catch { /* the page's business */ } repaint(); void refresh(); };
     const toggles = VIEWS.map((v) => { const b = button(said(words, v), '', () => { choose(v); showPrefs(false); }); b.dataset.view = v; return b; });
     switcher.append(...toggles);
     /* "Send when I stop", a switch: on, what is said is sent by itself. */
@@ -963,7 +1097,9 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     /* Under a heading of its own: it is about dictation. */
     const dictation = el('div', 'parley-dictation'); dictation.append(el('p', 'parley-menu-head', said(words, 'dictation')), autoButton);
     const searchButton = el('button', 'parley-search-open'); searchButton.type = 'button'; searchButton.append(sign('search'), el('span', '', said(words, 'search')));
-    prefsMenu.append(switcher, searchButton, dictation);
+    /* Every picture and file of the thread, as a gallery. */
+    const mediaButton = el('button', 'parley-media-open'); mediaButton.type = 'button'; mediaButton.append(icon('images', 'parley-sign'), el('span', '', said(words, 'media')));
+    prefsMenu.append(switcher, searchButton, mediaButton, dictation);
     prefs.append(prefsButton, prefsMenu);
     prefsButton.addEventListener('click', () => showPrefs(prefsMenu.hidden));
     prefs.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !prefsMenu.hidden) { showPrefs(false); prefsButton.focus(); } });
@@ -1024,22 +1160,29 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     const dropZone = el('div', 'parley-drop', said(words, 'drop')); dropZone.hidden = true;
     const zoom = zoomer(root, words);
     /* What floats over the chat first; then the chat, top to bottom. */
-    root.replaceChildren(zoom.box, dropZone, top, finder, main, quickRow, replyRow, pendingRow, form, problem);
+    /* The box and what goes with it: apart from the thread, by a line and some room. */
+    const composer = el('div', 'parley-composer');
+    composer.append(quickRow, replyRow, pendingRow, form, problem);
+    const reacting = reactionPicker();
+    const shelf = mediaShelf();
+    root.replaceChildren(zoom.box, shelf.box, reacting.box, dropZone, top, finder, main, composer);
     root.dataset.view = as;
     const narrow = () => root.clientWidth > 0 && root.clientWidth < NARROW_PX;
     let wasNarrow = narrow();
     const watch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (narrow() !== wasNarrow) { wasNarrow = narrow(); repaint(); } }) : null;
     watch?.observe(root);
-    const say = async (text, answers, files) => {
+    /* Part of what is in the box was dictated: the message says so (via: voice), once. */
+    let dictatedNow = false;
+    const say = async (text, answers, files, via) => {
         problem.hidden = true;
-        try { await send(text, answers, ...(files?.length ? [files] : [])); await refresh(); return true; } catch (error) { problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; return false; }
+        try { await send(text, answers, ...(files?.length || via ? [files?.length ? files : undefined] : []), ...(via ? [{ via }] : [])); await refresh(); return true; } catch (error) { problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; return false; }
     };
     const fileButton = (file) => (file.open === null || !open ? null : button(said(words, 'open'), 'parley-open', () => open(file)));
     const time = (text, when) => { const t = el('time', 'parley-time', text); if (when) t.title = when; return t; };
     const pictureUrl = (file) => { try { const u = picture?.(file); return typeof u === 'string' && u ? u : null; } catch { return null; } };
     const zoomFrom = (img) => {
         const all = [...thread.querySelectorAll('img[data-zoom]')];
-        zoom.show(all.map((i) => ({ url: i.dataset.zoom, name: i.dataset.name || i.alt || '' })), Math.max(0, all.indexOf(img)));
+        zoom.show(all.map((i) => ({ url: i.dataset.zoom, name: i.dataset.name || i.alt || '', title: i.dataset.title || '' })), Math.max(0, all.indexOf(img)), img);
     };
     /* A list of steps, each with its time. */
     function trail(list) {
@@ -1077,7 +1220,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         const important = (list) => list.filter((b) => b.t === 'alert' && b.kind === 'important');
         const more = (key, open2) => { const b = button(said(words, open2 ? 'see-less' : key), 'parley-unfold', () => { if (open2) expanded.delete(item.id); else expanded.add(item.id); repaint(); }); b.setAttribute('aria-expanded', String(open2)); return b; };
         /* A question is never folded; the detailed view and a search unfold everything. */
-        if (item.kind === 'ask' || v.view === 'detailed' || searching) return item.short ? [shortLine(), whole2()] : [whole2()];
+        /* Nor is the newest message of the agent: nothing seems left below it, nothing to scroll for. */
+        if (item.kind === 'ask' || item.last || v.view === 'detailed' || searching) return item.short ? [shortLine(), whole2()] : [whole2()];
         const isOpen = expanded.has(item.id);
         if (item.short) {
             if (isOpen) return [shortLine(), whole2(), more('see-details', true)];
@@ -1121,6 +1265,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             return holder;
         }
         if (row.type === 'waits') { const p = el('p', 'parley-waits', row.text); p.title = row.when; p.setAttribute('role', 'status'); return p; }
+        /* Done: said once, quietly, at the end. */
+        if (row.type === 'done') { const p = el('p', 'parley-done', row.text); p.title = row.when; p.setAttribute('role', 'status'); return p; }
         if (row.type === 'group') {
             /* A run of news of one topic: one line, unfolded on a click. */
             const holder = el('div', 'parley-group'); holder.dataset.level = 'news';
@@ -1153,8 +1299,17 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if (item.from === 'agent') {
             const head = el('p', 'parley-who');
             if (item.name) head.append(el('span', 'parley-name', item.name));
+            /* Which tool it is: small, in the detailed view only. */
+            if (item.name && item.tool && item.tool !== item.name) head.append(el('span', 'parley-tool', item.tool));
             if (item.time) head.append(time(item.trail ? `${item.time} - ${item.trail.label}` : item.time, item.when));
             bubble.append(head);
+            /* React to it: a button that shows on hover (a right click, or a long press, too). */
+            if (react && reactions.length && ['say', 'ask', 'show'].includes(item.kind)) {
+                const r = el('button', 'parley-react-open'); r.type = 'button'; r.title = said(words, 'react'); r.setAttribute('aria-label', r.title); r.setAttribute('aria-haspopup', 'true');
+                r.append(icon('smile-plus', 'parley-sign'));
+                r.addEventListener('click', (event) => { event.stopPropagation(); reacting.open(item, bubble); });
+                bubble.append(r);
+            }
         } else if (item.name) bubble.append(el('p', 'parley-who-person', item.name));
         if (item.label) bubble.append(el('p', 'parley-label', item.label));
         if (item.reply) bubble.append(el('p', 'parley-inreply', item.reply));
@@ -1168,6 +1323,20 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
                 if (item.file.shown && v.view === 'detailed') row2.append(el('span', 'parley-path', item.file.shown));
                 bubble.append(row2);
             }
+            if (item.outside) bubble.append(el('p', 'parley-outside', item.outside));
+        }
+        if (item.gallery?.length) {
+            /* Shown together: one gallery, each its title under it; its pictures go large one after the other. */
+            const gallery = el('div', 'parley-gallery'); gallery.dataset.count = String(item.gallery.length);
+            for (const f of item.gallery) {
+                const url = f.picture && f.open !== null ? pictureUrl(f) : null;
+                const cell = el('figure', 'parley-gallery-item');
+                if (url) cell.append(painter({ words, refs: new Map(), open, cache, urls, zoom: zoomFrom }).thumb(f, url, f.title));
+                else { cell.append(card(f, words, open, '', f.title)); }
+                if (f.shown) cell.append(el('span', 'parley-path', f.shown));
+                gallery.append(cell);
+            }
+            bubble.append(gallery);
             if (item.outside) bubble.append(el('p', 'parley-outside', item.outside));
         }
         if (item.files?.length) {
@@ -1200,14 +1369,156 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if (item.remind && remind) {
             bubble.append(button(said(words, 'remind'), 'parley-remind', async (event) => { event.target.disabled = true; try { await remind(); event.target.textContent = said(words, 'reminded'); } catch { event.target.disabled = false; } }));
         }
+        /* Its reaction: an icon and its word, under it; a click opens the choice again. */
+        if (item.reaction) {
+            const r = reactions.find((x) => x.id === item.reaction);
+            const chip = el('button', 'parley-reaction'); chip.type = 'button'; chip.dataset.reaction = item.reaction;
+            chip.title = said(words, `react-${item.reaction}-hint`);
+            chip.append(icon(r?.icon ?? 'smile-plus', 'parley-sign'), el('span', '', said(words, `react-${item.reaction}`)));
+            if (react) chip.addEventListener('click', (event) => { event.stopPropagation(); reacting.open(item, bubble); }); else chip.disabled = true;
+            bubble.append(chip);
+        }
+        /* Dictated: a small microphone, said in words to whoever does not see it. */
+        if (item.dictated) { const d = el('span', 'parley-dictated'); d.title = said(words, 'dictated'); d.setAttribute('role', 'img'); d.setAttribute('aria-label', d.title); d.append(icon('mic', 'parley-sign')); bubble.append(d); }
         if (item.from === 'person' && item.time) bubble.append(time(item.time, item.when));
         if (!item.trail) return bubble;
         /* The steps that led to it, opened by a click on it: above it, as they came. */
         const list = trail(item.trail.steps);
         list.dataset.for = item.id;
         bubble.dataset.steps = 'true'; bubble.tabIndex = 0;
-        folding(item.trail, bubble, bubble, list, { only: (event) => !(event.target instanceof Element && event.target.closest('button, a, img, pre, table, .parley-md code')) && !String(globalThis.getSelection?.() ?? '') });
+        folding(item.trail, bubble, bubble, list, { only: (event) => !(event.target instanceof Element && event.target.closest('button, a, img, pre, table, .parley-md code, figure')) && !String(globalThis.getSelection?.() ?? '') });
         return [list, bubble];
+    }
+    /* REACTIONS: one choice over the page, near the message -- each icon with
+       its word under it, its meaning on hover; the one standing is pressed,
+       pressed again it is taken back. Reply is there too: what is typed next
+       answers that message. Opened by the button on the message, a right
+       click, or a long press. */
+    function reactionPicker() {
+        const box = el('div', 'parley-react'); box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', said(words, 'react')); box.tabIndex = -1;
+        const grid = el('div', 'parley-react-grid');
+        const replyB = el('button', 'parley-react-reply'); replyB.type = 'button'; replyB.append(icon('reply', 'parley-sign'), el('span', '', said(words, 'reply')));
+        box.append(grid, replyB);
+        let target = null;
+        const close = () => { box.hidden = true; target = null; };
+        const choose2 = async (id) => {
+            const t = target; close();
+            if (!t || !react) return;
+            problem.hidden = true;
+            try { await react(t.id, id); await refresh(); } catch (error) { problem.textContent = said(words, 'not-sent', { error: String(error?.message ?? error) }); problem.hidden = false; }
+        };
+        replyB.addEventListener('click', () => { const t = target; close(); if (!t) return; replyTo = { id: t.id, text: cut(t.short || t.text, 90), auto: false }; dismissed.delete(t.id); paintReply(); focusBox(); });
+        box.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); close(); } });
+        document.addEventListener('pointerdown', (event) => { if (!box.hidden && !(event.target instanceof Node && box.contains(event.target)) && !(event.target instanceof Element && event.target.closest('.parley-react-open, .parley-reaction'))) close(); });
+        return {
+            box,
+            open(item, bubble) {
+                if (!react || !reactions.length) return;
+                target = item;
+                grid.replaceChildren(...reactions.map((r) => {
+                    const b = el('button', 'parley-react-choice'); b.type = 'button'; b.dataset.reaction = r.id;
+                    b.title = said(words, `react-${r.id}-hint`);
+                    b.setAttribute('aria-pressed', String(item.reaction === r.id));
+                    b.append(icon(r.icon, 'parley-sign'), el('span', 'parley-react-word', said(words, `react-${r.id}`)));
+                    if (item.reaction === r.id) b.title = `${said(words, 'react-remove')} - ${b.title}`;
+                    b.addEventListener('click', () => void choose2(item.reaction === r.id ? null : r.id));
+                    return b;
+                }));
+                replyB.hidden = !send;
+                box.hidden = false;
+                /* Near the message, inside the chat. */
+                const area = root.getBoundingClientRect(); const at = bubble.getBoundingClientRect(); const me = box.getBoundingClientRect();
+                const left = Math.max(8, Math.min(area.width - me.width - 8, at.right - area.left - me.width));
+                const below = at.top - area.top + 28;
+                const top = below + me.height > area.height - 8 ? Math.max(8, at.top - area.top - me.height + 24) : below;
+                box.style.left = `${left}px`; box.style.top = `${Math.max(8, Math.min(top, area.height - me.height - 8))}px`;
+                /* The choice itself takes the keys (Tab goes through it), none looks chosen that is not. */
+                box.focus?.({ preventScroll: true });
+            },
+            close,
+            get open2() { return !box.hidden; },
+        };
+    }
+    /* THE MEDIA OF THE THREAD: its pictures as a grid, newest first, and its
+       other files as a list; a picture goes large, with all the others of the
+       thread one after the other; "See in the thread" finds where it came. */
+    function mediaShelf() {
+        const box = el('div', 'parley-media'); box.hidden = true; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', said(words, 'media')); box.tabIndex = -1;
+        const head = el('div', 'parley-media-head');
+        const tabs = el('div', 'parley-media-tabs'); tabs.setAttribute('role', 'tablist');
+        const tab = (key) => { const b = el('button', 'parley-media-tab', said(words, key)); b.type = 'button'; b.setAttribute('role', 'tab'); b.dataset.tab = key; return b; };
+        const tPictures = tab('media-pictures'); const tFiles = tab('media-files');
+        tabs.append(tPictures, tFiles);
+        const shut = el('button', 'parley-media-close'); shut.type = 'button'; shut.title = said(words, 'close'); shut.setAttribute('aria-label', shut.title); shut.append(icon('x', 'parley-sign'));
+        head.append(el('h3', '', said(words, 'media')), tabs, shut);
+        const body2 = el('div', 'parley-media-body');
+        box.append(head, body2);
+        let on = 'media-pictures';
+        const close = () => { box.hidden = true; };
+        const find = (id) => {
+            close();
+            const row = [...thread.querySelectorAll('.parley-said')].find((b) => b.dataset.id === id);
+            if (!row) return;
+            sticky = false; row.scrollIntoView?.({ block: 'center' });
+            row.dataset.found = 'true'; setTimeout(() => { delete row.dataset.found; }, 1800);
+            paintJump();
+        };
+        function paint3() {
+            const m = media(latest, { locale });
+            for (const b of [tPictures, tFiles]) b.setAttribute('aria-selected', String(b.dataset.tab === on));
+            tPictures.textContent = `${said(words, 'media-pictures')} (${m.pictures.length})`; tFiles.textContent = `${said(words, 'media-files')} (${m.files.length})`;
+            if (on === 'media-pictures') {
+                const shown2 = m.pictures.map((f) => ({ f, url: picture ? pictureUrl(f) : null })).filter((x) => x.url);
+                if (!shown2.length) { body2.replaceChildren(el('p', 'parley-empty', said(words, 'media-none'))); return; }
+                /* Large: in the order of the thread, the oldest first. */
+                const inOrder = [...shown2].reverse();
+                const grid = el('div', 'parley-media-grid');
+                for (const x of shown2) {
+                    const cell = el('figure', 'parley-media-item');
+                    const b = el('button', 'parley-media-thumb'); b.type = 'button'; b.title = `${x.f.title} - ${x.f.name}`;
+                    const img = el('img'); img.src = x.url; img.alt = x.f.title; img.loading = 'lazy'; b.append(img);
+                    b.addEventListener('click', () => zoom.show(inOrder.map((y) => ({ url: y.url, name: y.f.name, title: y.f.title })), inOrder.indexOf(x), img));
+                    const where = button(said(words, 'see-in-thread'), 'parley-media-where', () => find(x.f.id));
+                    where.title = x.f.when;
+                    cell.append(b, el('figcaption', '', x.f.title), where);
+                    grid.append(cell);
+                }
+                body2.replaceChildren(grid);
+            } else {
+                if (!m.files.length) { body2.replaceChildren(el('p', 'parley-empty', said(words, 'media-none'))); return; }
+                const list = el('ul', 'parley-media-files');
+                for (const f of m.files) {
+                    const li = el('li');
+                    li.append(card(f, words, open, '', f.title));
+                    li.append(button(said(words, 'see-in-thread'), 'parley-media-where', () => find(f.id)));
+                    list.append(li);
+                }
+                body2.replaceChildren(list);
+            }
+        }
+        tPictures.addEventListener('click', () => { on = 'media-pictures'; paint3(); });
+        tFiles.addEventListener('click', () => { on = 'media-files'; paint3(); });
+        shut.addEventListener('click', close);
+        box.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !zoom.open) { event.preventDefault(); close(); } });
+        return { box, show() { box.hidden = false; paint3(); box.focus?.({ preventScroll: true }); }, close, get open() { return !box.hidden; } };
+    }
+    /* The side of the detailed view: what it does now with the steps of this turn, its machine as the application says, its files. */
+    function sideNow(v) {
+        const out = [];
+        const now = el('section', 'parley-side-now');
+        now.append(el('h3', '', said(words, 'side-now')));
+        if (v.side?.now) { now.append(el('p', 'parley-side-doing', v.side.now.text)); if (v.side.now.steps.length) now.append(trail(v.side.now.steps)); }
+        else now.append(el('p', 'parley-empty', said(words, 'side-nothing')));
+        out.push(now);
+        if (v.side?.about?.length) {
+            const about = el('section', 'parley-side-about');
+            about.append(el('h3', '', said(words, 'side-machine')));
+            const dl = el('dl');
+            for (const a of v.side.about) { const dt = el('dt', '', a.label); const dd = el('dd', '', a.text); if (a.tone) dd.dataset.tone = a.tone; dl.append(dt, dd); }
+            about.append(dl);
+            out.push(about);
+        }
+        return out;
     }
     function sideOf(v) {
         const files = el('section', 'parley-files');
@@ -1227,8 +1538,10 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         }
         return files;
     }
+    /* The rows already seen: null before the first look. */
+    let seenKeys = null;
     const wrap = (row, made) => {
-        const r = el('div', 'parley-row'); r.dataset.type = row.type;
+        const r = el('div', 'parley-row'); r.dataset.type = row.type; if (row.key) r.dataset.key = row.key;
         if (row.type === 'message') r.dataset.from = row.from;
         r.append(...(Array.isArray(made) ? made : [made]));
         return r;
@@ -1236,7 +1549,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     function paint(data) {
         latest = data;
         paintQuick();
-        const v = view(data, { words, view: as, locale, agentName });
+        const v = view(data, { words, view: as, locale, agentName, agentTool });
         paintReply(v);
         const small = narrow();
         const mark = JSON.stringify([v, small, [...expanded], searching ? query.value : '']);
@@ -1251,7 +1564,13 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         const keep = atBottom ? 0 : thread.scrollTop;
         if (!atBottom && v.items.length > count) { awayCount += v.items.length - count; paintJump(); }
         count = v.items.length;
-        thread.replaceChildren(...v.rows.map((row) => wrap(row, rowOf(row, v))));
+        /* What arrives while the thread is open comes in softly, and is marked a moment: never on the first look, nor what was there. */
+        const made = v.rows.map((row) => { const r = wrap(row, rowOf(row, v)); if (seenKeys !== null && row.key && !seenKeys.has(row.key) && !['day', 'gap'].includes(row.type)) r.dataset.arrived = row.type === 'message' && row.from !== 'system' ? 'message' : 'line'; return r; });
+        const firstLook = seenKeys === null;
+        seenKeys = new Set([...(seenKeys ?? []), ...v.rows.map((row) => row.key).filter(Boolean)]);
+        if (firstLook && !v.rows.length) seenKeys = new Set();
+        thread.replaceChildren(...made);
+        for (const r of made) if (r.dataset.arrived) setTimeout(() => { delete r.dataset.arrived; }, 1700);
         watchChoices();
         if (v.empty) thread.append(el('p', 'parley-empty', v.empty));
         aside.hidden = v.view !== 'detailed';
@@ -1263,9 +1582,9 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
                 /* One line on a narrow screen, unfolded on demand; the way to the terminal stays in sight. */
                 const fold = el('details', 'parley-fold'); fold.open = !folded;
                 fold.addEventListener('toggle', () => { folded = !fold.open; });
-                fold.append(el('summary', '', v.summary), sideOf(v));
+                fold.append(el('summary', '', v.summary), ...sideNow(v), sideOf(v));
                 aside.replaceChildren(fold, ...way);
-            } else aside.replaceChildren(sideOf(v), ...way);
+            } else aside.replaceChildren(...sideNow(v), sideOf(v), ...way);
         }
         if (searching) { mark2(moveToLast); moveToLast = false; }
         if (atBottom && !searching) { bottom(); sticky = true; awayCount = 0; paintJump(); requestAnimationFrame(bottom); } else if (!searching) thread.scrollTop = keep;
@@ -1276,7 +1595,11 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     /* The page around it settles (fonts, a keyboard, a turned phone): the newest stays in sight. */
     const settle = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (sticky) bottom(); }) : null;
     settle?.observe(thread);
+    /* A picture that arrives after the page was drawn makes it taller: the newest stays in sight. */
+    thread.addEventListener('load', () => { if (sticky) bottom(); }, true);
     async function refresh() { try { paint(await load()); } catch { /* shown again at the next look */ } }
+    /* The messages as last drawn. */
+    const latestItems = () => (latest ? view(latest, { words, view: as, locale, agentName, agentTool }).items : []);
     /* ---- the search ---- */
     let searching = false;
     let moveToLast = false;
@@ -1311,6 +1634,16 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
     function openSearch() { searching = true; finder.hidden = false; showPrefs(false); query.focus(); query.select?.(); repaint(); }
     function closeSearch() { searching = false; finder.hidden = true; query.value = ''; matches = []; repaint(); sticky = true; bottom(); paintJump(); }
     searchButton.addEventListener('click', openSearch);
+    mediaButton.addEventListener('click', () => { showPrefs(false); shelf.show(); });
+    /* A right click on a message of the agent: its reactions. */
+    thread.addEventListener('contextmenu', (event) => {
+        if (!react || !reactions.length) return;
+        const bubble = event.target instanceof Element ? event.target.closest('.parley-said[data-from="agent"]') : null;
+        if (!bubble || (event.target instanceof Element && event.target.closest('a, img, pre, code')) || String(globalThis.getSelection?.() ?? '')) return;
+        const item = latestItems().find((i) => i.id === bubble.dataset.id && ['say', 'ask', 'show'].includes(i.kind));
+        if (!item) return;
+        event.preventDefault(); reacting.open(item, bubble);
+    });
     let typing2;
     query.addEventListener('input', () => { clearTimeout(typing2); typing2 = setTimeout(() => { moveToLast = true; repaint(); }, 150); });
     query.addEventListener('keydown', (event) => { if (event.key === 'Escape') { event.preventDefault(); closeSearch(); } else if (event.key === 'Enter') { event.preventDefault(); step(event.shiftKey ? -1 : 1); } });
@@ -1327,6 +1660,9 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if (!bubble || event.pointerType === 'mouse') return;
         unpress();
         pressing = setTimeout(() => {
+            /* On a message of the agent, a long press also offers its reactions. */
+            const item = bubble.dataset.from === 'agent' && react && reactions.length ? latestItems().find((i) => i.id === bubble.dataset.id && ['say', 'ask', 'show'].includes(i.kind)) : null;
+            if (item && !(event.target instanceof Element && event.target.closest('a, button, img'))) reacting.open(item, bubble);
             for (const other of thread.querySelectorAll('.parley-said[data-reveal]')) delete other.dataset.reveal;
             bubble.dataset.reveal = 'true'; revealed = bubble.dataset.id ?? '';
             clearTimeout(hiding);
@@ -1339,7 +1675,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if (v) {
             const asking = v.asking;
             if (replyTo?.auto && (!asking || asking.id !== replyTo.id)) replyTo = null;
-            if (replyTo && !replyTo.auto && !v.items.some((i) => i.id === replyTo.id && (i.open || i.closed))) replyTo = null;
+            if (replyTo && !replyTo.auto && !v.items.some((i) => i.id === replyTo.id && i.from === 'agent')) replyTo = null;
             if (!replyTo && asking && !dismissed.has(asking.id) && send) replyTo = { ...asking, auto: true };
         }
         replyRow.hidden = !replyTo;
@@ -1349,11 +1685,11 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         replyRow.replaceChildren(el('span', 'parley-replying-text', said(words, 'replying', { question: replyTo.text })), x);
     }
     /* ---- the box: the keyboard, the ready answers, the voice ---- */
-    const media = (q) => typeof matchMedia === 'function' && matchMedia(q).matches;
-    const touching = typeof touch === 'boolean' ? touch : media('(any-pointer: coarse)');
+    const mediaQuery = (q) => typeof matchMedia === 'function' && matchMedia(q).matches;
+    const touching = typeof touch === 'boolean' ? touch : mediaQuery('(any-pointer: coarse)');
     /* With a keyboard, Enter sends and Shift+Enter is a new line, as in every
        chat; on a touch screen Enter is a new line and the button sends. */
-    const keyboard = media('(pointer: fine)');
+    const keyboard = mediaQuery('(pointer: fine)');
     /* The box grows with what is in it, up to a few lines, then scrolls. */
     const grow = () => {
         box.style.height = '';
@@ -1361,7 +1697,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         const full = box.scrollHeight + 2;
         if (full > box.getBoundingClientRect().height + 1) box.style.height = `${full}px`;
     };
-    box.addEventListener('input', grow);
+    box.addEventListener('input', () => { grow(); if (!box.value.trim()) dictatedNow = false; });
     /* The page puts the cursor in the box only where no keyboard comes up
        with it; on a touch screen, only the person's finger does. */
     const focusBox = () => { if (!touching && document.activeElement !== box) box.focus({ preventScroll: true }); };
@@ -1393,7 +1729,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             const url = previewOf(file);
             const chip = el('span', url ? 'parley-pending parley-pending-picture' : 'parley-pending');
             if (url) { const img = el('img'); img.src = url; img.alt = file.name; chip.append(img); chip.title = `${file.name} (${sizeText(file.size)})`; }
-            else { const icon = el('span', 'parley-card-icon'); icon.append(sign('file'), el('span', 'parley-card-ext', extOf(file.name))); const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', file.name), el('span', 'parley-size', sizeText(file.size))); chip.append(icon, about); }
+            else { const about = el('span', 'parley-card-about'); about.append(el('span', 'parley-name', file.name), kindLine(file.name, sizeText(file.size))); chip.append(fileGlyph(file.name), about); }
             const x = button('\u00d7', 'parley-unattach', () => { pending = pending.filter((_, j) => j !== i); paintPending(); stayIn(); });
             x.title = said(words, 'remove-file', { name: file.name }); x.setAttribute('aria-label', x.title);
             chip.append(x);
@@ -1408,7 +1744,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         if ((!text && pending.length === 0) || uploading) return;
         const answers = replyTo?.id;
         const answered = () => { if (replyTo && replyTo.id === answers) { dismissed.add(answers); replyTo = null; paintReply(); } };
-        if (pending.length === 0) { box.value = ''; grow(); if (await say(text, answers)) answered(); return; }
+        const via = dictatedNow ? 'voice' : undefined;
+        if (pending.length === 0) { box.value = ''; grow(); dictatedNow = false; if (await say(text, answers, undefined, via)) answered(); else dictatedNow = Boolean(via); return; }
         /* The files go first, one after the other; the message only once they all went. */
         uploading = true; go.disabled = clip.disabled = true;
         problem.hidden = false; problem.dataset.kind = 'sending'; problem.textContent = said(words, 'sending-files');
@@ -1421,7 +1758,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
             return;
         }
         problem.hidden = true; problem.dataset.kind = '';
-        const sent = await say(text, answers, files);
+        const sent = await say(text, answers, files, via);
+        if (sent) dictatedNow = false;
         uploading = false; go.disabled = clip.disabled = false;
         if (sent) { answered(); pending = []; paintPending(); if (box.value.trim() === text) { box.value = ''; grow(); } }
     };
@@ -1484,6 +1822,7 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         phrase: (text) => {
             if (!stopping) return;
             box.value = joined(box.value, text).slice(0, TEXT_MAX); grow();
+            dictatedNow = true;
             box.scrollTop = box.scrollHeight;
             if (writing) { sendWritten(); return; }
             if (auto) { clearTimeout(autoTimer); autoTimer = setTimeout(() => void sendBox(), AUTO_SEND_MS); }

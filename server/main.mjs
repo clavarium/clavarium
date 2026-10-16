@@ -65,6 +65,7 @@ const FILES = {
     '/manifest.webmanifest': ['web/manifest.webmanifest', 'application/manifest+json'],
     '/sw.js': ['web/sw.js', 'text/javascript; charset=utf-8'],
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],
+    '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
     '/vendor/xterm.js': ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
@@ -72,6 +73,8 @@ const FILES = {
     /* A PDF is drawn by the page itself, on a canvas: asked for only when one is previewed. */
     '/vendor/parley-ui.js': ['server/parley/ui/parley-ui.js', 'text/javascript; charset=utf-8'],
     '/vendor/parley-ui.css': ['server/parley/ui/parley-ui.css', 'text/css; charset=utf-8'],
+    /* Its icons (Lucide, copied in Parley): the chat's, and this page's own. */
+    '/vendor/parley-icons.js': ['server/parley/ui/parley-icons.js', 'text/javascript; charset=utf-8'],
     '/vendor/pdf.mjs': ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'text/javascript; charset=utf-8'],
     '/vendor/pdf.worker.mjs': ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'text/javascript; charset=utf-8'],
     /* Drawings in the chat (```mermaid), at the version package.json fixes: asked for only when one is shown. */

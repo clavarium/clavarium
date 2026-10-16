@@ -32,7 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
-export const VERSION = '0.7.0';
+export const VERSION = '0.8.0';
 /* A message may be long: the screen folds it, and shows its short version first. */
 export const TEXT_MAX = 16000;
 /* Its short version: a title of one or two lines. */
@@ -40,6 +40,9 @@ export const SHORT_MAX = 200;
 /* What it is doing now is one short line: a screen shows it while it works. */
 export const DOING_MAX = 200;
 export const CHOICES_MAX = 8;
+/* Files shown at once, as one gallery; the title of each. */
+export const SHOW_MAX = 12;
+export const TITLE_MAX = 120;
 export const STATES = ['working', 'waiting', 'done'];
 export const FOLDER = '.parley';
 
@@ -53,6 +56,27 @@ const size = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024
 /* The files the person attached to a message, one line each: where they are, for the agent to open. */
 const attached = (m) => (Array.isArray(m.files) ? m.files.slice(0, 10).map((f) => `\n  Attached file: ${plain(f?.path, 1000)}${Number.isInteger(f?.size) ? ` (${size(f.size)})` : ''}`).join('') : '');
 /* The short version of a message, when given: one or two lines. */
+/* A message the person dictated: said so, for the words a recognizer got wrong. */
+export const DICTATED = 'dictated: may hold recognition mistakes; ask when a key word seems wrong';
+/* What each reaction of the default set asks of the agent. The person picks
+   one on a message of the agent; the application may offer another set: an
+   unknown one is given by its name. */
+export const REACTION_MEANINGS = Object.freeze({
+    agree: 'Agree (thumbs up): noted. It is NOT an authorization: do nothing because of it.',
+    go: 'Go ahead: do what that message proposes. If it proposes several things, ask which one first.',
+    disagree: 'Disagree: ask them what is wrong rather than guessing.',
+    unclear: 'Not clear: explain that message more simply, without acting.',
+    stop: 'STOP: stop what you are doing now, and do nothing more until they write.',
+    redo: 'Do it another way: try a different approach to what that message did or proposes.',
+    later: 'Later: do nothing about it for now.',
+    love: 'Love it: noted, nothing to do.',
+});
+const reacted = (m) => {
+    const name = plain(m.reaction, 30).replace(/[^a-z0-9-]/g, '');
+    const target = `your message${m.toAt ? ` of ${plain(m.toAt, 40).slice(0, 16).replace('T', ' ')}` : ''}${m.quote ? ` "${plain(m.quote, 200).replace(/\s+/g, ' ')}"` : ''}`;
+    if (m.removed === true) return `They took back their reaction "${name}" to ${target}.`;
+    return `Reaction to ${target}: ${REACTION_MEANINGS[name] ?? `"${name}"`}`;
+};
 const brief = (short) => { const line = plain(short, SHORT_MAX * 2).replace(/\s+/g, ' ').trim().slice(0, SHORT_MAX); return line ? { short: line } : {}; };
 /* So many characters of a question's id are shown, and enough to close it. */
 export const ID_SHOWN = 8;
@@ -112,12 +136,17 @@ export function bridge(dir, { how = 'run `parley read`' } = {}) {
         },
         /* A relative path is the agent's own, from where it stands: it is
            posted whole, so that the application knows which file it is. */
-        show(path, note, { from = process.cwd() } = {}) {
-            if (!plain(path).trim()) throw new Error('the path is empty');
-            const whole = resolve(from, plain(path, 1000));
-            if (!existsSync(whole)) throw new Error(`no such file: ${whole}`);
-            post({ kind: 'show', path: whole, text: plain(note, 500) });
-            return 'Posted. They can open it from their screen if it is in a folder they share with you.';
+        /* `target`: one path, or several files shown together as one gallery,
+           each a path or { path, title }: a title says what it is ("Home page,
+           before"), the name of the file is only the fallback. */
+        show(target, note, { from = process.cwd() } = {}) {
+            const list = (Array.isArray(target) ? target : [target]).map((f) => (f && typeof f === 'object' ? { path: plain(f.path, 1000), title: plain(f.title, TITLE_MAX * 2).replace(/\s+/g, ' ').trim().slice(0, TITLE_MAX) } : { path: plain(f, 1000), title: '' }));
+            if (list.length === 0 || list.some((f) => !f.path.trim())) throw new Error('the path is empty');
+            if (list.length > SHOW_MAX) throw new Error(`${SHOW_MAX} files at most at once`);
+            const files = list.map((f) => { const whole = resolve(from, f.path); if (!existsSync(whole)) throw new Error(`no such file: ${whole}`); return { path: whole, ...(f.title ? { title: f.title } : {}) }; });
+            const several = Array.isArray(target) || files[0].title;
+            post({ kind: 'show', path: files[0].path, text: plain(note, 500), ...(several ? { files } : {}) });
+            return files.length > 1 ? `Posted, as one gallery of ${files.length}. They can open them from their screen if they are in a folder they share with you.` : 'Posted. They can open it from their screen if it is in a folder they share with you.';
         },
         status(state, note) {
             if (!STATES.includes(state)) throw new Error(`the state is one of: ${STATES.join(', ')}`);
@@ -153,12 +182,12 @@ export function bridge(dir, { how = 'run `parley read`' } = {}) {
             const closed = new Set(posted.filter((m) => m.kind === 'close').map((m) => m.answers));
             const open = posted.filter((m) => m.kind === 'ask' && typeof m.id === 'string' && !answered.has(m.id) && !closed.has(m.id));
             const pending = open.length === 0 ? '' : `\nOpen questions (one they answered another way: close it with parley close ID "the answer you understood"):${open.slice(-10).map((m) => `\n  [${m.id.slice(0, ID_SHOWN)}] ${plain(m.text, 200).replace(/\s+/g, ' ')}`).join('')}`;
-            const fromThem = (m) => `${m.answers ? `They answered your question "${plain(m.question, 200)}": ` : 'They wrote: '}${plain(m.text)}${attached(m)}`;
+            const fromThem = (m) => (m.reaction ? reacted(m) : `${m.answers ? `They answered your question "${plain(m.question, 200)}": ` : m.re ? `They replied to your message "${plain(m.quote, 200)}"${m.via === 'voice' ? ` (${DICTATED})` : ''}: ` : m.via === 'voice' ? `They wrote (${DICTATED}): ` : 'They wrote: '}${plain(m.text)}${attached(m)}`);
             if (all) {
                 const theirs = written.flatMap((m, i) => (m ? [{ at: String(m.at ?? ''), text: `${fromThem(m)}${i >= seen ? ' (new)' : ''}` }] : []));
                 const mine = lines(OUT).filter((m) => m && ['say', 'ask', 'show', 'close'].includes(m.kind)).map((m) => ({ at: String(m.at ?? ''),
                     text: m.kind === 'close' ? `You closed a question, the answer you understood being: ${plain(m.text, 500)}` : m.kind === 'ask' ? `You asked them: ${plain(m.text)}${Array.isArray(m.choices) && m.choices.length ? ` (choices: ${m.choices.map((c) => plain(c, 200)).join(', ')})` : ''}`
-                        : m.kind === 'show' ? `You showed them a file: ${plain(m.path, 1000)}${m.text ? ` (${plain(m.text, 500)})` : ''}` : `You told them: ${plain(m.text)}` }));
+                        : m.kind === 'show' ? (Array.isArray(m.files) && m.files.length > 1 ? `You showed them ${m.files.length} files: ${m.files.map((f) => `${plain(f?.path, 1000)}${f?.title ? ` "${plain(f.title, 120)}"` : ''}`).join(', ')}${m.text ? ` (${plain(m.text, 500)})` : ''}` : `You showed them a file: ${plain(m.path, 1000)}${m.text ? ` (${plain(m.text, 500)})` : ''}`) : `You told them: ${plain(m.text)}` }));
                 const both = [...mine, ...theirs].sort((a, b) => a.at.localeCompare(b.at)).slice(-ALL_ENTRIES).map((e) => `[${e.at.slice(0, 16).replace('T', ' ')}] ${e.text}`);
                 while (both.length > 1 && both.join('\n').length > ALL_CHARS) both.shift();
                 if (both.length === 0) return `Nothing was written yet, on either side.${pending}`;
@@ -166,23 +195,24 @@ export function bridge(dir, { how = 'run `parley read`' } = {}) {
             }
             const fresh = written.slice(seen).filter(Boolean);
             if (fresh.length === 0) return `No new message.${pending}`;
-            return `${fresh.map((m) => `${m.answers ? `Answer to your question "${plain(m.question, 200)}": ` : 'Message: '}${plain(m.text)}${attached(m)}`).join('\n')}${pending}`;
+            return `${fresh.map((m) => (m.reaction ? reacted(m) : `${m.answers ? `Answer to your question "${plain(m.question, 200)}": ` : m.re ? `Reply to your message "${plain(m.quote, 200)}"${m.via === 'voice' ? ` (${DICTATED})` : ''}: ` : m.via === 'voice' ? `Message (${DICTATED}): ` : 'Message: '}${plain(m.text)}${attached(m)}`)).join('\n')}${pending}`;
         },
     };
 }
 
 /* ---- MCP ---- */
 /* How an agent is asked to write, in every text it reads: the screen renders Markdown. */
-export const WRITING = 'The chat renders Markdown: write as you do in your terminal -- short lists, a bold label per point, one idea per line, a heading or a short title when long, one key sentence in a "> [!IMPORTANT]" block (an action, a decision, a blocker). Tables, code blocks and mermaid diagrams are shown; ==text== is highlighted; [ok] [todo] [blocked] [warn] are small badges; a picture from a shared folder is shown where you put it, and pictures on one line side by side: ![before](/work/before.png) ![after](/work/after.png).';
+export const WRITING = 'The chat renders Markdown: write as you do in your terminal -- short lists, a bold label per point, one idea per line, a heading or a short title when long, one key sentence in a "> [!IMPORTANT]" block (an action, a decision, a blocker). Tables, code blocks and mermaid diagrams are shown; ==text== is highlighted; [ok] [todo] [blocked] [warn] are small badges; a picture from a shared folder is shown where you put it, its text in brackets as its title under it, and pictures on one line side by side: ![Home page, before](/work/before.png) ![Home page, after](/work/after.png).';
+export const GALLERY = 'Pictures that go together (before and after, several pages) are shown at once, as one gallery: give each a title that says what it is ("Home page, before"); the file name is not a title.';
 export const SHORTER = 'For anything longer than a few lines, give a short version too (short): a title of one or two lines, shown first, the rest one tap away. Whatever asks them for an action or a decision, or says you are blocked, MUST be in the short version.';
 export const TOOLS = [
     { name: 'tell', description: `Tell the person you work for something: where you are, what you did, what you found. They read it on their own screen, not in this terminal. It does not wait for an answer. ${WRITING} ${SHORTER}`,
         inputSchema: { type: 'object', properties: { text: { type: 'string', description: 'What to tell them, in Markdown.' }, short: { type: 'string', description: 'Optional, for a long text: its title, one or two lines.' } }, required: ['text'] } },
     { name: 'ask', description: `Ask the person you work for a question, instead of asking it in the terminal. It does NOT wait: it posts the question and returns at once. Stop or go on with something else; you will be told in the terminal when a message arrives, then call read. A question they answered another way (a message typed later): close it with close. ${WRITING}`,
         inputSchema: { type: 'object', properties: { question: { type: 'string' }, choices: { type: 'array', items: { type: 'string' }, description: 'Optional: the answers they can pick from.' }, short: { type: 'string', description: 'Optional, for a long question: its title, one or two lines.' } }, required: ['question'] } },
-    { name: 'show', description: 'Point the person you work for to a file you made (a report, a picture, a page), so that they can open it from their screen. Put it in a folder you share with them.',
-        inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The path of the file.' }, note: { type: 'string', description: 'One line on what it is.' } }, required: ['path'] } },
-    { name: 'read', description: 'Read what was written to you since you last read: new instructions, answers to your questions, files they attached, and the questions still open with their ids. Call it when you are told a message arrived, and before you finish a task. With all: true, the whole exchange, both sides, oldest first: to pick up the thread after a restart.',
+    { name: 'show', description: `Point the person you work for to a file you made (a report, a picture, a page), or to several at once, so that they can open them from their screen. ${GALLERY} Put them in a folder you share with them.`,
+        inputSchema: { type: 'object', properties: { path: { type: 'string', description: 'The path of one file.' }, files: { type: 'array', items: { type: 'object', properties: { path: { type: 'string' }, title: { type: 'string', description: 'What it is, in their language: "Home page, before".' } }, required: ['path'] }, description: `Several files shown together (${SHOW_MAX} at most), each with its title.` }, paths: { type: 'array', items: { type: 'string' }, description: 'Several files, without titles (prefer files, with titles).' }, note: { type: 'string', description: 'One line on what it is, common to all.' } } } },
+    { name: 'read', description: 'Read what was written to you since you last read: new instructions, answers to your questions, files they attached, their reactions to your messages (only "go ahead" authorizes what a message proposes; "stop" means stop now), and the questions still open with their ids. A message they dictated is said so: it may hold recognition mistakes. Call it when you are told a message arrived, and before you finish a task. With all: true, the whole exchange, both sides, oldest first: to pick up the thread after a restart.',
         inputSchema: { type: 'object', properties: { all: { type: 'boolean', description: 'Optional: the whole exchange, not only what is new.' } } } },
     { name: 'close', description: 'Close a question of yours that they answered another way (in a message typed later, not with its buttons), saying the answer you understood. Their screen shows it; they may still correct it. The id is the one read shows.',
         inputSchema: { type: 'object', properties: { id: { type: 'string', description: 'The id of the question, as read shows it.' }, answer: { type: 'string', description: 'The answer you understood, in one line.' } }, required: ['id', 'answer'] } },
@@ -198,7 +228,7 @@ export function serve(dir, { input = process.stdin, output = process.stdout } = 
         if (name === 'tell') return verbs.tell(args.text, { short: args.short });
         if (name === 'ask') return verbs.ask(args.question, args.choices, { short: args.short });
         if (name === 'close') return verbs.close(args.id, args.answer);
-        if (name === 'show') return verbs.show(args.path, args.note);
+        if (name === 'show') return verbs.show(Array.isArray(args.files) ? args.files : Array.isArray(args.paths) ? args.paths : args.path, args.note);
         if (name === 'read') return verbs.read({ all: args.all === true });
         if (name === 'status') return verbs.status(args.state, args.note);
         if (name === 'doing') return verbs.doing(args.text);

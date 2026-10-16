@@ -22,7 +22,13 @@
  * automatic sending form). */
 (() => {
     const SVG = 'http://www.w3.org/2000/svg';
-    const KIND_ICON = { device: '▭', conversation: '>_', folder: '▤', git: '⑂', mailbox: '✉', secret: '⚿' };
+    /* Each kind's icon, from the set of the chat (Lucide, see icons.js): the same drawing on every screen, whatever its fonts. */
+    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', secret: 'key-round' };
+    /* An icon of that set, or, until it is there, nothing in its place. */
+    const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
+    const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
+    /* A pill that points up or down: its arrow drawn, then its words. */
+    const arrowed = (pill, dir, text) => { pill.replaceChildren(...[ic(dir === 'up' ? 'arrow-up' : 'arrow-down', 'lk-arrow')].filter(Boolean), text); return pill; };
     const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', secret: 'secret' };
     const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', secret: 'asset' };
     const TITLES = { device: 'Devices', conversation: 'Conversations', asset: 'Assets' };
@@ -211,7 +217,7 @@
         function nodeEl(n) {
             const cnt = graph.links.filter((l) => (l.from === n.id || l.to === n.id) && shown(l)).length;
             const e = h('div', { class: `lk-node lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}`, 'data-id': n.id, 'data-kind': n.kind, tabindex: 0, role: 'button', 'aria-label': `${n.name}, ${n.sub}, ${cnt} link${cnt === 1 ? '' : 's'}` },
-                h('span', { class: 'lk-ic', text: KIND_ICON[n.kind], 'aria-hidden': 'true' }),
+                kindIcon(n.kind),
                 h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: n.sub })),
                 h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
             if (VIEWS[view].sources.includes(n.kind) && !n.pending) {
@@ -350,8 +356,9 @@
                 const len = Math.min(40, g.room * 0.3); const names = [...new Set(g.ids)].map((id) => node(id).name);
                 const d = g.out ? `M${g.x},${g.y} L${g.x + len * 0.5},${g.y} Q${g.x + len},${g.y} ${g.x + len},${g.y + g.dir * 12}` : `M${g.x - len},${g.y + g.dir * 12} Q${g.x - len},${g.y} ${g.x - len * 0.5},${g.y} L${g.x},${g.y}`;
                 const hook = s('path', { d, class: 'pale hook' }); hook.style.stroke = css(g.k); layers[0].append(hook);
-                const pill = h('button', { type: 'button', class: `lk-hook ${g.out ? 'out' : 'in'}`, text: `${g.dir < 0 ? '↑' : '↓'} ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ''}`, title: `${g.dir < 0 ? 'Above' : 'Below'}: ${names.join(', ')}`,
+                const pill = h('button', { type: 'button', class: `lk-hook ${g.out ? 'out' : 'in'}`, title: `${g.dir < 0 ? 'Above' : 'Below'}: ${names.join(', ')}`,
                     style: `${g.out ? `left:${g.x + 4}px` : `left:${g.x - 4}px`};top:${g.y + g.dir * 22}px;max-width:${Math.max(48, Math.min(170, g.room - 24))}px` });
+                arrowed(pill, g.dir < 0 ? 'up' : 'down', `${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ''}`);
                 pill.addEventListener('click', () => { el([...g.ids].find((id) => el(id)))?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
                 bd.append(pill);
                 /* A name cut short says nothing: where it does not fit, the count, the names in its title. */
@@ -359,7 +366,7 @@
                     /* No room in the gap: inside its box, at the end of its second line, where there is. */
                     const r = el(g.box)?.getBoundingClientRect();
                     if (r) { pill.classList.add('inbox'); pill.style.left = `${r.right - b.left - 20}px`; pill.style.top = `${r.bottom - b.top - 13}px`; pill.style.maxWidth = `${Math.max(48, r.width - 100)}px`; }
-                    if (pill.scrollWidth > pill.clientWidth + 1) pill.textContent = `${g.dir < 0 ? '↑' : '↓'} ${names.length}`;
+                    if (pill.scrollWidth > pill.clientWidth + 1) arrowed(pill, g.dir < 0 ? 'up' : 'down', String(names.length));
                 }
                 /* Never over another pill or a knob: moved further the same way, or left out (the hook stays). */
                 const clear = () => { const r = pill.getBoundingClientRect(); return [...taken, ...knobs.map((q) => ({ left: q.x + b.left - 11, right: q.x + b.left + 11, top: q.y + b.top - 11, bottom: q.y + b.top + 11 }))].every((o) => r.right < o.left || r.left > o.right || r.bottom < o.top || r.top > o.bottom); };
@@ -374,8 +381,9 @@
                 for (const [dir, ids] of [['up', e.up], ['down', e.down]]) {
                     if (!ids.length) continue;
                     const n = new Set(ids).size;
-                    const pill = h('button', { type: 'button', class: `lk-edge ${dir}`, text: `${dir === 'up' ? '↑' : '↓'} ${n} more linked`, title: `${n} linked box${n === 1 ? '' : 'es'} ${dir === 'up' ? 'above' : 'below'}: bring into sight`,
+                    const pill = h('button', { type: 'button', class: `lk-edge ${dir}`, title: `${n} linked box${n === 1 ? '' : 'es'} ${dir === 'up' ? 'above' : 'below'}: bring into sight`,
                         style: dir === 'up' ? `left:${c.right - b.left - 14}px;top:${c.top - b.top + 8}px` : `left:${c.left - b.left + c.width / 2}px;top:${c.bottom - b.top + 4}px` });
+                    arrowed(pill, dir, `${n} more linked`);
                     pill.addEventListener('click', () => { el(ids[0])?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
                     bd.append(pill);
                 }
@@ -593,7 +601,7 @@
                 h('button', { type: 'button', text: 'Trace it', onclick: () => { void openFlows(n.id); } }));
             return h('div', { class: 'lk-sheet-wrap', onclick: (e) => { if (e.target === e.currentTarget) closeSheet(); } },
                 h('div', { class: `lk-sheet lk-c-${COLUMN[n.kind]}`, id: 'links-sheet', role: 'dialog', 'aria-modal': 'true', 'aria-label': `${n.name}: its links`, 'data-id': n.id },
-                    h('div', { class: 'lk-sheet-top' }, h('span', { class: 'lk-ic', text: KIND_ICON[n.kind], 'aria-hidden': 'true' }),
+                    h('div', { class: 'lk-sheet-top' }, kindIcon(n.kind),
                         h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: n.sub })),
                         h('button', { type: 'button', class: 'lk-x', 'aria-label': 'Close', text: '×', onclick: closeSheet })),
                     items.length ? h('ul', { class: 'lk-sheet-links' }, items.map((i) => h('li', {}, i))) : h('p', { class: 'lk-none', text: 'No link yet.' }),
@@ -611,7 +619,7 @@
                     const ls = graph.links.filter((l) => l.from === n.id || l.to === n.id);
                     list.append(h('li', {}, h('button', { type: 'button', class: `lk-item${n.pending ? ' pending' : ''}`, 'data-id': n.id, onclick: () => { ph.sheet = n.id; paintPhone(); $('links-sheet-edit')?.focus(); } },
                         h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: `${n.sub} · ${ls.length} link${ls.length === 1 ? '' : 's'}` })),
-                        h('span', { class: 'lk-dots' }, ls.slice(0, 6).map((l) => h('i', { style: `background:${css(KIND(l))}` }))), h('span', { class: 'lk-chev', text: '›' }))));
+                        h('span', { class: 'lk-dots' }, ls.slice(0, 6).map((l) => h('i', { style: `background:${css(KIND(l))}` }))), h('span', { class: 'lk-chev', 'aria-hidden': 'true' }, ic('chevron-right') ?? '›'))));
                 }
                 if (!graph.nodes.length) list.append(h('li', { class: 'lk-start' }, ['device', 'conversation', 'asset'].map(empty)));
                 else if (!list.children.length) list.append(h('li', {}, empty(ph.kind)));
@@ -663,7 +671,7 @@
                     if (ph.adding) {
                         const can = graph.nodes.filter((t) => allowed(n, t) && !out.some((l) => l.to === t.id));
                         parts.push(h('h4', { text: 'Link to' }), h('ul', { class: 'lk-plist' }, can.map((t) => h('li', {}, h('button', { type: 'button', class: 'lk-item', 'data-add': t.id, onclick: async () => { ph.adding = false; await link(n, t); paintPhone(); } },
-                            h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: t.name }), h('span', { class: 'lk-sb', text: t.sub })), h('span', { class: 'lk-chev', text: '+' }))))));
+                            h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: t.name }), h('span', { class: 'lk-sb', text: t.sub })), h('span', { class: 'lk-chev', 'aria-hidden': 'true' }, ic('plus') ?? '+'))))));
                     } else parts.push(h('button', { type: 'button', class: 'lk-add', text: `+ Link to ${n.kind === 'device' ? 'a conversation or an asset' : 'an asset'}`, onclick: () => { ph.adding = true; paintPhone(); } }));
                 }
             }

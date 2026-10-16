@@ -23,6 +23,12 @@
  *                            opened from the page; any other is said to be
  *                            outside the shared folders.
  *   agent-doing              nothing: the page shows it, nobody is alerted.
+ *   person-reacted           as Parley's set says: "stop" wakes it at once,
+ *                            even while it works (WAKE typed again if it was
+ *                            told already); "go", "disagree", "unclear",
+ *                            "redo" wake it as a message does; "agree",
+ *                            "later", "love" wake nobody (read with the next
+ *                            message).
  *
  * And this server's own part of the thread:
  *
@@ -215,10 +221,11 @@ export class Talk {
         return m && this.#resources.of(name).some((x) => x.name === m[1]) ? `${m[1]}:${m[2]}` : null;
     }
 
-    #parley(name) {
+    #parley(name, reacted = () => {}) {
         return new Parley(this.#dir(name), {
             reach: (path) => this.#reach(name, path),
             on: (event) => {
+                if (event.type === 'person-reacted') { reacted(event); return; }
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 const words = texts(this.#lastLang, this.settings().own);
                 if (event.type === 'agent-asked') this.#alert({ title: fill(words['alert-asks'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
@@ -304,7 +311,7 @@ export class Talk {
         return { ...this.of(name), invited: text };
     }
 
-    async say(name, text, answers, files) {
+    async say(name, text, answers, files, via) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
         if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
@@ -316,8 +323,21 @@ export class Talk {
             if (!info?.isFile()) throw new Refusal(400, 'A file of this message was not attached here first.');
             return { path, name: m[2], size: info.size };
         });
-        try { this.#parley(name).say(text ?? '', answers, attached); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
+        return { ...this.of(name), told };
+    }
+
+    /* THE OWNER REACTS to a message of the tool (`reaction` null: taken
+       back). Whether, and how soon, the tool is told is Parley's set's hint. */
+    async react(name, to, reaction) {
+        if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
+        if (typeof to !== 'string' || (reaction !== null && typeof reaction !== 'string')) throw new Refusal(400, 'Say which message (to) and which reaction, or null to take it back.');
+        let wakes = false;
+        try { this.#parley(name, (event) => { wakes = event.wakes; }).react(to, reaction); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        let told = 'kept';
+        if (wakes === 'now') { this.#want(name); told = await this.#wake(name, true); }
+        else if (wakes === true) { this.#want(name); told = await this.#wake(name); }
         return { ...this.of(name), told };
     }
 

@@ -54,6 +54,8 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     await me.page.locator('#mic').click();
     await me.until('the microphone is open', async () => (await me.page.locator('#mic').innerText()) === 'Stop');
     await me.sees('said out loud', 20_000);
+    /* Its tool is an AI (it has an instruction file): what is dictated starts with a microphone, once per message. */
+    await me.sees('\u{1F3A4} said out loud');
     assert.match(await me.page.locator('#voice-line').innerText(), /Typed: said out loud|Listening|Hearing|Writing/);
     assert.equal((await me.screen()).includes('command not found'), false, 'typed, not sent');
     /* With "auto", the phrase is sent once the person has stopped. */
@@ -74,6 +76,7 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     /* Send, while it listens: sent, with what is still being written. */
     await me.page.locator('#simple-thread .parley-send').click();
     await me.until('sent', async () => (await said()) === 1, 25_000);
+    assert.equal((await me.api('/api/conversations/by-voice/talk')).body.messages.find((m) => m.from === 'person').via, 'voice', 'the tool is told it was dictated');
     /* "Send when I stop": a choice of the device, beside the view; spoken, then sent, in one gesture. */
     await me.page.locator('#simple-thread .parley-prefs-open').click();
     await me.page.locator('#simple-thread .parley-auto').click();
