@@ -66,6 +66,19 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.equal(await page.locator('#flows-preview pre').innerText(), 'Look <img src=x onerror="window.owned=1">');
     assert.equal(await page.locator('#flows-preview img').count(), 0);
     assert.equal((await me.api('/api/conversations')).body.length, 2, 'nothing made yet');
+    /* Many links (a map of 4 agents x 5 folders, as the server would send it): every one still drawn, thin and
+       pale, without knobs; the box touched has its own in full, with their knobs. */
+    const many = { nodes: [...[1, 2, 3, 4].map((i) => ({ id: `conversation:c${i}`, kind: 'conversation', name: `c${i}`, sub: 'Shell', phase: 'ready' })), ...[1, 2, 3, 4, 5].map((i) => ({ id: `folder:f${i}`, kind: 'folder', name: `f${i}`, sub: 'folder' }))], flows: [] };
+    many.links = many.nodes.filter((n) => n.kind === 'conversation').flatMap((c) => [1, 2, 3, 4, 5].map((i) => ({ from: c.id, to: `folder:f${i}`, rights: 'r' })));
+    await page.route('**/api/flows', (r) => r.fulfill({ contentType: 'application/json', body: JSON.stringify(many) }));
+    await page.locator('#map-mode [data-mode=map]').click();
+    await me.until('20 links, all thin', async () => (await page.locator('#links-svg path.pale[data-kind]').count()) === 20);
+    assert.equal(await page.locator('#links-board .lk-knob').count(), 0);
+    await node('conversation:c2').click();
+    await me.until('its own in full', async () => (await page.locator('#links-svg path.on[data-from="conversation:c2"]').count()) === 5);
+    const knobs = await page.locator('#links-board .lk-knob').evaluateAll((l) => l.map((x) => x.dataset.from));
+    assert.ok(knobs.length > 0 && knobs.every((x) => x === 'conversation:c2'), `knobs only on its own: ${knobs}`);
+    await page.unroute('**/api/flows');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(me.errors, []);
 });

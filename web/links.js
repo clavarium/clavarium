@@ -64,7 +64,7 @@
         /* Every link is drawn unless this device chose to hide them: a screen with no line read as broken. */
         let allLines = true;
         try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
-        let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null;
+        let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null; let drawnMany = false;
         const ph = { screen: 'list', kind: 'device', id: null, adding: false, sheet: null };
         let traceOf = '*';
 
@@ -130,24 +130,53 @@
 
         /* ---------- Who gets what: the board ---------- */
         const board = () => $('links-board');
+        /* What each colour says. On a phone, every colour its list shows (dots, no lines). */
         function legend() {
             const box = $('links-legend'); box.replaceChildren();
+            const small = phone();
             const parts = [];
-            if (VIEWS[view].sources.includes('device')) parts.push('term', 'chat', 'both');
-            parts.push('read', 'write'); if (VIEWS[view].sources.includes('conversation')) parts.push('use');
-            const used = new Set(graph.links.filter(shown).map(KIND));
+            if (small || VIEWS[view].sources.includes('device')) parts.push('term', 'chat', 'both');
+            parts.push('read', 'write'); if (small || VIEWS[view].sources.includes('conversation')) parts.push('use');
+            const used = new Set(graph.links.filter((l) => small || shown(l)).map(KIND));
             for (const k of parts.filter((x) => used.has(x))) box.append(h('span', { class: `lk-key`, style: `color:${css(k)}` }, h('i'), h('span', { class: 'lk-key-w', text: WORDS[k] })));
-            if (VIEWS[view].sources.includes('device')) box.append(h('span', { class: 'lk-key lk-dim' }, h('i', { class: 'dash' }), h('span', { class: 'lk-key-w', text: 'a device to an asset' })));
+            if (!small && graph.links.some((l) => shown(l) && node(l.from).kind === 'device' && COLUMN[node(l.to).kind] === 'asset')) box.append(h('span', { class: 'lk-key lk-dim' }, h('i', { class: 'dash' }), h('span', { class: 'lk-key-w', text: 'a device to an asset' })));
             if (graph.nodes.some((n) => n.pending)) box.append(h('span', { class: 'lk-key lk-dim' }, h('b', { class: 'lk-pending-key' }), h('span', { class: 'lk-key-w', text: 'dashed: to pair, or to add' })));
         }
-        /* Boxes in the order that crosses least: each under the average place of what links to it. */
-        function ordered(col) {
-            const base = graph.nodes.filter((n) => COLUMN[n.kind] === col).sort((a, b) => (a.kind === b.kind ? 0 : ['folder', 'git', 'mailbox', 'secret'].indexOf(a.kind) - ['folder', 'git', 'mailbox', 'secret'].indexOf(b.kind)) || a.name.localeCompare(b.name));
-            if (col === 'device') return base;
-            const before = col === 'conversation' ? ordered('device') : [...ordered('conversation'), ...ordered('device')];
-            const pos = new Map(before.map((n, i) => [n.id, i]));
-            const score = (n) => { const r = graph.links.filter((l) => l.to === n.id && pos.has(l.from) && VIEWS[view].sources.includes(node(l.from).kind)).map((l) => pos.get(l.from)); return r.length ? r.reduce((x, y) => x + y, 0) / r.length : Infinity; };
-            return base.map((n, i) => ({ n, sc: score(n), i })).sort((x, y) => (x.sc - y.sc) || (x.i - y.i)).map((x) => x.n);
+        /* Boxes in the order that crosses least: each column in turn, both ways and a few
+           times, puts each box at the average place of what it is linked to; the order
+           that crossed least is kept. What is linked to nothing goes last, by name. */
+        function layout() {
+            const ASSETS = ['folder', 'git', 'mailbox', 'secret'];
+            const base = (k) => graph.nodes.filter((n) => COLUMN[n.kind] === k).sort((a, b) => (ASSETS.indexOf(a.kind) - ASSETS.indexOf(b.kind)) || a.name.localeCompare(b.name));
+            let cols = VIEWS[view].cols.map((ks) => ks.map(base));
+            const colOf = new Map(); cols.forEach((gs, ci) => gs.flat().forEach((n) => colOf.set(n.id, ci)));
+            const ls = graph.links.filter((l) => shown(l) && colOf.has(l.from) && colOf.has(l.to) && colOf.get(l.from) !== colOf.get(l.to));
+            const near = new Map(); for (const l of ls) { near.set(l.from, [...(near.get(l.from) ?? []), l.to]); near.set(l.to, [...(near.get(l.to) ?? []), l.from]); }
+            let pos = new Map();
+            const rank = () => { pos = new Map(); for (const gs of cols) { const all = gs.flat(); all.forEach((n, i) => pos.set(n.id, all.length > 1 ? i / (all.length - 1) : 0.5)); } };
+            const crossings = () => {
+                let c = 0;
+                for (let i = 0; i < ls.length; i += 1) for (let j = i + 1; j < ls.length; j += 1) {
+                    const a = ls[i]; const b = ls[j];
+                    if (colOf.get(a.from) !== colOf.get(b.from) || colOf.get(a.to) !== colOf.get(b.to)) continue;
+                    if ((pos.get(a.from) - pos.get(b.from)) * (pos.get(a.to) - pos.get(b.to)) < 0) c += 1;
+                }
+                return c;
+            };
+            const sortCol = (ci) => {
+                cols[ci] = cols[ci].map((g) => g.map((n, i) => { const r = (near.get(n.id) ?? []).map((id) => pos.get(id)); return { n, i, sc: r.length ? r.reduce((x, y) => x + y, 0) / r.length : Infinity }; })
+                    .sort((x, y) => (x.sc === y.sc ? x.i - y.i : x.sc < y.sc ? -1 : 1)).map((x) => x.n));
+                rank();
+            };
+            rank();
+            let best = cols.slice(); let least = crossings();
+            for (let round = 0; round < 6 && least > 0; round += 1) {
+                for (let ci = 1; ci < cols.length; ci += 1) sortCol(ci);
+                for (let ci = cols.length - 2; ci >= 0; ci -= 1) sortCol(ci);
+                const c = crossings();
+                if (c < least) { least = c; best = cols.slice(); }
+            }
+            return best;
         }
         function paint() {
             for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.setAttribute('aria-selected', String(b.dataset.view === view));
@@ -156,19 +185,28 @@
             const bd = board();
             bd.className = `lk-board ${VIEWS[view].cols.length === 3 ? 'three' : 'two'}`;
             bd.querySelectorAll('.lk-col, .lk-knob, .lk-pop, .lk-edge').forEach((e) => e.remove()); pop = null; popLink = null;
-            for (const cols of VIEWS[view].cols) {
+            const lists = layout();
+            VIEWS[view].cols.forEach((cols, ci) => {
                 const col = h('div', { class: 'lk-col' });
                 cols.forEach((k, i) => {
                     if (i) col.append(h('div', { class: 'lk-gap' }));
                     col.append(h('h3', { text: TITLES[k] }));
-                    const list = ordered(k);
+                    const list = lists[ci][i];
                     for (const n of list) col.append(nodeEl(n));
-                    if (!list.length) col.append(h('p', { class: 'hint lk-none', text: k === 'device' ? 'No device paired yet.' : k === 'conversation' ? 'No conversation yet.' : 'Nothing kept here yet.' }));
+                    if (!list.length) col.append(empty(k));
                 });
                 col.addEventListener('scroll', () => { place(); draw(); }, { passive: true });
                 bd.append(col);
-            }
+            });
             draw(); hint(); paintPhone();
+        }
+        /* An empty column says how to start: a device is paired, an asset added. */
+        function empty(k) {
+            const box = h('div', { class: 'lk-empty' }, h('p', { class: 'hint lk-none', text: k === 'device' ? 'No device paired yet.' : k === 'conversation' ? 'No conversation yet.' : 'Nothing kept here yet.' }));
+            if (k === 'device') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'device', text: '+ Pair a device', onclick: () => env.newDevice() }));
+            if (k === 'asset') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'asset', text: '+ Add an asset', onclick: () => env.openAssets() }));
+            if (k === 'conversation') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'conversation', text: '+ New conversation', onclick: () => env.newConversation() }));
+            return box;
         }
         function nodeEl(n) {
             const cnt = graph.links.filter((l) => (l.from === n.id || l.to === n.id) && shown(l)).length;
@@ -192,7 +230,7 @@
         function anchor(id, side) {
             const n = el(id); const col = n.closest('.lk-col');
             const r = n.getBoundingClientRect(); const c = col.getBoundingClientRect(); const b = board().getBoundingClientRect();
-            const top = c.top + 34; const bottom = c.bottom - 6;
+            const top = c.top + 34; const bottom = c.bottom - 2;
             let y = r.top + r.height / 2; let away = 0;
             if (y < top) { y = top; away = -1; } else if (y > bottom) { y = bottom; away = 1; }
             return { x: (side === 'out' ? r.right : r.left) - b.left, y: y - b.top, away, col };
@@ -207,41 +245,137 @@
             for (const x of up) set.add(x);
             return set;
         }
+        /* MANY LINKS: past this many in sight, every link is still drawn, but thin and
+           pale, without its knob, and gathered: one trunk per box that opens into a fan
+           near what it reaches. The box touched (or under the mouse) has its own links
+           in full colour, with their knobs. Fewer than this: every link in full. */
+        const MANY = 14;
+        /* The way a link goes. Gathered, it leaves its box as one trunk and opens near
+           its end. From a device to an asset over the conversations: it passes between
+           two conversations (never through one, which would read as its link), by the
+           free gap nearest to half way. */
+        function route(a, z, over, gathered) {
+            if (over) {
+                const want = (a.y + z.y) / 2;
+                let y = want; let best = Infinity;
+                for (const [y0, y1] of over.free) {
+                    const at = y1 - y0 >= 8 ? Math.min(Math.max(want, y0 + 4), y1 - 4) : (y0 + y1) / 2;
+                    if (Math.abs(at - want) < best) { best = Math.abs(at - want); y = at; }
+                }
+                const g1 = over.left - a.x; const g2 = z.x - over.right;
+                /* Its knob goes on the last stretch, after the conversations. */
+                const knob = (t) => { const u = 1 - t; return { x: u ** 3 * over.right + 3 * u * u * t * (over.right + g2 / 2) + 3 * u * t * t * (z.x - g2 / 2) + t ** 3 * z.x, y: (u ** 3 + 3 * u * u * t) * y + (3 * u * t * t + t ** 3) * z.y }; };
+                return { d: `M${a.x},${a.y} C${a.x + g1 / 2},${a.y} ${over.left - g1 / 2},${y} ${over.left},${y} L${over.right},${y} C${over.right + g2 / 2},${y} ${z.x - g2 / 2},${z.y} ${z.x},${z.y}`, knob };
+            }
+            if (!gathered) return { d: curve(a, z) };
+            const g = Math.max(30, z.x - a.x); const t = a.x + g * 0.35;
+            return { d: `M${a.x},${a.y} L${t},${a.y} C${t + g * 0.35},${a.y} ${z.x - g * 0.3},${z.y} ${z.x},${z.y}` };
+        }
+        /* The free gaps of the middle column, top to bottom, in the board's terms. */
+        function gaps(col, b) {
+            const c = col.getBoundingClientRect(); const out = [];
+            let at = c.top + 34 - b.top;
+            for (const n of [...col.querySelectorAll('.lk-node')].map((x) => x.getBoundingClientRect()).sort((x, y) => x.top - y.top)) {
+                if (n.bottom - b.top < at) continue;
+                if (n.top - b.top > at + 2) out.push([at, Math.min(n.top - b.top, c.bottom - b.top)]);
+                at = Math.max(at, n.bottom - b.top);
+                if (at > c.bottom - b.top) break;
+            }
+            if (at < c.bottom - b.top - 2) out.push([at, c.bottom - b.top]);
+            return out;
+        }
         function draw() {
             const bd = board(); const svg = $('links-svg');
             if (!shownNow() || phone()) return;
             const rel = (pinned || focus) ? related(pinned || focus) : null;
+            const ls = graph.links.filter(shown).filter((l) => el(l.from) && el(l.to));
+            const many = allLines && !drag && ls.length > MANY;
             bd.classList.toggle('simple', !allLines && !drag);
+            bd.classList.toggle('many', many);
             const b = bd.getBoundingClientRect();
+            const colEls = [...bd.querySelectorAll('.lk-col')]; const cols = colEls.map((c) => c.getBoundingClientRect());
+            const middle = cols.length === 3 ? { left: cols[1].left - b.left, right: cols[1].right - b.left, free: gaps(colEls[1], b) } : null;
             svg.setAttribute('viewBox', `0 0 ${b.width} ${b.height}`);
             svg.replaceChildren(markers('lkm'));
-            bd.querySelectorAll('.lk-knob, .lk-edge').forEach((c) => c.remove());
-            const edges = new Map();
-            for (const l of graph.links.filter(shown)) {
-                if (!el(l.from) || !el(l.to)) continue;
+            bd.querySelectorAll('.lk-knob, .lk-edge, .lk-hook').forEach((c) => c.remove());
+            const edges = new Map(); const knobs = []; const wanted = []; const hooks = new Map();
+            /* The pale ones first: the links in colour are drawn over them. */
+            const layers = [s('g', { class: 'lk-pale' }), s('g')];
+            svg.append(...layers);
+            for (const l of ls) {
                 const a = anchor(l.from, 'out'); const z = anchor(l.to, 'in'); const k = KIND(l);
                 const off = rel && !(rel.has(l.from) && rel.has(l.to));
+                const on = rel && !off;
+                const pale = many && !on;
                 const away = a.away || z.away;
                 for (const [p, end] of [[a, l.from], [z, l.to]]) if (p.away && !off) { const e = edges.get(p.col) ?? { up: [], down: [] }; (p.away < 0 ? e.up : e.down).push(end); edges.set(p.col, e); }
-                const d = curve(a, z);
-                const p = s('path', { d, class: [node(l.from).kind === 'device' && COLUMN[node(l.to).kind] === 'asset' ? 'dash' : '', away ? 'away' : '', off ? 'dim' : '', rel && !off ? 'on' : '', l.pending ? 'later' : ''].join(' '), 'data-from': l.from, 'data-to': l.to, 'data-kind': k });
+                /* Gathered, a link to a box out of sight is a short hook at the end in sight, bent the way the
+                   other end is; the pill at the column's edge says how many. */
+                if (pale && away) {
+                    /* Its other end hidden on the left: counted by the pill of that column only. */
+                    if (a.away || off) continue;
+                    const out = Boolean(z.away); const dir = a.away || z.away; const at = out ? a : z;
+                    const key = `${out ? l.from : l.to}|${dir}`;
+                    const g = hooks.get(key) ?? { box: out ? l.from : l.to, out, dir, x: at.x, y: at.y, room: z.x - a.x, k, ids: [] };
+                    g.ids.push(out ? l.to : l.from); hooks.set(key, g);
+                    continue;
+                }
+                const dash = node(l.from).kind === 'device' && COLUMN[node(l.to).kind] === 'asset';
+                const over = dash && middle && !away ? middle : null;
+                const r = route(a, z, over, many);
+                const p = s('path', { d: r.d, class: [dash ? 'dash' : '', away ? 'away' : '', off ? 'dim' : '', on ? 'on' : '', pale ? 'pale' : '', l.pending ? 'later' : ''].join(' '), 'data-from': l.from, 'data-to': l.to, 'data-kind': k });
                 p.style.stroke = css(k);
-                if (!away) p.setAttribute('marker-end', `url(#lkm-${k})`);
-                svg.append(p);
-                if (away) continue;
-                const hit = s('path', { d, class: 'hit' }); hit.addEventListener('click', () => openPop(l)); svg.append(hit);
-                /* The knob sits at two thirds of the way, near the target: never over the dot it was drawn from. */
-                const at = p.getPointAtLength(p.getTotalLength() * 0.68);
-                const kb = h('button', { type: 'button', class: `lk-knob${off ? ' dim' : ''}${rel && !off ? ' on' : ''}`, style: `background:${css(k)};left:${at.x}px;top:${at.y}px`, title: `${node(l.from).name} → ${node(l.to).name}: ${said(l)}`, 'aria-label': `${node(l.from).name} to ${node(l.to).name}: ${said(l)}. Change.`, 'data-from': l.from, 'data-to': l.to });
+                if (!away && !pale && !off) p.setAttribute('marker-end', `url(#lkm-${k})`);
+                layers[pale ? 0 : 1].append(p);
+                if (away || pale || off) continue;
+                const hit = s('path', { d: r.d, class: 'hit' }); hit.addEventListener('click', () => openPop(l)); layers[1].append(hit);
+                const spots = (r.knob ? [0.5, 0.3, 0.7, 0.2, 0.82].map(r.knob) : [0.68, 0.55, 0.8, 0.45, 0.88, 0.38].map((f) => p.getPointAtLength(p.getTotalLength() * f)));
+                wanted.push({ l, k, off, on, spots, late: Boolean(r.knob) });
+            }
+            /* Where several links meet, each knob takes the first spot along its own line clear of the others;
+               a link over the conversations, which has more room, last. The knob: near the target, never on
+               the dot it was drawn from, nor on a box. */
+            for (const { l, k, off, on, spots } of wanted.sort((x, y) => Number(x.late) - Number(y.late))) {
+                const room = (q) => Math.min(Infinity, ...knobs.map((o) => Math.hypot(o.x - q.x, o.y - q.y)));
+                const at = spots.find((q) => room(q) > 24) ?? spots.reduce((x, y) => (room(y) > room(x) ? y : x));
+                knobs.push(at);
+                const kb = h('button', { type: 'button', class: `lk-knob${off ? ' dim' : ''}${on ? ' on' : ''}`, style: `background:${css(k)};left:${at.x}px;top:${at.y}px`, title: `${node(l.from).name} → ${node(l.to).name}: ${said(l)}`, 'aria-label': `${node(l.from).name} to ${node(l.to).name}: ${said(l)}. Change.`, 'data-from': l.from, 'data-to': l.to });
                 kb.addEventListener('click', () => openPop(l));
                 bd.append(kb);
             }
-            /* Links to boxes scrolled away: a pill at the column's edge says how many, and brings the first into sight. */
+            /* A box whose links go to boxes out of sight: a short hook bent the way they are, and a small
+               pill naming them; touched, it brings the first into sight. */
+            const taken = [];
+            for (const g of hooks.values()) {
+                const len = Math.min(40, g.room * 0.3); const names = [...new Set(g.ids)].map((id) => node(id).name);
+                const d = g.out ? `M${g.x},${g.y} L${g.x + len * 0.5},${g.y} Q${g.x + len},${g.y} ${g.x + len},${g.y + g.dir * 12}` : `M${g.x - len},${g.y + g.dir * 12} Q${g.x - len},${g.y} ${g.x - len * 0.5},${g.y} L${g.x},${g.y}`;
+                const hook = s('path', { d, class: 'pale hook' }); hook.style.stroke = css(g.k); layers[0].append(hook);
+                const pill = h('button', { type: 'button', class: `lk-hook ${g.out ? 'out' : 'in'}`, text: `${g.dir < 0 ? '↑' : '↓'} ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ''}`, title: `${g.dir < 0 ? 'Above' : 'Below'}: ${names.join(', ')}`,
+                    style: `${g.out ? `left:${g.x + 4}px` : `left:${g.x - 4}px`};top:${g.y + g.dir * 22}px;max-width:${Math.max(48, Math.min(170, g.room - 24))}px` });
+                pill.addEventListener('click', () => { el([...g.ids].find((id) => el(id)))?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
+                bd.append(pill);
+                /* A name cut short says nothing: where it does not fit, the count, the names in its title. */
+                if (pill.scrollWidth > pill.clientWidth + 1) {
+                    /* No room in the gap: inside its box, at the end of its second line, where there is. */
+                    const r = el(g.box)?.getBoundingClientRect();
+                    if (r) { pill.classList.add('inbox'); pill.style.left = `${r.right - b.left - 20}px`; pill.style.top = `${r.bottom - b.top - 13}px`; pill.style.maxWidth = `${Math.max(48, r.width - 100)}px`; }
+                    if (pill.scrollWidth > pill.clientWidth + 1) pill.textContent = `${g.dir < 0 ? '↑' : '↓'} ${names.length}`;
+                }
+                /* Never over another pill or a knob: moved further the same way, or left out (the hook stays). */
+                const clear = () => { const r = pill.getBoundingClientRect(); return [...taken, ...knobs.map((q) => ({ left: q.x + b.left - 11, right: q.x + b.left + 11, top: q.y + b.top - 11, bottom: q.y + b.top + 11 }))].every((o) => r.right < o.left || r.left > o.right || r.bottom < o.top || r.top > o.bottom); };
+                let tries = 0;
+                while (!clear() && tries < 2) { tries += 1; pill.style.top = `${g.y + g.dir * (22 + tries * 20)}px`; }
+                if (clear()) taken.push(pill.getBoundingClientRect()); else pill.remove();
+            }
+            /* Links to boxes scrolled away: a pill says how many, and brings the first into sight.
+               Above: in the column's title band; below: in the strip under the column. Never over a name. */
             for (const [col, e] of edges) {
                 const c = col.getBoundingClientRect();
                 for (const [dir, ids] of [['up', e.up], ['down', e.down]]) {
                     if (!ids.length) continue;
-                    const pill = h('button', { type: 'button', class: 'lk-edge', text: `${dir === 'up' ? '↑' : '↓'} ${new Set(ids).size} linked`, style: `left:${c.left - b.left + c.width / 2}px;top:${dir === 'up' ? c.top - b.top + 32 : c.bottom - b.top - 30}px` });
+                    const n = new Set(ids).size;
+                    const pill = h('button', { type: 'button', class: `lk-edge ${dir}`, text: `${dir === 'up' ? '↑' : '↓'} ${n} more linked`, title: `${n} linked box${n === 1 ? '' : 'es'} ${dir === 'up' ? 'above' : 'below'}: bring into sight`,
+                        style: dir === 'up' ? `left:${c.right - b.left - 14}px;top:${c.top - b.top + 8}px` : `left:${c.left - b.left + c.width / 2}px;top:${c.bottom - b.top + 4}px` });
                     pill.addEventListener('click', () => { el(ids[0])?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
                     bd.append(pill);
                 }
@@ -254,6 +388,7 @@
                 e.classList.toggle('can', Boolean(src) && src.id !== n.id && allowed(src, n));
                 e.classList.toggle('faded', Boolean(rel) && !rel.has(n.id));
             });
+            if (many !== drawnMany) { drawnMany = many; hint(); }
         }
 
         /* A tap shows only what concerns that box; tapped again, everything comes back.
@@ -263,11 +398,37 @@
             const again = pinned === n.id;
             pinned = again ? null : n.id;
             picked = !again && VIEWS[view].sources.includes(n.kind) && !n.pending ? n : null;
-            closePop(); draw(); hint();
+            closePop(); hint(); reveal(); draw();
+        }
+        /* A box touched: what it is linked to, scrolled out of sight in another column, is brought into it. */
+        function reveal() {
+            if (!pinned || phone() || !el(pinned)) return;
+            const rel = related(pinned); const mine = el(pinned).closest('.lk-col');
+            for (const col of board().querySelectorAll('.lk-col')) {
+                if (col === mine) continue;
+                const ns = [...col.querySelectorAll('.lk-node')].filter((e) => rel.has(e.dataset.id));
+                if (!ns.length) continue;
+                const c = col.getBoundingClientRect(); const rs = ns.map((e) => e.getBoundingClientRect());
+                if (rs.every((r) => r.top >= c.top + 30 && r.bottom <= c.bottom)) continue;
+                const top = Math.min(...rs.map((r) => r.top)); const bottom = Math.max(...rs.map((r) => r.bottom));
+                col.scrollTop += bottom - top < c.height - 50 ? (top + bottom) / 2 - (c.top + c.bottom) / 2 : top - c.top - 40;
+            }
+        }
+        /* The board takes the height left on the screen: as many boxes in sight as can be. */
+        function fit() {
+            const bd = board(); const a = $('access');
+            if (phone() || !shownNow()) return;
+            const top = bd.getBoundingClientRect().top - a.getBoundingClientRect().top + a.scrollTop;
+            const want = `${Math.round(Math.max(320, a.clientHeight - top - 20))}px`;
+            if (bd.style.height !== want) { bd.style.height = want; requestAnimationFrame(() => draw()); }
         }
         function hint() {
             card();
-            $('links-hint').textContent = !pinned ? 'Tap a box to see its links. The number on a box is how many it has.' : picked ? 'Tap a box outlined in dashes to link it.' : '';
+            $('links-hint').textContent = pinned ? (picked ? `To give ${picked.kind === 'device' ? 'a conversation or an asset to' : 'an asset to'} ${picked.name}, tap it.` : '')
+                : !graph.nodes.length ? 'Nothing here yet: pair a device, add an asset, or start a conversation.'
+                : !graph.links.length ? 'Nothing is linked yet. Drag from the dot of a device or a conversation to what it gets.'
+                : !allLines ? 'Tap a box to see its links. The number on a box is how many it has.'
+                : drawnMany ? 'Many links: all drawn thin. Tap a box to see its own in colour.' : 'Tap a box to see its links in words.';
         }
         /* One box, in plain words: what it gives or gets, then what comes with it through a conversation. */
         function wordsFor(n) {
@@ -293,7 +454,7 @@
         }
         function card() {
             const c = $('links-card');
-            if (!pinned || !node(pinned)) { c.hidden = true; return; }
+            if (!pinned || !node(pinned)) { c.hidden = true; fit(); return; }
             const n = node(pinned);
             const items = wordsFor(n);
             const actions = h('span', { class: 'lk-card-actions' });
@@ -304,7 +465,7 @@
                 h('button', { type: 'button', text: 'See everything', onclick: () => { pinned = null; picked = null; draw(); hint(); } }));
             c.replaceChildren(h('h3', {}, h('span', { text: n.name }), h('small', { text: n.sub }), actions),
                 items.length ? h('ul', {}, items.map((i) => h('li', {}, i))) : h('p', { class: 'lk-none', text: 'No link yet.' }));
-            c.hidden = false;
+            c.hidden = false; fit();
         }
         async function pairIt(n) {
             try { const what = await request('/setup/pair', { label: n.name }); closeSheet(); await env.pairNew(what.grants, what.label); }
@@ -446,10 +607,11 @@
                 for (const n of graph.nodes.filter((x) => COLUMN[x.kind] === ph.kind).sort((a, b) => a.name.localeCompare(b.name))) {
                     const ls = graph.links.filter((l) => l.from === n.id || l.to === n.id);
                     list.append(h('li', {}, h('button', { type: 'button', class: `lk-item${n.pending ? ' pending' : ''}`, 'data-id': n.id, onclick: () => { ph.sheet = n.id; paintPhone(); $('links-sheet-edit')?.focus(); } },
-                        h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: `${n.sub} - ${ls.length} link${ls.length === 1 ? '' : 's'}` })),
+                        h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: `${n.sub} · ${ls.length} link${ls.length === 1 ? '' : 's'}` })),
                         h('span', { class: 'lk-dots' }, ls.slice(0, 6).map((l) => h('i', { style: `background:${css(KIND(l))}` }))), h('span', { class: 'lk-chev', text: '›' }))));
                 }
-                if (!list.children.length) list.append(h('li', { class: 'lk-none', text: 'Nothing here yet.' }));
+                if (!graph.nodes.length) list.append(h('li', { class: 'lk-start' }, ['device', 'conversation', 'asset'].map(empty)));
+                else if (!list.children.length) list.append(h('li', {}, empty(ph.kind)));
                 box.replaceChildren(kinds, list);
                 if (ph.sheet && node(ph.sheet)) box.append(sheetFor(node(ph.sheet))); else ph.sheet = null;
                 return;
@@ -816,7 +978,7 @@
         $('links').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); if (ph.sheet) closeSheet(); else if (pop) { closePop(); draw(); } else if (pinned) { pinned = null; picked = null; draw(); hint(); } else close(); } });
         /* A click away from it closes the knob's card (a button it just replaced is not "away"). */
         document.addEventListener('click', (e) => { if (pop && e.target.isConnected && !e.target.closest('.lk-pop, .lk-knob, .lk-node, svg')) { closePop(); draw(); } });
-        addEventListener('resize', () => { if (shownNow()) { paintPhone(); draw(); place(); } });
+        addEventListener('resize', () => { if (shownNow()) { legend(); paintPhone(); fit(); draw(); place(); } });
         $('links-scroller').addEventListener('scroll', () => draw(), { passive: true });
         return { open, openFlows, close };
     };

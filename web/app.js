@@ -1905,7 +1905,7 @@
     /* What those sheets share with the rest of the page: the requests, the
        automatic sending form of Access, the share sheet for a device to pair. */
     const links = DEVICE ? undefined : window.clavariumLinks?.({
-        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); },
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => { leavePlace({ list: true }); void openCreate(); },
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
@@ -3002,7 +3002,7 @@
         group.append(need);
         /* Its chat, given while it is off: said, so that nobody wonders why the device shows nothing. */
         if (has.chat && !talksHere(name)) {
-            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Given, and waiting. Its chat is off in this conversation: the device sees it once you turn it on (This conversation, then General).';
+            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Its chat is off: the device waits until you turn it on (General).'; off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
             group.append(off);
         }
         return group;
@@ -3154,7 +3154,7 @@
                     field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
                     name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
                 });
-                const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)}, paired ${new Date(device.createdAt).toLocaleDateString()}`;
+                const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
                 if (!device.seenAt) seen.className = 'warn';
                 const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
                 revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
@@ -3164,11 +3164,19 @@
                 fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
                 fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void paintManage(); });
                 const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
-                const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' ', seen);
+                const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
                 const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
                 const given = document.createElement('div'); given.className = 'given';
                 const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
                 for (const g of mine) given.append(grantRow(device, g));
+                /* Several chats given while off: said once for the card, not under each. */
+                const waiting = [...given.querySelectorAll('.parts-off')];
+                if (waiting.length > 1) {
+                    for (const w of waiting) w.remove();
+                    const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
+                    once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
+                    given.prepend(once);
+                }
                 if (only && mine.length === 0) {
                     const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
                     const label = document.createElement('span'); label.textContent = accessFor;
