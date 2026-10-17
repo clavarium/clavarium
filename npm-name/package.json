@@ -3,7 +3,7 @@
   "version": "0.0.2",
   "description": "Keeps the name until the server is published here. Clavarium: each AI agent in its own machine, with only what you attach. See https://github.com/clavarium/clavarium",
   "license": "MIT",
-  "homepage": "https://clavarium.github.io/clavarium/",
+  "homepage": "https://clavarium.org",
   "repository": { "type": "git", "url": "git+https://github.com/clavarium/clavarium.git", "directory": "npm-name" },
   "type": "module",
   "bin": { "clavarium": "keep.mjs" },
