@@ -31,6 +31,8 @@
     let thread = null;
     let threadOf = '';
     const noTerminal = () => DEVICE && !deviceParts.terminal;
+    /* A phone: what needs a wide screen (the Machine chapter's sizes) is not offered there. */
+    const narrow = () => matchMedia('(max-width: 700px)').matches;
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
     const $ = (id) => document.getElementById(id) ?? document.createElement('div');
@@ -55,8 +57,10 @@
         $('notice-health').hidden = true; $('notice-restart').hidden = true;
         notice.hidden = false;
         $('notice-spin').hidden = true; $('notice-steps').hidden = true;
-        $('notice-head').hidden = true; delete notice.dataset.progress;
+        $('notice-head').hidden = true; delete notice.dataset.progress; delete notice.dataset.loading;
     };
+    /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. */
+    const loading = () => { show('Loading the terminal\u2026'); $('notice-spin').hidden = false; notice.dataset.loading = 'yes'; };
     /* A restart: when the page first saw it (when the server did not say), and the clock that tells it. */
     const restartSeen = new Map(); let restartTicking = 0;
     /* A START TOLD STEP BY STEP (a build, a restart, a wake: `progress`, see
@@ -348,10 +352,13 @@
        draws the whole screen as soon as a screen attaches -- far more than
        the few bytes a channel that hangs gives back (its own echo of what the
        page sends) or than the bridge's own word (FOCUS_REPORTS). Nothing of
-       it is read. Times can be shortened by a test (window.clavariumTimes). */
+       it is read. A terminal slower than a blink (`loading`) is said in a
+       neutral word; a terminal that could not be opened is tried again in
+       silence for some seconds (`quiet`) before anything like a fault is
+       said. Times can be shortened by a test (window.clavariumTimes). */
     const PROOF_BYTES = 32;
     const FOCUS_REPORTS = '\x1b[?1004h';
-    const times = () => ({ look: 12_000, repair: 30_000, offer: 180_000, retry: 3000, ...(window.clavariumTimes ?? {}) });
+    const times = () => ({ loading: 1500, quiet: 10_000, look: 12_000, repair: 30_000, offer: 180_000, retry: 3000, ...(window.clavariumTimes ?? {}) });
     let slowTimers = [];
     const clearSlow = () => { for (const timer of slowTimers) clearTimeout(timer); slowTimers = []; };
     /* When this wait began (kept across the tries made by the page itself), and whether the server repaired it meanwhile. */
@@ -380,6 +387,8 @@
         const T = times();
         const waited = Date.now() - waitingSince;
         const later = (ms, run) => slowTimers.push(setTimeout(() => { if (socket === mine && !output && name === current) run(); }, Math.max(0, ms - waited)));
+        /* Slower than a blink: said in a neutral word, unless something is said already. */
+        later(T.loading, () => { if (notice.hidden && state.dataset.state !== 'live') loading(); });
         /* An opening that takes long: what is known of the machine is said under the wait. */
         later(T.look, () => void explainMachine(true));
         /* Repaired already in this wait, and still nothing: said plainly, with the restart. */
@@ -456,6 +465,15 @@
                     $('notice-spin').hidden = false;
                     slowTimers.push(setTimeout(() => { if (name === current && (!socket || socket === mine)) connect({ again: true }); }, T.retry));
                     socket = undefined; wanted = true;
+                    return;
+                /* Not opened, for a reason not told: often a blink (the phone waking, the server
+                   starting again). Tried again in silence for some seconds, under a neutral word. */
+                } else if (Date.now() - waitingSince < T.quiet) {
+                    say('connecting', 'connecting');
+                    if (notice.hidden || notice.dataset.loading) loading();
+                    slowTimers.push(setTimeout(() => { if (name === current && (!socket || socket === mine)) connect({ again: true }); }, T.retry));
+                    socket = undefined; wanted = true;
+                    if (DEVICE) void refresh();
                     return;
                 } else { show(failure || 'The terminal could not be opened.', 'Try again', connect); void explainMachine(false, Date.now() - waitingSince >= T.offer); }
                 /* On a device this is often the owner closing the conversation:
@@ -582,8 +600,10 @@
         stepText(way);
     }, true);
     let wheelAt = 0;
+    /* A picture large in the chat's viewer zooms itself, with a pinch or the wheel: the text is not grown under it. */
+    const inViewer = (event) => event.target instanceof Element && Boolean(event.target.closest('.parley-zoom'));
     addEventListener('wheel', (event) => {
-        if (!event.ctrlKey) return;
+        if (!event.ctrlKey || inViewer(event)) return;
         event.preventDefault(); event.stopPropagation();
         if (Date.now() - wheelAt < 120 || event.deltaY === 0) return;
         wheelAt = Date.now();
@@ -593,7 +613,7 @@
        once they lift (not at every move: each new size is sent to the machine). */
     let pinch = null;
     const spread = (touches) => Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
-    document.addEventListener('touchstart', (event) => { if (event.touches.length === 2) pinch = { from: spread(event.touches), scale: textScale }; }, { passive: true, capture: true });
+    document.addEventListener('touchstart', (event) => { if (event.touches.length === 2 && !inViewer(event)) pinch = { from: spread(event.touches), scale: textScale }; }, { passive: true, capture: true });
     document.addEventListener('touchmove', (event) => {
         if (!pinch || event.touches.length !== 2) return;
         event.preventDefault();
@@ -1221,10 +1241,14 @@
         $('health-strip').dataset.level = h.level;
         const shown = h.problems.filter((p) => p.level === 'warn' || p.level === 'bad');
         $('health-text').textContent = shown.map((p) => p.text).join(' ');
-        /* What can be done, from here: more memory where memory is short, a restart, its terminal when the chat is in front. */
+        /* What can be done, from here: more memory where memory is short, a restart, its terminal when the chat is in front.
+           A disk short of room: what takes it, in the terminal, and (on a wide screen) a larger disk -- a restart frees nothing. */
+        const disk = shown.some((p) => p.kind === 'disk'); const diskOnly = shown.every((p) => p.kind === 'disk');
         $('health-memory').hidden = DEVICE || !shown.some((p) => p.kind === 'memory');
-        $('health-restart').hidden = DEVICE;
-        $('health-terminal').hidden = !simple || noTerminal();
+        $('health-room').hidden = !disk || noTerminal();
+        $('health-disk').hidden = DEVICE || !disk || narrow();
+        $('health-restart').hidden = DEVICE || diskOnly;
+        $('health-terminal').hidden = !simple || noTerminal() || disk;
         $('health-dismiss').onclick = () => { healthDismissed = key; $('health-strip').hidden = true; };
     }
     /* "More memory...": its memory, ready to be chosen -- the next size up already picked, applied only once asked. */
@@ -1239,10 +1263,24 @@
         memory.scrollIntoView({ block: 'center' });
         memory.focus({ preventScroll: true });
     }
+    /* "Give it more disk...": its disk, ready to be chosen -- the next size up already picked, applied only once asked. */
+    async function openDisk() {
+        if (DEVICE || !current) return;
+        await openAccess(false);
+        openChapter('machine');
+        const disk = $('machine-disk');
+        const now = conversations.find((x) => x.name === current)?.diskGb ?? 8;
+        const bigger = [...disk.options].map((o) => Number(o.value)).find((gb) => gb > now);
+        if (bigger) disk.value = String(bigger);
+        disk.scrollIntoView({ block: 'center' });
+        disk.focus({ preventScroll: true });
+    }
     /* Its terminal, asked for: never shown by itself in place of its chat. */
     function seeTerminal() { simple = false; paintSimple(); paintHealth(); focusTerminal(); }
     $('health-memory').addEventListener('click', () => { void openMemory(); });
     $('health-terminal').addEventListener('click', seeTerminal);
+    $('health-room').addEventListener('click', seeTerminal);
+    $('health-disk').addEventListener('click', () => { void openDisk(); });
     /* The page has waited, or the terminal failed: the machine is looked at
        (never woken), and what is seen is said under the notice. A restart is
        offered only when its machine is not well, or when the wait is far
@@ -1258,8 +1296,10 @@
         /* The terminal may have come while the machine was being looked at: then the wait is over, nothing to say. */
         if (waiting && !waitingSince) return;
         /* Nothing over the screen to say it under: a long wait still says so. */
-        if (notice.hidden && !long) return;
-        if (notice.hidden) show('Its terminal still does not come.');
+        /* The neutral word of a load is not a place to list troubles either, until the wait is long. */
+        const quiet = notice.hidden || Boolean(notice.dataset.loading);
+        if (quiet && !long) return;
+        if (quiet) show('Its terminal still does not come.');
         /* Waking it is what the page is doing: "it is asleep" would say the opposite. */
         const said = waiting && record ? { ...record, problems: (record.problems ?? []).filter((p) => p.kind !== 'state') } : record;
         const shown = healthLines($('notice-health'), said, { all: true, brief: true });
@@ -1275,9 +1315,9 @@
        opened again. Its machine starting: nothing to repair, the wait goes on. */
     async function repairTerminal(name) {
         if (!home || name !== current) return;
-        say('repairing', 'connecting');
-        show('Its terminal does not come, though its machine runs: it is being repaired...');
-        $('notice-spin').hidden = false;
+        /* Repaired in silence: a repair that works is only a slower load. Said only if it does not help (stuck). */
+        say('connecting', 'connecting');
+        if (notice.hidden || notice.dataset.loading) loading();
         try { await post(DEVICE ? `${API}/terminal/repair?${new URLSearchParams({ c: name })}` : `${API}/conversations/${encodeURIComponent(name)}/terminal/repair`, {}); }
         catch (error) {
             if (name !== current) return;
@@ -1580,7 +1620,7 @@
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); },
+            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); },
             /* Files attached to a message: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
@@ -1643,11 +1683,11 @@
        use them -- its memory and a restart are the owner's; its terminal, a
        screen's that was given it. */
     /* "review:<repository>": the git review of a repository the line is about (the owner's). */
-    const ACTIONS = { memory: 'More memory...', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review' };
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' ? !noTerminal() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id)) && !DEVICE);
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id)) && !DEVICE);
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[kindOf(id)] })) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */

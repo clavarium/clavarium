@@ -18,6 +18,9 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     /* The map is what Access opens on. */
     await page.locator('#nav-access').click();
     assert.equal(await page.locator('#tab-map').getAttribute('aria-selected'), 'true');
+    /* Everything first, and shown by default. */
+    assert.deepEqual(await page.locator('#links-tabs [data-view]').evaluateAll((b) => b.map((x) => x.dataset.view)), ['all', 'convs', 'devices']);
+    await me.until('everything is the view at first', async () => (await page.locator('#links-tabs [data-view=all]').getAttribute('aria-selected')) === 'true');
     await page.locator('#links-tabs [data-view=convs]').click();
     const node = (id) => page.locator(`#links-board .lk-node[data-id="${id}"]`);
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 6);
@@ -26,6 +29,8 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     /* At rest every link is drawn, a line for each right given; this device may hide them, a count staying on each box. */
     const kinds = () => page.locator('#links-svg path[data-kind]').evaluateAll((l) => l.filter((x) => getComputedStyle(x).display !== 'none').map((x) => x.dataset.kind).sort().join());
     await me.until('every link is drawn at rest', async () => (await kinds()) === 'read,use,write,write');
+    /* No arrowheads: the colour says the right. */
+    assert.equal(await page.locator('#links-svg [marker-end], #links-svg marker').count(), 0);
     await page.locator('#links-all').uncheck();
     assert.equal(await node('conversation:client-a').locator('.lk-cnt').innerText(), '3');
     assert.equal(await page.locator('#links-svg path[data-kind]:visible').count(), 0);

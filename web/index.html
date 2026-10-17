@@ -57,6 +57,8 @@
       <span id="health-text"></span>
       <span class="health-actions">
         <button type="button" id="health-memory" class="primary" hidden>More memory...</button>
+        <button type="button" id="health-room" hidden>See what takes room</button>
+        <button type="button" id="health-disk" hidden>Give it more disk...</button>
         <button type="button" id="health-restart">Restart...</button>
         <button type="button" id="health-terminal" hidden>See the terminal</button>
         <button type="button" id="health-dismiss" aria-label="Dismiss" title="Dismiss">&times;</button>
@@ -328,9 +330,9 @@
             <div class="levels map-mode" id="map-mode" role="group" aria-label="Map or flows"><button type="button" data-mode="map" aria-pressed="true">Who gets what</button><button type="button" data-mode="flows" aria-pressed="false">Flows</button></div>
             <div id="links-tabs" class="lk-tabs" role="tablist" aria-label="What the map shows">
               <span class="hint lk-show">Show</span>
-              <button type="button" role="tab" data-view="devices">Devices</button>
-              <button type="button" role="tab" data-view="convs">Conversations</button>
               <button type="button" role="tab" data-view="all">Everything</button>
+              <button type="button" role="tab" data-view="convs">Conversations</button>
+              <button type="button" role="tab" data-view="devices">Devices</button>
             </div>
             <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
           </div>

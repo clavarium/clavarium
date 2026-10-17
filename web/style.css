@@ -700,6 +700,8 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 #nav button[aria-current="page"] { color: var(--ink); background: var(--bar); border-color: var(--line); box-shadow: inset 3px 0 0 var(--brass); }
 .nav-ic { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 #nav button[aria-current="page"] .nav-ic { stroke: var(--brass); }
+/* On a wide screen the list above is the menu, always there (the « button shows it when folded): the bar holds only the places of the whole. A phone keeps it: there the list is a screen of its own. */
+@media (min-width: 701px) { #nav #nav-conversations { display: none; } }
 @media (max-width: 700px) {
   /* A phone: a bar along the bottom, above the system's own strip; gone inside a conversation and while typing. */
   #nav { grid-row: 2; flex-direction: row; gap: 0; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0)); border-right: 0; }

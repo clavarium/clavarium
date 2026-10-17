@@ -905,7 +905,12 @@ function painter(ctx) {
    size), moved when zoomed (drag); the previous or next picture with the
    arrows, a swipe, or the strip of small pictures at the bottom; closed
    simply: a tap on the picture not zoomed, or on the ground around it, a
-   swipe down on a touch screen, Escape, or its button. */
+   swipe down on a touch screen, Escape, or its button. A pinch on it
+   zooms the picture alone, never the page: two fingers on the stage are
+   kept from the browser (touch events not passive, as touch-action is not
+   always obeyed: a browser set to "force zoom" ignores it); and if the
+   page is zoomed all the same while it is open, the viewer is sized back
+   to the screen (visualViewport), its bars keeping their size. */
 const ZOOM_MAX = 8;
 const OPEN_MS = 220;
 function zoomer(root, words) {
@@ -934,7 +939,9 @@ function zoomer(root, words) {
     let back = null;
     let from = null;
     const still = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const size = () => { const r = stage.getBoundingClientRect(); return { w: r.width || 1, h: r.height || 1 }; };
+    /* Sizes in the stage's own pixels; `k`, screen pixels per stage pixel (other than 1 only while the page is zoomed). */
+    const size = () => ({ w: stage.offsetWidth || stage.getBoundingClientRect().width || 1, h: stage.offsetHeight || stage.getBoundingClientRect().height || 1 });
+    const k = () => { const w = stage.offsetWidth; const r = stage.getBoundingClientRect().width; return w && r ? r / w : 1; };
     const natural = () => ({ w: img.naturalWidth || 1, h: img.naturalHeight || 1 });
     const max = () => Math.max(fit * ZOOM_MAX, 2);
     const apply = () => { img.style.transform = `translate(${tx}px, ${ty}px) scale(${s})`; box.dataset.zoomed = String(s > fit * 1.01); };
@@ -957,10 +964,10 @@ function zoomer(root, words) {
         const r = from; from = null;
         if (!r || still() || !r.width) return;
         const st = stage.getBoundingClientRect(); const n = natural();
-        const k = r.width / (n.w * s);
+        const q = k(); const g = r.width / q / (n.w * s);
         const fx = tx; const fy = ty; const fs = s;
         img.style.transition = 'none';
-        img.style.transform = `translate(${r.left - st.left}px, ${r.top - st.top}px) scale(${fs * k})`;
+        img.style.transform = `translate(${(r.left - st.left) / q}px, ${(r.top - st.top) / q}px) scale(${fs * g})`;
         box.dataset.opening = 'true';
         void img.getBoundingClientRect();
         img.style.transition = `transform ${OPEN_MS}ms cubic-bezier(.2,.8,.2,1)`;
@@ -998,7 +1005,21 @@ function zoomer(root, words) {
         paintStrip();
         if (img.complete && img.naturalWidth) { fitIn(); grow(); }
     }
-    function close() { clearTimeout(tapping); box.hidden = true; box.style.opacity = ''; img.removeAttribute('src'); try { back?.focus?.({ preventScroll: true }); } catch { /* gone */ } }
+    /* The page zoomed while it is open: the viewer covers the screen at its own size again. */
+    const view = () => (typeof window !== 'undefined' ? window.visualViewport : null);
+    const keep = () => {
+        const v = view();
+        if (box.hidden || !v || Math.abs(v.scale - 1) < 0.01) { box.style.transform = ''; box.style.transformOrigin = ''; box.style.width = ''; box.style.height = ''; box.style.right = ''; box.style.bottom = ''; box.dataset.kept = 'false'; }
+        else {
+            box.style.transformOrigin = '0 0'; box.style.right = 'auto'; box.style.bottom = 'auto';
+            box.style.width = `${v.width * v.scale}px`; box.style.height = `${v.height * v.scale}px`;
+            box.style.transform = `translate(${v.offsetLeft}px, ${v.offsetTop}px) scale(${1 / v.scale})`;
+            box.dataset.kept = 'true';
+        }
+        if (!box.hidden && img.naturalWidth) { if (s <= fit * 1.01) fitIn(); else { clamp(); apply(); } }
+    };
+    const watch = (on) => { const v = view(); if (!v) return; for (const type of ['resize', 'scroll']) (on ? v.addEventListener : v.removeEventListener).call(v, type, keep); };
+    function close() { clearTimeout(tapping); watch(false); box.hidden = true; keep(); box.style.opacity = ''; img.removeAttribute('src'); try { back?.focus?.({ preventScroll: true }); } catch { /* gone */ } }
     box.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') { event.preventDefault(); close(); }
         else if (event.key === 'ArrowLeft') go(-1);
@@ -1007,7 +1028,12 @@ function zoomer(root, words) {
         else if (event.key === '-') zoomTo(s / 1.5);
         else if (event.key === '0') fitIn();
     });
-    stage.addEventListener('wheel', (event) => { event.preventDefault(); const r = stage.getBoundingClientRect(); zoomTo(s * Math.exp(-event.deltaY * 0.0015), event.clientX - r.left, event.clientY - r.top); }, { passive: false });
+    stage.addEventListener('wheel', (event) => { event.preventDefault(); const r = stage.getBoundingClientRect(); const q = k(); zoomTo(s * Math.exp(-event.deltaY * 0.0015), (event.clientX - r.left) / q, (event.clientY - r.top) / q); }, { passive: false });
+    /* Two fingers on the picture are the picture's: the browser does not zoom the page with them. */
+    const mine = (event) => { if (event.touches && event.touches.length >= 2 && event.cancelable) event.preventDefault(); };
+    stage.addEventListener('touchstart', mine, { passive: false });
+    stage.addEventListener('touchmove', mine, { passive: false });
+    stage.addEventListener('gesturestart', (event) => event.preventDefault?.(), { passive: false });
     /* Fingers and a mouse: one moves (or swipes), two pinch, a double tap zooms, one tap closes. */
     const pointers = new Map();
     let pinch = null; let start = null; let lastTap = 0; let tapping;
@@ -1021,13 +1047,13 @@ function zoomer(root, words) {
     stage.addEventListener('pointermove', (event) => {
         if (!pointers.has(event.pointerId)) return;
         pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
-        const r = stage.getBoundingClientRect();
-        if (pointers.size === 2 && pinch) { const [a, b] = [...pointers.values()]; zoomTo(pinch.s * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), (a.x + b.x) / 2 - r.left, (a.y + b.y) / 2 - r.top); return; }
+        const r = stage.getBoundingClientRect(); const q = k();
+        if (pointers.size === 2 && pinch) { const [a, b] = [...pointers.values()]; zoomTo(pinch.s * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), ((a.x + b.x) / 2 - r.left) / q, ((a.y + b.y) / 2 - r.top) / q); return; }
         if (pointers.size !== 1 || !start) return;
-        if (s > fit * 1.01) { tx = start.tx + event.clientX - start.x; ty = start.ty + event.clientY - start.y; clamp(); apply(); return; }
+        if (s > fit * 1.01) { tx = start.tx + (event.clientX - start.x) / q; ty = start.ty + (event.clientY - start.y) / q; clamp(); apply(); return; }
         /* Not zoomed, pulled down by a finger: it follows, and fades. */
         const dy = event.clientY - start.y;
-        if (start.touch && dy > 10 && Math.abs(dy) > Math.abs(event.clientX - start.x)) { box.dataset.dragging = 'true'; img.style.transform = `translate(${start.tx}px, ${start.ty + dy}px) scale(${s})`; box.style.opacity = String(Math.max(0.35, 1 - dy / 600)); }
+        if (start.touch && dy > 10 && Math.abs(dy) > Math.abs(event.clientX - start.x)) { box.dataset.dragging = 'true'; img.style.transform = `translate(${start.tx}px, ${start.ty + dy / q}px) scale(${s})`; box.style.opacity = String(Math.max(0.35, 1 - dy / 600)); }
     });
     const up = (event) => {
         if (!pointers.has(event.pointerId)) return;
@@ -1043,7 +1069,7 @@ function zoomer(root, words) {
         const r = stage.getBoundingClientRect();
         if (now - lastTap < 320) {
             clearTimeout(tapping); lastTap = 0;
-            if (s > fit * 1.01) fitIn(); else zoomTo(Math.max(fit * 2.5, 1), event.clientX - r.left, event.clientY - r.top);
+            if (s > fit * 1.01) fitIn(); else zoomTo(Math.max(fit * 2.5, 1), (event.clientX - r.left) / k(), (event.clientY - r.top) / k());
             return;
         }
         lastTap = now;
@@ -1059,7 +1085,7 @@ function zoomer(root, words) {
             if (!all.length) return;
             back = document.activeElement; list = all; at = Math.max(0, Math.min(all.length - 1, index));
             try { from = thumb?.getBoundingClientRect?.() ?? null; } catch { from = null; }
-            box.hidden = false; load(); box.focus?.({ preventScroll: true });
+            box.hidden = false; watch(true); keep(); load(); box.focus?.({ preventScroll: true });
         },
         get open() { return !box.hidden; },
         close,

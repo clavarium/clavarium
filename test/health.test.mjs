@@ -38,8 +38,8 @@ test('what is said: the state, a machine that does not answer, memory, disk, fol
     assert.deepEqual(full.problems.map((p) => p.text), [
         'It ran out of memory 3 times since it started: a program in it was stopped. Its files are safe.',
         'Its memory is almost full: 30 MB free of 1024 MB.',
-        'Its disk is almost full: 100 MB left of 8000 MB. Give it more disk (This conversation, Machine).',
-        'Its work folder (/work) is almost full: 50 MB left of 10000 MB. Give it more disk (This conversation, Machine).',
+        'Its disk is almost full: 100 MB left of 8000 MB.',
+        'Its work folder (/work) is almost full: 50 MB left of 10000 MB.',
     ]);
     /* What each is about, and a name that stays the same whatever its numbers (one more time out of memory is a new one). */
     assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);

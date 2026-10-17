@@ -246,3 +246,49 @@ test('pictures shown together are one gallery with their titles, large one after
     assert.deepEqual([went.reaction, went.to], ['go', 'g3-0000-4000-8000-000000000000'.slice(0, 36)]);
     assert.deepEqual(me.errors, []);
 });
+
+test('on a touch screen, a pinch on a picture in the viewer zooms the picture alone, never the page; a page zoomed all the same leaves the viewer its size', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person({ phone: true });
+    await me.create('pinch');
+    assert.equal((await me.api('/api/conversations/pinch/talk', { on: true })).status, 200);
+    const work = join(b.dir, 'data', 'work', 'pinch');
+    writeFileSync(join(work, 'map.png'), png(320, 200, [60, 90, 200]));
+    writeFileSync(join(work, '.parley', 'from-agent.jsonl'), line('p1', 0, { kind: 'show', path: '/work/map.png', text: 'The map', files: [{ path: '/work/map.png', title: 'Map' }] }));
+    await me.page.goto(`${b.origin}/?c=pinch`);
+    const thread = me.page.locator('#simple-thread');
+    await me.until('the picture', async () => (await thread.locator('.parley-said[data-kind=show] img').count()) > 0);
+    await thread.locator('.parley-said[data-kind=show] img').first().click();
+    const zoom = thread.locator('.parley-zoom');
+    await me.until('large', async () => zoom.isVisible());
+    await me.until('fitted', async () => (await zoom.locator('.parley-zoom-stage img').evaluate((i) => i.complete && i.naturalWidth > 0)));
+    await wait(300);
+    const barBefore = (await zoom.locator('.parley-zoom-bar').boundingBox()).height;
+    const scaleOf = () => zoom.locator('.parley-zoom-stage img').evaluate((i) => new DOMMatrix(getComputedStyle(i).transform).a);
+    const fitted = await scaleOf();
+    const text = await me.page.evaluate(() => window.clavariumText().scale);
+    /* Two fingers on the picture, moved apart: the browser's own touch events. */
+    const box = await zoom.locator('.parley-zoom-stage img').boundingBox();
+    const cx = box.x + box.width / 2; const cy = box.y + box.height / 2;
+    const cdp = await me.context.newCDPSession(me.page);
+    const touch = (type, d) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: cx - d, y: cy, id: 1 }, { x: cx + d, y: cy, id: 2 }] });
+    await touch('touchStart', 20);
+    for (let d = 30; d <= 120; d += 10) { await touch('touchMove', d); await wait(16); }
+    await touch('touchEnd', 120);
+    await me.until('the picture is zoomed', async () => (await scaleOf()) > fitted * 2);
+    assert.equal(await zoom.getAttribute('data-zoomed'), 'true');
+    assert.equal(await me.page.evaluate(() => window.visualViewport.scale), 1, 'the page did not zoom');
+    assert.equal(await me.page.evaluate(() => window.clavariumText().scale), text, 'the text of the page did not grow');
+    const barAfter = (await zoom.locator('.parley-zoom-bar').boundingBox()).height; assert.ok(Math.abs(barAfter - barBefore) < 1, `its bars kept their size (${barAfter} for ${barBefore})`);
+    /* The page zoomed all the same (a browser that forces it): the viewer is sized back to the screen. */
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
+    await me.until('the page is zoomed', async () => (await me.page.evaluate(() => window.visualViewport.scale)) > 1.9);
+    await me.until('the viewer kept its size', async () => (await zoom.getAttribute('data-kept')) === 'true');
+    const kept = await me.page.evaluate(() => { const r = document.querySelector('#simple-thread .parley-zoom-bar').getBoundingClientRect(); const v = window.visualViewport; return { height: r.height * v.scale, left: r.left - v.offsetLeft, width: document.querySelector('#simple-thread .parley-zoom').getBoundingClientRect().width * v.scale, screen: v.width * v.scale }; });
+    assert.ok(Math.abs(kept.height - barBefore) < 1.5, `its bars as tall on the screen (${kept.height} for ${barBefore})`);
+    assert.ok(Math.abs(kept.left) < 1.5 && Math.abs(kept.width - kept.screen) < 1.5, 'across the screen, where the screen is');
+    await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
+    await zoom.locator('.parley-zoom-close').click();
+    assert.equal(await zoom.isVisible(), false);
+    assert.deepEqual(me.errors, []);
+});

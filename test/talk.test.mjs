@@ -247,10 +247,13 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     b.talk.machine('helper', { level: 'bad', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }] });
     lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
     assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'needs-you', tone: 'bad', actions: ['restart', 'terminal'] });
+    /* A disk short of room alone: a restart frees nothing -- what takes the room, and a larger disk. */
+    b.talk.machine('helper', { level: 'warn', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }, { level: 'warn', kind: 'disk', key: 'disk:/', text: 'Its disk is almost full: 50 MB left of 8000 MB.' }] });
+    assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk']);
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
     b.talk.machine('helper', memory);
-    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 3);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 4);
     assert.deepEqual(b.typed.filter((x) => x !== WAKE && x !== 'Enter'), [], 'nothing of it is typed to the tool');
 });
 

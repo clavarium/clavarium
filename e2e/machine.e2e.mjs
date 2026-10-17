@@ -128,6 +128,36 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     assert.deepEqual(me.errors, []);
 });
 
+test('a terminal not opened for a blink is tried again in silence, under a neutral word; a fault is said only if it lasts', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('blink');
+    /* The bridge refuses the first openings, with no reason a page could act on (a server starting again). */
+    let refused = 2;
+    await me.page.routeWebSocket(/\/terminal\?/, (ws) => {
+        if (refused > 0) { refused -= 1; ws.send(JSON.stringify({ type: 'error', text: 'Not now.' })); ws.close({ code: 1011, reason: 'cannot open' }); return; }
+        ws.connectToServer();
+    });
+    /* Every sentence said over the terminal is kept, to be read after. */
+    await me.context.addInitScript(() => {
+        window.clavariumTimes = { loading: 100, retry: 300 };
+        window.said = [];
+        addEventListener('DOMContentLoaded', () => { const n = document.getElementById('notice-text'); new MutationObserver(() => window.said.push(n.textContent)).observe(n, { childList: true, characterData: true, subtree: true }); });
+    });
+    await me.page.reload();
+    await me.until('live after two refusals', async () => refused === 0 && (await me.state()) === 'live', 20_000);
+    const said = await me.page.evaluate(() => window.said);
+    assert.ok(said.includes('Loading the terminal\u2026'), `a neutral word: ${JSON.stringify(said)}`);
+    assert.deepEqual(said.filter((x) => /Not now|could not|repair/i.test(x)), [], 'no fault said for a blink');
+    assert.equal(await me.page.locator('#notice').isVisible(), false);
+    /* Refused for longer than a blink: the fault is said, with Try again. */
+    refused = Infinity;
+    await me.context.addInitScript(() => { window.clavariumTimes = { loading: 100, retry: 300, quiet: 1500 }; });
+    await me.page.reload();
+    await me.until('the fault is said', async () => (await me.page.locator('#notice-action').innerText().catch(() => '')) === 'Try again' && (await me.page.locator('#notice-text').innerText()) === 'Not now.', 20_000);
+    assert.deepEqual(me.errors, []);
+});
+
 test('memory saturated and a full disk are said; memory and disk are changed from the Machine chapter, and the record holds what the machine has', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
@@ -149,6 +179,12 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     /* Over its screen: "More memory..." opens its memory, the next size up picked, nothing applied yet. */
     await me.page.locator('#panel-close').click();
     assert.match(await me.page.locator('#health-text').innerText(), /ran out of memory 2 times/);
+    /* Its disk short of room: what takes it (its terminal) and a larger disk are offered too. */
+    assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', '\u00d7']);
+    await me.page.locator('#health-disk').click();
+    await me.until('its disk, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-disk');
+    assert.equal(await me.page.locator('#machine-disk').inputValue(), '10');
+    await me.page.locator('#panel-close').click();
     await me.page.locator('#health-memory').click();
     await me.until('its memory, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-memory');
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '1024');
@@ -158,7 +194,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     const line = me.page.locator('#simple-thread .parley-system');
     await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
     assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal']);
-    assert.equal(await me.page.locator('#health-terminal').isVisible(), true, 'the strip offers its terminal over the chat');
+    assert.equal(await me.page.locator('#health-room').isVisible(), true, 'the strip offers its terminal over the chat');
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
     await me.page.locator('#folders').click();

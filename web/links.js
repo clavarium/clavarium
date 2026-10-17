@@ -38,7 +38,6 @@
         all: { cols: [['device'], ['conversation'], ['asset']], sources: ['device', 'conversation'] },
     };
     const WORDS = { term: 'Terminal', chat: 'Chat', both: 'Terminal + chat', read: 'Read', write: 'Read and write', use: 'Use' };
-    const ALL_KINDS = ['term', 'chat', 'both', 'read', 'write', 'use'];
 
     /* A small maker of elements: text is always text. */
     function h(tag, props = {}, ...children) {
@@ -56,7 +55,6 @@
     const css = (k) => `var(--k-${k})`;
     const nameOf = (id) => id.slice(id.indexOf(':') + 1);
     const curve = (a, z) => { const dx = Math.max(30, (z.x - a.x) * 0.5); return `M${a.x},${a.y} C${a.x + dx},${a.y} ${z.x - dx},${z.y} ${z.x},${z.y}`; };
-    const markers = (prefix) => { const d = s('defs'); for (const k of ALL_KINDS) { const m = s('marker', { id: `${prefix}-${k}`, viewBox: '0 0 10 10', refX: 9, refY: 5, markerWidth: 6, markerHeight: 6, orient: 'auto' }); const p = s('path', { d: 'M0 0 10 5 0 10z' }); p.style.fill = css(k); m.append(p); d.append(m); } return d; };
     const phone = () => matchMedia('(max-width: 600px)').matches;
     /* The map is on screen: Access is open, on its map. */
     const shownNow = () => !document.getElementById('links').hidden && !document.getElementById('access').hidden && !document.getElementById('access-map').hidden;
@@ -65,7 +63,8 @@
         const $ = (id) => document.getElementById(id);
         let graph = { nodes: [], links: [], flows: [] };
         let byId = new Map();
-        let view = matchMedia('(min-width: 900px)').matches ? 'all' : 'devices';
+        /* Everything by default, on every screen: the view that tells the most. */
+        let view = 'all';
         try { const v = localStorage.getItem('clavarium-links-view'); if (VIEWS[v]) view = v; } catch { /* none kept */ }
         /* Every link is drawn unless this device chose to hide them: a screen with no line read as broken. */
         let allLines = true;
@@ -302,7 +301,8 @@
             const colEls = [...bd.querySelectorAll('.lk-col')]; const cols = colEls.map((c) => c.getBoundingClientRect());
             const middle = cols.length === 3 ? { left: cols[1].left - b.left, right: cols[1].right - b.left, free: gaps(colEls[1], b) } : null;
             svg.setAttribute('viewBox', `0 0 ${b.width} ${b.height}`);
-            svg.replaceChildren(markers('lkm'));
+            /* No arrowheads: the colour of a line says the right. */
+            svg.replaceChildren();
             bd.querySelectorAll('.lk-knob, .lk-edge, .lk-hook').forEach((c) => c.remove());
             const edges = new Map(); const knobs = []; const wanted = []; const hooks = new Map();
             /* The pale ones first: the links in colour are drawn over them. */
@@ -331,7 +331,6 @@
                 const r = route(a, z, over, many);
                 const p = s('path', { d: r.d, class: [dash ? 'dash' : '', away ? 'away' : '', off ? 'dim' : '', on ? 'on' : '', pale ? 'pale' : '', l.pending ? 'later' : ''].join(' '), 'data-from': l.from, 'data-to': l.to, 'data-kind': k });
                 p.style.stroke = css(k);
-                if (!away && !pale && !off) p.setAttribute('marker-end', `url(#lkm-${k})`);
                 layers[pale ? 0 : 1].append(p);
                 if (away || pale || off) continue;
                 const hit = s('path', { d: r.d, class: 'hit' }); hit.addEventListener('click', () => openPop(l)); layers[1].append(hit);
@@ -725,15 +724,15 @@
             return [{ id, d: 0 }, ...out];
         }
         const tnode = (n, extra = '') => h('button', { type: 'button', class: `lk-tnode lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}${extra}`, title: `Trace ${n.name}` }, h('b', { text: n.name }), h('small', { text: n.sub }));
-        function drawEdges(boardEl, svgEl, list, keyOf, prefix) {
+        function drawEdges(boardEl, svgEl, list) {
             requestAnimationFrame(() => {
                 const r = boardEl.getBoundingClientRect();
                 svgEl.setAttribute('viewBox', `0 0 ${r.width} ${r.height}`);
-                svgEl.replaceChildren(markers(prefix));
+                svgEl.replaceChildren();
                 for (const [ka, kz, k, pending] of list) {
                     const a = boardEl.querySelector(`[data-key="${CSS.escape(ka)}"]`)?.getBoundingClientRect(); const z = boardEl.querySelector(`[data-key="${CSS.escape(kz)}"]`)?.getBoundingClientRect();
                     if (!a || !z) continue;
-                    const p = s('path', { d: curve({ x: a.right - r.left, y: a.top + a.height / 2 - r.top }, { x: z.left - r.left, y: z.top + z.height / 2 - r.top }), 'marker-end': `url(#${prefix}-${k})`, class: pending ? 'later' : '' });
+                    const p = s('path', { d: curve({ x: a.right - r.left, y: a.top + a.height / 2 - r.top }, { x: z.left - r.left, y: z.top + z.height / 2 - r.top }), class: pending ? 'later' : '' });
                     p.style.stroke = css(k); svgEl.append(p);
                 }
             });
@@ -760,7 +759,7 @@
                 if (!(d >= 0 || d + 1 <= 0)) continue;
                 if (where.has(`${e.from}@${d}`) && where.has(`${e.to}@${d + 1}`)) list.push([`${e.from}@${d}`, `${e.to}@${d + 1}`, e.k, e.l.pending, e, d]);
             }
-            drawEdges(tb, sv, list, null, 'lkt');
+            drawEdges(tb, sv, list);
             /* The same, in sentences, step by step: what a phone shows instead of the drawing. */
             for (const d of ds.filter((x) => x !== 0)) {
                 const these = list.filter((x) => (d > 0 ? x[5] === d - 1 : x[5] === d));
@@ -814,7 +813,7 @@
                     tb.append(col);
                 }
                 const list = es.filter((e) => !back.has(e) && lvl.get(e.to) > lvl.get(e.from)).map((e) => [e.from, e.to, e.k, e.l.pending]);
-                drawEdges(tb, sv, list, null, `lki${gi}`);
+                drawEdges(tb, sv, list);
                 const words = h('ul', { class: 'lk-steps' }, graph.links.filter((l) => set.has(l.from) && set.has(l.to)).map(linkSentence));
                 host.append(h('section', { class: 'lk-island', 'data-around': f.around }, head, h('div', { class: 'lk-tscroll' }, tb), h('details', { class: 'lk-words', open: phone() || undefined }, h('summary', { text: 'In words' }), words)));
             });

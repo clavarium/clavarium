@@ -19,9 +19,8 @@ test('three places at the bottom left; Access is Map, Devices, Assets with Expor
     await me.create('garden');
     await me.api('/api/resources', { name: 'seeds' });
     await pairDevice(me, b.origin, [{ asset: 'folder:seeds', rights: 'r' }], 'Kitchen tablet');
-    /* The three items, in this order, and nothing else: the list is the first. */
-    assert.deepEqual(await page.locator('#nav button').allInnerTexts(), ['Conversations', 'Access', 'Settings']);
-    assert.equal(await page.locator('#nav-conversations').getAttribute('aria-current'), 'page');
+    /* On a wide screen the list above is the menu: the bar holds the places of the whole, Access and Settings. */
+    assert.deepEqual(await page.locator('#nav button:visible').allInnerTexts(), ['Access', 'Settings']);
     const navBox = await page.locator('#nav').boundingBox(); const listBox = await page.locator('#list').boundingBox();
     assert.ok(navBox.x < 5 && navBox.y >= listBox.y + listBox.height - 1, 'under the list, bottom left');
     for (const id of ['#links-open', '#assets-open', '#sharing-open', '#settings-open']) assert.equal(await page.locator(id).count(), 0, `${id} has gone into the places`);
@@ -87,9 +86,9 @@ test('three places at the bottom left; Access is Map, Devices, Assets with Expor
     await page.goto(`${b.origin}/?open=settings`);
     await me.until('settings', async () => page.locator('#settings').isVisible());
     assert.equal(await page.locator('#nav-settings').getAttribute('aria-current'), 'page');
-    await page.locator('#nav-conversations').click();
-    await me.until('back to the list', async () => !(await page.locator('#settings').isVisible()));
-    assert.equal(await page.locator('#nav-conversations').getAttribute('aria-current'), 'page');
+    /* A conversation touched in the list: Settings gives way to it. */
+    await page.locator('#items .item', { hasText: 'garden' }).click();
+    await me.until('settings gave way to garden', async () => !(await page.locator('#settings').isVisible()) && (await page.locator('#items .item[aria-current=true]').innerText()).includes('garden'));
     assert.deepEqual(me.errors, []);
 });
 
