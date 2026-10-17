@@ -1803,8 +1803,13 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
        opened. Should a browser move the focus all the same, it is given back
        in the same gesture. */
     let typing = false;
+    /* On a touch screen, the microphone and the buttons of the thread (an
+       answer, a reaction) are said or tapped, not typed: the keyboard is not
+       kept for them, and never brought back after them. */
+    const spoken = (target) => touching && (target.closest('.parley-mic') || thread.contains(target));
     const keep = (event) => {
         if (!(event.target instanceof Element) || !event.target.closest('button')) return;
+        if (spoken(event.target)) { typing = false; return; }
         typing = document.activeElement === box;
         if (typing) event.preventDefault();
     };
@@ -1935,6 +1940,8 @@ export function mount(root, { load, send, words = {}, open, terminal, remind, vi
         error: (message) => { if (stopping) tell('error', String(message ?? '')); },
     };
     mic.addEventListener('click', async () => {
+        /* Speaking on a touch screen: the keyboard goes away, and stays away. */
+        if (touching && document.activeElement === box) box.blur();
         if (stopping) { quiet(); stayIn(); return; }
         if (starting || !voice) return;
         starting = true;
