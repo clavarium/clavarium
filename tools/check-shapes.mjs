@@ -76,6 +76,9 @@ const identities = new Set(
         .split('\n').filter(Boolean));
 for (const who of identities) {
     if (/@users\.noreply\.github\.com$/i.test(who)) continue;
+    /* GitHub itself commits a change made on its site (Pages writing docs/CNAME,
+       for instance): its committer is this one address, the author stays ours. */
+    if (who === ['noreply', 'github.com'].join('@')) continue;
     console.error(`a commit is signed ${who}`);
     console.error('  Commits here are signed with a GitHub noreply address.');
     console.error('  A contributor whose form differs adds it to this rule, in the open.');
