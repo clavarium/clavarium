@@ -73,8 +73,8 @@ const ran = (log, pred) => log.filter((e) => e.argv && pred(e.argv));
 const installRuns = (log) => ran(log, (a) => a[0] === '/bin/bash' && a[1].endsWith('install.sh'));
 
 test('the parameters: one way in, a domain, a default administrator; anything odd is refused', () => {
-    /* Neither --relay nor --port: a relay that does not exist yet, its address asked later. */
-    assert.equal(parseOnline(['--domain', 'clav.example.com', '--relay-user', 'ubuntu']).askRelay, true);
+    /* Neither --relay nor --port: the domain is the relay's address. */
+    assert.equal(parseOnline(['--domain', 'clav.example.com', '--relay-user', 'ubuntu']).relay, 'clav.example.com', 'no --relay: the relay is reached by the domain');
     const r = parseOnline(['--relay', 'relay.example.net', '--domain', 'clav.example.com']);
     assert.equal(r.user, 'root'); assert.equal(r.relayPort, '22'); assert.equal(r.admin, ['admin', 'clav.example.com'].join('@'));
     assert.equal(parseOnline(['--port', '--domain', 'clav.example.com', '--admin', 'you@example.com']).admin, 'you@example.com');

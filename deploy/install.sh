@@ -263,15 +263,22 @@ if [ "$KEEP_RELEASE" = "yes" ]; then
     release="$(basename "$(readlink -f "$CODE/current")")"
     echo "   the release that runs is kept: $release"
 else
-if [ -n "$VERSION" ]; then
+if [ -n "$VERSION" ] && [ -L "$CODE/current" ] && [ "$(basename "$(readlink -f "$CODE/current")")" = "$VERSION" ]; then
+    # Run again with the version that runs already (a step after it failed, a
+    # DNS record made late): kept as it is, and the rest goes on.
+    release="$VERSION"
+    echo "   clavarium@$VERSION runs here already: kept"
+elif [ -n "$VERSION" ]; then
     echo "   clavarium@$VERSION from npm: fetched, checked, built, tried (a few minutes)"
     release="$(updater prepare --version "$VERSION")" || refuse "clavarium@$VERSION was not installed (above: why)"
 else
     echo "   the working tree $FROM_DIR (development): copied, built, tried"
     release="$(updater prepare --from-dir "$FROM_DIR")" || refuse "the working tree was not installed (above: why)"
 fi
-systemctl stop clavarium.service 2>/dev/null || true
-updater switch "$release"
+if [ "$(basename "$(readlink -f "$CODE/current" 2>/dev/null)")" != "$release" ]; then
+    systemctl stop clavarium.service 2>/dev/null || true
+    updater switch "$release"
+fi
 fi
 APP="$CODE/current/app"
 NODE="$CODE/current/node/bin/node"

@@ -81,9 +81,9 @@ export function parseOnline(args) {
         }
     }
     if (o.relay && o.port) throw new Bad('say how it will be reached: --relay HOST or --port, not both');
-    /* Neither: through a relay that does not exist yet -- its key is shown first,
-       and its address asked once the operator has made it with that key. */
-    if (!o.relay && !o.port) o.askRelay = true;
+    /* Neither: the usual case -- the domain points to the relay, which is
+       reached by the domain itself (its address is not needed). */
+    if (!o.relay && !o.port) o.relay = o.domain;
     if (!DOMAIN.test(o.domain)) throw new Bad('--domain is a host name, lower case, like clav.example.com');
     o.admin ||= `admin@${o.domain}`;
     if (!EMAIL.test(o.admin)) throw new Bad('--admin is an e-mail address, lower case');
