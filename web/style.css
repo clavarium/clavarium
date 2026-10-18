@@ -1132,6 +1132,9 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 
 /* ---------- THE REVIEW (E) ---------- */
 .review { position: fixed; inset: 0; z-index: 30; overflow-y: auto; background: var(--bg); padding: 14px 20px 40px; display: flex; flex-direction: column; gap: 10px; }
+/* Inside the page it was opened from: the conversation's Assets view, or the server's Assets below its header. */
+.review.inset { position: static; inset: auto; z-index: auto; flex: 1 1 auto; min-height: 0; }
+:is(#cassets, #assets):has(> .review:not([hidden])) > .as { display: none; }
 .rv-head { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
 .rv-head > b { font-size: 1.375rem; overflow-wrap: anywhere; }
 .rv-branches { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }

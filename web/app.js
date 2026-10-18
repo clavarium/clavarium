@@ -2164,7 +2164,7 @@
         if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
         const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint', 'Drawing the branches...'));
         holder.append(facts, chapter('Branches', acts), diagram);
-        const back = place ? { label: 'Assets', go: () => { void paintAssets(); } } : { label: 'Assets', go: () => { void paintRoomAssets(); } };
+        const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: 'Assets', go: () => { void paintRoomAssets(); } };
         review.addEventListener('click', () => { void openGit(name, { back }); });
         const [out, graph] = await Promise.all([getJson(`/git/${name}/outgoing`, null), getJson(`/git/${name}/graph`, null)]);
         facts.replaceChildren();
@@ -2253,6 +2253,7 @@
     function closeRoomAssets() {
         if (!assetsShown) return;
         assetsShown = false; $('cassets').hidden = true; unembedFiles(); paintViews();
+        if ($('cassets').contains($('gitview'))) shutGit();
     }
 
     /* ---- the server's ---- */
@@ -2520,7 +2521,8 @@
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
-        if (which !== 'conversations') { closeRoomAssets(); for (const id of ['panel', 'files', 'copy', 'gitview']) $(id).hidden = true; view('room'); }
+        if (which !== 'conversations') { closeRoomAssets(); for (const id of ['panel', 'files', 'copy']) $(id).hidden = true; view('room'); }
+        if (which !== 'assets' || !$('assets').contains($('gitview'))) shutGit();
     }
     function placeAddress() {
         const q = new URLSearchParams();
@@ -3269,17 +3271,33 @@
         if (!commit && out.state === 'ahead') await runChecks();
     }
     /* `commit`: one commit of the diagram. `back`: {label, go} -- where the page goes back to. */
+    /* The review is shown inside the page it was opened from, never over it:
+       in the server's Assets (its header stays), or in a conversation's Assets
+       view (the list of conversations and the bar Chat | Terminal | Assets
+       stay, and leave it). */
     async function openGit(name, { commit = '', back = null, target = '', branch = '' } = {}) {
-        gitShown = name; gitCommit = commit; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = 'changes';
         for (const id of ['panel', 'files']) if (!$(id).classList.contains('embedded')) $(id).hidden = true;
-        $('gitview').hidden = false; $('gitview').scrollTop = 0;
+        let host = null;
+        if (place === 'assets') host = $('assets');
+        else if (!DEVICE && current) {
+            /* From the chat or a sheet: the Assets view opened on it; closing gives back the view it was in. */
+            if (!assetsShown) { back ??= { label: 'Back', go: () => { closeRoomAssets(); focusTerminal(); } }; roomPick = `git:${name}`; await openRoomAssets(); }
+            host = $('cassets');
+        }
+        const g = $('gitview');
+        if (host && g.parentNode !== host) host.append(g);
+        g.classList.toggle('inset', Boolean(host));
+        gitShown = name; gitCommit = commit; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = 'changes';
+        g.hidden = false; g.scrollTop = 0;
         await paintGit();
     }
+    /* Left without its own button (Chat, Terminal, another conversation, another place). */
+    function shutGit() { $('gitview').hidden = true; gitShown = ''; gitBack = null; }
     for (const b of $('gitview-tabs').querySelectorAll('[data-tab]')) b.addEventListener('click', () => { gitTab = b.dataset.tab; paintReviewTab(); });
     for (const b of $('gitview-layout').querySelectorAll('[data-layout]')) b.addEventListener('click', () => { gitLayout = b.dataset.layout; paintReviewTab(); drawDiff(gitText.replace(/\n$/, '')); });
     for (const b of $('gitview-picker').querySelectorAll('[data-step]')) b.addEventListener('click', () => { showFile(gitFile + Number(b.dataset.step)); $('gitview-diff').scrollIntoView({ block: 'start' }); });
-    $('gitview-set-remote').addEventListener('click', () => { const name = gitShown; $('gitview').hidden = true; gitShown = ''; void openAssetsPlace(`git:${name}`, { remote: true }); });
-    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; const back = gitBack; gitBack = null; if (back?.go) back.go(); else focusTerminal(); });
+    $('gitview-set-remote').addEventListener('click', () => { const name = gitShown; shutGit(); void openAssetsPlace(`git:${name}`, { remote: true }); });
+    $('gitview-close').addEventListener('click', () => { const back = gitBack; shutGit(); if (back?.go) back.go(); else focusTerminal(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-check').addEventListener('click', () => { void runChecks(); });
     $('gitview-branch').addEventListener('change', () => { gitAskedBranch = $('gitview-branch').value; gitAsked = ''; void paintGit(); });

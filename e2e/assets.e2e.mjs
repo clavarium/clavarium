@@ -98,7 +98,15 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     assert.match(await page.locator('#gitview-commits').innerText(), /Adaptive <b>threshold<\/b> for the light/);
     await page.locator('#gitview-tabs [data-tab="changes"]').click();
     await shot(page, 'tablet-review');
-    await page.locator('#gitview-close').click();
+    /* Inside the page, never over it: the conversations and the bar stay, Assets chosen; Chat leaves it. */
+    for (const kept of ['#list', '#room > header', '#view-chat', '#view-terminal', '#view-assets']) assert.equal(await page.locator(kept).isVisible(), true, kept);
+    assert.equal(await page.locator('#view-assets').getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#cassets #gitview').isVisible(), true, 'in the Assets view');
+    assert.equal(await page.locator('#cassets-rows').isVisible(), false, 'the review has the room');
+    await page.locator('#view-chat').click();
+    await me.until('Chat leaves the review', async () => !(await page.locator('#gitview').isVisible()) && !(await page.locator('#cassets').isVisible()));
+    await page.locator('#view-assets').click();
+    await me.until('Assets again, without the review', async () => await page.locator('#cassets-rows').isVisible() && !(await page.locator('#gitview').isVisible()));
     /* A folder: its files, here. */
     await page.locator('#cassets-rows .as-row[data-asset="folder:notes"]').click();
     await me.until('its files are shown in the detail', async () => await page.locator('#cassets-detail #files').isVisible());
@@ -128,6 +136,13 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await me.until('the repository: its settings', async () => /Remote/.test(await page.locator('#assets-detail .as-settings').innerText()));
     await me.until('its branches, here too', async () => (await page.locator('#assets-detail .gg-row').count()) >= 3, 20_000);
     await shot(page, 'tablet-server-assets');
+    /* Its review, in the place: the header of Assets and the conversations stay; "< site" goes back. */
+    await page.locator('#assets-detail button[data-act="review"]').click();
+    await me.until('the review in Assets', async () => /would be sent to/.test(await page.locator('#gitview-state').innerText()), 20_000);
+    for (const kept of ['#list', '#assets > .panel-top', '#assets #gitview']) assert.equal(await page.locator(kept).isVisible(), true, kept);
+    assert.equal(await page.locator('#gitview-back').innerText(), 'site');
+    await page.locator('#gitview-close').click();
+    await me.until('the repository again', async () => !(await page.locator('#gitview').isVisible()) && await page.locator('#assets-detail').isVisible());
     await page.locator('#nav-access').click();
     await me.until('the map', async () => await page.locator('#links').isVisible());
     for (const gone of ['#tab-devices', '#tab-assets', '#flows-export']) assert.equal(await page.locator(gone).isVisible(), false, gone);
@@ -148,6 +163,7 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     assert.equal(await phone.page.locator('#gitview-layout').isVisible(), false, 'unified only');
     assert.equal(await phone.page.locator('#gitview-diff .d2h-file-wrapper:visible').count(), 1);
     await shot(phone.page, 'phone-review');
+    for (const kept of ['#view-chat', '#view-terminal', '#view-assets']) assert.equal(await phone.page.locator(kept).isVisible(), true, `on a phone too: ${kept}`);
     await phone.page.locator('#gitview-picker button[data-step="1"]').tap();
     await phone.until('the second file', async () => (await phone.page.locator('#gitview-picker-at').innerText()) === '2 / 2');
     await phone.page.locator('#gitview-close').tap();
