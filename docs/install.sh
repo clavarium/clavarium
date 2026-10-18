@@ -70,7 +70,7 @@ if [ -n "$KEY_ONLY" ]; then
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    qrencode -t ANSIUTF8 -m 2 < "$ACCESS/setup-key.pub" || true
+    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
     echo "Next: create the relay (Ubuntu) with this key, point your domain to its address, then:"
     echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email>"
     exit 0
