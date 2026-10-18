@@ -89,7 +89,7 @@ export class Toolbox {
             const sha256 = createHash('sha256').update(bytes).digest('hex');
             const there = existsSync(`${dir}/${file}`) ? createHash('sha256').update(readFileSync(`${dir}/${file}`)).digest('hex') : '';
             if (there !== sha256) { writeFileSync(`${dir}/.${file}.new`, bytes); renameSync(`${dir}/.${file}.new`, `${dir}/${file}`); }
-            const version = /-(\d+\.\d+\.\d+)\.tgz$/.exec(file)?.[1] ?? '';
+            const version = /-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.tgz$/.exec(file)?.[1] ?? '';
             tools.push({ name: source.name, version, file, sha256, usage: source.usage(`${TOOLS_PATH}/${file}`) });
         }
         const kept = new Set([...tools.map((t) => t.file), 'index.json', ...(this.#notes ? [NOTES] : [])]);

@@ -62,7 +62,7 @@ test('the folder is made by the host program, then filled: each archive, and an 
     const [archive] = readdirSync(files).filter((f) => f.endsWith('.tgz'));
     const sha256 = createHash('sha256').update(readFileSync(join(files, archive))).digest('hex');
     assert.equal(sha256, createHash('sha256').update(readFileSync(parleySource()[0].archive)).digest('hex'));
-    assert.deepEqual(index, { tools: [{ name: 'parley', version: /-(\d+\.\d+\.\d+)\.tgz$/.exec(archive)[1], file: archive, sha256, usage: 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }] });
+    assert.deepEqual(index, { tools: [{ name: 'parley', version: /-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.tgz$/.exec(archive)[1], file: archive, sha256, usage: 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }] });
     assert.deepEqual(JSON.parse(readFileSync(join(files, 'index.json'), 'utf8')), index, 'what a tool reads in /tools/index.json');
     assert.equal(b.box.find('parley').path, `${TOOLS_PATH}/${archive}`);
     /* Prepared again: what is no longer listed goes, what is there is kept. */

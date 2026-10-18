@@ -1010,3 +1010,10 @@ button.inline:hover { color: var(--brass); }
 #server-gauge [data-level="bad"] .gauge-bar > span { background: var(--danger); }
 #server-gauge .gauge-n { color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
 #server-gauge [data-level="ok"] .gauge-word { color: var(--ink2); }
+/* Hidden conversations: a quiet link at the bottom of the list; a dot when one of them needs you. */
+#hidden-toggle { display: block; margin: .5rem .75rem; color: var(--ink2); font-size: .8rem; }
+#hidden-toggle[hidden] { display: none; }
+#hidden-toggle .needs-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--brass); vertical-align: middle; }
+.item[data-hidden="true"] { opacity: .7; }
+#create .advanced { margin: .25rem 0; }
+#create .advanced summary { cursor: pointer; color: var(--ink2); font-size: .8rem; }

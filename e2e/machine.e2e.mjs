@@ -65,7 +65,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     /* Every right in its machine: the default, given at its first start. */
     await me.sees('\nset rights:full');
     /* Parley was installed in it by the server (never by the tool), from /tools, offline. */
-    assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+\.tgz\n$/);
+    assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     report(b, 'silent', { silent: true });
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();

@@ -424,6 +424,10 @@ export async function handleApi(request, response, conversations, headers, resou
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
+        const titling = /^\/api\/conversations\/([^/]+)\/title$/.exec(pathname);
+        if (titling) return send(200, conversations.setTitle(decodeURIComponent(titling[1]), body.title)), true;
+        const hiding = /^\/api\/conversations\/([^/]+)\/hidden$/.exec(pathname);
+        if (hiding) return send(200, conversations.setHidden(decodeURIComponent(hiding[1]), body.on)), true;
         const marking = /^\/api\/conversations\/([^/]+)\/voice-mark$/.exec(pathname);
         if (marking) return send(200, conversations.setVoiceMark(decodeURIComponent(marking[1]), body.on)), true;
         const resuming = /^\/api\/conversations\/([^/]+)\/resume$/.exec(pathname);

@@ -6,7 +6,7 @@
  *   - Sleep is a button, never a guess: telling a long job from an idle tool
  *     cannot be done without reading the tool, and this server does not read.
  */
-import { isConversationName } from './names.mjs';
+import { isConversationName, identifierFrom, titleProblem } from './names.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
@@ -189,7 +189,8 @@ export class Conversations {
 
     /* Whether a new machine may be made for this request: what `create`
        checks, and the server's room (capacity.mjs). Asked before `create`. */
-    async admit({ name, tool, memoryMb } = {}) {
+    async admit({ name, title, tool, memoryMb } = {}) {
+        if (!name && typeof title === 'string' && !titleProblem(title)) ({ name } = this.#naming({ title }));
         const chosen = this.#tools.find((t) => t.id === tool);
         /* What `create` refuses anyway is said by `create`. */
         if (!chosen || !isConversationName(name) || this.#store.get(name)) return;
@@ -201,7 +202,17 @@ export class Conversations {
     /* `workOnDisk`: the tool works on its machine's own disk instead of in a
        folder kept by the server. Faster for a large code project; but what
        it makes is then not seen from the page, and goes with the machine. */
-    create({ name, tool, memoryMb, workOnDisk }) {
+    /* A conversation is made from the name a person reads (`title`), its
+       identifier drawn from it, or from an identifier alone (the advanced
+       options, a blueprint). The identifier never changes afterwards. */
+    #naming({ name, title }) {
+        if (title !== undefined) { const problem = titleProblem(title); if (problem) throw new Refusal(400, problem); }
+        const id = name || (title !== undefined ? identifierFrom(title, (x) => Boolean(this.#store.get(x))) : name);
+        return { name: id, title: title !== undefined && title !== id ? title : undefined };
+    }
+
+    create({ name: given, title: read, tool, memoryMb, workOnDisk }) {
+        const { name, title } = this.#naming({ name: given, title: read });
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
         if (!chosen) throw new Refusal(400, 'Unknown tool.');
@@ -211,7 +222,7 @@ export class Conversations {
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         this.#store.put(conversation);
         this.built = this.#build(name, chosen, memory);
         return conversation;
@@ -447,6 +458,28 @@ export class Conversations {
         const said = given.replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069<>]/g, ' ').replace(/\s+/g, ' ').trim();
         if (said.length > CHAT_NAME_MAX) throw new Refusal(400, `${CHAT_NAME_MAX} characters at most.`);
         this.#store.patch(name, { chatName: said || undefined });
+        return this.#store.get(name);
+    }
+
+    /* THE NAME A PERSON READS, changed at any time; its identifier stays.
+       Kept only when it differs from the identifier: a conversation made
+       before free names is read by its identifier, and nothing is rewritten. */
+    setTitle(name, title) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const problem = titleProblem(title);
+        if (problem) throw new Refusal(400, problem);
+        this.#store.patch(name, { title: title === name ? undefined : title });
+        return this.#store.get(name);
+    }
+
+    /* Hidden from the list, like a hidden file: it runs, keeps its rights,
+       and is still in Access; the list says how many are hidden. */
+    setHidden(name, on) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (hidden from the list) or false (shown).');
+        this.#store.patch(name, { hidden: on ? true : undefined });
         return this.#store.get(name);
     }
 

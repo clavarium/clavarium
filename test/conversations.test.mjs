@@ -732,6 +732,32 @@ test('a start that fails ends its steps; a server restarted meanwhile forgets th
     assert.equal(b.store.get('demo').progress, undefined);
 });
 
+test('a free name: the identifier drawn from it at creation and fixed; the name changed at any time; hidden from the list and shown again', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    const made = all.create({ title: 'Location voiture', tool: 'bold' });
+    await all.built;
+    assert.deepEqual([made.name, made.title], ['location-voiture', 'Location voiture']);
+    const twin = all.create({ title: 'Location voiture', tool: 'bold' });
+    await all.built;
+    assert.equal(twin.name, 'location-voiture-2', 'taken: a number');
+    assert.throws(() => all.create({ title: `evil${String.fromCodePoint(0x202e)}txt`, tool: 'bold' }), /invisible or direction/);
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    assert.equal(all.get('demo').title, undefined, 'made from an identifier: read by it, nothing written');
+    all.setTitle('demo', 'Demo 🚗');
+    assert.equal(all.get('demo').title, 'Demo 🚗');
+    all.setTitle('demo', 'demo');
+    assert.equal(all.get('demo').title, undefined, 'its identifier again: nothing kept');
+    assert.throws(() => all.setTitle('demo', ' x'), /space/);
+    assert.throws(() => all.setTitle('nobody', 'x'), /No such/);
+    all.setHidden('demo', true);
+    assert.equal(all.list().find((c) => c.name === 'demo').hidden, true);
+    all.setHidden('demo', false);
+    assert.equal(all.get('demo').hidden, undefined);
+    assert.throws(() => all.setHidden('demo', 'yes'), /true/);
+});
+
 test('its name in the chat, and whether what is dictated into its terminal is marked: the neutral word and the mark by default, never a mark for a tool that is no AI', async (t) => {
     const b = bench(t);
     const all = b.make();

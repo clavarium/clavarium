@@ -650,8 +650,8 @@
     function enter(keepSheets = false) {
         if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
-        $('name').textContent = current || 'No conversation';
-        document.title = current ? `${current} - Clavarium` : 'Clavarium';
+        $('name').textContent = (c ? shownName(c) : current) || 'No conversation';
+        document.title = current ? `${c ? shownName(c) : current} - Clavarium` : 'Clavarium';
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
@@ -731,10 +731,20 @@
         if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind, retry: j.retry === true });
         return j;
     };
+    /* The name a person reads; a conversation made before free names is read by its identifier. */
+    const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : c?.name ?? '');
+    /* It needs its owner: it asks or waits, its answerer asks, it failed, its machine is unwell. Said even when it is hidden. */
+    const needsYou = (c) => Boolean((c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) || c.answerer?.needs || c.phase === 'failed'
+        || (c.phase === 'ready' && !c.asleep && ['warn', 'bad'].includes(c.health?.level)));
+    /* Hidden conversations are shown on a click on "N hidden", for this page only. */
+    let showHidden = false;
     function paint() {
         const items = $('items');
         items.replaceChildren();
+        const hidden = conversations.filter((c) => c.hidden === true);
         for (const c of conversations) {
+            /* The one open stays in sight, hidden or not. */
+            if (c.hidden === true && !showHidden && c.name !== current) continue;
             const b = document.createElement('button');
             b.type = 'button'; b.className = 'item'; b.dataset.phase = c.phase;
             /* Ready, but its tool not there yet: it still reads as under way. */
@@ -742,7 +752,9 @@
             if (c.name === current) b.setAttribute('aria-current', 'true');
             const title = document.createElement('b');
             const dot = document.createElement('span'); dot.className = 'dot';
-            title.append(dot, c.name);
+            title.append(dot, shownName(c));
+            if (c.title) b.title = c.name;
+            if (c.hidden === true) b.dataset.hidden = 'true';
             const sub = document.createElement('small');
             /* Under way: the step the panel shows, in its words (the tool named once). */
             const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
@@ -761,6 +773,14 @@
             b.addEventListener('click', () => select(c.name));
             items.append(b);
         }
+        const toggle = $('hidden-toggle');
+        toggle.hidden = DEVICE || hidden.length === 0;
+        toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
+        toggle.setAttribute('aria-expanded', String(showHidden));
+        const calling = hidden.some(needsYou);
+        toggle.dataset.needs = String(calling);
+        toggle.title = calling ? 'A hidden conversation needs you' : '';
+        if (calling && !showHidden) { const dot = document.createElement('span'); dot.className = 'needs-dot'; dot.setAttribute('aria-label', 'one needs you'); toggle.append(' ', dot); }
         $('empty').hidden = conversations.length > 0;
         paintDeviceCount();
     }
@@ -832,16 +852,21 @@
         $('create').hidden = false;
         focusField($('create-name'));
     }
+    $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
     $('new').addEventListener('click', () => { void openCreate(); });
     $('create-cancel').addEventListener('click', () => { $('create').hidden = true; });
+    /* The identifier drawn from the name, as the server draws it (names.mjs), shown before it is made; the server decides. */
+    const identifierOf = (title) => String(title).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 32).replace(/-+$/, '') || 'conversation';
+    $('create-name').addEventListener('input', () => { $('create-id').placeholder = identifierOf($('create-name').value.trim()); });
     $('create').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const name = $('create-name').value.trim();
+        const title = $('create-name').value.trim();
+        const id = $('create-id').value.trim();
         try {
-            await post(`${API}/conversations`, { name, tool: chosenTool, workOnDisk: $('create-disk').checked });
-            $('create').hidden = true; $('create-name').value = ''; $('create-disk').checked = false;
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), tool: chosenTool, workOnDisk: $('create-disk').checked });
+            $('create').hidden = true; $('create-name').value = ''; $('create-id').value = ''; $('create-disk').checked = false;
             await refresh();
-            select(name);
+            select(made.name);
         } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
     });
 
@@ -1380,7 +1405,7 @@
         const facts = $('general-facts'); facts.replaceChildren();
         const fact = (term, value) => { const dt = document.createElement('dt'); dt.textContent = term; const dd = document.createElement('dd'); dd.textContent = value; facts.append(dt, dd); };
         if (here) {
-            fact('Name', here.name);
+            fact('Identifier', here.name);
             fact('Tool', here.toolLabel ?? here.tool);
             if (here.createdAt) fact('Created', new Date(here.createdAt).toLocaleString());
             fact('Machine', `${sizeWords(here.memoryMb)} of memory, ${here.diskGb ? `${here.diskGb} GB` : 'an unknown size of'} disk`);
@@ -1740,6 +1765,9 @@
         if (DEVICE) { $('talk-box').hidden = true; $('voice-mark-box').hidden = true; return; }
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
+        if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
+        $('title-box').hidden = $('hide-box').hidden = DEVICE || !here;
+        for (const b of $('hide-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.hidden === true)));
         $('voice-mark-box').hidden = !here?.ai;
         for (const b of $('voice-mark').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.voiceMark === true)));
         await readTalk();
@@ -1755,6 +1783,19 @@
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
             try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk`, { on: b.dataset.on === 'true' }); await paintTalkBox(); void paintThread(); void paintGuide(conversations.find((x) => x.name === current)); }
+            catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        });
+    }
+    $('title-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/title`, { title: $('title-name').value.trim() }); $('title-name').blur(); await refresh(); enter(true); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
+    for (const b of $('hide-on').children) {
+        b.addEventListener('click', async () => {
+            $('panel-error').hidden = true;
+            try { await post(`${API}/conversations/${encodeURIComponent(current)}/hidden`, { on: b.dataset.on === 'true' }); await refresh(); for (const x of $('hide-on').children) x.setAttribute('aria-pressed', String(x === b)); }
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
@@ -2092,7 +2133,7 @@
                 }
                 for (const c of ready.filter((x) => x.name !== accessFor)) {
                     const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
-                    const who = document.createElement('span'); who.textContent = c.name;
+                    const who = document.createElement('span'); who.textContent = shownName(c);
                     const options = kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
                     line.append(who, modes(options, resource.attachments?.[c.name] ?? 'none', async (access) => { await attachTo(c.name, resource.name, access, 'assets-error'); await paintAssets(); }, `What ${c.name} may do with ${resource.name}`));
                     inside.append(line);
@@ -2247,7 +2288,7 @@
                 const inside = document.createElement('div'); inside.className = 'asset-inside';
                 for (const c of ready.filter((x) => x.name !== accessFor)) {
                     const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
-                    const who = document.createElement('span'); who.textContent = c.name;
+                    const who = document.createElement('span'); who.textContent = shownName(c);
                     line.append(who, modes([['off', 'Off'], ['use', 'Use']], secret.conversations.includes(c.name) ? 'use' : 'off', async (value) => { await handTo(c.name, secret.name, value === 'use', 'assets-error'); await paintAssets(); }, `Whether the tool of ${c.name} is handed ${secret.name}`));
                     inside.append(line);
                 }

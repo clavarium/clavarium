@@ -15,7 +15,12 @@
     <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
     <form id="create" hidden autocomplete="off">
       <label for="create-name">Name</label>
-      <input id="create-name" name="name" required maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
+      <input id="create-name" name="name" required maxlength="60" placeholder="Website redesign" spellcheck="false">
+      <details class="advanced"><summary>Advanced options</summary>
+        <label for="create-id">Identifier</label>
+        <input id="create-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
+        <p class="hint">Used for its machine, its folders, its address and what is given to it. Drawn from the name when empty; it cannot be changed later. The name can.</p>
+      </details>
       <span class="legend">What runs in it</span>
       <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
       <label class="check"><input type="checkbox" id="create-disk"> Work on the machine's own disk</label>
@@ -25,6 +30,8 @@
         <span class="hint">a new machine takes a few minutes</span></div>
     </form>
     <div id="items"></div>
+    <!-- Hidden conversations still run; this shows them, and says when one needs you. -->
+    <button type="button" id="hidden-toggle" class="inline" hidden aria-expanded="false"></button>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
     <!-- Shown only when this server is short of disk or memory: opens Settings, This server. -->
     <button type="button" id="server-gauge" hidden></button>
@@ -104,6 +111,13 @@
           <summary><span class="chapter-title">General</span><span class="chapter-about">What it is, and how you talk with it.</span></summary>
           <div class="chapter-body">
             <dl id="general-facts" class="facts"></dl>
+            <div id="title-box" hidden>
+            <form id="title-form" class="row" autocomplete="off"><label for="title-name">Name</label><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></form>
+            </div>
+            <div id="hide-box" hidden>
+            <div class="row"><span>In the list</span><div class="levels" id="hide-on" role="group" aria-label="Hidden from the list"><button type="button" data-on="false">Shown</button><button type="button" data-on="true">Hidden</button></div></div>
+            <p class="hint">Hidden, it runs as before, keeps what it was given and stays in Access; "hidden" at the bottom of the list shows it.</p>
+            </div>
             <!-- WHAT ITS TOOL IS TOLD ABOUT WHERE IT IS: the exact text, made by the
                  server from these settings; the owner's own lines; told again on a click. -->
             <div id="guide-box">
