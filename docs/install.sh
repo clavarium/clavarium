@@ -72,20 +72,12 @@ if [ -n "$KEY_ONLY" ]; then
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    # The QR code is 78 columns by 39 lines: shown under the key when the screen
-    # has room, alone on a cleared screen when it is just big enough, not at all
-    # (the text above is the same key) when it is smaller.
-    size="$(stty size </dev/tty 2>/dev/null || echo "67 240")"; lines="${size% *}"; cols="${size#* }"
-    if [ "$cols" -ge 78 ] && [ "$lines" -ge 45 ]; then
-        qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
-    elif [ "$cols" -ge 78 ] && [ "$lines" -ge 40 ] && [ -r /dev/tty ]; then
-        printf 'The same key as a QR code takes the whole screen: press Enter to see it.'; read -r _ </dev/tty || true
-        clear; qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
-        printf 'Press Enter to go on.'; read -r _ </dev/tty || true; clear
-        echo "    $(cat "$ACCESS/setup-key.pub")"
-    else
-        echo "(This screen is too small for the QR code: ${cols}x${lines}, it needs 78x40. The text above is the key.)"
-    fi
+    # The QR code is 78 columns by 39 lines. Always shown; on a screen that looks
+    # small it is drawn from the top of a cleared screen, to have all the room there is.
+    lines="$(stty size </dev/tty 2>/dev/null | cut -d' ' -f1)"
+    if [ -n "$lines" ] && [ "$lines" -lt 45 ]; then clear 2>/dev/null || true; fi
+    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    echo "    $(cat "$ACCESS/setup-key.pub")"
     echo "Kept here, where the installation (step 2) takes it: $ACCESS/setup-key (the private half"
     echo "never leaves this machine) and $ACCESS/setup-key.pub (the public one, above)."
     echo
