@@ -9,6 +9,7 @@
 import { isConversationName } from './names.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
+import { resumeOrFresh } from './tools.mjs';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -424,7 +425,7 @@ export class Conversations {
            first: added at EVERY start, a resume included (a tool does not
            keep it from its last session). */
         const rights = tool.rights ? (c.askFirst === true ? tool.rights.ask : tool.rights.full) : [];
-        return [...(resume ? tool.resume : tool.command), ...rights];
+        return resume ? resumeOrFresh([...tool.resume, ...rights], [...tool.command, ...rights]) : [...tool.command, ...rights];
     }
 
     /* Whether its tool asks before acting (true), or acts without asking in

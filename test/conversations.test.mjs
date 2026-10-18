@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { Conversations, Refusal, SESSION } from '../server/conversations.mjs';
 import { Store } from '../server/store.mjs';
 import { Vms, vmName } from '../server/vm.mjs';
-import { readTools } from '../server/tools.mjs';
+import { readTools, resumeOrFresh } from '../server/tools.mjs';
 
 const TOOLS = readTools(JSON.stringify([
     { id: 'tool', label: 'Tool', command: ['tool', '--go'], memoryMb: 1024, install: [['sudo', 'install-tool']] },
@@ -450,7 +450,7 @@ test('its tool takes up its last session when it starts -- never at its first st
     await all.built;
     const tool = async () => { const argv = await all.open('demo'); all.left('demo'); return argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')); };
     assert.deepEqual(await tool(), ['again'], 'its first start: no session to take up');
-    assert.deepEqual(await tool(), ['again', '--continue']);
+    assert.deepEqual(await tool(), resumeOrFresh(['again', '--continue'], ['again']));
     assert.equal(all.list()[0].resumes, true);
     assert.deepEqual(all.tools().map((x) => [x.id, x.resumes]), [['tool', false], ['again', true], ['bold', true]]);
     all.setResume('demo', false);
@@ -458,7 +458,7 @@ test('its tool takes up its last session when it starts -- never at its first st
     assert.deepEqual(await tool(), ['again'], 'started fresh, as the owner chose');
     all.setResume('demo', true);
     assert.equal(all.get('demo').resume, undefined, 'the default is not written');
-    assert.deepEqual(await tool(), ['again', '--continue']);
+    assert.deepEqual(await tool(), resumeOrFresh(['again', '--continue'], ['again']));
     assert.throws(() => all.setResume('demo', 'yes'), /true/);
     assert.throws(() => all.setResume('nobody', true), /No such conversation/);
     /* Built again: a new disk, no session on it. */
@@ -480,7 +480,7 @@ test('every right in its own machine by default, at EVERY start of its tool (fir
     const tool = async () => { const argv = await all.open('demo'); all.left('demo'); return argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')); };
     const FULL = ['--every-right', '--settings', '{"a": [1]}'];
     assert.deepEqual(await tool(), ['bold', ...FULL], 'its first start');
-    assert.deepEqual(await tool(), ['bold', '--continue', ...FULL], 'a resume: the tool does not keep it from its last session');
+    assert.deepEqual(await tool(), resumeOrFresh(['bold', '--continue', ...FULL], ['bold', ...FULL]), 'a resume: the tool does not keep it from its last session');
     assert.equal(all.list()[0].rights, true);
     assert.equal(all.list()[0].askFirst, undefined, 'the default is not written');
     assert.deepEqual(all.tools().map((x) => [x.id, x.rights]), [['tool', false], ['again', false], ['bold', true]]);
@@ -489,10 +489,10 @@ test('every right in its own machine by default, at EVERY start of its tool (fir
     all.setResume('demo', true);
     all.setAskFirst('demo', true);
     assert.equal(all.get('demo').askFirst, true);
-    assert.deepEqual(await tool(), ['bold', '--continue', '--asks']);
+    assert.deepEqual(await tool(), resumeOrFresh(['bold', '--continue', '--asks'], ['bold', '--asks']));
     all.setAskFirst('demo', false);
     assert.equal(all.get('demo').askFirst, undefined);
-    assert.deepEqual(await tool(), ['bold', '--continue', ...FULL]);
+    assert.deepEqual(await tool(), resumeOrFresh(['bold', '--continue', ...FULL], ['bold', ...FULL]));
     assert.throws(() => all.setAskFirst('demo', 'yes'), /true/);
     assert.throws(() => all.setAskFirst('nobody', true), /No such conversation/);
     /* Built again: a new disk; still every right. */
@@ -751,4 +751,18 @@ test('its name in the chat, and whether what is dictated into its terminal is ma
     all.setVoiceMark('demo', true);
     assert.equal(all.get('demo').voiceMark, undefined, 'the default is not written');
     assert.throws(() => all.setVoiceMark('demo', 'yes'), /true/);
+});
+
+test('a resume that finds no session of its own ("No conversation found") starts the tool fresh, in the same terminal; a tool that ran and was quit stays quit', async () => {
+    const { spawnSync } = await import('node:child_process');
+    const run = (argv) => spawnSync(argv[0], argv.slice(1), { encoding: 'utf8' });
+    /* The resume says so and stops at once: a new session, with the same rights (quotes and all). */
+    const none = run(resumeOrFresh(['sh', '-c', 'echo No conversation found; exit 1'], ['printf', '%s|', 'fresh', '{"a": [1]}', "it's"]));
+    assert.equal(none.status, 0);
+    assert.match(none.stdout, /No conversation found\n\nNo session to take up here: a new one starts\.\nfresh\|\{"a": \[1\]\}\|it's\|/);
+    /* It resumed and was quit normally: nothing more. */
+    const quit = run(resumeOrFresh(['sh', '-c', 'echo resumed; exit 0'], ['echo', 'fresh']));
+    assert.equal(quit.stdout, 'resumed\n'); assert.equal(quit.status, 0);
+    /* No bare ";" for tmux to take as its own. */
+    assert.ok(!resumeOrFresh(['a'], ['b']).includes(';'));
 });

@@ -107,3 +107,16 @@ export function readTools(text) {
 export function loadTools(path = new URL('../config/tools.json', import.meta.url)) {
     return readTools(readFileSync(path, 'utf8'));
 }
+
+/* TAKING UP ITS LAST SESSION, OR A NEW ONE: a tool told to resume where it has
+   no session of its own (never spoken to, its session files gone) may just say
+   so and stop ("No conversation found"), leaving a dead terminal. If the resume
+   fails within RESUME_GRACE_S, the tool starts fresh, in the same terminal. A
+   tool that ran and is quit stays quit. One argument vector, for tmux. */
+export const RESUME_GRACE_S = 20;
+const shq = (a) => `'${String(a).replace(/'/g, `'\\''`)}'`;
+export function resumeOrFresh(resume, fresh) {
+    const script = `t=$(date +%s); ${resume.map(shq).join(' ')}; c=$?; `
+        + `if [ "$c" -ne 0 ] && [ $(( $(date +%s) - t )) -lt ${RESUME_GRACE_S} ]; then echo; echo 'No session to take up here: a new one starts.'; exec ${fresh.map(shq).join(' ')}; fi; exit "$c"`;
+    return ['sh', '-c', script];
+}
