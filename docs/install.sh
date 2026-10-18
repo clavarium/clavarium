@@ -55,6 +55,7 @@ done
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root: curl -fsSL https://clavarium.org/install.sh | sudo bash"
 
+# Version of this script: 2026-10-18.3 (printed, to tell a stale copy from the current one).
 # STEP 1 OF 2, ALONE: the key the relay will be made with. Made here, its private
 # half never leaves this machine; its public half shown as text and as a QR code.
 # The installation (step 2) takes it from the same place.
@@ -65,12 +66,16 @@ if [ -n "$KEY_ONLY" ]; then
         || refuse "openssh-client and qrencode could not be installed"
     install -d -m 0700 "$ACCESS"
     [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
+    echo "clavarium install.sh 2026-10-18.3"
     echo
     echo "The key to create your relay with (its SSH key, at your host). It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    echo "Kept here, where the installation (step 2) takes it: $ACCESS/setup-key (the private half"
+    echo "never leaves this machine) and $ACCESS/setup-key.pub (the public one, above)."
+    echo
     echo "Where it goes, if your host does not ask for it when you create the machine: on the relay,"
     echo "in /home/<user>/.ssh/authorized_keys (or /root/.ssh/authorized_keys for root), one line."
     echo "That user must be able to use sudo without a password (most hosts' default user can)."
