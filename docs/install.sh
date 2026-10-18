@@ -72,10 +72,7 @@ if [ -n "$KEY_ONLY" ]; then
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    # The QR code is 78 columns by 39 lines. Always shown; on a screen that looks
-    # small it is drawn from the top of a cleared screen, to have all the room there is.
-    lines="$(stty size </dev/tty 2>/dev/null | cut -d' ' -f1)"
-    if [ -n "$lines" ] && [ "$lines" -lt 45 ]; then clear 2>/dev/null || true; fi
+    # The QR code is 78 columns by 39 lines, shown as it is, whatever the screen.
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo "Kept here, where the installation (step 2) takes it: $ACCESS/setup-key (the private half"
