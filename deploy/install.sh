@@ -661,6 +661,12 @@ if [ -n "$RELAY" ]; then
     echo
     echo "ON THE RELAY ($RELAY), run this one command; the tunnel then comes up by itself:"
     echo "    sudo deploy/relay.sh --key \"$TUNNEL_KEY\""
+    # A server with a screen and a keyboard only: the key, carried by a phone.
+    # It is a PUBLIC key: showing it is safe; it lets the relay know this machine.
+    if command -v qrencode >/dev/null 2>&1 || apt-get install -y -qq qrencode >/dev/null 2>&1; then
+        echo "The same key, to read with a phone or a tablet:"
+        qrencode -t ANSIUTF8 -m 2 -- "$TUNNEL_KEY" || true
+    fi
     echo "It will print this, and it must be the same:    $RELAY_PRINT"
     echo "The name $DOMAIN must lead to the relay."
 else
