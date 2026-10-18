@@ -69,9 +69,9 @@ if [ -n "$KEY_ONLY" ]; then
     # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
     # everything else after it: if the screen is too small for the code, the key
     # is still there as text, under it, to copy.
-    echo "clavarium install.sh 2026-10-18.13"
+    echo "clavarium install.sh 2026-10-18.14"
     echo
-    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    tr -d "\n" < "$ACCESS/setup-key.pub" | qrencode -t ANSI -m 1 -l L || true
     echo
     echo "Above: the QR code of the key to create your relay with. It is a PUBLIC key: showing it is safe."
     echo
