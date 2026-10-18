@@ -6,11 +6,12 @@ import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Toolbox, parleySource, TOOLS_PATH } from '../server/toolbox.mjs';
+import { Toolbox, parleySource, integrityOf, TOOLS_PATH } from '../server/toolbox.mjs';
+import { packageFile, locked } from '../server/parley.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 
-function bench(t, { make = 0, mount = { code: 0 } } = {}) {
+function bench(t, { make = 0, mount = { code: 0 }, sources } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-tools-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const asked = [];
@@ -19,17 +20,36 @@ function bench(t, { make = 0, mount = { code: 0 } } = {}) {
         mountTools: async (name, uid, gid) => { asked.push(`mount ${name} ${uid} ${gid}`); return typeof mount === 'function' ? mount() : mount; },
         unmountTools: async (name) => { asked.push(`unmount ${name}`); return { code: 0 }; },
     };
-    const box = new Toolbox({ host, vms, mntDir: dir, uid: 994, gid: 985 });
+    const box = new Toolbox({ host, vms, mntDir: dir, uid: 994, gid: 985, ...(sources ? { sources } : {}) });
     return { dir, asked, box, vms, host };
 }
 
-test('Parley is the first tool: its archive as npm packed it, with one line of usage', () => {
+test('Parley is the first tool: its archive as the registry served it, at the version installed, with the integrity npm recorded', () => {
     const [parley] = parleySource();
     assert.equal(parley.name, 'parley');
-    assert.match(parley.archive, /server\/parley\/clavarium-parley-\d+\.\d+\.\d+\.tgz$/);
+    const version = JSON.parse(readFileSync(packageFile('clavarium-parley', 'package.json'), 'utf8')).version;
+    assert.ok(parley.archive.endsWith(`/toolbox/clavarium-parley-${version}.tgz`), parley.archive);
     assert.equal(readFileSync(parley.archive).subarray(0, 2).toString('hex'), '1f8b', 'a gzip archive');
+    assert.equal(integrityOf(readFileSync(parley.archive)), locked('clavarium-parley').integrity, 'the archive npm recorded');
+    assert.equal(version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).dependencies['clavarium-parley'], 'an exact version, from package.json');
     /* Installed by the server: nothing in the index asks a tool to install it. */
     assert.equal(parley.usage('/tools/x.tgz'), 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.');
+});
+
+test('an archive that is not the one npm recorded, or none, is not given to machines', async (t) => {
+    const app = mkdtempSync(join(tmpdir(), 'clv-app-'));
+    t.after(() => rmSync(app, { recursive: true, force: true }));
+    const version = JSON.parse(readFileSync(packageFile('clavarium-parley', 'package.json'), 'utf8')).version;
+    assert.deepEqual(parleySource({ app }), [], 'no archive: nothing');
+    mkdirSync(join(app, 'toolbox'));
+    writeFileSync(join(app, 'toolbox', `clavarium-parley-${version}.tgz`), 'not the archive');
+    assert.deepEqual(parleySource({ app }), [], 'no lock file that records it: nothing');
+    writeFileSync(join(app, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/clavarium-parley': locked('clavarium-parley') } }));
+    const [source] = parleySource({ app });
+    assert.equal(source.integrity, locked('clavarium-parley').integrity);
+    const b = bench(t, { sources: [source] });
+    const index = await b.box.prepare();
+    assert.deepEqual(index.tools, [], 'the archive differs from what npm recorded: not offered');
 });
 
 test('the folder is made by the host program, then filled: each archive, and an index of name, version, checksum and usage', async (t) => {

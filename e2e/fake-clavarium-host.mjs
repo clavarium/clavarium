@@ -87,6 +87,38 @@ if (area === 'server' && verb === 'usage') {
     console.log(process.env.FAKE_SERVER_USAGE ?? ['used data 120', 'used folders 2300', 'used work 1800', 'used removed 0', 'used tools 3', ...made.map((vm) => `used machine ${vm} 1500`), 'used shelf 0', 'used others 0', 'used images 650'].join('\n'));
     process.exit(0);
 }
+/* UPDATES: the updater played on two files (the ones the server reads, as the
+   real updater writes them): FAKE_VM_DIR/update/state.json and update.conf.
+   What the registry has out: update/registry; a version that will not come up: update/broken. */
+if (area === 'update') {
+    const at = join(DIR, 'update');
+    mkdirSync(at, { recursive: true });
+    const read = (f, d) => { try { return readFileSync(join(at, f), 'utf8').trim(); } catch { return d; } };
+    const state = JSON.parse(read('state.json', '{}'));
+    const save = () => writeFileSync(join(at, 'state.json'), JSON.stringify(state));
+    const now = new Date().toISOString();
+    const done = (entry) => { state.history = [{ at: now, ...entry }, ...(state.history ?? [])]; state.running = null; };
+    if (verb === 'check') { const out = read('registry', ''); state.checkedAt = now; state.available = out && out !== state.version ? out : null; save(); process.exit(0); }
+    if (verb === 'set') {
+        const conf = Object.fromEntries(read('update.conf', '').split('\n').filter((l) => l.includes('=')).map((l) => l.split('=')));
+        conf[{ mode: 'MODE', channel: 'CHANNEL', window: 'WINDOW' }[argv[0]]] = argv[1];
+        writeFileSync(join(at, 'update.conf'), `${Object.entries(conf).map(([k, v]) => `${k}=${v}`).join('\n')}\n`);
+        process.exit(0);
+    }
+    if (verb === 'apply') {
+        const from = state.version;
+        if (read('broken', '') === argv[0]) done({ action: 'update', from, to: argv[0], result: 'rolled-back', why: 'it did not answer' });
+        else { done({ action: 'update', from, to: argv[0], result: 'done' }); state.version = argv[0]; state.releases = [{ id: argv[0], version: argv[0], current: true }, { id: from, version: from, current: false }]; }
+        state.available = null; save(); process.exit(0);
+    }
+    if (verb === 'rollback') {
+        const from = state.version;
+        done({ action: 'back', from, to: argv[0], result: 'done' }); state.version = argv[0];
+        state.releases = [{ id: argv[0], version: argv[0], current: true }, { id: from, version: from, current: false }];
+        save(); process.exit(0);
+    }
+    process.exit(64);
+}
 if (area === 'net') {
     if (verb === 'apply') { writeFileSync(`${DIR}/network-rules`, argv[0]); appendFileSync(`${DIR}/network-log`, `${Date.now()}\n`); process.exit(0); }
     /* taps, bridge: no VM runs here, so there is nothing to list. */

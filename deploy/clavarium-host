@@ -80,9 +80,16 @@ CONF="/etc/clavarium/host.conf"
 RUNNER_ROOT="/var/lib/clavarium/runner-root"
 GIT_READ="/usr/lib/clavarium/git-read"
 LOCKS="/run/clavarium"
+# THE UPDATER (verbs "update ..."): the release that runs, its Node.js and its
+# updater, all root's (install.sh, deploy/updater.mjs). A request for the
+# updater's service is written where only root writes.
+CODE="/opt/clavarium"
+UPDATER_NODE="$CODE/current/node/bin/node"
+UPDATER="$CODE/current/app/deploy/updater.mjs"
+UPDATE_STATE="/var/lib/clavarium/update"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git|server> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -659,6 +666,34 @@ case "$AREA $VERB" in
         systemctl stop "clvread-$1_*.service" >/dev/null 2>&1 || true
         systemctl reset-failed "clvread-$1_*.service" >/dev/null 2>&1 || true
         exit 0 ;;
+    "update check")
+        # Asks the registry what is out on the channel, now, and prints what
+        # the updater knows (state.json). No argument: the registry, the name
+        # of the package and the channel are the updater's own, not asked.
+        [ $# -eq 0 ] || usage
+        run "$UPDATER_NODE" "$UPDATER" check ;;
+    "update set")
+        # <mode|channel|window> <value>: one setting of /etc/clavarium/update.conf.
+        [ $# -eq 2 ] || usage
+        case "$1" in
+            mode) [[ "$2" =~ ^(auto|asap|ask|off)$ ]] || refuse "not a mode: $2" ;;
+            channel) [[ "$2" =~ ^(latest|next)$ ]] || refuse "not a channel: $2" ;;
+            window) [[ "$2" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && [ "${2%-*}" != "${2#*-}" ] || refuse "not a window: $2" ;;
+            *) refuse "not a setting: $1" ;;
+        esac
+        run "$UPDATER_NODE" "$UPDATER" set "$1" "$2" ;;
+    "update apply"|"update rollback")
+        # <version>: done by the updater's own service, in the background, so
+        # that restarting this server does not cut it. The updater checks it
+        # again: apply only to a newer version, from the registry, verified;
+        # rollback only to a release that is kept.
+        [ $# -eq 1 ] || usage
+        [[ "$1" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || { [ "$VERB" = "rollback" ] && [[ "$1" =~ ^local-[0-9]{8}-[0-9]{6}$ ]]; } || refuse "not a version: $1"
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "echo $VERB $1 > $UPDATE_STATE/request" "systemctl start --no-block clavarium-update.service"; exit 0; fi
+        install -d -o root -g root -m 0755 "$UPDATE_STATE"
+        printf '%s %s\n' "$VERB" "$1" > "$UPDATE_STATE/request.new"
+        mv -f -- "$UPDATE_STATE/request.new" "$UPDATE_STATE/request"
+        exec systemctl start --no-block clavarium-update.service ;;
     "path held")
         # <dir>: the check `held` makes, run for real on that path, as the
         # caller (root not needed to refuse). --say-only only: it exists so

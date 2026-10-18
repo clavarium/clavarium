@@ -1,10 +1,29 @@
 {
   "name": "clavarium",
-  "version": "0.0.0",
+  "version": "0.1.0-next.1",
   "license": "MIT",
-  "private": true,
   "type": "module",
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
+  "homepage": "https://clavarium.org",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/clavarium/clavarium.git"
+  },
+  "bin": {
+    "clavarium": "deploy/clavarium.mjs"
+  },
+  "files": [
+    "server/",
+    "web/",
+    "config/",
+    "deploy/",
+    "npm-shrinkwrap.json",
+    "LICENSE",
+    "README.md"
+  ],
+  "clavarium": {
+    "dataFormat": 1
+  },
   "scripts": {
     "start": "node server/main.mjs",
     "test": "node --test \"test/*.test.mjs\"",
@@ -15,7 +34,8 @@
     "hooks": "git config core.hooksPath hooks",
     "prepare": "git config core.hooksPath hooks 2>/dev/null || true",
     "check:hooks": "node tools/check-hooks.mjs",
-    "test:e2e": "node --test --test-concurrency=1 \"e2e/*.e2e.mjs\""
+    "test:e2e": "node --test --test-concurrency=1 \"e2e/*.e2e.mjs\"",
+    "toolbox": "node deploy/parley-archive.mjs"
   },
   "engines": {
     "node": ">=22"
@@ -23,6 +43,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "clavarium-parley": "0.9.0",
     "mermaid": "11.17.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",
@@ -30,5 +51,8 @@
     "qrcode": "^1.5.4",
     "web-push": "^3.6.7",
     "ws": "^8.18.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

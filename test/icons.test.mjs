@@ -4,7 +4,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { ICONS } from '../server/parley/ui/parley-icons.js';
+import { packageFile } from '../server/parley.mjs';
+const { ICONS } = await import(packageFile('clavarium-parley', 'ui/parley-icons.js'));
 
 const web = (name) => readFileSync(new URL(`../web/${name}`, import.meta.url), 'utf8');
 

@@ -1,7 +1,7 @@
 /* TALK: a conversation with a tool, on a screen that is not its terminal.
  *
- * THIS IS A BRANCHING ON PARLEY (server/parley, a project of its own, copied
- * here unchanged). Parley gives the tool six verbs -- a command, `parley`,
+ * THIS IS A BRANCHING ON PARLEY (clavarium-parley, a project of its own, an npm
+ * dependency at an exact version: server/parley.mjs). Parley gives the tool six verbs -- a command, `parley`,
  * which this server installs in every machine from /tools (toolbox.mjs) -- and
  * gives this server the other side. PARLEY ANNOUNCES, THIS SERVER DECIDES:
  *
@@ -52,9 +52,9 @@
 import { posix, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, lstatSync } from 'node:fs';
-import { install, Parley, WAKE, REREAD, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from './parley/host/parley-host.mjs';
+import { install, Parley, WAKE, REREAD, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
-import { KEYS } from './parley/ui/parley-ui.js';
+import { KEYS } from 'clavarium-parley/ui';
 import { Refusal, SESSION } from './conversations.mjs';
 import { SOCKET } from './tmux.mjs';
 import { isConversationName } from './names.mjs';

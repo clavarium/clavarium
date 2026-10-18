@@ -93,6 +93,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         ...(serverRoomMs === undefined ? {} : { serverRoomMs }),
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
+        /* What the updater would write: an installation only once a test writes update.conf (updates.e2e.mjs). */
+        updateState: join(dir, 'update', 'state.json'), updateConf: join(dir, 'update', 'update.conf'),
     });
     const origin = `http://127.0.0.1:${server.address().port}`;
     /* `microphone`: a WAV file the browser will hear as its microphone. */

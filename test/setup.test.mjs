@@ -96,7 +96,7 @@ test('export, import into an empty Clavarium, export again: the same file', asyn
     /* Nothing that is data or a secret, no time. */
     for (const never of ['never-exported', 'createdAt', 'T0', 'sealed', 'token']) assert.ok(!first.includes(never), `the file holds ${never}`);
     const doc = JSON.parse(first);
-    assert.deepEqual([doc.clavarium, doc.version, doc['made with']], ['flow', 2, 'Clavarium 0.0.0']);
+    assert.deepEqual([doc.clavarium, doc.version, doc['made with']], ['flow', 2, `Clavarium ${JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version}`]);
     assert.deepEqual(doc.nodes.map((n) => n.id), ["device:Dad's tablet", 'conversation:helper', 'conversation:writer', 'folder:book', 'folder:photos', 'git:site', 'mailbox:home-mail', 'secret:MODEL_KEY']);
     assert.deepEqual(doc.links.find((l) => l.to === 'git:site').autoSend, { branches: ['test', 'try/*'], quietSeconds: 30, perHour: 4, create: false, checks: true });
     assert.equal(doc.links.find((l) => l.from === "device:Dad's tablet" && l.to === 'conversation:writer').gives, 'chat');

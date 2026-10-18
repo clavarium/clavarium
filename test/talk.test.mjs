@@ -11,10 +11,11 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
 import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
-import { WAKE, REREAD } from '../server/parley/host/parley-host.mjs';
-import { run } from '../server/parley/bin/parley.mjs';
+import { WAKE, REREAD } from 'clavarium-parley/host';
+import { packageFile } from '../server/parley.mjs';
+const { run } = await import(packageFile('clavarium-parley', 'bin/parley.mjs'));
 
-const BRIDGE = fileURLToPath(new URL('../server/parley/server/parley-mcp.mjs', import.meta.url));
+const BRIDGE = packageFile('clavarium-parley', 'server/parley-mcp.mjs');
 const until = async (what, check, ms = 5000) => { const end = Date.now() + ms; for (;;) { if (await check()) return; if (Date.now() > end) throw new Error(`never happened: ${what}`); await new Promise((r) => setTimeout(r, 20)); } };
 
 /* A conversation "helper" whose machine runs a tool, all of it stand-ins. */

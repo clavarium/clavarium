@@ -20,7 +20,25 @@
 #                      open a page on this machine is its operator. Not for a
 #                      machine other people use. Takes no --domain, --operator
 #                      or --relay.
+#   --version X.Y.Z    install exactly this version of the package "clavarium"
+#                      from npm, checked (integrity, provenance from
+#                      github.com/clavarium/clavarium, npm audit signatures).
+#                      The default when this script comes from the package
+#                      (npx clavarium install): its own version.
+#   --from-dir DIR     FOR DEVELOPMENT: install the code of a working tree,
+#                      as it is (not checked). The default when this script
+#                      runs from a git working tree.
+#   --updates MODE     auto (default): updates itself in the window below;
+#                      asap: as soon as a version is out; ask: says so in
+#                      Settings and waits; off. Changed later in Settings.
+#   --update-window HH:MM-HH:MM   when "auto" may update (default 02:00-05:00)
+#   --channel C        latest (default) or next (versions with a "-": tests)
 #   --dry-run          check the parameters, say what would be done, do nothing
+#
+# RUN AGAIN on an installation, it installs the version asked for beside the
+# one that runs and switches to it. An installation made before releases
+# existed (code copied into /opt/clavarium) is moved to them; the old copy is
+# removed only once the new one answers.
 #
 # WHAT IT SETS UP, and why it is safe to leave running:
 #   - an account, "clavarium", that owns its data and NOTHING ELSE: no shell,
@@ -28,7 +46,10 @@
 #   - the ONE program it may run as root (clavarium-host), named alone in the
 #     rule that allows it. Everything that needs root goes through it;
 #   - the code in /opt/clavarium, owned by root: the server cannot rewrite
-#     itself;
+#     itself. One folder per version (releases/<version>), the one that runs
+#     named by a link (current); the last two are kept to go back to. A timer
+#     looks for new versions and updates (deploy/updater.mjs), as --updates
+#     and Settings say;
 #   - the data in /home/clavarium, the account's home; the directories whose
 #     content gets mounted into VMs belong to root (see clavarium-host).
 #     UNDER /home ON PURPOSE: the VM manager is confined and can only share
@@ -63,6 +84,7 @@ GIT_READ="/usr/lib/clavarium/git-read"
 ETC="/etc/clavarium"
 HOST_PROGRAM="/usr/local/sbin/clavarium-host"
 UNIT="/etc/systemd/system/clavarium.service"
+UPDATE_CONF="$ETC/update.conf"
 # The edge: exact releases, exact checksums (sha256 of what is downloaded).
 CADDY_VERSION="2.11.4"
 CADDY_SHA256="527fbf917c39189a1e3b31d34fa955601680b2d5c8055d2a87b8b9588dec7bb9"
@@ -76,11 +98,12 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
 DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"
+VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
@@ -90,6 +113,11 @@ while [ $# -gt 0 ]; do
         --relay-port) RELAY_PORT="${2:-}"; shift 2 || bad "--relay-port needs a value" ;;
         --core-only) CORE_ONLY="yes"; shift ;;
         --local) LOCAL="yes"; shift ;;
+        --version) VERSION="${2:-}"; [ -n "$VERSION" ] || bad "--version needs a value"; shift 2 ;;
+        --from-dir) FROM_DIR="${2:-}"; [ -n "$FROM_DIR" ] || bad "--from-dir needs a value"; shift 2 ;;
+        --updates) UPDATES="${2:-}"; shift 2 || bad "--updates needs a value" ;;
+        --update-window) WINDOW="${2:-}"; shift 2 || bad "--update-window needs a value" ;;
+        --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value" ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -115,6 +143,29 @@ if [ -n "$RELAY" ]; then
     [ "$CORE_ONLY" = "no" ] || bad "--relay comes with the edge: it cannot go with --core-only"
 fi
 
+# WHAT IS INSTALLED: an exact version from npm, or a working tree (development).
+[ -z "$VERSION" ] || [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || bad "--version is an exact version, like 1.2.3 or 1.3.0-next.1"
+[ -z "$VERSION" ] || [ -z "$FROM_DIR" ] || bad "--version (from npm) or --from-dir (a working tree), not both"
+if [ -n "$FROM_DIR" ]; then
+    FROM_DIR="$(cd "$FROM_DIR" 2>/dev/null && pwd)" || bad "--from-dir is a folder that exists"
+    [ -f "$FROM_DIR/server/main.mjs" ] && [ -f "$FROM_DIR/package-lock.json" ] || bad "--from-dir is a working tree of Clavarium (server/main.mjs, package-lock.json)"
+fi
+if [ -z "$VERSION" ] && [ -z "$FROM_DIR" ]; then
+    if [ -e "$HERE/.git" ]; then FROM_DIR="$HERE"
+    else VERSION="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$HERE/package.json" | head -1)"
+        [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || refuse "the version of this package was not found in $HERE/package.json: give --version"
+    fi
+fi
+[ -z "$UPDATES" ] || [[ "$UPDATES" =~ ^(auto|asap|ask|off)$ ]] || bad "--updates is auto, asap, ask or off"
+[ -z "$WINDOW" ] || { [[ "$WINDOW" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && [ "${WINDOW%-*}" != "${WINDOW#*-}" ]; } || bad "--update-window is two times, like 02:00-05:00"
+[ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
+# What the updates will be, as the settings file has them or as asked now.
+had() { { sed -n "s/^$1=//p" "$UPDATE_CONF" 2>/dev/null || true; } | head -1; }
+SHOW_MODE="${UPDATES:-$(had MODE)}"; SHOW_MODE="${SHOW_MODE:-auto}"
+SHOW_WINDOW="${WINDOW:-$(had WINDOW)}"; SHOW_WINDOW="${SHOW_WINDOW:-02:00-05:00}"
+case "$VERSION" in *-*) default_channel="next" ;; *) default_channel="latest" ;; esac
+SHOW_CHANNEL="${CHANNEL:-$(had CHANNEL)}"; SHOW_CHANNEL="${SHOW_CHANNEL:-$default_channel}"
+
 # The Node.js the server runs on: the same pinned version, with the same
 # checksum, as the one put in the VMs. One place says which (server/tools.mjs).
 NODE_VERSION="$(sed -n "s/^export const NODE_VERSION = '\(v[0-9.]*\)';$/\1/p" "$HERE/server/tools.mjs")"
@@ -127,7 +178,9 @@ would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
-  code        $CODE (root)      data  $DATA      folders  $MNT (root's chain)      vault key  $VAULT
+  release     $([ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
+  updates     $(case "$SHOW_MODE" in auto) echo "automatic, between ${SHOW_WINDOW%-*} and ${SHOW_WINDOW#*-}" ;; asap) echo "as soon as a version is out" ;; ask) echo "said in Settings, done when you say" ;; off) echo "off" ;; esac), channel $SHOW_CHANNEL
+  code        $CODE/releases/<version>, $CODE/current (root)      data  $DATA      folders  $MNT (root's chain)      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
   edge        $([ "$LOCAL" = "yes" ] && echo "none (--local): no address in https, no sign-in" || [ "$CORE_ONLY" = "yes" ] && echo "none (--core-only)" || echo "caddy $CADDY_VERSION (TLS), oauth2-proxy $PROXY_VERSION (sign-in), dex $DEX_VERSION (who the operators are)")
   reached     $([ "$LOCAL" = "yes" ] && echo "from this machine only; from another one of yours, through ssh -L" || [ -n "$RELAY" ] && echo "through the relay $RELAY (this machine dials out; nothing here listens to the outside)" || echo "directly: ports 443 and 80 of this machine")
@@ -162,30 +215,53 @@ install -d -o "$ACCOUNT" -g "$ACCOUNT" -m 0700 "$VAULT"
 install -d -o root -g root -m 0755 "$MNT" "$MNT/resources" "$MNT/views" "$MNT/removed" "$MNT/work" "$MNT/work-disks"
 
 step "code"
-systemctl stop clavarium.service 2>/dev/null || true
-install -d -o root -g root -m 0755 "$CODE"
-rm -rf -- "$CODE/server" "$CODE/web" "$CODE/config"
-cp -r "$HERE/server" "$HERE/web" "$HERE/config" "$HERE/package.json" "$HERE/package-lock.json" "$CODE/"
-if [ ! -x "$CODE/node/bin/node" ] || [ "$("$CODE/node/bin/node" --version)" != "$NODE_VERSION" ]; then
-    archive="$(mktemp)"
-    curl --proto '=https' --tlsv1.2 -fsSL --max-time 600 -o "$archive" "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-x64.tar.xz"
-    echo "$NODE_SHA256  $archive" | sha256sum -c - >/dev/null || refuse "the Node.js archive does not have the expected checksum"
-    rm -rf -- "$CODE/node"; install -d "$CODE/node"
-    tar -xJf "$archive" -C "$CODE/node" --strip-components=1 --no-same-owner
-    rm -f -- "$archive"
+# No update while this runs: the timer and its service wait.
+systemctl stop clavarium-update.timer clavarium-update.service 2>/dev/null || true
+install -d -o root -g root -m 0755 "$CODE" "$CODE/releases" "$CODE/nodes"
+# An installation from before releases: its code sits in $CODE itself. It
+# keeps running while the new release is made beside it, and is removed only
+# once the new one answers (below).
+LEGACY="no"; [ -d "$CODE/server" ] && [ ! -L "$CODE/current" ] && LEGACY="yes"
+# The Node.js the updater runs on to make the release (each release then has
+# the one its own code pins, most often this one).
+NODE_DIR="$CODE/nodes/$NODE_VERSION"
+if [ ! -x "$NODE_DIR/bin/node" ]; then
+    rm -rf -- "$NODE_DIR.partial"
+    if [ -x "$CODE/node/bin/node" ] && [ "$("$CODE/node/bin/node" --version)" = "$NODE_VERSION" ]; then
+        cp -a "$CODE/node" "$NODE_DIR.partial"
+    else
+        archive="$(mktemp)"
+        curl --proto '=https' --tlsv1.2 -fsSL --max-time 600 -o "$archive" "https://nodejs.org/dist/$NODE_VERSION/node-$NODE_VERSION-linux-x64.tar.xz"
+        echo "$NODE_SHA256  $archive" | sha256sum -c - >/dev/null || refuse "the Node.js archive does not have the expected checksum"
+        install -d "$NODE_DIR.partial"
+        tar -xJf "$archive" -C "$NODE_DIR.partial" --strip-components=1 --no-same-owner
+        rm -f -- "$archive"
+    fi
+    mv -- "$NODE_DIR.partial" "$NODE_DIR"
 fi
-(cd "$CODE" && PATH="$CODE/node/bin:$PATH" npm ci --omit=dev --no-audit --no-fund --loglevel=error >/dev/null)
-[ -f "$CODE/node_modules/node-pty/build/Release/pty.node" ] || refuse "the terminal module was not built (see: cd $CODE && npm ci)"
-chown -R root:root "$CODE"
+updater() { PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/node" "$HERE/deploy/updater.mjs" "$@"; }
+if [ -n "$VERSION" ]; then
+    echo "   clavarium@$VERSION from npm: fetched, checked, built, tried (a few minutes)"
+    release="$(updater prepare --version "$VERSION")" || refuse "clavarium@$VERSION was not installed (above: why)"
+else
+    echo "   the working tree $FROM_DIR (development): copied, built, tried"
+    release="$(updater prepare --from-dir "$FROM_DIR")" || refuse "the working tree was not installed (above: why)"
+fi
+systemctl stop clavarium.service 2>/dev/null || true
+updater switch "$release"
+APP="$CODE/current/app"
+NODE="$CODE/current/node/bin/node"
+# The updater of the release now in place, for what follows and from now on.
+updater() { PATH="$CODE/current/node/bin:$PATH" "$NODE" "$APP/deploy/updater.mjs" "$@"; }
 
 step "the git reader"
 # The one way the server reads an agent's repository: a sandbox around one
 # fixed script (clavarium-host "git read"). Its root is empty and root's.
 install -d -o root -g root -m 0755 /var/lib/clavarium /usr/lib/clavarium "$RUNNER_ROOT"
-install -o root -g root -m 0755 "$HERE/deploy/git-read" "$GIT_READ"
+install -o root -g root -m 0755 "$APP/deploy/git-read" "$GIT_READ"
 
 step "the one privileged program"
-install -o root -g root -m 0755 "$HERE/deploy/clavarium-host" "$HOST_PROGRAM"
+install -o root -g root -m 0755 "$APP/deploy/clavarium-host" "$HOST_PROGRAM"
 install -d -o root -g root -m 0755 "$ETC"
 printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
 rule="$(mktemp)"
@@ -198,7 +274,7 @@ step "what the machines are given, on root's chain"
 # removed/ move from $DATA to $MNT, with the server stopped (above); the
 # machines are given back what they had, from the new places, through the
 # program just installed. See deploy/move-to-mnt.sh.
-bash "$HERE/deploy/move-to-mnt.sh" --data "$DATA" --mnt "$MNT" --host "$HOST_PROGRAM" --node "$CODE/node/bin/node"
+bash "$APP/deploy/move-to-mnt.sh" --data "$DATA" --mnt "$MNT" --host "$HOST_PROGRAM" --node "$NODE"
 # Each component from / to each of them belongs to root, nobody else may
 # write it, and no access list says otherwise (ls marks one with a '+').
 for at in /home "$MNT" "$MNT/resources" "$MNT/views" "$MNT/removed" "$MNT/work" "$MNT/work-disks"; do
@@ -222,17 +298,49 @@ Wants=network-online.target
 [Service]
 User=$ACCOUNT
 Group=$ACCOUNT
-WorkingDirectory=$CODE
+WorkingDirectory=$CODE/current/app
 EnvironmentFile=$ETC/server.env
-ExecStart=$CODE/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT$([ "$LOCAL" = "yes" ] || echo " --operators $OPERATORS --public-origin https://$DOMAIN")
+ExecStart=$CODE/current/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT$([ "$LOCAL" = "yes" ] || echo " --operators $OPERATORS --public-origin https://$DOMAIN")
 Restart=on-failure
 RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
 UNITFILE
+
+# THE UPDATES: their settings (kept from an earlier run unless asked here),
+# and the timer that looks for a new version every 15 minutes. What it does
+# is the updater's (deploy/updater.mjs), as root, through this service only.
+updater set port "$PORT" >/dev/null
+updater set mode "$SHOW_MODE" >/dev/null
+updater set window "$SHOW_WINDOW" >/dev/null
+updater set channel "$SHOW_CHANNEL" >/dev/null
+cat > /etc/systemd/system/clavarium-update.service <<UPDATEUNIT
+[Unit]
+Description=Clavarium - looks for a new version, and updates as its settings say
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=$CODE/current/node/bin/node $CODE/current/app/deploy/updater.mjs run
+TimeoutStartSec=3600
+UPDATEUNIT
+cat > /etc/systemd/system/clavarium-update.timer <<'UPDATETIMER'
+[Unit]
+Description=Clavarium - looks for a new version every 15 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=15min
+RandomizedDelaySec=3min
+
+[Install]
+WantedBy=timers.target
+UPDATETIMER
 systemctl daemon-reload
 systemctl enable --quiet clavarium.service
+systemctl enable --quiet clavarium-update.timer
 systemctl restart clavarium.service
 
 step "checks"
@@ -244,6 +352,15 @@ systemctl is-active --quiet clavarium.service || refuse "the service did not sta
 curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$PORT/" || refuse "the server does not answer on 127.0.0.1:$PORT"
 sudo -u "$ACCOUNT" sudo -n -l "$HOST_PROGRAM" >/dev/null || refuse "the account cannot reach its one program"
 if sudo -u "$ACCOUNT" sudo -n -l /bin/sh >/dev/null 2>&1; then refuse "the account can run more than its one program as root"; fi
+# It answers: the copy of an installation from before releases goes, and
+# releases beyond the last two. Then the timer may look for updates.
+if [ "$LEGACY" = "yes" ]; then
+    rm -rf -- "$CODE/server" "$CODE/web" "$CODE/config" "$CODE/node_modules" "$CODE/node" "$CODE/package.json" "$CODE/package-lock.json"
+    echo "   the earlier copy of the code in $CODE was removed: it runs from $CODE/current"
+fi
+updater prune
+systemctl start clavarium-update.timer
+echo "   running: $(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$APP/package.json" | head -1) ($release)"
 
 if [ "$LOCAL" = "yes" ]; then
     echo "Clavarium is installed, to try it:   http://127.0.0.1:$PORT   (from this machine only)"

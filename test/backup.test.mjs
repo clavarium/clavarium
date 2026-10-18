@@ -139,3 +139,15 @@ test('a backup with no secret stored needs no key to come back', (t) => {
     assert.match(made.out, /vault key\s+none yet/);
     assert.equal(run('restore.sh', files(h.out).archive, '--root', h.root).code, 0);
 });
+
+test('--server-only, taken before each update: the server\'s own data and settings, not the folders given to machines', (t) => {
+    const h = house(t);
+    const r = run('backup.sh', '--server-only', '--to', h.out, '--root', h.root);
+    assert.equal(r.code, 0, r.err);
+    const inside = listing(files(h.out).archive);
+    assert.ok(inside.includes('home/clavarium/conversations.json'));
+    assert.ok(inside.includes('etc/clavarium/'));
+    for (const out of ['home/clavarium/resources', 'home/clavarium-mnt', 'etc/dex', 'home/clavarium/views']) assert.ok(!inside.includes(out), out);
+    /* restore.sh takes it as a backup. */
+    assert.equal(run('restore.sh', files(h.out).archive, '--vault-key', files(h.out).key, '--check').code, 0);
+});

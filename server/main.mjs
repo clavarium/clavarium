@@ -52,9 +52,12 @@ import { Shelf } from './shelf.mjs';
 import { Health } from './health.mjs';
 import { Setup } from './setup.mjs';
 import { Capacity } from './capacity.mjs';
+import { packageFile, PARLEY } from './parley.mjs';
+import { Updates } from './updates.mjs';
+import { migrateData } from './dataformat.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
-const FILES = {
+export const FILES = {
     '/': ['web/index.html', 'text/html; charset=utf-8'],
     '/app.js': ['web/app.js', 'text/javascript; charset=utf-8'],
     '/style.css': ['web/style.css', 'text/css; charset=utf-8'],
@@ -67,21 +70,21 @@ const FILES = {
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],
     '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
-    '/vendor/xterm.js': ['node_modules/@xterm/xterm/lib/xterm.js', 'text/javascript; charset=utf-8'],
-    '/vendor/xterm.css': ['node_modules/@xterm/xterm/css/xterm.css', 'text/css; charset=utf-8'],
-    '/vendor/fit.js': ['node_modules/@xterm/addon-fit/lib/addon-fit.js', 'text/javascript; charset=utf-8'],
+    '/vendor/xterm.js': [packageFile('@xterm/xterm', 'lib/xterm.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/xterm.css': [packageFile('@xterm/xterm', 'css/xterm.css'), 'text/css; charset=utf-8'],
+    '/vendor/fit.js': [packageFile('@xterm/addon-fit', 'lib/addon-fit.js'), 'text/javascript; charset=utf-8'],
     /* A PDF is drawn by the page itself, on a canvas: asked for only when one is previewed. */
-    '/vendor/parley-ui.js': ['server/parley/ui/parley-ui.js', 'text/javascript; charset=utf-8'],
-    '/vendor/parley-ui.css': ['server/parley/ui/parley-ui.css', 'text/css; charset=utf-8'],
+    '/vendor/parley-ui.js': [packageFile(PARLEY, 'ui/parley-ui.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/parley-ui.css': [packageFile(PARLEY, 'ui/parley-ui.css'), 'text/css; charset=utf-8'],
     /* Its icons (Lucide, copied in Parley): the chat's, and this page's own. */
-    '/vendor/parley-icons.js': ['server/parley/ui/parley-icons.js', 'text/javascript; charset=utf-8'],
-    '/vendor/pdf.mjs': ['node_modules/pdfjs-dist/build/pdf.min.mjs', 'text/javascript; charset=utf-8'],
-    '/vendor/pdf.worker.mjs': ['node_modules/pdfjs-dist/build/pdf.worker.min.mjs', 'text/javascript; charset=utf-8'],
+    '/vendor/parley-icons.js': [packageFile(PARLEY, 'ui/parley-icons.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/pdf.mjs': [packageFile('pdfjs-dist', 'build/pdf.min.mjs'), 'text/javascript; charset=utf-8'],
+    '/vendor/pdf.worker.mjs': [packageFile('pdfjs-dist', 'build/pdf.worker.min.mjs'), 'text/javascript; charset=utf-8'],
     /* Drawings in the chat (```mermaid), at the version package.json fixes: asked for only when one is shown. */
-    '/vendor/mermaid.js': ['node_modules/mermaid/dist/mermaid.min.js', 'text/javascript; charset=utf-8'],
+    '/vendor/mermaid.js': [packageFile('mermaid', 'dist/mermaid.min.js'), 'text/javascript; charset=utf-8'],
     /* Code coloured in the chat: Prism and the languages it is given, one file; asked for only when code is shown. */
     '/vendor/prism.js': [['web/prism-manual.js', ...['core', 'clike', 'markup', 'css', 'javascript', 'typescript', 'json', 'python', 'bash', 'markup-templating', 'php', 'sql', 'yaml', 'diff', 'markdown', 'ini', 'apacheconf']
-        .map((l) => `node_modules/prismjs/components/prism-${l}.min.js`)], 'text/javascript; charset=utf-8'],
+        .map((l) => packageFile('prismjs', `components/prism-${l}.min.js`))], 'text/javascript; charset=utf-8'],
 };
 /* The device door serves the same files under /c/: that prefix is the only
    one the edge lets through without sign-on. Its page differs; nothing else. */
@@ -107,10 +110,10 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates } = {}) {
     const sendFile = async (response, file) => {
         /* Several files are one, in their order. */
-        const body = Array.isArray(file[0]) ? Buffer.concat((await Promise.all(file[0].map((f) => readFile(ROOT + f)))).flatMap((b) => [b, Buffer.from('\n;\n')])) : await readFile(ROOT + file[0]);
+        const body = Array.isArray(file[0]) ? Buffer.concat((await Promise.all(file[0].map((f) => readFile(f.startsWith('/') ? f : ROOT + f)))).flatMap((b) => [b, Buffer.from('\n;\n')])) : await readFile(file[0].startsWith('/') ? file[0] : ROOT + file[0]);
         response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(body);
     };
     const server = createServer(async (request, response) => {
@@ -142,7 +145,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates)) return;
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -172,7 +175,10 @@ const PARLEY_WAIT_MS = 20_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf }) {
+    /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
+    const migrated = migrateData(dataDir);
+    if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
     let repairTerminal = async () => { throw new Error('not ready'); };
@@ -327,12 +333,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     void all.reconcileAll?.().catch(() => {});
     const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
+    /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
+    const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });
+    const stopUpdates = updates.watch();
     const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
     /* This server's disk and memory, and the reserve no machine may eat into: see capacity.mjs. */
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }) });
     all.room = (ask) => capacity.check(ask);
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopShelf(); stopHealth(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, repair: (name) => repairTerminal(name) });
+    server.on('close', () => { closing = true; stopShelf(); stopHealth(); stopUpdates(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

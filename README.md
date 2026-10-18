@@ -75,7 +75,7 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   terminal; the server reads nothing more.
 
 - **12 - talk through the app**: a branching on Clavarium Parley, a project
-  of its own (copied unchanged in `server/parley`). Every machine has a
+  of its own (an npm dependency at an exact version, `clavarium-parley`). Every machine has a
   read-only folder of tools at hand, `/tools`, with an index; Parley's
   archive is the first. Asked once, in its terminal, the tool installs it
   (`npm install -g /tools/...`) and talks through six commands: `parley
@@ -212,6 +212,12 @@ The host needs `tmux` and `bindfs` (the read-only views).
 
     # to try it on a machine of your own, with no domain: this machine only, no sign-in
     sudo deploy/install.sh --local
+
+    # from npm, an exact version, checked (integrity, provenance, signatures);
+    # it then updates itself (Settings, Updates; --updates auto|asap|ask|off,
+    # --update-window 02:00-05:00, --channel latest|next) and keeps the last
+    # two versions to go back to (deploy/updater.mjs)
+    sudo npx clavarium@VERSION install --domain clav.example.com --operator you@example.com
 
     # or all of it as one VM on any computer that has Multipass (the computer is left alone)
     deploy/appliance.sh --domain clav.example.com --operator you@example.com --relay relay.example.net

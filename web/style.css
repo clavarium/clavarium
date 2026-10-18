@@ -976,6 +976,22 @@ button.inline:hover { color: var(--brass); }
 .reserve-row label { display: inline-flex; align-items: center; gap: 6px; }
 .reserve-row input { width: 5.5em; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 
+/* UPDATES (Settings): the version, one line of state, three settings, the way back. */
+#updates { display: grid; gap: 10px; outline: none; }
+.updates-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+#updates-state { color: var(--ink2); font-size: .8125rem; flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
+.updates-news { margin: 0; font-size: .8125rem; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); background: var(--bar); overflow-wrap: anywhere; }
+.updates-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px; max-width: 30rem; }
+.updates-grid select, .updates-window input { min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; max-width: 100%; }
+.updates-window { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink2); font-size: .8125rem; }
+#updates-back { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#updates-back .hint { margin: 0; }
+.updates-history { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; font-size: .8125rem; }
+.updates-history li { display: grid; grid-template-columns: auto 1fr; gap: 0 10px; }
+.updates-history time { color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.updates-history small { grid-column: 2; color: var(--ink2); overflow-wrap: anywhere; }
+.updates-history [data-result="rolled-back"], .updates-history [data-result="failed"] { color: var(--danger); }
+
 /* The small gauge at the bottom of the list, only when the server is short of room. */
 #server-gauge { flex: 0 0 auto; cursor: pointer; display: grid; gap: 4px; width: 100%; padding: 8px 10px; text-align: left; font-size: .75rem; background: var(--bar); border: 1px solid var(--warn); border-radius: 8px; color: var(--ink); }
 #server-gauge .gauge-title { font-weight: 700; color: var(--warn); }

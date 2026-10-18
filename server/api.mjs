@@ -31,6 +31,11 @@
  *   POST /api/git-hosts/forget              {host}: the next contact trusts the key it is shown
  *   GET  /api/shelf                         the ready-made machine: date, size, tools, rebuild in progress, last refusal
  *   POST /api/shelf/rebuild                 rebuild it now, in the background (refused when the disk is short)
+ *   GET  /api/updates                       Settings, Updates: version, channel, mode, window, what is out, history, what to go back to
+ *   POST /api/updates/check                 ask the registry now
+ *   POST /api/updates/settings              { mode, channel, window }
+ *   POST /api/updates/apply                 { version }: update to the version that is out (in the background)
+ *   POST /api/updates/back                  { version }: go back to a release that is kept (in the background)
  *   GET  /api/git/<name>/outgoing?target=<branch>&branch=<branch>   what would go from the agent's branch, to that branch of the remote
  *   POST /api/git/<name>/push               {head, target?, sure?}: exactly that reviewed commit, to exactly that branch
  *   GET  /api/git/<name>/keep               origin kept up to date, checks, automatic sending, log
@@ -97,7 +102,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -188,6 +193,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
+            /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
+            if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
             if (pathname === '/api/server/brief' && capacity) return send(200, await capacity.brief()), true;
@@ -257,6 +264,10 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         if (pathname === '/api/git-keys' && gitAccess) return send(201, gitAccess.makeKey(body)), true;
         if (pathname === '/api/shelf/rebuild' && shelf) return send(202, await shelf.rebuild()), true;
+        if (pathname === '/api/updates/check' && updates) return send(200, await updates.check()), true;
+        if (pathname === '/api/updates/settings' && updates) return send(200, await updates.settings({ mode: body.mode, channel: body.channel, window: body.window })), true;
+        if (pathname === '/api/updates/apply' && updates) return send(202, await updates.apply(body.version)), true;
+        if (pathname === '/api/updates/back' && updates) return send(202, await updates.back(body.version)), true;
         if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, memoryMb: body.memoryMb }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);

@@ -560,6 +560,26 @@
             <p id="reserve-error" class="error" role="alert" hidden></p>
           </div>
         </div>
+        <!-- UPDATES: what runs, what is out, how this server updates itself
+             (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
+        <div class="panel-top" id="settings-updates-top"><b>Updates</b></div>
+        <div id="updates" tabindex="-1">
+          <div class="updates-head"><b id="updates-version"></b><span id="updates-state" role="status"></span><button type="button" id="updates-check">Check now</button></div>
+          <p id="updates-news" class="updates-news" hidden></p>
+          <div class="row" id="updates-offer" hidden><button type="button" id="updates-apply" class="primary"></button></div>
+          <div id="updates-settings" class="updates-grid">
+            <label for="updates-mode">Mode</label>
+            <select id="updates-mode"><option value="auto">Automatic, in a window</option><option value="asap">As soon as out</option><option value="ask">Ask me</option><option value="off">Off</option></select>
+            <label for="updates-from" id="updates-window-label">Window</label>
+            <span id="updates-window" class="updates-window"><input type="time" id="updates-from" aria-label="From"><span aria-hidden="true">to</span><input type="time" id="updates-to" aria-label="To"></span>
+            <label for="updates-channel">Channel</label>
+            <select id="updates-channel"><option value="latest">Stable</option><option value="next">Next (test versions)</option></select>
+          </div>
+          <p class="hint" id="updates-saved" role="status"></p>
+          <div id="updates-back"></div>
+          <details id="updates-history-box" hidden><summary>History</summary><ul id="updates-history" class="updates-history"></ul></details>
+          <p id="updates-error" class="error" role="alert" hidden></p>
+        </div>
         <div class="panel-top"><b>Storage &amp; backup</b></div>
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
         <details id="settings-advanced">

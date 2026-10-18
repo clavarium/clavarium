@@ -1,0 +1,600 @@
+#!/usr/bin/env node
+/* ---------------------------------------------------------------------------
+ * THE UPDATER: Clavarium from npm, an exact version per release, checked,
+ * switched to, and switched back from when it does not come up.
+ *
+ * Runs as root, and ONLY through three doors: the installer (install.sh:
+ * prepare, switch, prune), the minute systemd starts it (clavarium-update
+ * .service, from its timer every 15 minutes or asked by the host program:
+ * run), and the host program's verbs (clavarium-host update check / set /
+ * apply / rollback). The server itself never runs it: it asks the host program,
+ * which writes a request and starts the service, so that restarting the
+ * server does not kill the update on its way.
+ *
+ *   /opt/clavarium/releases/<id>/        one release, never changed once made:
+ *       package.json, package-lock.json  "clavarium": "<version>", exactly
+ *       node_modules/clavarium/          the package as the registry served it
+ *       app -> node_modules/clavarium    where the server runs (a local release:
+ *                                        app/ is a copy of a working tree)
+ *       node -> /opt/clavarium/nodes/vX  the Node.js its tools.mjs pins
+ *       release.json                     id, version, data format, source, when
+ *   /opt/clavarium/current -> releases/<id>
+ *   /etc/clavarium/update.conf           MODE, CHANNEL, WINDOW, PORT (root's)
+ *   /var/lib/clavarium/update/           state.json (read by the server),
+ *                                        request, lock, backup/
+ *
+ * A RELEASE IS MADE (prepare) in a folder of its own, beside the one that runs:
+ *   1. npm installs clavarium@<version> with no script run, from the registry;
+ *   2. checked: the integrity npm recorded is the registry's; Clavarium and
+ *      Parley each carry a provenance statement whose subject is that very
+ *      archive and whose source is their repository on GitHub (REPOS); and
+ *      `npm audit signatures` checks the registry's signatures and those
+ *      statements' own signatures, for every package installed;
+ *   3. only then the build scripts run (npm rebuild: node-pty is compiled),
+ *      Parley's archive for the machines is fetched and checked
+ *      (parley-archive.mjs), and the server's own smoke test runs
+ *      (server/smoke.mjs). Anything wrong: the folder goes, nothing changed.
+ *
+ * AN UPDATE (apply), never while a machine is being built, moved or restarted:
+ * a release is made; a backup of the server's data is taken (backup.sh
+ * --server-only); the link is switched; the privileged programs of the new
+ * release are put in place; the server restarts and must come up (health).
+ * If it does not: the link goes back, the previous programs too, the data
+ * backup is put back if the data format moved, the server restarts, and the
+ * owner is told (state.json, read by the server: Settings, and an alert).
+ * The last two releases are kept: "Go back to x.y.z" (rollback).
+ *
+ * Exit codes: 0 done; 64 usage; 78 refused, with the reason; 1 failed.
+ * --------------------------------------------------------------------------- */
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync, existsSync, symlinkSync, realpathSync, cpSync, openSync, closeSync, statfsSync, chmodSync } from 'node:fs';
+import { dirname, join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
+
+export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read' };
+export const NAME = 'clavarium';
+/* Where each package checked here must have been built: its provenance says so. */
+export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley' };
+export const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
+export const LOCAL = /^local-\d{8}-\d{6}$/;
+export const MODES = ['auto', 'asap', 'ask', 'off'];
+export const CHANNELS = ['latest', 'next'];
+export const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+export const DEFAULTS = { MODE: 'auto', CHANNEL: 'latest', WINDOW: '02:00-05:00', PORT: '7717' };
+/* A conversation in one of these phases is in the middle of something the restart would cut. */
+const BUSY = ['building', 'moving', 'restarting'];
+const HISTORY_MAX = 30;
+const ASK_EVERY_MS = 6 * 3600_000;
+const PROVENANCE = 'https://slsa.dev/provenance/v1';
+
+export class Refused extends Error {}
+
+/* SEMANTIC VERSIONS, compared as npm does: a pre-release comes before its release. */
+export function compareVersions(a, b) {
+    const parse = (v) => { const [core, pre] = String(v).split(/-(.*)/s); return { core: core.split('.').map(Number), pre: pre ? pre.split('.') : [] }; };
+    const x = parse(a); const y = parse(b);
+    for (let i = 0; i < 3; i += 1) if (x.core[i] !== y.core[i]) return x.core[i] < y.core[i] ? -1 : 1;
+    if (!x.pre.length || !y.pre.length) return x.pre.length === y.pre.length ? 0 : x.pre.length ? -1 : 1;
+    for (let i = 0; i < Math.max(x.pre.length, y.pre.length); i += 1) {
+        const p = x.pre[i]; const q = y.pre[i];
+        if (p === undefined) return -1; if (q === undefined) return 1;
+        if (p === q) continue;
+        const pn = /^\d+$/.test(p); const qn = /^\d+$/.test(q);
+        if (pn && qn) return Number(p) < Number(q) ? -1 : 1;
+        if (pn !== qn) return pn ? -1 : 1;
+        return p < q ? -1 : 1;
+    }
+    return 0;
+}
+
+/* "02:00-05:00": is this moment in it (local time; a window may pass midnight)? */
+export function inWindow(window, now) {
+    const m = WINDOW.exec(window ?? ''); if (!m) return false;
+    const [from, to] = window.split('-').map((t) => { const [h, mi] = t.split(':').map(Number); return h * 60 + mi; });
+    const at = now.getHours() * 60 + now.getMinutes();
+    return from <= to ? at >= from && at < to : at >= from || at < to;
+}
+
+export function readConf(file) {
+    const conf = { ...DEFAULTS };
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch { return conf; }
+    for (const line of text.split('\n')) { const m = /^([A-Z]+)=(.*)$/.exec(line.trim()); if (m && m[1] in DEFAULTS) conf[m[1]] = m[2]; }
+    if (!MODES.includes(conf.MODE)) conf.MODE = DEFAULTS.MODE;
+    if (!CHANNELS.includes(conf.CHANNEL)) conf.CHANNEL = DEFAULTS.CHANNEL;
+    if (!WINDOW.test(conf.WINDOW)) conf.WINDOW = DEFAULTS.WINDOW;
+    if (!/^\d{4,5}$/.test(conf.PORT)) conf.PORT = DEFAULTS.PORT;
+    return conf;
+}
+
+/* One setting changed, the others kept: only the known keys, only their known shapes. */
+export function writeConf(file, key, value) {
+    const checks = { mode: ['MODE', (v) => MODES.includes(v)], channel: ['CHANNEL', (v) => CHANNELS.includes(v)], window: ['WINDOW', (v) => WINDOW.test(v) && v.slice(0, 5) !== v.slice(6)], port: ['PORT', (v) => /^\d{4,5}$/.test(v)] };
+    const check = checks[key];
+    if (!check) throw new Refused(`not a setting: ${key}`);
+    if (!check[1](value)) throw new Refused(`not a value for ${key}: ${value}`);
+    const conf = { ...readConf(file), [check[0]]: value };
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(`${file}.new`, `# Clavarium updates: written by install.sh and by Settings, Updates (through clavarium-host).\n${Object.entries(conf).map(([k, v]) => `${k}=${v}`).join('\n')}\n`, { mode: 0o644 });
+    renameSync(`${file}.new`, file);
+    return conf;
+}
+
+/* A program, with a time limit; what it said, bounded. */
+export function runCommand(argv, { cwd, env = process.env, timeoutMs = 900_000 } = {}) {
+    return new Promise((resolve) => {
+        const child = spawn(argv[0], argv.slice(1), { cwd, env, stdio: ['ignore', 'pipe', 'pipe'] });
+        let stdout = ''; let stderr = '';
+        child.stdout.on('data', (d) => { stdout = (stdout + d).slice(-20_000); });
+        child.stderr.on('data', (d) => { stderr = (stderr + d).slice(-20_000); });
+        const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
+        child.on('error', (error) => { clearTimeout(timer); resolve({ code: 127, stdout, stderr: error.message }); });
+        child.on('close', (code) => { clearTimeout(timer); resolve({ code: code ?? 1, stdout, stderr }); });
+    });
+}
+
+const lastLine = (r) => String(r.stderr || r.stdout || '').trim().split('\n').filter((l) => l.trim() && !/^npm (notice|warn)/.test(l)).pop()?.slice(0, 300) ?? `exit ${r.code}`;
+const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15);
+const toHex = (integrity) => Buffer.from(String(integrity).replace(/^sha512-/, ''), 'base64').toString('hex');
+
+export class Updater {
+    #o; #run; #fetch;
+    constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
+        verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, minFreeMb = 1024, healthMs = 60_000, settleMs = 10_000 } = {}) {
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, settleMs };
+        this.#run = run; this.#fetch = fetcher;
+        this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
+        this.restart = restart ?? (() => this.#run(['systemctl', 'restart', 'clavarium.service'], { timeoutMs: 120_000 }));
+        this.health = health ?? ((release) => this.#health(release));
+        this.backup = backup ?? ((app) => this.#backup(app));
+        this.restoreData = restoreData ?? ((app, archive) => this.#restoreData(app, archive));
+        this.installPrivileged = installPrivileged ?? ((app) => this.#installPrivileged(app));
+        this.ensureNode = ensureNode ?? ((app) => this.#ensureNode(app));
+    }
+
+    get releasesDir() { return join(this.#o.code, 'releases'); }
+    #state() { try { return JSON.parse(readFileSync(join(this.#o.stateDir, 'state.json'), 'utf8')); } catch { return { history: [] }; } }
+    #save(change) {
+        const state = { ...this.#state(), ...change, releases: this.releases().map(({ id, version, dataFormat, current }) => ({ id, version, dataFormat, current })) };
+        state.version = this.current()?.version ?? null;
+        mkdirSync(this.#o.stateDir, { recursive: true, mode: 0o755 });
+        const file = join(this.#o.stateDir, 'state.json');
+        writeFileSync(`${file}.new`, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o644 });
+        chmodSync(`${file}.new`, 0o644);
+        renameSync(`${file}.new`, file);
+        return state;
+    }
+    #step(action, version, step) { this.#o.log(`${action} ${version}: ${step}`); this.#save({ running: { action, version, step, since: (this.#state().running?.since) ?? this.#o.now().toISOString() } }); }
+    #history(entry) {
+        const state = this.#state();
+        const history = [{ id: createHash('sha256').update(`${Date.now()}${Math.random()}`).digest('hex').slice(0, 12), at: this.#o.now().toISOString(), ...entry }, ...(state.history ?? [])].slice(0, HISTORY_MAX);
+        return this.#save({ history, running: null });
+    }
+
+    /* The releases there are: { id, version, dataFormat, source, at, current, dir, app }. */
+    releases() {
+        let names = [];
+        try { names = readdirSync(this.releasesDir).filter((n) => !n.startsWith('.')); } catch { return []; }
+        let current = '';
+        try { current = basename(realpathSync(join(this.#o.code, 'current'))); } catch { /* none yet */ }
+        return names.map((id) => {
+            try {
+                const r = JSON.parse(readFileSync(join(this.releasesDir, id, 'release.json'), 'utf8'));
+                return { ...r, id, current: id === current, dir: join(this.releasesDir, id), app: join(this.releasesDir, id, 'app') };
+            } catch { return undefined; }
+        }).filter(Boolean).sort((a, b) => String(b.at).localeCompare(String(a.at)) || compareVersions(b.version, a.version));
+    }
+    current() { return this.releases().find((r) => r.current); }
+
+    about() {
+        const conf = readConf(this.#o.conf);
+        const state = this.#state();
+        return { ...state, version: this.current()?.version ?? null, mode: conf.MODE, channel: conf.CHANNEL, window: conf.WINDOW, releases: this.releases().map(({ id, version, dataFormat, current }) => ({ id, version, dataFormat, current })) };
+    }
+
+    set(key, value) { writeConf(this.#o.conf, key, value); return this.about(); }
+
+    async #json(url) {
+        const answer = await this.#fetch(url, { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(60_000) });
+        if (!answer.ok) throw new Error(`the registry answered ${answer.status} for ${url}`);
+        return answer.json();
+    }
+    #packument(name) { return this.#json(`${this.#o.registry}/${name}`); }
+
+    /* WHAT IS OUT on the channel: the version a check would update to, or null. */
+    async check() {
+        const current = this.current();
+        const conf = readConf(this.#o.conf);
+        try {
+            const p = await this.#packument(NAME);
+            const tags = p['dist-tags'] ?? {};
+            let candidate = tags.latest;
+            if (conf.CHANNEL === 'next' && tags.next && (!candidate || compareVersions(tags.next, candidate) > 0)) candidate = tags.next;
+            if (candidate && (!VERSION.test(candidate) || !p.versions?.[candidate])) candidate = undefined;
+            const available = candidate && (!current || compareVersions(candidate, current.version) > 0) ? candidate : null;
+            this.#save({ checkedAt: this.#o.now().toISOString(), available, checkError: null });
+            return available;
+        } catch (error) {
+            this.#save({ checkedAt: this.#o.now().toISOString(), checkError: `The registry could not be asked: ${error.message}` });
+            throw error;
+        }
+    }
+
+    /* Room on the disk of the code, before anything is fetched. */
+    #room() {
+        try {
+            mkdirSync(this.releasesDir, { recursive: true });
+            const s = statfsSync(this.releasesDir); const freeMb = Math.floor((s.bavail * s.bsize) / 1048576);
+            if (freeMb < this.#o.minFreeMb) throw new Refused(`only ${freeMb} MB free for a new release; ${this.#o.minFreeMb} MB are needed`);
+        } catch (error) { if (error instanceof Refused) throw error; }
+    }
+
+    #npmEnv(nodeDir) { return { ...process.env, PATH: `${nodeDir ? `${nodeDir}/bin:` : ''}${dirname(process.execPath)}:${process.env.PATH ?? '/usr/bin:/bin'}`, npm_config_update_notifier: 'false', npm_config_fund: 'false', npm_config_audit: 'false' }; }
+    #npm(args, { cwd, nodeDir, timeoutMs = 900_000 } = {}) {
+        const npm = nodeDir ? join(nodeDir, 'bin', 'npm') : join(dirname(process.execPath), 'npm');
+        return this.#run([npm, ...args, '--registry', `${this.#o.registry}/`, '--cache', join(this.#o.stateDir, 'npm-cache'), '--loglevel=error'], { cwd, env: this.#npmEnv(nodeDir), timeoutMs });
+    }
+
+    /* MAKE A RELEASE: from the registry at an exact version, or (development) from a working tree. Resolves with it. */
+    async prepare({ version, fromDir } = {}) {
+        if (version !== undefined && !VERSION.test(version)) throw new Refused(`not a version: ${version}`);
+        if (version === undefined && !fromDir) throw new Refused('prepare needs a version or a folder');
+        const id = version ?? `local-${stamp(this.#o.now())}`;
+        if (this.current()?.id === id) throw new Refused(`${id} is the release that runs`);
+        this.#room();
+        const dir = join(this.releasesDir, id);
+        const tmp = join(this.releasesDir, `.${id}.partial`);
+        rmSync(tmp, { recursive: true, force: true });
+        mkdirSync(tmp, { recursive: true, mode: 0o755 });
+        const action = version ? 'prepare' : 'prepare-local';
+        try {
+            let app;
+            if (version) {
+                this.#step(action, id, 'Fetching');
+                writeFileSync(join(tmp, 'package.json'), `${JSON.stringify({ name: 'clavarium-release', private: true, dependencies: { [NAME]: version } }, null, 2)}\n`);
+                const got = await this.#npm(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-exact'], { cwd: tmp });
+                if (got.code !== 0) throw new Error(`npm could not install ${NAME}@${version}: ${lastLine(got)}`);
+                app = join(tmp, 'node_modules', NAME);
+                const manifest = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8'));
+                if (manifest.name !== NAME || manifest.version !== version) throw new Error(`npm installed ${manifest.name}@${manifest.version}, not ${NAME}@${version}`);
+                this.#step(action, id, 'Checking');
+                await this.verify(tmp, version);
+            } else {
+                this.#step(action, id, 'Copying');
+                app = join(tmp, 'app');
+                mkdirSync(app);
+                for (const part of ['server', 'web', 'config', 'deploy', 'package.json', 'package-lock.json', 'npm-shrinkwrap.json', 'LICENSE', 'README.md']) {
+                    if (existsSync(join(fromDir, part))) cpSync(join(fromDir, part), join(app, part), { recursive: true });
+                }
+                const got = await this.#npm(['ci', '--ignore-scripts', '--omit=dev', '--no-audit', '--no-fund'], { cwd: app });
+                if (got.code !== 0) throw new Error(`npm ci: ${lastLine(got)}`);
+            }
+            const nodeDir = await this.ensureNode(app);
+            symlinkSync(nodeDir, join(tmp, 'node'));
+            this.#step(action, id, 'Building');
+            /* The build scripts run now, checked first: node-pty is compiled for this release's Node.js. */
+            const built = await this.#npm(['rebuild', '--no-audit', '--no-fund'], { cwd: version ? tmp : app, nodeDir });
+            if (built.code !== 0) throw new Error(`the build failed (npm rebuild): ${lastLine(built)}`);
+            await fetchParleyArchive({ app, registry: this.#o.registry, fetcher: this.#fetch });
+            if (version) symlinkSync(join('node_modules', NAME), join(tmp, 'app'));
+            this.#step(action, id, 'Testing');
+            const smoke = await this.#run([join(nodeDir, 'bin', 'node'), join(app, 'server', 'smoke.mjs')], { cwd: app, env: this.#npmEnv(nodeDir), timeoutMs: 120_000 });
+            if (smoke.code !== 0) throw new Error(`its smoke test failed: ${lastLine(smoke)}`);
+            const manifest = JSON.parse(readFileSync(join(app, 'package.json'), 'utf8'));
+            writeFileSync(join(tmp, 'release.json'), `${JSON.stringify({ id, version: manifest.version, dataFormat: manifest.clavarium?.dataFormat ?? 1, source: version ? 'npm' : 'local', at: this.#o.now().toISOString() }, null, 2)}\n`);
+            rmSync(dir, { recursive: true, force: true });
+            renameSync(tmp, dir);
+            this.#save({ running: null });
+            return this.releases().find((r) => r.id === id);
+        } catch (error) {
+            rmSync(tmp, { recursive: true, force: true });
+            this.#save({ running: null });
+            throw error;
+        } finally {
+            rmSync(join(this.#o.stateDir, 'npm-cache'), { recursive: true, force: true });
+        }
+    }
+
+    /* CHECKED BEFORE ANY OF ITS CODE RUNS (see the top). `dir`: the release, as npm installed it. */
+    async verify(dir, version) {
+        const lock = JSON.parse(readFileSync(join(dir, 'package-lock.json'), 'utf8'));
+        const entry = (name) => Object.entries(lock.packages ?? {}).find(([key]) => key === `node_modules/${name}` || key.endsWith(`/node_modules/${name}`))?.[1];
+        const own = entry(NAME);
+        const p = await this.#packument(NAME);
+        const dist = p.versions?.[version]?.dist;
+        if (!own || !dist || own.version !== version || own.integrity !== dist.integrity) throw new Error(`${NAME}@${version} as installed is not the archive the registry lists`);
+        for (const name of Object.keys(REPOS)) {
+            const e = name === NAME ? own : entry(name);
+            if (!e) throw new Error(`${name} is not in the release`);
+            await this.provenance(name, e.version, e.integrity);
+        }
+        const signed = await this.verifySignatures(dir);
+        if (signed.code !== 0) throw new Error(`npm audit signatures refused it: ${lastLine(signed)}`);
+    }
+
+    /* Its provenance statement names this archive, and the repository it must come from. */
+    async provenance(name, version, integrity) {
+        const p = await this.#packument(name);
+        const url = p.versions?.[version]?.dist?.attestations?.url;
+        if (!url) throw new Error(`${name}@${version} has no provenance: it was not built and published by its repository`);
+        if (new URL(url).origin !== new URL(this.#o.registry).origin) throw new Error(`${name}@${version}: its provenance is not on the registry`);
+        const { attestations = [] } = await this.#json(url);
+        const statement = attestations.filter((a) => a.predicateType === PROVENANCE).map((a) => { try { return JSON.parse(Buffer.from(a.bundle.dsseEnvelope.payload, 'base64').toString('utf8')); } catch { return undefined; } }).find(Boolean);
+        if (!statement) throw new Error(`${name}@${version} has no provenance statement`);
+        const subject = (statement.subject ?? []).find((s) => s.name === `pkg:npm/${name}@${version}`);
+        if (!subject || subject.digest?.sha512 !== toHex(integrity)) throw new Error(`${name}@${version}: its provenance is about another archive`);
+        const repository = statement.predicate?.buildDefinition?.externalParameters?.workflow?.repository;
+        if (repository !== REPOS[name]) throw new Error(`${name}@${version} was built from ${repository ?? 'an unknown place'}, not ${REPOS[name]}`);
+    }
+
+    /* THE LINK, switched in one rename. */
+    switchTo(id) {
+        if (!existsSync(join(this.releasesDir, id, 'release.json'))) throw new Refused(`no such release: ${id}`);
+        const link = join(this.#o.code, 'current');
+        rmSync(`${link}.new`, { force: true });
+        symlinkSync(join('releases', id), `${link}.new`);
+        renameSync(`${link}.new`, link);
+    }
+
+    /* A conversation in the middle of a build, a move or a restart: '' or why not now. */
+    busy() {
+        let all = [];
+        try { all = JSON.parse(readFileSync(join(this.#o.data, 'conversations.json'), 'utf8')); } catch { return ''; }
+        const busy = (Array.isArray(all) ? all : []).filter((c) => BUSY.includes(c.phase)).map((c) => c.name);
+        return busy.length ? `a machine is being built or restarted (${busy.slice(0, 3).join(', ')}): the update waits` : '';
+    }
+    #dataFormat() { try { return JSON.parse(readFileSync(join(this.#o.data, 'data-format.json'), 'utf8')).format; } catch { return undefined; } }
+
+    #lock() {
+        mkdirSync(this.#o.stateDir, { recursive: true, mode: 0o755 });
+        const file = join(this.#o.stateDir, 'lock');
+        for (let i = 0; i < 2; i += 1) {
+            try { const fd = openSync(file, 'wx'); writeFileSync(fd, String(process.pid)); closeSync(fd); return () => rmSync(file, { force: true }); } catch (error) {
+                if (error.code !== 'EEXIST') throw error;
+                const pid = Number(readFileSync(file, 'utf8')) || 0;
+                let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch { /* gone */ }
+                if (alive) throw new Refused('an update or an installation is running already');
+                rmSync(file, { force: true });
+            }
+        }
+        throw new Refused('an update or an installation is running already');
+    }
+
+    /* AN UPDATE to `version`, newer than the release that runs. */
+    async apply(version) {
+        if (!VERSION.test(version ?? '')) throw new Refused(`not a version: ${version}`);
+        const from = this.current();
+        if (from && compareVersions(version, from.version) <= 0) throw new Refused(`${version} is not newer than ${from.version}`);
+        const why = this.busy(); if (why) throw new Refused(why);
+        const unlock = this.#lock();
+        try {
+            let release;
+            try { release = await this.prepare({ version }); } catch (error) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: error.message }); throw error; }
+            const before = this.#dataFormat();
+            let archive;
+            try {
+                this.#step('update', version, 'Backing up');
+                archive = await this.backup(from?.app ?? release.app);
+            } catch (error) { rmSync(release.dir, { recursive: true, force: true }); this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: `the backup failed: ${error.message}` }); throw error; }
+            const late = this.busy();
+            if (late) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: late }); throw new Refused(late); }
+            const failed = await this.#switchAndCheck(release, 'update', version);
+            if (!failed) {
+                this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'done' });
+                this.prune();
+                return this.about();
+            }
+            /* IT DID NOT COME UP: back to what ran, its data too if it moved. */
+            let why2 = failed;
+            if (from) {
+                this.#step('update', version, 'Going back');
+                this.switchTo(from.id);
+                await this.installPrivileged(from.app).catch(() => {});
+                if (archive && this.#dataFormat() !== before) { const r = await this.restoreData(from.app, archive).catch((e) => ({ code: 1, stderr: e.message })); if (r?.code) why2 += `; the data backup could not be put back (${lastLine(r)}): ${archive}`; }
+                const back = await this.#restartAndCheck(from);
+                if (back) why2 += `; ${from.version} did not come back either (${back}): journalctl -u clavarium`;
+                rmSync(release.dir, { recursive: true, force: true });
+            }
+            this.#history({ action: 'update', from: from?.version ?? null, to: version, result: from ? 'rolled-back' : 'failed', why: why2 });
+            this.prune();
+            return this.about();
+        } finally { unlock(); }
+    }
+
+    /* GO BACK to a release that is kept, if it can read the data. */
+    async rollback(id) {
+        if (!VERSION.test(id ?? '') && !LOCAL.test(id ?? '')) throw new Refused(`not a release: ${id}`);
+        const from = this.current();
+        const to = this.releases().find((r) => r.id === id);
+        if (!to) throw new Refused(`${id} is not kept here`);
+        if (to.current) throw new Refused(`${id} is the release that runs`);
+        const format = this.#dataFormat();
+        if (format !== undefined && to.dataFormat < format) throw new Refused(`${to.version} cannot read the data of this version (format ${format}; it reads ${to.dataFormat})`);
+        const why = this.busy(); if (why) throw new Refused(why);
+        const unlock = this.#lock();
+        try {
+            const failed = await this.#switchAndCheck(to, 'back', to.version);
+            if (!failed) { this.#history({ action: 'back', from: from?.version ?? null, to: to.version, result: 'done' }); return this.about(); }
+            let why2 = failed;
+            if (from) {
+                this.switchTo(from.id);
+                await this.installPrivileged(from.app).catch(() => {});
+                const back = await this.#restartAndCheck(from);
+                if (back) why2 += `; ${from.version} did not come back either (${back})`;
+            }
+            this.#history({ action: 'back', from: from?.version ?? null, to: to.version, result: 'failed', why: why2 });
+            return this.about();
+        } finally { unlock(); }
+    }
+
+    async #switchAndCheck(release, action, version) {
+        try {
+            this.#step(action, version, 'Switching');
+            this.switchTo(release.id);
+            await this.installPrivileged(release.app);
+        } catch (error) { return `it could not be put in place: ${error.message}`; }
+        this.#step(action, version, 'Restarting');
+        return this.#restartAndCheck(release);
+    }
+    /* '' when it came up, or why not. */
+    async #restartAndCheck(release) {
+        const r = await this.restart().catch((e) => ({ code: 1, stderr: e.message }));
+        if (r?.code) return `the server did not restart: ${lastLine(r)}`;
+        const h = await this.health(release).catch((e) => e.message || 'no answer');
+        return h || '';
+    }
+
+    /* KEPT: the release that runs and the one before it; the Node.js they use; nothing half made. */
+    prune() {
+        const all = this.releases();
+        const current = all.find((r) => r.current);
+        /* The one gone from at the last update or return that worked; else the newest other one. */
+        const last = (this.#state().history ?? []).find((h) => h.result === 'done');
+        const previous = all.find((r) => !r.current && last && r.version === last.from) ?? all.find((r) => !r.current);
+        const keep = new Set([current?.id, previous?.id].filter(Boolean));
+        for (const r of all) if (!keep.has(r.id)) rmSync(r.dir, { recursive: true, force: true });
+        for (const name of readdirSync(this.releasesDir)) if (name.startsWith('.') && name.endsWith('.partial')) rmSync(join(this.releasesDir, name), { recursive: true, force: true });
+        const nodes = join(this.#o.code, 'nodes');
+        if (existsSync(nodes)) {
+            const used = new Set(this.releases().map((r) => { try { return realpathSync(join(r.dir, 'node')); } catch { return ''; } }));
+            for (const v of readdirSync(nodes)) { const at = join(nodes, v); let real = at; try { real = realpathSync(at); } catch { /* keep the name */ } if (!used.has(real)) rmSync(at, { recursive: true, force: true }); }
+        }
+        this.#save({});
+    }
+
+    /* THE TIMER'S TURN, every 15 minutes: what the mode says. */
+    async tick() {
+        const conf = readConf(this.#o.conf);
+        const now = this.#o.now();
+        if (conf.MODE === 'off') return 'off';
+        const state = this.#state();
+        const since = state.checkedAt ? now - new Date(state.checkedAt) : Infinity;
+        if (conf.MODE === 'auto' && !inWindow(conf.WINDOW, now)) return 'outside the window';
+        if (conf.MODE === 'ask' && since < ASK_EVERY_MS) return 'checked lately';
+        const available = await this.check();
+        if (!available) return 'up to date';
+        if (conf.MODE === 'ask') return `${available} is out: waiting for the owner`;
+        /* A version that failed here is not tried again by itself: the owner can, from Settings. */
+        if ((state.history ?? []).some((h) => h.to === available && h.action === 'update' && h.result !== 'done')) return `${available} failed here before: not tried again by itself`;
+        if (this.busy()) return this.busy();
+        await this.apply(available);
+        return `updated to ${available}`;
+    }
+
+    /* What the host program asked (a request file), or the timer's turn. */
+    async runOnce() {
+        const file = join(this.#o.stateDir, 'request');
+        let request = '';
+        try { request = readFileSync(file, 'utf8').trim(); rmSync(file, { force: true }); } catch { /* none */ }
+        const [verb, arg] = request.split(/\s+/);
+        try {
+            if (verb === 'apply') return await this.apply(arg);
+            if (verb === 'rollback') return await this.rollback(arg);
+            return await this.tick();
+        } catch (error) {
+            if (error instanceof Refused && request) this.#save({ refused: { at: this.#o.now().toISOString(), why: error.message } });
+            throw error;
+        }
+    }
+
+    /* ------------------------- the real machine's ways ------------------------- */
+    async #health(release) {
+        const port = readConf(this.#o.conf).PORT;
+        const end = Date.now() + this.#o.healthMs;
+        const target = realpathSync(release.dir);
+        let said = 'it did not answer';
+        for (;;) {
+            const active = await this.#run(['systemctl', 'is-active', '--quiet', 'clavarium.service'], { timeoutMs: 10_000 });
+            const answered = active.code === 0 && await this.#fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000), redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);
+            if (answered) {
+                const pid = (await this.#run(['systemctl', 'show', '-p', 'MainPID', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim();
+                let cwd = ''; try { cwd = realpathSync(`/proc/${pid}/cwd`); } catch { /* gone */ }
+                if (cwd.startsWith(target)) break;
+                said = 'the server that answers is not this release';
+            } else if (active.code !== 0) said = 'the service is not running';
+            if (Date.now() > end) return said;
+            await new Promise((r) => setTimeout(r, 1000));
+        }
+        /* And it stays up. */
+        await new Promise((r) => setTimeout(r, this.#o.settleMs));
+        const still = await this.#run(['systemctl', 'is-active', '--quiet', 'clavarium.service'], { timeoutMs: 10_000 });
+        return still.code === 0 ? '' : 'the server stopped soon after it started';
+    }
+
+    async #backup(app) {
+        const to = join(this.#o.stateDir, 'backup');
+        rmSync(to, { recursive: true, force: true });
+        mkdirSync(to, { recursive: true, mode: 0o700 });
+        const r = await this.#run(['bash', join(app, 'deploy', 'backup.sh'), '--server-only', '--to', to], { timeoutMs: 1_800_000 });
+        if (r.code !== 0) throw new Error(lastLine(r));
+        const archive = readdirSync(to).find((f) => f.endsWith('.tgz'));
+        if (!archive) throw new Error('backup.sh wrote no archive');
+        return join(to, archive);
+    }
+
+    #restoreData(app, archive) {
+        const key = archive.replace(/\.tgz$/, '.vault-key');
+        return this.#run(['bash', join(app, 'deploy', 'restore.sh'), archive, ...(existsSync(key) ? ['--vault-key', key] : [])], { timeoutMs: 1_800_000 });
+    }
+
+    async #installPrivileged(app) {
+        for (const [from, to] of [[join(app, 'deploy', 'clavarium-host'), this.#o.hostTarget], [join(app, 'deploy', 'git-read'), this.#o.gitReadTarget]]) {
+            const r = await this.#run(['install', '-o', 'root', '-g', 'root', '-m', '0755', from, to], { timeoutMs: 30_000 });
+            if (r.code !== 0) throw new Error(`${to}: ${lastLine(r)}`);
+        }
+    }
+
+    /* The Node.js the release pins (server/tools.mjs), checked against its checksum, shared between releases. */
+    async #ensureNode(app) {
+        const text = readFileSync(join(app, 'server', 'tools.mjs'), 'utf8');
+        const v = /^export const NODE_VERSION = '(v\d+\.\d+\.\d+)';$/m.exec(text)?.[1];
+        const sum = /^export const NODE_SHA256 = '([0-9a-f]{64})';$/m.exec(text)?.[1];
+        if (!v || !sum) throw new Error('the release does not pin a Node.js version');
+        const dir = join(this.#o.code, 'nodes', v);
+        if (existsSync(join(dir, 'bin', 'node'))) return dir;
+        mkdirSync(join(this.#o.code, 'nodes'), { recursive: true });
+        const tmp = `${dir}.partial`; const file = `${dir}.tar.xz`;
+        rmSync(tmp, { recursive: true, force: true }); mkdirSync(tmp);
+        try {
+            const answer = await this.#fetch(`https://nodejs.org/dist/${v}/node-${v}-linux-x64.tar.xz`, { signal: AbortSignal.timeout(600_000) });
+            if (!answer.ok) throw new Error(`nodejs.org answered ${answer.status}`);
+            const bytes = Buffer.from(await answer.arrayBuffer());
+            if (createHash('sha256').update(bytes).digest('hex') !== sum) throw new Error(`Node.js ${v} does not have the checksum the release pins`);
+            writeFileSync(file, bytes);
+            const r = await this.#run(['tar', '-xJf', file, '-C', tmp, '--strip-components=1', '--no-same-owner'], { timeoutMs: 300_000 });
+            if (r.code !== 0) throw new Error(`Node.js could not be unpacked: ${lastLine(r)}`);
+            renameSync(tmp, dir);
+            return dir;
+        } finally { rmSync(tmp, { recursive: true, force: true }); rmSync(file, { force: true }); }
+    }
+}
+
+/* -------------------------------- the command -------------------------------- */
+async function main(argv) {
+    const [verb, ...rest] = argv;
+    const value = (name) => { const i = rest.indexOf(name); return i >= 0 ? rest[i + 1] : undefined; };
+    /* What it does is said on stderr (the journal); stdout carries only the answer. */
+    const u = new Updater({ log: (line) => console.error(line) });
+    const print = (x) => console.log(JSON.stringify(x, null, 2));
+    switch (verb) {
+        case 'check': await u.check().catch(() => {}); return print(u.about());
+        case 'status': return print(u.about());
+        case 'run': { const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
+        case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
+        case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }
+        case 'switch': if (!VERSION.test(rest[0] ?? '') && !LOCAL.test(rest[0] ?? '')) throw new Refused('switch <release>'); u.switchTo(rest[0]); return;
+        case 'prune': u.prune(); return;
+        case 'apply': return print(await u.apply(rest[0]));
+        case 'rollback': return print(await u.rollback(rest[0]));
+        default:
+            console.error('usage: updater.mjs check | status | run | set <key> <value> | prepare --version V | prepare --from-dir DIR | switch <release> | prune | apply <version> | rollback <release>');
+            process.exitCode = 64;
+    }
+}
+
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
+    if (process.getuid?.() !== 0) { console.error('updater: REFUSED: run it as root (it is run by install.sh, the clavarium-update service and clavarium-host)'); process.exit(78); }
+    main(process.argv.slice(2)).catch((error) => { console.error(`updater: ${error instanceof Refused ? 'REFUSED: ' : ''}${error.message}`); process.exitCode = error instanceof Refused ? 78 : 1; });
+}

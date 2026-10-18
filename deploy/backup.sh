@@ -18,6 +18,9 @@
 # tool installed there, what sits in /work -- is not copied. What must outlive
 # a machine belongs in a folder attached to the conversation.
 #
+#   --server-only  the server's own data and settings only (home/clavarium,
+#                without the folders given to machines; etc/clavarium): what
+#                an update may change. Taken by the updater before each one.
 #   --root DIR   look for everything under DIR instead of /. For tests.
 #
 # Exit codes: 0 done; 64 bad parameters; 78 refused.
@@ -27,11 +30,12 @@ set -euo pipefail
 bad() { echo "backup: $*" >&2; echo "usage: backup.sh --to FOLDER" >&2; exit 64; }
 refuse() { echo "backup: REFUSED: $*" >&2; exit 78; }
 
-TO=""; ROOT=""
+TO=""; ROOT=""; SERVER_ONLY="no"
 while [ $# -gt 0 ]; do
     case "$1" in
         --to) TO="${2:-}"; shift 2 || bad "--to needs a value" ;;
         --root) ROOT="${2:-}"; shift 2 || bad "--root needs a value" ;;
+        --server-only) SERVER_ONLY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
 done
@@ -50,8 +54,14 @@ KEY="$ROOT/var/lib/clavarium-vault/vault.key"
 # made again at start. Work folders are copied as their files; the disks that
 # hold them are made again. An older house kept all that under home/clavarium:
 # the same rule there.)
-parts=()
-for part in home/clavarium home/clavarium-mnt etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel; do
+parts=(); skip=()
+all="home/clavarium home/clavarium-mnt etc/clavarium etc/dex etc/oauth2-proxy etc/caddy var/lib/caddy var/lib/dex var/lib/clavarium-tunnel"
+if [ "$SERVER_ONLY" = "yes" ]; then
+    all="home/clavarium etc/clavarium"
+    # An older house kept the machines' folders in its data directory: not these.
+    skip=(--exclude='home/clavarium/resources' --exclude='home/clavarium/work' --exclude='home/clavarium/removed' --exclude='home/clavarium/toolbox')
+fi
+for part in $all; do
     [ -e "$ROOT/$part" ] && parts+=("$part")
 done
 
@@ -67,10 +77,10 @@ trap 'rm -rf -- "$note"' EXIT
 
 # The identity provider keeps a small database: it is still while it is copied.
 dex_was_up="no"
-if [ "$ROOT" = "/" ] && systemctl is-active --quiet dex.service 2>/dev/null; then dex_was_up="yes"; systemctl stop dex.service; fi
+if [ "$ROOT" = "/" ] && [ "$SERVER_ONLY" = "no" ] && systemctl is-active --quiet dex.service 2>/dev/null; then dex_was_up="yes"; systemctl stop dex.service; fi
 umask 077
 status=0
-tar -czf "$archive" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' --exclude='home/clavarium-mnt/views' --exclude='home/clavarium-mnt/work-disks' --exclude='*.tmp' -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
+tar -czf "$archive" --exclude='home/clavarium/views' --exclude='home/clavarium/work-disks' --exclude='home/clavarium-mnt/views' --exclude='home/clavarium-mnt/work-disks' --exclude='*.tmp' "${skip[@]}" -C "$note" BACKUP.txt -C "$(cd "$ROOT" && pwd)" "${parts[@]}" || status=$?
 [ "$dex_was_up" = "no" ] || systemctl start dex.service
 # (1: a file changed while it was read -- the copy is still whole.)
 [ "$status" -le 1 ] || { rm -f -- "$archive"; refuse "the archive could not be written"; }

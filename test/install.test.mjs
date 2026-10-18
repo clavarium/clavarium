@@ -93,3 +93,22 @@ test('to try it: --local needs no domain and no operator, sets up nothing of the
     /* Without --local, a domain and an operator are still required. */
     assert.equal(install('--dry-run').code, 64);
 });
+
+test('what is installed: an exact version from npm, checked, or a working tree for development; how it updates', () => {
+    const npm = install('--local', '--version', '0.2.0-next.1', '--dry-run');
+    assert.equal(npm.code, 0, npm.err);
+    assert.match(npm.out, /release\s+clavarium@0\.2\.0-next\.1 from npm, checked \(integrity, provenance from github\.com\/clavarium\/clavarium, npm audit signatures\)/);
+    assert.match(npm.out, /updates\s+automatic, between 02:00 and 05:00, channel next/, 'a pre-release follows "next" unless told');
+    assert.match(install('--local', '--dry-run').out, /release\s+the working tree .*\(development: not checked\)/, 'from a working tree: that tree');
+    const asked = install('--local', '--version', '1.0.0', '--updates', 'ask', '--channel', 'latest', '--dry-run');
+    assert.match(asked.out, /updates\s+said in Settings, done when you say, channel latest/);
+    assert.match(install('--local', '--updates', 'auto', '--update-window', '23:30-01:00', '--dry-run').out, /automatic, between 23:30 and 01:00/);
+    for (const bad of [['--version', '1.0'], ['--version', 'latest'], ['--version', '1.0.0', '--from-dir', '.'], ['--from-dir', '/nonexistent'], ['--updates', 'always'], ['--update-window', '2-5'], ['--update-window', '02:00-02:00'], ['--channel', 'beta']]) {
+        const r = install('--local', ...bad, '--dry-run');
+        assert.equal(r.code, 64, bad.join(' ')); assert.equal(r.out, '');
+    }
+    /* The service runs the release the link names; the timer runs its updater. */
+    const text = readFileSync(SCRIPT, 'utf8');
+    assert.match(text, /^WorkingDirectory=\$CODE\/current\/app$/m);
+    assert.match(text, /^ExecStart=\$CODE\/current\/node\/bin\/node \$CODE\/current\/app\/deploy\/updater\.mjs run$/m);
+});

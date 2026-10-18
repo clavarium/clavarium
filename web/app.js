@@ -2424,8 +2424,103 @@
             ? `Who may sign in: ${platform.operators.join(', ')}. Address: ${platform.address ?? 'not declared'}. Both were set when this was installed.`
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
-        await Promise.all([paintHosts(), paintShelf(), paintServer()]);
+        await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
+
+    /* ---------- Updates: what runs, what is out, how it updates itself (server/updates.mjs) ---------- */
+    let updatesTimer; let updatesBusy = false;
+    const RESULT_WORDS = { done: 'Done', 'rolled-back': 'Did not work: went back', failed: 'Failed' };
+    const sinceWords = (iso) => {
+        const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+        return s < 90 ? 'just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`;
+    };
+    const when = (iso) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+    function updatesError(text) { $('updates-error').textContent = text ?? ''; $('updates-error').hidden = !text; }
+    async function paintUpdates() {
+        clearTimeout(updatesTimer);
+        const u = await fetch(`${API}/updates`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        /* The server restarts during an update: asked again until it answers. */
+        if (!u) { if (updatesBusy && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000); return; }
+        $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
+        for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
+        if (!u.installed) {
+            $('updates-state').textContent = 'Not installed with install.sh: no updates here.';
+            $('updates-offer').hidden = true; $('updates-news').hidden = true; $('updates-history-box').hidden = true;
+            return;
+        }
+        const running = u.running;
+        updatesBusy = Boolean(running);
+        $('updates-state').textContent = running ? `${running.action === 'back' ? 'Going back to' : 'Updating to'} ${running.version}: ${running.step.toLowerCase()}...`
+            : u.checkError ? 'Could not check just now.'
+            : u.available ? `${u.available} is out.`
+            : u.checkedAt ? `Up to date · checked ${sinceWords(u.checkedAt)}` : 'Up to date';
+        $('updates-check').disabled = Boolean(running);
+        $('updates-offer').hidden = !u.available || Boolean(running);
+        $('updates-apply').textContent = `Update to ${u.available ?? ''}`;
+        /* The last thing that went wrong, said once at the top, in words. */
+        const last = u.history[0];
+        const why = (last?.why ?? '').replace(/^./, (c) => c.toUpperCase());
+        const news = !running && last && last.result !== 'done' ? (last.result === 'rolled-back' ? `The update to ${last.to} did not work, so ${last.from} was put back. ${why}` : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed: ${last.why ?? ''}`)
+            : !running && u.refused && (!last || u.refused.at > last.at) ? `Not done: ${u.refused.why}` : '';
+        $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news;
+        if (![$('updates-mode'), $('updates-from'), $('updates-to'), $('updates-channel')].includes(document.activeElement)) {
+            $('updates-mode').value = u.mode; $('updates-channel').value = u.channel;
+            [$('updates-from').value, $('updates-to').value] = u.window.split('-');
+        }
+        const auto = u.mode === 'auto';
+        $('updates-window').hidden = !auto; $('updates-window-label').hidden = !auto;
+        const back = $('updates-back'); back.replaceChildren();
+        for (const r of running ? [] : u.back) {
+            const b = document.createElement('button'); b.type = 'button'; b.textContent = `Go back to ${r.version}`;
+            b.addEventListener('click', () => {
+                /* Asked once more, in place: it restarts the server. */
+                const sure = document.createElement('span'); sure.className = 'hint'; sure.textContent = `The server restarts on ${r.version}.`;
+                const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'primary'; yes.textContent = 'Go back';
+                const no = document.createElement('button'); no.type = 'button'; no.textContent = 'Cancel';
+                no.addEventListener('click', () => { void paintUpdates(); });
+                yes.addEventListener('click', async () => {
+                    updatesError(); yes.disabled = true;
+                    try { await post(`${API}/updates/back`, { version: r.id }); updatesBusy = true; } catch (error) { updatesError(error.message); }
+                    await paintUpdates();
+                });
+                back.replaceChildren(sure, yes, no); yes.focus();
+            });
+            back.append(b);
+        }
+        const list = $('updates-history'); list.replaceChildren();
+        for (const h of u.history) {
+            const li = document.createElement('li'); li.dataset.result = h.result;
+            const t = document.createElement('time'); t.dateTime = h.at; t.textContent = when(h.at);
+            const what = document.createElement('span'); what.textContent = `${h.from ?? '?'} → ${h.to} · ${h.action === 'back' && h.result === 'done' ? 'Went back' : RESULT_WORDS[h.result] ?? h.result}`;
+            li.append(t, what);
+            if (h.why) { const why = document.createElement('small'); why.textContent = h.why; li.append(why); }
+            list.append(li);
+        }
+        $('updates-history-box').hidden = u.history.length === 0;
+        if (running && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000);
+    }
+    $('updates-check').addEventListener('click', async () => {
+        updatesError(); $('updates-check').disabled = true; $('updates-state').textContent = 'Checking...';
+        try { await post(`${API}/updates/check`); } catch (error) { updatesError(error.message); }
+        $('updates-check').disabled = false;
+        await paintUpdates();
+    });
+    $('updates-apply').addEventListener('click', async () => {
+        updatesError();
+        const version = $('updates-apply').textContent.replace(/^Update to /, '');
+        try { await post(`${API}/updates/apply`, { version }); updatesBusy = true; } catch (error) { updatesError(error.message); }
+        await paintUpdates();
+    });
+    async function saveUpdates(change) {
+        updatesError(); $('updates-saved').textContent = '';
+        try { await post(`${API}/updates/settings`, change); $('updates-saved').textContent = 'Saved.'; } catch (error) { updatesError(error.message); }
+        await paintUpdates();
+    }
+    $('updates-mode').addEventListener('change', () => { void saveUpdates({ mode: $('updates-mode').value }); });
+    $('updates-channel').addEventListener('change', () => { void saveUpdates({ channel: $('updates-channel').value }); });
+    for (const id of ['updates-from', 'updates-to']) $(id).addEventListener('change', () => {
+        if ($('updates-from').value && $('updates-to').value) void saveUpdates({ window: `${$('updates-from').value}-${$('updates-to').value}` });
+    });
 
     /* ---------- This server: its disk and memory, and the reserve ---------- */
     const GB = (mb) => `${(mb / 1024).toFixed(mb >= 10 * 1024 ? 0 : 1)} GB`;

@@ -10,7 +10,8 @@
  * offline, as root (no script of the package runs: it has none).
  *
  *   /tools/index.json                  { tools: [{ name, version, file, sha256, usage }] }
- *   /tools/clavarium-parley-0.5.0.tgz  Parley, the first of them (npm pack)
+ *   /tools/clavarium-parley-0.9.0.tgz  Parley, the first of them, as the registry
+ *                                      served it (checked: parley.mjs)
  *   /tools/CLAVARIUM.md                where a tool is, the same for every
  *                                      machine (see guide.mjs): `notes`
  *
@@ -24,18 +25,28 @@
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, mkdirSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { APP, ARCHIVES, PARLEY, archiveName, locked, parleyDir, parleyVersion } from './parley.mjs';
 
 export const TOOLS_PATH = '/tools';
 export const NOTES = 'CLAVARIUM.md';
-const PARLEY = fileURLToPath(new URL('./parley/', import.meta.url));
-
-/* What is put there: { name, archive (a path here), usage(file) }. */
-export function parleySource(dir = PARLEY) {
-    const file = readdirSync(dir).find((f) => /^clavarium-parley-\d+\.\d+\.\d+\.tgz$/.test(f));
-    if (!file) return [];
-    return [{ name: 'parley', archive: `${dir}${file}`, usage: () => 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }];
+/* What is put there: { name, archive (a path here), integrity, usage(file) }.
+   Parley's archive as the registry served it, next to the code (see
+   parley.mjs), with the integrity npm recorded for the version installed:
+   prepare() refuses an archive that is not that one. Missing, it is said
+   once and nothing is offered: no machine gets a Parley nobody checked. */
+export function parleySource({ app = APP, dir } = {}) {
+    let version;
+    try { version = parleyVersion(dir ?? parleyDir()); } catch (error) { console.error(`Parley: ${error.message}`); return []; }
+    const archive = join(app, ARCHIVES, archiveName(version));
+    if (!existsSync(archive)) { console.error(`Parley: ${archive} is missing (npm run toolbox): no machine is given Parley`); return []; }
+    const lock = locked(PARLEY, app);
+    if (lock?.version !== version) { console.error(`Parley: the lock file does not record version ${version}: no machine is given Parley`); return []; }
+    return [{ name: 'parley', archive, integrity: lock.integrity, usage: () => 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }];
 }
+
+/* "sha512-<base64>", as npm writes an integrity. */
+export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
@@ -73,6 +84,7 @@ export class Toolbox {
         const tools = [];
         for (const source of this.#sources) {
             const bytes = readFileSync(source.archive);
+            if (source.integrity && integrityOf(bytes) !== source.integrity) { console.error(`${source.archive} is not the archive npm recorded (integrity differs): not given to machines`); continue; }
             const file = source.archive.split('/').pop();
             const sha256 = createHash('sha256').update(bytes).digest('hex');
             const there = existsSync(`${dir}/${file}`) ? createHash('sha256').update(readFileSync(`${dir}/${file}`)).digest('hex') : '';
