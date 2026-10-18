@@ -4,6 +4,9 @@
 #
 #   curl -fsSL https://clavarium.org/install.sh | sudo bash
 #   curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --channel next
+#   ... -s -- --relay IP --relay-user ubuntu --domain clav.example.com --admin you@example.com
+#       installs, shows the setup key (text + QR), waits for the relay, then goes online
+#   ... -s -- --direct --domain clav.example.com     (ports 80 and 443 open to this machine)
 #
 # It asks nothing and always ends in LOCAL MODE (this computer only, no
 # sign-in). It prints the next command (`sudo clavarium online ...`) and the
@@ -30,13 +33,18 @@ NODES="/opt/clavarium/nodes"
 bad() { echo "install: $*" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 
-CHANNEL="latest"; VERSION=""; PASS=()
+CHANNEL="latest"; VERSION=""; PASS=(); ONLINE=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value"; PASS+=(--channel "$CHANNEL") ;;
         --version) VERSION="${2:-}"; shift 2 || bad "--version needs a value" ;;
         --local) shift ;;
-        --domain|--operator|--relay|--core-only|--from-dir|--keep-release|--relay-installed) bad "$1: this installs in local mode only. To go online afterwards: sudo clavarium online ..." ;;
+        # Going online in the same command: installed in local mode first, then
+        # `clavarium online` runs and WAITS for the relay (or the domain) by itself.
+        --relay|--relay-user|--domain|--admin|--relay-fingerprint) [ -n "${2:-}" ] || bad "$1 needs a value"; ONLINE+=("$1" "$2"); shift 2 ;;
+        --keep-setup-key|--yes) ONLINE+=("$1"); shift ;;
+        --direct) ONLINE+=(--port); shift ;;
+        --operator|--core-only|--from-dir|--keep-release|--relay-installed) bad "$1 is not for this script (see deploy/install.sh)" ;;
         *) PASS+=("$1"); shift ;;
     esac
 done
@@ -80,3 +88,10 @@ got="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$work/package/package.json" 
 echo "   clavarium $got"
 
 PATH="$NODE_DIR/bin:$PATH" bash "$work/package/deploy/install.sh" --local --version "$got" "${PASS[@]}"
+# Asked to go online too: on with it now. The questions (the relay's fingerprint)
+# are read from the keyboard (/dev/tty), not from this script's own input.
+if [ "${#ONLINE[@]}" -gt 0 ]; then
+    echo
+    echo "== going online"
+    exec /usr/local/bin/clavarium online "${ONLINE[@]}" </dev/tty
+fi

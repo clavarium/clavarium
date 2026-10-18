@@ -24,8 +24,9 @@
  * `sys`, so the tests can stand in for SSH, npm and DNS.
  */
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, renameSync, openSync, readSync, writeSync, closeSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, renameSync, openSync, readSync, writeSync, closeSync } from 'node:fs';
 import { promises as dns } from 'node:dns';
+import { connect } from 'node:net';
 import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -144,7 +145,7 @@ export async function showKeys(sys, P = PATHS, { which = 'all' } = {}) {
 
 /* ---------------------------------- SSH ---------------------------------- */
 const sshOptions = (key, knownHosts, port) => [
-    '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', `IdentityFile=${key}`,
+    '-o', 'BatchMode=yes', '-o', 'IdentitiesOnly=yes', '-o', `IdentityFile=${key}`, '-o', 'PreferredAuthentications=publickey', '-o', 'NumberOfPasswordPrompts=0',
     '-o', `UserKnownHostsFile=${knownHosts}`, '-o', 'StrictHostKeyChecking=yes', '-o', 'ConnectTimeout=10', '-p', String(port),
 ];
 const quote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
@@ -304,12 +305,34 @@ async function fingerprintOf(sys, P, line) {
     return { file, print };
 }
 
-async function waitForSetupKey(sys, o, at, deadline) {
+/* NOT BANNED WHILE WAITING. A relay may run fail2ban (by default: banned after
+   5 failed logins in 10 minutes). So: while its SSH port does not even answer,
+   only that port is looked at (no login, nothing counted); once it answers,
+   one key, one try, then 5 minutes, a second, 5 minutes, a third (the
+   operator's rule): after three failures it waits for Enter on the keyboard
+   (with --yes and no keyboard: 5 minutes more each time). */
+export const KNOCK_MS = 5 * 60_000;
+export const KNOCKS = 3;
+const portAnswers = (host, port, ms = 5000) => new Promise((resolve) => {
+    const s = connect({ host, port: Number(port) });
+    const done = (ok) => { s.destroy(); resolve(ok); };
+    s.setTimeout(ms, () => done(false)); s.once('connect', () => done(true)); s.once('error', () => done(false));
+});
+export async function waitForSetupKey(sys, o, at, deadline) {
     const check = o.user === 'root' ? 'true' : 'sudo -n true';
     let said = '';
     const say = (text) => { if (text !== said) { said = text; sys.print(text); } };
+    let tries = 0;
+    const knock = sys.portAnswers ?? portAnswers;
     for (;;) {
+        if (!(await knock(o.relay, o.relayPort ?? 22))) {
+            say(`${o.relay} does not answer on its SSH port yet: waiting, without trying to log in...`);
+            if (sys.now() > deadline) throw new Failed(`${o.relay} did not answer on its SSH port within ${WAIT_MS / 60000} minutes`);
+            await sys.sleep(15_000);
+            continue;
+        }
         const r = await sys.run(['ssh', ...at, `${o.user}@${o.relay}`, check]);
+        tries += 1;
         if (r.code === 0) { sys.print(`The setup key opens ${o.user}@${o.relay}${o.user === 'root' ? '' : ', with sudo'}.`); return; }
         const err = r.err || '';
         if (/password is required|not in the sudoers|may not run sudo/i.test(err)) say(`${o.user} on ${o.relay} needs sudo without a password: add "${o.user} ALL=(ALL) NOPASSWD: ALL" in /etc/sudoers.d there. Waiting...`);
@@ -317,7 +340,14 @@ async function waitForSetupKey(sys, o, at, deadline) {
         else if (/Host key verification failed|REMOTE HOST IDENTIFICATION/i.test(err)) throw new Refused(`${o.relay} answered with another key than a moment ago: stopped`);
         else say(`${o.relay} does not answer yet (${tail(r)}). Waiting...`);
         if (sys.now() > deadline) throw new Failed(`the setup key was not accepted on ${o.user}@${o.relay} within ${WAIT_MS / 60000} minutes`);
-        await sys.sleep(5000);
+        if (tries >= KNOCKS && !o.yes && sys.waitEnter) {
+            sys.print(`   ${KNOCKS} tries refused: put the setup key on the relay, then press Enter to try again (Ctrl-C to stop).`);
+            if (!(await sys.waitEnter())) throw new Failed('no keyboard to wait on: run sudo clavarium online again once the key is on the relay');
+            tries = 0;
+            continue;
+        }
+        sys.print(`   next try in ${KNOCK_MS / 60_000} min (${tries} of ${KNOCKS})${sys.sleepOrEnter && !o.yes ? ' -- or press Enter to try now' : ''}`);
+        await (sys.sleepOrEnter && !o.yes ? sys.sleepOrEnter(KNOCK_MS) : sys.sleep(KNOCK_MS));
     }
 }
 
@@ -477,6 +507,18 @@ export function realSys() {
             for (const s of [child.stdout, child.stderr]) createInterface({ input: s }).on('line', (l) => onLine?.(l));
             const exited = new Promise((resolve) => { child.on('error', () => { ended = true; resolve({ code: 127 }); }); child.on('close', (code) => { ended = true; resolve({ code: code ?? 1 }); }); });
             return { exited, ended: () => ended, stop: () => { if (!ended) child.kill('SIGTERM'); } };
+        },
+        /* A wait that Enter on the keyboard cuts short (no keyboard: the whole wait). */
+        sleepOrEnter: (ms) => new Promise((resolve) => {
+            let tty; let timer;
+            const done = () => { clearTimeout(timer); try { tty?.destroy(); } catch { /* gone */ } resolve(); };
+            timer = setTimeout(done, ms);
+            try { tty = createReadStream('/dev/tty'); tty.on('data', (d) => { if (d.includes(10) || d.includes(13)) done(); }); tty.on('error', () => {}); } catch { /* no keyboard: the timer alone */ }
+        }),
+        waitEnter: async () => {
+            let fd;
+            try { fd = openSync('/dev/tty', 'r'); } catch { return false; }
+            try { const buf = Buffer.alloc(256); let s = ''; while (!s.includes('\n')) { const n = readSync(fd, buf, 0, buf.length, null); if (!n) break; s += buf.toString('utf8', 0, n); } return true; } finally { closeSync(fd); }
         },
         ask: async (question) => {
             let fd;

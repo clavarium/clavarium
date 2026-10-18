@@ -35,13 +35,14 @@ function place() {
 
 /* The world as a test wants it. `ssh(user, host, command, argv)` answers SSH;
    `caddy` is a list of log-line lists, one per test run of Caddy. */
-function world({ dns = {}, ssh = () => OK, caddy = [], answers = [], ports = {}, root }) {
-    const log = []; const printed = []; let t = 0;
+function world({ dns = {}, ssh = () => OK, caddy = [], answers = [], ports = {}, root, portOpen = () => true }) {
+    const log = []; const printed = []; const slept = []; let t = 0;
     const sys = {
         tmp: root,
         print: (s) => printed.push(s),
         now: () => t,
-        sleep: async (ms) => { t += ms; },
+        sleep: async (ms) => { t += ms; slept.push(ms); },
+        portAnswers: async () => portOpen(),
         resolve: async (name) => dns[name] ?? [],
         ask: async (q) => { log.push({ ask: q }); return answers.shift() ?? false; },
         run: async (argv, opts = {}) => {
@@ -309,4 +310,21 @@ test('the relay program version this Clavarium installs is the one relay/ declar
     const pkg = JSON.parse(readFileSync(new URL('../relay/package.json', import.meta.url), 'utf8'));
     assert.equal(pinned, pkg.version);
     assert.match(readFileSync(new URL('../relay/clavarium-relay', import.meta.url), 'utf8'), new RegExp(`^VERSION_OF_THIS="${pkg.version.replace(/\./g, '\\.')}"$`, 'm'));
+});
+
+test('waiting for the relay is not banned: no login while its port is shut; then one try, 5 min, a second, 5 min, a third, then Enter', async () => {
+    const { waitForSetupKey, KNOCK_MS } = await import('../deploy/online.mjs');
+    let t = 0; const slept = []; const printed = []; let open = false; let logins = 0; let enters = 0;
+    const sys = {
+        now: () => t, print: (s) => printed.push(s),
+        sleep: async (ms) => { t += ms; slept.push(ms); if (slept.length === 2) open = true; },
+        portAnswers: async () => open,
+        run: async () => { logins += 1; return logins <= 4 ? { code: 255, out: '', err: 'Permission denied (publickey).' } : { code: 0, out: '', err: '' }; },
+        waitEnter: async () => { enters += 1; return true; },
+    };
+    await waitForSetupKey(sys, { user: 'ubuntu', relay: 'relay.example.net', relayPort: '22', yes: false }, [], Infinity);
+    assert.deepEqual(slept.slice(0, 2), [15_000, 15_000], 'the shut port is only looked at');
+    assert.deepEqual(slept.slice(2), [KNOCK_MS, KNOCK_MS, KNOCK_MS], '5 minutes between tries, and again after Enter');
+    assert.equal(enters, 1, 'after three refusals, Enter is waited for');
+    assert.equal(logins, 5);
 });

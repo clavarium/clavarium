@@ -133,7 +133,7 @@ test('going online later: the settings change, the release that runs stays; loca
 const BOOT = fileURLToPath(new URL('../docs/install.sh', import.meta.url));
 const boot = (...args) => { const r = spawnSync('/bin/bash', [BOOT, ...args], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
 
-test('install.sh of the site: the same pinned Node.js, local mode always, options passed on, nothing asked', () => {
+test('install.sh of the site: the same pinned Node.js, local mode first, options passed on; asked to go online, it hands over to clavarium online (which waits for the relay)', () => {
     const text = readFileSync(BOOT, 'utf8');
     assert.ok(text.includes(`NODE_VERSION="${NODE_VERSION}"`));
     const sha = /^export const NODE_SHA256 = '([0-9a-f]{64})';$/m.exec(readFileSync(new URL('../server/tools.mjs', import.meta.url), 'utf8'))[1];
@@ -141,7 +141,8 @@ test('install.sh of the site: the same pinned Node.js, local mode always, option
     assert.match(text, /sha256sum -c -/);
     assert.match(text, /bash "\$work\/package\/deploy\/install\.sh" --local --version "\$got" "\$\{PASS\[@\]\}"/);
     assert.ok(!/\bread\b -/.test(text), 'it asks nothing');
-    for (const bad of [['--channel', 'beta'], ['--domain', 'clav.example.com'], ['--relay', 'relay.example.net'], ['--version', 'latest']]) {
+    assert.match(text, /exec \/usr\/local\/bin\/clavarium online "\$\{ONLINE\[@\]\}" <\/dev\/tty/);
+    for (const bad of [['--channel', 'beta'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
         const r = boot(...bad);
         assert.equal(r.code, 64, bad.join(' '));
     }
