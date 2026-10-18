@@ -8,7 +8,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseOnline, online, showKeys, relayCommand, explain, isPrivate, checkDns, Bad, Refused, Failed } from '../deploy/online.mjs';
+import { parseOnline, online, showKeys, QR_WARNING, relayCommand, explain, isPrivate, checkDns, Bad, Refused, Failed } from '../deploy/online.mjs';
 
 const ip = (...parts) => parts.join('.');
 const RELAY_IP = ip(203, 0, 113, 7);
@@ -23,7 +23,7 @@ function place() {
     const root = mkdtempSync(join(tmpdir(), 'clavarium-online-'));
     const P = {
         access: join(root, 'access'), tunnel: join(root, 'tunnel'), relayConf: join(root, 'etc', 'relay.conf'),
-        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), code: join(root, 'code'), caddy: join(root, 'caddy'),
+        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), code: join(root, 'code'), caddy: join(root, 'caddy'), passwords: join(root, 'passwords'),
     };
     mkdirSync(join(P.code, 'current', 'app', 'deploy'), { recursive: true });
     copyFileSync(RELAY_SH, join(P.code, 'current', 'app', 'deploy', 'relay.sh'));
@@ -99,6 +99,10 @@ test('clavarium key: three keys made here once, the public ones shown as text an
         assert.match(w.text(), /SETUP KEY/); assert.ok(w.text().includes(keys.setup)); assert.ok(w.text().includes(`relay.sh --key "${keys.tunnel}"`));
         assert.deepEqual(ran(w.log, (a) => a[0] === 'qrencode').map((e) => e.argv.at(-1)), [keys.setup, keys.tunnel]);
         assert.ok(existsSync(join(P.access, 'keeper-key.pub')));
+        /* The QR code far from the key's text, a warning above it: a phone must read the code, not the text. */
+        const t = w.text();
+        assert.ok(t.indexOf(QR_WARNING) < t.indexOf('[QR]') && t.indexOf('[QR]') < t.indexOf(keys.setup), 'warning, code, then text');
+        assert.match(t.slice(t.indexOf('[QR]'), t.indexOf(keys.setup)), /\n\s*\n\s*\n\s*\n\s*\n/, 'a wide gap');
         const again = world({ root });
         await showKeys(again.sys, P, { which: 'setup' });
         assert.equal(ran(again.log, (a) => a.includes('ssh-keygen')).length, 0, 'made once');
@@ -122,6 +126,7 @@ test('--port: DNS, ports free, a real test on 80 then 443, and only then server 
     const { root, P, done } = place();
     try {
         const w = world({ root, dns: { 'clav.example.com': [HOME_IP] }, caddy: [[CERT], [CERT]] });
+        writeFileSync(P.passwords, '    admin    S3CRET-PW\n'); /* what install.sh writes there */
         await online(parseOnline(['--port', '--domain', 'clav.example.com']), w.sys, P);
         const starts = w.log.filter((e) => e.start);
         assert.equal(starts.length, 2);
@@ -131,6 +136,12 @@ test('--port: DNS, ports free, a real test on 80 then 443, and only then server 
         assert.ok(w.log.indexOf(starts[1]) < w.log.indexOf(runs[0]), 'the test comes first');
         assert.match(w.text(), /Online: https:\/\/clav\.example\.com/);
         assert.equal(readdirLeft(root), 0, 'the test leaves nothing behind');
+        /* The password goes through a file install.sh writes, shown LAST (it does not scroll away), then deleted; the diagnosis before it. */
+        assert.equal(runs[0].opts.env.CLAVARIUM_PASSWORDS_TO, P.passwords);
+        assert.ok(!existsSync(P.passwords));
+        assert.ok(w.text().indexOf('Diagnosis:') < w.text().indexOf('Online: https'));
+        assert.equal(w.printed.at(-1), '    admin    S3CRET-PW');
+        assert.match(w.printed.at(-2), /SIGN IN WITH \(shown ONCE.*lost: sudo clavarium password EMAIL/);
     } finally { done(); }
 });
 const readdirLeft = (root) => { try { return readdirSync(root).filter((f) => f.startsWith('clavarium-test-')).length; } catch { return 0; } };

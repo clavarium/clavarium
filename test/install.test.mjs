@@ -127,6 +127,10 @@ test('going online later: the settings change, the release that runs stays; loca
     assert.match(text, /if \[ "\$LOCAL" = "yes" \] \|\| \[ "\$CORE_ONLY" = "no" \]; then\nstep "edge: programs"/);
     assert.ok(text.indexOf('step "edge: programs"') < text.indexOf('Clavarium is installed, in local mode'));
     assert.match(text, /qrencode openssh-client/);
+    /* The certificate: Let's Encrypt first, Caddy's own as a fallback, replaced by a timer as soon as it can. */
+    assert.match(text, /issuer acme \{\n\t\t\tdisable_tlsalpn_challenge\n\t\t\}\n\t\tissuer internal/);
+    assert.match(text, /\/usr\/local\/bin\/clavarium doctor --install-watch/);
+    assert.match(text, /CLAVARIUM_PASSWORDS_TO/);
 });
 
 /* THE ONE LINE OF THE SITE: curl -fsSL https://clavarium.org/install.sh | sudo bash */
@@ -140,9 +144,15 @@ test('install.sh of the site: the same pinned Node.js, local mode first, options
     assert.ok(text.includes(`NODE_SHA256="${sha}"`));
     assert.match(text, /sha256sum -c -/);
     assert.match(text, /bash "\$work\/package\/deploy\/install\.sh" --local --version "\$got" "\$\{PASS\[@\]\}"/);
-    /* It asks nothing -- but --key-only, which waits for Enter around the QR code (shown alone, so a phone reads the code and not the text). */
-    const outsideKeyOnly = text.replace(/if \[ -n "\$KEY_ONLY" \]; then[\s\S]*?\n    exit 0\nfi/, '');
-    assert.ok(!/\bread\b -/.test(outsideKeyOnly), 'it asks nothing');
+    /* It asks nothing, and never clears the screen. */
+    assert.ok(!/\bread\b -|\bclear\b/.test(text), 'it asks nothing');
+    /* Every QR code: a warning above it, the key's text far below it (a phone must read the code, not the text). */
+    for (const t of [text, readFileSync(SCRIPT, 'utf8')]) {
+        for (const m of t.matchAll(/qrencode -t ANSI[^\n]*\n/g)) {
+            assert.match(t.slice(0, m.index).split('\n').slice(-2).join('\n'), /WARNING: read the QR code with the camera, not the text/);
+            assert.match(t.slice(m.index + m[0].length).split('\n')[0], /printf '(\\n){6}'/);
+        }
+    }
     assert.match(text, /exec \/usr\/local\/bin\/clavarium online "\$\{ONLINE\[@\]\}" <\/dev\/tty/);
     for (const bad of [['--channel', 'beta'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
         const r = boot(...bad);

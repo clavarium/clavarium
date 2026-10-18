@@ -31,6 +31,7 @@ import { createInterface } from 'node:readline';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readConf } from './updater.mjs';
+import { doctor, servedCert, DOCTOR_PATHS } from './doctor.mjs';
 
 export const PATHS = {
     access: '/var/lib/clavarium-relay-access',
@@ -40,6 +41,7 @@ export const PATHS = {
     unit: '/etc/systemd/system/clavarium.service',
     code: '/opt/clavarium',
     caddy: '/usr/local/bin/caddy',
+    passwords: '/run/clavarium-passwords',
 };
 export const STAGING = 'https://acme-staging-v02.api.letsencrypt.org/directory';
 const DOMAIN = /^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/;
@@ -123,24 +125,30 @@ export async function ensureKeys(sys, P = PATHS) {
     return { setup: read(f.setup), keeper: read(f.keeper), tunnel: read(f.tunnel) };
 }
 
+/* The QR code far from the key's text: with the text next to it, a phone may read
+   the TEXT (I/l/1 and case mixed up, the end cut off) instead of the code. */
+export const QR_WARNING = 'WARNING: read the QR code with the camera, not the text: some phones read the text on screen and get letters wrong, while the code is exact.';
 async function qr(sys, text) {
     const r = await sys.run(['qrencode', '-t', 'ANSI', '-m', '1', '-l', 'L', '--', text]);
-    if (r.code === 0 && r.out) sys.print(r.out.replace(/\n$/, ''));
+    if (r.code !== 0 || !r.out) return;
+    sys.print(QR_WARNING);
+    sys.print(r.out.replace(/\n$/, ''));
+    sys.print('\n\n\n\n\n');
 }
 
 /* `sudo clavarium key`: the public keys, as text and as QR codes for a phone. */
 export async function showKeys(sys, P = PATHS, { which = 'all' } = {}) {
     const keys = await ensureKeys(sys, P);
     if (which === 'all' || which === 'setup') {
+        await qr(sys, keys.setup);
         sys.print('SETUP KEY: for `clavarium online --relay`. Put it once on the relay, in');
         sys.print('~/.ssh/authorized_keys of an account that has sudo. It is taken out at the end.');
         sys.print(`    ${keys.setup}`);
-        await qr(sys, keys.setup);
     }
     if (which === 'all' || which === 'tunnel') {
+        await qr(sys, keys.tunnel);
         sys.print('TUNNEL KEY: only if you set up the relay yourself:');
         sys.print(`    sudo deploy/relay.sh --key "${keys.tunnel}"`);
-        await qr(sys, keys.tunnel);
     }
     sys.print('These are PUBLIC keys: showing them is safe.');
     return keys;
@@ -379,9 +387,9 @@ async function setUpRelay(sys, P, o, keys) {
     }
 
     sys.print('');
+    await qr(sys, keys.setup);
     sys.print(`1. Put this SETUP KEY on the relay, in ~${o.user}/.ssh/authorized_keys of ${o.relay}${o.user === 'root' ? '' : ` (${o.user} needs sudo without a password)`}:`);
     sys.print(`    ${keys.setup}`);
-    await qr(sys, keys.setup);
     sys.print('(A public key: safe to show. It is taken out again at the end.)');
     sys.print('');
     const deadline = sys.now() + WAIT_MS;
@@ -443,8 +451,20 @@ async function switchToServer(sys, P, o) {
     if (o.relay) argv.push('--relay', o.relay, '--relay-port', o.relayPort, '--relay-installed');
     sys.print('');
     sys.print('Switching to server mode: HTTPS, sign-in, the administrator...');
-    const r = await sys.run(argv, { stream: true, inherit: true });
+    const r = await sys.run(argv, { stream: true, inherit: true, env: { CLAVARIUM_PASSWORDS_TO: P.passwords } });
     if (r.code !== 0) throw new Failed(`the switch to server mode failed (exit ${r.code}, above: why)`);
+}
+
+/* The certificate: Caddy asks Let's Encrypt as it starts; a few minutes at most. */
+async function waitCertificate(sys, o) {
+    sys.print('');
+    sys.print(`Waiting for the certificate of ${o.domain} from Let's Encrypt (a few minutes at most)...`);
+    for (let i = 0; i < 18; i += 1) {
+        const c = await servedCert(sys, o.domain);
+        if (!c.none && c.verified && !c.local) { sys.print(`   obtained: ${c.issuer}`); return; }
+        await sys.sleep(10_000);
+    }
+    sys.print('   not yet: Caddy keeps asking by itself. The diagnosis below says why.');
 }
 
 /* `sudo clavarium online ...` */
@@ -478,10 +498,21 @@ export async function online(o, sys, P = PATHS) {
     } finally {
         tunnel?.proc.stop();
     }
-    await switchToServer(sys, P, o);
-    sys.print('');
-    sys.print(`Online: https://${o.domain}   (sign in as ${o.admin}, with the password above)`);
-    if (o.relay) sys.print('The relay is watched from here: sudo clavarium relay status');
+    try {
+        await switchToServer(sys, P, o);
+        await waitCertificate(sys, o);
+        await doctor(sys, {}, { ...DOCTOR_PATHS, unit: P.unit, relayConf: P.relayConf });
+        sys.print('');
+        sys.print(`Online: https://${o.domain}`);
+        if (o.relay) sys.print('The relay is watched from here: sudo clavarium relay status');
+        sys.print('Anything wrong later: sudo clavarium doctor (it says what to do; --fix repairs what it can)');
+        const pw = existsSync(P.passwords) ? readFileSync(P.passwords, 'utf8') : '';
+        sys.print('');
+        if (pw) {
+            sys.print('SIGN IN WITH (shown ONCE, kept nowhere in clear; lost: sudo clavarium password EMAIL):');
+            sys.print(pw.replace(/\n$/, ''));
+        } else sys.print(`Sign in as ${o.admin}, with its password (lost: sudo clavarium password ${o.admin}).`);
+    } finally { rmSync(P.passwords, { force: true }); }
 }
 
 /* `sudo clavarium relay VERB` */

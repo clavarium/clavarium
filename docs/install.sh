@@ -55,7 +55,7 @@ done
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root: curl -fsSL https://clavarium.org/install.sh | sudo bash"
 
-# Version of this script: 2026-10-18.4 (printed, to tell a stale copy from the current one).
+# Version of this script: 2026-10-18.16 (printed, to tell a stale copy from the current one).
 # STEP 1 OF 2, ALONE: the key the relay will be made with. Made here, its private
 # half never leaves this machine; its public half shown as text and as a QR code.
 # The installation (step 2) takes it from the same place.
@@ -66,18 +66,14 @@ if [ -n "$KEY_ONLY" ]; then
         || refuse "openssh-client and qrencode could not be installed"
     install -d -m 0700 "$ACCESS"
     [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
-    # THE QR CODE ALONE ON THE SCREEN FIRST: with the key's text next to it, a phone
-    # may read the TEXT (character recognition: I/l/1 and case mixed up, the end cut
-    # off by the screen) instead of the code. So the code alone, Enter, then the text.
-    echo "clavarium install.sh 2026-10-18.15"
+    # THE QR CODE FAR FROM THE KEY'S TEXT: with the text next to it, a phone may read
+    # the TEXT (character recognition: I/l/1 and case mixed up, the end cut off by the
+    # screen) instead of the code. So: a warning, the code, a wide gap, then the text.
+    echo "clavarium install.sh 2026-10-18.16"
     echo
-    echo "Next: the QR code of the relay's key, alone on the screen. Read it with your phone's camera"
-    echo "(the code, not text), copy what it gives, then press Enter here."
-    printf 'Press Enter to show it.'; read -r _ </dev/tty 2>/dev/null || true
-    clear 2>/dev/null || true
+    echo "WARNING: read the QR code with the camera, not the text: some phones read the text on screen and get letters wrong, while the code is exact."
     tr -d "\n" < "$ACCESS/setup-key.pub" | qrencode -t ANSI -m 1 -l L || true
-    printf 'Press Enter when it is read.'; read -r _ </dev/tty 2>/dev/null || true
-    clear 2>/dev/null || true
+    printf '\n\n\n\n\n\n'
     echo "The key to create your relay with. It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"

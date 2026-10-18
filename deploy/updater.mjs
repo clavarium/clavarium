@@ -159,6 +159,8 @@ export class Updater {
     #save(change) {
         const state = { ...this.#state(), ...change, releases: this.releases().map(({ id, version, dataFormat, current }) => ({ id, version, dataFormat, current })) };
         state.version = this.current()?.version ?? null;
+        /* "Available" is only ever a version NEWER than the one that runs: once it runs, it is not offered again. */
+        if (state.available && (!VERSION.test(state.available) || (state.version && VERSION.test(state.version) && compareVersions(state.available, state.version) <= 0))) state.available = null;
         mkdirSync(this.#o.stateDir, { recursive: true, mode: 0o755 });
         const file = join(this.#o.stateDir, 'state.json');
         writeFileSync(`${file}.new`, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o644 });
@@ -494,8 +496,12 @@ export class Updater {
         try { request = readFileSync(file, 'utf8').trim(); rmSync(file, { force: true }); } catch { /* none */ }
         const [verb, arg] = request.split(/\s+/);
         try {
-            if (verb === 'apply') return await this.apply(arg);
-            if (verb === 'rollback') return await this.rollback(arg);
+            /* Asked by the administrator: once done, the registry asked once more, so what is offered is what is true now. */
+            if (verb === 'apply' || verb === 'rollback') {
+                const r = verb === 'apply' ? await this.apply(arg) : await this.rollback(arg);
+                await this.check().catch(() => {});
+                return r;
+            }
             return await this.tick();
         } catch (error) {
             if (error instanceof Refused && request) this.#save({ refused: { at: this.#o.now().toISOString(), why: error.message } });

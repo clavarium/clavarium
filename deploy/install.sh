@@ -538,7 +538,10 @@ else
 fi
 
 # Behind a relay, the front listens on the loopback only: the tunnel is the
-# one way in.
+# one way in. Let's Encrypt first; if it cannot be reached (a tunnel not up yet),
+# a certificate Caddy makes itself, so the site still answers (with a warning).
+# Caddy would keep that one for hours: clavarium-certificate.timer replaces it
+# with Let's Encrypt's as soon as it can (sudo clavarium doctor --certificate).
 BIND=""; [ -z "$RELAY" ] || BIND="	bind 127.0.0.1"
 cat > /etc/caddy/Caddyfile <<CADDY
 # The only thing on this machine that takes what comes from the outside.
@@ -621,6 +624,8 @@ PROXYUNIT
 systemctl daemon-reload
 systemctl enable --quiet caddy.service dex.service oauth2-proxy.service
 systemctl restart dex.service caddy.service oauth2-proxy.service
+# A certificate Caddy made itself (its fallback) replaced by Let's Encrypt's as soon as it can.
+/usr/local/bin/clavarium doctor --install-watch || echo "install: the certificate timer could not be set: sudo clavarium doctor --fix" >&2
 
 step "edge: checks"
 local_get() { curl -sk -o /dev/null -w '%{http_code}' --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN$1" || true; }
@@ -692,7 +697,11 @@ fi
 
 echo
 echo "Clavarium is installed:   https://$DOMAIN"
-if [ -n "$PASSWORDS" ]; then
+if [ -n "$PASSWORDS" ] && [ -n "${CLAVARIUM_PASSWORDS_TO:-}" ]; then
+    # Run by `clavarium online`: it shows them LAST, where they do not scroll away, then deletes them.
+    ( umask 077; printf '%s' "$PASSWORDS" > "$CLAVARIUM_PASSWORDS_TO" )
+    echo "Sign in with: the password is shown at the very end."
+elif [ -n "$PASSWORDS" ]; then
     echo "Sign in with (shown ONCE, kept nowhere in clear):"
     printf '%s' "$PASSWORDS"
 else
@@ -702,14 +711,17 @@ if [ -n "$RELAY" ] && [ "$RELAY_INSTALLED" = "yes" ]; then
     echo "The relay $RELAY is set up; the tunnel comes up by itself.   Its fingerprint: $RELAY_PRINT"
 elif [ -n "$RELAY" ]; then
     echo
-    echo "ON THE RELAY ($RELAY), run this one command; the tunnel then comes up by itself:"
-    echo "    sudo deploy/relay.sh --key \"$TUNNEL_KEY\""
     # A server with a screen and a keyboard only: the key, carried by a phone.
     # It is a PUBLIC key: showing it is safe; it lets the relay know this machine.
+    # The QR code far from the key's text, so a phone reads the code, not the text.
     if command -v qrencode >/dev/null 2>&1 || apt-get install -y -qq qrencode >/dev/null 2>&1; then
-        echo "The same key, to read with a phone or a tablet:"
+        echo "The relay's tunnel key, as a QR code:"
+        echo "WARNING: read the QR code with the camera, not the text: some phones read the text on screen and get letters wrong, while the code is exact."
         qrencode -t ANSI -m 1 -l L -- "$TUNNEL_KEY" || true
+        printf '\n\n\n\n\n\n'
     fi
+    echo "ON THE RELAY ($RELAY), run this one command; the tunnel then comes up by itself:"
+    echo "    sudo deploy/relay.sh --key \"$TUNNEL_KEY\""
     echo "It will print this, and it must be the same:    $RELAY_PRINT"
     echo "The name $DOMAIN must lead to the relay."
 else

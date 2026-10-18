@@ -196,6 +196,18 @@ test('the timer does what the mode says: off, a window, as soon as out, ask; a r
     assert.equal(s.current(), '1.0.0');
     assert.equal(existsSync(join(s.dirs.stateDir, 'request')), false);
     assert.equal(s.u.about().history[0].action, 'back');
+    /* After what the administrator asked, the registry is asked once more: back on 1.0.0, 1.0.1 is offered again. */
+    assert.equal(s.u.about().available, '1.0.1');
+    /* An update asked through the interface: once it runs, it is not offered again. */
+    writeFileSync(join(s.dirs.stateDir, 'request'), 'apply 1.0.1\n');
+    await s.u.runOnce();
+    assert.equal(s.current(), '1.0.1');
+    assert.equal(s.u.about().available, null, 'the version that runs is not offered');
+    /* And a newer one out meanwhile is offered at once, without waiting for the timer. */
+    s.publish('1.0.2');
+    writeFileSync(join(s.dirs.stateDir, 'request'), 'apply 1.0.1\n');
+    await s.u.runOnce();
+    assert.equal(s.u.about().available, '1.0.2');
 });
 
 test('going back: only to a release that is kept, and that can read the data', async (t) => {

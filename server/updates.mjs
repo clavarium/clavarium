@@ -14,6 +14,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { Refusal } from './conversations.mjs';
+import { compareVersions } from '../deploy/updater.mjs';
 
 export const STATE_FILE = '/var/lib/clavarium/update/state.json';
 export const CONF_FILE = '/etc/clavarium/update.conf';
@@ -46,12 +47,15 @@ export class Updates {
     about() {
         if (!this.installed) return { installed: false, version: this.#version };
         const s = this.#read();
+        const version = s.version ?? this.#version;
+        /* Never offered: the version that runs, or an older one (a state written before it ran). */
+        const newer = VERSION.test(s.available ?? '') && !(VERSION.test(version ?? '') && compareVersions(s.available, version) <= 0);
         const releases = Array.isArray(s.releases) ? s.releases : [];
         return {
             installed: true,
-            version: s.version ?? this.#version,
+            version,
             ...this.#settings(),
-            available: VERSION.test(s.available ?? '') ? s.available : null,
+            available: newer ? s.available : null,
             checkedAt: s.checkedAt ?? null,
             checkError: s.checkError ?? null,
             running: s.running ?? null,

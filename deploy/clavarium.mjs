@@ -12,6 +12,8 @@
  *   sudo clavarium online --port --domain NAME [...]
  *   sudo clavarium key                                       the public keys, text and QR
  *   sudo clavarium relay status | repair | update-os | update-relay | forget-setup-key
+ *   sudo clavarium doctor [--fix]                            what works, what does not, what to do
+ *   sudo clavarium password EMAIL                            a new password for an administrator
  *
  * `install` runs deploy/install.sh of this package, which installs THIS
  * version from npm (checked) into /opt/clavarium/releases/X.Y.Z; every other
@@ -25,6 +27,18 @@ import { fileURLToPath } from 'node:url';
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const [verb, ...rest] = process.argv.slice(2);
 if (verb === '--version' || verb === '-v') { console.log(version); process.exit(0); }
+if (['doctor', 'password'].includes(verb)) {
+    const { doctor, newPassword, certificateWatch, installWatch } = await import('./doctor.mjs');
+    if (process.getuid?.() !== 0) { console.error(`clavarium ${verb}: run it as root: sudo clavarium ${verb} ...`); process.exit(78); }
+    const sys = (await import('./online.mjs')).realSys();
+    try {
+        if (verb === 'password') { await newPassword(sys, rest[0]); process.exit(0); }
+        if (rest.length === 1 && rest[0] === '--certificate') process.exit(await certificateWatch(sys));
+        if (rest.length === 1 && rest[0] === '--install-watch') { await installWatch(sys); process.exit(0); }
+        if (rest.some((a) => a !== '--fix')) throw new Error('usage: sudo clavarium doctor [--fix]');
+        process.exit((await doctor(sys, { fix: rest.includes('--fix') })) ? 1 : 0);
+    } catch (error) { console.error(`clavarium ${verb}: ${error.message}`); process.exit(1); }
+}
 if (['online', 'key', 'relay'].includes(verb)) {
     const o = await import('./online.mjs');
     if (process.getuid?.() !== 0) { console.error(`clavarium ${verb}: run it as root: sudo clavarium ${verb} ...`); process.exit(78); }
@@ -48,7 +62,9 @@ if (verb !== 'install') {
         + '  sudo clavarium online --relay HOST --domain NAME                  then online, through a relay of yours\n'
         + '  sudo clavarium online --port --domain NAME                        or with ports 80 and 443 open\n'
         + '  sudo clavarium key                                                the public keys again (text and QR)\n'
-        + '  sudo clavarium relay status|repair|update-os|update-relay|forget-setup-key\n\n'
+        + '  sudo clavarium relay status|repair|update-os|update-relay|forget-setup-key\n'
+        + '  sudo clavarium doctor [--fix]                                     what works, what does not, what to do\n'
+        + '  sudo clavarium password EMAIL                                     a new password for an administrator\n\n'
         + 'https://clavarium.org');
     process.exit(verb ? 64 : 0);
 }
