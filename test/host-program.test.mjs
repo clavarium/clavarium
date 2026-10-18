@@ -203,7 +203,7 @@ test('everything root mounts, unmounts or moves is under MNT, never under the da
     assert.doesNotMatch(text.split('\n').filter((l) => !l.trimStart().startsWith('#')).join('\n'), /\$DATA\/(views|work|work-disks|removed|resources|toolbox)/, 'no root path under the data directory');
 });
 
-test('held: the check before each use refuses a link, a component of another account, one others may write', { skip: process.getuid() === 0 ? 'run as root: the refusals tried here are of an ordinary account' : false }, () => {
+test('held: the check before each use refuses a link, a component of another account, one others may write', { skip: process.getuid() === 0 ? 'run as root: the refusals tried here are of an ordinary account' : process.env.CI ? 'reads the layout of this very machine (/usr, /home, /tmp): a CI runner\'s is not a server\'s; run on the server by npm run check' : false }, () => {
     const held = (path) => withMnt('path', 'held', path);
     assert.deepEqual(held('/usr/share'), { code: 0, out: 'held: /usr/share', err: '' }, 'root\'s from / down');
     /* /tmp may be written by anyone: nothing under it is held. */
