@@ -156,7 +156,7 @@ test('the settings of a conversation are chapters that fold, all folded at first
     const open = () => me.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#panel details.chapter')].map((d) => [d.dataset.chapter, d.open])));
     assert.deepEqual(await open(), { general: false, machine: false, access: false, wakeups: false, answerer: false, sharing: false, advanced: false });
     await me.chapter('general');
-    await me.until('General says what it is', async () => /Name\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
+    await me.until('General says what it is', async () => /Identifier\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
     await me.page.locator('#chapter-wakeups > summary').click();
     assert.equal(await me.page.locator('#sleep').isVisible(), false, 'folded away');
     await me.page.locator('#panel-close').click();
