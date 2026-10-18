@@ -228,9 +228,9 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #sharing-what { display: flex; flex-direction: column; }
 
 /* What can be unfolded looks like it can. */
-#panel details > summary { list-style: none; cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; }
-#panel details > summary::before { content: '+ '; }
-#panel details[open] > summary::before { content: '- '; }
+#panel details:not(.chapter) > summary { list-style: none; cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; }
+#panel details:not(.chapter) > summary::before { content: '+ '; }
+#panel details[open]:not(.chapter) > summary::before { content: '- '; }
 #sharing-label { min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #sharing label { font-size: .8125rem; }
 
@@ -308,10 +308,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 @media (prefers-reduced-motion: reduce) { .asset-head b::before { transition: none; } }
 .asset-inside { flex-basis: 100%; padding: 0 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 700px) { .asset-head { grid-template-columns: 1fr; gap: 2px; } }
-#assets details > summary, #access-advanced > summary, #settings-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
-#assets details > summary::before, #access-advanced > summary::before, #settings-advanced > summary::before { content: '+ '; }
-#assets details[open] > summary::before, #access-advanced[open] > summary::before, #settings-advanced[open] > summary::before { content: '- '; }
-#assets details form, #access-advanced > div, #settings-advanced > div { margin-top: 8px; }
+#assets details > summary, #access-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button, #222c38); font-weight: 600; list-style: none; align-self: flex-start; }
+#assets details > summary::before, #access-advanced > summary::before { content: '+ '; }
+#assets details[open] > summary::before, #access-advanced[open] > summary::before { content: '- '; }
+#assets details form, #access-advanced > div { margin-top: 8px; }
 #attach-picker { border: 1px solid var(--brass); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 #chips { cursor: pointer; }
 #settings .row { align-items: center; gap: 10px; }
@@ -398,17 +398,21 @@ textarea.public-key { flex: 1 1 260px; min-width: 0; font: .75rem ui-monospace, 
 #gitview #gitview-guards ul { margin: 4px 0 8px; padding-left: 20px; }
 #gitview #gitview-guards li { overflow-wrap: anywhere; }
 
-/* ---------- this conversation: chapters that fold, as a project's settings ---------- */
-#panel { gap: 12px; }
-#panel details.chapter { border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
-#panel details.chapter > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 14px; border: 0; background: none; border-radius: 10px; min-height: 48px; }
-#panel details.chapter > summary::-webkit-details-marker { display: none; }
-#panel details.chapter > summary::before { content: none; }
-#panel details.chapter > summary::after { content: "Expand"; margin-left: auto; font-size: .75rem; font-weight: 600; color: var(--ink2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; }
-#panel details.chapter[open] > summary::after { content: "Collapse"; }
-#panel details.chapter[open] > summary { border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; }
+/* ---------- chapters that fold, as a project's settings (a conversation's, and Settings) ---------- */
+#panel, #settings { gap: 12px; }
+details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
+details.chapter > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 14px; border: 0; background: none; border-radius: 10px; min-height: 48px; }
+details.chapter > summary::-webkit-details-marker { display: none; }
+details.chapter > summary::before { content: none; }
+details.chapter > summary::after { content: "Expand"; margin-left: auto; font-size: .75rem; font-weight: 600; color: var(--ink2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; }
+details.chapter[open] > summary::after { content: "Collapse"; }
+details.chapter[open] > summary { border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; }
 .chapter-title { font-size: 1.0625rem; font-weight: 700; color: var(--ink); }
 .chapter-about { font-size: .8125rem; font-weight: 400; color: var(--ink2); flex: 1 1 14rem; }
+.chapter-group { margin: 10px 0 -4px; font-size: .8125rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+/* Reached by a link: said for a moment. */
+details.chapter.reached { outline: 2px solid var(--brass); outline-offset: 2px; }
+@media (prefers-reduced-motion: no-preference) { details.chapter { transition: outline-color .6s; } }
 .chapter-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; background: var(--panel); border-radius: 0 0 10px 10px; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
 .facts dt { color: var(--ink2); }
@@ -973,6 +977,8 @@ button.inline:hover { color: var(--brass); }
 .server-parts .sub { font-weight: normal; color: var(--ink2); }
 .server-parts dt.sub { padding-left: 14px; }
 .reserve-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.reserve-what { min-width: 4.5em; font-weight: 600; }
+.server-note.promised[data-over="true"] { color: var(--warn, #b7791f); font-weight: 600; }
 .reserve-row label { display: inline-flex; align-items: center; gap: 6px; }
 .reserve-row input { width: 5.5em; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 

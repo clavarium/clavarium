@@ -338,10 +338,14 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const stopUpdates = updates.watch();
     const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
     /* This server's disk and memory, and the reserve no machine may eat into: see capacity.mjs. */
-    const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }) });
+    const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
+        /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
+        sleep: (name) => all.sleep(name), alert: (payload) => { void alerts.tell(payload); },
+        say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
+    const stopWatch = capacity.start();
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopShelf(); stopHealth(); stopUpdates(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

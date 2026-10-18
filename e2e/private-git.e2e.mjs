@@ -104,7 +104,7 @@ test('a git server\'s recorded key is forgotten from Settings, deep down, after 
     await me.page.locator('#nav-settings').click();
     /* Out of the way: under Advanced, closed. */
     assert.equal(await me.page.locator('#git-hosts').isVisible(), false);
-    await me.page.locator('#settings-advanced summary').click();
+    await me.chapter('s-advanced');
     const row = me.page.locator('#git-hosts .folder[data-host="example.com"]');
     await me.until('the hosts are listed', async () => (await row.count()) === 1);
     assert.match(await row.innerText(), /ssh-ed25519 SHA256:[A-Za-z0-9+/]+/);

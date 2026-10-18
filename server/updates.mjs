@@ -107,7 +107,7 @@ export class Updates {
             if (this.#store.get('told')?.key === key) return;
             this.#store.put({ name: 'told', key });
             const title = last.result === 'rolled-back' ? `The update to ${last.to} did not work: back on ${last.from}` : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed`;
-            void this.#alerts?.tell({ title, body: String(last.why ?? '').slice(0, 180), url: '/?open=settings' })?.catch?.(() => {});
+            void this.#alerts?.tell({ title, body: String(last.why ?? '').slice(0, 180), url: '/?open=settings&at=updates' })?.catch?.(() => {});
         };
         look();
         this.#timer = setInterval(look, everyMs); this.#timer.unref?.();

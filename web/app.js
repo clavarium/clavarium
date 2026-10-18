@@ -1193,9 +1193,9 @@
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
-    /* ---------- the chapters of "This conversation": folded or not, kept on this device ---------- */
-    /* What is used every day is open at first; the rest is one tap away. */
-    const OPEN_AT_FIRST = { general: true, machine: true, access: true };
+    /* ---------- chapters (a conversation's settings, and Settings): folded or not, kept on this device ---------- */
+    /* All folded at first, as a project's settings: what the person opens is kept. */
+    const OPEN_AT_FIRST = {};
     let chapters = {};
     try { chapters = JSON.parse(localStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
     for (const chapter of document.querySelectorAll('details.chapter')) {
@@ -1206,7 +1206,19 @@
             try { localStorage.setItem('clavarium-chapters', JSON.stringify(chapters)); } catch { /* as above */ }
         });
     }
-    const openChapter = (key) => { const chapter = document.querySelector(`details.chapter[data-chapter="${key}"]`); if (chapter) chapter.open = true; return chapter; };
+    /* Reached by a link (or a button that leads to it): opened, and said for a moment. */
+    let reachedTimer;
+    const openChapter = (key, { show = true } = {}) => {
+        const chapter = document.querySelector(`details.chapter[data-chapter="${key}"]`);
+        if (!chapter) return chapter;
+        chapter.open = true;
+        if (show) {
+            for (const other of document.querySelectorAll('details.chapter.reached')) other.classList.remove('reached');
+            chapter.classList.add('reached');
+            clearTimeout(reachedTimer); reachedTimer = setTimeout(() => chapter.classList.remove('reached'), 2000);
+        }
+        return chapter;
+    };
 
     /* ---------- the machine: its health, its size, a restart ---------- */
     const sizeWords = (mb) => (mb >= 1024 ? `${Number.isInteger(mb / 1024) ? mb / 1024 : (mb / 1024).toFixed(1)} GB` : `${mb} MB`);
@@ -2371,7 +2383,13 @@
         const wanted = q.get('c') ?? '';
         if (home && wanted !== current && conversations.some((c) => c.name === wanted)) select(wanted);
         const open = q.get('open') ?? '';
-        if (open === 'settings') { await openSettings({ push: false }); return; }
+        if (open === 'settings') {
+            await openSettings({ push: false });
+            /* A link to one chapter of Settings (?open=settings&at=resources): that one opened, and shown. */
+            const at = q.get('at') ?? '';
+            if (/^[a-z]{1,20}$/.test(at)) openChapter(`s-${at}`)?.scrollIntoView({ block: 'start' });
+            return;
+        }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
         if (former) { await openAccessPage(former[0], { mode: former[1], of: q.get('for') ?? '', push: false }); return; }
         leavePlace({ fromHistory: true });
@@ -2436,11 +2454,13 @@
     };
     const when = (iso) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     function updatesError(text) { $('updates-error').textContent = text ?? ''; $('updates-error').hidden = !text; }
+    let lastUpdates = null;
     async function paintUpdates() {
         clearTimeout(updatesTimer);
         const u = await fetch(`${API}/updates`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         /* The server restarts during an update: asked again until it answers. */
         if (!u) { if (updatesBusy && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000); return; }
+        lastUpdates = u;
         $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
         if (!u.installed) {
@@ -2456,12 +2476,22 @@
             : u.checkedAt ? `Up to date · checked ${sinceWords(u.checkedAt)}` : 'Up to date';
         $('updates-check').disabled = Boolean(running);
         $('updates-offer').hidden = !u.available || Boolean(running);
-        $('updates-apply').textContent = `Update to ${u.available ?? ''}`;
-        /* The last thing that went wrong, said once at the top, in words. */
+        /* A version that already failed here is not offered as usual: tried again only on purpose, warned. */
+        const failedHere = Boolean(u.available) && u.history.some((h) => h.action === 'update' && h.to === u.available && h.result !== 'done');
+        const apply = $('updates-apply');
+        apply.dataset.version = u.available ?? '';
+        apply.dataset.retry = String(failedHere);
+        apply.className = failedHere ? '' : 'primary';
+        apply.textContent = failedHere ? `Try ${u.available} again\u2026` : `Update to ${u.available ?? ''}`;
+        $('updates-retry-note').textContent = failedHere ? `It did not start here before. If it fails again, ${u.version} is put back.` : '';
+        $('updates-retry-note').hidden = !failedHere;
+        $('updates-retry-yes').hidden = true; $('updates-retry-no').hidden = true; apply.hidden = false;
+        /* The last thing that went wrong, said once at the top, in words: a version put
+           back runs normally -- only the new one did not start, here. */
         const last = u.history[0];
-        const why = (last?.why ?? '').replace(/^./, (c) => c.toUpperCase());
-        const news = !running && last && last.result !== 'done' ? (last.result === 'rolled-back' ? `The update to ${last.to} did not work, so ${last.from} was put back. ${why}` : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed: ${last.why ?? ''}`)
-            : !running && u.refused && (!last || u.refused.at > last.at) ? `Not done: ${u.refused.why}` : '';
+        const backFailed = /did not come back either/.test(last?.why ?? '');
+        const news = !running && last && last.result !== 'done' ? (last.result === 'rolled-back' ? (backFailed ? `${last.to} did not start on this server, and putting ${last.from} back did not work either: ${last.why}` : `${last.to} did not start on this server, so ${last.from} was put back. ${last.from} runs normally.`) : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed: ${last.why ?? ''}`)
+            : !running && u.refused && (!last || u.refused.at > last.at) && !/is not newer than/.test(u.refused.why ?? '') ? `Not done: ${u.refused.why}` : '';
         $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news;
         if (![$('updates-mode'), $('updates-from'), $('updates-to'), $('updates-channel')].includes(document.activeElement)) {
             $('updates-mode').value = u.mode; $('updates-channel').value = u.channel;
@@ -2500,17 +2530,30 @@
         if (running && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000);
     }
     $('updates-check').addEventListener('click', async () => {
-        updatesError(); $('updates-check').disabled = true; $('updates-state').textContent = 'Checking...';
-        try { await post(`${API}/updates/check`); } catch (error) { updatesError(error.message); }
-        $('updates-check').disabled = false;
+        updatesError(); $('updates-check').disabled = true; $('updates-check').textContent = 'Checking...'; $('updates-state').textContent = 'Checking...';
+        let failed = false;
+        try { await post(`${API}/updates/check`); } catch (error) { failed = true; updatesError(`Could not ask npm: ${error.message}. Try again later.`); }
+        $('updates-check').disabled = false; $('updates-check').textContent = 'Check now';
         await paintUpdates();
+        /* The answer to the click, said next to it. */
+        const u = lastUpdates;
+        if (!failed && u && !u.checkError) { $('updates-news').textContent = u.available ? `${u.available} is out.` : `No new version: ${u.version} is the latest.`; $('updates-news').hidden = false; }
     });
-    $('updates-apply').addEventListener('click', async () => {
+    async function applyUpdate() {
         updatesError();
-        const version = $('updates-apply').textContent.replace(/^Update to /, '');
+        const version = $('updates-apply').dataset.version;
         try { await post(`${API}/updates/apply`, { version }); updatesBusy = true; } catch (error) { updatesError(error.message); }
         await paintUpdates();
+    }
+    $('updates-apply').addEventListener('click', () => {
+        if ($('updates-apply').dataset.retry !== 'true') { void applyUpdate(); return; }
+        /* Tried again: asked once more, in place. */
+        $('updates-apply').hidden = true;
+        $('updates-retry-note').textContent = `The server restarts to try ${$('updates-apply').dataset.version} again.`;
+        $('updates-retry-yes').hidden = false; $('updates-retry-no').hidden = false; $('updates-retry-yes').focus();
     });
+    $('updates-retry-yes').addEventListener('click', () => { void applyUpdate(); });
+    $('updates-retry-no').addEventListener('click', () => { void paintUpdates(); });
     async function saveUpdates(change) {
         updatesError(); $('updates-saved').textContent = '';
         try { await post(`${API}/updates/settings`, change); $('updates-saved').textContent = 'Saved.'; } catch (error) { updatesError(error.message); }
@@ -2600,22 +2643,35 @@
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         $('settings-server-top').hidden = !r; $('settings-server').hidden = !r;
         if (!r) return;
-        const editing = [$('reserve-disk'), $('reserve-memory')].includes(document.activeElement);
-        if (!editing) { $('reserve-disk').value = String(Math.round((r.reserve.diskMb / 1024) * 100) / 100); $('reserve-memory').value = String(Math.round((r.reserve.memoryMb / 1024) * 100) / 100); }
+        /* The two settings of each: a fixed amount and a share; the larger is kept free. */
+        const set = r.settings ?? { ...r.reserve, diskPercent: 0, memoryPercent: 0 };
+        const editing = ['reserve-disk', 'reserve-disk-percent', 'reserve-memory', 'reserve-memory-percent'].some((id) => $(id) === document.activeElement);
+        if (!editing) {
+            $('reserve-disk').value = String(Math.round((set.diskMb / 1024) * 100) / 100); $('reserve-memory').value = String(Math.round((set.memoryMb / 1024) * 100) / 100);
+            $('reserve-disk-percent').value = String(set.diskPercent); $('reserve-memory-percent').value = String(set.memoryPercent);
+        }
+        $('reserve-now').textContent = r.known ? `Kept free now: ${GB(r.reserve.diskMb)} of disk, ${GB(r.reserve.memoryMb)} of memory.` : '';
+        /* What was promised, only said: never refused for it. */
+        const promised = (line, p, words) => {
+            line.hidden = !p; if (!p) return;
+            line.dataset.over = String(p.over);
+            line.textContent = `${words(GB(p.mb), GB(p.totalMb))}${p.over ? ' That is more than there is: fine while they do not all fill up.' : ''}`;
+        };
+        promised($('promised-disk'), r.promised?.disk, (mb, total) => `Disks promised to machines, at their largest: ${mb} of ${total}.`);
+        promised($('promised-memory'), r.promised?.memory, (mb, total) => `Memory given to running machines: ${mb} of ${total}.`);
         $('server-unknown').hidden = r.known;
         $('server-disks').hidden = !r.disk; $('server-memory').hidden = !r.memory;
         if (r.disk) paintDisks(r);
         if (r.memory) {
             const mem = r.memory;
-            $('server-memory-figures').textContent = `${GB(mem.spareMb)} free of ${GB(mem.totalMb)}`;
-            meter($('server-memory-meter'), mem.usedPercent, r.reserve.memoryMb, mem.totalMb, levelOf(r.high.memory, mem.usedPercent, mem.spareMb - r.reserve.memoryMb, r.reserve.memoryMb));
+            $('server-memory-figures').textContent = `${GB(mem.freeMb)} free of ${GB(mem.totalMb)}`;
+            meter($('server-memory-meter'), mem.usedPercent, r.reserve.memoryMb, mem.totalMb, levelOf(r.high.memory, mem.usedPercent, mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb));
             $('server-memory-state').textContent = 'Short'; $('server-memory-state').hidden = !r.high.memory;
-            $('server-memory-note').textContent = aboveWords(mem.spareMb - r.reserve.memoryMb, r.reserve.memoryMb);
+            $('server-memory-note').textContent = aboveWords(mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb);
             const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
             parts($('server-memory-parts'), [
                 [`Running machines (${r.machines.length})`, held],
                 ...r.machines.map((x) => [x.shelf ? 'ready-made machine (being made)' : (x.name ?? 'another machine'), x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true]),
-                ...(mem.promisedMb > 0 ? [['given to them, not used yet', mem.promisedMb, true]] : []),
                 ['The system and other programs', Math.max(0, mem.totalMb - mem.freeMb - held)],
             ]);
         }
@@ -2625,9 +2681,12 @@
     $('reserve-save').addEventListener('click', async () => {
         $('reserve-error').hidden = true; $('reserve-saved').textContent = '';
         const mb = (id) => { const v = Number.parseFloat($(id).value.replace(',', '.')); return Number.isFinite(v) ? Math.round(v * 1024) : NaN; };
+        const share = (id) => { const v = Number($(id).value.trim()); return Number.isInteger(v) && v >= 0 && v <= 100 ? v : NaN; };
         const diskMb = mb('reserve-disk'); const memoryMb = mb('reserve-memory');
+        const diskPercent = share('reserve-disk-percent'); const memoryPercent = share('reserve-memory-percent');
         if (!(diskMb >= 0) || !(memoryMb >= 0)) { $('reserve-error').textContent = 'Write a number of gigabytes, 0 or more.'; $('reserve-error').hidden = false; return; }
-        try { await post(`${API}/server/reserve`, { diskMb, memoryMb }); $('reserve-saved').textContent = 'Saved.'; } catch (error) { $('reserve-error').textContent = error.message; $('reserve-error').hidden = false; return; }
+        if (Number.isNaN(diskPercent) || Number.isNaN(memoryPercent)) { $('reserve-error').textContent = 'Write a whole percent, from 0 to 100.'; $('reserve-error').hidden = false; return; }
+        try { await post(`${API}/server/reserve`, { diskMb, diskPercent, memoryMb, memoryPercent }); $('reserve-saved').textContent = 'Saved.'; } catch (error) { $('reserve-error').textContent = error.message; $('reserve-error').hidden = false; return; }
         await paintServer(); void paintGauge();
     });
     /* THE SMALL GAUGE at the bottom of the list: only when disk or memory is
@@ -2657,7 +2716,7 @@
     }
     $('server-gauge').addEventListener('click', async () => {
         if (place !== 'settings') await openSettings(); else await paintServer();
-        const top = $('settings-server-top');
+        const top = openChapter('s-resources');
         top.scrollIntoView({ block: 'start' });
         $('settings-server').focus({ preventScroll: true });
     });

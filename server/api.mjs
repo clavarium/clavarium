@@ -268,7 +268,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/updates/settings' && updates) return send(200, await updates.settings({ mode: body.mode, channel: body.channel, window: body.window })), true;
         if (pathname === '/api/updates/apply' && updates) return send(202, await updates.apply(body.version)), true;
         if (pathname === '/api/updates/back' && updates) return send(202, await updates.back(body.version)), true;
-        if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, memoryMb: body.memoryMb }); return send(200, await capacity.about()), true; }
+        if (pathname === '/api/server/reserve' && capacity) { capacity.setReserve({ diskMb: body.diskMb, diskPercent: body.diskPercent, memoryMb: body.memoryMb, memoryPercent: body.memoryPercent }); return send(200, await capacity.about()), true; }
         if (pathname === '/api/git-hosts/forget' && gitAccess) return send(200, gitAccess.forgetHost(body.host)), true;
         const unkeyed = /^\/api\/git-keys\/([a-z0-9-]{1,32})\/remove$/.exec(pathname);
         if (unkeyed && gitAccess) { gitAccess.removeKey(unkeyed[1]); return send(200, { ok: true }), true; }

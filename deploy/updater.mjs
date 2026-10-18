@@ -366,7 +366,9 @@ export class Updater {
     async apply(version) {
         if (!VERSION.test(version ?? '')) throw new Refused(`not a version: ${version}`);
         const from = this.current();
-        if (from && compareVersions(version, from.version) <= 0) throw new Refused(`${version} is not newer than ${from.version}`);
+        /* Asked for the version that runs (a request that waited while it came by itself): done already. */
+        if (from && compareVersions(version, from.version) === 0) return;
+        if (from && compareVersions(version, from.version) < 0) throw new Refused(`${version} is not newer than ${from.version}`);
         const why = this.busy(); if (why) throw new Refused(why);
         const unlock = this.#lock();
         try {
@@ -515,7 +517,7 @@ export class Updater {
                 let cwd = ''; try { cwd = realpathSync(`/proc/${pid}/cwd`); } catch { /* gone */ }
                 if (cwd.startsWith(target)) break;
                 said = 'the server that answers is not this release';
-            } else if (active.code !== 0) said = 'the service is not running';
+            } else if (active.code !== 0) said = 'its service stopped';
             if (Date.now() > end) return said;
             await new Promise((r) => setTimeout(r, 1000));
         }

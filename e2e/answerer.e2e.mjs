@@ -23,6 +23,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     assert.equal((await me.api('/api/alerts', { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/a-device', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } }, label: 'Tablet' })).status, 201);
     assert.equal((await me.api('/api/alerts', { subscription: { endpoint: 'https://example.com/hook', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } } })).status, 400);
     await me.page.locator('#nav-settings').click();
+    await me.chapter('s-alerts');
     await me.until('Settings has its alerts', async () => (await me.page.locator('#alerts-state').innerText()).length > 0);
     await me.page.locator('#settings-close').click();
     /* Its place is in "This conversation"; off, and it says what turning it on means. */

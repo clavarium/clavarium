@@ -14,22 +14,35 @@
  *           disks, the machines' disks, the images). Slow (it measures
  *           folders): asked again after USAGE_MS at most, in the background.
  *
- * THE RESERVE (Settings, This server): creating, starting, waking or growing
- * a machine is refused, with a sentence that says why and what to do, when
- * it would leave less than the reserve. Memory: the machine's size (or what
- * it grows by) against the memory free -- less what the running machines
- * were given and have not taken yet, since they will. Disk: what a new
- * machine takes, or what a disk grows by, against the disk free where the
- * machines' disks are. Starting or waking is never refused for disk: a full
- * disk is cleaned from inside the conversations.
+ * THE RESERVE (Settings, This server, Resources): for each of disk and
+ * memory, the larger of a fixed amount and a share of the whole (by default
+ * disk 5 GB or 5 %, memory 1 GB or 5 %). It is judged on what the system
+ * says is free (df on the machines' disk, MemAvailable), never on sums of
+ * what machines were given:
+ *   - creating, starting, waking or growing a machine is refused, with a
+ *     sentence that says why and what to do, when what is free less what the
+ *     machine needs at first would be under the reserve. Memory: its size
+ *     (or what it grows by). Disk: what a new machine takes, or what a disk
+ *     grows by. Starting or waking is never refused for disk: a full disk is
+ *     cleaned from inside the conversations.
+ *   - all the time (watch): once what is free falls under the reserve, the
+ *     owner is alerted and the running machine that takes the most is put to
+ *     sleep, said in its conversation. Once: again only after what is free
+ *     came back above the reserve.
+ * What was PROMISED (the disks' largest sizes, the memory given to running
+ * machines) is only said, with a warning when it is more than there is.
  *
  * When the figures cannot be read (a host program from before these verbs),
  * nothing is refused: the reserve is a guard, not a gate that jams.
  */
-import { Refusal } from './conversations.mjs';
+import { Refusal, DISK_GB } from './conversations.mjs';
 
-export const RESERVE_DISK_MB = 3 * 1024;
+export const RESERVE_DISK_MB = 5 * 1024;
 export const RESERVE_MEMORY_MB = 1024;
+export const RESERVE_DISK_PERCENT = 5;
+export const RESERVE_MEMORY_PERCENT = 5;
+/* How often what is free is looked at, against the reserve. */
+export const WATCH_MS = 60_000;
 /* What may be set, in megabytes. */
 export const RESERVE_DISK_MAX_MB = 1024 * 1024;
 export const RESERVE_MEMORY_MAX_MB = 256 * 1024;
@@ -74,32 +87,39 @@ export const gb = (mb) => `${(mb / 1024).toFixed(1)} GB`;
 const percent = (part, all) => (all > 0 ? Math.round((part / all) * 100) : 0);
 
 export class Capacity {
-    #run; #store; #conversations; #shelf; #now; #roomMs; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
+    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
 
     /* `run(argv)`: the host program. `store`: where the reserve is kept.
        `conversations`: what each machine was given. `shelf`: how large a
        ready-made machine is (a new one is a copy of it). */
     /* `roomMs`: how long what is free is taken as known (ROOM_MS). */
-    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS }) {
-        this.#roomMs = roomMs;
+    /* `sleep(name)`, `alert(payload)`, `say(name, text)`: what watch() does
+       when what is free falls under the reserve. */
+    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, alert = null, say = null }) {
+        this.#roomMs = roomMs; this.#sleep = sleep; this.#alert = alert; this.#say = say;
         this.#run = run; this.#store = store; this.#conversations = conversations; this.#shelf = shelf; this.#now = now;
     }
 
+    /* The two settings of each: a fixed amount and a share of the whole. */
     reserve() {
         const r = this.#store.get('reserve') ?? {};
-        return { diskMb: r.diskMb ?? RESERVE_DISK_MB, memoryMb: r.memoryMb ?? RESERVE_MEMORY_MB };
+        return { diskMb: r.diskMb ?? RESERVE_DISK_MB, diskPercent: r.diskPercent ?? RESERVE_DISK_PERCENT, memoryMb: r.memoryMb ?? RESERVE_MEMORY_MB, memoryPercent: r.memoryPercent ?? RESERVE_MEMORY_PERCENT };
     }
-    setReserve({ diskMb, memoryMb } = {}) {
+    setReserve({ diskMb, diskPercent, memoryMb, memoryPercent } = {}) {
         const now = this.reserve();
         const take = (value, max, what) => {
             if (value === undefined || value === null || value === '') return undefined;
             const n = Number(value);
-            if (!Number.isInteger(n) || n < 0 || n > max) throw new Refusal(400, `The ${what} reserve is a whole number of megabytes, from 0 to ${max}.`);
+            if (!Number.isInteger(n) || n < 0 || n > max) throw new Refusal(400, max === 100 ? `The ${what} reserve share is a whole number of percent, from 0 to 100.` : `The ${what} reserve is a whole number of megabytes, from 0 to ${max}.`);
             return n;
         };
-        const disk = take(diskMb, RESERVE_DISK_MAX_MB, 'disk') ?? now.diskMb;
-        const memory = take(memoryMb, RESERVE_MEMORY_MAX_MB, 'memory') ?? now.memoryMb;
-        this.#store.put({ name: 'reserve', diskMb: disk, memoryMb: memory });
+        const kept = {
+            diskMb: take(diskMb, RESERVE_DISK_MAX_MB, 'disk') ?? now.diskMb,
+            diskPercent: take(diskPercent, 100, 'disk') ?? now.diskPercent,
+            memoryMb: take(memoryMb, RESERVE_MEMORY_MAX_MB, 'memory') ?? now.memoryMb,
+            memoryPercent: take(memoryPercent, 100, 'memory') ?? now.memoryPercent,
+        };
+        this.#store.put({ name: 'reserve', ...kept });
         return this.reserve();
     }
 
@@ -131,21 +151,29 @@ export class Capacity {
        disk but the first one, and that one not long. */
     #figures(room) {
         if (!room) return null;
-        const reserve = this.reserve();
-        const records = new Map(this.#conversations.list().map((c) => [`clv-${c.name}`, c]));
+        const set = this.reserve();
+        const all = this.#conversations.list();
+        const records = new Map(all.map((c) => [`clv-${c.name}`, c]));
         const machines = room.machines.map((m) => {
             const c = records.get(m.vm);
             return { name: c ? c.name : null, shelf: m.vm.startsWith('clvshelf-'), rssMb: m.rssMb, sizeMb: c?.memoryMb ?? null };
         });
-        /* Given to running machines and not taken yet: it will be. */
-        const promisedMb = machines.reduce((sum, m) => sum + (m.sizeMb ? Math.max(0, m.sizeMb - m.rssMb) : 0), 0);
-        const memory = room.memory ? {
-            totalMb: room.memory.totalMb, freeMb: room.memory.availableMb, promisedMb,
-            spareMb: Math.max(0, room.memory.availableMb - promisedMb),
-            /* Counted as taken: what running machines were given and will take. */
-            usedPercent: percent(room.memory.totalMb - Math.max(0, room.memory.availableMb - promisedMb), room.memory.totalMb),
-        } : null;
+        /* What the system says is available: the machines' own use is in it already. */
+        const memory = room.memory ? { totalMb: room.memory.totalMb, freeMb: room.memory.availableMb, usedPercent: percent(room.memory.totalMb - room.memory.availableMb, room.memory.totalMb) } : null;
         const where = room.places.find((p) => p.what === 'machines') ?? room.places[0];
+        /* The reserve kept, in megabytes: the larger of the fixed amount and the share of the whole. */
+        const share = (totalMb, pct) => Math.round((totalMb * pct) / 100);
+        const reserve = {
+            diskMb: Math.max(set.diskMb, where ? share(where.sizeMb, set.diskPercent) : 0),
+            memoryMb: Math.max(set.memoryMb, memory ? share(memory.totalMb, set.memoryPercent) : 0),
+        };
+        /* Promised, only said: every disk at its largest, the memory given to running machines. */
+        const diskPromisedMb = all.reduce((sum, c) => sum + (c.diskGb ?? DISK_GB) * 1024, 0);
+        const memoryPromisedMb = machines.reduce((sum, m) => sum + (m.sizeMb ?? 0), 0);
+        const promised = {
+            disk: where ? { mb: diskPromisedMb, totalMb: where.sizeMb, over: diskPromisedMb > where.sizeMb } : null,
+            memory: memory ? { mb: memoryPromisedMb, totalMb: memory.totalMb, over: memoryPromisedMb > memory.totalMb } : null,
+        };
         /* The same disk named once, with all it holds. */
         const disks = [];
         for (const p of room.places) {
@@ -155,9 +183,9 @@ export class Capacity {
         const disk = where ? { sizeMb: where.sizeMb, freeMb: where.freeMb, usedPercent: percent(where.sizeMb - where.freeMb, where.sizeMb), disks: disks.map(({ device, ...d }) => d) } : null;
         const high = {
             disk: Boolean(disk) && disks.some((d) => d.usedPercent > HIGH_PERCENT || d.freeMb < HIGH_FACTOR * reserve.diskMb),
-            memory: Boolean(memory) && (memory.usedPercent > HIGH_PERCENT || memory.spareMb < HIGH_FACTOR * reserve.memoryMb),
+            memory: Boolean(memory) && (memory.usedPercent > HIGH_PERCENT || memory.freeMb < HIGH_FACTOR * reserve.memoryMb),
         };
-        return { reserve, disk, memory, machines, high };
+        return { reserve, settings: set, disk, memory, machines, promised, high };
     }
 
     /* For Settings, This server: everything known. */
@@ -175,7 +203,7 @@ export class Capacity {
             machines: { disksMb: Object.values(u.machines).reduce((a, b) => a + b, 0), each: Object.entries(u.machines).map(([name, mb]) => ({ name, mb })).sort((a, b) => b.mb - a.mb), shelfMb: u.shelf ?? null, imagesMb: u.images ?? null, othersMb: u.others ?? null },
             at: new Date(this.#usageAt).toISOString(),
         } : null;
-        return { known: Boolean(figures), reserve: this.reserve(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
+        return { known: Boolean(figures), reserve: { diskMb: this.reserve().diskMb, memoryMb: this.reserve().memoryMb }, settings: this.reserve(), ...(figures ?? {}), usage, measuring: Boolean(this.#measuring) };
     }
 
     /* For the list: only whether it is high, and how much. Cheap: what is
@@ -191,7 +219,7 @@ export class Capacity {
         return {
             known: true, high: f.high.disk || f.high.memory,
             disk: disk ? { usedPercent: disk.usedPercent, freeMb: disk.freeMb, aboveMb: disk.freeMb - r.diskMb, high: f.high.disk, level: level(f.high.disk, disk.usedPercent, disk.freeMb - r.diskMb, r.diskMb) } : null,
-            memory: f.memory ? { usedPercent: f.memory.usedPercent, freeMb: f.memory.spareMb, aboveMb: f.memory.spareMb - r.memoryMb, high: f.high.memory, level: level(f.high.memory, f.memory.usedPercent, f.memory.spareMb - r.memoryMb, r.memoryMb) } : null,
+            memory: f.memory ? { usedPercent: f.memory.usedPercent, freeMb: f.memory.freeMb, aboveMb: f.memory.freeMb - r.memoryMb, high: f.high.memory, level: level(f.high.memory, f.memory.usedPercent, f.memory.freeMb - r.memoryMb, r.memoryMb) } : null,
         };
     }
 
@@ -206,15 +234,51 @@ export class Capacity {
         const r = f.reserve;
         const verb = kind === 'create' ? 'Not created' : kind === 'start' ? 'Not started' : 'Not changed';
         const who = name ? `${name}` : 'a new machine';
-        if (f.memory && memoryMb > 0 && f.memory.spareMb - memoryMb < r.memoryMb) {
+        if (f.memory && memoryMb > 0 && f.memory.freeMb - memoryMb < r.memoryMb) {
             const asks = kind === 'grow' ? `${gb(memoryMb)} more memory for ${who}` : `${gb(memoryMb)} of memory for ${who}`;
             const what = kind === 'create' ? 'Put a conversation you are not using to sleep, or choose less memory' : kind === 'grow' ? 'Put a conversation you are not using to sleep, or give it less' : 'Put a conversation you are not using to sleep';
-            throw new Refusal(409, `${verb}: this server cannot spare ${asks}. It has ${gb(f.memory.spareMb)} free for machines and keeps ${gb(r.memoryMb)} in reserve. ${what}, or lower the reserve in Settings, This server.`);
+            throw new Refusal(409, `${verb}: this server cannot spare ${asks}. It has ${gb(f.memory.freeMb)} of memory free and keeps ${gb(r.memoryMb)} in reserve. ${what}, or lower the reserve in Settings, This server.`);
         }
         const takes = kind === 'create' ? (this.#shelf?.about?.().current?.sizeMb ?? NEW_MACHINE_MB) : diskMb;
         if (f.disk && kind !== 'start' && takes > 0 && f.disk.freeMb - takes < r.diskMb) {
             const asks = kind === 'create' ? `the ${gb(takes)} of disk a new machine takes` : `${gb(takes)} more disk for ${who}`;
             throw new Refusal(409, `${verb}: this server cannot spare ${asks}. It has ${gb(f.disk.freeMb)} of disk free and keeps ${gb(r.diskMb)} in reserve. Archive conversations you no longer need, or lower the reserve in Settings, This server.`);
         }
+    }
+
+    /* WATCHED: what is free against the reserve, all the time. Under it, once
+       (again only after it came back above): the owner alerted, and the
+       running machine that takes the most put to sleep and told so in its
+       conversation. Disk: the one whose disk is largest (by the last
+       measure; memory held when none is known). Resolves with what was done. */
+    async watch() {
+        const f = this.#figures(await this.room({ fresh: true }).catch(() => null));
+        if (!f) return [];
+        const done = [];
+        const awake = new Set(this.#conversations.awake?.() ?? []);
+        for (const what of ['disk', 'memory']) {
+            const free = f[what]?.freeMb;
+            const short = free !== undefined && free < f.reserve[`${what}Mb`];
+            const was = this.#short[what];
+            this.#short[what] = short;
+            if (!short || was) continue;
+            const running = f.machines.filter((m) => m.name && awake.has(m.name));
+            const takes = (m) => (what === 'disk' ? this.#usage?.machines?.[m.name] ?? -1 : m.rssMb);
+            const most = running.sort((a, b) => takes(b) - takes(a) || b.rssMb - a.rssMb)[0] ?? null;
+            let slept = null;
+            if (most && this.#sleep) slept = await Promise.resolve(this.#sleep(most.name)).then(() => most.name, () => null);
+            const figures = `${gb(free)} free, ${gb(f.reserve[`${what}Mb`])} kept in reserve`;
+            this.#alert?.({ title: `This server is short of ${what}`, body: `${figures}.${slept ? ` ${slept} was put to sleep.` : ''}`, url: '/?open=settings&at=resources' });
+            if (slept) this.#say?.(slept, `This server ran short of ${what} (${figures}). This machine took the most, so it was put to sleep. Wake it once there is room again.`);
+            done.push({ what, slept });
+        }
+        return done;
+    }
+
+    /* Watches every `everyMs`; returns what stops it. */
+    start(everyMs = WATCH_MS) {
+        const timer = setInterval(() => { void this.watch().catch(() => {}); }, everyMs);
+        timer.unref?.();
+        return () => clearInterval(timer);
     }
 }

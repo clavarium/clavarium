@@ -45,6 +45,7 @@ test('the size of the text is one setting of the device: every text and the term
     const before = await me.page.evaluate(() => window.clavariumTerminal.cols);
     assert.deepEqual(await text(me), { scale: 1, terminal: 14 });
     await me.page.locator('#nav-settings').click();
+    await me.chapter('s-screen');
     await me.page.locator('#settings-text button[data-text="larger"]').click();
     assert.deepEqual(await text(me), { scale: 1.1, terminal: 15.5 });
     assert.equal(await me.page.locator('#settings-text .text-now').innerText(), '110%');
@@ -77,6 +78,7 @@ test('the size of the text is one setting of the device: every text and the term
     await me.until('live again', async () => (await me.state()) === 'live');
     assert.deepEqual(await text(me), { scale: 0.9, terminal: 12.5 });
     await me.page.locator('#nav-settings').click();
+    await me.chapter('s-screen');
     await me.page.locator('#settings-text button[data-text="normal"]').click();
     assert.deepEqual(await text(me), { scale: 1, terminal: 14 });
     assert.deepEqual(me.errors, []);
@@ -146,22 +148,22 @@ test('on a phone the terminal has the room: one line of bar, one line of keys, t
     assert.deepEqual(me.errors, []);
 });
 
-test('the settings of a conversation are chapters that fold; what is folded is kept on this device', { skip: SKIP }, async (t) => {
+test('the settings of a conversation are chapters that fold, all folded at first; what is opened is kept on this device; a button that leads to one opens it', { skip: SKIP }, async (t) => {
     const b = await bench(t);
-    const me = await b.person();
+    const me = await b.person({ chapters: {} });
     await me.create('tidy');
     await me.page.locator('#folders').click();
-    const open = () => me.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('details.chapter')].map((d) => [d.dataset.chapter, d.open])));
-    assert.deepEqual(await open(), { general: true, machine: true, access: true, wakeups: false, answerer: false, sharing: false, advanced: false });
+    const open = () => me.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#panel details.chapter')].map((d) => [d.dataset.chapter, d.open])));
+    assert.deepEqual(await open(), { general: false, machine: false, access: false, wakeups: false, answerer: false, sharing: false, advanced: false });
+    await me.chapter('general');
     await me.until('General says what it is', async () => /Name\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
     await me.page.locator('#chapter-wakeups > summary').click();
-    await me.page.locator('#chapter-machine > summary').click();
     assert.equal(await me.page.locator('#sleep').isVisible(), false, 'folded away');
     await me.page.locator('#panel-close').click();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();
-    assert.deepEqual(await open(), { general: true, machine: false, access: true, wakeups: true, answerer: false, sharing: false, advanced: false });
+    assert.deepEqual(await open(), { general: true, machine: false, access: false, wakeups: true, answerer: false, sharing: false, advanced: false });
     await me.chapter('machine');
     assert.equal(await me.page.locator('#sleep').isVisible(), true);
     assert.equal(await me.page.locator('#restart').isVisible(), true);

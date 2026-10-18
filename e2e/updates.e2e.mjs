@@ -11,6 +11,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     const p = me.page;
     /* Run from a working tree: said, nothing offered. */
     await p.locator('#nav-settings').click();
+    await me.chapter('s-updates');
     await me.until('the version is said', async () => /^Clavarium \S+/.test(await p.locator('#updates-version').innerText()));
     assert.equal(await p.locator('#updates-state').innerText(), 'Not installed with install.sh: no updates here.');
     assert.equal(await p.locator('#updates-check').isVisible(), false);
@@ -48,9 +49,17 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     writeFileSync(join(at, 'registry'), '0.3.0'); writeFileSync(join(at, 'broken'), '0.3.0');
     await p.locator('#updates-check').click();
     await p.locator('#updates-apply', { hasText: 'Update to 0.3.0' }).click();
-    await me.until('the failure is said', async () => (await p.locator('#updates-news').innerText().catch(() => '')) === 'The update to 0.3.0 did not work, so 0.2.0 was put back. It did not answer');
+    await me.until('the failure is said', async () => (await p.locator('#updates-news').innerText().catch(() => '')) === '0.3.0 did not start on this server, so 0.2.0 was put back. 0.2.0 runs normally.');
     assert.equal(await p.locator('#updates-version').innerText(), 'Clavarium 0.2.0');
     assert.match(await p.locator('#updates-history').innerText(), /0\.2\.0 → 0\.3\.0 · Did not work: went back\s+it did not answer/);
+    /* A version that failed here: not offered as usual; tried again only on purpose, warned. */
+    assert.equal(await p.locator('#updates-apply').innerText(), 'Try 0.3.0 again\u2026');
+    assert.equal(await p.locator('#updates-apply').getAttribute('class'), '');
+    assert.equal(await p.locator('#updates-retry-note').innerText(), 'It did not start here before. If it fails again, 0.2.0 is put back.');
+    await p.locator('#updates-apply').click();
+    assert.equal(await p.locator('#updates-retry-note').innerText(), 'The server restarts to try 0.3.0 again.');
+    await p.locator('#updates-retry-no').click();
+    await me.until('offered as before', async () => (await p.locator('#updates-apply').isVisible()) && !(await p.locator('#updates-retry-yes').isVisible()));
     /* Going back, asked once more in place. */
     await p.locator('#updates-back button', { hasText: 'Go back to 0.1.0' }).click();
     assert.equal(await p.locator('#updates-back .hint').innerText(), 'The server restarts on 0.1.0.');
@@ -62,6 +71,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     const phone = await b.person({ phone: true });
     await phone.page.emulateMedia({ colorScheme: 'dark' });
     await phone.page.locator('#nav-settings').click();
+    await phone.chapter('s-updates');
     await phone.until('Updates on the phone', async () => (await phone.page.locator('#updates-version').innerText().catch(() => '')) === 'Clavarium 0.1.0');
     await phone.page.locator('#settings-updates-top').scrollIntoViewIfNeeded();
     for (const id of ['#updates-check', '#updates-mode', '#updates-channel']) {

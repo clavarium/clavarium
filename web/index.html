@@ -505,17 +505,33 @@
       <!-- SETTINGS: the platform, and this device. -->
       <div id="settings" class="sheet" hidden>
         <div class="panel-top"><b>Settings</b><button type="button" id="settings-close">Close</button></div>
-        <div class="panel-top"><b>This device</b></div>
+        <h3 class="chapter-group">This device</h3>
+        <details class="chapter" id="settings-ch-screen" data-chapter="s-screen">
+          <summary><span class="chapter-title">Screen</span><span class="chapter-about">Light or dark, text size, the app.</span></summary>
+          <div class="chapter-body">
         <div class="row"><span>Screen</span><button type="button" id="theme" aria-label="Light or dark screen">Light</button><button type="button" id="install" class="primary" hidden>Install the app</button></div>
         <div class="row"><span>Text size</span><span class="text-size" id="settings-text" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span></div>
         <p class="hint">All text, the terminal's too, on this device only. Also: two fingers pinched, Ctrl and the wheel, Ctrl + and Ctrl -.</p>
-        <div class="panel-top"><b>Alerts</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-alerts" data-chapter="s-alerts">
+          <summary><span class="chapter-title">Alerts</span><span class="chapter-about">Be told here when a tool waits for you.</span></summary>
+          <div class="chapter-body">
         <p class="hint" id="alerts-state">When a tool stops and waits for you, this device can be told.</p>
         <div class="row"><button type="button" id="alerts-on" class="primary">Alert me on this device</button><button type="button" id="alerts-off" hidden>Stop alerting this device</button><button type="button" id="alerts-test" hidden>Send a test</button></div>
-        <div class="panel-top"><b>Shortcuts</b></div>
+          </div>
+        </details>
+        <h3 class="chapter-group">This server</h3>
+        <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
+          <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">The ready-made answers under the terminal.</span></summary>
+          <div class="chapter-body">
         <p class="hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
         <div id="settings-shortcuts"></div>
-        <div class="panel-top"><b>Chat screen</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-words" data-chapter="s-words">
+          <summary><span class="chapter-title">Chat screen</span><span class="chapter-about">Its language, and your own words.</span></summary>
+          <div class="chapter-body">
         <div class="row"><label for="words-lang">Language</label><select id="words-lang"><option value="device">The language of each device</option></select></div>
         <details id="words-box">
           <summary>Your own words</summary>
@@ -527,18 +543,34 @@
         </details>
         <!-- WHAT THE THREAD SHOWS of what this server says there: each kind of
              event at a level (server/talk.mjs EVENT_LEVELS); the owner may move one. -->
-        <div class="panel-top"><b>Chat: what the thread shows</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-thread" data-chapter="s-thread">
+          <summary><span class="chapter-title">Chat thread</span><span class="chapter-about">What the chat says of machines and repositories.</span></summary>
+          <div class="chapter-body">
         <p class="hint">Besides the messages, the chat says what happened to its machine and its repositories. <b>Needs you</b>: in both views. <b>News</b>: in the simple view as one short line, several in a row grouped. <b>Trace</b>: in the detailed view only. Never counted as unread.</p>
         <div id="thread-levels" class="thread-levels"></div>
         <p class="hint" id="thread-saved" role="status"></p>
         <p id="thread-error" class="error" role="alert" hidden></p>
-        <div class="panel-top"><b>Dictation</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-dictation" data-chapter="s-dictation">
+          <summary><span class="chapter-title">Dictation</span><span class="chapter-about">Speech to text, on this server.</span></summary>
+          <div class="chapter-body">
         <p id="settings-dictation" class="hint"></p>
-        <div class="panel-top"><b>People &amp; address</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-people" data-chapter="s-people">
+          <summary><span class="chapter-title">People &amp; address</span><span class="chapter-about">Who may sign in, and where.</span></summary>
+          <div class="chapter-body">
         <p id="settings-people" class="hint"></p>
         <!-- THIS SERVER: its disk and memory, what takes them, and the reserve
              no machine may eat into (server/capacity.mjs). Nothing here wakes a machine. -->
-        <div class="panel-top" id="settings-server-top"><b>This server</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-server-top" data-chapter="s-resources">
+          <summary><span class="chapter-title">Resources</span><span class="chapter-about">Disk and memory, what takes them, the reserve.</span></summary>
+          <div class="chapter-body">
         <div id="settings-server" tabindex="-1">
           <p id="server-unknown" class="hint" hidden>This server's disk and memory cannot be read just now. Nothing is refused for lack of room while they cannot.</p>
           <div id="server-disks"></div>
@@ -549,24 +581,41 @@
             <dl id="server-memory-parts" class="server-parts"></dl>
           </div>
           <div class="server-block">
-            <div class="server-head"><b>Reserve</b><span class="server-figures">always left free</span></div>
+            <div class="server-head"><b>Reserve</b><span class="server-figures">always left free, the larger of the two</span></div>
             <div class="reserve-row">
-              <label>Disk <input type="number" id="reserve-disk" min="0" max="1024" step="0.5" inputmode="decimal"> GB</label>
-              <label>Memory <input type="number" id="reserve-memory" min="0" max="256" step="0.25" inputmode="decimal"> GB</label>
+              <span class="reserve-what">Disk</span>
+              <label><input type="number" id="reserve-disk" min="0" max="1024" step="0.5" inputmode="decimal" aria-label="Disk reserve, in GB"> GB</label>
+              <span aria-hidden="true">or</span>
+              <label><input type="number" id="reserve-disk-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Disk reserve, in percent of the disk"> %</label>
+            </div>
+            <div class="reserve-row">
+              <span class="reserve-what">Memory</span>
+              <label><input type="number" id="reserve-memory" min="0" max="256" step="0.25" inputmode="decimal" aria-label="Memory reserve, in GB"> GB</label>
+              <span aria-hidden="true">or</span>
+              <label><input type="number" id="reserve-memory-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Memory reserve, in percent of the memory"> %</label>
+            </div>
+            <div class="reserve-row">
               <button type="button" id="reserve-save" class="primary">Save</button>
               <span class="hint" id="reserve-saved" role="status"></span>
             </div>
-            <p class="hint">Creating, starting or waking a machine, or giving a machine more memory or disk, is refused if it would leave less than this free; you are told what to free instead. Waking is never refused for lack of disk, so you can always get in to clean up. The striped end of each bar is the reserve.</p>
+            <p class="server-note" id="reserve-now"></p>
+            <p class="hint">Judged on what is really free. A machine is not created, started or given more if that would leave less. Below it, you are alerted and the running machine that takes the most is put to sleep. Waking is never refused for lack of disk, so you can get in to clean up.</p>
+            <p class="server-note promised" id="promised-disk" hidden></p>
+            <p class="server-note promised" id="promised-memory" hidden></p>
             <p id="reserve-error" class="error" role="alert" hidden></p>
           </div>
         </div>
         <!-- UPDATES: what runs, what is out, how this server updates itself
              (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
-        <div class="panel-top" id="settings-updates-top"><b>Updates</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-updates-top" data-chapter="s-updates">
+          <summary><span class="chapter-title">Updates</span><span class="chapter-about">The version that runs, and how it updates.</span></summary>
+          <div class="chapter-body">
         <div id="updates" tabindex="-1">
           <div class="updates-head"><b id="updates-version"></b><span id="updates-state" role="status"></span><button type="button" id="updates-check">Check now</button></div>
           <p id="updates-news" class="updates-news" hidden></p>
-          <div class="row" id="updates-offer" hidden><button type="button" id="updates-apply" class="primary"></button></div>
+          <div class="row" id="updates-offer" hidden><button type="button" id="updates-apply" class="primary"></button><button type="button" id="updates-retry-yes" class="primary" hidden>Try again</button><button type="button" id="updates-retry-no" hidden>Cancel</button><span class="hint" id="updates-retry-note" hidden></span></div>
           <div id="updates-settings" class="updates-grid">
             <label for="updates-mode">Mode</label>
             <select id="updates-mode"><option value="auto">Automatic, in a window</option><option value="asap">As soon as out</option><option value="ask">Ask me</option><option value="off">Off</option></select>
@@ -580,10 +629,17 @@
           <details id="updates-history-box" hidden><summary>History</summary><ul id="updates-history" class="updates-history"></ul></details>
           <p id="updates-error" class="error" role="alert" hidden></p>
         </div>
-        <div class="panel-top"><b>Storage &amp; backup</b></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
+          <summary><span class="chapter-title">Storage &amp; backup</span><span class="chapter-about">Disk sizes, and how to back up.</span></summary>
+          <div class="chapter-body">
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
-        <details id="settings-advanced">
-          <summary>Advanced</summary>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-advanced" data-chapter="s-advanced">
+          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Ready-made machine, git server keys.</span></summary>
+          <div class="chapter-body" id="settings-advanced">
           <div id="shelf">
             <b>Ready-made machine</b>
             <p class="hint">New conversations start from a copy of a machine prepared in advance, with the tools already installed: a minute or two instead of several. It is rebuilt each month in the background; running conversations are not touched.</p>
@@ -598,9 +654,14 @@
             <div id="git-hosts"></div>
             <p id="git-hosts-error" class="error" role="alert" hidden></p>
           </div>
+          </div>
         </details>
-        <div class="panel-top"><b>About</b></div>
+        <details class="chapter" id="settings-ch-about" data-chapter="s-about">
+          <summary><span class="chapter-title">About</span><span class="chapter-about">The version that runs here.</span></summary>
+          <div class="chapter-body">
         <p id="settings-about" class="hint"></p>
+          </div>
+        </details>
       </div>
       <div id="copy" class="sheet" hidden>
         <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close">Close</button></div>

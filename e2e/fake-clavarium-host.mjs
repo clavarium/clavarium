@@ -109,7 +109,9 @@ if (area === 'update') {
         const from = state.version;
         if (read('broken', '') === argv[0]) done({ action: 'update', from, to: argv[0], result: 'rolled-back', why: 'it did not answer' });
         else { done({ action: 'update', from, to: argv[0], result: 'done' }); state.version = argv[0]; state.releases = [{ id: argv[0], version: argv[0], current: true }, { id: from, version: from, current: false }]; }
-        state.available = null; save(); process.exit(0);
+        /* As the updater: what is out stays out after a version put back. */
+        if (state.version === argv[0]) state.available = null;
+        save(); process.exit(0);
     }
     if (verb === 'rollback') {
         const from = state.version;
