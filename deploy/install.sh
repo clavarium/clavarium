@@ -189,10 +189,16 @@ PLAN
 fi
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root (sudo)"
+# /etc/os-release is read in a subshell: it defines VERSION, NAME and more, which
+# would overwrite this script's own (VERSION is the Clavarium version asked for).
 # shellcheck disable=SC1091
-. /etc/os-release
-[ "${ID:-}" = "ubuntu" ] || refuse "this is ${PRETTY_NAME:-not Ubuntu}; Clavarium installs on Ubuntu Server $SUPPORTED"
-case " $SUPPORTED " in *" ${VERSION_ID:-} "*) : ;; *) refuse "this is Ubuntu ${VERSION_ID:-?}; supported: $SUPPORTED" ;; esac
+OS_ID="$(. /etc/os-release 2>/dev/null; printf '%s' "${ID:-}")"
+# shellcheck disable=SC1091
+OS_VERSION_ID="$(. /etc/os-release 2>/dev/null; printf '%s' "${VERSION_ID:-}")"
+# shellcheck disable=SC1091
+OS_PRETTY="$(. /etc/os-release 2>/dev/null; printf '%s' "${PRETTY_NAME:-}")"
+[ "$OS_ID" = "ubuntu" ] || refuse "this is ${OS_PRETTY:-not Ubuntu}; Clavarium installs on Ubuntu Server $SUPPORTED"
+case " $SUPPORTED " in *" ${OS_VERSION_ID} "*) : ;; *) refuse "this is Ubuntu ${OS_VERSION_ID:-?}; supported: $SUPPORTED" ;; esac
 [ "$(uname -m)" = "x86_64" ] || refuse "this machine is $(uname -m); only x86_64 is supported"
 grep -Eq '(vmx|svm)' /proc/cpuinfo || echo "install: WARNING: this processor does not show virtualisation: VMs may not start." >&2
 
