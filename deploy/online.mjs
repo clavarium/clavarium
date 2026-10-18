@@ -124,7 +124,7 @@ export async function ensureKeys(sys, P = PATHS) {
 }
 
 async function qr(sys, text) {
-    const r = await sys.run(['qrencode', '-t', 'ANSIUTF8', '-m', '2', '--', text]);
+    const r = await sys.run(['qrencode', '-t', 'ANSI', '-m', '1', '-l', 'L', '--', text]);
     if (r.code === 0 && r.out) sys.print(r.out.replace(/\n$/, ''));
 }
 

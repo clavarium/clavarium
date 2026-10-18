@@ -701,7 +701,7 @@ elif [ -n "$RELAY" ]; then
     # It is a PUBLIC key: showing it is safe; it lets the relay know this machine.
     if command -v qrencode >/dev/null 2>&1 || apt-get install -y -qq qrencode >/dev/null 2>&1; then
         echo "The same key, to read with a phone or a tablet:"
-        qrencode -t ANSIUTF8 -m 2 -- "$TUNNEL_KEY" || true
+        qrencode -t ANSI -m 1 -l L -- "$TUNNEL_KEY" || true
     fi
     echo "It will print this, and it must be the same:    $RELAY_PRINT"
     echo "The name $DOMAIN must lead to the relay."
