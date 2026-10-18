@@ -216,11 +216,13 @@ The host needs `tmux` and `bindfs` (the read-only views).
     # the stable version from npm, in local mode, asking nothing (Node.js pinned and
     # checked first); it prints the next command and the public keys (text and QR)
     curl -fsSL https://clavarium.org/install.sh | sudo bash
-    # online in the same line: it installs, shows the setup key (text and QR), waits for
-    # the relay, sets it up over SSH, tests from the internet, shows the password once
-    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay relay.example.net \
-        --relay-user ubuntu --domain clav.example.com --admin you@example.com
-    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --direct --domain clav.example.com
+    # online in the same line: it installs, shows the setup key (text and QR), asks for the
+    # relay's address once you made it with that key, waits for your DNS, sets the relay up
+    # over SSH, tests from the internet, shows the password once
+    DOMAIN=<your-domain>
+    EMAIL=<your-email>
+    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN" --admin "$EMAIL" --relay-user ubuntu
+    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --direct --domain "$DOMAIN"
     # or later, from local mode
     sudo clavarium online --relay relay.example.net --domain clav.example.com
     sudo clavarium online --port --domain clav.example.com

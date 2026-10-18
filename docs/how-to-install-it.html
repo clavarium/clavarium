@@ -149,14 +149,15 @@ code { font-family: var(--mono); font-size: .9em; }
   <div class="wrap">
     <h2>Install on Ubuntu</h2>
     <p class="note">Ubuntu Server 24.04 or 26.04. In its terminal:</p>
-    <div class="snip wide main"><pre id="cmd">curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- \
-  --relay relay.example.net --relay-user ubuntu --domain clav.example.com --admin you@example.com</pre><button class="copy" type="button" data-copy="cmd">Copy</button></div>
-    <p class="note" style="margin-top:1rem">One line, and the rest is done by itself: it installs, shows the setup key (text and QR code) and waits. Create your relay at your host with that key as its SSH key, point your domain to it; Clavarium reaches it, asks you to confirm its fingerprint, sets it up, goes online and shows your password once.</p>
-    <div class="snip wide"><pre># ports 80 and 443 reach this machine: no relay
-curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --direct --domain clav.example.com
-
-# this machine only, no sign-in (go online later with: sudo clavarium online ...)
-curl -fsSL https://clavarium.org/install.sh | sudo bash</pre></div>
+    <div class="snip wide"><pre id="vals">DOMAIN=&lt;your-domain&gt;
+EMAIL=&lt;your-email&gt;</pre><button class="copy" type="button" data-copy="vals">Copy</button></div>
+    <div class="snip wide main"><pre id="cmd">curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain "$DOMAIN" --admin "$EMAIL" --relay-user ubuntu</pre><button class="copy" type="button" data-copy="cmd">Copy</button></div>
+    <ol class="rows" style="margin-top:1rem">
+      <li>It installs, then shows a key (text and QR code).</li>
+      <li>At your host, create a small Ubuntu machine, the relay, with that key as its SSH key. Type its address when asked.</li>
+      <li>Point your domain to that address. Clavarium waits for it, asks you to confirm the relay's fingerprint, sets everything up and shows your password once.</li>
+    </ol>
+    <p class="note" style="margin-top:1rem">Ports 80 and 443 reach this machine? No relay: add <code>--direct</code>. This machine only, no sign-in: the command alone, without options.</p>
     <ul class="rows" style="margin-top:1rem">
       <li>Your sub-domain instead of the example. Its DNS record points to the relay, or to this machine.</li>
       <li>A real test from the internet runs first. If it fails, it says why and changes nothing.</li>

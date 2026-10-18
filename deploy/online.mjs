@@ -63,7 +63,7 @@ export const USAGE = [
 ].join('\n');
 
 export function parseOnline(args) {
-    const o = { relay: '', user: 'root', relayPort: '22', domain: '', admin: '', fingerprint: '', keepSetupKey: false, yes: false, port: false };
+    const o = { askRelay: false, relay: '', user: 'root', relayPort: '22', domain: '', admin: '', fingerprint: '', keepSetupKey: false, yes: false, port: false };
     const value = (i, name) => { const v = args[i + 1]; if (v === undefined || v.startsWith('--')) throw new Bad(`${name} needs a value`); return v; };
     for (let i = 0; i < args.length; i++) {
         const a = args[i];
@@ -80,12 +80,15 @@ export function parseOnline(args) {
             default: throw new Bad(`unknown parameter: ${a}`);
         }
     }
-    if (!o.relay === !o.port) throw new Bad('say how it will be reached: --relay HOST or --port');
+    if (o.relay && o.port) throw new Bad('say how it will be reached: --relay HOST or --port, not both');
+    /* Neither: through a relay that does not exist yet -- its key is shown first,
+       and its address asked once the operator has made it with that key. */
+    if (!o.relay && !o.port) o.askRelay = true;
     if (!DOMAIN.test(o.domain)) throw new Bad('--domain is a host name, lower case, like clav.example.com');
     o.admin ||= `admin@${o.domain}`;
     if (!EMAIL.test(o.admin)) throw new Bad('--admin is an e-mail address, lower case');
-    if (o.relay) {
-        if (!HOST.test(o.relay)) throw new Bad('--relay is the name or the address of the relay machine');
+    if (o.relay || o.askRelay) {
+        if (o.relay && !HOST.test(o.relay)) throw new Bad('--relay is the name or the address of the relay machine');
         if (!USER.test(o.user)) throw new Bad('--relay-user is an account name');
         if (!/^\d{1,5}$/.test(o.relayPort) || +o.relayPort < 1 || +o.relayPort > 65535) throw new Bad('--relay-port is a port number');
         if (o.fingerprint && !PRINT.test(o.fingerprint)) throw new Bad('--relay-fingerprint looks like SHA256:... (ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub on the relay)');
@@ -214,6 +217,19 @@ export async function checkDns(sys, o) {
     if (!pub.length) throw new Failed(`${o.domain} points to ${got.join(', ')}: a private address, which the internet cannot reach. Use the public one (your router's, or your server's)`);
     sys.print(`DNS: ${o.domain} -> ${got.join(', ')}.`);
     return got;
+}
+
+/* The domain made to point to the relay while the operator is at it: waited for
+   (every 30 s, Enter to look now), the record to make said once. */
+export async function waitDns(sys, o) {
+    let said = false;
+    for (;;) {
+        const relay = await addresses(sys, o.relay);
+        const got = await addresses(sys, o.domain);
+        if (relay.length && got.some((a) => relay.includes(a))) return;
+        if (!said && relay.length) { said = true; sys.print(`At your DNS provider, point the domain to the relay:\n    ${o.domain}  A  ${relay[0]}\nWaiting for it (it takes a few minutes) -- or press Enter to look now.`); }
+        await (sys.sleepOrEnter ? sys.sleepOrEnter(30_000) : sys.sleep(30_000));
+    }
 }
 
 /* ------------------------ the test from the internet ------------------------ */
@@ -437,6 +453,17 @@ export async function online(o, sys, P = PATHS) {
     if (was) throw new Refused(`this machine is in server mode already: https://${was}`);
     if (!existsSync(P.caddy)) throw new Failed('the HTTPS programs are not on this machine: run the installer again (curl -fsSL https://clavarium.org/install.sh | sudo bash)');
     const keys = await ensureKeys(sys, P);
+    if (o.askRelay) {
+        await showKeys(sys, P, { which: 'setup' });
+        sys.print('Create the relay at your host now (Ubuntu), with the key above as its SSH key.');
+        for (;;) {
+            const a = String(await sys.askLine('Its address, once it exists (IP or name): ') ?? '').trim();
+            if (HOST.test(a)) { o.relay = a; break; }
+            if (!a && !sys.hasKeyboard?.()) throw new Failed('no keyboard to ask on: give --relay HOST');
+            sys.print('   That is not an address: an IP address, or a name like relay.example.com');
+        }
+        await waitDns(sys, o);
+    }
     await checkDns(sys, o);
     await portsFree(sys);
     if (o.relay) await setUpRelay(sys, P, o, keys);
@@ -515,6 +542,12 @@ export function realSys() {
             timer = setTimeout(done, ms);
             try { tty = createReadStream('/dev/tty'); tty.on('data', (d) => { if (d.includes(10) || d.includes(13)) done(); }); tty.on('error', () => {}); } catch { /* no keyboard: the timer alone */ }
         }),
+        hasKeyboard: () => { try { closeSync(openSync('/dev/tty', 'r')); return true; } catch { return false; } },
+        askLine: async (question) => {
+            let fd;
+            try { fd = openSync('/dev/tty', 'r+'); } catch { return ''; }
+            try { writeSync(fd, question); const buf = Buffer.alloc(512); let s = ''; while (!s.includes('\n')) { const n = readSync(fd, buf, 0, buf.length, null); if (!n) break; s += buf.toString('utf8', 0, n); } return s.split('\n')[0]; } finally { closeSync(fd); }
+        },
         waitEnter: async () => {
             let fd;
             try { fd = openSync('/dev/tty', 'r'); } catch { return false; }

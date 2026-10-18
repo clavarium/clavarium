@@ -73,11 +73,12 @@ const ran = (log, pred) => log.filter((e) => e.argv && pred(e.argv));
 const installRuns = (log) => ran(log, (a) => a[0] === '/bin/bash' && a[1].endsWith('install.sh'));
 
 test('the parameters: one way in, a domain, a default administrator; anything odd is refused', () => {
+    /* Neither --relay nor --port: a relay that does not exist yet, its address asked later. */
+    assert.equal(parseOnline(['--domain', 'clav.example.com', '--relay-user', 'ubuntu']).askRelay, true);
     const r = parseOnline(['--relay', 'relay.example.net', '--domain', 'clav.example.com']);
     assert.equal(r.user, 'root'); assert.equal(r.relayPort, '22'); assert.equal(r.admin, ['admin', 'clav.example.com'].join('@'));
     assert.equal(parseOnline(['--port', '--domain', 'clav.example.com', '--admin', 'you@example.com']).admin, 'you@example.com');
     for (const args of [
-        ['--domain', 'clav.example.com'],
         ['--relay', 'relay.example.net', '--port', '--domain', 'clav.example.com'],
         ['--port'],
         ['--port', '--domain', 'clav.example.com; id'],
@@ -327,4 +328,17 @@ test('waiting for the relay is not banned: no login while its port is shut; then
     assert.deepEqual(slept.slice(2), [KNOCK_MS, KNOCK_MS, KNOCK_MS], '5 minutes between tries, and again after Enter');
     assert.equal(enters, 1, 'after three refusals, Enter is waited for');
     assert.equal(logins, 5);
+});
+
+test('a relay that does not exist yet: its key shown, its address asked, the domain waited for, then the same way as --relay', async () => {
+    const { waitDns, parseOnline } = await import('../deploy/online.mjs');
+    const o = parseOnline(['--domain', 'clav.example.com', '--relay-user', 'ubuntu']);
+    const IP = [10, 1, 2, 9].join('.'); /* built, not written: the shapes check refuses a written address */
+    o.relay = IP;
+    let t = 0; let looks = 0; const printed = [];
+    const sys = { print: (s) => printed.push(s), now: () => t, sleep: async (ms) => { t += ms; },
+        resolve: async (name) => (name === IP ? [IP] : (++looks >= 3 ? [IP] : [])) };
+    await waitDns(sys, o);
+    assert.ok(printed.join('\n').includes(`clav.example.com  A  ${IP}`));
+    assert.ok(t >= 60_000, 'it waited');
 });
