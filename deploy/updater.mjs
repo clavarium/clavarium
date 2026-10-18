@@ -554,6 +554,10 @@ export class Updater {
             const r = await this.#run(['install', '-o', 'root', '-g', 'root', '-m', '0755', from, to], { timeoutMs: 30_000 });
             if (r.code !== 0) throw new Error(`${to}: ${lastLine(r)}`);
         }
+        /* What a release sets up beside itself (the certificate timer): an update does not run install.sh again.
+           Best effort: the update does not depend on it; `sudo clavarium doctor` says when it is missing. */
+        const node = join(dirname(app), 'node', 'bin', 'node');
+        if (existsSync(node)) await this.#run([node, join(app, 'deploy', 'clavarium.mjs'), 'doctor', '--install-watch'], { timeoutMs: 60_000 }).catch(() => {});
     }
 
     /* The Node.js the release pins (server/tools.mjs), checked against its checksum, shared between releases. */

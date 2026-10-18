@@ -7,6 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { NODE_VERSION } from '../server/tools.mjs';
+import { probeBlock } from '../deploy/doctor.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../deploy/install.sh', import.meta.url));
 const install = (...args) => { const r = spawnSync('/bin/bash', [SCRIPT, ...args], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
@@ -130,6 +131,8 @@ test('going online later: the settings change, the release that runs stays; loca
     /* The certificate: Let's Encrypt first, Caddy's own as a fallback, replaced by a timer as soon as it can. */
     assert.match(text, /issuer acme \{\n\t\t\tdisable_tlsalpn_challenge\n\t\t\}\n\t\tissuer internal/);
     assert.match(text, /\/usr\/local\/bin\/clavarium doctor --install-watch/);
+    /* The probe of port 80, the same block as doctor.mjs writes for an older install. */
+    assert.ok(text.includes(probeBlock('$DOMAIN', '$PROBE', true).replace('\tbind 127.0.0.1\n', '$BIND\n')), 'the same probe block');
     assert.match(text, /CLAVARIUM_PASSWORDS_TO/);
 });
 

@@ -75,6 +75,10 @@ export async function diagnose(sys, P = DOCTOR_PATHS) {
     add({ what: `the name ${domain}`, ok: dnsOk, detail: addrs.length ? `leads to ${addrs.join(', ')}` : 'leads nowhere',
         fix: relay ? `make ${domain} lead to the relay (${want?.join(', ') || relay}) at your DNS host` : `make ${domain} lead to this machine at your DNS host` });
 
+    const seen = await reached(sys, domain, probeOf(P));
+    add({ what: `reached by its name, port 80`, ok: seen.ok, detail: seen.ok ? `http://${domain} leads here` : seen.why,
+        fix: seen.why?.includes('probe') ? 'sudo clavarium doctor --fix' : relay ? `the tunnel: sudo clavarium relay status; the name: ${domain} must lead to the relay` : `${domain} must lead to this machine, and port 80 be open to it`,
+        repair: seen.why?.includes('probe') ? 'probe' : null });
     const c = await servedCert(sys, domain);
     const days = Number.isFinite(c.end) ? Math.floor((c.end - sys.now()) / 86_400_000) : null;
     if (c.none) {
@@ -115,18 +119,83 @@ async function renewCertificate(sys, P) {
     sys.print('   Caddy restarted: it asks Let\'s Encrypt now');
 }
 
+/* IS THIS MACHINE REACHED BY ITS NAME, ON PORT 80, FROM THE INTERNET? Asked
+   BEFORE Let's Encrypt is, so its quotas are not spent on a name or a tunnel
+   that is not ready: Caddy answers a token of this machine at
+   http://NAME/.well-known/clavarium-probe (the way Let's Encrypt comes in). */
+export const PROBE_PATH = '/.well-known/clavarium-probe';
+export const probeOf = (P) => /respond "([0-9a-f]{32})" 200/.exec(read(P.caddyfile) ?? '')?.[1] ?? null;
+export function probeBlock(domain, token, behindRelay) {
+    return `
+# Clavarium's probe: is this machine reached by its name on port 80? Asked before Let's Encrypt is.
+http://${domain} {
+${behindRelay ? '\tbind 127.0.0.1\n' : ''}\thandle ${PROBE_PATH} {
+\t\trespond "${token}" 200
+\t}
+\thandle {
+\t\tredir https://{host}{uri} 308
+\t}
+}
+`;
+}
+export async function reached(sys, domain, token) {
+    if (!token) return { ok: false, why: 'the probe is not set up (sudo clavarium doctor --fix sets it up)' };
+    const addrs = await sys.resolve(domain);
+    if (!addrs.length) return { ok: false, why: `${domain} leads nowhere (DNS)` };
+    const r = await sys.run(['curl', '-s', '--max-time', '15', '-o', '-', '-w', '\n%{http_code}', `http://${domain}${PROBE_PATH}`]);
+    const [body, code] = [r.out.split('\n').slice(0, -1).join('\n').trim(), r.out.split('\n').at(-1)];
+    if (body === token) return { ok: true };
+    return { ok: false, silent: r.code !== 0, why: r.code !== 0 ? `http://${domain} does not answer from the internet (curl exit ${r.code})` : `http://${domain} answers, but it is not this machine (HTTP ${code})` };
+}
+
 /* `clavarium doctor --certificate`, every 20 minutes (clavarium-certificate.timer):
-   a certificate Caddy made itself is replaced by Let's Encrypt's as soon as it can.
-   Nothing is done while the certificate is a public one. 3 tries an hour at most:
-   under Let's Encrypt's limit of 5 failed validations an hour. */
+   a certificate Caddy made itself is replaced by Let's Encrypt's as soon as it can
+   -- only once this machine is seen reached by its name: Let's Encrypt is not
+   asked for nothing. Nothing at all while the certificate is a public one. */
 export async function certificateWatch(sys, P = DOCTOR_PATHS) {
     const domain = domainOf(P);
     if (!domain) return 0;
     const c = await servedCert(sys, domain);
     if (!c.none && !c.local) return 0;
-    sys.print(`${domain}: ${c.none ? 'no certificate served' : 'a certificate made by Caddy itself'}: asking Let's Encrypt again`);
+    const seen = await reached(sys, domain, probeOf(P));
+    /* No answer from here is not proof: a home router may not loop its own public
+       address back (--port). Then Let's Encrypt's test server decides. A name that
+       leads nowhere, or to another machine, is proof enough: nothing is asked. */
+    if (!seen.ok && !seen.silent) { sys.print(`${domain}: ${c.none ? 'no certificate served' : 'a certificate made by Caddy itself'}; Let's Encrypt not asked: ${seen.why}`); return 0; }
+    const staged = await stagingTest(sys, P, domain);
+    if (!staged.ok) { sys.print(`${domain}: Let's Encrypt's test server could not validate it: ${staged.why}. The real one is not asked; Caddy's own certificate is kept.`); return 0; }
+    sys.print(`${domain}: reached from the internet and validated by Let's Encrypt's test server: asking the real one now`);
     await renewCertificate(sys, P);
     return 0;
+}
+
+/* LET'S ENCRYPT'S TEST SERVER FIRST (staging: its quotas are far larger): the
+   real one is asked only once the test one validated this very name, the same
+   way. Port 80 is the front's, so the front stops for the test (seconds; the
+   site only had Caddy's own certificate anyway) and starts again after it,
+   whatever happens. */
+export async function stagingTest(sys, P, domain) {
+    const { acmeTest } = await import('./online.mjs');
+    await sys.run(['systemctl', 'stop', 'caddy']);
+    try {
+        return await acmeTest(sys, { caddy: P.caddy }, { domain, relay: relayOf(P), challenge: 'http', timeoutMs: 90_000 });
+    } catch (error) {
+        return { ok: false, why: error.message };
+    } finally {
+        await sys.run(['systemctl', 'start', 'caddy']);
+    }
+}
+
+/* An install before the probe existed: it is added to the Caddyfile. */
+export async function ensureProbe(sys, P = DOCTOR_PATHS) {
+    const domain = domainOf(P); const file = read(P.caddyfile);
+    if (!domain || !file || probeOf(P)) return false;
+    const token = (await sys.run(['openssl', 'rand', '-hex', '16'])).out.trim();
+    if (!/^[0-9a-f]{32}$/.test(token)) return false;
+    writeFileSync(`${P.caddyfile}.new`, file + probeBlock(domain, token, Boolean(relayOf(P))));
+    renameSync(`${P.caddyfile}.new`, P.caddyfile);
+    await sys.run(['systemctl', 'reload', 'caddy']);
+    return true;
 }
 
 /* The timer of certificateWatch. Written by install.sh, and by doctor --fix on a
@@ -150,6 +219,7 @@ OnUnitActiveSec=20min
 WantedBy=timers.target
 `;
 export async function installWatch(sys, P = DOCTOR_PATHS) {
+    await ensureProbe(sys, P);
     const svc = `${P.systemd}/clavarium-certificate.service`; const tim = `${P.systemd}/clavarium-certificate.timer`;
     if (read(svc) === WATCH_SERVICE && read(tim) === WATCH_TIMER) return false;
     writeFileSync(svc, WATCH_SERVICE); writeFileSync(tim, WATCH_TIMER);
@@ -169,7 +239,13 @@ export async function doctor(sys, { fix = false } = {}, P = DOCTOR_PATHS) {
     if (domainOf(P) && await installWatch(sys, P)) sys.print('   the certificate is now checked every 20 minutes (clavarium-certificate.timer)');
     for (const c of repairs) {
         if (c.repair === 'restart') { await sys.run(['systemctl', 'restart', c.unit]); sys.print(`   ${c.unit}: restarted`); }
-        if (c.repair === 'certificate') await renewCertificate(sys, P);
+        if (c.repair === 'probe' && await ensureProbe(sys, P)) sys.print('   the probe of port 80: set up');
+        if (c.repair === 'certificate') {
+            const seen = await reached(sys, domainOf(P), probeOf(P));
+            const staged = seen.ok || seen.silent ? await stagingTest(sys, P, domainOf(P)) : null;
+            if (staged?.ok) { sys.print('   validated by Let\'s Encrypt\'s test server'); await renewCertificate(sys, P); }
+            else sys.print(`   the certificate: the real Let's Encrypt not asked, ${staged ? `its test server could not validate it: ${staged.why}` : seen.why}`);
+        }
     }
     if (!repairs.length) { sys.print('   nothing this command can repair: see "what to do" above'); return bad; }
     /* Let's Encrypt answers in seconds when all is well. */

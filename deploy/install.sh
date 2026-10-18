@@ -543,6 +543,9 @@ fi
 # Caddy would keep that one for hours: clavarium-certificate.timer replaces it
 # with Let's Encrypt's as soon as it can (sudo clavarium doctor --certificate).
 BIND=""; [ -z "$RELAY" ] || BIND="	bind 127.0.0.1"
+# The probe's token: kept on a rerun (see deploy/doctor.mjs, probeBlock).
+PROBE="$(sed -n 's/.*respond "\([0-9a-f]\{32\}\)" 200.*/\1/p' /etc/caddy/Caddyfile 2>/dev/null | head -1)"
+[ -n "$PROBE" ] || PROBE="$(openssl rand -hex 16)"
 cat > /etc/caddy/Caddyfile <<CADDY
 # The only thing on this machine that takes what comes from the outside.
 $DOMAIN {
@@ -558,6 +561,17 @@ $BIND
 	}
 	handle {
 		reverse_proxy 127.0.0.1:4180
+	}
+}
+
+# Clavarium's probe: is this machine reached by its name on port 80? Asked before Let's Encrypt is.
+http://$DOMAIN {
+$BIND
+	handle /.well-known/clavarium-probe {
+		respond "$PROBE" 200
+	}
+	handle {
+		redir https://{host}{uri} 308
 	}
 }
 CADDY
