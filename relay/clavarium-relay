@@ -1,0 +1,282 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# THE MAINTENANCE PROGRAM OF A CLAVARIUM RELAY. Runs as root, on the relay.
+#
+#   clavarium-relay status                 what is set up, what runs, what is due
+#   clavarium-relay repair                 writes the rules and the port service again
+#   clavarium-relay update-os [--reboot]   Ubuntu's updates now (and a restart if one is due)
+#   clavarium-relay update-relay X.Y.Z     this program at exactly that version, from npm
+#   clavarium-relay rotate-key tunnel|keeper "ssh-ed25519 AAAA... name"
+#   clavarium-relay setup --key LINE [--keeper-key LINE]   (relay.sh runs it once)
+#   clavarium-relay version
+#
+# WHO RUNS IT. Root, by hand; or the home machine, through the maintenance
+# account "clavarium-keeper": that account's SSH key leads to "door" (below)
+# and nowhere else, and sudo lets it run this one program, nothing else.
+#
+# IT NEVER TAKES CODE FROM THE HOME MACHINE. update-relay is told a version
+# number only; it fetches the package "clavarium-relay" of that version from
+# the npm registry itself, checks it against the registry's sha512, and only
+# then replaces this file.
+#
+# Exit codes: 0 done (status: all is well); 1 something is wrong (said);
+# 64 bad parameters; 78 refused.
+# ---------------------------------------------------------------------------
+set -euo pipefail
+
+VERSION_OF_THIS="0.1.0"
+# Tests run it on a folder that stands for "/": nothing outside it is touched.
+ROOT="${CLAVARIUM_RELAY_ROOT:-}"
+REGISTRY="https://registry.npmjs.org"
+[ -z "$ROOT" ] || REGISTRY="${CLAVARIUM_RELAY_REGISTRY:-$REGISTRY}"
+
+TUNNEL="clavarium-tunnel"
+KEEPER="clavarium-keeper"
+TLS_PORT="8443"
+HTTP_PORT="8080"
+PROGRAM="/usr/local/sbin/clavarium-relay"
+KEYS="/etc/ssh/clavarium-relay"
+SSHD_FILE="$ROOT/etc/ssh/sshd_config.d/10-clavarium-relay.conf"
+RULES="$ROOT/etc/clavarium-relay.nft"
+UNIT="$ROOT/etc/systemd/system/clavarium-relay-ports.service"
+SUDOERS="$ROOT/etc/sudoers.d/clavarium-relay"
+UPGRADES="$ROOT/etc/apt/apt.conf.d/52clavarium-relay"
+KEY_RE='^ssh-ed25519 [A-Za-z0-9+/]{68}( [A-Za-z0-9@._-]{1,64})?$'
+VERSION_RE='^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$'
+
+bad() { echo "clavarium-relay: $*" >&2; echo "usage: clavarium-relay status | repair | update-os [--reboot] | update-relay X.Y.Z | rotate-key tunnel|keeper KEY | version" >&2; exit 64; }
+refuse() { echo "clavarium-relay: REFUSED: $*" >&2; exit 78; }
+as_root() { [ -n "$ROOT" ] || [ "$(id -u)" -eq 0 ] || refuse "run it as root (sudo)"; }
+key_ok() { case "$1" in *"PRIVATE KEY"*) return 1 ;; esac; [[ "$1" =~ $KEY_RE ]]; }
+
+# --- fetch_relay: shared, word for word, with deploy/relay.sh (a test says so) ---
+# fetch_relay VERSION DIR: the package clavarium-relay@VERSION from the registry,
+# checked against the registry's sha512, unpacked in DIR (DIR/package/...).
+fetch_relay() {
+    local version="$1" dir="$2" meta integrity got proto="=https"
+    case "$REGISTRY" in file://*) proto="=file" ;; esac
+    meta="$(curl --proto "$proto" -fsSL --max-time 60 "$REGISTRY/clavarium-relay/$version")" || { echo "the registry did not answer for clavarium-relay@$version" >&2; return 1; }
+    printf '%s' "$meta" | grep -Eq "\"version\" *: *\"${version//./\\.}\"" || { echo "the registry has no clavarium-relay@$version" >&2; return 1; }
+    integrity="$(printf '%s' "$meta" | grep -Eo '"integrity" *: *"sha512-[A-Za-z0-9+/=]+"' | head -1 | sed 's/.*"\(sha512-[^"]*\)"$/\1/')"
+    [ -n "$integrity" ] || { echo "the registry gave no sha512 for clavarium-relay@$version" >&2; return 1; }
+    curl --proto "$proto" -fsSL --max-time 120 -o "$dir/relay.tgz" "$REGISTRY/clavarium-relay/-/clavarium-relay-$version.tgz" || { echo "the package could not be downloaded" >&2; return 1; }
+    got="sha512-$(openssl dgst -sha512 -binary "$dir/relay.tgz" | base64 -w0)"
+    [ "$got" = "$integrity" ] || { echo "the package is not the one the registry describes (sha512)" >&2; return 1; }
+    tar -xzf "$dir/relay.tgz" -C "$dir" --no-same-owner package/clavarium-relay package/package.json || { echo "the package does not hold the program" >&2; return 1; }
+    grep -Eq "\"name\" *: *\"clavarium-relay\"" "$dir/package/package.json" && grep -Eq "\"version\" *: *\"${version//./\\.}\"" "$dir/package/package.json" || { echo "the package is not clavarium-relay@$version" >&2; return 1; }
+    bash -n "$dir/package/clavarium-relay" || { echo "the program in the package does not parse" >&2; return 1; }
+}
+# --- end of fetch_relay ---
+
+write_key() { # write_key ACCOUNT LINE: the one key of that account, in a file root owns
+    local account="$1" key="$2" options
+    key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+    if [ "$account" = "$TUNNEL" ]; then options="restrict,port-forwarding,permitlisten=\"$TLS_PORT\",permitlisten=\"$HTTP_PORT\""; else options="restrict"; fi
+    install -d -m 0755 "$ROOT$KEYS"
+    printf '%s %s\n' "$options" "$key" > "$ROOT$KEYS/$account.new"
+    chmod 0644 "$ROOT$KEYS/$account.new"
+    mv -f -- "$ROOT$KEYS/$account.new" "$ROOT$KEYS/$account"
+}
+
+do_repair() {
+    as_root
+    [ -s "$ROOT$KEYS/$TUNNEL" ] || refuse "this machine has no tunnel key: set it up with relay.sh --key ..."
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+    local missing=""
+    command -v nft >/dev/null 2>&1 || missing="nftables"
+    [ -e "$ROOT/usr/bin/unattended-upgrade" ] || missing="$missing unattended-upgrades"
+    if [ -n "$missing" ]; then
+        # shellcheck disable=SC2086
+        apt-get update -qq && apt-get install -y -qq $missing >/dev/null || refuse "could not install:$missing"
+    fi
+    id "$TUNNEL" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin "$TUNNEL"
+    # The keeper's commands go through its shell to "door": it needs one, and
+    # has no password and no other command.
+    if [ -s "$ROOT$KEYS/$KEEPER" ]; then id "$KEEPER" >/dev/null 2>&1 || useradd --system --home-dir /nonexistent --no-create-home --shell /bin/sh "$KEEPER"; fi
+
+    install -d "$(dirname "$SSHD_FILE")"
+    cat > "$SSHD_FILE" <<SSHD
+# Clavarium relay: what its two accounts may do. Written by clavarium-relay.
+Match User $TUNNEL
+    AuthorizedKeysFile $KEYS/%u
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AllowTcpForwarding remote
+    GatewayPorts clientspecified
+    PermitListen $TLS_PORT $HTTP_PORT
+    PermitOpen none
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+    ForceCommand /bin/false
+    # A tunnel that died without saying so gives its ports back within minutes.
+    ClientAliveInterval 30
+    ClientAliveCountMax 3
+Match User $KEEPER
+    AuthorizedKeysFile $KEYS/%u
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AllowTcpForwarding no
+    PermitTTY no
+    X11Forwarding no
+    AllowAgentForwarding no
+    PermitTunnel no
+    ForceCommand $PROGRAM door
+# What follows this file in the server's settings is for everybody again.
+Match all
+SSHD
+    if ! sshd -t; then rm -f -- "$SSHD_FILE"; refuse "the SSH server refused these settings; they were taken out again"; fi
+    systemctl reload ssh.service 2>/dev/null || systemctl reload sshd.service
+
+    install -d "$(dirname "$SUDOERS")"
+    printf '# Clavarium relay: the maintenance account may run ONE program as root.\n%s ALL=(root) NOPASSWD: %s\n' "$KEEPER" "$PROGRAM" > "$SUDOERS.new"
+    visudo -cf "$SUDOERS.new" >/dev/null || { rm -f -- "$SUDOERS.new"; refuse "the sudo rule did not pass its check"; }
+    chmod 0440 "$SUDOERS.new"; mv -f -- "$SUDOERS.new" "$SUDOERS"
+
+    cat > "$RULES" <<NFT
+# Clavarium relay: what arrives on 443 and 80 goes to the tunnel. Written by clavarium-relay.
+table inet clavarium_relay
+delete table inet clavarium_relay
+table inet clavarium_relay {
+  chain arriving {
+    type nat hook prerouting priority dstnat;
+    tcp dport 443 redirect to :$TLS_PORT
+    tcp dport 80 redirect to :$HTTP_PORT
+  }
+}
+NFT
+    install -d "$(dirname "$UNIT")"
+    cat > "$UNIT" <<UNITFILE
+[Unit]
+Description=Clavarium relay - 443 and 80 go to the tunnel
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/clavarium-relay.nft
+ExecStop=/usr/sbin/nft delete table inet clavarium_relay
+
+[Install]
+WantedBy=multi-user.target
+UNITFILE
+    systemctl daemon-reload
+    systemctl enable --quiet clavarium-relay-ports.service
+    systemctl restart clavarium-relay-ports.service
+    systemctl is-active --quiet clavarium-relay-ports.service || refuse "the port rule could not be loaded: journalctl -u clavarium-relay-ports"
+
+    # Ubuntu's security updates, by themselves, every day.
+    install -d "$(dirname "$UPGRADES")"
+    cat > "$UPGRADES" <<'APT'
+// Clavarium relay: security updates install by themselves. Written by clavarium-relay.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+APT::Periodic::AutocleanInterval "7";
+APT
+    systemctl enable --quiet --now unattended-upgrades.service 2>/dev/null || true
+    echo "repaired: ssh rules, sudo rule, port rule, automatic updates"
+}
+
+do_status() {
+    local bad_count=0 line
+    say() { printf '%-15s %s\n' "$1" "$2"; }
+    check() { if eval "$2"; then say "$1" "${3:-ok}"; else say "$1" "${4:-missing}"; bad_count=$((bad_count + 1)); fi; }
+    say version "$VERSION_OF_THIS"
+    check tunnel-account "id $TUNNEL >/dev/null 2>&1"
+    check tunnel-key "[ -s '$ROOT$KEYS/$TUNNEL' ]"
+    check keeper-account "id $KEEPER >/dev/null 2>&1"
+    check ssh-rules "[ -s '$SSHD_FILE' ]"
+    check sudo-rule "[ -s '$SUDOERS' ]"
+    check port-rules "systemctl is-active --quiet clavarium-relay-ports.service" ok "not loaded"
+    check os-updates "[ -s '$UPGRADES' ]" automatic off
+    line="waiting for home"
+    ss -ltnH "sport = :$TLS_PORT" 2>/dev/null | grep -q . && line="connected"
+    say tunnel "$line"
+    if [ -e "$ROOT/var/run/reboot-required" ]; then say reboot needed; else say reboot no; fi
+    [ "$bad_count" -eq 0 ]
+}
+
+do_update_os() {
+    as_root
+    export DEBIAN_FRONTEND=noninteractive NEEDRESTART_SUSPEND=1
+    apt-get update -qq
+    apt-get -y -qq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade >/dev/null
+    apt-get -y -qq autoremove >/dev/null || true
+    if [ -e "$ROOT/var/run/reboot-required" ]; then
+        if [ "${1:-}" = "--reboot" ]; then echo "updated; restarting now"; systemctl reboot; else echo "updated; a restart is due (update-os --reboot)"; fi
+    else echo "updated"; fi
+}
+
+do_update_relay() {
+    as_root
+    local version="${1:-}" dir
+    [[ "$version" =~ $VERSION_RE ]] || bad "update-relay takes an exact version, like 0.1.0"
+    dir="$(mktemp -d)"
+    if ! fetch_relay "$version" "$dir"; then rm -rf -- "$dir"; refuse "clavarium-relay@$version was not installed (above: why); this version stays"; fi
+    install -m 0755 "$dir/package/clavarium-relay" "$ROOT$PROGRAM.new"
+    mv -f -- "$ROOT$PROGRAM.new" "$ROOT$PROGRAM"
+    rm -rf -- "$dir"
+    echo "clavarium-relay $version installed"
+    # The new version writes its own rules.
+    exec "$ROOT$PROGRAM" repair
+}
+
+do_rotate_key() {
+    as_root
+    local who="${1:-}"; shift || true
+    local key="$*"
+    case "$who" in tunnel) who="$TUNNEL" ;; keeper) who="$KEEPER" ;; *) bad "rotate-key tunnel|keeper KEY" ;; esac
+    write_key "$who" "$key"
+    echo "the key of $who was replaced"
+}
+
+do_setup() {
+    as_root
+    local key="" keeper=""
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --key) key="${2:-}"; shift 2 || bad "--key needs a value" ;;
+            --keeper-key) keeper="${2:-}"; shift 2 || bad "--keeper-key needs a value" ;;
+            *) bad "unknown parameter: $1" ;;
+        esac
+    done
+    write_key "$TUNNEL" "$key"
+    [ -z "$keeper" ] || write_key "$KEEPER" "$keeper"
+    do_repair
+}
+
+# THE DOOR: what the maintenance account's SSH key leads to. It runs as that
+# account, takes the command it was asked for, lets through only the verbs
+# above with parameters of the expected shape, and asks sudo for this program.
+do_door() {
+    local -a words
+    read -r -a words <<< "${SSH_ORIGINAL_COMMAND:-}"
+    local verb="${words[0]:-}"
+    local sudo=(sudo -n "$PROGRAM")
+    case "$verb" in
+        status|repair|version) [ "${#words[@]}" -eq 1 ] || bad "$verb takes nothing"; exec "${sudo[@]}" "$verb" ;;
+        update-os) [ "${#words[@]}" -eq 1 ] || { [ "${#words[@]}" -eq 2 ] && [ "${words[1]}" = "--reboot" ]; } || bad "update-os [--reboot]"; exec "${sudo[@]}" "${words[@]}" ;;
+        update-relay) [ "${#words[@]}" -eq 2 ] && [[ "${words[1]}" =~ $VERSION_RE ]] || bad "update-relay X.Y.Z"; exec "${sudo[@]}" update-relay "${words[1]}" ;;
+        rotate-key)
+            case "${words[1]:-}" in tunnel|keeper) : ;; *) bad "rotate-key tunnel|keeper KEY" ;; esac
+            local key="${words[*]:2}"
+            key_ok "$key" || bad "a key is one line: ssh-ed25519, the key, and optionally a name"
+            exec "${sudo[@]}" rotate-key "${words[1]}" "$key" ;;
+        *) bad "not a verb of this door: ${verb:-nothing}" ;;
+    esac
+}
+
+verb="${1:-}"; shift || true
+case "$verb" in
+    status) do_status ;;
+    repair) do_repair ;;
+    update-os) do_update_os "$@" ;;
+    update-relay) do_update_relay "$@" ;;
+    rotate-key) do_rotate_key "$@" ;;
+    setup) do_setup "$@" ;;
+    door) do_door ;;
+    version|--version) echo "$VERSION_OF_THIS" ;;
+    *) bad "unknown verb: ${verb:-none}" ;;
+esac

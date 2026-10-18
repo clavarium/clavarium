@@ -16,6 +16,18 @@ test('with a public key it says what it would do: two ports, nothing seen', () =
     assert.match(r.out, /443 -> 8443, 80 -> 8080/);
     assert.match(r.out, /sees\s+nothing/);
     assert.equal(relay('--key', `ssh-ed25519 ${BODY}`, '--dry-run').code, 0, 'the name is optional');
+    assert.match(r.out, /maintenance none/);
+    assert.match(r.out, /updates\s+Ubuntu's security updates, automatic/);
+});
+
+test('with a maintenance key it says so; the same key twice, or a bad one, is refused', () => {
+    const keeper = `ssh-ed25519 ${'AAAAC3NzaC1lZDI1NTE5AAAAI' + 'K'.repeat(43)} clavarium-keeper`;
+    const r = relay('--key', KEY, '--keeper-key', keeper, '--dry-run');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /maintenance clavarium-keeper: may run clavarium-relay, and nothing else/);
+    assert.match(r.out, /program\s+clavarium-relay@\S+ from npm, checked/);
+    assert.equal(relay('--key', KEY, '--keeper-key', KEY, '--dry-run').code, 64);
+    assert.equal(relay('--key', KEY, '--keeper-key', 'ssh-rsa AAAA', '--dry-run').code, 64);
 });
 
 test('the key line gives rights: anything but exactly one public key is refused', () => {
@@ -31,8 +43,8 @@ test('the key line gives rights: anything but exactly one public key is refused'
     assert.match(relay('--key', '-----BEGIN OPENSSH PRIVATE KEY-----', '--dry-run').err, /must never leave home/);
 });
 
-test('the tunnel account is bounded twice: by its key line and by the SSH server', () => {
-    const text = readFileSync(SCRIPT, 'utf8');
+test('the tunnel account is bounded twice: by its key line and by the SSH server (written by the relay program)', () => {
+    const text = readFileSync(new URL('../relay/clavarium-relay', import.meta.url), 'utf8');
     assert.match(text, /restrict,port-forwarding,permitlisten=/);
     for (const line of ['AllowTcpForwarding remote', 'PermitOpen none', 'PermitTTY no', 'ForceCommand /bin/false', 'PasswordAuthentication no']) assert.ok(text.includes(line), line);
 });

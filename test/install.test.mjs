@@ -112,3 +112,43 @@ test('what is installed: an exact version from npm, checked, or a working tree f
     assert.match(text, /^WorkingDirectory=\$CODE\/current\/app$/m);
     assert.match(text, /^ExecStart=\$CODE\/current\/node\/bin\/node \$CODE\/current\/app\/deploy\/updater\.mjs run$/m);
 });
+
+test('going online later: the settings change, the release that runs stays; local mode ends with the keys and the next command', () => {
+    const r = install('--domain', 'clav.example.com', '--operator', 'you@example.com', '--relay', 'relay.example.net', '--relay-installed', '--keep-release', '--dry-run');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /release\s+the one that runs, kept \(--keep-release\)/);
+    const text = readFileSync(SCRIPT, 'utf8');
+    /* The command for the keyboard is the package's, from the release that runs. */
+    assert.ok(text.includes('"$CODE/current/node/bin/node" "$CODE/current/app/deploy/clavarium.mjs" > /usr/local/bin/clavarium'));
+    assert.match(text, /\/usr\/local\/bin\/clavarium key/);
+    assert.match(text, /sudo clavarium online --relay RELAY_HOST --domain/);
+    assert.match(text, /sudo clavarium online --port --domain/);
+    /* The edge's programs are on the machine in local mode too, switched off, for the test from the internet. */
+    assert.match(text, /if \[ "\$LOCAL" = "yes" \] \|\| \[ "\$CORE_ONLY" = "no" \]; then\nstep "edge: programs"/);
+    assert.ok(text.indexOf('step "edge: programs"') < text.indexOf('Clavarium is installed, in local mode'));
+    assert.match(text, /qrencode openssh-client/);
+});
+
+/* THE ONE LINE OF THE SITE: curl -fsSL https://clavarium.org/install.sh | sudo bash */
+const BOOT = fileURLToPath(new URL('../docs/install.sh', import.meta.url));
+const boot = (...args) => { const r = spawnSync('/bin/bash', [BOOT, ...args], { encoding: 'utf8' }); return { code: r.status, out: r.stdout, err: r.stderr }; };
+
+test('install.sh of the site: the same pinned Node.js, local mode always, options passed on, nothing asked', () => {
+    const text = readFileSync(BOOT, 'utf8');
+    assert.ok(text.includes(`NODE_VERSION="${NODE_VERSION}"`));
+    const sha = /^export const NODE_SHA256 = '([0-9a-f]{64})';$/m.exec(readFileSync(new URL('../server/tools.mjs', import.meta.url), 'utf8'))[1];
+    assert.ok(text.includes(`NODE_SHA256="${sha}"`));
+    assert.match(text, /sha256sum -c -/);
+    assert.match(text, /bash "\$work\/package\/deploy\/install\.sh" --local --version "\$got" "\$\{PASS\[@\]\}"/);
+    assert.ok(!/\bread\b -/.test(text), 'it asks nothing');
+    for (const bad of [['--channel', 'beta'], ['--domain', 'clav.example.com'], ['--relay', 'relay.example.net'], ['--version', 'latest']]) {
+        const r = boot(...bad);
+        assert.equal(r.code, 64, bad.join(' '));
+    }
+});
+
+test('install.sh of the site will not go further unless it is root', { skip: process.getuid() === 0 }, () => {
+    const r = boot('--channel', 'next');
+    assert.equal(r.code, 78);
+    assert.match(r.err, /sudo bash/);
+});

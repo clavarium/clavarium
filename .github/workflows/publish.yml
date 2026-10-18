@@ -11,9 +11,15 @@
 # the "next" channel see it. The end-to-end tests need a browser and a
 # machine of their own: they are run before a version is set (npm run check).
 #
-# Set up once on npmjs.com: clavarium > Settings > Trusted publishing >
-# GitHub Actions, organisation "clavarium", repository "clavarium", workflow
-# "publish.yml" -- the exact file name.
+# THE RELAY'S PROGRAM, relay/, is a package of its own, "clavarium-relay",
+# with its own version (it moves only when the relay changes): published the
+# same way, from relay/, when its declared version is not online -- BEFORE
+# the server, so that no published Clavarium names a relay version that is
+# not on the registry (deploy/relay.sh, RELAY_VERSION).
+#
+# Set up once on npmjs.com, for EACH package (clavarium, clavarium-relay):
+# Settings > Trusted publishing > GitHub Actions, organisation "clavarium",
+# repository "clavarium", workflow "publish.yml" -- the exact file name.
 name: publish
 
 on:
@@ -59,6 +65,37 @@ jobs:
           npm run check:names
           npm run check:shell
           npm test
+      - name: Is this version of the relay's program online already?
+        id: relay
+        working-directory: relay
+        run: |
+          set -eu
+          version="$(node -p "require('./package.json').version")"
+          status=0; out="$(npm view "clavarium-relay@${version}" version 2>&1)" || status=$?
+          if [ "$status" -eq 0 ] && [ -n "$out" ]; then echo "publish=no" >> "$GITHUB_OUTPUT"; echo "::notice::clavarium-relay@${version} is online already"
+          elif printf '%s' "$out" | grep -q E404; then echo "publish=yes" >> "$GITHUB_OUTPUT"; echo "::notice::publishing clavarium-relay@${version}"
+          else echo "::error::the registry did not answer: $out"; exit 1; fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+      - name: The relay's package holds its program, and nothing else
+        if: steps.relay.outputs.publish == 'yes'
+        working-directory: relay
+        run: |
+          set -eu
+          npm pack --dry-run --json > ../relay-pack.json
+          node -e '
+            const files = JSON.parse(require("fs").readFileSync("../relay-pack.json", "utf8"))[0].files.map((f) => f.path).sort();
+            if (JSON.stringify(files) !== JSON.stringify(["README.md", "clavarium-relay", "package.json"])) { console.error("relay package:", files); process.exit(1); }'
+          rm -f ../relay-pack.json
+          bash -n clavarium-relay
+      - name: Publish the relay's program
+        if: steps.relay.outputs.publish == 'yes'
+        working-directory: relay
+        run: |
+          set -eu
+          case "${{ steps.relay.outputs.version }}" in
+            *-*) npm publish --provenance --tag next ;;
+            *)   npm publish --provenance ;;
+          esac
       - name: Is this version online already?
         id: target
         run: |

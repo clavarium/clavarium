@@ -213,6 +213,16 @@ The host needs `tmux` and `bindfs` (the read-only views).
     # to try it on a machine of your own, with no domain: this machine only, no sign-in
     sudo deploy/install.sh --local
 
+    # the stable version from npm, in local mode, asking nothing (Node.js pinned and
+    # checked first); it prints the next command and the public keys (text and QR)
+    curl -fsSL https://clavarium.org/install.sh | sudo bash
+    # then online: HTTPS, an administrator, a password shown once -- after a real
+    # test from the internet (Let's Encrypt staging); the relay is set up over SSH
+    sudo clavarium online --relay relay.example.net --domain clav.example.com
+    sudo clavarium online --port --domain clav.example.com
+    sudo clavarium key                  # the public keys again
+    sudo clavarium relay status         # status | repair | update-os | update-relay | forget-setup-key
+
     # from npm, an exact version, checked (integrity, provenance, signatures);
     # it then updates itself (Settings, Updates; --updates auto|asap|ask|off,
     # --update-window 02:00-05:00, --channel latest|next) and keeps the last

@@ -149,14 +149,17 @@ code { font-family: var(--mono); font-size: .9em; }
   <div class="wrap">
     <h2>Install on Ubuntu</h2>
     <p class="note">Ubuntu Server 24.04 or 26.04. In its terminal:</p>
-    <div class="snip wide main"><pre id="cmd">git clone https://example.com/clavarium.git
-cd clavarium
-sudo deploy/install.sh \
-  --domain clav.example.com \
-  --operator you@example.com</pre><button class="copy" type="button" data-copy="cmd">Copy</button></div>
+    <div class="snip wide main"><pre id="cmd">curl -fsSL https://clavarium.org/install.sh | sudo bash</pre><button class="copy" type="button" data-copy="cmd">Copy</button></div>
+    <p class="note" style="margin-top:1rem">It asks nothing and ends in local mode: this machine only. Then, to go online:</p>
+    <div class="snip wide"><pre># through a small machine of yours that has a public address
+sudo clavarium online --relay relay.example.net --domain clav.example.com
+
+# or, if ports 80 and 443 reach this machine
+sudo clavarium online --port --domain clav.example.com</pre></div>
     <ul class="rows" style="margin-top:1rem">
-      <li>Your sub-domain and your email instead of the examples.</li>
-      <li>No domain yet? <code>--local</code> instead of both: <a href="#try">try it first</a>.</li>
+      <li>Your sub-domain instead of the example. Its DNS record points to the relay, or to this machine.</li>
+      <li>A real test from the internet runs first. If it fails, it says why and changes nothing.</li>
+      <li>A screen and a keyboard are enough: keys are shown as QR codes. <code>sudo clavarium key</code> shows them again.</li>
       <li>Windows and Mac: later.</li>
     </ul>
   </div>
@@ -175,7 +178,7 @@ sudo deploy/install.sh \
     <ol class="steps">
       <li>A small computer, left on. A mini PC does. Put Ubuntu Server on it.</li>
       <li>Point a name of yours to it. <a href="#relay">No public address at home?</a></li>
-      <li>Paste the lines above in its terminal. Keep the password it shows.</li>
+      <li>Type the two commands above in its terminal. Keep the password it shows.</li>
       <li>Open your address in a browser, on your phone too. Sign in.</li>
       <li>New conversation: pick an agent, and sign in to your AI provider in its window.</li>
       <li>Give it a folder. Say what you want, in plain words.</li>
@@ -212,13 +215,13 @@ sudo deploy/install.sh \
   <div class="wrap">
     <h2>To try it first, with no domain</h2>
     <p class="note">No name, no sign-in: the page answers on that machine only.</p>
-    <div class="snip wide"><pre>sudo deploy/install.sh --local
+    <div class="snip wide"><pre>curl -fsSL https://clavarium.org/install.sh | sudo bash
 
 # from another computer of yours
 ssh -L 7717:127.0.0.1:7717 you@that-machine     # then http://127.0.0.1:7717</pre></div>
     <ul class="rows" style="margin-top:1rem">
       <li>Whoever can open a page on that machine is its operator: not for a machine other people use.</li>
-      <li>For real use, run the installer again with a domain and an operator.</li>
+      <li>For real use: <code>sudo clavarium online</code>, as above.</li>
     </ul>
   </div>
 </section>
@@ -227,15 +230,17 @@ ssh -L 7717:127.0.0.1:7717 you@that-machine     # then http://127.0.0.1:7717</pr
   <div class="wrap">
     <h2>No public address at home?</h2>
     <p class="note">The machine at home dials out to a small machine that has one. Home opens no port.</p>
-    <div class="snip wide"><pre># at home
-sudo deploy/install.sh --domain clav.example.com \
-  --operator you@example.com --relay relay.example.net
+    <div class="snip wide"><pre># at home: it shows a setup key, waits until it is on the relay,
+# shows the relay's fingerprint, then sets the relay up by itself
+sudo clavarium online --relay relay.example.net --relay-user ubuntu \
+  --domain clav.example.com
 
-# on the relay, with the line the first command printed
+# or set up the relay yourself, with the tunnel key (sudo clavarium key)
 sudo deploy/relay.sh --key "ssh-ed25519 AAAA…"</pre></div>
     <ul class="rows" style="margin-top:1rem">
       <li>The relay carries bytes. Encryption starts in your browser and ends at home.</li>
-      <li>It holds no certificate and no secret of yours.</li>
+      <li>It holds no certificate and no secret of yours. The setup key is taken out at the end.</li>
+      <li>It updates Ubuntu by itself. <code>sudo clavarium relay status</code> tells how it is.</li>
       <li>One record in your domain keeps whoever runs the relay from obtaining a certificate for your name; the script says which.</li>
     </ul>
   </div>

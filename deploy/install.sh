@@ -33,7 +33,16 @@
 #                      Settings and waits; off. Changed later in Settings.
 #   --update-window HH:MM-HH:MM   when "auto" may update (default 02:00-05:00)
 #   --channel C        latest (default) or next (versions with a "-": tests)
+#   --keep-release     keep the release that runs (change the settings only:
+#                      what `clavarium online` does to go from local mode to
+#                      server mode)
+#   --relay-installed  the relay was set up already (by `clavarium online`):
+#                      do not print the command to run on it
 #   --dry-run          check the parameters, say what would be done, do nothing
+#
+# AFTER --local, going online is one command: `sudo clavarium online --relay
+# HOST --domain NAME` or `sudo clavarium online --port --domain NAME` (see
+# deploy/online.mjs); `sudo clavarium key` shows the public keys again.
 #
 # RUN AGAIN on an installation, it installs the version asked for beside the
 # one that runs and switches to it. An installation made before releases
@@ -102,7 +111,7 @@ bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"
+DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
 VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -118,6 +127,8 @@ while [ $# -gt 0 ]; do
         --updates) UPDATES="${2:-}"; shift 2 || bad "--updates needs a value" ;;
         --update-window) WINDOW="${2:-}"; shift 2 || bad "--update-window needs a value" ;;
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value" ;;
+        --keep-release) KEEP_RELEASE="yes"; shift ;;
+        --relay-installed) RELAY_INSTALLED="yes"; shift ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -178,7 +189,7 @@ would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
-  release     $([ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
+  release     $([ "$KEEP_RELEASE" = "yes" ] && echo "the one that runs, kept (--keep-release)" || [ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
   updates     $(case "$SHOW_MODE" in auto) echo "automatic, between ${SHOW_WINDOW%-*} and ${SHOW_WINDOW#*-}" ;; asap) echo "as soon as a version is out" ;; ask) echo "said in Settings, done when you say" ;; off) echo "off" ;; esac), channel $SHOW_CHANNEL
   code        $CODE/releases/<version>, $CODE/current (root)      data  $DATA      folders  $MNT (root's chain)      vault key  $VAULT
   root rule   $ACCOUNT may run $HOST_PROGRAM, and nothing else
@@ -209,7 +220,8 @@ export NEEDRESTART_SUSPEND=1
 apt-get update -qq
 # bindfs: the read-only views. nftables: the network rules. build-essential
 # and python3: one module of the server (the terminal) is compiled here.
-apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl git >/dev/null
+# qrencode: the public keys, shown as QR codes on a screen. openssh-client: the tunnel.
+apt-get install -y -qq bindfs nftables build-essential python3 curl ca-certificates xz-utils sudo snapd openssl git qrencode openssh-client >/dev/null
 snap list multipass >/dev/null 2>&1 || snap install multipass >/dev/null
 
 step "account"
@@ -246,6 +258,11 @@ if [ ! -x "$NODE_DIR/bin/node" ]; then
     mv -- "$NODE_DIR.partial" "$NODE_DIR"
 fi
 updater() { PATH="$NODE_DIR/bin:$PATH" "$NODE_DIR/bin/node" "$HERE/deploy/updater.mjs" "$@"; }
+if [ "$KEEP_RELEASE" = "yes" ]; then
+    [ -L "$CODE/current" ] || refuse "--keep-release: no release runs here yet"
+    release="$(basename "$(readlink -f "$CODE/current")")"
+    echo "   the release that runs is kept: $release"
+else
 if [ -n "$VERSION" ]; then
     echo "   clavarium@$VERSION from npm: fetched, checked, built, tried (a few minutes)"
     release="$(updater prepare --version "$VERSION")" || refuse "clavarium@$VERSION was not installed (above: why)"
@@ -255,6 +272,7 @@ else
 fi
 systemctl stop clavarium.service 2>/dev/null || true
 updater switch "$release"
+fi
 APP="$CODE/current/app"
 NODE="$CODE/current/node/bin/node"
 # The updater of the release now in place, for what follows and from now on.
@@ -268,6 +286,10 @@ install -o root -g root -m 0755 "$APP/deploy/git-read" "$GIT_READ"
 
 step "the one privileged program"
 install -o root -g root -m 0755 "$APP/deploy/clavarium-host" "$HOST_PROGRAM"
+# The command for the keyboard (sudo clavarium online, key, relay): the
+# program of the package, from the release that runs.
+printf '#!/bin/sh\n# Clavarium: the command of the release that runs. Written by install.sh.\nexec %s %s "$@"\n' "$CODE/current/node/bin/node" "$CODE/current/app/deploy/clavarium.mjs" > /usr/local/bin/clavarium
+chmod 0755 /usr/local/bin/clavarium
 install -d -o root -g root -m 0755 "$ETC"
 printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
 rule="$(mktemp)"
@@ -368,20 +390,8 @@ updater prune
 systemctl start clavarium-update.timer
 echo "   running: $(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$APP/package.json" | head -1) ($release)"
 
-if [ "$LOCAL" = "yes" ]; then
-    echo "Clavarium is installed, to try it:   http://127.0.0.1:$PORT   (from this machine only)"
-    echo "From another computer of yours:      ssh -L $PORT:127.0.0.1:$PORT <you>@<this machine>, then the same address there."
-    echo "There is no sign-in: whoever can open a page on this machine is its operator."
-    echo "For real use, run it again with --domain and --operator."
-    exit 0
-fi
-if [ "$CORE_ONLY" = "yes" ]; then
-    echo "Clavarium is installed: 127.0.0.1:$PORT, for $OPERATORS."
-    echo "It answers nobody yet: put an authenticating proxy in front, for https://$DOMAIN."
-    exit 0
-fi
-
-# ------------------------------- THE EDGE ---------------------------------
+# THE EDGE'S PROGRAMS: also in local mode, switched off, so that going online
+# (sudo clavarium online) has them, and can test from the internet first.
 # Downloads one file and refuses it unless it has the expected checksum.
 fetch() { # <url> <sha256> <destination> [extra curl arguments...]
     local url="$1" sum="$2" to="$3"; shift 3
@@ -390,6 +400,7 @@ fetch() { # <url> <sha256> <destination> [extra curl arguments...]
 }
 account() { id "$1" >/dev/null 2>&1 || useradd --system --home-dir "$2" --no-create-home --shell /usr/sbin/nologin "$1"; }
 
+if [ "$LOCAL" = "yes" ] || [ "$CORE_ONLY" = "no" ]; then
 step "edge: programs"
 work="$(mktemp -d)"
 if [ "$(/usr/local/bin/caddy version 2>/dev/null | cut -d' ' -f1)" != "v$CADDY_VERSION" ]; then
@@ -411,6 +422,29 @@ if [ "$(sha256sum /usr/local/bin/dex 2>/dev/null | cut -d' ' -f1)" != "$DEX_SHA2
     install -o root -g root -m 0755 "$work/usr/local/bin/dex" /usr/local/bin/dex
 fi
 rm -rf -- "$work"
+fi
+
+if [ "$LOCAL" = "yes" ]; then
+    echo
+    # The keys for going online, as text and as QR codes (a screen and a keyboard may be all there is).
+    /usr/local/bin/clavarium key || echo "install: the keys could not be shown: sudo clavarium key" >&2
+    echo
+    echo "Clavarium is installed, in local mode:   http://127.0.0.1:$PORT   (this machine only, no sign-in)"
+    echo "From another computer of yours:          ssh -L $PORT:127.0.0.1:$PORT <you>@<this machine>"
+    echo
+    echo "NEXT, to go online (HTTPS, an administrator, a password shown once):"
+    echo "    sudo clavarium online --relay RELAY_HOST --domain clav.example.com     through a relay of yours"
+    echo "    sudo clavarium online --port --domain clav.example.com                 or with ports 80 and 443 open here"
+    echo "The keys again: sudo clavarium key"
+    exit 0
+fi
+if [ "$CORE_ONLY" = "yes" ]; then
+    echo "Clavarium is installed: 127.0.0.1:$PORT, for $OPERATORS."
+    echo "It answers nobody yet: put an authenticating proxy in front, for https://$DOMAIN."
+    exit 0
+fi
+
+# ------------------------------- THE EDGE ---------------------------------
 
 step "edge: accounts and settings"
 account caddy /var/lib/caddy; account dex /var/lib/dex; account oauth2-proxy /nonexistent
@@ -657,7 +691,9 @@ if [ -n "$PASSWORDS" ]; then
 else
     echo "Operators and passwords: unchanged."
 fi
-if [ -n "$RELAY" ]; then
+if [ -n "$RELAY" ] && [ "$RELAY_INSTALLED" = "yes" ]; then
+    echo "The relay $RELAY is set up; the tunnel comes up by itself.   Its fingerprint: $RELAY_PRINT"
+elif [ -n "$RELAY" ]; then
     echo
     echo "ON THE RELAY ($RELAY), run this one command; the tunnel then comes up by itself:"
     echo "    sudo deploy/relay.sh --key \"$TUNNEL_KEY\""
