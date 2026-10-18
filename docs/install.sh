@@ -66,16 +66,24 @@ if [ -n "$KEY_ONLY" ]; then
         || refuse "openssh-client and qrencode could not be installed"
     install -d -m 0700 "$ACCESS"
     [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
-    # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
-    # everything else after it: if the screen is too small for the code, the key
-    # is still there as text, under it, to copy.
-    echo "clavarium install.sh 2026-10-18.14"
+    # THE QR CODE ALONE ON THE SCREEN FIRST: with the key's text next to it, a phone
+    # may read the TEXT (character recognition: I/l/1 and case mixed up, the end cut
+    # off by the screen) instead of the code. So the code alone, Enter, then the text.
+    echo "clavarium install.sh 2026-10-18.15"
     echo
+    echo "Next: the QR code of the relay's key, alone on the screen. Read it with your phone's camera"
+    echo "(the code, not text), copy what it gives, then press Enter here."
+    printf 'Press Enter to show it.'; read -r _ </dev/tty 2>/dev/null || true
+    clear 2>/dev/null || true
     tr -d "\n" < "$ACCESS/setup-key.pub" | qrencode -t ANSI -m 1 -l L || true
-    echo
-    echo "Above: the QR code of the key to create your relay with. It is a PUBLIC key: showing it is safe."
+    printf 'Press Enter when it is read.'; read -r _ </dev/tty 2>/dev/null || true
+    clear 2>/dev/null || true
+    echo "The key to create your relay with. It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
+    echo
+    echo "Its fingerprint, to check what you copied (your host often shows it once the key is added):"
+    echo "    $(ssh-keygen -lf "$ACCESS/setup-key.pub" | cut -d' ' -f2)"
     echo
     echo "Create the relay (Ubuntu) with this key as its SSH key. On the relay, it goes as one line in"
     echo "/home/<user>/.ssh/authorized_keys (or /root/.ssh/authorized_keys); that user needs sudo without a password."

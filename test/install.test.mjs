@@ -140,7 +140,9 @@ test('install.sh of the site: the same pinned Node.js, local mode first, options
     assert.ok(text.includes(`NODE_SHA256="${sha}"`));
     assert.match(text, /sha256sum -c -/);
     assert.match(text, /bash "\$work\/package\/deploy\/install\.sh" --local --version "\$got" "\$\{PASS\[@\]\}"/);
-    assert.ok(!/\bread\b -/.test(text), 'it asks nothing');
+    /* It asks nothing -- but --key-only, which waits for Enter around the QR code (shown alone, so a phone reads the code and not the text). */
+    const outsideKeyOnly = text.replace(/if \[ -n "\$KEY_ONLY" \]; then[\s\S]*?\n    exit 0\nfi/, '');
+    assert.ok(!/\bread\b -/.test(outsideKeyOnly), 'it asks nothing');
     assert.match(text, /exec \/usr\/local\/bin\/clavarium online "\$\{ONLINE\[@\]\}" <\/dev\/tty/);
     for (const bad of [['--channel', 'beta'], ['--domain'], ['--relay'], ['--version', 'latest'], ['--operator', 'x@example.com']]) {
         const r = boot(...bad);
