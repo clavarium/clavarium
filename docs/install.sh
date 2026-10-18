@@ -7,6 +7,7 @@
 #   ... -s -- --relay IP --relay-user ubuntu --domain clav.example.com --admin you@example.com
 #       installs, shows the setup key (text + QR), waits for the relay, then goes online
 #   ... -s -- --direct --domain clav.example.com     (ports 80 and 443 open to this machine)
+#   ... -s -- --key-only     step 1 alone: the relay's key, text + QR, in seconds
 #
 # It asks nothing and always ends in LOCAL MODE (this computer only, no
 # sign-in). It prints the next command (`sudo clavarium online ...`) and the
@@ -33,12 +34,13 @@ NODES="/opt/clavarium/nodes"
 bad() { echo "install: $*" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 
-CHANNEL="latest"; VERSION=""; PASS=(); ONLINE=()
+CHANNEL="latest"; VERSION=""; PASS=(); ONLINE=(); KEY_ONLY=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value"; PASS+=(--channel "$CHANNEL") ;;
         --version) VERSION="${2:-}"; shift 2 || bad "--version needs a value" ;;
         --local) shift ;;
+        --key-only) KEY_ONLY=yes; shift ;;
         # Going online in the same command: installed in local mode first, then
         # `clavarium online` runs and WAITS for the relay (or the domain) by itself.
         --relay|--relay-user|--domain|--admin|--relay-fingerprint) [ -n "${2:-}" ] || bad "$1 needs a value"; ONLINE+=("$1" "$2"); shift 2 ;;
@@ -52,6 +54,27 @@ done
 [ -z "$VERSION" ] || [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || bad "--version is an exact version, like 1.2.3"
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root: curl -fsSL https://clavarium.org/install.sh | sudo bash"
+
+# STEP 1 OF 2, ALONE: the key the relay will be made with. Made here, its private
+# half never leaves this machine; its public half shown as text and as a QR code.
+# The installation (step 2) takes it from the same place.
+if [ -n "$KEY_ONLY" ]; then
+    ACCESS=/var/lib/clavarium-relay-access
+    command -v ssh-keygen >/dev/null 2>&1 && command -v qrencode >/dev/null 2>&1 \
+        || { export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1; { apt-get update -qq && apt-get install -y -qq openssh-client qrencode; } >/dev/null 2>&1; } \
+        || refuse "openssh-client and qrencode could not be installed"
+    install -d -m 0700 "$ACCESS"
+    [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
+    echo
+    echo "The key to create your relay with (its SSH key, at your host). It is a PUBLIC key: showing it is safe."
+    echo
+    echo "    $(cat "$ACCESS/setup-key.pub")"
+    echo
+    qrencode -t ANSIUTF8 -m 2 < "$ACCESS/setup-key.pub" || true
+    echo "Next: create the relay (Ubuntu) with this key, point your domain to its address, then:"
+    echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email>"
+    exit 0
+fi
 # shellcheck disable=SC1091
 OS="$(. /etc/os-release 2>/dev/null; printf '%s %s' "${ID:-}" "${VERSION_ID:-}")"
 case "$OS" in "ubuntu 24.04"|"ubuntu 26.04") : ;; *) refuse "this is ${OS:-an unknown system}; Clavarium installs on Ubuntu Server 24.04 or 26.04" ;; esac
