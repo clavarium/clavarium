@@ -601,6 +601,15 @@ if [ -n "$RELAY" ]; then
     apt-get install -y -qq openssh-client >/dev/null
     account clavarium-tunnel /nonexistent
     install -d -o clavarium-tunnel -g clavarium-tunnel -m 0700 /var/lib/clavarium-tunnel
+    # An installation made before this script named the key "cle" and gave it
+    # to another account: the relay knows THAT key. It is taken over, never
+    # replaced, and what the tunnel reads is given to the account that runs it.
+    if [ ! -e /var/lib/clavarium-tunnel/key ] && [ -s /var/lib/clavarium-tunnel/cle ]; then
+        install -o clavarium-tunnel -g clavarium-tunnel -m 0600 /var/lib/clavarium-tunnel/cle /var/lib/clavarium-tunnel/key
+        [ -s /var/lib/clavarium-tunnel/cle.pub ] && install -o clavarium-tunnel -g clavarium-tunnel -m 0644 /var/lib/clavarium-tunnel/cle.pub /var/lib/clavarium-tunnel/key.pub
+        echo "   the tunnel key of the earlier installation is kept: the relay already knows it"
+    fi
+    [ -e /var/lib/clavarium-tunnel/known_hosts ] && chown clavarium-tunnel:clavarium-tunnel /var/lib/clavarium-tunnel/known_hosts
     # The private key is made here and never leaves this machine.
     [ -e /var/lib/clavarium-tunnel/key ] || sudo -u clavarium-tunnel ssh-keygen -q -t ed25519 -N '' -C clavarium-tunnel -f /var/lib/clavarium-tunnel/key
     # The relay's identity is taken once and then held: a different machine
