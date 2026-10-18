@@ -69,7 +69,7 @@ if [ -n "$KEY_ONLY" ]; then
     # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
     # everything else after it: if the screen is too small for the code, the key
     # is still there as text, under it, to copy.
-    echo "clavarium install.sh 2026-10-18.11"
+    echo "clavarium install.sh 2026-10-18.12"
     echo
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
     echo
@@ -85,7 +85,7 @@ if [ -n "$KEY_ONLY" ]; then
     echo "    $ACCESS/setup-key.pub    the public key, shown above"
     echo
     echo "Then point your domain to the relay's address, and run:"
-    echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email>"
+    echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email> --channel next"
     echo
     exit 0
 fi
@@ -124,6 +124,8 @@ got="$(sed -n 's/^  "version": "\([^"]*\)",$/\1/p' "$work/package/package.json" 
 [[ "$got" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || refuse "the package has no version"
 echo "   clavarium $got"
 
+# Until the first stable version, "latest" is the package that only keeps the name.
+[ -f "$work/package/deploy/install.sh" ] || refuse "clavarium@$got (the $CHANNEL channel) cannot be installed yet: there is no stable version so far. Add --channel next to the command."
 PATH="$NODE_DIR/bin:$PATH" bash "$work/package/deploy/install.sh" --local --version "$got" "${PASS[@]}"
 # Asked to go online too: on with it now. The questions (the relay's fingerprint)
 # are read from the keyboard (/dev/tty), not from this script's own input.
