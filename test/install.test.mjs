@@ -134,6 +134,8 @@ test('going online later: the settings change, the release that runs stays; loca
     /* The probe of port 80, the same block as doctor.mjs writes for an older install. */
     assert.ok(text.includes(probeBlock('$DOMAIN', '$PROBE', true).replace('\tbind 127.0.0.1\n', '$BIND\n')), 'the same probe block');
     assert.match(text, /CLAVARIUM_PASSWORDS_TO/);
+    /* Behind a relay, Caddy is asked again once the tunnel holds (its first try came before it). */
+    assert.ok(text.indexOf('systemctl restart clavarium-tunnel.service') < text.lastIndexOf('systemctl restart caddy.service'));
 });
 
 /* THE ONE LINE OF THE SITE: curl -fsSL https://clavarium.org/install.sh | sudo bash */

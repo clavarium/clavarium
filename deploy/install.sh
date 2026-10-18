@@ -705,6 +705,16 @@ TUNNEL
     systemctl daemon-reload
     systemctl enable --quiet clavarium-tunnel.service
     systemctl restart clavarium-tunnel.service
+    # Caddy asked Let's Encrypt as it started, BEFORE the tunnel was up: it could not
+    # be reached, and fell back to a certificate of its own. Asked again once the
+    # tunnel holds (ExitOnForwardFailure: an ssh still running after 10 s has its forwards).
+    if [ "$RELAY_INSTALLED" = "yes" ]; then
+        sleep 10
+        if systemctl is-active --quiet clavarium-tunnel.service; then
+            rm -rf -- "/var/lib/caddy/caddy/certificates/local/$DOMAIN"
+            systemctl restart caddy.service
+        fi
+    fi
     TUNNEL_KEY="$(cat /var/lib/clavarium-tunnel/key.pub)"
     RELAY_PRINT="$(ssh-keygen -l -f /var/lib/clavarium-tunnel/known_hosts | cut -d' ' -f2 | head -1)"
 fi

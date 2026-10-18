@@ -213,6 +213,7 @@ Description=Clavarium - the certificate, every 20 minutes
 
 [Timer]
 OnBootSec=10min
+OnActiveSec=2min
 OnUnitActiveSec=20min
 
 [Install]

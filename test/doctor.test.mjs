@@ -152,6 +152,7 @@ test('every 20 minutes: nothing while the certificate is public; a local one is 
         assert.equal(probeOf(P), 'cd'.repeat(16));
         assert.match(readFileSync(P.caddyfile, 'utf8'), /http:\/\/clav\.example\.com \{\n\tbind 127\.0\.0\.1\n\thandle \/\.well-known\/clavarium-probe/);
         assert.ok(old.log.some((a) => a.join(' ') === 'systemctl reload caddy'));
+        assert.match(WATCH_TIMER, /OnActiveSec=2min/, 'a first turn 2 minutes after it is set up');
         assert.match(WATCH_TIMER, /OnUnitActiveSec=20min/, 'under Let\'s Encrypt\'s 5 failed validations an hour');
     } finally { done(); }
 });

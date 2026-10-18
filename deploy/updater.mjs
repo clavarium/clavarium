@@ -595,7 +595,11 @@ async function main(argv) {
     switch (verb) {
         case 'check': await u.check().catch(() => {}); return print(u.about());
         case 'status': return print(u.about());
-        case 'run': { const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
+        case 'run': {
+            /* What this release sets up beside itself (the certificate timer), at its first turn: the
+               update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
+            try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
+            const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }
         case 'switch': if (!VERSION.test(rest[0] ?? '') && !LOCAL.test(rest[0] ?? '')) throw new Refused('switch <release>'); u.switchTo(rest[0]); return;
