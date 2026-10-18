@@ -69,18 +69,17 @@ if [ -n "$KEY_ONLY" ]; then
     # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
     # everything else after it: if the screen is too small for the code, the key
     # is still there as text, under it, to copy.
-    echo "clavarium install.sh 2026-10-18.8"
+    echo "clavarium install.sh 2026-10-18.9"
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
     echo
     echo "Above: the QR code of the key to create your relay with. It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    echo "At your host: give this key as the SSH key of the new relay (Ubuntu)."
-    echo "If your host does not ask for it: on the relay, add it as one line to"
-    echo "/home/<user>/.ssh/authorized_keys (or /root/.ssh/authorized_keys). That user needs sudo without a password."
+    echo "Create the relay (Ubuntu) with this key as its SSH key. On the relay, it goes as one line in"
+    echo "/home/<user>/.ssh/authorized_keys (or /root/.ssh/authorized_keys); that user needs sudo without a password."
     echo
-    echo "Kept on this machine for step 2: $ACCESS/setup-key (private, never leaves it) and setup-key.pub."
+    echo "The key is in $ACCESS/ (setup-key, private: it never leaves this machine; setup-key.pub)."
     echo
     echo "Then point your domain to the relay's address, and run:"
     echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email>"
