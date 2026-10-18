@@ -1,0 +1,13 @@
+{
+  "name": "clavarium-relay",
+  "version": "0.0.1",
+  "description": "The maintenance program of a Clavarium relay (status, repair, updates). Not built yet: this version keeps the name.",
+  "license": "MIT",
+  "homepage": "https://clavarium.org",
+  "repository": { "type": "git", "url": "git+https://github.com/clavarium/clavarium.git", "directory": "relay" },
+  "type": "module",
+  "bin": { "clavarium-relay": "keep.mjs" },
+  "files": ["keep.mjs", "README.md"],
+  "dependencies": {},
+  "publishConfig": { "access": "public" }
+}

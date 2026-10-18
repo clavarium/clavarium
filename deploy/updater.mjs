@@ -480,7 +480,9 @@ export class Updater {
         if ((state.history ?? []).some((h) => h.to === available && h.action === 'update' && h.result !== 'done')) return `${available} failed here before: not tried again by itself`;
         if (this.busy()) return this.busy();
         await this.apply(available);
-        return `updated to ${available}`;
+        /* What the history says, not what was hoped: a version that did not start was undone. */
+        const last = (this.#state().history ?? []).at(-1);
+        return last?.to === available && last.result !== 'done' ? `${available} did not work: back to ${last.from ?? 'nothing'} (${last.why ?? last.result})` : `updated to ${available}`;
     }
 
     /* What the host program asked (a request file), or the timer's turn. */
