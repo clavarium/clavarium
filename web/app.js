@@ -2611,6 +2611,12 @@
     }
     addEventListener('popstate', (event) => {
         if (DEVICE) return;
+        /* Back while a review is shown: the review closes, as with its own "‹" link. */
+        if (reviewInHistory && !event.state?.review) {
+            reviewInHistory = false;
+            const back = gitBack; shutGit(); if (back?.go) back.go(); else focusTerminal();
+            return;
+        }
         pushed = event.state?.depth ?? 0;
         /* Walked back on purpose (Close): the address is set to what is shown. */
         if (skipPop) { skipPop = false; remember(false); return; }
@@ -3287,12 +3293,19 @@
         const g = $('gitview');
         if (host && g.parentNode !== host) host.append(g);
         g.classList.toggle('inset', Boolean(host));
+        /* The device's own Back (a phone's gesture, the browser's button) closes the review: it is a step of its own in the history. */
+        if (!DEVICE && !reviewInHistory) { history.pushState({ depth: pushed, review: true }, '', location.href); reviewInHistory = true; }
         gitShown = name; gitCommit = commit; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = 'changes';
         g.hidden = false; g.scrollTop = 0;
         await paintGit();
     }
     /* Left without its own button (Chat, Terminal, another conversation, another place). */
-    function shutGit() { $('gitview').hidden = true; gitShown = ''; gitBack = null; }
+    let reviewInHistory = false;
+    function shutGit() {
+        $('gitview').hidden = true; gitShown = ''; gitBack = null;
+        /* Closed by a click: its step in the history stays, as the place it was opened from. */
+        if (reviewInHistory) { reviewInHistory = false; if (history.state?.review) history.replaceState({ depth: history.state.depth ?? 0 }, '', location.href); }
+    }
     for (const b of $('gitview-tabs').querySelectorAll('[data-tab]')) b.addEventListener('click', () => { gitTab = b.dataset.tab; paintReviewTab(); });
     for (const b of $('gitview-layout').querySelectorAll('[data-layout]')) b.addEventListener('click', () => { gitLayout = b.dataset.layout; paintReviewTab(); drawDiff(gitText.replace(/\n$/, '')); });
     for (const b of $('gitview-picker').querySelectorAll('[data-step]')) b.addEventListener('click', () => { showFile(gitFile + Number(b.dataset.step)); $('gitview-diff').scrollIntoView({ block: 'start' }); });

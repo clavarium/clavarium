@@ -86,8 +86,9 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await page.locator('#gitview-layout button[data-layout="line-by-line"]').click();
     await me.until('unified', async () => (await page.locator('#gitview-diff .d2h-file-side-diff').count()) === 0 && (await page.locator('#gitview-diff .d2h-file-diff').count()) > 0);
     await page.locator('#gitview-layout button[data-layout="side-by-side"]').click();
-    await page.locator('#gitview-close').click();
-    await me.until('back in its Assets', async () => !(await page.locator('#gitview').isVisible()) && await page.locator('#cassets').isVisible());
+    /* The device's Back (a phone's gesture, the browser's button) closes the review, and only it. */
+    await page.goBack();
+    await me.until('Back closes the review', async () => !(await page.locator('#gitview').isVisible()) && await page.locator('#cassets').isVisible());
     /* "Open the review": what would go, with its checks, Send to main. */
     await me.until('the detail is drawn again', async () => (await page.locator('#cassets-detail button[data-act="review"]').count()) === 1, 20_000);
     await page.locator('#cassets-detail button[data-act="review"]').click();
