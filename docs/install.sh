@@ -71,6 +71,10 @@ if [ -n "$KEY_ONLY" ]; then
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    echo "Where it goes, if your host does not ask for it when you create the machine: on the relay,"
+    echo "in /home/<user>/.ssh/authorized_keys (or /root/.ssh/authorized_keys for root), one line."
+    echo "That user must be able to use sudo without a password (most hosts' default user can)."
+    echo
     echo "Next: create the relay (Ubuntu) with this key, point your domain to its address, then:"
     echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email>"
     exit 0
