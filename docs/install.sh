@@ -66,15 +66,15 @@ if [ -n "$KEY_ONLY" ]; then
         || refuse "openssh-client and qrencode could not be installed"
     install -d -m 0700 "$ACCESS"
     [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
-    echo "clavarium install.sh 2026-10-18.4"
-    echo
+    # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
+    # everything else after it: if the screen is too small for the code, the key
+    # is still there as text, under it, to copy.
+    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    echo "clavarium install.sh 2026-10-18.5"
     echo "The key to create your relay with (its SSH key, at your host). It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    # The QR code is 78 columns by 39 lines, shown as it is, whatever the screen.
-    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
-    echo "    $(cat "$ACCESS/setup-key.pub")"
     echo "Kept here, where the installation (step 2) takes it: $ACCESS/setup-key (the private half"
     echo "never leaves this machine) and $ACCESS/setup-key.pub (the public one, above)."
     echo
