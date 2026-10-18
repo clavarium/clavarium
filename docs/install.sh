@@ -69,7 +69,7 @@ if [ -n "$KEY_ONLY" ]; then
     # The QR code first (78 columns by 39 lines, as it is, whatever the screen),
     # everything else after it: if the screen is too small for the code, the key
     # is still there as text, under it, to copy.
-    echo "clavarium install.sh 2026-10-18.12"
+    echo "clavarium install.sh 2026-10-18.13"
     echo
     qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
     echo
@@ -85,7 +85,7 @@ if [ -n "$KEY_ONLY" ]; then
     echo "    $ACCESS/setup-key.pub    the public key, shown above"
     echo
     echo "Then point your domain to the relay's address, and run:"
-    echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --relay <relay-ip> --relay-user ubuntu --domain <your-domain> --admin <your-email> --channel next"
+    echo "    curl -fsSL https://clavarium.org/install.sh | sudo bash -s -- --domain <your-domain> --admin <your-email> --relay-user ubuntu"
     echo
     exit 0
 fi
@@ -129,6 +129,12 @@ echo "   clavarium $got"
 PATH="$NODE_DIR/bin:$PATH" bash "$work/package/deploy/install.sh" --local --version "$got" "${PASS[@]}"
 # Asked to go online too: on with it now. The questions (the relay's fingerprint)
 # are read from the keyboard (/dev/tty), not from this script's own input.
+# A domain and no --relay nor --direct: the usual case, the domain points to the
+# relay, so the relay is reached by the domain itself (its IP is not needed).
+has() { local x; for x in "${ONLINE[@]}"; do [ "$x" = "$1" ] && return 0; done; return 1; }
+if has --domain && ! has --relay && ! has --port; then
+    for i in "${!ONLINE[@]}"; do [ "${ONLINE[$i]}" = "--domain" ] && ONLINE+=(--relay "${ONLINE[$((i + 1))]}"); done
+fi
 if [ "${#ONLINE[@]}" -gt 0 ]; then
     echo
     echo "== going online"
