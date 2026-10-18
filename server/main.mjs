@@ -397,6 +397,8 @@ function hostSetting(key) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    /* DELIBERATELY BROKEN, this version only: it proves an update that does not start is undone by itself. */
+    console.error('0.1.0-next.4 refuses to start, on purpose: the updater must go back by itself.'); process.exit(70);
     const argv = process.argv.slice(2);
     const port = Number(option(argv, 'port', '7717'));
     const host = option(argv, 'host', '');
