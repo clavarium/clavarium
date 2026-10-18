@@ -55,7 +55,7 @@ done
 
 [ "$(id -u)" -eq 0 ] || refuse "run it as root: curl -fsSL https://clavarium.org/install.sh | sudo bash"
 
-# Version of this script: 2026-10-18.3 (printed, to tell a stale copy from the current one).
+# Version of this script: 2026-10-18.4 (printed, to tell a stale copy from the current one).
 # STEP 1 OF 2, ALONE: the key the relay will be made with. Made here, its private
 # half never leaves this machine; its public half shown as text and as a QR code.
 # The installation (step 2) takes it from the same place.
@@ -66,13 +66,26 @@ if [ -n "$KEY_ONLY" ]; then
         || refuse "openssh-client and qrencode could not be installed"
     install -d -m 0700 "$ACCESS"
     [ -s "$ACCESS/setup-key" ] || ssh-keygen -q -t ed25519 -N '' -C clavarium-setup -f "$ACCESS/setup-key"
-    echo "clavarium install.sh 2026-10-18.3"
+    echo "clavarium install.sh 2026-10-18.4"
     echo
     echo "The key to create your relay with (its SSH key, at your host). It is a PUBLIC key: showing it is safe."
     echo
     echo "    $(cat "$ACCESS/setup-key.pub")"
     echo
-    qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    # The QR code is 78 columns by 39 lines: shown under the key when the screen
+    # has room, alone on a cleared screen when it is just big enough, not at all
+    # (the text above is the same key) when it is smaller.
+    size="$(stty size </dev/tty 2>/dev/null || echo "67 240")"; lines="${size% *}"; cols="${size#* }"
+    if [ "$cols" -ge 78 ] && [ "$lines" -ge 45 ]; then
+        qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+    elif [ "$cols" -ge 78 ] && [ "$lines" -ge 40 ] && [ -r /dev/tty ]; then
+        printf 'The same key as a QR code takes the whole screen: press Enter to see it.'; read -r _ </dev/tty || true
+        clear; qrencode -t ANSI -m 1 -l L < "$ACCESS/setup-key.pub" || true
+        printf 'Press Enter to go on.'; read -r _ </dev/tty || true; clear
+        echo "    $(cat "$ACCESS/setup-key.pub")"
+    else
+        echo "(This screen is too small for the QR code: ${cols}x${lines}, it needs 78x40. The text above is the key.)"
+    fi
     echo "Kept here, where the installation (step 2) takes it: $ACCESS/setup-key (the private half"
     echo "never leaves this machine) and $ACCESS/setup-key.pub (the public one, above)."
     echo
