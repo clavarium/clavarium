@@ -9,7 +9,7 @@ test('the simple screen: the same conversation without its terminal, for whoever
     await me.type('echo "The report is ready."; echo "38 orders, 3 late" > report.txt');
     await me.sees('\nThe report is ready.');
     assert.equal(await me.page.locator('#simple').isVisible(), false, 'the terminal first, as always');
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-chat').click();
     await me.until('it says what the tool says, as plain text', async () => (await me.page.locator('#simple-says').innerText()).includes('The report is ready.'));
     await me.until('what is ready to read is listed', async () => (await me.page.locator('#simple-files .file').first().innerText().catch(() => '')).includes('report.txt'));
     /* What is written in the box is typed into the same terminal, as one line. */
@@ -26,7 +26,7 @@ test('the simple screen: the same conversation without its terminal, for whoever
     await me.page.reload();
     await me.until('simple again after a reload', async () => (await me.page.locator('#simple').isVisible()) && (await me.page.locator('#simple-says').innerText()).includes('said from the box'), 30_000);
     /* And back to its screen: nothing was lost, it was underneath all along. */
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-terminal').click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
     assert.equal(await me.page.locator('#keys button[data-keys=esc]').isVisible(), true);
     await me.type('echo "typed in the terminal"');

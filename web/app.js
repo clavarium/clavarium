@@ -655,7 +655,7 @@
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
-        if (!keepSheets) $('panel').hidden = $('files').hidden = $('copy').hidden = true;
+        if (!keepSheets) { closeRoomAssets(); $('panel').hidden = $('files').hidden = $('copy').hidden = true; }
         paintChips();
         $('keys').hidden = !current;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
@@ -998,20 +998,37 @@
 
     /* ---------- folders ---------- */
     const LEVELS = [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
+    /* THE BAR (G): Chat | Terminal | Assets N, then its settings. What was
+       given to it is counted on "Assets", and shown there. */
+    let assetsShown = false; let roomPick = '';
     function paintChips() {
-        const chips = $('chips');
-        chips.replaceChildren();
-        if (conversations.find((x) => x.name === current)?.offline === true) {
-            const chip = document.createElement('span'); chip.className = 'chip'; chip.dataset.access = 'offline'; chip.textContent = 'offline';
-            chips.append(chip);
-        }
-        for (const r of conversations.find((x) => x.name === current)?.resources ?? []) {
-            const chip = document.createElement('span');
-            chip.className = 'chip'; chip.dataset.access = r.access;
-            chip.textContent = `${r.name} - ${r.access}`;
-            chips.append(chip);
-        }
+        if (DEVICE) return;
+        const c = conversations.find((x) => x.name === current);
+        $('views').hidden = !c;
+        const n = (c?.resources?.length ?? 0) + (c?.secrets?.length ?? 0) + (c?.work === 'kept' ? 1 : 0);
+        $('assets-count').textContent = n ? String(n) : '';
+        /* Its title names each of them, with what it may do. */
+        $('view-assets').title = c ? [...(c.offline === true ? ['offline'] : []), ...(c.resources ?? []).map((r) => `${r.name} - ${r.access}`), ...(c.secrets ?? [])].join(', ') || 'Nothing given yet' : '';
+        paintViews();
+        /* Drawn again only when what it was given changed (not at each look at the list). */
+        const sig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
+        if (assetsShown && sig !== roomSig) void paintRoomAssets();
     }
+    let roomSig = '';
+    function paintViews() {
+        if (DEVICE) return;
+        $('view-chat').setAttribute('aria-pressed', String(simple && !assetsShown));
+        $('view-terminal').setAttribute('aria-pressed', String(!simple && !assetsShown));
+        $('view-assets').setAttribute('aria-pressed', String(assetsShown));
+    }
+    function chooseView(which) {
+        if (which === 'assets') { void openRoomAssets(); return; }
+        closeRoomAssets();
+        if ((which === 'chat') !== simple) toggleSimple(); else if (!simple) focusTerminal();
+    }
+    $('view-chat').addEventListener('click', () => chooseView('chat'));
+    $('view-terminal').addEventListener('click', () => chooseView('terminal'));
+    $('view-assets').addEventListener('click', () => chooseView('assets'));
     /* ONE RULE: the left column is the platform, the bar is this conversation.
          Its Access chapter  what THIS conversation has: attached folders,
                    repositories and mailboxes, secrets handed to its tool,
@@ -1581,6 +1598,7 @@
         const chatting = talk.on && talkOf === current;
         $('simple-toggle').hidden = DEVICE && (!chatting || noTerminal());
         $('simple-toggle').textContent = simple ? (chatting ? 'Terminal' : 'Its screen') : chatting ? 'Chat' : 'Simple';
+        paintViews();
         if (!simple) return;
         const c = conversations.find((x) => x.name === current);
         const state = $('state').textContent;
@@ -1591,14 +1609,15 @@
         $('simple-says').textContent = saysNow() || 'Nothing on its screen yet.';
         if (Date.now() - simpleFilesAt > 8000) void paintSimpleFiles();
     }
-    $('simple-toggle').addEventListener('click', () => {
+    $('simple-toggle').addEventListener('click', () => toggleSimple());
+    function toggleSimple() {
         simple = !simple;
         /* Its terminal, one click from a chat, for now: the next opening is on the chat again. */
         if (!(talk.on && talkOf === current)) { simplePref = simple; try { localStorage.setItem('clavarium-simple', simple ? '1' : '0'); } catch { /* as above */ } }
         simpleFilesAt = 0; paintSimple();
         if (simple) void readTalk().then(paintThread);
         if (!simple) focusTerminal();
-    });
+    }
     /* ---------- talk: a conversation with the tool, shown by Parley ---------- */
     /* The exchange is drawn by Parley's own library (a project of its own,
        served from /vendor): this page tells it where to load from, how to
@@ -2082,96 +2101,280 @@
     $('chips').addEventListener('click', () => { if (!DEVICE && current) void openAccess(false); });
     $('panel-close').addEventListener('click', () => { $('panel').hidden = true; focusTerminal(); });
 
-    /* ---------- Assets: everything kept here ---------- */
-    let assetsKind = ''; let assetOpen = '';
+    /* ---------- ASSETS: one design, two pages (G and H) ----------
+       The server's (a place, beside Access and Settings): everything kept
+       here, by kind, with a search and a small "+" per kind; one opened on
+       the right says who uses it, its state, its settings. A conversation's
+       own (the bar's "Assets N"): what it was given, the same rows; a folder
+       opened shows its files (the Files sheet, moved in), a repository its
+       branches. On a phone, the list, then one asset with "All assets". */
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round']];
+    const byKind = (items) => ASSET_KINDS.flatMap(([k]) => items.filter((i) => i.kind === k));
+    const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
+    const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+    const kindIcon = (kind) => { const name = ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
+    /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
+    function paintAsList(holder, items, { chosen, choose, add, empty }) {
+        holder.replaceChildren();
+        for (const [kind, title] of ASSET_KINDS) {
+            const mine = items.filter((i) => i.kind === kind);
+            if (mine.length === 0 && !add) continue;
+            const section = el('section', 'as-kind'); section.dataset.kind = kind;
+            const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
+            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret' }[kind]}`, () => add(kind)));
+            section.append(head);
+            if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
+            for (const item of mine) {
+                const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
+                if (item.key === chosen) row.setAttribute('aria-current', 'true');
+                const name = el('b', '', item.name);
+                if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
+                const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
+                const words = el('span', 'as-words'); words.append(name, sub);
+                row.append(kindIcon(kind), words);
+                row.addEventListener('click', () => choose(item.key));
+                section.append(row);
+            }
+            holder.append(section);
+        }
+        if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+    }
+    /* The top of a detail: "All assets" (a phone), the icon, the name, a badge. */
+    function asTitle(item, back) {
+        const top = el('div', 'as-title');
+        const all = el('button', 'as-link as-back', '‹ All assets'); all.type = 'button'; all.addEventListener('click', back);
+        const h = el('h2'); h.append(kindIcon(item.kind), el('span', '', item.name));
+        if (item.badge) h.append(el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badgeLong ?? item.badge));
+        top.append(all, h);
+        return top;
+    }
+    const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
+    const boxSub = (box) => (!box ? 'mailbox' : box.failure ? box.failure : `${box.messages} message${box.messages === 1 ? '' : 's'}`);
+    const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
+
+    /* A repository, on the right: its branch, what would go, the diagram. */
+    async function gitDetail(holder, name, { place = false } = {}) {
+        const facts = el('div', 'as-facts'); facts.append(el('p', 'hint', 'Looking at its branches...'));
+        const acts = el('div', 'as-acts');
+        const review = el('button', '', 'Open the review'); review.type = 'button'; review.dataset.act = 'review';
+        const send = el('button', 'primary', 'Send...'); send.type = 'button'; send.dataset.act = 'send'; send.hidden = true;
+        acts.append(review, send);
+        /* In a conversation, its files too, below. */
+        if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
+        const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint', 'Drawing the branches...'));
+        holder.append(facts, chapter('Branches', acts), diagram);
+        const back = place ? { label: 'Assets', go: () => { void paintAssets(); } } : { label: 'Assets', go: () => { void paintRoomAssets(); } };
+        review.addEventListener('click', () => { void openGit(name, { back }); });
+        const [out, graph] = await Promise.all([getJson(`/git/${name}/outgoing`, null), getJson(`/git/${name}/graph`, null)]);
+        facts.replaceChildren();
+        if (out) {
+            const line = el('p', 'as-line');
+            if (out.branch) { line.append('Its agent works on '); line.append(el('b', '', out.branch)); if (out.target) { line.append('; you send to '); line.append(el('b', '', out.target)); } line.append('.'); }
+            else line.textContent = out.message ?? '';
+            const cards = el('div', 'as-cards');
+            const card = (label, value, tone) => { const c = el('div', 'as-card'); c.append(el('small', '', label), el('b', tone ?? '', value)); return c; };
+            const n = out.count;
+            cards.append(card('To send', out.state === 'ahead' ? (n === null ? 'some commits' : `${n} commit${n === 1 ? '' : 's'}`) : out.state === 'up-to-date' ? 'nothing' : '-', out.state === 'ahead' ? 'warn' : 'ok'),
+                card('State', { ahead: 'ahead', 'up-to-date': 'up to date', diverged: 'behind: pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' }[out.state] ?? out.state, out.state === 'diverged' || out.state === 'unreachable' ? 'bad' : ''),
+                card('Remote', out.remote ? hostOf(out.remote) : 'none'));
+            facts.append(line, cards);
+            if (out.state === 'ahead' && out.target) { send.hidden = false; send.textContent = `Send to ${out.target}...`; send.addEventListener('click', () => { void openGit(name, { back, target: out.target, branch: out.branch ?? '' }); }); }
+        }
+        diagram.replaceChildren(graph ? window.clavariumGraph.draw(graph, { pick: (c) => { void openGit(name, { commit: c.id, back }); } }) : el('p', 'hint', 'The branches could not be read.'));
+    }
+    /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
+    let filesHome = null;
+    function embedFiles(holder, name) {
+        const f = $('files');
+        if (!filesHome) filesHome = { parent: f.parentNode, next: f.nextSibling };
+        holder.append(f); f.classList.add('embedded');
+        if (filesOf !== name) { filesOf = name; filesAt = ''; }
+        f.hidden = false;
+        void paintFiles();
+    }
+    function unembedFiles() {
+        const f = $('files');
+        if (!f.classList.contains('embedded') || !filesHome) return;
+        f.classList.remove('embedded'); f.hidden = true;
+        filesHome.parent.insertBefore(f, filesHome.next);
+    }
+
+    /* ---- a conversation's own ---- */
+    async function paintRoomAssets() {
+        if (!assetsShown) return;
+        const c = conversations.find((x) => x.name === current);
+        roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
+        const [all, secrets, boxes] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', [])]);
+        const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
+        const items = [];
+        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write' });
+        for (const r of all.filter((x) => mine.has(x.name))) {
+            const kind = kindOf(r); const access = mine.get(r.name);
+            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only',
+                sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, sub: 'name only · used by its agent' });
+        const chosen = items.find((i) => i.key === roomPick) ?? (narrow() ? null : byKind(items)[0] ?? null);
+        const as = $('cassets-as');
+        as.dataset.open = chosen ? 'detail' : 'list';
+        paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => { roomPick = key; void paintRoomAssets(); }, empty: 'Nothing is given to it yet.' });
+        const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
+        $('cassets-rows').prepend(top);
+        if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
+        const detail = $('cassets-detail');
+        if (!chosen) { unembedFiles(); detail.replaceChildren(); return; }
+        const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key;
+        if (!keepFiles) { unembedFiles(); detail.replaceChildren(); }
+        detail.dataset.asset = chosen.key;
+        const back = () => { roomPick = ''; void paintRoomAssets(); };
+        if (keepFiles) { void paintFiles(); return; }
+        detail.append(asTitle(chosen, back));
+        if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
+            if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+            embedFiles(detail, chosen.name);
+        } else if (chosen.kind === 'git') await gitDetail(detail, chosen.name);
+        else {
+            detail.append(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'), chapter('Used by'));
+            const list = el('div', 'as-chips');
+            for (const who of chosen.secret.conversations) list.append(el('span', 'as-chip', shownName(conversations.find((x) => x.name === who)) || who));
+            detail.append(list);
+        }
+    }
+    async function openRoomAssets(pick) {
+        if (DEVICE || !current) return;
+        for (const id of ['panel', 'copy']) $(id).hidden = true;
+        if (!$('files').classList.contains('embedded')) $('files').hidden = true;
+        if (pick !== undefined) roomPick = pick;
+        assetsShown = true; $('cassets').hidden = false; paintViews();
+        await paintRoomAssets();
+    }
+    function closeRoomAssets() {
+        if (!assetsShown) return;
+        assetsShown = false; $('cassets').hidden = true; unembedFiles(); paintViews();
+    }
+
+    /* ---- the server's ---- */
+    let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false;
     async function paintAssets() {
-        const [all, boxes, secrets, keys] = await Promise.all([
-            fetch(`${API}/resources`).then((r) => r.json()), fetch(`${API}/mailboxes`).then((r) => r.json()).catch(() => []), fetch(`${API}/secrets`).then((r) => r.json()).catch(() => []), fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []), readDevices()]);
-        const ready = conversations.filter((c) => c.phase === 'ready');
-        const count = { folder: 0, git: 0, mailbox: 0, secret: secrets.length };
-        for (const r of all) count[kindOf(r)] += 1;
-        /* The kinds, as chips with how many there are. */
-        const filters = $('assets-filters'); filters.replaceChildren();
-        for (const [kind, text] of [['', `All ${all.length + secrets.length}`], ['folder', `Folders ${count.folder}`], ['git', `Repositories ${count.git}`], ['mailbox', `Mailboxes ${count.mailbox}`], ['secret', `Secrets ${count.secret}`]]) {
-            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.setAttribute('aria-pressed', String(assetsKind === kind));
-            b.addEventListener('click', () => { assetsKind = kind; void paintAssets(); });
-            filters.append(b);
-        }
-        for (const section of $('assets').querySelectorAll('section')) section.hidden = assetsKind !== '' && section.dataset.kind !== assetsKind;
-        for (const kind of ['folder', 'git', 'mailbox']) $(`assets-${kind}`).replaceChildren();
-        for (const resource of all) {
-            const kind = kindOf(resource); const asset = `${kind}:${resource.name}`;
-            const users = Object.entries(resource.attachments ?? {});
-            const holders = devicesWith(asset);
-            const row = document.createElement('div'); row.className = 'asset'; row.dataset.name = resource.name;
-            const head = document.createElement('button'); head.type = 'button'; head.className = 'asset-head'; head.setAttribute('aria-expanded', String(assetOpen === asset));
-            const name = document.createElement('b'); name.textContent = resource.name;
-            const used = document.createElement('span'); used.className = users.length ? '' : 'hint';
-            used.textContent = users.length ? users.map(([c, access]) => `${c} (${access})`).join(', ') : 'not used';
-            const given = document.createElement('span'); given.className = 'hint';
-            const box = kind === 'mailbox' ? boxes.find((m) => m.name === resource.name) : undefined;
-            given.textContent = [holders.length ? `on ${holders.map((d) => d.label).join(', ')}` : '', box ? (box.failure ? box.failure : `${box.messages} message(s)`) : '', kind === 'git' && resource.from ? `from ${hostOf(resource.from)}${viaText(resource.via)}` : ''].filter(Boolean).join(' - ');
-            head.append(name, used, given);
-            head.addEventListener('click', () => { assetOpen = assetOpen === asset ? '' : asset; void paintAssets(); });
-            row.append(head);
-            if (kind === 'git') {
-                const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
-                review.addEventListener('click', () => { void openGit(resource.name); });
-                row.append(review);
-            }
-            /* Filtered on one conversation: what it may do with this, at once, without opening the card. */
-            const only = ready.find((c) => c.name === accessFor);
-            if (accessFor) row.append(forRow(only, kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']], resource.attachments?.[accessFor] ?? 'none',
-                async (access) => { await attachTo(accessFor, resource.name, access, 'assets-error'); await paintAssets(); }, `What ${accessFor} may do with ${resource.name}`));
-            if (assetOpen === asset) {
-                /* Opened: every conversation, with what it may do with this. */
-                const inside = document.createElement('div'); inside.className = 'asset-inside';
-                if (kind === 'git' && resource.from) {
-                    const where = document.createElement('p'); where.className = 'hint';
-                    where.textContent = `Cloned from ${resource.from}${viaText(resource.via)}.${resource.via?.hostKey ? ` Host key recorded for ${hostOf(resource.from)}: ${resource.via.hostKey}.` : ''}`;
-                    inside.append(where);
-                }
-                for (const c of ready.filter((x) => x.name !== accessFor)) {
-                    const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
-                    const who = document.createElement('span'); who.textContent = shownName(c);
-                    const options = kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-                    line.append(who, modes(options, resource.attachments?.[c.name] ?? 'none', async (access) => { await attachTo(c.name, resource.name, access, 'assets-error'); await paintAssets(); }, `What ${c.name} may do with ${resource.name}`));
-                    inside.append(line);
-                }
-                if (ready.length === 0) { const none = document.createElement('p'); none.className = 'hint'; none.textContent = 'No conversation is ready to attach it to.'; inside.append(none); }
-                const actions = document.createElement('div'); actions.className = 'row';
-                const give = document.createElement('button'); give.type = 'button'; give.textContent = holders.length ? `Shared with ${holders.length} - Share...` : 'Share...';
-                give.addEventListener('click', () => { void openCompose([[asset, 'r']]); });
-                /* Always shown; when it cannot be done, it says why. */
-                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
-                const why = document.createElement('span'); why.className = 'hint';
-                if (users.length > 0) { remove.disabled = true; why.textContent = `attached to ${users.length} conversation${users.length > 1 ? 's' : ''}: set ${users.length > 1 ? 'them' : 'it'} to Off first`; }
-                remove.addEventListener('click', () => {
-                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, remove ${resource.name} (its files are kept aside on the server)`;
-                    sure.addEventListener('click', async () => {
-                        try { await post(`${API}/resources/${resource.name}/remove`); assetOpen = ''; }
-                        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                        await paintAssets();
-                    });
-                    remove.replaceWith(sure);
-                });
-                actions.append(give, remove, why); inside.append(actions); row.append(inside);
-            }
-            $(`assets-${kind}`).append(row);
-        }
-        for (const kind of ['folder', 'git', 'mailbox']) $(`assets-${kind}-title`).textContent = `${{ folder: 'Folders', git: 'Repositories', mailbox: 'Mailboxes' }[kind]} (${count[kind]})`;
-        $('assets-secret-title').textContent = `Secrets (${count.secret})`;
-        paintSecrets(secrets, ready);
+        if (place !== 'assets' || DEVICE) return;
+        const [all, boxes, secrets, keys] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), readDevices()]);
         paintKeys(keys);
+        const items = [];
+        for (const r of all) {
+            const kind = kindOf(r); const users = Object.keys(r.attachments ?? {}).length;
+            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
+                sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', sub: 'name only' });
+        const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
+        const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? (narrow() ? null : byKind(shown)[0] ?? null);
+        $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
+        paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(false); void paintAssets(); }, add: (kind) => { assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        const detail = $('assets-detail');
+        /* The forms go back to where they wait before the detail is drawn again. */
+        for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
+        detail.replaceChildren();
+        const back = () => { assetOpen = ''; assetsAdding = ''; void paintAssets(); };
+        if (assetsAdding) {
+            const all2 = el('button', 'as-link as-back', '‹ All assets'); all2.type = 'button'; all2.addEventListener('click', back);
+            const form = $(`${assetsAdding}-box`); form.hidden = false;
+            detail.append(all2, form);
+            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
+            focusField(form.querySelector('input:not([type=radio])'));
+            return;
+        }
+        if (!chosen) return;
+        detail.append(asTitle(chosen, back));
+        const ready = conversations.filter((c) => c.phase === 'ready');
+        const r = chosen.resource;
+        /* State, in a line. */
+        if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        if (chosen.kind === 'secret') detail.append(el('p', 'hint', 'Its value is never shown again. A change takes effect the next time the tool starts.'));
+        /* Used by: each conversation that has it, what it may do; "+" offers the others. */
+        const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
+        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : r.attachments?.[c.name] ?? 'none');
+        const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
+        const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
+        const users = el('div', 'as-users');
+        const picker = el('div', 'as-users as-picker'); picker.hidden = true;
+        const row = (c) => {
+            const line = el('div', 'given-row'); line.dataset.conversation = c.name;
+            line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
+                if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
+                else await attachTo(c.name, chosen.name, value, 'assets-error');
+                await paintAssets();
+            }, `What ${c.name} may do with ${chosen.name}`));
+            return line;
+        };
+        for (const c of using) users.append(row(c));
+        if (using.length === 0) users.append(el('p', 'hint', 'No conversation uses it.'));
+        for (const c of others) picker.append(row(c));
+        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation has it.' : 'No conversation is ready.'));
+        detail.append(chapter('Used by', roundPlus('Give it to a conversation', () => { picker.hidden = !picker.hidden; })), users, picker);
+        if (chosen.kind === 'git') {
+            const holder = el('div', 'as-git'); detail.append(holder);
+            /* Settings: where it is sent, with what. */
+            const settings = await getJson(`/git/${chosen.name}`, {});
+            const edit = el('button', 'as-edit', '✎ Edit'); edit.type = 'button';
+            const table = el('dl', 'as-settings');
+            const fact = (k, v) => { table.append(el('dt', '', k), el('dd', '', v)); };
+            fact('Remote', settings.remote ?? 'none');
+            fact('Sent with', settings.hasKey ? 'a key kept for it' : settings.sshKey ? `SSH key ${settings.sshKey}` : r.via?.method && r.via.method !== 'none' ? viaText(r.via).replace(/^, with /, '') : 'what it was cloned with');
+            if (r.from && r.via?.hostKey) fact('Host key', `${hostOf(r.from)}: ${r.via.hostKey}`);
+            detail.append(chapter('Settings', edit), table);
+            const box = $('gitview-remote-box');
+            remoteShown = chosen.name;
+            await fillRemote(chosen.name, settings);
+            box.hidden = !remoteEditing; box.open = true;
+            detail.append(box);
+            edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
+            void gitDetail(holder, chosen.name, { place: true });
+        }
+        /* Delete, out of the way; refused while it is used, and why. */
+        const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
+        const why = el('small', 'hint');
+        const inUse = chosen.kind !== 'secret' && using.length > 0;
+        if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
+        remove.addEventListener('click', () => {
+            const sure = el('button', 'danger', chosen.kind === 'secret' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name} (its files are kept aside on the server)`); sure.type = 'button';
+            sure.addEventListener('click', async () => {
+                try { await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`); assetOpen = ''; }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                await paintAssets();
+            });
+            remove.replaceWith(sure);
+        });
+        /* Given to a device: from here too (the map shows who has it). */
+        const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
+        share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
+        const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' ? [] : [share, el('br')]), remove, why);
+        detail.append(foot);
     }
-    /* The line of the conversation Access is filtered on, under an asset's name: its control, or why there is none. */
-    function forRow(conversation, options, chosen, pick, label) {
-        const line = document.createElement('div'); line.className = 'given-row for-row'; line.dataset.conversation = accessFor;
-        const who = document.createElement('span'); who.textContent = accessFor;
-        if (!conversation) { const why = document.createElement('small'); why.className = 'hint'; why.textContent = ' not ready yet'; who.append(why); line.append(who); return line; }
-        line.append(who, modes(options, chosen, pick, label));
-        return line;
+    /* The remote form of a repository, filled for it. */
+    async function fillRemote(name, settings) {
+        $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? ''; $('gitview-key').value = '';
+        const pick = $('gitview-sshkey'); pick.replaceChildren();
+        for (const [value, text] of [['', '(none)'], ...gitKeys.map((k) => [k.name, k.name])]) { const o = document.createElement('option'); o.value = value; o.textContent = text; pick.append(o); }
+        pick.value = settings.sshKey ?? '';
+        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.'
+            : settings.sshKey ? `Over ssh, the SSH key ${settings.sshKey} is used.` : 'No key is kept for sending: what the repository was cloned with is used, for the same server only; a remote that asks for more will refuse.';
     }
+    $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
+    $('assets-close').addEventListener('click', () => leavePlace());
+    $('assets').addEventListener('keydown', (event) => { if (event.key === 'Escape' && !event.defaultPrevented && event.target.tagName !== 'INPUT') leavePlace(); });
+    /* The Assets place, on one asset (`key`), its remote form open (`remote`). */
+    async function openAssetsPlace(key, { remote = false, push = true } = {}) {
+        if (DEVICE) return;
+        if (key !== undefined) { assetOpen = key; assetsAdding = ''; }
+        remoteEditing = remote;
+        enterPlace('assets', push);
+        $('assets-error').hidden = true;
+        await paintAssets();
+    }
+    async function openAssets() { await openAssetsPlace(); }
     /* ---------- private repositories: how this server gets in ---------- */
     /* The host of an address, whatever its form (user@host:path has no URL form). */
     const hostOf = (from) => { try { return new URL(from).hostname; } catch { return /@([^:/]+):/.exec(String(from))?.[1] ?? String(from); } };
@@ -2270,50 +2473,13 @@
     });
     $('git-key-copy').addEventListener('click', () => { void copyField($('git-key-public'), $('git-key-copy')); });
     /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
-    function paintSecrets(all, ready) {
-        const rows = $('secret-rows');
-        rows.replaceChildren();
-        for (const secret of all) {
-            const asset = `secret:${secret.name}`;
-            const row = document.createElement('div'); row.className = 'asset'; row.dataset.name = secret.name;
-            const head = document.createElement('button'); head.type = 'button'; head.className = 'asset-head'; head.setAttribute('aria-expanded', String(assetOpen === asset));
-            const name = document.createElement('b'); name.textContent = secret.name;
-            const used = document.createElement('span'); used.className = secret.conversations.length ? '' : 'hint'; used.textContent = secret.conversations.length ? secret.conversations.join(', ') : 'not used';
-            head.append(name, used);
-            head.addEventListener('click', () => { assetOpen = assetOpen === asset ? '' : asset; void paintAssets(); });
-            row.append(head);
-            if (accessFor) row.append(forRow(ready.find((c) => c.name === accessFor), [['off', 'Off'], ['use', 'Use']], secret.conversations.includes(accessFor) ? 'use' : 'off',
-                async (value) => { await handTo(accessFor, secret.name, value === 'use', 'assets-error'); await paintAssets(); }, `Whether the tool of ${accessFor} is handed ${secret.name}`));
-            if (assetOpen === asset) {
-                const inside = document.createElement('div'); inside.className = 'asset-inside';
-                for (const c of ready.filter((x) => x.name !== accessFor)) {
-                    const line = document.createElement('div'); line.className = 'given-row'; line.dataset.conversation = c.name;
-                    const who = document.createElement('span'); who.textContent = shownName(c);
-                    line.append(who, modes([['off', 'Off'], ['use', 'Use']], secret.conversations.includes(c.name) ? 'use' : 'off', async (value) => { await handTo(c.name, secret.name, value === 'use', 'assets-error'); await paintAssets(); }, `Whether the tool of ${c.name} is handed ${secret.name}`));
-                    inside.append(line);
-                }
-                const note = document.createElement('p'); note.className = 'hint'; note.textContent = 'A change takes effect the next time the tool starts (leave the tool, then "Start it again").'; inside.append(note);
-                const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Delete';
-                remove.addEventListener('click', () => {
-                    const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Yes, delete ${secret.name}`;
-                    sure.addEventListener('click', async () => { await post(`${API}/secrets/${secret.name}/remove`).catch(() => {}); assetOpen = ''; await paintAssets(); });
-                    remove.replaceWith(sure);
-                });
-                inside.append(remove); row.append(inside);
-            }
-            rows.append(row);
-        }
-        $('secret-empty').hidden = all.length > 0;
-    }
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); $('secret-name').value = ''; $('secret-value').value = ''; $('secret-box').open = false; }
+        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; $('secret-value').value = ''; }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await paintAssets();
     });
-    /* Assets are a tab of Access. */
-    async function openAssets() { await openAccessPage('assets'); }
 
     /* ---------- who gets what, and flows: see links.js ---------- */
     /* What those sheets share with the rest of the page: the requests, the
@@ -2322,6 +2488,7 @@
         API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => { leavePlace({ list: true }); void openCreate(); },
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
+        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? deviceCard(d, '', true) : null; },
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
         modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); remember(true); } },
         toFlows: () => openAccessPage('map', { mode: 'flows' }),
@@ -2338,7 +2505,7 @@
        find it again, and the names of the screens that came before (links,
        flows, assets, sharing) lead to their tab. */
     const TABS = ['map', 'devices', 'assets'];
-    const FORMER = { access: ['map', 'map'], map: ['map', 'map'], links: ['map', 'map'], 'who-gets-what': ['map', 'map'], flows: ['map', 'flows'], devices: ['devices'], sharing: ['devices'], assets: ['assets'] };
+    const FORMER = { access: ['map', 'map'], map: ['map', 'map'], links: ['map', 'map'], 'who-gets-what': ['map', 'map'], flows: ['map', 'flows'], devices: ['map', 'map'], sharing: ['map', 'map'] };
     let place = 'conversations';
     let accessTab = 'map'; let mapMode = 'map'; let accessFor = '';
     let placeFrom = 'list';      /* the screen (list or room) a place goes back to */
@@ -2352,12 +2519,14 @@
         for (const b of $('nav').querySelectorAll('button[data-place]')) { if (b.dataset.place === which) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
-        if (which !== 'conversations') { for (const id of ['panel', 'files', 'copy', 'gitview']) $(id).hidden = true; view('room'); }
+        $('assets').hidden = which !== 'assets';
+        if (which !== 'conversations') { closeRoomAssets(); for (const id of ['panel', 'files', 'copy', 'gitview']) $(id).hidden = true; view('room'); }
     }
     function placeAddress() {
         const q = new URLSearchParams();
         if (current) q.set('c', current);
         if (place !== 'conversations') q.set('open', place);
+        if (place === 'assets' && assetOpen) q.set('a', assetOpen);
         if (place === 'access') { q.set('tab', accessTab === 'map' && mapMode === 'flows' ? 'flows' : accessTab); if (accessFor) q.set('for', accessFor); }
         const query = q.toString();
         return query ? `?${query}` : location.pathname;
@@ -2389,7 +2558,6 @@
         for (const b of $('access-tabs').querySelectorAll('[data-tab]')) { const on = b.dataset.tab === accessTab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
         $('access-map').hidden = accessTab !== 'map';
         $('sharing').hidden = accessTab !== 'devices';
-        $('assets').hidden = accessTab !== 'assets';
         for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mapMode));
         if (accessFor && !conversations.some((c) => c.name === accessFor)) accessFor = '';
         $('access-for').hidden = !accessFor;
@@ -2397,8 +2565,10 @@
     }
     /* `of`: the conversation it is filtered on ('' for none; left as it is when not given).
        `face`: on the devices tab, 'compose' keeps what openCompose prepared. */
-    async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, fromPanel = false } = {}) {
+    async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, fromPanel = false, pin } = {}) {
         if (DEVICE) return;
+        /* Assets left Access: a conversation's own, or the server's. */
+        if (tab === 'assets') { if (of) { leavePlace({ keepView: true, panel: false }); await openRoomAssets(); } else await openAssetsPlace(undefined, { push }); return; }
         if (of !== undefined) accessFor = of;
         accessTab = TABS.includes(tab) ? tab : 'map';
         if (mode) mapMode = mode;
@@ -2409,7 +2579,7 @@
         if (arriving) void readDevices().then(paintDeviceCount);
         if (accessTab === 'map') {
             if (mapMode === 'flows') await links?.openFlows();
-            else await links?.open({ pin: accessFor ? `conversation:${accessFor}` : null });
+            else await links?.open({ pin: pin ?? (accessFor ? `conversation:${accessFor}` : null) });
         } else if (accessTab === 'devices') {
             if (shown === 'compose') { paintCompose(); face('compose'); }
             else { face('manage'); await paintManage(); }
@@ -2431,6 +2601,8 @@
             if (/^[a-z]{1,20}$/.test(at)) openChapter(`s-${at}`)?.scrollIntoView({ block: 'start' });
             return;
         }
+        /* Assets, a place of its own now (it was a tab of Access). */
+        if (open === 'assets' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
         if (former) { await openAccessPage(former[0], { mode: former[1], of: q.get('for') ?? '', push: false }); return; }
         leavePlace({ fromHistory: true });
@@ -2443,7 +2615,9 @@
         void followAddress();
     });
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-access').addEventListener('click', () => { if (place !== 'access') void openAccessPage(); });
+    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map') void openAccessPage('map'); });
+    $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
+    $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
     $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
@@ -2459,8 +2633,8 @@
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
     $('access').addEventListener('keydown', (event) => { if (event.key === 'Escape' && !event.defaultPrevented && event.target.closest?.('#links') === null) leavePlace(); });
     /* From a conversation's own sheet: Access, on that conversation alone. */
-    $('access-assets-here').addEventListener('click', () => { void openAccessPage('assets', { of: current, fromPanel: true }); });
-    $('access-devices-here').addEventListener('click', () => { void openAccessPage('devices', { of: current, fromPanel: true }); });
+    $('access-assets-here').addEventListener('click', () => { void openRoomAssets(); });
+    $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current, fromPanel: true }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings({ push = true } = {}) {
@@ -2831,7 +3005,7 @@
             if (made.firstSeen) {
                 $('git-said').textContent = `${made.name} was cloned. First contact with ${hostOf(made.from)}: its host key (${made.firstSeen.join(', ')}) was recorded. A different key later will be refused.`;
                 $('git-said').hidden = false;
-            } else $('git-box').open = false;
+            } else assetsAdding = '';
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
         await paintAssets();
@@ -2847,12 +3021,16 @@
     const NEW_BRANCH = '\u0000new';
     function paintChecks(result) {
         const state = $('gitview-checks-state'); state.className = '';
-        if (!result) { state.textContent = 'Running the checks in the agent\'s machine...'; $('gitview-checks-output').textContent = ''; return; }
+        if (!result) { state.textContent = 'Running the checks in the agent\'s machine...'; $('gitview-checks-output').textContent = ''; const mini = $('gitview-numbers').querySelector('.checks-mini'); if (mini) { mini.textContent = 'Checks running...'; mini.dataset.status = 'running'; } return; }
         const where = result.machine ? ` (machine of ${result.machine})` : '';
         state.textContent = result.status === 'passed' ? `Checks passed in the agent's machine${where}.`
             : result.status === 'failed' ? `Checks FAILED in the agent's machine${where}.`
                 : result.status === 'none' ? 'Nothing was checked: no pre-push hook, no check command.' : 'The checks could not run.';
         if (result.status === 'passed' || result.status === 'failed') state.className = result.status;
+        /* Said again in the numbers line and on the tab: the checks at a glance. */
+        $('gitview-n-checks').textContent = result.status === 'passed' ? '\u2713' : result.status === 'failed' ? '\u2717' : '';
+        const mini = $('gitview-numbers').querySelector('.checks-mini');
+        if (mini) { mini.textContent = result.status === 'passed' ? '\u2713 Checks passed' : result.status === 'failed' ? '\u2717 Checks failed' : result.status === 'none' ? 'No checks' : 'Checks not run'; mini.dataset.status = result.status; }
         $('gitview-checks-output').textContent = result.output ?? '';
     }
     function showSend(passed, commits) {
@@ -2947,45 +3125,130 @@
         $('gitview-dropped').hidden = dropped.length === 0;
         $('gitview-dropped').textContent = dropped.length ? `Not taken, their names cannot be sent: ${dropped.map((d) => d.name).join(', ')}.` : '';
     }
+    /* THE REVIEW PAGE (E). `gitCommit`: one commit looked at (from the branch
+       diagram), never sent from here; otherwise what would go. The diff is
+       drawn by diff2html from its text: each line escaped there, a subject
+       or a path set as text here -- nothing the agent wrote becomes markup. */
+    let gitCommit = ''; let gitBack = null; let gitLayout = 'side-by-side'; let gitTab = 'changes'; let gitFile = 0; let gitFiles = [];
+    const reviewNarrow = () => matchMedia('(max-width: 700px)').matches;
+    /* The files of a diff, from its text: path, lines added and removed, and what became of it. */
+    function diffFiles(text) {
+        const files = [];
+        let f = null;
+        for (const line of String(text ?? '').split('\n')) {
+            if (line.startsWith('diff --git ')) { const m = / b\/(.*)$/.exec(line); f = { path: m ? m[1] : line.slice(11), added: 0, removed: 0, how: 'changed' }; files.push(f); continue; }
+            if (!f) continue;
+            if (line.startsWith('new file mode')) f.how = 'added';
+            else if (line.startsWith('deleted file mode')) f.how = 'deleted';
+            else if (line.startsWith('rename to ')) { f.how = 'renamed'; f.path = line.slice(10); }
+            else if (line.startsWith('Binary files')) f.how = f.how === 'changed' ? 'binary' : f.how;
+            else if (line.startsWith('+') && !line.startsWith('+++ ')) f.added += 1;
+            else if (line.startsWith('-') && !line.startsWith('--- ')) f.removed += 1;
+        }
+        return files;
+    }
+    function paintReviewTab() {
+        for (const b of $('gitview-tabs').querySelectorAll('[data-tab]')) b.setAttribute('aria-selected', String(b.dataset.tab === gitTab));
+        for (const tab of ['changes', 'commits', 'checks']) $(`gitview-pane-${tab}`).hidden = tab !== gitTab;
+        $('gitview-layout').hidden = gitTab !== 'changes' || reviewNarrow();
+        for (const b of $('gitview-layout').querySelectorAll('[data-layout]')) b.setAttribute('aria-pressed', String(b.dataset.layout === gitLayout));
+    }
+    /* On a phone, one file at a time: "1 / 3". */
+    function showFile(at) {
+        const wrappers = [...$('gitview-diff').querySelectorAll('.d2h-file-wrapper')];
+        gitFile = Math.max(0, Math.min(at, wrappers.length - 1));
+        const one = reviewNarrow();
+        wrappers.forEach((w, i) => { w.hidden = one && i !== gitFile; });
+        $('gitview-picker').hidden = !one || wrappers.length < 2;
+        $('gitview-picker-at').textContent = `${gitFile + 1} / ${wrappers.length}`;
+        for (const [i, b] of [...$('gitview-tree').querySelectorAll('button')].entries()) b.setAttribute('aria-current', String(i === gitFile));
+    }
+    function drawDiff(text) {
+        const target = $('gitview-diff');
+        target.replaceChildren();
+        gitFiles = diffFiles(text);
+        const tree = $('gitview-tree'); tree.replaceChildren();
+        gitFiles.forEach((f, i) => {
+            const b = document.createElement('button'); b.type = 'button'; b.dataset.how = f.how;
+            const name = document.createElement('span'); name.className = 'rv-path'; name.textContent = f.path; name.title = f.path;
+            const plus = document.createElement('small'); plus.className = 'plus'; plus.textContent = `+${f.added}`;
+            const minus = document.createElement('small'); minus.className = 'minus'; minus.textContent = `−${f.removed}`;
+            b.append(name, plus, minus);
+            b.addEventListener('click', () => { showFile(i); if (!reviewNarrow()) target.querySelectorAll('.d2h-file-wrapper')[i]?.scrollIntoView({ block: 'start' }); });
+            tree.append(b);
+        });
+        tree.hidden = gitFiles.length === 0;
+        if (!text) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'No change to show.'; target.append(p); showFile(0); return; }
+        const Ui = window.Diff2HtmlUI;
+        if (!Ui) { const pre = document.createElement('pre'); pre.textContent = text; target.append(pre); return; }
+        const ui = new Ui(target, text, {
+            outputFormat: reviewNarrow() ? 'line-by-line' : gitLayout, drawFileList: false, matching: 'lines', diffStyle: 'word',
+            fileContentToggle: true, stickyFileHeaders: false, synchronisedScroll: true, highlight: true, renderNothingWhenEmpty: false,
+            colorScheme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark',
+        });
+        ui.draw();
+        try { ui.highlightCode(); } catch { /* the plain diff stays */ }
+        showFile(gitFile);
+    }
+    let gitText = '';
     async function paintGit() {
         const name = gitShown;
-        $('gitview-name').textContent = `${name} - git repository`;
+        const commit = gitCommit;
+        $('gitview-name').textContent = name;
+        $('gitview-back').textContent = gitBack?.label ?? 'Back';
         $('gitview-error').hidden = true; $('gitview-push').hidden = true; $('gitview-check').hidden = true; $('gitview-checks').hidden = true;
-        $('gitview-offer-row').hidden = true; $('gitview-guards').hidden = true; $('gitview-dropped').hidden = true;
-        $('gitview-state').textContent = 'Looking at what was committed...';
-        $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').textContent = '';
+        $('gitview-offer-row').hidden = true; $('gitview-guards').hidden = true; $('gitview-dropped').hidden = true; $('gitview-remote-go').hidden = true;
+        $('gitview-state').textContent = commit ? 'Looking at this commit...' : 'Looking at what was committed...';
+        $('gitview-numbers').replaceChildren();
+        $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').replaceChildren(); $('gitview-tree').replaceChildren();
+        $('gitview-n-files').textContent = ''; $('gitview-n-commits').textContent = ''; $('gitview-n-checks').textContent = '';
+        $('gitview-from').hidden = true; $('gitview-arrow').hidden = Boolean(commit);
+        if (commit) $('gitview-target-row').hidden = $('gitview-branch-row').hidden = true;
         gitHead = null; gitTarget = null; gitState = ''; gitConfirm = false;
-        const settings = await (await fetch(`${API}/git/${name}`)).json().catch(() => ({}));
-        $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? '';
-        const keys = await fetch(`${API}/git-keys`).then((r) => r.json()).catch(() => []);
-        const pick = $('gitview-sshkey'); pick.replaceChildren();
-        for (const [value, text] of [['', '(none)'], ...keys.map((k) => [k.name, k.name])]) { const o = document.createElement('option'); o.value = value; o.textContent = text; pick.append(o); }
-        pick.value = settings.sshKey ?? '';
-        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.'
-            : settings.sshKey ? `Over ssh, the SSH key ${settings.sshKey} is used.` : 'No key is kept for sending: what the repository was cloned with is used, for the same server only; a remote that asks for more will refuse.';
-        await paintKeep();
+        paintReviewTab();
+        if (!commit) await paintKeep();
         let out;
         try {
             const query = new URLSearchParams();
-            if (gitAsked) query.set('target', gitAsked);
-            if (gitAskedBranch) query.set('branch', gitAskedBranch);
-            const r = await fetch(`${API}/git/${name}/outgoing${query.size ? `?${query}` : ''}`);
+            if (commit) query.set('id', commit);
+            if (!commit && gitAsked) query.set('target', gitAsked);
+            if (!commit && gitAskedBranch) query.set('branch', gitAskedBranch);
+            const r = await fetch(`${API}/git/${name}/${commit ? 'commit' : 'outgoing'}${query.size ? `?${query}` : ''}`);
             out = await r.json();
             if (!r.ok) throw Object.assign(new Error(out.error || 'The repository could not be read.'), { offer: out.offer });
         } catch (error) {
+            if (gitShown !== name || gitCommit !== commit) return;
             $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false;
             /* An fsck refusal the owner may waive (old histories only): offered, never done for them. */
-            if (error.offer && gitShown === name) { $('gitview-offer').textContent = `Accept "${error.offer}" in this repository`; $('gitview-offer').dataset.id = error.offer; $('gitview-offer-row').hidden = false; }
+            if (error.offer) { $('gitview-offer').textContent = `Accept "${error.offer}" in this repository`; $('gitview-offer').dataset.id = error.offer; $('gitview-offer-row').hidden = false; }
             return;
         }
-        if (gitShown !== name) return;
-        gitHead = out.head; gitTarget = out.target; gitState = out.state; gitCommits = out.count === undefined ? out.commits.length : out.count; gitBranch = out.branch; gitConfirm = Boolean(out.guards?.confirm);
-        fillBranches(out);
+        if (gitShown !== name || gitCommit !== commit) return;
+        gitHead = commit ? null : out.head; gitTarget = out.target ?? null; gitState = out.state; gitCommits = out.count === undefined ? out.commits.length : out.count; gitBranch = out.branch ?? null; gitConfirm = Boolean(out.guards?.confirm);
+        if (commit) {
+            const c = out.commits[0];
+            $('gitview-from').textContent = commit.slice(0, 7); $('gitview-from').hidden = false; $('gitview-from').title = c?.subject ?? '';
+        } else {
+            fillBranches(out);
+            if ($('gitview-branch-row').hidden && out.branch) { $('gitview-from').textContent = out.branch; $('gitview-from').hidden = false; }
+            $('gitview-target-row').hidden = !['ahead', 'up-to-date', 'diverged'].includes(out.state);
+            $('gitview-arrow').hidden = $('gitview-target-row').hidden;
+            fillTargets(out);
+        }
         paintGuards(out);
-        $('gitview-target-row').hidden = !['ahead', 'up-to-date', 'diverged'].includes(out.state);
-        fillTargets(out);
-        $('gitview-state').textContent = out.message;
-        $('gitview-remote-box').open = out.state === 'no-remote' || out.state === 'unreachable';
+        $('gitview-state').textContent = commit ? (out.commits[0]?.subject ?? '') + (out.message ? ` - ${out.message}` : '') : out.message;
+        $('gitview-remote-go').hidden = !['no-remote', 'unreachable'].includes(out.state);
+        /* The numbers line: commits, files, lines, the weight. */
+        gitText = out.diff + (out.cut ? '\n' : '');
+        const files = diffFiles(out.diff);
+        const added = files.reduce((n, f) => n + f.added, 0); const removed = files.reduce((n, f) => n + f.removed, 0);
+        const bit = (text, cls) => { const span = document.createElement('span'); span.textContent = text; if (cls) span.className = cls; return span; };
+        const count = out.count === null || out.count === undefined ? 'Commits (not counted)' : `${out.count} commit${out.count === 1 ? '' : 's'}`;
+        $('gitview-numbers').append(bit(count, 'strong'), bit(` · ${files.length} file${files.length === 1 ? '' : 's'}`), bit(`+${added}`, 'plus'), bit(`−${removed}`, 'minus'),
+            ...(commit || out.state !== 'ahead' ? [] : [bit('', 'checks-mini')]),
+            ...(out.guards?.newBytes !== null && out.guards?.newBytes !== undefined ? [bit(`${sizeText(out.guards.newBytes)} of new data`, 'hint')] : []));
+        $('gitview-n-files').textContent = String(files.length);
+        $('gitview-n-commits').textContent = String(out.commits.length);
         for (const c of out.commits) {
             const line = document.createElement('div'); line.className = 'commit';
             const id = document.createElement('code'); id.textContent = c.id.slice(0, 8);
@@ -2997,14 +3260,26 @@
             $('gitview-commits').append(line);
         }
         $('gitview-stat').textContent = out.stat;
-        $('gitview-diff').textContent = out.diff + (out.cut ? '\n... (the rest is not shown here: too long)' : '');
+        gitFile = 0;
+        drawDiff(out.diff);
+        if (out.cut) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = '... (the rest is not shown here: too long)'; $('gitview-diff').append(p); }
         /* Before Send is shown, the checks run in the machine: their result
            is shown, and Send waits for them (it is refused without them only
            if the owner asked for that). */
-        if (out.state === 'ahead') await runChecks();
+        if (!commit && out.state === 'ahead') await runChecks();
     }
-    async function openGit(name) { gitShown = name; gitAsked = ''; gitAskedBranch = ''; for (const id of ['panel', 'settings', 'files']) $(id).hidden = true; $('gitview').hidden = false; await paintGit(); }
-    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; focusTerminal(); });
+    /* `commit`: one commit of the diagram. `back`: {label, go} -- where the page goes back to. */
+    async function openGit(name, { commit = '', back = null, target = '', branch = '' } = {}) {
+        gitShown = name; gitCommit = commit; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = 'changes';
+        for (const id of ['panel', 'files']) if (!$(id).classList.contains('embedded')) $(id).hidden = true;
+        $('gitview').hidden = false; $('gitview').scrollTop = 0;
+        await paintGit();
+    }
+    for (const b of $('gitview-tabs').querySelectorAll('[data-tab]')) b.addEventListener('click', () => { gitTab = b.dataset.tab; paintReviewTab(); });
+    for (const b of $('gitview-layout').querySelectorAll('[data-layout]')) b.addEventListener('click', () => { gitLayout = b.dataset.layout; paintReviewTab(); drawDiff(gitText.replace(/\n$/, '')); });
+    for (const b of $('gitview-picker').querySelectorAll('[data-step]')) b.addEventListener('click', () => { showFile(gitFile + Number(b.dataset.step)); $('gitview-diff').scrollIntoView({ block: 'start' }); });
+    $('gitview-set-remote').addEventListener('click', () => { const name = gitShown; $('gitview').hidden = true; gitShown = ''; void openAssetsPlace(`git:${name}`, { remote: true }); });
+    $('gitview-close').addEventListener('click', () => { $('gitview').hidden = true; gitShown = ''; const back = gitBack; gitBack = null; if (back?.go) back.go(); else focusTerminal(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-check').addEventListener('click', () => { void runChecks(); });
     $('gitview-branch').addEventListener('change', () => { gitAskedBranch = $('gitview-branch').value; gitAsked = ''; void paintGit(); });
@@ -3057,9 +3332,10 @@
     });
     $('gitview-remote').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('gitview-error').hidden = true;
-        try { await post(`${API}/git/${gitShown}/remote`, { url: $('gitview-url').value.trim(), user: $('gitview-user').value.trim(), key: $('gitview-key').value, ...(looksSsh($('gitview-url').value.trim()) && $('gitview-sshkey').value ? { sshKey: $('gitview-sshkey').value } : {}) }); $('gitview-key').value = ''; await paintGit(); }
-        catch (error) { $('gitview-error').textContent = error.message; $('gitview-error').hidden = false; }
+        $('assets-error').hidden = true;
+        const name = remoteShown;
+        try { await post(`${API}/git/${name}/remote`, { url: $('gitview-url').value.trim(), user: $('gitview-user').value.trim(), key: $('gitview-key').value, ...(looksSsh($('gitview-url').value.trim()) && $('gitview-sshkey').value ? { sshKey: $('gitview-sshkey').value } : {}) }); $('gitview-key').value = ''; remoteEditing = false; await paintAssets(); }
+        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
     });
 
     $('mailbox-new').addEventListener('submit', async (event) => {
@@ -3069,7 +3345,7 @@
         button.disabled = true; button.textContent = 'Reading the mailbox...';
         try {
             await post(`${API}/mailboxes`, { name: $('mailbox-name').value.trim(), host: $('mailbox-host').value.trim(), port: $('mailbox-port').value.trim(), user: $('mailbox-user').value.trim(), password: $('mailbox-password').value });
-            $('mailbox-new').reset(); $('mailbox-box').open = false;
+            assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = ''; $('mailbox-new').reset();
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
         await paintAssets();
@@ -3077,7 +3353,7 @@
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; $('folder-box').open = false; if (made?.name) assetOpen = `folder:${made.name}`; }
+        try { const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; assetsAdding = ''; if (made?.name) assetOpen = `folder:${made.name}`; }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await paintAssets();
     });
@@ -4526,8 +4802,8 @@
     function takeBack(button, question, run) {
         const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = question;
         const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
-        keep.addEventListener('click', () => { void paintManage(); });
-        sure.addEventListener('click', async () => { await run().catch(() => {}); await paintManage(); void refresh(); });
+        keep.addEventListener('click', () => { void repaintDevices(); });
+        sure.addEventListener('click', async () => { await run().catch(() => {}); await repaintDevices(); void refresh(); });
         button.replaceWith(sure, keep);
     }
     function grantRow(device, g) {
@@ -4535,7 +4811,7 @@
         const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
         const label = document.createElement('span'); label.textContent = name;
         const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await paintManage(); }, `What ${device.label} may do with ${name}`);
+        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await repaintDevices(); }, `What ${device.label} may do with ${name}`);
         const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
         take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
         row.append(label, right, take);
@@ -4543,6 +4819,65 @@
     }
     let manageBy = 'device';
     const deviceShut = new Set();      /* the device cards folded on this page */
+    /* After a change to a device: its list (the Devices pane) or the map, drawn again. */
+    async function repaintDevices() {
+        if (place === 'access' && accessTab === 'devices') { await paintManage(); return; }
+        await readDevices(); await links?.changed();
+    }
+    /* One device's card: its name (renamed here), what it has, revoke it. On
+       the map's card of the device too (`onMap`: never folded). */
+    function deviceCard(device, only, onMap = false) {
+        const card = document.createElement('div'); card.className = 'device card'; card.dataset.device = device.id;
+        const name = document.createElement('b'); name.textContent = device.label;
+        const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
+        rename.addEventListener('click', () => {
+            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
+            const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
+            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
+            save.addEventListener('click', () => { void done(); });
+            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+            name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
+        });
+        const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
+        if (!device.seenAt) seen.className = 'warn';
+        const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
+        revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
+        /* A card that folds, as the chapters of a conversation do: open unless folded on purpose. */
+        const shut = !onMap && deviceShut.has(device.id);
+        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'card-fold'; fold.textContent = shut ? 'Expand' : 'Collapse';
+        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
+        fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void repaintDevices(); });
+        const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
+        const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
+        const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
+        const given = document.createElement('div'); given.className = 'given';
+        const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
+        for (const g of mine) given.append(grantRow(device, g));
+        /* Several chats given while off: said once for the card, not under each. */
+        const waiting = [...given.querySelectorAll('.parts-off')];
+        if (waiting.length > 1) {
+            for (const w of waiting) w.remove();
+            const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
+            once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
+            given.prepend(once);
+        }
+        if (only && mine.length === 0) {
+            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
+            const label = document.createElement('span'); label.textContent = accessFor;
+            const none = document.createElement('small'); none.className = 'hint'; none.textContent = ' not shared'; label.append(none);
+            const give = document.createElement('button'); give.type = 'button'; give.className = 'primary'; give.textContent = `Give ${accessFor}`;
+            give.addEventListener('click', async () => { give.disabled = true; await post(`${API}/devices/${device.id}/give`, { asset: only, rights: partsFor(accessFor) }).catch(() => {}); await repaintDevices(); void refresh(); });
+            row.append(label, give); given.append(row);
+        }
+        /* What the filter leaves out is named, never only counted. */
+        if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
+        const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
+        more.addEventListener('click', () => { void openCompose([], device.id); });
+        const acts = document.createElement('div'); acts.className = 'row device-acts'; acts.append(more, rename, revoke);
+        const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
+        card.append(head, body);
+        return card;
+    }
     async function paintManage() {
         await readDevices();
         $('share-by-device').setAttribute('aria-pressed', String(manageBy === 'device')); $('share-by-thing').setAttribute('aria-pressed', String(manageBy === 'thing'));
@@ -4555,55 +4890,7 @@
         if (manageBy === 'device' || only) {
             rows.hidden = false; things.hidden = true;
             for (const device of [...sharedDevices].sort((a, b2) => String(b2.seenAt ?? '').localeCompare(String(a.seenAt ?? '')))) {
-                const card = document.createElement('div'); card.className = 'device card'; card.dataset.device = device.id;
-                const name = document.createElement('b'); name.textContent = device.label;
-                const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
-                rename.addEventListener('click', () => {
-                    const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
-                    const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
-                    const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await paintManage(); };
-                    save.addEventListener('click', () => { void done(); });
-                    field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
-                    name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
-                });
-                const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
-                if (!device.seenAt) seen.className = 'warn';
-                const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
-                revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
-                /* A card that folds, as the chapters of a conversation do: open unless folded on purpose. */
-                const shut = deviceShut.has(device.id);
-                const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'card-fold'; fold.textContent = shut ? 'Expand' : 'Collapse';
-                fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
-                fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void paintManage(); });
-                const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
-                const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
-                const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
-                const given = document.createElement('div'); given.className = 'given';
-                const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
-                for (const g of mine) given.append(grantRow(device, g));
-                /* Several chats given while off: said once for the card, not under each. */
-                const waiting = [...given.querySelectorAll('.parts-off')];
-                if (waiting.length > 1) {
-                    for (const w of waiting) w.remove();
-                    const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
-                    once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
-                    given.prepend(once);
-                }
-                if (only && mine.length === 0) {
-                    const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
-                    const label = document.createElement('span'); label.textContent = accessFor;
-                    const none = document.createElement('small'); none.className = 'hint'; none.textContent = ' not shared'; label.append(none);
-                    const give = document.createElement('button'); give.type = 'button'; give.className = 'primary'; give.textContent = `Give ${accessFor}`;
-                    give.addEventListener('click', async () => { give.disabled = true; await post(`${API}/devices/${device.id}/give`, { asset: only, rights: partsFor(accessFor) }).catch(() => {}); await paintManage(); void refresh(); });
-                    row.append(label, give); given.append(row);
-                }
-                /* What the filter leaves out is named, never only counted. */
-                if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
-                const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
-                more.addEventListener('click', () => { void openCompose([], device.id); });
-                const acts = document.createElement('div'); acts.className = 'row device-acts'; acts.append(more, rename, revoke);
-                const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
-                card.append(head, body); rows.append(card);
+                rows.append(deviceCard(device, only));
             }
             return;
         }
@@ -4668,7 +4955,7 @@
     /* Back from choosing or from the code: where it was opened from. */
     $('sharing-close').addEventListener('click', () => {
         face('manage'); void refresh();
-        if (composeFrom === 'conversation') leavePlace(); else void openAccessPage(composeFrom);
+        if (composeFrom === 'conversation') leavePlace(); else void openAccessPage(composeFrom === 'devices' ? 'map' : composeFrom);
     });
 
     $('sharing-new').addEventListener('click', async () => {
@@ -4679,7 +4966,8 @@
                 const before = new Map(sharedDevices.find((d) => d.id === shareTarget).grants.map((g) => [g.asset, g.rights]));
                 for (const [asset, rights] of basket) if (before.get(asset) !== rights) await post(`${API}/devices/${shareTarget}/give`, { asset, rights });
                 for (const asset of before.keys()) if (!basket.has(asset)) await post(`${API}/devices/${shareTarget}/take`, { asset });
-                await openManage(); void refresh();
+                /* Back on the map, on that device's card. */
+                await readDevices(); await openAccessPage('map', { pin: `device:${shareTarget}` }); void refresh();
                 return;
             }
             const label = $('sharing-label').value.trim();
@@ -4710,7 +4998,7 @@
             $('share-cancel').onclick = async () => { await post(`${API}/shares/cancel`, { code: new URL(shared.url).hash.slice(1) }).catch(() => {}); await openCompose([...basket]); $('sharing-label').value = label; sayChoice(); };
         } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
     });
-    $('share-done').addEventListener('click', () => { void openManage(); void refresh(); });
+    $('share-done').addEventListener('click', () => { void openAccessPage('map'); void refresh(); });
 
     /* ---------- resting and archiving ---------- */
     $('sleep').addEventListener('click', async () => {

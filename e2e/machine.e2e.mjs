@@ -190,7 +190,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '1024');
     /* Its chat says it too, where it happened, with the same ways out; and the terminal is shown only when asked. */
     await me.page.locator('#panel-close').click();
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-chat').click();
     const line = me.page.locator('#simple-thread .parley-system');
     await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
     assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal']);

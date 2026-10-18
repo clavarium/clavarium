@@ -40,6 +40,9 @@ export const UNCHANGED_MAX = 50;
 /* A commit message is shown up to this many characters, and the cut is said. */
 export const MESSAGE_MAX = 4000;
 export const REVIEWS_KEPT = 20;
+/* The branch diagram: so many commits, so many of the remote's branches. */
+export const GRAPH_COMMITS = 40;
+export const GRAPH_BRANCHES = 20;
 /* How long a review waits for the reference, and a send or a refresh. */
 export const REVIEW_WAIT_MS = 10_000;
 export const SEND_WAIT_MS = 60_000;
@@ -406,6 +409,66 @@ export class GitReview {
                 return { ...nothing, ...base0, ...shown, branches, targetExists: Boolean(remoteTip), remoteTip, state, message };
             } finally { release(); }
         } finally { got.remove(); }
+    }
+
+    /* The workspace of one read, with the remote's history lent to it when
+       there is one, for `work(ws, remoteTips)`; deleted after. */
+    async #withRead(r, work) {
+        const got = await this.#read(r);
+        try {
+            let release = null; let remoteTips = new Map();
+            if (this.#remoteOf(r) && this.#resources.hasOrigin(r.name)) {
+                release = await this.#runner.lock(this.#reference(r.name), REVIEW_WAIT_MS);
+                this.#runner.borrow(got.path, this.#reference(r.name));
+                remoteTips = await this.#tipsIn(this.#reference(r.name));
+            }
+            try { return await work(got, remoteTips); } finally { release?.(); }
+        } finally { got.remove(); }
+    }
+
+    /* THE BRANCH DIAGRAM: the agent's branches, the remote's, and their
+       last commits, newest first in topological order: { branches: [{name,
+       id, side: 'agent'|'remote'}], commits: [{id, parents, subject, date,
+       refs: [{name, side}]}] }. What the agent wrote is escaped as everywhere. */
+    async graph(name) {
+        const r = this.#repository(name);
+        try {
+            return await this.#withRead(r, async (got, remoteTips) => {
+                const branches = got.branches.map((b) => ({ name: escaped(b.name), id: b.id, side: 'agent' }));
+                for (const [b, id] of [...remoteTips].sort(([a], [c]) => a.localeCompare(c)).slice(0, GRAPH_BRANCHES)) branches.push({ name: escaped(b), id, side: 'remote' });
+                const tips = [...new Set(branches.map((b) => b.id))];
+                if (tips.length === 0) return { branches, commits: [] };
+                const log = await this.#runner.in(got.path, ['log', '--topo-order', `--max-count=${GRAPH_COMMITS}`, '-z', '--format=%H%x00%P%x00%aI%x00%s', '--stdin', '--end-of-options'], { input: `${tips.join('\n')}\n`, deadlineMs: 60_000, maxBytes: 4 * 1024 * 1024 });
+                const fields = log.stdout.toString('utf8').split('\0');
+                const commits = [];
+                for (let i = 0; i + 3 < fields.length; i += 4) {
+                    const id = fields[i].replace(/^\n/, '');
+                    if (!isId(id)) break;
+                    commits.push({ id, parents: fields[i + 1].split(' ').filter(isId), date: fields[i + 2], subject: escaped(fields[i + 3]).slice(0, 300),
+                        refs: branches.filter((b) => b.id === id).map((b) => ({ name: b.name, side: b.side })) });
+                }
+                return { branches, commits };
+            });
+        } catch (error) {
+            if (error instanceof GitFailure && error.kind === 'empty') return { branches: [], commits: [] };
+            throw error;
+        }
+    }
+
+    /* ONE COMMIT, as a review shows it: against its first parent (or
+       nothing, for the first commit). Never sent from here. */
+    async commit(name, id) {
+        const r = this.#repository(name);
+        const asked = String(id ?? '');
+        if (!isId(asked)) throw new Refusal(400, 'A commit is named by its full identifier.');
+        return this.#withRead(r, async (got) => {
+            const p = await this.#runner.in(got.path, ['rev-list', '--parents', '--max-count=1', '--end-of-options', asked], { deadlineMs: 60_000 });
+            const ids = p.stdout.toString('latin1').trim().split(' ');
+            if (p.code !== 0 || ids[0] !== asked) throw new Refusal(404, 'This commit is not in the repository.');
+            const parents = ids.slice(1).filter(isId);
+            const shown = await this.#compare(got.path, { head: asked, base: parents[0] ?? EMPTY_TREE, range: [asked], negatives: parents });
+            return { ...shown, id: asked, parents, head: asked, state: 'commit', message: parents.length > 1 ? 'A merge: its changes against its first parent.' : '' };
+        });
     }
 
     /* What a review shows of head against base, in a workspace: the commits

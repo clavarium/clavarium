@@ -472,8 +472,12 @@
                 h('button', { type: 'button', text: 'See everything', onclick: () => { pinned = null; picked = null; draw(); hint(); } }));
             c.replaceChildren(h('h3', {}, h('span', { text: n.name }), h('small', { text: n.sub }), actions),
                 items.length ? h('ul', {}, items.map((i) => h('li', {}, i))) : h('p', { class: 'lk-none', text: 'No link yet.' }));
+            /* A paired device: its own card -- rename it, revoke it, what it has (the Devices tab is gone). */
+            const own = deviceCard(n);
+            if (own) c.append(own);
             c.hidden = false; fit();
         }
+        const deviceCard = (n) => (n.kind === 'device' && !n.pending && n.id.startsWith('device:') ? env.deviceCard?.(n.id.slice('device:'.length)) ?? null : null);
         async function pairIt(n) {
             try { const what = await request('/setup/pair', { label: n.name }); closeSheet(); await env.pairNew(what.grants, what.label); }
             catch (e) { err(e.message); }
@@ -604,7 +608,7 @@
                         h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: n.sub })),
                         h('button', { type: 'button', class: 'lk-x', 'aria-label': 'Close', text: '×', onclick: closeSheet })),
                     items.length ? h('ul', { class: 'lk-sheet-links' }, items.map((i) => h('li', {}, i))) : h('p', { class: 'lk-none', text: 'No link yet.' }),
-                    actions));
+                    actions, deviceCard(n)));
         }
         const PHONE_KINDS = [['device', 'Devices'], ['conversation', 'Conversations'], ['asset', 'Assets']];
         function paintPhone() {
@@ -990,6 +994,6 @@
         document.addEventListener('click', (e) => { if (pop && e.target.isConnected && !e.target.closest('.lk-pop, .lk-knob, .lk-node, svg')) { closePop(); draw(); } });
         addEventListener('resize', () => { if (shownNow()) { legend(); paintPhone(); fit(); draw(); place(); } });
         $('links-scroller').addEventListener('scroll', () => draw(), { passive: true });
-        return { open, openFlows, close };
+        return { open, openFlows, close, changed };
     };
 })();

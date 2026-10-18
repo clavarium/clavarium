@@ -17,7 +17,7 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     const page = me.page;
     /* The map is what Access opens on. */
     await page.locator('#nav-access').click();
-    assert.equal(await page.locator('#tab-map').getAttribute('aria-selected'), 'true');
+    await me.until('the map is shown', async () => page.locator('#links').isVisible());
     /* Everything first, and shown by default. */
     assert.deepEqual(await page.locator('#links-tabs [data-view]').evaluateAll((b) => b.map((x) => x.dataset.view)), ['all', 'convs', 'devices']);
     await me.until('everything is the view at first', async () => (await page.locator('#links-tabs [data-view=all]').getAttribute('aria-selected')) === 'true');
@@ -62,7 +62,9 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await me.until('the trace of client-a', async () => (await page.locator('#flows-trace .lk-tnode').count()) >= 4);
     assert.equal(await page.locator('#flows-of').inputValue(), 'conversation:client-a');
     assert.match(await page.locator('#flows-trace .lk-steps').evaluate((e) => e.textContent), /client-a writes in site-a/);
-    /* Exported: the configuration, never a value. */
+    /* Exported, from Settings: the configuration, never a value. */
+    await page.locator('#nav-settings').click();
+    await page.locator('#settings-ch-backup > summary').click();
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#flows-export').click()]);
     const text = readFileSync(await download.path(), 'utf8');
     assert.ok(text.includes('"id": "secret:DEPLOY_A"') && !text.includes('not-a-real-value'));

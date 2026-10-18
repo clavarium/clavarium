@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="/vendor/xterm.css">
 <link rel="stylesheet" href="/style.css">
 <link rel="stylesheet" href="/vendor/parley-ui.css">
+<link rel="stylesheet" href="/vendor/diff2html.css">
 <div id="app" data-place="conversations">
   <aside id="list" hidden>
     <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
@@ -41,6 +42,7 @@
        the bottom on a phone. -->
   <nav id="nav" aria-label="Places" hidden>
     <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="message-square"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Conversations</span></button>
+    <button type="button" id="nav-assets" data-place="assets"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="layers"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span></button>
     <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/></svg><span>Access</span></button>
     <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="settings"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
   </nav>
@@ -48,17 +50,15 @@
     <header>
       <button type="button" id="back" aria-label="All conversations" hidden>&lsaquo;</button>
       <button type="button" id="fold" aria-label="Hide the list of conversations" aria-pressed="false" title="Hide or show the list of conversations">&laquo;</button>
+      <span id="state" data-state="connecting" role="status">connecting</span>
       <b id="name"></b>
-      <span id="tool" class="tag" hidden></span>
-      <span id="state" data-state="connecting">connecting</span>
-      <span id="chips" class="chips"></span>
-      <div id="menu-items">
-        <button type="button" id="simple-toggle" class="in-menu" aria-pressed="false" title="A plain screen: what it says, what is ready, a box to say what you want">Simple</button>
-        <button type="button" id="files-open" class="in-menu" hidden>Files</button>
-        <button type="button" id="folders" class="in-menu" hidden>This conversation</button>
-        <span class="in-menu text-size" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span>
+      <!-- THE BAR: its chat, its terminal, what it was given; its settings (G). -->
+      <div id="views" class="views" role="group" aria-label="What to see">
+        <button type="button" id="view-chat" aria-pressed="false" title="Its chat"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Chat</span></button>
+        <button type="button" id="view-terminal" aria-pressed="false" title="Its terminal"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></svg><span>Terminal</span></button>
+        <button type="button" id="view-assets" aria-pressed="false" title="What it was given"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span><b id="assets-count" class="count"></b></button>
       </div>
-      <button type="button" id="menu" aria-expanded="false" aria-label="More">&#8943;</button>
+      <button type="button" id="folders" aria-label="Settings of this conversation" title="Settings of this conversation" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
     </header>
     <div id="health-strip" role="status" hidden>
       <span id="health-text"></span>
@@ -104,6 +104,14 @@
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <!-- THIS CONVERSATION: its settings, in chapters that fold, as a project's
            settings do. Nothing is created here: what it is given is made in Assets. -->
+      <!-- WHAT THIS CONVERSATION WAS GIVEN (G): the same list, its own, with
+           each opened on the right (a folder: its files). -->
+      <div id="cassets" class="sheet as-room" hidden>
+        <div class="as" id="cassets-as">
+          <div class="as-list"><div id="cassets-rows"></div></div>
+          <div class="as-detail" id="cassets-detail"></div>
+        </div>
+      </div>
       <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b id="panel-title">This conversation</b><button type="button" id="panel-close">Close</button></div>
         <p id="panel-error" class="error" role="alert" hidden></p>
@@ -330,16 +338,9 @@
         <div class="panel-top access-top">
           <b>Access</b>
           <span id="access-for" class="for-badge" hidden><span class="hint">Only</span> <b id="access-for-name"></b><button type="button" id="access-for-clear" aria-label="Show everything, not only this conversation" title="Show everything">&times;</button></span>
-          <span id="export-note" class="hint">Secrets are never exported, only their names.</span>
-          <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json" hidden><button type="button" id="access-close">Close</button></span>
+          <button type="button" id="access-close">Close</button>
         </div>
-        <span id="flows-said" class="hint" role="status"></span>
-        <div id="access-tabs" class="seg" role="tablist" aria-label="Access">
-          <button type="button" role="tab" id="tab-map" data-tab="map" aria-controls="access-map" aria-selected="true">Map</button>
-          <button type="button" role="tab" id="tab-devices" data-tab="devices" aria-controls="sharing" aria-selected="false">Devices</button>
-          <button type="button" role="tab" id="tab-assets" data-tab="assets" aria-controls="assets" aria-selected="false">Assets</button>
-        </div>
-        <div id="access-map" class="pane" role="tabpanel" aria-labelledby="tab-map">
+        <div id="access-map" class="pane">
           <div class="row map-bar">
             <div class="levels map-mode" id="map-mode" role="group" aria-label="Map or flows"><button type="button" data-mode="map" aria-pressed="true">Who gets what</button><button type="button" data-mode="flows" aria-pressed="false">Flows</button></div>
             <div id="links-tabs" class="lk-tabs" role="tablist" aria-label="What the map shows">
@@ -349,6 +350,7 @@
               <button type="button" role="tab" data-view="devices">Devices</button>
             </div>
             <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
+            <button type="button" id="map-new-device">+ New device</button>
           </div>
         <!-- THE MAP (once "Who gets what"): every device, conversation and asset, and the rights between them (links.js). -->
         <div id="links" class="pane">
@@ -368,106 +370,7 @@
           <div id="flows-all"></div>
         </div>
         </div>
-      <div id="assets" class="pane" role="tabpanel" aria-labelledby="tab-assets" hidden>
-        <p class="hint">Folders, repositories, mailboxes, secrets: what is kept here, which conversations use it, which devices were given it.</p>
-        <div id="assets-filters" class="choices" role="group" aria-label="Kind of asset"></div>
-        <p id="assets-error" class="error" role="alert" hidden></p>
-        <section data-kind="folder">
-          <div class="panel-top"><b id="assets-folder-title">Folders</b></div>
-          <div id="assets-folder"></div>
-          <details id="folder-box"><summary>New folder</summary>
-        <form id="folder-new" autocomplete="off">
-          <label for="folder-name">New folder</label>
-          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
-            <button type="submit" class="primary">Create</button></div>
-        </form>
-          </details>
-        </section>
-        <section data-kind="git">
-          <div class="panel-top"><b id="assets-git-title">Repositories</b></div>
-          <div id="assets-git"></div>
-        <details id="git-box">
-          <summary>Add a repository</summary>
-          <p class="hint">A folder that starts as a repository: empty, or cloned from a remote -- public, or private over SSH or HTTPS. It is attached and shared like a folder, to read or to write. What opens a private remote is kept on this server, sealed, and used here only (to clone, to look, to send): the tool's machine never receives it.</p>
-          <form id="git-new" autocomplete="off">
-            <label for="git-name">Name</label>
-            <input id="git-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website" spellcheck="false" autocapitalize="off" required>
-            <label for="git-from">Clone from (optional)</label>
-            <input id="git-from" inputmode="url" maxlength="500" placeholder="git@example.com:team/project.git or https://example.com/team/project.git" spellcheck="false" autocapitalize="off">
-            <fieldset id="git-via">
-              <legend>How this server gets in</legend>
-              <label><input type="radio" name="git-via" value="ssh-key" checked> SSH key made here <small class="hint">(recommended: its private half never leaves this server)</small></label>
-              <label><input type="radio" name="git-via" value="token"> HTTPS access token</label>
-              <label><input type="radio" name="git-via" value="password"> HTTPS user name and password <small class="warn">(not recommended: a password often opens far more than this repository)</small></label>
-              <label><input type="radio" name="git-via" value="none"> Nothing: a public https address</label>
-            </fieldset>
-            <div id="git-via-ssh-key" class="git-via-part">
-              <label for="git-key">Key</label>
-              <div class="row"><select id="git-key"></select><button type="button" id="git-key-new">New key</button></div>
-              <div id="git-key-make" class="row" hidden><input id="git-key-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" aria-label="Name of the new key" placeholder="deploy-key" spellcheck="false" autocapitalize="off"><button type="button" id="git-key-make-go" class="primary">Make the key</button></div>
-              <div id="git-key-shown" hidden>
-                <label for="git-key-public">Public key: add it to the repository on the hosting service, then press Add</label>
-                <div class="row"><textarea id="git-key-public" class="public-key" readonly rows="3" spellcheck="false"></textarea><button type="button" id="git-key-copy">Copy</button></div>
-                <p class="hint">On GitHub a deploy key works for one repository only (Settings - Deploy keys). On GitLab one deploy key can be enabled on several projects (Settings - Repository - Deploy keys). To let Send push, allow it to write there.</p>
-              </div>
-            </div>
-            <div id="git-via-token" class="git-via-part" hidden>
-              <label for="git-token-user">User name (optional)</label>
-              <input id="git-token-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
-              <label for="git-token">Access token (kept sealed here; give it access to this repository only)</label>
-              <input id="git-token" type="password" autocomplete="new-password">
-            </div>
-            <div id="git-via-password" class="git-via-part" hidden>
-              <p class="warn">Not recommended: prefer an SSH key made here, or a token limited to this repository.</p>
-              <label for="git-pass-user">User name</label>
-              <input id="git-pass-user" spellcheck="false" autocapitalize="off" autocomplete="off">
-              <label for="git-pass">Password (kept sealed here)</label>
-              <input id="git-pass" type="password" autocomplete="new-password">
-            </div>
-            <div class="row"><button type="submit" class="primary">Add</button></div>
-            <p id="git-said" class="hint" role="status" hidden></p>
-            <p id="git-error" class="error" role="alert" hidden></p>
-          </form>
-        </details>
-        <div class="panel-top"><b id="git-keys-title">SSH keys made here</b><small class="hint">the private half never leaves this server</small></div>
-        <div id="git-keys"></div>
-        <p id="git-keys-empty" class="hint">No key yet: "New key" in Add a repository makes one.</p>
-        </section>
-        <section data-kind="mailbox">
-          <div class="panel-top"><b id="assets-mailbox-title">Mailboxes</b><small class="hint">read-only copies</small></div>
-          <div id="assets-mailbox"></div>
-        <details id="mailbox-box">
-          <summary>Add a mailbox</summary>
-          <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
-          <form id="mailbox-new" autocomplete="off">
-            <label for="mailbox-name">Folder name</label>
-            <input id="mailbox-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="inbox" spellcheck="false" autocapitalize="off" required>
-            <label for="mailbox-host">Mail server (IMAP, TLS)</label>
-            <div class="row"><input id="mailbox-host" placeholder="imap.example.com" spellcheck="false" autocapitalize="off" required><input id="mailbox-port" inputmode="numeric" placeholder="993" aria-label="Port" size="5"></div>
-            <label for="mailbox-user">User</label>
-            <input id="mailbox-user" spellcheck="false" autocapitalize="off" autocomplete="off" required>
-            <label for="mailbox-password">Password</label>
-            <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password" required>
-              <button type="submit" class="primary">Add</button></div>
-            <p id="mailbox-error" class="error" role="alert" hidden></p>
-          </form>
-        </details>
-        </section>
-        <section data-kind="secret">
-          <div class="panel-top"><b id="assets-secret-title">Secrets</b><small class="hint">a value goes in and is never shown again</small></div>
-          <div id="secret-rows"></div>
-          <p id="secret-empty" class="hint" hidden>No secret yet.</p>
-          <details id="secret-box"><summary>Add a secret</summary>
-        <form id="secret-new" autocomplete="off">
-          <label for="secret-name">New secret, or a new value for an existing one</label>
-          <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
-            <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
-            <button type="submit" class="primary">Save</button></div>
-        </form>
-          </details>
-        </section>
-      </div>
-      <div id="sharing" class="pane" role="tabpanel" aria-labelledby="tab-devices" hidden>
+      <div id="sharing" class="pane" hidden>
         <div class="panel-top" id="sharing-top" hidden><b id="sharing-title">Share</b><button type="button" id="sharing-close">Back</button></div>
         <!-- Choosing what a device gets: a basket you add to. -->
         <div id="share-compose">
@@ -517,6 +420,109 @@
       </div>
       </div>
       <!-- SETTINGS: the platform, and this device. -->
+      <!-- ASSETS (H): everything kept on this server, by kind; one opened on the
+           right: who uses it, its state, its settings. The forms that make
+           one, and a repository's remote, wait in #assets-forms and are moved
+           into the detail when asked for. -->
+      <div id="assets" class="sheet as-place" hidden>
+        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
+        <p id="assets-error" class="error" role="alert" hidden></p>
+        <div class="as" id="assets-as">
+          <div class="as-list"><input type="search" id="assets-search" placeholder="Search assets" aria-label="Search assets" spellcheck="false" autocomplete="off"><div id="assets-rows"></div></div>
+          <div class="as-detail" id="assets-detail"></div>
+        </div>
+        <div id="assets-forms" hidden>
+          <div id="folder-box" class="as-form" data-kind="folder"><h3>New folder</h3>
+        <form id="folder-new" autocomplete="off">
+          <label for="folder-name">New folder</label>
+          <div class="row"><input id="folder-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="reports" spellcheck="false" autocapitalize="none" required>
+            <button type="submit" class="primary">Create</button></div>
+        </form>
+          </div>
+          <div id="git-box" class="as-form" data-kind="git"><h3>New repository</h3>
+          <p class="hint">A folder that starts as a repository: empty, or cloned from a remote -- public, or private over SSH or HTTPS. It is attached and shared like a folder, to read or to write. What opens a private remote is kept on this server, sealed, and used here only (to clone, to look, to send): the tool's machine never receives it.</p>
+          <form id="git-new" autocomplete="off">
+            <label for="git-name">Name</label>
+            <input id="git-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website" spellcheck="false" autocapitalize="off" required>
+            <label for="git-from">Clone from (optional)</label>
+            <input id="git-from" inputmode="url" maxlength="500" placeholder="git@example.com:team/project.git or https://example.com/team/project.git" spellcheck="false" autocapitalize="off">
+            <fieldset id="git-via">
+              <legend>How this server gets in</legend>
+              <label><input type="radio" name="git-via" value="ssh-key" checked> SSH key made here <small class="hint">(recommended: its private half never leaves this server)</small></label>
+              <label><input type="radio" name="git-via" value="token"> HTTPS access token</label>
+              <label><input type="radio" name="git-via" value="password"> HTTPS user name and password <small class="warn">(not recommended: a password often opens far more than this repository)</small></label>
+              <label><input type="radio" name="git-via" value="none"> Nothing: a public https address</label>
+            </fieldset>
+            <div id="git-via-ssh-key" class="git-via-part">
+              <label for="git-key">Key</label>
+              <div class="row"><select id="git-key"></select><button type="button" id="git-key-new">New key</button></div>
+              <div id="git-key-make" class="row" hidden><input id="git-key-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" aria-label="Name of the new key" placeholder="deploy-key" spellcheck="false" autocapitalize="off"><button type="button" id="git-key-make-go" class="primary">Make the key</button></div>
+              <div id="git-key-shown" hidden>
+                <label for="git-key-public">Public key: add it to the repository on the hosting service, then press Add</label>
+                <div class="row"><textarea id="git-key-public" class="public-key" readonly rows="3" spellcheck="false"></textarea><button type="button" id="git-key-copy">Copy</button></div>
+                <p class="hint">On GitHub a deploy key works for one repository only (Settings - Deploy keys). On GitLab one deploy key can be enabled on several projects (Settings - Repository - Deploy keys). To let Send push, allow it to write there.</p>
+              </div>
+            </div>
+            <div id="git-via-token" class="git-via-part" hidden>
+              <label for="git-token-user">User name (optional)</label>
+              <input id="git-token-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
+              <label for="git-token">Access token (kept sealed here; give it access to this repository only)</label>
+              <input id="git-token" type="password" autocomplete="new-password">
+            </div>
+            <div id="git-via-password" class="git-via-part" hidden>
+              <p class="warn">Not recommended: prefer an SSH key made here, or a token limited to this repository.</p>
+              <label for="git-pass-user">User name</label>
+              <input id="git-pass-user" spellcheck="false" autocapitalize="off" autocomplete="off">
+              <label for="git-pass">Password (kept sealed here)</label>
+              <input id="git-pass" type="password" autocomplete="new-password">
+            </div>
+            <div class="row"><button type="submit" class="primary">Add</button></div>
+            <p id="git-said" class="hint" role="status" hidden></p>
+            <p id="git-error" class="error" role="alert" hidden></p>
+          </form>
+        <div class="panel-top"><b id="git-keys-title">SSH keys made here</b><small class="hint">the private half never leaves this server</small></div>
+        <div id="git-keys"></div>
+        <p id="git-keys-empty" class="hint">No key yet: "New key" in Add a repository makes one.</p>
+          </div>
+          <div id="mailbox-box" class="as-form" data-kind="mailbox"><h3>New mailbox</h3>
+          <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
+          <form id="mailbox-new" autocomplete="off">
+            <label for="mailbox-name">Folder name</label>
+            <input id="mailbox-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="inbox" spellcheck="false" autocapitalize="off" required>
+            <label for="mailbox-host">Mail server (IMAP, TLS)</label>
+            <div class="row"><input id="mailbox-host" placeholder="imap.example.com" spellcheck="false" autocapitalize="off" required><input id="mailbox-port" inputmode="numeric" placeholder="993" aria-label="Port" size="5"></div>
+            <label for="mailbox-user">User</label>
+            <input id="mailbox-user" spellcheck="false" autocapitalize="off" autocomplete="off" required>
+            <label for="mailbox-password">Password</label>
+            <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password" required>
+              <button type="submit" class="primary">Add</button></div>
+            <p id="mailbox-error" class="error" role="alert" hidden></p>
+          </form>
+          </div>
+          <div id="secret-box" class="as-form" data-kind="secret"><h3>New secret</h3><p class="hint">A value goes in and is never shown again.</p>
+        <form id="secret-new" autocomplete="off">
+          <label for="secret-name">New secret, or a new value for an existing one</label>
+          <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
+            <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
+            <button type="submit" class="primary">Save</button></div>
+        </form>
+          </div>
+        <details id="gitview-remote-box">
+          <summary>Where the commits are sent</summary>
+          <form id="gitview-remote" autocomplete="off">
+            <label for="gitview-url">Address (https or ssh)</label>
+            <input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required>
+            <label for="gitview-sshkey">SSH key made here (for an ssh address)</label>
+            <select id="gitview-sshkey"></select>
+            <label for="gitview-user">For an https address: user name of the token (optional)</label>
+            <input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
+            <label for="gitview-key">Key or token that may push (kept sealed here; leave empty to keep the one there is)</label>
+            <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>
+            <p id="gitview-key-state" class="hint"></p>
+          </form>
+        </details>
+        </div>
+      </div>
       <div id="settings" class="sheet" hidden>
         <div class="panel-top"><b>Settings</b><button type="button" id="settings-close">Close</button></div>
         <h3 class="chapter-group">This device</h3>
@@ -648,6 +654,7 @@
         <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
           <summary><span class="chapter-title">Storage &amp; backup</span><span class="chapter-about">Disk sizes, and how to back up.</span></summary>
           <div class="chapter-body">
+        <div class="row"><span id="export-note" class="hint">Secrets are never exported, only their names.</span>           <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json" hidden></span> <span id="flows-said" class="hint" role="status"></span></div>
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
           </div>
         </details>
@@ -730,56 +737,47 @@
         <p id="files-empty" class="hint" hidden>This folder is empty.</p>
         <div id="files-drop" hidden><p id="files-drop-text">Drop to upload here</p></div>
       </div>
-      <div id="gitview" class="sheet" hidden>
-        <div class="panel-top"><b id="gitview-name">Repository</b><button type="button" id="gitview-close">Close</button></div>
-        <p class="hint">The tool commits in its machine and never holds the key that lets commits out: it is kept here. You see what would go, then you send it. What is sent is exactly what you were shown.</p>
-        <div id="gitview-branch-row" class="row" hidden>
-          <label for="gitview-branch">The agent's branch</label>
-          <select id="gitview-branch"></select>
+      <!-- THE REVIEW (E): one page for what a repository would send, or for one
+           commit. The diff is drawn by diff2html from the text of the diff:
+           every line is escaped there, nothing the agent wrote is markup. -->
+      <div id="gitview" class="review" hidden>
+        <div class="rv-head">
+          <button type="button" id="gitview-close" class="as-link">&lsaquo; <span id="gitview-back">Back</span></button>
+          <b id="gitview-name">Repository</b>
+          <span class="rv-branches"><span id="gitview-branch-row" hidden><label for="gitview-branch" class="sr">The agent's branch</label><select id="gitview-branch" class="pill agent"></select></span><span id="gitview-from" class="pill agent"></span><span id="gitview-arrow" aria-hidden="true">&rarr;</span><span id="gitview-target-row" hidden><label for="gitview-target" class="sr">Send to the branch</label><select id="gitview-target" class="pill target"></select><input id="gitview-newbranch" spellcheck="false" autocapitalize="off" autocomplete="off" maxlength="200" placeholder="new-branch-name" aria-label="Name of the new branch" hidden><button type="button" id="gitview-newbranch-go" hidden>Look</button></span></span>
+          <span class="rv-acts"><button type="button" id="gitview-again" title="Look again">&#8635;</button><button type="button" id="gitview-check" hidden>Run the checks again</button><button type="button" id="gitview-push" class="primary" hidden>Send</button></span>
         </div>
-        <div id="gitview-target-row" class="row" hidden>
-          <label for="gitview-target">Send to the branch</label>
-          <select id="gitview-target"></select>
-          <input id="gitview-newbranch" spellcheck="false" autocapitalize="off" autocomplete="off" maxlength="200" placeholder="new-branch-name" aria-label="Name of the new branch" hidden>
-          <button type="button" id="gitview-newbranch-go" hidden>Look</button>
-        </div>
+        <p id="gitview-numbers" class="rv-numbers"></p>
         <p id="gitview-state" role="status"></p>
+        <p id="gitview-error" class="error" role="alert" hidden></p>
+        <div class="row" id="gitview-offer-row" hidden><button type="button" id="gitview-offer"></button><span class="hint">Only for checks about old dates, modes and author lines, which old tools got wrong. Never for what protects a checkout.</span></div>
+        <p id="gitview-remote-go" class="hint" hidden><button type="button" id="gitview-set-remote" class="as-link">Set where it is sent, in Assets</button></p>
+        <p id="gitview-read" class="hint" role="status" hidden></p>
+        <p id="gitview-dropped" class="hint" hidden></p>
+        <div id="gitview-guards" class="rv-good" hidden><b>Good to know</b><ul id="gitview-guards-list"></ul></div>
+        <div id="gitview-tabs" class="rv-tabs" role="tablist" aria-label="Review">
+          <button type="button" role="tab" data-tab="changes" aria-selected="true">Changes <span class="count" id="gitview-n-files"></span></button>
+          <button type="button" role="tab" data-tab="commits" aria-selected="false">Commits <span class="count" id="gitview-n-commits"></span></button>
+          <button type="button" role="tab" data-tab="checks" aria-selected="false">Checks <span id="gitview-n-checks"></span></button>
+          <span class="rv-layout levels" id="gitview-layout" role="group" aria-label="Layout"><button type="button" data-layout="side-by-side" aria-pressed="true">Side by side</button><button type="button" data-layout="line-by-line" aria-pressed="false">Unified</button></span>
+        </div>
+        <div id="gitview-pane-changes" class="rv-pane">
+          <div class="rv-picker" id="gitview-picker" hidden><button type="button" data-step="-1" aria-label="Previous file">&lsaquo;</button><span id="gitview-picker-at"></span><button type="button" data-step="1" aria-label="Next file">&rsaquo;</button></div>
+          <div class="rv-body"><nav id="gitview-tree" class="rv-tree" aria-label="Files changed"></nav><div id="gitview-diff" class="rv-diff"></div></div>
+          <pre id="gitview-stat" hidden></pre>
+        </div>
+        <div id="gitview-pane-commits" class="rv-pane" hidden><div id="gitview-commits"></div></div>
+        <div id="gitview-pane-checks" class="rv-pane" hidden>
         <div id="gitview-checks" hidden>
           <p class="hint">Checks run in the agent's machine (its pre-push hook, your check command): a safeguard, not a proof. The tool could make them pass.</p>
           <p id="gitview-checks-state" role="status"></p>
           <pre id="gitview-checks-output"></pre>
-        </div>
-        <div class="row"><button type="button" id="gitview-push" class="primary" hidden>Send these commits</button><button type="button" id="gitview-check" hidden>Run the checks again</button><button type="button" id="gitview-again">Look again</button></div>
-        <p id="gitview-error" class="error" role="alert" hidden></p>
-        <div class="row" id="gitview-offer-row" hidden><button type="button" id="gitview-offer"></button><span class="hint">Only for checks about old dates, modes and author lines, which old tools got wrong. Never for what protects a checkout.</span></div>
-        <p id="gitview-read" class="hint" role="status" hidden></p>
-        <p id="gitview-dropped" class="hint" hidden></p>
-        <div id="gitview-guards" hidden>
-          <b>What the changes alone do not show</b>
-          <ul id="gitview-guards-list"></ul>
         </div>
         <div id="gitview-origin" hidden>
           <p class="hint" id="gitview-origin-where"></p>
           <div class="row"><code id="gitview-origin-fetch"></code></div>
           <div class="row"><button type="button" id="gitview-refresh">Refresh now</button><span class="hint" id="gitview-origin-state" role="status"></span></div>
         </div>
-        <div id="gitview-commits"></div>
-        <pre id="gitview-stat"></pre>
-        <pre id="gitview-diff"></pre>
-        <details id="gitview-remote-box">
-          <summary>Where the commits are sent</summary>
-          <form id="gitview-remote" autocomplete="off">
-            <label for="gitview-url">Address (https or ssh)</label>
-            <input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required>
-            <label for="gitview-sshkey">SSH key made here (for an ssh address)</label>
-            <select id="gitview-sshkey"></select>
-            <label for="gitview-user">For an https address: user name of the token (optional)</label>
-            <input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
-            <label for="gitview-key">Key or token that may push (kept sealed here; leave empty to keep the one there is)</label>
-            <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>
-            <p id="gitview-key-state" class="hint"></p>
-          </form>
-        </details>
         <details id="gitview-keep-box">
           <summary>Checks, origin, automatic sending</summary>
           <form id="gitview-keep" autocomplete="off">
@@ -800,6 +798,7 @@
           <p id="gitview-log-empty" class="hint">Nothing yet.</p>
           <div id="gitview-log"></div>
         </details>
+        </div>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
@@ -852,6 +851,8 @@
 </div>
 <script src="/vendor/xterm.js"></script>
 <script src="/vendor/fit.js"></script>
+<script src="/vendor/diff2html.js"></script>
+<script src="/gitgraph.js"></script>
 <script src="/links.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>

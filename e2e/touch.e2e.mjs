@@ -189,8 +189,8 @@ test('with the lock on, nothing the page does brings the on-screen keyboard back
     await holds('a resize');
 
     /* Sheets and windows that give the focus back when they close. */
-    await me.menu(); await tap('#files-open'); await tap('#files-close');
-    await holds('Files closed');
+    await tap('#view-assets'); await tap('#view-terminal');
+    await holds('Assets closed');
     await me.menu(); await tap('#folders');
     await me.chapter('wakeups');
     await me.page.locator('#wakeups-new-box summary').tap();

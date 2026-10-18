@@ -70,6 +70,10 @@ export const FILES = {
     '/voice-core.js': ['web/voice-core.js', 'text/javascript; charset=utf-8'],
     '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
+    '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
+    /* The review's diff, drawn by diff2html (vendored, pinned: web/vendor/diff2html/LICENSE). */
+    '/vendor/diff2html.js': ['web/vendor/diff2html/diff2html-ui-slim.min.js', 'text/javascript; charset=utf-8'],
+    '/vendor/diff2html.css': ['web/vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
     '/vendor/xterm.js': [packageFile('@xterm/xterm', 'lib/xterm.js'), 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': [packageFile('@xterm/xterm', 'css/xterm.css'), 'text/css; charset=utf-8'],
     '/vendor/fit.js': [packageFile('@xterm/addon-fit', 'lib/addon-fit.js'), 'text/javascript; charset=utf-8'],

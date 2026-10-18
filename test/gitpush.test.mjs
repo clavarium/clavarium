@@ -492,3 +492,28 @@ test('an automatic sending is decided again under the lock, after its refresh: n
     assert.deepEqual(seen, ['main'], 'asked with the default branch the send\'s own refresh knows');
     assert.throws(() => git(b.remote, 'rev-parse', '--verify', '--quiet', 'refs/heads/try/new'));
 });
+
+test('the branch diagram: the agent\'s branches and the remote\'s, their last commits; each commit opens as a review', async (t) => {
+    const b = bench(t);
+    assert.deepEqual(await b.review.graph('site'), { branches: [], commits: [] }, 'nothing committed: nothing drawn');
+    const first = b.commit('README.md', '# site\n', 'Start the site');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site');
+    await b.review.push('site', { head: first });
+    git(b.work, 'checkout', '--quiet', '-b', 'dev');
+    const second = b.commit('page.html', '<h1>hi</h1>\n', 'Add a <b>page</b>');
+    const drawn = await b.review.graph('site');
+    assert.deepEqual(drawn.branches.map((x) => `${x.side}:${x.name}`).sort(), ['agent:dev', 'agent:main', 'remote:main']);
+    assert.deepEqual(drawn.commits.map((c) => c.subject), ['Add a <b>page</b>', 'Start the site'], 'newest first; the subject is text, the page escapes it');
+    assert.deepEqual(drawn.commits[0].parents, [first]);
+    assert.deepEqual(drawn.commits[0].refs, [{ name: 'dev', side: 'agent' }]);
+    assert.deepEqual(drawn.commits[1].refs.map((r) => r.side).sort(), ['agent', 'remote']);
+    const one = await b.review.commit('site', second);
+    assert.deepEqual([one.state, one.count, one.commits.map((c) => c.id), one.parents], ['commit', 1, [second], [first]]);
+    assert.match(one.diff, /^\+<h1>hi<\/h1>$/m);
+    assert.doesNotMatch(one.diff, /README/, 'against its parent only');
+    assert.match((await b.review.commit('site', first)).diff, /^\+# site$/m, 'the first commit, against nothing');
+    await assert.rejects(b.review.commit('site', 'HEAD'), /full identifier/);
+    await assert.rejects(b.review.commit('site', 'f'.repeat(40)), /not in the repository/);
+    assert.deepEqual(readdirSync(b.workRoot), [], 'each workspace is gone');
+});

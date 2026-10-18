@@ -85,6 +85,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     await me.until('the checks failed', async () => /Checks FAILED/.test(await me.page.locator('#gitview-checks-state').innerText()));
     assert.match(await me.page.locator('#gitview-checks-output').innerText(), /tests are red/);
     assert.equal(await me.page.locator('#gitview-push').isVisible(), true);
+    await me.page.locator('#gitview-tabs [data-tab="checks"]').click();
     await me.page.locator('#gitview-keep-box summary').click();
     assert.match(await me.page.locator('#gitview-auto-where').innerText(), /set for each conversation.*Now: none\./, 'no branch is sent to by itself, to begin with');
     assert.equal(await me.page.locator('#gitview-refreshminutes').inputValue(), '5');
@@ -254,15 +255,14 @@ test('automatic sending is set per conversation, right under its write access: h
     await me.until('helper is ready', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'helper')?.phase === 'ready', 30_000);
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
-    await me.openAccess('assets');
-    const asset = me.page.locator('#assets-git .asset[data-name="shop"]');
-    await asset.locator('.asset-head').click();
+    const asset = await me.openAsset('git', 'shop');
+    await asset.locator('.as-chapter .as-add').first().click();
     await asset.locator('.given-row[data-conversation="helper"] button', { hasText: 'Write' }).click();
     await me.until('a second writer is asked about', async () => /Other conversations write in this same folder/.test(await me.page.locator('#assets-error').innerText()));
     assert.equal((await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper, undefined, 'not attached yet');
     await me.page.locator('#assets-error .attach-shared').click();
     await me.until('helper writes', async () => (await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper === 'write');
-    await me.page.locator('#access-close').click();
+    await me.page.locator('#assets-close').click();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();

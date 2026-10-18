@@ -29,6 +29,6 @@ test('a conversation whose machine is gone can have it built again, and finds it
     await me.type('cat ../resources/notes/kept.txt; cat made-here.txt; echo checked');
     await me.sees('kept-in-a-folder');
     await me.sees('\nmade-where-the-tool-works');
-    assert.match(await me.page.locator('#chips').innerText(), /notes - write/);
+    assert.match(await me.page.locator('#view-assets').getAttribute('title'), /notes - write/);
     assert.deepEqual(me.errors.filter((e) => !/410|1011|WebSocket/.test(e)), []);
 });

@@ -10,78 +10,63 @@ async function pairDevice(me, origin, grants, label) {
     const r = await fetch(`${origin}/c/api/pair`, { method: 'POST', headers: { origin, 'content-type': 'application/json' }, body: JSON.stringify({ code: new URL(shared.url).hash.slice(1), key: publicKey.export({ format: 'jwk' }), label }) });
     assert.equal(r.status, 201);
 }
-const selected = (page, tab) => page.locator(`#tab-${tab}`).getAttribute('aria-selected');
-
-test('three places at the bottom left; Access is Map, Devices, Assets with Export and Import always in sight; a conversation opens it filtered on itself; old addresses lead to their tab; Back walks the tabs', { skip: SKIP }, async (t) => {
+test('three places at the bottom left -- Assets, Access, Settings; Access is the map alone, a device is a card on it; Export and Import are in Settings; a conversation opens its own Assets; old addresses lead to their place; Back walks them', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     const page = me.page;
     await me.create('garden');
     await me.api('/api/resources', { name: 'seeds' });
     await pairDevice(me, b.origin, [{ asset: 'folder:seeds', rights: 'r' }], 'Kitchen tablet');
-    /* On a wide screen the list above is the menu: the bar holds the places of the whole, Access and Settings. */
-    assert.deepEqual(await page.locator('#nav button:visible').allInnerTexts(), ['Access', 'Settings']);
+    /* On a wide screen the list above is the menu: the bar holds the places of the whole. */
+    assert.deepEqual(await page.locator('#nav button:visible').allInnerTexts(), ['Assets', 'Access', 'Settings']);
     const navBox = await page.locator('#nav').boundingBox(); const listBox = await page.locator('#list').boundingBox();
     assert.ok(navBox.x < 5 && navBox.y >= listBox.y + listBox.height - 1, 'under the list, bottom left');
-    for (const id of ['#links-open', '#assets-open', '#sharing-open', '#settings-open']) assert.equal(await page.locator(id).count(), 0, `${id} has gone into the places`);
-    /* Access: its tabs in this order, the map first. */
+    for (const id of ['#links-open', '#assets-open', '#sharing-open', '#settings-open', '#access-tabs', '#tab-devices']) assert.equal(await page.locator(id).count(), 0, `${id} is gone`);
+    /* Access: the map alone; a device is a card on it; a new device starts there. */
     await page.locator('#nav-access').click();
-    /* The tablet was paired after the page was opened: counted on the way in. */
-    await me.until('the tabs, with the devices counted', async () => (await page.locator('#access-tabs [role=tab]').allInnerTexts()).join('|') === 'Map|Devices (1)|Assets');
-    assert.equal(await selected(page, 'map'), 'true');
     assert.equal(await page.locator('#nav-access').getAttribute('aria-current'), 'page');
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 3);
-    /* Export and Import, whatever the tab; Flows is a switch of the map. */
-    for (const tab of ['map', 'devices', 'assets']) {
-        await page.locator(`#tab-${tab}`).click();
-        assert.equal(await selected(page, tab), 'true');
-        for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, `${id} on ${tab}`);
-    }
-    assert.equal(await page.locator('#sharing-devices .device').count(), 1, 'the devices tab is the former Devices & sharing');
-    await page.locator('#tab-map').click();
+    assert.equal(await page.locator('#map-new-device').isVisible(), true);
+    assert.equal(await page.locator('#flows-export').isVisible(), false, 'Export is in Settings now');
+    const card = await me.openDevice('Kitchen tablet');
+    assert.deepEqual(await card.locator('.device-acts button').allInnerTexts(), ['+ Give more', 'Rename', 'Revoke device']);
+    assert.equal(await card.locator('.given-row').count(), 1, 'what it has');
     await page.locator('#map-mode [data-mode=flows]').click();
     await me.until('the flows are shown', async () => (await page.locator('#flows').isVisible()) && !(await page.locator('#links').isVisible()));
     assert.match(page.url(), /open=access&tab=flows/);
-    /* Back: the map again, then the tab before, then out of Access. */
     await page.goBack();
     await me.until('back on the map', async () => (await page.locator('#links').isVisible()) && !(await page.locator('#flows').isVisible()));
-    await page.goBack();
-    await me.until('back on the assets tab', async () => (await selected(page, 'assets')) === 'true');
     await page.locator('#access-close').click();
     await me.until('Access is closed, and its address with it', async () => !(await page.locator('#access').isVisible()) && new URL(page.url()).searchParams.get('open') === null);
-    /* From a conversation: Access, on that conversation alone. Attach an asset... */
+    /* Assets, a place of its own, with its address. */
+    await page.locator('#nav-assets').click();
+    await me.until('the Assets place', async () => (await page.locator('#assets').isVisible()) && /open=assets/.test(page.url()));
+    await page.locator('#assets-rows .as-row[data-asset="folder:seeds"]').click();
+    await me.until('seeds, opened', async () => /a=folder%3Aseeds/.test(page.url()));
+    await page.locator('#assets-close').click();
+    /* Export and Import: in Settings. */
+    await page.locator('#nav-settings').click();
+    await page.locator('#settings-ch-backup > summary').click();
+    for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, id);
+    await page.locator('#settings-close').click();
+    /* From a conversation: its own Assets, and "+" to attach. */
     await page.locator('#folders').click();
     await me.chapter('access');
     await page.locator('#access-assets-here').click();
-    await me.until('the assets tab, filtered', async () => (await selected(page, 'assets')) === 'true' && (await page.locator('#access-for').isVisible()));
-    assert.equal(await page.locator('#access-for-name').innerText(), 'garden');
-    const seeds = page.locator('#assets-folder .asset[data-name="seeds"]');
-    await seeds.locator('.for-row[data-conversation="garden"] .levels button', { hasText: 'Read' }).click();
+    await me.until('its own Assets', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#view-assets').getAttribute('aria-pressed')) === 'true');
+    await page.locator('#cassets-rows .as-list-top .as-add').click();
+    await me.until('the attach picker', async () => page.locator('#attach-picker').isVisible());
+    await page.locator('#attach-rows .folder[data-name="seeds"]').locator('button', { hasText: 'Read' }).click();
     await me.until('seeds is read by garden', async () => (await me.api('/api/conversations')).body[0].resources.some((r) => r.name === 'seeds' && r.access === 'read'));
-    /* ...the badge takes the filter away. */
-    await page.locator('#access-for-clear').click();
-    await me.until('no filter', async () => !(await page.locator('#access-for').isVisible()) && (await page.locator('.for-row').count()) === 0);
-    assert.equal(new URL(page.url()).searchParams.get('for'), null);
-    /* Closed, it goes back to the conversation's own sheet it came from. */
-    await page.locator('#access-close').click();
-    await me.until('back on its sheet', async () => page.locator('#panel').isVisible());
-    /* Share with a device: the devices, each with what it has of this conversation, given in one click. */
+    /* Share with a device: the map, on this conversation. */
     await me.chapter('sharing');
     await page.locator('#access-devices-here').click();
-    await me.until('the devices tab, filtered', async () => (await selected(page, 'devices')) === 'true' && (await page.locator('#access-for').isVisible()));
-    const tablet = page.locator('#sharing-devices .device', { hasText: 'Kitchen tablet' });
-    await me.until('the tablet says it has not garden', async () => /garden not shared/.test(await tablet.innerText()));
-    await tablet.locator('button', { hasText: 'Give garden' }).click();
-    await me.until('the tablet has garden', async () => (await me.api('/api/devices')).body[0].grants.some((g) => g.asset === 'conversation:garden'));
-    await me.until('its line says so', async () => (await tablet.locator('.given-row[data-asset="conversation:garden"] label[data-part=terminal] input').count()) === 1);
-    /* A card folds, as a chapter does. */
-    await tablet.locator('.card-fold').click();
-    await me.until('folded', async () => (await tablet.locator('.given-row').count()) === 0 || !(await tablet.locator('.given-row').first().isVisible()));
-    /* The addresses of the screens that came before lead to their tab; Settings has its own. */
-    for (const [old, tab, flows] of [['links', 'map', false], ['who-gets-what', 'map', false], ['flows', 'map', true], ['sharing', 'devices', false], ['assets', 'assets', false]]) {
+    await me.until('the map, on garden', async () => (await page.locator('#links-card').isVisible()) && /garden/.test(await page.locator('#links-card h3').innerText()));
+    /* The addresses of the screens that came before lead to their place; Settings has its own. */
+    for (const [old, where, flows] of [['links', 'access', false], ['who-gets-what', 'access', false], ['flows', 'access', true], ['sharing', 'access', false], ['devices', 'access', false], ['assets', 'assets', false]]) {
         await page.goto(`${b.origin}/?c=garden&open=${old}`);
-        await me.until(`?open=${old} opens ${tab}`, async () => (await page.locator('#access').isVisible()) && (await selected(page, tab)) === 'true');
-        assert.equal(await page.locator('#flows').isVisible(), flows, `${old}: flows or map`);
+        await me.until(`?open=${old} opens ${where}`, async () => page.locator(`#${where}`).isVisible());
+        if (where === 'access') assert.equal(await page.locator('#flows').isVisible(), flows, `${old}: flows or map`);
     }
     await page.goto(`${b.origin}/?open=settings`);
     await me.until('settings', async () => page.locator('#settings').isVisible());
@@ -107,25 +92,23 @@ test('on a phone: the list first, a bar along the bottom with the three items, A
     assert.ok(Math.abs(bar.y + bar.height - height) <= 1, `at the very bottom (${bar.y + bar.height} of ${height})`);
     assert.ok(bar.width >= page.viewportSize().width - 1, 'across the screen');
     const items = page.locator('#nav button');
-    assert.equal(await items.count(), 3);
-    for (let i = 0; i < 3; i += 1) {
+    assert.equal(await items.count(), 4);
+    for (let i = 0; i < 4; i += 1) {
         const item = items.nth(i);
         assert.equal(await item.locator('svg').count(), 1, 'an icon');
         assert.ok((await item.boundingBox()).height >= 44, 'a fingertip high');
     }
-    assert.deepEqual(await items.allInnerTexts(), ['Conversations', 'Access', 'Settings']);
+    assert.deepEqual(await items.allInnerTexts(), ['Conversations', 'Assets', 'Access', 'Settings']);
     /* Inside a conversation the bar gives its room to the terminal; back on the list, it is there again. */
     await page.locator('#items .item', { hasText: 'garden' }).click();
     await me.until('the conversation', async () => (await me.state()) === 'live');
     assert.equal(await page.locator('#nav').isVisible(), false);
     await page.locator('#back').click();
     await me.until('the bar again', async () => page.locator('#nav').isVisible());
-    /* Access, the whole screen: no bar of a conversation over it; three tabs of one width. */
+    /* Access, the whole screen: no bar of a conversation over it; the map alone. */
     await page.locator('#nav-access').click();
     await me.until('Access', async () => page.locator('#access').isVisible());
     assert.equal(await page.locator('#room > header').isVisible(), false);
-    const widths = await page.locator('#access-tabs [role=tab]').evaluateAll((l) => l.map((x) => Math.round(x.getBoundingClientRect().width)));
-    assert.equal(new Set(widths).size, 1, `segmented: ${widths}`);
     assert.equal(await page.locator('#nav').isVisible(), true);
     /* A box touched: its links, from the bottom, and Edit. */
     await page.locator('#links-phone .lk-kinds button', { hasText: 'Conversations' }).click();

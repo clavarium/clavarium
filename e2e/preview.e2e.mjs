@@ -56,7 +56,7 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
         fetch('/api/conversations').then((r) => { document.getElementById('asked').textContent = 'answered ' + r.status; }, () => { document.getElementById('asked').textContent = 'refused'; });
     </script>`);
     writeFileSync(join(work, 'data.bin'), Buffer.from([0, 1, 2, 3]));
-    await me.page.locator('#files-open').click();
+    await me.files('work');
     const open = async (name) => { await me.page.locator('#files-rows .file', { hasText: name }).click(); };
     /* A PDF: drawn on a canvas by the page, never handed to the browser as a document. */
     await open('summary.pdf');
@@ -95,7 +95,7 @@ test('a file is shown in the page: text as text, a picture as a picture, a PDF d
     assert.equal((await me.page.request.get(`${b.origin}/api/files/page?c=viewer&r=work&p=chart.png`)).status(), 400);
     /* A conversation whose network was cut: its page stays text, and the server refuses to serve it as a page. */
     await me.api('/api/conversations/viewer/network', { online: false });
-    await me.page.reload(); await me.page.locator('#files-open').click();
+    await me.page.reload(); await me.files('work');
     await open('page.html');
     await me.until('offline: its source is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('<h1 id="planted">'));
     assert.equal(await me.page.locator('#preview-body iframe').count(), 0);
@@ -246,7 +246,7 @@ test('Copy in the window: all the text of a text file, the source of a page, a p
         const bitmap = await createImageBitmap(await item.getType('image/png'));
         return `png ${bitmap.width}x${bitmap.height}`;
     });
-    await me.page.locator('#files-open').click();
+    await me.files('work');
     const open = async (name) => { await me.page.locator('#files-rows .file', { hasText: name }).click(); await me.until(`${name} is shown`, async () => (await me.page.locator('#preview-name').innerText()) === name && (await me.page.locator('#preview-note').innerText().catch(() => '')) !== 'Loading...'); };
     const copy = me.page.locator('#preview-copy');
     /* Text, exactly as it is: every character, tabs and new lines kept. */

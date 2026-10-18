@@ -52,8 +52,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     /* The owner's phone is told that the tool asks, in French. */
     await me.until('the phone is told', async () => alerted.length === 1, 15_000);
     assert.deepEqual(alerted[0], { title: 'helper vous pose une question', body: 'Blue or red cover?', url: '/?c=helper' });
-    await me.until('the plain screen is its chat', async () => (await me.page.locator('#simple-toggle').innerText()) === 'Chat');
-    await me.page.locator('#simple-toggle').click();
+    /* The plain screen is its chat: Chat, in the bar. */
+    await me.page.locator('#view-chat').click();
     const asked = me.page.locator('#simple-thread .parley-said[data-kind=ask]');
     await me.until('the question is on the chat screen, in French', async () => (await asked.innerText().catch(() => '')).includes('Blue or red cover?') && (await asked.innerText()).includes('Il vous demande'));
     assert.equal(await me.page.locator('#simple-thread .parley-send').innerText(), 'Envoyer');
@@ -111,13 +111,13 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     delete process.env.FAKE_VM_LOG;
     assert.deepEqual(sent, [], 'the machine is not asked about, and nothing is sent into it, to type that line');
     /* The tool reads: the answer to its question, and the message; then says what it does now. */
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-terminal').click();
     await me.type('clear; parley read; parley doing "counting the late orders"; echo doing');
     await me.printed('doing');
     const read = (await me.screen()).replace(/\n/g, '');
     assert.ok(read.includes('Answer to your question "Blue or red cover?": blue') && read.includes('Message: Keep it under two pages.'), read);
     /* Under the last message, one line, moving, while it works. */
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-chat').click();
     const now = me.page.locator('#simple-thread .parley-now');
     await me.until('what it does now, under the last message', async () => (await now.innerText().catch(() => '')).includes('counting the late orders'));
     assert.equal(await now.getAttribute('data-live'), 'true');
@@ -125,10 +125,10 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     /* Read now, and being worked on: the signs of its messages say so. */
     await me.until('worked on', async () => (await me.page.locator('#simple-thread .parley-sign-state[data-state=working]').count()) > 0);
     /* It shows two files, one it cannot share, and says it is done. */
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-terminal').click();
     await me.type('clear; echo "38 orders, 3 late" > report.txt; printf \'%s\\n\' \'{"id":"s1","at":"2030-01-01T00:00:00.000Z","kind":"show","path":"/work/report.txt","text":"The report."}\' >> .parley/from-agent.jsonl; echo x > /tmp/clv-e2e-secret.txt; parley show /tmp/clv-e2e-secret.txt >/dev/null; parley status done; echo shown');
     await me.printed('shown');
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-chat').click();
     await me.until('the file it can share is there', async () => (await me.page.locator('#simple-thread .parley-said[data-kind=show]').count()) === 1);
     /* Its next message came: the line is gone, and the steps that led there are one click away. */
     assert.equal(await now.count(), 0, 'gone with its next message');
@@ -171,12 +171,12 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     assert.equal(await me.page.locator('#simple-thread .parley-files li').count(), 2);
     assert.equal(await me.page.locator('#simple-thread .parley-files li[data-outside=true]').count(), 1);
     /* Opened again, it shows its chat first, as it was left; its terminal is one click away, for now. */
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-terminal').click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
     await me.page.reload();
     await me.until('detailed again after a reload', async () => (await me.page.locator('#simple-thread .parley-views button[data-view=detailed]').getAttribute('aria-pressed').catch(() => '')) === 'true');
     assert.equal(await me.page.locator('#simple-thread').isVisible(), true, 'the chat first');
-    assert.equal(await me.page.locator('#simple-toggle').innerText(), 'Terminal');
+    assert.equal(await me.page.locator('#view-chat').getAttribute('aria-pressed'), 'true');
     await me.until('what is typed goes to the chat', async () => (await me.page.evaluate(() => document.activeElement?.className)) === 'parley-box');
     await me.page.locator('#simple-thread .parley-terminal').click();
     assert.equal(await me.page.locator('#simple').isVisible(), false, 'its terminal, as it was');
@@ -191,7 +191,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.page.locator('#words-save').click();
     await me.until('a word that does not exist is refused', async () => /no such word: sned/.test(await me.page.locator('#words-error').innerText()));
     await me.page.locator('#settings-close').click();
-    await me.page.locator('#simple-toggle').click();
+    await me.page.locator('#view-chat').click();
     await me.until('the button says it', async () => (await me.page.locator('#simple-thread .parley-send').innerText().catch(() => '')) === 'Clique ici pour faire <b>taratata</b>');
     /* A ready answer that presses Enter is sent from the chat at once; the other is put in its box, to be completed. */
     await me.api('/api/shortcuts', { label: 'Start with', text: 'Start with the cover', enter: false });
@@ -213,7 +213,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     const pocket = await b.person({ phone: true, locale: 'fr-FR' });
     await pocket.page.locator('#items .item', { hasText: 'helper' }).click();
     await pocket.until('the phone opens on its chat', async () => (await pocket.page.locator('#simple-thread .parley-said[data-kind=ask]').count()) > 0);
-    assert.equal(await pocket.page.locator('#simple-toggle').innerText(), 'Terminal', 'its terminal one tap away');
+    assert.equal(await pocket.page.locator('#view-chat').getAttribute('aria-pressed'), 'true', 'its chat first, its terminal one tap away');
     /* Its terminal went with it, one screen at a time: the computer says so, and takes it back. */
     await me.until('the computer is told', async () => /now open on another screen/.test(await me.page.locator('#notice-text').innerText().catch(() => '')) && me.page.locator('#notice').isVisible());
     await me.page.locator('#notice-action', { hasText: 'Use it here' }).click();

@@ -74,11 +74,11 @@ test('a code works once; a removed device is out at once, with nothing left on s
 
     /* The owner removes the phone, in two clicks. */
     await owner.page.locator('#notice-action').click().catch(() => {});
-    await owner.openAccess('devices');
-    await owner.until('the phone is listed', async () => (await owner.page.locator('#sharing-devices .device').count()) === 1);
-    await owner.page.locator('#sharing-devices .device button', { hasText: 'Revoke device' }).click();
-    await owner.page.locator('#sharing-devices button.danger').click();
-    await owner.until('no device left', async () => (await owner.page.locator('#sharing-devices .device').count()) === 0);
+    /* Its card, from its box on the map. */
+    const phoneCard = await owner.openDevice('A phone');
+    await phoneCard.locator('button', { hasText: 'Revoke device' }).click();
+    await owner.page.locator('#links-card button.danger').click();
+    await owner.until('no device left', async () => (await owner.page.locator('#links .lk-node[data-id^="device:"]').count()) === 0);
     await owner.page.locator('#access-close').click();
 
     await phone.until('the phone says it is out, in words', async () => /was closed, or this device was removed/.test(await phone.page.locator('#notice-text').innerText().catch(() => '')), 25_000);
@@ -97,7 +97,7 @@ test('shared with a phone: files of the conversation, and only where the owner a
     for (const [folder, access] of [['photos', 'Write'], ['papers', 'Read']]) {
         await owner.newFolder(folder);
         await owner.access(folder, access);
-        await owner.until(`${folder} is attached`, async () => (await owner.page.locator('#chips').innerText()).includes(`${folder} - ${access.toLowerCase()}`));
+        await owner.until(`${folder} is attached`, async () => (await owner.page.locator('#view-assets').getAttribute('title')).includes(`${folder} - ${access.toLowerCase()}`));
     }
     const url = await share(owner);
     const phone = await b.person({ phone: true, at: url.replace(/^https?:\/\/[^/]+/, '') });
@@ -258,7 +258,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await tablet.page.locator('#files-close').click();
 
     /* WHO HAS WHAT, by device: a card with a name, what it has, each thing with its way back. */
-    const card = owner.page.locator('#sharing-devices .device', { hasText: "Dad's tablet" });
+    const card = await owner.openDevice("Dad's tablet");
     await owner.until('the card lists what it has', async () => (await card.locator('.given-row').count()) === 3);
     /* A right is changed in place, with no new code... */
     await card.locator('.given-row', { hasText: 'recipes' }).locator('.levels button', { hasText: 'Write' }).click();
@@ -269,26 +269,22 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await add('accounts');
     assert.equal(await owner.page.locator('#sharing-new').innerText(), 'Save changes');
     await owner.page.locator('#sharing-new').click();
-    await owner.until('accounts is given', async () => (await card.locator('.given-row').count()) === 4);
+    await owner.until('back on its card, accounts is given', async () => (await owner.page.locator('#links-card .device .given-row').count()) === 4);
     /* ...it is renamed in place... */
-    await card.locator('button', { hasText: 'Rename' }).click();
-    const only = owner.page.locator('#sharing-devices .device').first();      /* its name is a field now */
+    await owner.page.locator('#links-card .device button', { hasText: 'Rename' }).click();
+    const only = owner.page.locator('#links-card .device').first();      /* its name is a field now */
     await only.locator('input[aria-label="Name of this device"]').fill('Papa');
     await only.locator('button', { hasText: 'Save' }).click();
-    await owner.until('it is called Papa', async () => (await owner.page.locator('#sharing-devices .device', { hasText: 'Papa' }).count()) === 1);
-    /* BY THING: who can see this folder? */
-    await owner.page.locator('#share-by-thing').click();
-    const thing = owner.page.locator('#share-things .thing', { hasText: 'recipes - folder - 1 device' });
-    await owner.until('recipes names its one device', async () => /Papa/.test(await thing.innerText().catch(() => '')));
-    /* Taken back from there, asked twice. */
-    await thing.locator('button', { hasText: 'Take back' }).click();
-    await owner.page.locator('#share-things button.danger').click();
-    await owner.until('recipes is shared with nobody', async () => /Not shared \(\d\)/.test(await owner.page.locator('#share-things').innerText()) && !(await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes'));
+    await owner.until('it is called Papa', async () => (await owner.page.locator('#links .lk-node[data-id^="device:"]', { hasText: 'Papa' }).count()) === 1);
+    /* Taken back from its card, asked twice. */
+    const papa = await owner.openDevice('Papa');
+    await papa.locator('.given-row', { hasText: 'recipes' }).locator('button', { hasText: 'Take back' }).click();
+    await owner.page.locator('#links-card .device button.danger').click();
+    await owner.until('recipes is shared with nobody', async () => !(await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes'));
     await owner.page.locator('#access-close').click();
     /* Seen at a glance, outside Access: the list; and how many devices there are, on the tab that lists them. */
     await owner.until('the list marks both conversations as shared', async () => (await owner.page.locator('#items .shared-mark').count()) === 2);
     assert.equal(await owner.page.locator('#access').isVisible(), false);
-    assert.match(await owner.page.locator('#tab-devices').textContent(), /Devices \(1\)/);
     /* The tablet finds the changes by itself: accounts given, recipes gone. */
     await tablet.page.reload();
     await tablet.until('live again', async () => (await tablet.state()) === 'live');
@@ -303,10 +299,8 @@ test('a folder is shared from its own row, alone and to read; a code not wanted 
     const owner = await b.person();
     await owner.create('private');
     await owner.api('/api/resources', { name: 'album' });
-    await owner.openAccess('assets');
-    const album = owner.page.locator('#assets-folder .asset[data-name="album"]');
-    await album.locator('.asset-head').click();
-    await album.locator('button', { hasText: 'Share...' }).click();
+    const album = await owner.openAsset('folder', 'album');
+    await album.locator('button', { hasText: 'Share with a device...' }).click();
     /* The folder, to read, and NOT the conversation behind the panel. */
     await owner.until('the basket holds the folder only', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
     assert.match(await owner.page.locator('#share-basket').innerText(), /album folder/);

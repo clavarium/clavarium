@@ -10,10 +10,9 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.create('writer');
     await me.type('pwd; echo "the report" > report.txt; mkdir drafts; echo ok');
     await me.sees('\nok');
-    await me.page.locator('#files-open').click();
-    /* Nothing was attached, nothing was asked of the tool: its work is there. */
-    /* The tabs are painted a moment after the sheet opens: waited for, not read at once. */
-    await me.until('its work folder is the one tab', async () => JSON.stringify(await me.page.locator('#files-tabs button').allInnerTexts()) === JSON.stringify(['work - where the tool works']));
+    /* Nothing was attached, nothing was asked of the tool: its work is there, the one thing in its Assets. */
+    await me.files('work');
+    assert.deepEqual(await me.page.locator('#cassets-rows .as-row').evaluateAll((l) => l.map((x) => x.dataset.asset)), ['folder:work']);
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('report.txt'));
     assert.equal(await me.page.locator('#files-import').isVisible(), true, 'and a file can be handed to the tool the same way');
     await me.page.locator('#files-rows .file', { hasText: 'report.txt' }).click();
@@ -49,7 +48,7 @@ test('what the tool makes where it works is seen in Files, at once, and can be d
     await me.page.locator('.entry.open .acts button', { hasText: 'Delete the folder' }).click();
     await me.until('the folder is gone', async () => !existsSync(join(work, 'drafts')));
     await me.page.locator('#files-views button[data-view=list]').click();
-    await me.page.locator('#files-close').click();
+    await me.page.locator('#view-terminal').click();
     /* Archived: its work is put aside on the server, not erased. */
     assert.equal((await me.api('/api/conversations/writer/archive', {})).status, 200);
     assert.match((await me.api('/api/resources', { name: 'work' })).body.error, /where each conversation works/);
@@ -63,9 +62,9 @@ test('asked to work on the disk of its machine, a conversation keeps nothing her
     await me.type('echo x > built.txt; echo ok');
     await me.sees('\nok');
     assert.equal((await me.api('/api/conversations')).body[0].work, 'disk');
-    await me.page.locator('#files-open').click();
-    await me.until('no folder is shown', async () => (await me.page.locator('#files-tabs button').count()) === 0);
-    assert.match(await me.page.locator('#files-none').innerText(), /works on the disk of its machine/);
+    await me.page.locator('#view-assets').click();
+    await me.until('it says its work is not kept here', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()));
+    assert.equal(await me.page.locator('#cassets-rows .as-row').count(), 0, 'no folder is shown');
     assert.equal((await me.page.evaluate(async () => (await fetch('/api/files?c=big-project&r=work&p=')).status)), 404);
 });
 
@@ -92,9 +91,9 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     /* To a folder kept here: its files are then in Files. */
     await move('Keep its work here', /less than 1 GB would stay free, or if the work holds symbolic links that a kept folder refuses/);
     assert.equal((await me.api('/api/conversations')).body[0].work, 'kept');
-    await me.page.locator('#files-open').click();
+    await me.files('work');
     await me.until('what was made before the move is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('early.txt'));
-    await me.page.locator('#files-close').click();
+    await me.page.locator('#view-terminal').click();
     await me.type('cat early.txt sub/deep.txt; echo "made after" > late.txt; echo seen');
     await me.sees('made before the move\ndeep');
     /* And back to the disk of its machine: nothing is shown here any more, nothing is lost. */
@@ -102,9 +101,9 @@ test('the work of a conversation moves to a kept folder and back, with a warning
     assert.equal((await me.api('/api/conversations')).body[0].work, 'disk');
     await me.type('cat early.txt late.txt; echo both-there');
     await me.sees('made before the move\nmade after');
-    await me.page.locator('#files-open').click();
-    await me.until('no folder is shown', async () => (await me.page.locator('#files-tabs button').count()) === 0);
-    await me.page.locator('#files-close').click();
+    await me.page.locator('#view-assets').click();
+    await me.until('no folder is shown', async () => /disk of its machine/.test(await me.page.locator('#cassets-rows').innerText()) && (await me.page.locator('#cassets-rows .as-row').count()) === 0);
+    await me.page.locator('#view-terminal').click();
     /* A link made by the tool travels as a link. */
     await me.type('ln -s early.txt link-to-it; echo linked');
     await me.sees('\nlinked');

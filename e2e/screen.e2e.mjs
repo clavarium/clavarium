@@ -112,7 +112,9 @@ test('on a phone the terminal has the room: one line of bar, one line of keys, t
     assert.equal(first.keyLines, 1);
     assert.equal(first.shortcuts, false, 'ready-made answers wait until they are wanted');
     assert.equal(first.sideways, false);
-    for (const hidden of ['#files-open', '#folders', '#simple-toggle', '#copy-open', '#keys button[data-keys="tab"]']) assert.equal(await me.page.locator(hidden).isVisible(), false, hidden);
+    for (const hidden of ['#copy-open', '#keys button[data-keys="tab"]']) assert.equal(await me.page.locator(hidden).isVisible(), false, hidden);
+    /* The bar, in one line: Chat | Terminal | Assets as signs, and its settings. */
+    for (const shown of ['#view-chat', '#view-terminal', '#view-assets', '#folders']) assert.equal(await me.page.locator(shown).isVisible(), true, shown);
     /* "More": the other keys, and the ready-made answers. */
     await me.page.locator('#keys-more').tap();
     for (const shown of ['#copy-open', '#keys button[data-keys="tab"]', '#keys button[data-keys="backspace"]', '#keys button[data-keys="stop"]', '#shortcuts']) assert.equal(await me.page.locator(shown).isVisible(), true, shown);
@@ -124,15 +126,16 @@ test('on a phone the terminal has the room: one line of bar, one line of keys, t
     await me.until('the ready-made answers come', async () => me.page.locator('#shortcuts').isVisible());
     await me.page.locator('#keys button[data-keys="enter"]').tap();
     await me.until('and go', async () => !(await me.page.locator('#shortcuts').isVisible()));
-    /* The bar's "...": Files, this conversation, the text size; a touch elsewhere folds it. */
-    await me.page.locator('#menu').tap();
-    for (const shown of ['#files-open', '#folders', '#simple-toggle', '#menu-items .text-size']) assert.equal(await me.page.locator(shown).isVisible(), true, shown);
-    await me.page.locator('#terminal').tap();
-    assert.equal(await me.page.locator('#files-open').isVisible(), false);
-    /* Larger text, by its buttons then by two fingers: laid out again, never sideways. */
-    await me.page.locator('#menu').tap();
-    for (let i = 0; i < 3; i++) await me.page.locator('#menu-items .text-size button[data-text="larger"]').tap();
+    /* Larger text, by its buttons (Settings, Screen) then by two fingers: laid out again, never sideways. */
+    await me.page.locator('#back').tap();
+    await me.page.locator('#nav-settings').tap();
+    const screenChapter = me.page.locator('#settings-ch-screen');
+    if (!(await screenChapter.evaluate((d) => d.open))) await screenChapter.locator(':scope > summary').tap();
+    for (let i = 0; i < 3; i++) await me.page.locator('#settings-text button[data-text="larger"]').tap();
     assert.equal((await text(me)).scale, 1.4);
+    await me.page.locator('#nav-conversations').tap();
+    await me.page.locator('#items .item', { hasText: 'pocket' }).tap();
+    await me.until('back in pocket', async () => (await me.state()) === 'live' && me.page.locator('#terminal').isVisible());
     const client = await me.page.context().newCDPSession(me.page);
     const fingers = (type, spread) => client.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x: 195 - spread, y: 300, id: 1 }, { x: 195 + spread, y: 300, id: 2 }] });
     await fingers('touchStart', 40);

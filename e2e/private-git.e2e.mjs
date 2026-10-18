@@ -30,8 +30,7 @@ test('a private repository is added with a new key: its public half is shown and
     const answers = [];
     me.page.on('response', async (r) => { if (r.url().includes('/api/')) answers.push(await r.text().catch(() => '')); });
     await me.create('coder');
-    await me.openAccess('assets');
-    await me.page.locator('#git-box summary').click();
+    await me.addAsset('git');
     await me.page.fill('#git-name', 'site');
     await me.page.fill('#git-from', 'git@example.com:team/site.git');
 
@@ -66,9 +65,9 @@ test('a private repository is added with a new key: its public half is shown and
     /* The owner pastes it into the hosting service; then Add clones, on the server. */
     writeFileSync(join(b.sshRoot, 'authorized_keys'), `${copied}\n`);
     await me.page.locator('#git-new button[type=submit]').click();
-    await me.until('the repository is listed', async () => (await me.page.locator('#assets-git .asset[data-name="site"]').count()) === 1, 30_000);
+    await me.until('the repository is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="git:site"]').count()) === 1, 30_000);
     assert.match(await me.page.locator('#git-said').innerText(), /First contact with example\.com: its host key \(ssh-ed25519 SHA256:[A-Za-z0-9+/]+\) was recorded/);
-    assert.match(await me.page.locator('#assets-git .asset[data-name="site"]').innerText(), /from example\.com, with the SSH key deploy-a/);
+    assert.match(await me.page.locator('#assets-rows .as-row[data-asset="git:site"]').innerText(), /from example\.com, with the SSH key deploy-a/);
     assert.equal(await me.page.locator('#git-token').inputValue(), '', 'nothing typed is kept in the form');
 
     /* The key is listed with the repository it opens, and cannot be removed while it does. */
@@ -78,7 +77,7 @@ test('a private repository is added with a new key: its public half is shown and
     assert.equal(await key.locator('button', { hasText: 'Remove' }).isDisabled(), true);
     assert.match(await key.innerText(), /would cut site off/);
     assert.equal((await me.api('/api/git-keys/deploy-a/remove', {})).status, 409);
-    await me.page.locator('#access-close').click();
+    await me.page.locator('#assets-close').click();
 
     /* The tool reads the repository; it never sees the key. */
     await me.access('site', 'Read');

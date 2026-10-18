@@ -170,20 +170,58 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             const pane = () => spawnSync('tmux', ['-L', tmuxOf(name), 'list-panes', '-a', '-F', '#{pane_width}x#{pane_height}'], { encoding: 'utf8' }).stdout.trim();
             await until(`the terminal of ${name} has the page's size`, async () => pane() === await page.evaluate(() => `${window.clavariumTerminal.cols}x${window.clavariumTerminal.rows}`));
         }
-        /* Access, one of the three places at the bottom left, on one of its tabs: 'map', 'devices' or 'assets'. */
+        /* A place at the bottom left: 'assets' (the server's Assets), or 'map' (Access, the map alone; 'devices' too: devices are on the map). */
         async function openAccess(tab = 'map') {
+            if (tab === 'assets') {
+                await page.locator('#nav-assets').click();
+                await until('the Assets place is shown', async () => page.locator('#assets').isVisible());
+                return;
+            }
             await page.locator('#nav-access').click();
-            await page.locator(`#tab-${tab}`).click();
-            await until(`the ${tab} tab of Access is shown`, async () => (await page.locator(`#tab-${tab}`).getAttribute('aria-selected')) === 'true' && page.locator('#access').isVisible());
+            await until('the map of Access is shown', async () => (await page.locator('#access').isVisible()) && page.locator('#links').isVisible());
+        }
+        /* A device's own card, from its box on the map: rename, revoke, what it has. */
+        async function openDevice(label) {
+            await openAccess('map');
+            const box = page.locator('#links .lk-node[data-id^="device:"]', { hasText: label }).first();
+            await until(`${label} is on the map`, async () => (await box.count()) === 1);
+            /* Already shown (the map opened on it): a second tap would put it away. */
+            const shown = async () => (await page.locator('#links-card').isVisible()) && (await page.locator('#links-card .device', { hasText: label }).count()) === 1;
+            if (!(await shown())) await box.click();
+            await until(`the card of ${label}`, shown);
+            return page.locator('#links-card .device');
+        }
+        /* In the server's Assets: the "+" of a kind, then its form. */
+        async function addAsset(kind) {
+            await openAccess('assets');
+            await page.locator(`#assets-rows .as-kind[data-kind="${kind}"] .as-add`).click();
+        }
+        /* One asset opened in the server's Assets; its detail. */
+        async function openAsset(kind, name) {
+            await openAccess('assets');
+            const row = page.locator(`#assets-rows .as-row[data-asset="${kind}:${name}"]`);
+            await until(`${name} is listed in Assets`, async () => (await row.count()) === 1, 30_000);
+            await row.click();
+            await until(`${name} is opened`, async () => (await page.locator('#assets-detail h2').innerText().catch(() => '')).includes(name));
+            return page.locator('#assets-detail');
         }
         /* A folder is made in Assets. */
         async function newFolder(name) {
-            await openAccess('assets');
-            await page.locator('#folder-box summary').click();
+            await addAsset('folder');
             await page.fill('#folder-name', name);
             await page.locator('#folder-new button[type=submit]').click();
-            await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-folder .asset[data-name="${name}"]`).count()) === 1);
-            await page.locator('#access-close').click();
+            await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-rows .as-row[data-asset="folder:${name}"]`).count()) === 1);
+            await page.locator('#assets-close').click();
+        }
+        /* The files of a folder of the conversation shown: its Assets, that folder. */
+        async function files(name) {
+            if ((await page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await page.locator('#view-assets').click();
+            const row = page.locator(`#cassets-rows .as-row[data-name="${name}"]`);
+            await until(`${name} is in its Assets`, async () => (await row.count()) === 1);
+            await row.click();
+            /* A repository opens on its branches; its files are one click further. */
+            if ((await row.getAttribute('data-asset')).startsWith('git:')) await page.locator('#cassets-detail button[data-act="files"]').click();
+            await until(`the files of ${name}`, async () => await page.locator('#cassets-detail #files').isVisible());
         }
         /* What the conversation shown may do with it, set in Access: 'Read', 'Write', or 'Off' (detached). */
         async function access(name, level) {
@@ -209,10 +247,11 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             const box = page.locator(`details.chapter[data-chapter="${key}"]`);
             if (!(await box.evaluate((d) => d.open))) await box.locator(':scope > summary').click();
         }
-        /* On a phone: the bar's "..." menu is opened, and the keys behind "More". */
-        async function menu() { if ((await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
+        /* A shared device's bar has a "..." menu; the owner's has none any more (everything of it is in sight). */
+        async function menu() { if (await page.locator('#menu').isVisible() && (await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
+        /* On a phone: the keys behind "More". */
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, newFolder, access, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, newFolder, files, access, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot };
 }

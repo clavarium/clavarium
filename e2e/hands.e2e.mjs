@@ -95,7 +95,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await me.newFolder('reports');
     const setAccess = (folder, access) => me.access(folder, access);
     await setAccess('reports', 'Write');
-    assert.match(await me.page.locator('#chips').innerText(), /reports - write/);
+    assert.match(await me.page.locator('#view-assets').getAttribute('title'), /reports - write/);
     await me.type('echo "q3 is fine" > ../resources/reports/q3.txt; mkdir -p ../resources/reports/out; echo ok');
     await me.sees('\nok');
     /* What the VM manager was asked to mount: the folder itself for writing... */
@@ -104,8 +104,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     /* ...and, for reading, the read-only VIEW, never the folder. */
     await setAccess('reports', 'Read');
     assert.equal(mounted(), `${b.dir}/data/views/reports`);
-    await me.page.locator('#files-open').click();
-    await me.page.locator('#files-tabs button', { hasText: 'reports' }).click();
+    await me.files('reports');
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('q3.txt'));
     assert.equal(await me.page.locator('#files-readonly').isVisible(), true);
     assert.equal(await me.page.locator('#files-import').isVisible(), false);
@@ -117,22 +116,19 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     assert.equal(download.suggestedFilename(), 'q3.txt');
     await me.page.locator('#files-rows .file', { hasText: 'out' }).click();
     await me.until('inside the sub-folder', async () => (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'reports/out');
-    await me.page.locator('#files-close').click();
+    await me.page.locator('#view-terminal').click();
     /* Removed from Assets: only a folder attached nowhere can go -- the button is there, greyed, and says why. */
-    await me.openAccess('assets');
-    const asset = me.page.locator('#assets-folder .asset[data-name="reports"]');
-    /* A folder just made opens on its card by itself: the arrow is down. */
-    assert.equal(await asset.locator('.asset-head').getAttribute('aria-expanded'), 'true');
-    await me.until('it says which conversation uses it', async () => /with-folders \(read\)/.test(await asset.locator('.asset-head').innerText()));
-    assert.equal(await asset.locator('button', { hasText: 'Remove' }).isDisabled(), true);
-    assert.match(await asset.innerText(), /attached to 1 conversation: set it to Off first/);
-    /* Set to Off from there, for that conversation: no need to go and open it. */
+    const asset = await me.openAsset('folder', 'reports');
+    await me.until('it says which conversation uses it', async () => (await asset.locator('.as-users .given-row[data-conversation="with-folders"]').count()) === 1);
+    assert.equal(await asset.locator('.danger-link').isDisabled(), true);
+    assert.match(await asset.innerText(), /used by 1 conversation: set it to Off first/);
+    /* Set to Off from there, for that conversation. */
     await asset.locator('.given-row[data-conversation="with-folders"] .levels button', { hasText: 'Off' }).click();
-    await me.until('it is not used any more', async () => /not used/.test(await asset.locator('.asset-head').innerText().catch(() => '')));
-    await asset.locator('button', { hasText: 'Remove' }).click();
-    await me.page.locator('#assets button.danger').click();
-    await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-folder .asset').count()) === 0);
-    await me.page.locator('#access-close').click();
+    await me.until('it is not used any more', async () => /No conversation uses it/.test(await asset.innerText().catch(() => '')));
+    await asset.locator('.danger-link').click();
+    await asset.locator('button.danger').click();
+    await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-rows .as-row[data-asset^="folder:"]').count()) === 0);
+    await me.page.locator('#assets-close').click();
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
@@ -140,24 +136,22 @@ test('a git repository is added from the page, attached like a folder, and is a 
     const b = await bench(t);
     const me = await b.person();
     await me.create('coder');
-    await me.openAccess('assets');
-    await me.page.locator('#git-box summary').click();
+    await me.addAsset('git');
     await me.page.fill('#git-name', 'site');
     await me.page.locator('#git-new button[type=submit]').click();
-    await me.until('the repository is listed', async () => (await me.page.locator('#assets-git .asset[data-name="site"]').count()) === 1);
-    assert.match(await me.page.locator('#assets-git-title').innerText(), /Repositories \(1\)/);
-    await me.page.locator('#access-close').click();
+    await me.until('the repository is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="git:site"]').count()) === 1);
+    await me.until('and opened', async () => (await me.page.locator('#assets-detail h2').innerText().catch(() => '')).includes('site'));
+    await me.page.locator('#assets-close').click();
     await me.access('site', 'Write');
-    assert.match(await me.page.locator('#chips').innerText(), /site - write/);
+    assert.match(await me.page.locator('#view-assets').getAttribute('title'), /site - write/);
     await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
     await me.sees('## No commits yet on main');
     await me.sees('\n1\n');
     /* Its files are in Files; what git keeps for itself is not. */
-    await me.page.locator('#files-open').click();
-    await me.page.locator('#files-tabs button', { hasText: 'site' }).click();
+    await me.files('site');
     await me.until('the file is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('README.md'));
     assert.equal((await me.page.locator('#files-rows').innerText()).includes('.git'), false);
-    await me.page.locator('#files-close').click();
+    await me.page.locator('#view-terminal').click();
     /* And it can be given in a share, to read or to write, as any other thing. */
     await me.page.locator('#folders').click();
     await me.chapter('sharing');
@@ -191,14 +185,19 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     /* No address yet: said, and the form is open. */
     await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));
     assert.equal(await me.page.locator('#gitview-push').isVisible(), false);
+    /* Where it is sent is set in Assets, the review says where. */
+    await me.page.locator('#gitview-set-remote').click();
+    await me.until('its remote form, in Assets', async () => me.page.locator('#gitview-url').isVisible());
     await me.page.fill('#gitview-url', remote);
     await me.page.fill('#gitview-key', 'a-token-the-tool-never-sees');
     await me.page.locator('#gitview-remote button[type=submit]').click();
+    await me.until('it is saved', async () => /remote\.git/.test(await me.page.locator('#assets-detail .as-settings').innerText().catch(() => '')));
+    await me.page.locator('#assets-detail button[data-act="review"]').click();
     /* What would go: the commit, the file, the change. */
     await me.until('the commit is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
     assert.match(await me.page.locator('#gitview-commits').innerText(), /Add the home page/);
     assert.match(await me.page.locator('#gitview-stat').innerText(), /index\.html/);
-    assert.match(await me.page.locator('#gitview-diff').innerText(), /\+<h1>hello<\/h1>/);
+    assert.match(await me.page.locator('#gitview-diff').innerText(), /\+\s*<h1>hello<\/h1>/);
     assert.equal(await me.page.locator('#gitview h1').count(), 0, 'what the tool wrote is shown as text, never built');
     /* Two clicks to send; then the remote has it, and nothing is left to send. */
     await me.page.locator('#gitview-push').click();
@@ -211,6 +210,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     /* The key: kept, sealed, and in nothing the tool can read. */
     assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true, sshKey: null });
     await me.page.locator('#gitview-close').click();
+    await me.page.locator('#assets-close').click();
     await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');
     await me.sees('\n0\n');
     assert.deepEqual(me.errors, []);
