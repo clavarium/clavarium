@@ -4,7 +4,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NODE_VERSION } from '../server/tools.mjs';
 import { probeBlock } from '../deploy/doctor.mjs';
@@ -136,6 +138,22 @@ test('going online later: the settings change, the release that runs stays; loca
     assert.match(text, /CLAVARIUM_PASSWORDS_TO/);
     /* Behind a relay, Caddy is asked again once the tunnel holds (its first try came before it). */
     assert.ok(text.indexOf('systemctl restart clavarium-tunnel.service') < text.lastIndexOf('systemctl restart caddy.service'));
+});
+
+test('going online from local mode: no Caddyfile yet is not a failure, an existing probe token is kept', () => {
+    const line = readFileSync(SCRIPT, 'utf8').split('\n').find((l) => l.startsWith('PROBE="$('));
+    assert.ok(line, 'the line that reads the probe token');
+    const dir = mkdtempSync(join(tmpdir(), 'caddyfile-'));
+    const run = (file) => spawnSync('/bin/bash', ['-c', `set -euo pipefail; ${line.replaceAll('/etc/caddy/Caddyfile', file)}; echo "token:$PROBE"`], { encoding: 'utf8' });
+    const none = run(join(dir, 'missing'));
+    assert.equal(none.status, 0, none.stderr);
+    assert.equal(none.stdout, 'token:\n');
+    const token = 'ab'.repeat(16);
+    writeFileSync(join(dir, 'Caddyfile'), `\thandle /probe {\n\t\trespond "${token}" 200\n\t}\n`);
+    const kept = run(join(dir, 'Caddyfile'));
+    assert.equal(kept.status, 0, kept.stderr);
+    assert.equal(kept.stdout, `token:${token}\n`);
+    rmSync(dir, { recursive: true, force: true });
 });
 
 /* THE ONE LINE OF THE SITE: curl -fsSL https://clavarium.org/install.sh | sudo bash */

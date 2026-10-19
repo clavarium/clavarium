@@ -551,7 +551,8 @@ fi
 # with Let's Encrypt's as soon as it can (sudo clavarium doctor --certificate).
 BIND=""; [ -z "$RELAY" ] || BIND="	bind 127.0.0.1"
 # The probe's token: kept on a rerun (see deploy/doctor.mjs, probeBlock).
-PROBE="$(sed -n 's/.*respond "\([0-9a-f]\{32\}\)" 200.*/\1/p' /etc/caddy/Caddyfile 2>/dev/null | head -1)"
+# No Caddyfile yet (going online from local mode): no token, not a failure (pipefail).
+PROBE="$( { sed -n 's/.*respond "\([0-9a-f]\{32\}\)" 200.*/\1/p' /etc/caddy/Caddyfile 2>/dev/null || true; } | head -1)"
 [ -n "$PROBE" ] || PROBE="$(openssl rand -hex 16)"
 cat > /etc/caddy/Caddyfile <<CADDY
 # The only thing on this machine that takes what comes from the outside.
