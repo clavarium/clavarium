@@ -529,11 +529,15 @@ export class Updater {
         return last?.to === available && last.result !== 'done' ? `${available} did not work: back to ${last.from ?? 'nothing'} (${last.why ?? last.result})` : `updated to ${available}`;
     }
 
-    /* THE WATCHDOG, at each timer turn: the server down (its service failed or stopped, or no answer
-       WATCH_MISSES turns in a row) is acted on, once, and said in the history:
-       - after an update of less than WATCH_RECENT_MS, with the release before it kept (and able to
-         read the data): back to it, by itself ("did not stay up"), not tried again by itself;
-       - otherwise: one restart.
+    /* THE WATCHDOG, at each timer turn: the server down (its service failed, stopped, or starting
+       again and again; or no answer WATCH_MISSES turns in a row) is acted on, once, and said in the
+       history:
+       - first, one restart of the release that runs: what blocked the old server (a process left
+         on its port, a view left broken) is cleared by the restart itself (#restart), and the new
+         version is seldom the cause (19-10: going back cured nothing);
+       - only if it does not come back, after an update of less than WATCH_RECENT_MS with the
+         release before it kept (and able to read the data): back to it, by itself, not tried
+         again by itself.
        Never more than one action in WATCH_EVERY_MS, so that it never loops. { acted, said } */
     async watchdog() {
         const state = await this.serviceState().catch(() => 'unknown');
@@ -542,7 +546,8 @@ export class Updater {
         if (up) { if (w.misses) this.#save({ watch: { ...w, misses: 0 } }); return { acted: false, said: 'up' }; }
         const misses = (w.misses ?? 0) + 1;
         this.#save({ watch: { ...w, misses, seen: state } });
-        const down = state === 'failed' || state === 'inactive' || misses >= WATCH_MISSES;
+        /* "activating" at a timer turn: systemd starting it again and again (a start takes seconds). */
+        const down = state === 'failed' || state === 'inactive' || state === 'activating' || misses >= WATCH_MISSES;
         this.#o.log(`watchdog: the server is ${state === 'active' ? 'active but does not answer' : state} (turn ${misses})`);
         if (!down) return { acted: false, said: `the server does not answer (turn ${misses} of ${WATCH_MISSES})` };
         const now = this.#o.now();
@@ -553,13 +558,17 @@ export class Updater {
             this.#save({ watch: { misses: 0, actedAt: now.toISOString(), seen: state } });
             const log = await this.#seen(`the server was down (${state})`);
             const current = this.current();
+            const v = current?.version ?? null;
+            const was = state === 'active' ? 'no answer' : state;
+            this.#o.log(`watchdog: the server is ${state}: restarted once`);
+            const failed = current ? await this.#restartAndCheck(current) : await this.restart().then((r) => (r?.code ? lastLine(r) : '')).catch((e) => e.message);
             /* The last update or return (a restart by the watchdog is not one). */
             const last = (this.#state().history ?? []).find((h) => h.action !== 'restart');
-            const recent = current && last && last.action === 'update' && last.result === 'done' && last.to === current.version && now - new Date(last.at) < WATCH_RECENT_MS;
+            const recent = failed && current && last && last.action === 'update' && last.result === 'done' && last.to === current.version && now - new Date(last.at) < WATCH_RECENT_MS;
             const previous = recent ? this.releases().find((r) => !r.current && r.version === last.from) : undefined;
             const format = this.#dataFormat();
             if (previous && (format === undefined || previous.dataFormat >= format)) {
-                let why = `${current.version} did not stay up (its service ${state === 'active' ? 'did not answer' : `was ${state}`}): back to ${previous.version}`;
+                let why = `${current.version} did not stay up (its service ${state === 'active' ? 'did not answer' : `was ${state}`}) nor came back after a restart (${failed}): back to ${previous.version}`;
                 this.#o.log(`watchdog: ${why}`);
                 this.#step('update', current.version, 'Going back');
                 let back;
@@ -570,10 +579,7 @@ export class Updater {
                 this.prune();
                 return { acted: true, said: why };
             }
-            const v = current?.version ?? null;
-            this.#o.log(`watchdog: the server is ${state}: restarted once`);
-            const failed = current ? await this.#restartAndCheck(current) : await this.restart().then((r) => (r?.code ? lastLine(r) : '')).catch((e) => e.message);
-            const why = `the server was down (${state === 'active' ? 'no answer' : state}): restarted by itself${failed ? `; it did not come back (${failed}): journalctl -u clavarium` : ''}`;
+            const why = `the server was down (${was}): restarted by itself${failed ? `; it did not come back (${failed}): journalctl -u clavarium` : ''}`;
             this.#history({ action: 'restart', from: v, to: v, result: failed ? 'failed' : 'done', by: 'watchdog', why, log: log.slice(-LOG_MAX) });
             return { acted: true, said: why };
         } finally { unlock(); }
@@ -646,6 +652,10 @@ export class Updater {
         const stuck = left.filter((x) => x.state === 'D' && x.port);
         if (stuck.length) return { code: 1, stderr: `a stuck process holds the port: ${stuck.map((p) => `pid ${p.pid}, state D`).join('; ')} (it waits on the kernel and cannot be killed): the server needs a reboot` };
         if (left.some((x) => x.state === 'D')) this.#o.log(`processes of the old server stuck in state D (not on the port): ${left.map((p) => p.pid).join(', ')}`);
+        /* The views the old server left broken (their program killed with it): taken off, or the
+           new server could not make them again before a reboot. Never a reason not to start. */
+        const repaired = await this.#run([this.#o.hostTarget, 'mounts', 'repair'], { timeoutMs: 60_000 });
+        if (repaired.code || String(repaired.stderr).trim()) this.#o.log(`mounts: ${String(repaired.stderr).trim() || `exit ${repaired.code}`}`);
         await this.#run(['systemctl', 'reset-failed', 'clavarium.service'], { timeoutMs: 30_000 });
         return this.#run(['systemctl', 'start', 'clavarium.service'], { timeoutMs: 120_000 });
     }

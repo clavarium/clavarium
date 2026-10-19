@@ -89,7 +89,7 @@ UPDATER="$CODE/current/app/deploy/updater.mjs"
 UPDATE_STATE="/var/lib/clavarium/update"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -208,6 +208,22 @@ folder_of() {
     [ "$SAY" = "yes" ] && return 0
     [ -d "$MNT/resources/$1" ] && [ ! -L "$MNT/resources/$1" ] || refuse "no such folder: $1"
     held "$MNT/resources/$1"
+}
+
+# A VIEW WHOSE PROGRAM IS GONE (bindfs killed or crashed) stays mounted, but
+# everything done there fails with "Transport endpoint is not connected": the
+# view cannot be made again, and before 0.2.1 the server died at its start on
+# it -- only a reboot cleared it (the update of 19-10). Such a mount is taken
+# off (lazily: whatever still holds it gets an error, never a hang); one that
+# answers is left alone. Only a FUSE mount exactly at that path, under $MNT.
+unstale() {
+    [ "$SAY" = "yes" ] && return 0
+    local at="$1"
+    case "$at" in "$MNT"/views/*|"$MNT"/toolbox/view) : ;; *) refuse "not a view: $at" ;; esac
+    awk -v p="$at" '$2 == p && $3 ~ /^fuse/ { found = 1 } END { exit !found }' /proc/self/mounts || return 0
+    timeout 10 stat -- "$at" >/dev/null 2>&1 && return 0
+    umount -l -- "$at" || refuse "the broken view at $at could not be taken off"
+    echo "a broken view was taken off: $at" >&2
 }
 
 # How a finished read unit is said to the server: from what systemd recorded,
@@ -541,6 +557,7 @@ case "$AREA $VERB" in
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         folder_of "$1"; kept views
         if [ "$SAY" != "yes" ]; then
+            unstale "$MNT/views/$1"
             mkdir -p "$MNT/views/$1"
             held "$MNT/views/$1"
             mountpoint -q "$MNT/views/$1" && exit 0
@@ -558,6 +575,7 @@ case "$AREA $VERB" in
         files="$MNT/toolbox/files"; view="$MNT/toolbox/view"
         if [ "$SAY" = "yes" ]; then printf '%s\n' "install -d -o OWNER -g GROUP -m 0755 $files" "bindfs -r -o allow_other $files $view"; exit 0; fi
         kept toolbox
+        unstale "$view"
         [ ! -L "$files" ] && [ ! -L "$view" ] || refuse "the tools folder is not what it should be"
         if [ ! -e "$files" ]; then owner="$(stat -c %u:%g "$DATA")"; install -d -o "${owner%:*}" -g "${owner#*:}" -m 0755 "$files"; fi
         held "$files"
@@ -569,11 +587,23 @@ case "$AREA $VERB" in
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         kept views
         if [ "$SAY" != "yes" ]; then
+            unstale "$MNT/views/$1"
             [ -e "$MNT/views/$1" ] || exit 0
             held "$MNT/views/$1"
             mountpoint -q "$MNT/views/$1" || exit 0
         fi
         run umount "$MNT/views/$1" ;;
+    "mounts repair")
+        # Every broken view taken off (see unstale): asked by the server as it
+        # starts, and by the updater (root) after each stop of the server, so
+        # that a view left broken never needs a reboot. Says what it did.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "umount -l <each FUSE view under $MNT that does not answer>"; exit 0; fi
+        kept views; kept toolbox
+        awk '$3 ~ /^fuse/ { print $2 }' /proc/self/mounts | while IFS= read -r at; do
+            case "$at" in "$MNT"/views/*|"$MNT"/toolbox/view) unstale "$at" ;; esac
+        done
+        exit 0 ;;
     "net taps")
         [ $# -eq 0 ] || usage
         run pgrep -a qemu-system ;;

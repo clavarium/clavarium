@@ -226,6 +226,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        and serves its pages even when the host program or the VM manager does not answer;
        a machine that starts waits for it (all.prepare). */
     const hostSteps = (async () => {
+        /* A view left broken (its program gone: killed, crashed) is taken off first, or none can
+           be made there again before a reboot: see clavarium-host, "mounts repair". */
+        const repaired = await asHost(['mounts', 'repair'], { timeoutMs: 60_000 });
+        if (repaired.code || repaired.stderr.trim()) console.error(`mounts: ${repaired.stderr.trim() || `exit ${repaired.code}`}`);
         /* Before anything can start a VM: see resources.mjs. */
         await folders.ensureViews().catch((error) => console.error(`views: ${error.message}`));
         /* Not in place is said, not fatal: no machine is then given /tools. */

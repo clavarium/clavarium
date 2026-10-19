@@ -272,7 +272,7 @@ test('a busy phase holds an update back only while the server runs, and only for
     assert.equal(await s.u.tick(), 'updated to 1.0.1');
 });
 
-test('the watchdog: a server that did not stay up after an update goes back by itself, once; otherwise one restart an hour', async (t) => {
+test('the watchdog: a server that did not stay up after an update, nor came back after a restart, goes back by itself, once; otherwise one restart an hour', async (t) => {
     const s = await setup(t);
     await installed(s);
     s.publish('1.0.1');
@@ -282,12 +282,14 @@ test('the watchdog: a server that did not stay up after an update goes back by i
     /* Up: nothing. */
     assert.equal(await s.u.runOnce(), 'up to date');
     assert.deepEqual(s.calls, []);
-    /* It died after the update looked well (its service failed): back to 1.0.0, by itself. */
+    /* It died after the update looked well (its service failed), and a restart does not bring it
+       back: back to 1.0.0, by itself. */
     s.at(new Date(2026, 9, 18, 13, 0));
     s.service.state = 'failed';
-    assert.match(await s.u.runOnce(), /^1\.0\.1 did not stay up \(its service was failed\): back to 1\.0\.0$/);
+    s.broken.add('1.0.1');
+    assert.match(await s.u.runOnce(), /^1\.0\.1 did not stay up \(its service was failed\) nor came back after a restart \(.+\): back to 1\.0\.0$/);
     assert.equal(s.current(), '1.0.0');
-    assert.deepEqual(s.calls, ['privileged 1.0.0', 'restart', 'health 1.0.0']);
+    assert.deepEqual(s.calls, ['restart', 'health 1.0.1', 'privileged 1.0.0', 'restart', 'health 1.0.0']);
     const [last] = s.u.about().history;
     assert.equal(last.result, 'rolled-back'); assert.equal(last.by, 'watchdog'); assert.equal(last.from, '1.0.0'); assert.equal(last.to, '1.0.1');
     /* Up again on 1.0.0: 1.0.1 is not tried again by itself. */
@@ -318,6 +320,24 @@ test('the watchdog: a server that did not stay up after an update goes back by i
     const third = await s.u.watchdog();
     assert.equal(third.acted, true); assert.match(third.said, /no answer/);
     assert.deepEqual(s.calls, ['restart', 'health 1.0.0']);
+});
+
+test('the watchdog restarts the release that runs first: what blocked the old server is cleared by the restart, the new version is kept', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    await s.u.apply('1.0.1');
+    s.calls.length = 0;
+    /* Started again and again by systemd (a port held, a view broken): acted on at the first turn. */
+    s.service.state = 'activating';
+    s.at(new Date(2026, 9, 18, 13, 0));
+    const r = await s.u.watchdog();
+    assert.equal(r.acted, true);
+    assert.match(r.said, /^the server was down \(activating\): restarted by itself$/);
+    assert.equal(s.current(), '1.0.1', 'not sent back: the version was not the cause');
+    assert.deepEqual(s.calls, ['restart', 'health 1.0.1']);
+    assert.equal(s.u.about().history[0].action, 'restart');
+    assert.equal(s.u.about().history[0].result, 'done');
 });
 
 test('the watchdog does not go back to a release that cannot read the data, nor after a day', async (t) => {
