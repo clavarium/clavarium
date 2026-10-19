@@ -25,8 +25,9 @@
     let deviceShared = [];
     /* The parts of its conversation this device was given: its terminal, its
        chat ('write', 'read' or null). Only those are shown -- and the server
-       refuses the others whatever this page does. */
-    let deviceParts = { terminal: true, chat: null };
+       refuses the others whatever this page does. Nothing until the server said (/me): a
+       terminal button shown before that was a terminal the device had not been given. */
+    let deviceParts = { terminal: false, chat: null };
     /* What Parley mounted for the chat screen, and for which conversation. */
     let thread = null;
     let threadOf = '';

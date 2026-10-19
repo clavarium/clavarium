@@ -29,6 +29,8 @@ export const PATH = '/terminal';
 export const DEVICE_PATH = '/c/terminal';
 export const CLOSE_ENDED = 1000;
 export const CLOSE_TAKEN = 4001;
+/* A device whose right on this terminal was taken back (or its session ended): put out at once. */
+export const CLOSE_REVOKED = 4003;
 /* A channel that dropped is reopened after a moment, a few times a minute at most. */
 export const REOPEN_AFTER_MS = 1000;
 export const REDRAW_AFTER_MS = 250;
@@ -82,15 +84,23 @@ export const sameOrigin = makeOriginCheck();
 export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {} }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
+    /* THE DEVICES AT A TERMINAL, each with what lets it stay: asked again when the owner changes
+       what devices were given (recheck), and before anything it types is typed. A right taken
+       back used to end only at the next connection -- an open terminal went on (found 19-10). */
+    const deviceSeats = new Map();      /* viewer -> () => still allowed */
+    const allowed = (viewer) => { const still = deviceSeats.get(viewer); if (!still || still()) return true; deviceSeats.delete(viewer); viewer.close(CLOSE_REVOKED, 'not given any more'); return false; };
 
     server.on('upgrade', (request, socket, head) => {
         const url = new URL(request.url ?? '/', 'http://local');
         let name;
+        let still;
         if (url.pathname === DEVICE_PATH) {
             /* A device: no operator identity is looked at, and none is needed. */
             /* `d`: which of its pairings this device speaks for. */
-            name = deviceName(request.headers, url.searchParams.get('d') ?? '', url.searchParams.get('c') ?? undefined) ?? '';
+            const ask = () => deviceName(request.headers, url.searchParams.get('d') ?? '', url.searchParams.get('c') ?? undefined) ?? '';
+            name = ask();
             if (!isConversationName(name) || !originOk(request.headers)) { socket.destroy(); return; }
+            still = () => ask() === name;
         } else if (url.pathname === PATH) {
             name = url.searchParams.get('c') ?? '';
             if (!isConversationName(name) || !originOk(request.headers) || gate(request.headers) === undefined) { socket.destroy(); return; }
@@ -98,6 +108,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const cols = Number(url.searchParams.get('cols'));
         const rows = Number(url.searchParams.get('rows'));
         sockets.handleUpgrade(request, socket, head, (viewer) => {
+            if (still) { deviceSeats.set(viewer, still); viewer.on('close', () => deviceSeats.delete(viewer)); }
             seat(viewer, name, within(cols, COLS) ? cols : 80, within(rows, ROWS) ? rows : 24);
         });
     });
@@ -236,7 +247,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'ready' }));
         const mine = kept;
         viewer.on('message', (data, binary) => {
-            if (mine.sink !== viewer) return;
+            if (mine.sink !== viewer || !allowed(viewer)) return;
             /* `onTyped`: told THAT something came from a screen (the owner is there), which is not reading what the tool prints. */
             if (binary) {
                 const typed = data.toString();
@@ -296,5 +307,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        since anything came out of it -- THAT something came, never what: a
        tool still drawing its first screen is not reading its keyboard yet. */
     const settled = (name) => { const kept = live.get(name); return kept ? { openFor: Date.now() - kept.openedAt, quietFor: Date.now() - kept.outputAt } : null; };
-    return { seats, drop, warm, type, settled, open: (name) => live.has(name), droppedAt: (name) => dropped.get(name) };
+    /* What devices were given changed: each device at a terminal is asked again. */
+    const recheck = () => { for (const viewer of [...deviceSeats.keys()]) allowed(viewer); };
+    return { seats, drop, warm, type, settled, recheck, open: (name) => live.has(name), droppedAt: (name) => dropped.get(name) };
 }

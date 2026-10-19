@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import WebSocket from 'ws';
-import { attachBridge, sameOrigin, CLOSE_ENDED, CLOSE_TAKEN } from '../server/bridge.mjs';
+import { attachBridge, sameOrigin, CLOSE_ENDED, CLOSE_TAKEN, CLOSE_REVOKED } from '../server/bridge.mjs';
 
 /* The next piece of terminal output a screen receives (the bridge's own
    words, such as "ready", are text frames and are skipped). */
@@ -233,4 +233,32 @@ test('one opening at a time: the server\'s warm, a line to type and a screen ask
     const lost = b.bridge.type('demo', 'One more.', 40);
     b.bridge.drop('demo');
     assert.equal(await lost, 'enter');
+});
+
+test('a device at a terminal is put out as soon as its right is taken back: nothing it types after goes in, and it does not wait for its next connection', async (t) => {
+    let given = true;
+    const b = await bench(t, { deviceName: (headers, pairing, wanted) => (given && pairing === 'p1' && wanted === 'demo' ? 'demo' : undefined) });
+    const ws = new WebSocket(`ws://${b.host}/c/terminal?d=p1&c=demo`, { headers: { origin: `http://${b.host}` } });
+    await once(ws, 'open');
+    await b.until(() => b.terminals.made.length === 1);
+    const term = b.terminals.made[0];
+    ws.send(Buffer.from('id\r'));
+    await b.until(() => term.written.length === 1);
+    /* The owner takes it back: on the next look, out. */
+    given = false;
+    const closed = once(ws, 'close');
+    b.bridge.recheck();
+    const [code] = await closed;
+    assert.equal(code, CLOSE_REVOKED);
+    assert.deepEqual(term.written, ['id\r'], 'nothing more typed');
+    /* Taken back, and what it sends before the look is not typed either. */
+    given = true;
+    const ws2 = new WebSocket(`ws://${b.host}/c/terminal?d=p1&c=demo`, { headers: { origin: `http://${b.host}` } });
+    await once(ws2, 'open');
+    await new Promise((r) => setTimeout(r, 50));
+    given = false;
+    const closed2 = once(ws2, 'close');
+    ws2.send(Buffer.from('rm -rf /\r'));
+    assert.equal((await closed2)[0], CLOSE_REVOKED);
+    assert.ok(!term.written.includes('rm -rf /\r'));
 });

@@ -410,6 +410,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         deviceName: (headers, pairing, wanted) => deviceTerminal(devices, headers, pairing, wanted),
     });
     all.drop = (name) => bridge.drop(name);
+    /* What a device was given changes: a terminal it holds and lost goes at once. */
+    devices.changed = () => bridge.recheck();
+    /* And a session that ends by itself (its hours are up): seen within a minute. */
+    const rechecking = setInterval(() => bridge.recheck(), 60_000); rechecking.unref?.();
     /* A TERMINAL THAT DOES NOT COME, though its machine runs (asked by the
        page once it has waited): repaired (conversations.mjs), then opened
        again before the page comes back for it. */

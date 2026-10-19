@@ -80,16 +80,26 @@ test('without a session the door gives the page and pairing, and nothing else', 
     assert.equal(elsewhere.status, 403);
 });
 
-test('the terminal of a device is its conversation; revoked, the device is out everywhere', async (t) => {
+test('the terminal of a device is its conversation, named, and no other; revoked, the device is out everywhere', async (t) => {
     const b = await bench(t);
     const phone = await b.pairPhone('family');
-    const attach = (cookie) => new Promise((done) => {
-        const ws = new WebSocket(`${b.base.replace('http', 'ws')}/c/terminal?c=work&d=${phone.id}`, { headers: { origin: b.origin, ...(cookie ? { cookie } : {}) } });
+    const attach = (cookie, c = 'family') => new Promise((done) => {
+        const ws = new WebSocket(`${b.base.replace('http', 'ws')}/c/terminal?${c === null ? '' : `c=${c}&`}d=${phone.id}`, { headers: { origin: b.origin, ...(cookie ? { cookie } : {}) } });
         ws.on('open', () => { ws.close(); done('opened'); });
         ws.on('error', () => done('refused'));
     });
     assert.equal(await attach(undefined), 'refused', 'no session');
     assert.equal(await attach(phone.cookie), 'opened');
+    /* A conversation it was not given is refused -- not answered with its own in its place. */
+    assert.equal(await attach(phone.cookie, 'work'), 'refused');
+    assert.equal(await attach(phone.cookie, 'nothing-here'), 'refused');
+    assert.equal(await attach(phone.cookie, null), 'refused', 'no conversation named: nothing guessed');
+    for (const route of ['/me?c=work', '/files?c=work&r=accounts&p=', '/conversations/work/talk', '/shortcuts?c=work']) {
+        const r = await b.device(`/c/api/${phone.id}${route}`, { cookie: phone.cookie });
+        const body = await r.json();
+        assert.ok(r.status >= 400 || body.name === null, `${route}: nothing of the other conversation (${r.status})`);
+        assert.ok(!JSON.stringify(body).includes('bank.txt'), `${route}: none of its files`);
+    }
     assert.deepEqual((await (await b.operator('/api/conversations/family/devices')).json()).map((d) => d.label), ['Phone']);
     assert.equal((await b.operator(`/api/devices/${phone.id}/revoke`, {})).status, 200);
     assert.equal((await b.device(`/c/api/${phone.id}/me`, { cookie: phone.cookie })).status, 401);
@@ -124,7 +134,7 @@ test('a composed share: two conversations and a folder of its own, each with its
     const me = await (await get('/me?c=work')).json();
     assert.deepEqual([me.name, me.conversations, me.shared], ['work', ['family', 'work'], [{ name: 'accounts', type: 'folder', access: 'read' }]]);
     assert.equal((await (await get('/me?c=family')).json()).name, 'family');
-    assert.equal((await (await get('/me?c=someone-elses')).json()).name, 'family', 'a conversation it was not given falls back on its own');
+    assert.equal((await (await get('/me?c=someone-elses')).json()).name, null, 'a conversation it was not given is none: never another in its place');
     /* The folder given to the device itself: read, from any of its conversations; never written. */
     assert.deepEqual((await (await get('/files?c=family&r=accounts&p=')).json()).entries.map((e) => e.name), ['bank.txt']);
     const write = await fetch(`${b.base}/c/api/${tablet.id}/files/import?c=family&r=accounts&p=&name=x.txt`, { method: 'POST', headers: { origin: b.origin, 'content-type': 'application/octet-stream', cookie: tablet.cookie }, body: 'x' });
@@ -221,7 +231,8 @@ test('a conversation shared in parts: what was not given is refused by the serve
     assert.equal((await (await b.operator('/api/conversations/family/talk')).json()).on, true);
 
     /* The terminal alone: none of the chat, its words included. */
-    assert.equal(await terminalOf(b, terminalOnly), 'opened');
+    assert.equal(await terminalOf(b, terminalOnly, 'family'), 'opened');
+    assert.equal(await terminalOf(b, terminalOnly), 'refused', 'no conversation named: nothing guessed');
     assert.equal(await status(terminalOnly, '/shortcuts'), 200);
     for (const path of ['/conversations/family/talk', '/talk/words?lang=en']) assert.equal(await status(terminalOnly, path), 403, path);
     assert.equal(await status(terminalOnly, '/conversations/family/talk', { text: 'sneaked in' }), 403);
@@ -240,7 +251,7 @@ test('a conversation shared in parts: what was not given is refused by the serve
 
     /* Changed later by the owner, without a new code: the terminal is given, the chat taken. */
     assert.equal((await b.operator(`/api/devices/${chatOnly.id}/give`, { asset: 'conversation:family', rights: 'x' })).status, 200);
-    assert.equal(await terminalOf(b, chatOnly), 'opened');
+    assert.equal(await terminalOf(b, chatOnly, 'family'), 'opened');
     assert.equal(await status(chatOnly, '/conversations/family/talk'), 403);
     /* At least one part: nothing at all is not a share. */
     assert.equal((await b.operator(`/api/devices/${chatOnly.id}/give`, { asset: 'conversation:family', rights: '' })).status, 400);

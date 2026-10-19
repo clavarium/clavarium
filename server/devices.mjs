@@ -60,6 +60,7 @@ export class Devices {
        conversation was shared in two parts (see below). */
     constructor(store, now = () => Date.now(), grants = new Grants(), { chatWas = () => false } = {}) {
         this.#store = store; this.#now = now; this.#grants = grants;
+        this.changed = () => {};
         /* Sessions outlive a restart of this server (a new version put in place): what is kept is
            only their sha256 and their end, on the device's record, never the session itself. */
         for (const d of store.all()) for (const k of Array.isArray(d.sessions) ? d.sessions : []) {
@@ -133,6 +134,7 @@ export class Devices {
         const clean = readRights(asset, rights);
         if (typeOf(asset) === 'secret') throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
         this.#grants.give(pairingSubject(id), asset, clean);
+        this.changed();
     }
     /* A name the owner will recognise. */
     rename(id, label) {
@@ -148,6 +150,7 @@ export class Devices {
         if (!this.#store.get(id)) throw new Refusal(404, 'No such device.');
         this.#grants.take(pairingSubject(id), String(asset));
         if (this.grantsOf(id).length === 0) this.revoke(id);
+        this.changed();
     }
 
     revoke(id) {
@@ -156,6 +159,7 @@ export class Devices {
         this.#grants.forgetSubject(pairingSubject(id));
         this.#challenges.delete(id);
         for (const [key, s] of this.#sessions) if (s.device === id) this.#sessions.delete(key);
+        this.changed();
     }
 
     /* Something is gone (a conversation archived, a folder removed): nobody
@@ -164,6 +168,7 @@ export class Devices {
     forgetAsset(asset) {
         this.#grants.forgetAsset(asset);
         for (const d of this.#store.all()) if (this.grantsOf(d.name).length === 0) this.revoke(d.name);
+        this.changed();
     }
 
     /* ---- device side ---- */
@@ -231,7 +236,10 @@ export class Devices {
         const id = this.pairingOf(session, pairing);
         if (id === undefined) return undefined;
         const mine = this.conversationsOf(id);
-        return mine.includes(wanted) ? wanted : mine[0];
+        /* None named: its first. One named and not given: none -- never another one in its place
+           (a terminal asked for one conversation once opened on another). */
+        if (wanted === undefined || wanted === '') return mine[0];
+        return mine.includes(wanted) ? wanted : undefined;
     }
 }
 

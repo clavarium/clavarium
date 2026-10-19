@@ -144,9 +144,10 @@ test('one code gives a chosen list: conversations to use, folders to read or wri
     assert.deepEqual(b.devices.conversationsOf(device), ['family', 'garden']);
     assert.deepEqual(b.devices.grantsOf(device).map((g) => `${g.asset} ${g.rights}`), ['conversation:family x', 'conversation:garden x', 'folder:photos r', 'git:site rw']);
     const session = b.devices.open(device, p.sign(b.devices.challenge(device).nonce)).session;
-    /* It names the conversation it speaks for; one it was not given falls back on its own. */
+    /* It names the conversation it speaks for; one it was not given is none -- never another in its place. */
     assert.equal(b.devices.conversationOf(session, device, 'garden'), 'garden');
-    assert.equal(b.devices.conversationOf(session, device, 'private-work'), 'family');
+    assert.equal(b.devices.conversationOf(session, device, 'private-work'), undefined);
+    assert.equal(b.devices.conversationOf(session, device), 'family', 'naming none: its first');
     assert.deepEqual(b.devices.of('garden').map((d) => d.id), [device]);
     assert.throws(() => b.devices.share([{ asset: 'secret:MODEL_KEY', rights: 'x' }]), /never shared with a device/);
     assert.throws(() => b.devices.share([{ asset: 'folder:photos', rights: 'x' }]), /takes these rights/);

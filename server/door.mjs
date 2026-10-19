@@ -60,7 +60,7 @@ async function readJson(request) {
 }
 
 /* The conversation the pairing asking speaks for, or undefined: the one it
-   names if it was given it, otherwise the first it was given. */
+   names, only if it was given it; naming none, the first it was given. */
 export function deviceConversation(devices, headers, pairing, wanted) {
     if (!isPairingId(pairing)) return undefined;
     return devices.conversationOf(readCookie(headers.cookie, cookieNameOf(pairing)), pairing, wanted);
@@ -70,6 +70,8 @@ export function deviceConversation(devices, headers, pairing, wanted) {
    A pairing given its chat alone gets no terminal channel at all -- no
    keys, no shortcuts, no dictation typed into it. */
 export function deviceTerminal(devices, headers, pairing, wanted) {
+    /* A terminal is always asked for by the name of its conversation: nothing is guessed. */
+    if (typeof wanted !== 'string' || wanted === '') return undefined;
     const name = deviceConversation(devices, headers, pairing, wanted);
     return name !== undefined && devices.rightsOn(pairing, name).includes('x') ? name : undefined;
 }
