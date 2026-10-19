@@ -160,6 +160,8 @@ if (area === 'git') {
     if (!existsSync(folderOf(name)) || lstatSync(folderOf(name)).isSymbolicLink()) { console.error(`REFUSED: no such folder: ${name}`); process.exit(78); }
     const child = spawn(process.execPath, [join(dirname(new URL(import.meta.url).pathname), 'fake-git-read.mjs'), folderOf(name), name], { stdio: ['ignore', 'inherit', 'inherit'] });
     child.on('close', (code) => process.exit(code ?? 82));
+/* The views never break here: nothing to take off. */
+} else if (area === 'mounts' && verb === 'repair') { process.exit(0);
 } else if (area !== 'vm') { console.error(`REFUSED: unknown verb: ${area} ${verb}`); process.exit(78); }
 /* Everything below plays a VM. */
 if (area === 'vm') {
@@ -168,6 +170,8 @@ if (area === 'vm') {
     const stateOf = (vm) => (existsSync(join(home(vm), 'state')) ? readFileSync(join(home(vm), 'state'), 'utf8') : undefined);
     const setState = (vm, s) => writeFileSync(join(home(vm), 'state'), s);
     const fail = (message, code = 2) => { console.error(message); process.exit(code); };
+    /* The VM manager answers here: asked if it does (vmwatch.mjs), and restarted when asked. */
+    if (verb === 'ping' || verb === 'revive') process.exit(0);
     /* A path of the VM, as a path here. */
     /* ("dir/." and "dir/" mean something to cp: the ending is kept.) */
     const inVm = (vm, path) => (path.startsWith('/') ? join(root(vm), path) + (path.endsWith('/.') ? '/.' : path.endsWith('/') && path !== '/' ? '/' : '') : path);
