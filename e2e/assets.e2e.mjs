@@ -57,7 +57,7 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await me.until('the chat is shown', async () => (await page.locator('#view-chat').getAttribute('aria-pressed')) === 'true' && await page.locator('#simple').isVisible());
     await page.locator('#view-terminal').click();
     await me.until('the terminal is back', async () => !(await page.locator('#simple').isVisible()));
-    /* Its Assets: by kind, the repository first and opened. */
+    /* Its Assets: by kind, the repository first; nothing opened until one is chosen. */
     await page.locator('#view-assets').click();
     const rows = page.locator('#cassets-rows .as-row');
     await me.until('its assets are listed', async () => (await rows.count()) === 3);
@@ -65,6 +65,9 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     assert.deepEqual(await page.locator('#cassets-rows .as-kind h3').allTextContents(), ['Git repositories', 'Folders']);
     assert.match(await page.locator('#cassets-rows .as-row[data-asset="git:site"]').innerText(), /site\s*write/);
     assert.match(await page.locator('#cassets-rows .as-row[data-asset="folder:notes"]').innerText(), /notes\s*read/);
+    assert.equal(await page.locator('#cassets-detail .as-none').innerText(), 'Select an asset to see its detail.');
+    assert.equal(await page.locator('#cassets-rows .as-row[aria-current="true"]').count(), 0, 'no row chosen');
+    await page.locator('#cassets-rows .as-row[data-asset="git:site"]').click();
     await me.until('the repository is opened, its branches drawn', async () => (await page.locator('#cassets-detail .gg-row').count()) >= 3, 20_000);
     assert.match(await page.locator('#cassets-detail .as-line').innerText(), /Its agent works on dev; you send to dev\./);
     assert.match(await page.locator('#cassets-detail .as-cards').innerText(), /To send\s*2 commits/);
@@ -121,6 +124,8 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await me.until('the Assets place', async () => await page.locator('#assets').isVisible());
     await me.until('everything is listed', async () => (await page.locator('#assets-rows .as-row').count()) === 2);
     assert.equal(await page.locator('#assets-rows .as-row[data-asset="git:site"] .as-badge').innerText(), '1', 'how many conversations use it');
+    assert.equal(await page.locator('#assets-detail .as-none').innerText(), 'Select an asset to see its detail.', 'nothing opened by itself');
+    await shot(page, 'tablet-assets-none-chosen');
     await page.fill('#assets-search', 'not');
     await me.until('searched', async () => (await page.locator('#assets-rows .as-row').count()) === 1);
     await page.fill('#assets-search', '');
@@ -193,6 +198,7 @@ test('the last checks of a repository are kept and shown in its detail: their re
     assert.deepEqual([kept[0].name, kept[0].targets.main.status, kept[0].targets.main.head], ['site', 'failed', head], 'kept in the data folder');
     /* In the conversation's Assets. */
     await page.locator('#view-assets').click();
+    await page.locator('#cassets-rows .as-row[data-asset="git:site"]').click();
     const card = page.locator('#cassets-detail .as-lastchecks');
     await me.until('the last checks are shown', async () => await card.isVisible(), 20_000);
     assert.match(await card.innerText(), new RegExp(`Last checks\\s*Failed[\\s\\S]*on ${head.slice(0, 7)} · just now · to main`));

@@ -30,8 +30,9 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
 
 - **5 - hands**: one-click shortcuts (sent, or left to complete), and
   dictation: the microphone stays open and each phrase is typed into the
-  terminal; "auto" presses Enter once the person has stopped. Dictation needs
-  `CLAVARIUM_TRANSCRIPTION_URL` (and `_KEY`) in the environment.
+  terminal; "auto" presses Enter once the person has stopped. Its engine is chosen
+  in Settings, Dictation (a provider, its key one of the secrets);
+  `CLAVARIUM_TRANSCRIPTION_URL` (and `_KEY`) in the environment is the fallback.
 
 - **6 - the app and sharing**: the page is installable; a conversation is
   shared with a one-use QR code; the device that scans it makes its own key,

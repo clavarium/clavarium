@@ -217,3 +217,57 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     await me.sees('\n0\n');
     assert.deepEqual(me.errors, []);
 });
+
+test('Settings, Dictation: a provider fills in its address and model; saved, it is used at once; "Try it" shows what was heard; the key never reaches the page', { skip: SKIP }, async (t) => {
+    const second = (level) => { const s = new Float32Array(RATE); for (let i = 0; i < RATE; i++) s[i] = level * Math.sin((2 * Math.PI * 220 * i) / RATE); return s; };
+    const microphone = join(mkdtempSync(join(tmpdir(), 'clv-mic-')), 'voice.wav');
+    writeFileSync(microphone, toWav([second(0.004), second(0.004), second(0.5), second(0.004), second(0.004), second(0.004)]));
+    const b = await bench(t, { microphone });
+    const me = await b.person();
+    assert.equal((await me.api('/api/secrets', { name: 'STT_KEY', value: 'a-key-never-shown' })).status, 201);
+    await me.page.locator('#nav-settings').click();
+    /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each. */
+    await me.chapter('s-about');
+    await me.until('the facts', async () => /^Clavarium \S+/.test(await me.page.locator('#settings-about').innerText()));
+    assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Who may sign in/);
+    assert.match(await me.page.locator('#settings-address').innerText(), /^Address: /);
+    assert.equal(await me.page.locator('#settings-ch-people').count(), 0, 'People & address: merged into About');
+    const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
+    assert.deepEqual(idle, [], 'a chapter that only ever shows text');
+    /* No shortcut: one line, how to add one. */
+    if ((await me.api('/api/shortcuts')).body.length === 0) { await me.chapter('s-shortcuts'); assert.match(await me.page.locator('#settings-shortcuts-hint').innerText(), /No shortcut yet/); }
+    await me.chapter('s-dictation');
+    await me.until('the environment\'s engine is said', async () => /set on the server \(CLAVARIUM_TRANSCRIPTION_URL\)/.test(await me.page.locator('#settings-dictation').innerText()));
+    /* Each provider fills in its address and its model. */
+    await me.page.selectOption('#dictation-provider', 'mistral');
+    assert.equal(await me.page.inputValue('#dictation-url'), 'https://api.mistral.ai/v1/audio/transcriptions');
+    assert.equal(await me.page.inputValue('#dictation-model'), 'voxtral-mini-latest');
+    await me.page.selectOption('#dictation-provider', 'groq');
+    assert.equal(await me.page.inputValue('#dictation-model'), 'whisper-large-v3-turbo');
+    /* An address of this server's own network with a named provider: refused, and why. */
+    await me.page.fill('#dictation-url', b.engineUrl);
+    await me.page.locator('#dictation-save').click();
+    await me.until('refused', async () => /only with "Other/.test(await me.page.locator('#dictation-error').innerText()));
+    /* "Other (compatible)": an engine of one's own, here the bench's. */
+    await me.page.selectOption('#dictation-provider', 'other');
+    assert.equal(await me.page.inputValue('#dictation-url'), '');
+    assert.equal(await me.page.locator('#dictation-other-hint').isVisible(), true);
+    await me.page.fill('#dictation-url', b.engineUrl);
+    await me.page.fill('#dictation-model', 'local-whisper');
+    await me.page.selectOption('#dictation-secret', 'STT_KEY');
+    await me.page.selectOption('#dictation-language', 'fr');
+    await me.page.locator('#dictation-try').click();
+    await me.until('heard', async () => (await me.page.locator('#dictation-heard').innerText()) === 'Heard: said out loud', 20_000);
+    assert.equal(b.engineKeys.at(-1), 'Bearer a-key-never-shown', 'the server put the key in, from the secret');
+    assert.equal((await me.api('/api/dictation')).body.source, 'env', 'trying saves nothing');
+    await me.page.locator('#dictation-save').click();
+    await me.until('saved', async () => /chosen here/.test(await me.page.locator('#settings-dictation').innerText()));
+    const about = await me.api('/api/dictation');
+    assert.deepEqual([about.body.provider, about.body.model, about.body.secret, about.body.language], ['other', 'local-whisper', 'STT_KEY', 'fr']);
+    assert.equal(JSON.stringify(about.body).includes('a-key-never-shown'), false);
+    assert.equal(await me.page.content().then((html) => html.includes('a-key-never-shown')), false);
+    /* Turned off: the environment's engine again. */
+    await me.page.locator('#dictation-off').click();
+    await me.until('off', async () => (await me.api('/api/dictation')).body.source === 'env');
+    assert.deepEqual(me.errors, []);
+});

@@ -2515,7 +2515,6 @@
        opened shows its files (the Files sheet, moved in), a repository its
        branches. On a phone, the list, then one asset with "All assets". */
     const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round']];
-    const byKind = (items) => ASSET_KINDS.flatMap(([k]) => items.filter((i) => i.kind === k));
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     const kindIcon = (kind) => { const name = ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
@@ -2644,6 +2643,9 @@
         filesHome.parent.insertBefore(f, filesHome.next);
     }
 
+    /* Nothing is opened by itself: the wide detail says what it is for. */
+    const noAssetChosen = () => el('p', 'hint as-none', 'Select an asset to see its detail.');
+
     /* ---- a conversation's own ---- */
     async function paintRoomAssets() {
         if (!assetsShown) return;
@@ -2660,7 +2662,7 @@
                 sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
         for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, sub: 'name only · used by its agent' });
-        const chosen = items.find((i) => i.key === roomPick) ?? (narrow() ? null : byKind(items)[0] ?? null);
+        const chosen = items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
         paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
@@ -2668,7 +2670,7 @@
         $('cassets-rows').prepend(top);
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
-        if (!chosen) { unembedFiles(); detail.replaceChildren(); return; }
+        if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
         const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key;
         if (!keepFiles) { unembedFiles(); detail.replaceChildren(); }
         detail.dataset.asset = chosen.key;
@@ -2730,7 +2732,7 @@
         }
         for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', sub: 'name only' });
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
-        const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? (narrow() ? null : byKind(shown)[0] ?? null);
+        const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
         paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { placeAssetStep(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); }, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
         const detail = $('assets-detail');
@@ -2767,7 +2769,7 @@
             focusField(form.querySelector('input:not([type=radio])'));
             return;
         }
-        if (!chosen) return;
+        if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
         detail.append(asTitle(chosen, back));
         const ready = conversations.filter((c) => c.phase === 'ready');
         const r = chosen.resource;
@@ -3166,14 +3168,95 @@
             remove.addEventListener('click', async () => { await post(`${API}/shortcuts/${shortcut.id}/remove`).catch(() => {}); await openSettings(); void paintShortcuts(); });
             row.append(label, remove); list.append(row);
         }
-        $('settings-dictation').textContent = platform.dictation ? `Speech is turned into text by "${platform.dictation}". It is set on the server (CLAVARIUM_TRANSCRIPTION_URL).` : 'No speech-to-text engine is set on the server: Dictate is not offered.';
+        void paintDictation();
+        /* With no shortcut, one line: how to add one (this is the only place to remove them). */
+        $('settings-shortcuts-hint').textContent = saved.length ? 'The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.' : 'No shortcut yet: add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length
-            ? `Who may sign in: ${platform.operators.join(', ')}. Address: ${platform.address ?? 'not declared'}. Both were set when this was installed.`
+            ? `Who may sign in: ${platform.operators.join(', ')} (set when this was installed).`
             : 'Development mode: anyone on this machine is the operator.';
+        $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}.`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         void paintInstance();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
+
+    /* ---------- Dictation, in Settings: the engine, chosen here (server/voice.mjs) ---------- */
+    let dictationProviders = [];
+    const dictationChoice = () => {
+        const lang = $('dictation-language').value;
+        return { provider: $('dictation-provider').value, url: $('dictation-url').value.trim(), model: $('dictation-model').value.trim(), secret: $('dictation-secret').value,
+            language: lang === 'other' ? $('dictation-language-code').value.trim() : lang };
+    };
+    const dictationSay = (error, saved = '') => {
+        $('dictation-error').textContent = error ?? ''; $('dictation-error').hidden = !error;
+        $('dictation-saved').textContent = saved;
+    };
+    const showLanguage = (code) => {
+        const known = [...$('dictation-language').options].some((o) => o.value === code && code !== 'other');
+        $('dictation-language').value = known ? code : 'other';
+        $('dictation-language-code').value = known ? '' : code;
+        $('dictation-language-code').hidden = known;
+    };
+    async function paintDictation() {
+        const [about, secrets] = await Promise.all([getJson('/dictation', null), getJson('/secrets', [])]);
+        if (!about) { $('settings-dictation').textContent = 'Dictation cannot be set from here.'; $('dictation-form').hidden = true; return; }
+        $('settings-dictation').textContent = about.source === 'settings'
+            ? `On: speech is turned into text by "${about.model}", chosen here.${about.env ? ' The engine set on the server (CLAVARIUM_TRANSCRIPTION_URL) is the fallback when this is turned off.' : ''}`
+            : about.source === 'env'
+                ? `On: speech is turned into text by "${about.env.model}", set on the server (CLAVARIUM_TRANSCRIPTION_URL). An engine chosen here takes its place.`
+                : 'Off: no speech-to-text engine, so Dictate is not offered. Choose one below.';
+        if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
+        dictationProviders = about.providers;
+        const provider = $('dictation-provider');
+        if (provider.options.length === 0) for (const p of about.providers) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; provider.append(o); }
+        const secret = $('dictation-secret');
+        secret.replaceChildren(secret.options[0] ?? Object.assign(document.createElement('option'), { value: '', textContent: 'No key' }));
+        for (const s2 of secrets) { const o = document.createElement('option'); o.value = s2.name; o.textContent = s2.name; secret.append(o); }
+        if ($('dictation-form').contains(document.activeElement)) return;
+        provider.value = about.provider ?? 'ovh';
+        const first = dictationProviders.find((p) => p.id === provider.value);
+        $('dictation-url').value = about.provider ? about.url : first?.url ?? '';
+        $('dictation-model').value = about.provider ? about.model : first?.model ?? '';
+        secret.value = [...secret.options].some((o) => o.value === about.secret) ? about.secret : '';
+        showLanguage(about.language ?? '');
+        $('dictation-other-hint').hidden = provider.value !== 'other';
+        $('dictation-off').hidden = about.source !== 'settings';
+    }
+    $('dictation-provider').addEventListener('change', () => {
+        const p = dictationProviders.find((x) => x.id === $('dictation-provider').value);
+        if (p) { $('dictation-url').value = p.url; $('dictation-model').value = p.model; }
+        $('dictation-other-hint').hidden = $('dictation-provider').value !== 'other';
+    });
+    $('dictation-language').addEventListener('change', () => { $('dictation-language-code').hidden = $('dictation-language').value !== 'other'; });
+    $('dictation-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try { await post(`${API}/dictation`, dictationChoice()); document.activeElement?.blur(); dictationSay(null, 'Saved: in use now.'); void paintDictation(); }
+        catch (error) { dictationSay(error.message); }
+    });
+    $('dictation-off').addEventListener('click', async () => {
+        try { await post(`${API}/dictation/off`); dictationSay(null, 'Turned off.'); void paintDictation(); } catch (error) { dictationSay(error.message); }
+    });
+    /* "Try it": a few seconds from this microphone, sent to the engine in the form (nothing saved), its text shown. */
+    let stopTrying = null;
+    const endTry = () => { stopTrying?.(); stopTrying = null; $('dictation-try').textContent = 'Try it'; };
+    $('dictation-try').addEventListener('click', async () => {
+        if (stopTrying) { endTry(); return; }
+        dictationSay(null);
+        const heard = $('dictation-heard');
+        if (!window.clavariumVoice) { dictationSay('The microphone cannot be used on this page.'); return; }
+        const to = `${API}/dictation/try?${new URLSearchParams(dictationChoice())}`;
+        const words = { calibrating: 'Listening to the room...', listening: 'Speak now: a short sentence.', hearing: 'Hearing...', transcribing: 'Writing...' };
+        try {
+            heard.hidden = false; heard.textContent = 'Opening the microphone...';
+            const stop = await window.clavariumVoice.listen({
+                state: (w) => { if (stopTrying) heard.textContent = words[w] ?? w; },
+                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; },
+                error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
+            }, { to });
+            stopTrying = stop; $('dictation-try').textContent = 'Stop';
+            setTimeout(() => { if (stopTrying === stop) { endTry(); if (!heard.textContent.startsWith('Heard')) heard.textContent = 'Nothing was heard.'; } }, 15_000);
+        } catch { heard.hidden = true; dictationSay('The microphone could not be opened.'); }
+    });
 
     /* ---------- the name of this Clavarium, in Settings ---------- */
     async function paintInstance() {

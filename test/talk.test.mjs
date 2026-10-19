@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
+import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
 import { WAKE, REREAD } from 'clavarium-parley/host';
 import { packageFile } from '../server/parley.mjs';
@@ -43,7 +43,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined), installIn: async (name) => { installs.push(name); return world.install ?? ''; } } : null;
     /* The terminal the bridge keeps open (`world.open`), and what health last saw (`world.seen`). */
     const channel = [];
-    const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
+    const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, settled: () => (world.open === true ? world.settled ?? { openFor: 1e9, quietFor: 1e9 } : null), type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
     const health = { of: () => world.seen ?? null };
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox, terminal, health,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
@@ -284,6 +284,37 @@ test('after a restart its chat says so, and once the tool had time to start it i
     assert.equal(b.typed.length, 2);
     const failed = b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1);
     assert.deepEqual([failed.level, failed.tone, failed.event, failed.actions], ['needs-you', 'bad', 'machine-problem', ['restart', 'terminal']]);
+});
+
+test('after a restart the line is typed only once the tool is READY: its terminal open long enough and quiet, so its Enter is a real Enter', async (t) => {
+    const b = bench(t);
+    b.world.clock = Date.now();
+    await b.talk.set('helper', true);
+    b.world.open = true;
+    /* Its terminal has just been opened (the tool starts now), and it draws. */
+    b.world.settled = { openFor: 300, quietFor: 0 };
+    b.talk.renewed('helper', 'Its machine was restarted: the tool started again.', true);
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(b.typed, [], 'started, not ready: nothing typed into a tool that does not read its keyboard yet');
+    /* Open long enough, but still drawing its first screen. */
+    b.world.settled = { openFor: REREAD_AFTER_MS + 1, quietFor: 100 };
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(b.typed, [], 'still drawing: not yet');
+    /* Quiet: the line, then Enter apart, down the open channel, once. */
+    b.world.settled = { openFor: REREAD_AFTER_MS + 3000, quietFor: SETTLED_MS + 1 };
+    b.world.clock += SETTLED_MS + 200;
+    await until('typed', () => b.typed.length === 2);
+    assert.deepEqual(b.channel, [[REREAD, ENTER_AFTER_MS]]);
+    assert.deepEqual(b.typed, [REREAD, 'Enter']);
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(b.typed.length, 2, 'once');
+    /* A tool that never stops drawing is told anyway, after a while. */
+    b.talk.renewed('helper', 'Restarted again.', true);
+    b.world.settled = { openFor: READY_MAX_MS + 1, quietFor: 0 };
+    b.world.clock += REREAD_AFTER_MS + 1;
+    await until('typed again', () => b.typed.length === 4);
 });
 
 test('a file the person attaches is put in the bridge folder, in a folder of its own; the message gives its path; it opens from the chat, as what the tool shows does', async (t) => {

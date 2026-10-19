@@ -96,6 +96,16 @@ export function typeCommand(line) {
 export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts.';
 /* After a restart, the tool is given this long to start before REREAD is typed. */
 export const REREAD_AFTER_MS = 10_000;
+/* READY, NOT JUST STARTED. The tool starts when its terminal is opened, which
+   may be well after the restart was said; and a tool still starting does not
+   read its keyboard yet: the line and its Enter then wait together, and are
+   read at once as a paste -- the Enter becomes a new line in its input box,
+   never sent (seen on a real deployment). REREAD is typed once its terminal
+   has been open REREAD_AFTER_MS and nothing has come out of it for
+   SETTLED_MS; after READY_MAX_MS open, typed anyway (a tool that never stops
+   drawing). */
+export const SETTLED_MS = 2_000;
+export const READY_MAX_MS = 60_000;
 /* Lines of the machine kept for one conversation, at most. */
 export const SYSTEM_MAX = 50;
 /* THE THREAD'S OWN LINES, by kind of event, and how much each matters --
@@ -447,6 +457,14 @@ export class Talk {
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return later(RETRY_MS);
+        if (this.#terminal?.settled) {
+            await this.#warm(name);
+            const s = this.#terminal.settled(name);
+            if (s) {
+                const wait = Math.max(this.#rereadAfter - s.openFor, s.openFor < READY_MAX_MS ? SETTLED_MS - s.quietFor : 0);
+                if (wait > 0) return later(wait + 100);
+            }
+        }
         if (!(await this.#type(name, REREAD).catch(() => false))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
         const waits = this.#parley(name).unread() > 0;

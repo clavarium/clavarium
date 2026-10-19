@@ -158,13 +158,13 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
         /* What is dictated goes into the terminal, or into the chat's box: one of the two must be its to write in. */
         const speaks = part.terminal || part.chat === 'write';
-        if (request.method === 'GET' && route === '/voice') return send(200, { available: voice !== undefined && speaks, engine: speaks ? voice?.model ?? null : null });
+        if (request.method === 'GET' && route === '/voice') return send(200, { available: voice?.current() !== undefined && speaks, engine: speaks ? voice?.model ?? null : null });
         if (request.method === 'POST' && route === '/voice') {
             need(speaks, 'the terminal or the chat');
             if (request.headers['content-type'] !== 'audio/wav') return send(400, { error: 'A recording is a WAV file.' });
             const parts = []; let size = 0;
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
-            return send(200, { text: await transcribe(voice, Buffer.concat(parts)) });
+            return send(200, { text: voice ? await voice.transcribe(Buffer.concat(parts)) : await transcribe(undefined, Buffer.concat(parts)) });
         }
         /* Its conversation's chat, whatever conversation the address names: the device's own. */
         /* Only for a pairing given its chat: to read it, or to write there too. */

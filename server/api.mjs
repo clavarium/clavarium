@@ -71,6 +71,10 @@
  *   POST /api/shortcuts/<id>/remove
  *   GET  /api/voice                         is dictation available?
  *   POST /api/voice                         the body IS a WAV recording -> {text}
+ *   GET  /api/dictation                     the engine chosen in Settings (never a key: a secret's name)
+ *   POST /api/dictation                     {provider, url, model, secret, language}: chosen, at once
+ *   POST /api/dictation/off                 the environment's engine, if any, again
+ *   POST /api/dictation/try?provider=&url=&model=&secret=&language=   a WAV -> {text}, nothing saved
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
  *   GET  /api/flows                         who gets what: devices, conversations, assets, the rights between them, the flows
  *   POST /api/flows/name                    {around, name}: a flow named by the owner ('' gives it back its own)
@@ -139,14 +143,18 @@ export async function handleApi(request, response, conversations, headers, resou
         return resources.folder(any.name);
     };
     try {
-        if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice !== undefined, engine: voice?.model ?? null }), true;
-        if (request.method === 'POST' && pathname === '/api/voice') {
+        if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice?.current() !== undefined, engine: voice?.model ?? null }), true;
+        if (request.method === 'GET' && pathname === '/api/dictation' && voice) return send(200, voice.about()), true;
+        if (request.method === 'POST' && (pathname === '/api/voice' || (pathname === '/api/dictation/try' && voice))) {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'audio/wav') {
                 return send(403, { error: 'This request does not come from this site.' }), true;
             }
             const parts = []; let size = 0;
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
-            return send(200, { text: await transcribe(voice, Buffer.concat(parts)) }), true;
+            const audio = Buffer.concat(parts);
+            /* "Try it": the choice in the form, in the address's parameters (no key in it: a secret's name). */
+            if (pathname === '/api/dictation/try') return send(200, { text: await voice.try(Object.fromEntries(query), audio) }), true;
+            return send(200, { text: voice ? await voice.transcribe(audio) : await transcribe(undefined, audio) }), true;
         }
         if (request.method === 'GET' && pathname === '/api/files') return send(200, await list(attached(), query.get('p') ?? '')), true;
         if (request.method === 'GET' && pathname === '/api/files/machine') {
@@ -438,6 +446,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
         /* The list: folders and order, the same on every device (conversations.mjs). */
         if (pathname === '/api/instance' && instance) return send(200, instance.setName(body.name)), true;
+        if (pathname === '/api/dictation' && voice) return send(200, voice.set(body)), true;
+        if (pathname === '/api/dictation/off' && voice) return send(200, voice.off()), true;
         if (pathname === '/api/order') return send(200, conversations.setOrder({ order: body.order, groups: body.groups })), true;
         if (pathname === '/api/groups/rename') return send(200, conversations.renameGroup(body.from, body.to)), true;
         if (pathname === '/api/groups/move') return send(200, conversations.moveGroup(body.group, body.to)), true;

@@ -570,7 +570,7 @@
         <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
           <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">The ready-made answers under the terminal.</span></summary>
           <div class="chapter-body">
-        <p class="hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
+        <p class="hint" id="settings-shortcuts-hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
         <div id="settings-shortcuts"></div>
           </div>
         </details>
@@ -603,16 +603,22 @@
           <summary><span class="chapter-title">Dictation</span><span class="chapter-about">Speech to text, on this server.</span></summary>
           <div class="chapter-body">
         <p id="settings-dictation" class="hint"></p>
+        <form id="dictation-form" autocomplete="off">
+          <div class="row"><label for="dictation-provider">Provider</label><select id="dictation-provider"></select></div>
+          <div class="row"><label for="dictation-url">Address</label><input id="dictation-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div>
+          <div class="row"><label for="dictation-model">Model</label><input id="dictation-model" spellcheck="false" maxlength="100"></div>
+          <div class="row"><label for="dictation-secret">Key</label><select id="dictation-secret"><option value="">No key</option></select></div>
+          <div class="row"><label for="dictation-language">Language</label><select id="dictation-language"><option value="">Automatic</option><option value="en">English (en)</option><option value="fr">French (fr)</option><option value="de">German (de)</option><option value="es">Spanish (es)</option><option value="it">Italian (it)</option><option value="nl">Dutch (nl)</option><option value="pt">Portuguese (pt)</option><option value="other">Another code...</option></select><input id="dictation-language-code" maxlength="8" spellcheck="false" placeholder="code, such as pl" aria-label="Language code" hidden></div>
+          <p class="hint" id="dictation-key-hint">The key is one of your secrets (Assets, Secrets), chosen by its name: it is never shown, and only this server uses it, when it transcribes.</p>
+          <p class="hint" id="dictation-other-hint" hidden>"Other (compatible)": any engine with the same interface (<code>/v1/audio/transcriptions</code>). Only with it may the address be on this server's own network (localhost, a private address, plain http), for an engine of your own: the others must be public HTTPS addresses.</p>
+          <div class="row"><button type="submit" class="primary" id="dictation-save">Save</button><button type="button" id="dictation-try">Try it</button><button type="button" id="dictation-off">Turn off</button><span class="hint" id="dictation-saved" role="status"></span></div>
+          <p class="hint" id="dictation-heard" role="status" hidden></p>
+          <p class="error" id="dictation-error" role="alert" hidden></p>
+        </form>
           </div>
         </details>
-        <details class="chapter" id="settings-ch-people" data-chapter="s-people">
-          <summary><span class="chapter-title">People &amp; address</span><span class="chapter-about">Who may sign in, and where.</span></summary>
-          <div class="chapter-body">
-        <p id="settings-people" class="hint"></p>
         <!-- THIS SERVER: its disk and memory, what takes them, and the reserve
              no machine may eat into (server/capacity.mjs). Nothing here wakes a machine. -->
-          </div>
-        </details>
         <details class="chapter" id="settings-server-top" data-chapter="s-resources">
           <summary><span class="chapter-title">Resources</span><span class="chapter-about">Disk and memory, what takes them, the reserve.</span></summary>
           <div class="chapter-body">
@@ -703,9 +709,12 @@
           </div>
         </details>
         <details class="chapter" id="settings-ch-about" data-chapter="s-about">
-          <summary><span class="chapter-title">About</span><span class="chapter-about">The version that runs here.</span></summary>
+          <summary><span class="chapter-title">About</span><span class="chapter-about">The version, who may sign in, the address.</span></summary>
           <div class="chapter-body">
+        <!-- Facts only, one line each: a chapter with nothing to act on is not a chapter. -->
         <p id="settings-about" class="hint"></p>
+        <p id="settings-people" class="hint"></p>
+        <p id="settings-address" class="hint"></p>
           </div>
         </details>
       </div>

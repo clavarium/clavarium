@@ -59,7 +59,9 @@ export const tmuxOf = (name) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}clv-${
 export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
-    const engine = createServer((request, response) => { request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
+    /* `engineKeys`: the authorization each request carried (Settings' key reaches the engine, and only it). */
+    const engineKeys = [];
+    const engine = createServer((request, response) => { engineKeys.push(request.headers.authorization ?? null); request.resume(); request.on('end', () => response.end(JSON.stringify({ text: 'said out loud' }))); });
     await new Promise((ready) => engine.listen(0, '127.0.0.1', ready));
     process.env.FAKE_VM_DIR = dir;
     /* The stand-in machines' tmux servers are named after this bench: another
@@ -253,5 +255,5 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
         return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, newFolder, files, access, chapter, menu, more };
     }
-    return { origin, dir, person, browser, sshRoot };
+    return { origin, dir, person, browser, sshRoot, engineKeys, engineUrl: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` };
 }

@@ -10,7 +10,11 @@
  * (a line break is Enter), direction marks, zero-width characters -- and the
  * length is bounded: a dictation is a sentence, not a file.
  */
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { Refusal } from './conversations.mjs';
+import { JsonFile } from './store.mjs';
+import { isSecretName } from './secrets.mjs';
 
 export const AUDIO_MAX = 512 * 1024;
 export const TEXT_MAX = 2000;
@@ -77,7 +81,7 @@ export async function transcribe(config, audio, fetcher = fetch) {
     form.append('response_format', 'json');
     let response;
     try {
-        response = await fetcher(config.url, { method: 'POST', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        response = await fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
     } catch {
         /* The error of a failed request repeats the address it was sent to:
            it is not passed on. */
@@ -87,4 +91,119 @@ export async function transcribe(config, audio, fetcher = fetch) {
     const body = await response.json().catch(() => undefined);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
     return cleanDictation(body.text);
+}
+
+/* ---------- THE ENGINE CHOSEN IN SETTINGS ----------
+ * Settings > Dictation: a provider fills in the address and the model (both
+ * may be changed); the key is one of the SECRETS already kept (Assets >
+ * Secrets), named, never shown, never sent to a page: it is opened here, at
+ * the moment of transcribing, and goes nowhere but in the request's header.
+ * What is set there wins; the CLAVARIUM_TRANSCRIPTION_* environment stays
+ * the fallback. Applied at once, without a restart.
+ *
+ * WHERE IT MAY SEND: the address is chosen in a page, and this server would
+ * then post to it -- with a key. So: HTTPS only, and never an address of the
+ * server's own network (loopback, private, link-local), checked again on what
+ * the name resolves to at each use; except with "Other (compatible)", made
+ * for an engine of one's own, where a local or private address is allowed,
+ * plain HTTP included. */
+export const PROVIDERS = {
+    ovh: { label: 'OVH AI Endpoints', url: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/audio/transcriptions', model: 'whisper-large-v3-turbo' },
+    openai: { label: 'OpenAI', url: 'https://api.openai.com/v1/audio/transcriptions', model: 'whisper-1' },
+    groq: { label: 'Groq', url: 'https://api.groq.com/openai/v1/audio/transcriptions', model: 'whisper-large-v3-turbo' },
+    mistral: { label: 'Mistral', url: 'https://api.mistral.ai/v1/audio/transcriptions', model: 'voxtral-mini-latest' },
+    other: { label: 'Other (compatible)', url: '', model: '' },
+};
+const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
+const MODEL = /^[A-Za-z0-9._:/-]{1,100}$/;
+
+/* An address of this server's own network, written as such. */
+export function isPrivateHost(host) {
+    const h = String(host).toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+    if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.lan') || h.endsWith('.home.arpa')) return true;
+    const kind = isIP(h);
+    if (kind === 0) return !h.includes('.');
+    if (kind === 6) {
+        const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
+        if (mapped) return isPrivateHost(mapped[1]);
+        return h === '::' || h === '::1' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h);
+    }
+    const [a, b] = h.split('.').map(Number);
+    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
+}
+
+/* What is wrong with a choice, in a sentence; undefined when it is fine. */
+export function dictationProblem(c) {
+    if (!c || typeof c !== 'object') return 'Choose an engine.';
+    if (!Object.hasOwn(PROVIDERS, c.provider)) return 'Choose a provider among those offered.';
+    let url;
+    try { url = new URL(String(c.url ?? '')); } catch { return 'The address is not a web address.'; }
+    if (url.username || url.password) return 'The address cannot carry a name or a password: the key is a secret.';
+    const own = isPrivateHost(url.hostname);
+    if (own && c.provider !== 'other') return 'An address of this server\'s own network is allowed only with "Other (compatible)", for an engine of your own.';
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && own)) return 'The address must start with https:// (plain http only for an engine on this server\'s own network).';
+    if (!MODEL.test(String(c.model ?? ''))) return 'Give the name of a model.';
+    if (c.secret !== undefined && c.secret !== '' && !isSecretName(c.secret)) return 'The key is the name of a secret.';
+    if (c.language !== undefined && c.language !== '' && !LANGUAGE.test(String(c.language))) return 'The language is a code such as en or fr, or automatic.';
+    return undefined;
+}
+
+export class Dictation {
+    #file; #env; #secret; #lookup; #fetcher;
+    /* `secret(name)`: the value of a secret, or undefined. `lookup(host)`: the addresses a name resolves to. */
+    constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch } = {}) {
+        this.#file = file; this.#env = env; this.#secret = secret; this.#lookup = lookup; this.#fetcher = fetcher;
+    }
+    #saved() { const kept = this.#file.get(); return kept?.on === true && !dictationProblem(kept) ? kept : undefined; }
+    #configOf(c) {
+        return { url: c.url, model: c.model, language: c.language || undefined, key: c.secret ? this.#secret(c.secret) : undefined, provider: c.provider };
+    }
+    /* What transcribes now: the one set in Settings, else the environment's. */
+    current() {
+        const saved = this.#saved();
+        return saved ? this.#configOf(saved) : voiceConfig(this.#env);
+    }
+    get model() { return this.current()?.model; }
+    /* For the page: never a key, nor the environment's address (it may carry one). */
+    about() {
+        const saved = this.#file.get() ?? {};
+        const env = voiceConfig(this.#env);
+        return {
+            on: this.#saved() !== undefined,
+            provider: saved.provider ?? null, url: saved.url ?? '', model: saved.model ?? '', secret: saved.secret ?? '', language: saved.language ?? '',
+            secretMissing: Boolean(saved.secret) && this.#secret(saved.secret) === undefined,
+            env: env ? { model: env.model } : null,
+            source: this.#saved() ? 'settings' : env ? 'env' : null,
+            providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, ...p })),
+        };
+    }
+    #checked(body) {
+        const c = { provider: body?.provider, url: String(body?.url ?? '').trim(), model: String(body?.model ?? '').trim(), secret: String(body?.secret ?? '').trim(), language: String(body?.language ?? '').trim() };
+        const problem = dictationProblem(c);
+        if (problem) throw new Refusal(400, problem);
+        if (c.secret && this.#secret(c.secret) === undefined) throw new Refusal(400, 'No secret has this name: add it in Assets, Secrets.');
+        return c;
+    }
+    set(body) { this.#file.set({ ...this.#checked(body), on: true }); return this.about(); }
+    /* Turned off: the environment's engine, if any, takes over again. The choice is kept, to be turned on again. */
+    off() { const kept = this.#file.get() ?? {}; this.#file.set({ ...kept, on: false }); return this.about(); }
+    /* A name resolving to this server's own network is refused unless "Other" was chosen. */
+    async #guard(config) {
+        if (!config.provider || config.provider === 'other') return;
+        const host = new URL(config.url).hostname;
+        let addresses;
+        try { addresses = isIP(host.replace(/^\[|\]$/g, '')) ? [{ address: host }] : await this.#lookup(host); } catch { throw new Refusal(502, 'The speech-to-text engine cannot be reached.'); }
+        if (addresses.some((a) => isPrivateHost(a.address))) throw new Refusal(400, 'This address leads into this server\'s own network: only "Other (compatible)" may.');
+    }
+    async transcribe(audio) {
+        const config = this.current();
+        if (config) await this.#guard(config);
+        return transcribe(config, audio, this.#fetcher);
+    }
+    /* "Try it": what is in the form, not saved, on one short recording. */
+    async try(body, audio) {
+        const config = this.#configOf(this.#checked(body));
+        await this.#guard(config);
+        return transcribe(config, audio, this.#fetcher);
+    }
 }

@@ -74,8 +74,9 @@ Then the two checks it cannot make:
 | 17 | Resize: one step more memory; it comes back with it | tablet |
 | 18 | Access map: three "+" and "All devices" | tablet, phone |
 | 19 | Settings: the name of the instance, changed and put back | tablet |
-| 20 | Settings, Updates: the version and the channel | tablet |
-| 21 | Restore: its folder, its memory, the name of the instance, as they were | tablet |
+| 20 | Settings, Dictation: the chapter; a provider fills in its address and model (nothing saved) | tablet |
+| 21 | Settings, Updates: the version and the channel | tablet |
+| 22 | Restore: its folder, its memory, the name of the instance, as they were | tablet |
 
 ## Ready means
 

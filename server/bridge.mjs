@@ -142,9 +142,10 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const terminal = await spawn(name, cols, rows, say);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);
-        const kept = { terminal, sink, cols, rows };
+        const kept = { terminal, sink, cols, rows, openedAt: Date.now(), outputAt: Date.now() };
         live.set(name, kept);
         terminal.onData((bytes) => {
+            kept.outputAt = Date.now();
             if (kept.sink?.readyState === 1) { kept.sink.send(bytes, { binary: true }); return; }
             if (!kept.sink) { const answer = answerForAbsentScreen(bytes); if (answer) terminal.write(answer); }
         });
@@ -267,5 +268,9 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
     /* `type(name, line, ms)`: see above. `droppedAt(name)`: when it was last
        closed for its machine's sake, or undefined. */
     const drop = (name) => { dropped.set(name, Date.now()); close(name); };
-    return { seats, drop, warm, type, open: (name) => live.has(name), droppedAt: (name) => dropped.get(name) };
+    /* `settled(name)`: how long its terminal has been open, and how long
+       since anything came out of it -- THAT something came, never what: a
+       tool still drawing its first screen is not reading its keyboard yet. */
+    const settled = (name) => { const kept = live.get(name); return kept ? { openFor: Date.now() - kept.openedAt, quietFor: Date.now() - kept.outputAt } : null; };
+    return { seats, drop, warm, type, settled, open: (name) => live.has(name), droppedAt: (name) => dropped.get(name) };
 }

@@ -66,6 +66,10 @@ export class Secrets {
     list() { return this.#store.all().map(({ name, createdAt }) => ({ name, conversations: this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)), createdAt })); }
     of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
 
+    /* The value, for this server's own use only (the key of the dictation
+       engine, put in a request's header): never returned by any route. */
+    reveal(name) { const s = this.#store.get(name); return s ? this.#vault.open(s.sealed) : undefined; }
+
     /* Creates, or replaces the value of, a secret. */
     set({ name, value }) {
         if (!isSecretName(name)) throw new Refusal(400, 'A secret is named like a variable: capitals, digits and underscores, starting with a letter.');

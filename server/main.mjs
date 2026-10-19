@@ -28,7 +28,7 @@ import { Vms, runner } from './vm.mjs';
 import { Resources } from './resources.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 import { Shortcuts } from './shortcuts.mjs';
-import { voiceConfig } from './voice.mjs';
+import { Dictation } from './voice.mjs';
 import QRCode from 'qrcode';
 import { Devices } from './devices.mjs';
 import { handleDoor, deviceTerminal } from './door.mjs';
@@ -221,7 +221,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     await toolbox.prepare().catch((error) => console.error(error.message));
     await all.ensureWork?.();
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
-    const voice = voiceConfig(env);
+    /* The engine of dictation: chosen in Settings, else the environment's (voice.mjs). */
+    const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name) });
     /* Read here already: a device paired before a conversation was shared in
        two parts keeps the chat it reached then (see devices.mjs). */
     const talkStore = new Store(`${dataDir}/talk.json`);
@@ -342,7 +343,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* What the VM manager says each machine has is what is recorded (a record
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
-    const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, dictation: voice ? (voice.model ?? 'set') : null };
+    const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
     /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
     const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });

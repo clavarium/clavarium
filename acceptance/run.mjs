@@ -633,6 +633,28 @@ export async function run(o, log = console.log) {
             return `"${instance.name}" -> "${trial}" -> "${instance.name}"`;
         });
 
+        /* Looked at, never saved: no real key is ever chosen by this run. */
+        await check('Settings, Dictation: the chapter, and a provider fills in its address and model', async (pic) => {
+            await page.locator('#nav-settings').click().catch(() => {});
+            await until('Settings', () => shown(page, '#settings'), 20_000);
+            await chapter(page, 'settings-ch-dictation', '#dictation-provider');
+            const before = await page.locator('#dictation-provider').inputValue();
+            const was = await api('/api/dictation');
+            await page.selectOption('#dictation-provider', 'mistral');
+            const url = await page.locator('#dictation-url').inputValue();
+            const model = await page.locator('#dictation-model').inputValue();
+            if (url !== 'https://api.mistral.ai/v1/audio/transcriptions' || model !== 'voxtral-mini-latest') throw new Error(`Mistral filled in "${url}", "${model}"`);
+            await page.selectOption('#dictation-provider', 'other');
+            if (await page.locator('#dictation-url').inputValue() !== '' || !(await page.locator('#dictation-other-hint').isVisible())) throw new Error('"Other" did not empty the address or say where it may send');
+            await pic(page, 'tablet-dictation');
+            const said = (await page.locator('#settings-dictation').innerText()).trim();
+            /* Nothing saved: the page is left as it came. */
+            await page.selectOption('#dictation-provider', before);
+            const now = await api('/api/dictation');
+            if (JSON.stringify([now.source, now.provider, now.url]) !== JSON.stringify([was.source, was.provider, was.url])) throw new Error('the choice changed on the server');
+            return `${said.slice(0, 90)}; Mistral and Other fill in as they should; nothing saved`;
+        });
+
         await check('Settings, Updates: version and channel', async (pic) => {
             await page.goto(`${o.target}/`, { waitUntil: 'domcontentloaded' });
             await until('the list', () => shown(page, '#items .item'), 30_000);
