@@ -190,7 +190,11 @@ export async function run(o, log = console.log) {
         await p.goto(`${o.target}/?c=${encodeURIComponent(o.conversation)}`, { waitUntil: 'domcontentloaded' });
         await until(`${what}: its views`, () => shown(p, '#views'), 30_000);
         await p.locator('#view-terminal').click();
-        await until(`${what}: its terminal is live`, async () => (await p.locator('#state').innerText()).trim() === 'live', 3 * 60_000, 1000);
+        /* The phone page of this run, still on the conversation, may take the terminal when both come back: it is taken back. */
+        await until(`${what}: its terminal is live`, async () => {
+            if (/open on another screen/.test(await p.locator('#notice-text').innerText().catch(() => '')) && await p.locator('#notice-action').isVisible()) await p.locator('#notice-action').click();
+            return (await p.locator('#state').innerText()).trim() === 'live';
+        }, 3 * 60_000, 1000);
         /* Its tool takes its last session up: never the dead end of a session it cannot find. */
         let text = '';
         for (let i = 0; i < 20; i++) {
