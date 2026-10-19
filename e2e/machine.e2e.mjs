@@ -209,7 +209,9 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     const c = (await me.api('/api/conversations')).body[0];
     assert.equal(c.restarted, 'It now has 2048 MB of memory, 16 GB of disk.');
-    /* Its chat says it, and the tool, started again with nothing of the chat in mind, is told once to read it whole. */
+    /* Its chat says it. The tool, started again with nothing of the chat in mind, is told to read it whole
+       with the person's next message, never alone (a line typed while it reloads stayed unsent). */
+    assert.equal((await me.api('/api/conversations/roomy/talk', { text: 'Where are we?' })).status, 201);
     await me.sees('Your chat with the person is kept: run "parley read --all" before going on.');
     assert.ok((await me.api('/api/conversations/roomy/talk')).body.messages.some((m) => m.from === 'system' && m.text === 'Its machine was restarted with 2048 MB of memory, 16 GB of disk: the tool started again.'));
     assert.equal(c.memoryMb, 2048); assert.equal(c.diskGb, 16);

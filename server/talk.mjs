@@ -440,7 +440,7 @@ export class Talk {
 
     /* Its machine was restarted, or built again (conversations.mjs): said in
        the thread, and, the tool having started again with nothing of the
-       chat in mind, REREAD is typed once it had time to start. */
+       chat in mind, REREAD is typed with the person's next message (never alone). */
     renewed(name, text, started = true) {
         const r = this.#store.get(name);
         if (r?.on !== true) return;
@@ -456,6 +456,10 @@ export class Talk {
         if (r?.on !== true || r.reread !== true) return 'done';
         if (this.#now() < (this.#nextTry.get(`reread:${name}`) ?? 0)) return 'later';
         const later = (ms) => { this.#nextTry.set(`reread:${name}`, this.#now() + ms); return 'later'; };
+        /* Typed only when the person has written since: a line typed while the tool
+           reloads a long session after a restart sat in its input box, never sent
+           (seen on a real deployment). By then the tool has long been ready. */
+        if (this.#parley(name).unread() === 0) return later(RETRY_MS);
         if (!this.#conversations.awake().includes(name)) return later(RETRY_MS);
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return later(TYPING_QUIET_MS - quiet + 100);

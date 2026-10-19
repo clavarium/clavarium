@@ -287,7 +287,7 @@ test('after a restart its chat says so, and once the tool had time to start it i
     assert.deepEqual([failed.level, failed.tone, failed.event, failed.actions], ['needs-you', 'bad', 'machine-problem', ['restart', 'terminal']]);
 });
 
-test('after a restart the line is typed only once the tool is READY: its terminal open long enough and quiet, so its Enter is a real Enter', async (t) => {
+test('after a restart the line is typed only with the person\'s next message, and only once the tool is READY: its terminal open long enough and quiet, so its Enter is a real Enter', async (t) => {
     const b = bench(t);
     b.world.clock = Date.now();
     await b.talk.set('helper', true);
@@ -303,9 +303,15 @@ test('after a restart the line is typed only once the tool is READY: its termina
     b.world.clock += REREAD_AFTER_MS + 1;
     await new Promise((r) => setTimeout(r, 200));
     assert.deepEqual(b.typed, [], 'still drawing: not yet');
-    /* Quiet: the line, then Enter apart, down the open channel, once. */
+    /* Ready and quiet, but the person has not written since: nothing is typed alone
+       (a line typed while it reloads a long session stayed in its input box, unsent). */
     b.world.settled = { openFor: REREAD_AFTER_MS + 3000, quietFor: SETTLED_MS + 1 };
     b.world.clock += SETTLED_MS + 200;
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(b.typed, [], 'nothing waits: nothing typed');
+    /* The person writes: the line that makes it read everything, then Enter apart, once. */
+    await b.talk.say('helper', 'Where are we?');
+    b.world.clock += 60_000;
     await until('typed', () => b.typed.length === 2);
     assert.deepEqual(b.channel, [[REREAD, ENTER_AFTER_MS]]);
     assert.deepEqual(b.typed, [REREAD, 'Enter']);
