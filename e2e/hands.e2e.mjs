@@ -211,6 +211,8 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true, sshKey: null });
     await me.page.locator('#gitview-close').click();
     await me.page.locator('#assets-close').click();
+    /* The page closed: its Assets tab is there again, as it was left; the terminal is one tab away. */
+    await me.page.locator('#view-terminal').click();
     await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');
     await me.sees('\n0\n');
     assert.deepEqual(me.errors, []);

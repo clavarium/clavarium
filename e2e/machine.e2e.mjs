@@ -78,7 +78,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#ask-first button[data-on=true]').click();
     await me.until('it asks before acting', async () => (await me.page.locator('#ask-first button[data-on=true]').getAttribute('aria-pressed')) === 'true');
     assert.equal((await me.api('/api/conversations')).body.find((x) => x.name === 'silent').askFirst, true);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     /* Over the terminal, with what can be done. */
     assert.equal(await me.page.locator('#health-strip').isVisible(), true);
     assert.match(await me.page.locator('#health-text').innerText(), /does not answer/);
@@ -117,7 +117,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#folders').click();
     await me.until('the strip is gone', async () => !(await me.page.locator('#health-strip').isVisible()));
     await me.until('the Machine chapter says it was restarted', async () => /Restarted\./.test(await me.page.locator('#machine-restarted').innerText()));
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     /* A terminal that the repair does not bring back: said plainly, and only then a restart is offered. */
     writeFileSync(join(vmHome(b, 'silent'), 'hang-attach'), ''); writeFileSync(join(vmHome(b, 'silent'), 'hang-always'), '');
     assert.equal((await me.api('/api/conversations/silent/terminal/repair', {})).body.session, 'kept', 'its tool answers: kept as it is');
@@ -177,19 +177,19 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-disk').inputValue(), '8');
     assert.equal(await me.page.locator('#machine-disk option[value="8"]').innerText(), '8 GB (now)');
     /* Over its screen: "More memory..." opens its memory, the next size up picked, nothing applied yet. */
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     assert.match(await me.page.locator('#health-text').innerText(), /ran out of memory 2 times/);
     /* Its disk short of room: what takes it (its terminal) and a larger disk are offered too. */
     assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', '\u00d7']);
     await me.page.locator('#health-disk').click();
     await me.until('its disk, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-disk');
     assert.equal(await me.page.locator('#machine-disk').inputValue(), '10');
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await me.page.locator('#health-memory').click();
     await me.until('its memory, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-memory');
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '1024');
     /* Its chat says it too, where it happened, with the same ways out; and the terminal is shown only when asked. */
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await me.page.locator('#view-chat').click();
     const line = me.page.locator('#simple-thread .parley-system');
     await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
@@ -222,7 +222,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '2048');
     assert.equal(await me.page.locator('#machine-memory option[value="2048"]').innerText(), '2 GB (now)');
     assert.match(await me.page.locator('#general-facts').innerText(), /2 GB of memory, 16 GB disk/);
-    await me.page.locator('#panel-close').click();
+    await me.page.locator('#view-terminal').click();
     await me.type('echo still-here');
     await me.sees('\nstill-here');
     assert.deepEqual(me.errors, []);

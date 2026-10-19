@@ -240,7 +240,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
                 await page.locator(`#attach-rows .folder[data-name="${name}"]`).locator('button', { hasText: level }).click();
                 await until(`${name} is attached`, async () => (await row.count()) === 1);
             }
-            await page.locator('#panel-close').click();
+            await page.goBack();
         }
         /* A chapter of "This conversation" is unfolded, if it is not already. */
         async function chapter(key) {

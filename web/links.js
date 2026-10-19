@@ -195,7 +195,7 @@
                 const col = h('div', { class: 'lk-col' });
                 cols.forEach((k, i) => {
                     if (i) col.append(h('div', { class: 'lk-gap' }));
-                    col.append(h('h3', { text: TITLES[k] }));
+                    col.append(h('h3', { class: 'lk-colh' }, h('span', { text: TITLES[k] }), plus(k)));
                     const list = lists[ci][i];
                     for (const n of list) col.append(nodeEl(n));
                     if (!list.length) col.append(empty(k));
@@ -205,12 +205,17 @@
             });
             draw(); hint(); paintPhone();
         }
-        /* An empty column says how to start: a device is paired, an asset added. */
+        /* How each kind is made: a device paired, a conversation created, an asset added. The same,
+           from the small round "+" by each column's title (always there, however many it holds)
+           and from an empty column. */
+        const START = { device: () => env.newDevice(), conversation: () => env.newConversation(), asset: () => (env.newAsset ?? env.openAssets)() };
+        const NEW = { device: 'New device', conversation: 'New conversation', asset: 'New asset' };
+        const plus = (k) => h('button', { type: 'button', class: 'as-add lk-add', 'data-add': k, 'aria-label': NEW[k], title: NEW[k], text: '+', onclick: () => START[k]() });
         function empty(k) {
             const box = h('div', { class: 'lk-empty' }, h('p', { class: 'hint lk-none', text: k === 'device' ? 'No device paired yet.' : k === 'conversation' ? 'No conversation yet.' : 'Nothing kept here yet.' }));
-            if (k === 'device') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'device', text: '+ Pair a device', onclick: () => env.newDevice() }));
-            if (k === 'asset') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'asset', text: '+ Add an asset', onclick: () => env.openAssets() }));
-            if (k === 'conversation') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'conversation', text: '+ New conversation', onclick: () => env.newConversation() }));
+            if (k === 'device') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'device', text: '+ Pair a device', onclick: START.device }));
+            if (k === 'asset') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'asset', text: '+ Add an asset', onclick: START.asset }));
+            if (k === 'conversation') box.append(h('button', { type: 'button', class: 'primary', 'data-start': 'conversation', text: '+ New conversation', onclick: START.conversation }));
             return box;
         }
         function nodeEl(n) {
@@ -593,7 +598,15 @@
         }
 
         /* ---------- on a phone: a list; a box touched rises from the bottom with its links; Edit gives its links as rows ---------- */
-        function closeSheet() { if (!ph.sheet) return; ph.sheet = null; $('links-phone').querySelector('.lk-sheet-wrap')?.remove(); }
+        function closeSheet() { if (!ph.sheet) return; ph.sheet = null; $('links-phone').querySelector('.lk-sheet-wrap')?.remove(); sheetSync(); }
+        /* The page is told when the box rises and when it is gone: over the screen, Back closes it. */
+        let sheetShown = false;
+        function sheetSync() {
+            const now = Boolean(ph.sheet) && phone();
+            if (now === sheetShown) return;
+            sheetShown = now;
+            if (now) env.sheetOpened?.(() => { sheetShown = false; closeSheet(); }); else env.sheetClosed?.();
+        }
         function sheetFor(n) {
             const items = wordsFor(n);
             const edit = () => { ph.sheet = null; ph.screen = 'one'; ph.id = n.id; ph.adding = false; paintPhone(); $('access').scrollTop = 0; };
@@ -611,7 +624,8 @@
                     actions, deviceCard(n)));
         }
         const PHONE_KINDS = [['device', 'Devices'], ['conversation', 'Conversations'], ['asset', 'Assets']];
-        function paintPhone() {
+        function paintPhone() { paintPhone2(); sheetSync(); }
+        function paintPhone2() {
             const box = $('links-phone');
             if (!phone()) { box.replaceChildren(); return; }
             if (ph.screen === 'one' && !node(ph.id)) ph.screen = 'list';
@@ -626,7 +640,9 @@
                 }
                 if (!graph.nodes.length) list.append(h('li', { class: 'lk-start' }, ['device', 'conversation', 'asset'].map(empty)));
                 else if (!list.children.length) list.append(h('li', {}, empty(ph.kind)));
-                box.replaceChildren(kinds, list);
+                /* The kind shown, and its "+", always. */
+                const head = h('div', { class: 'lk-phead' }, h('b', { text: TITLES[ph.kind] }), plus(ph.kind));
+                box.replaceChildren(kinds, head, list);
                 if (ph.sheet && node(ph.sheet)) box.append(sheetFor(node(ph.sheet))); else ph.sheet = null;
                 return;
             }

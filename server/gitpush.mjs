@@ -259,7 +259,7 @@ export class GitReview {
                 if (before.get(b) === now || rewritten.some((w) => w.branch === b) || (ours && ours.branch === b && ours.head === now)) continue;
                 const counted = await this.#runner.in(reference, ['rev-list', '--count', '--stdin', '--end-of-options'], { input: `${now}\n${had}\n`, deadlineMs: 120_000 }).catch(() => null);
                 const commits = Number(counted?.code === 0 ? counted.stdout.toString('latin1').trim() : 0) || 0;
-                if (commits > 0) brought.push({ branch: b, commits });
+                if (commits > 0) brought.push({ branch: b, commits, head: now, base: before.get(b) ?? null });
             }
         }
         if (made) await this.#resources.shareOrigin(r.name).catch(() => {});
@@ -456,18 +456,31 @@ export class GitReview {
     }
 
     /* ONE COMMIT, as a review shows it: against its first parent (or
-       nothing, for the first commit). Never sent from here. */
-    async commit(name, id) {
+       nothing, for the first commit). Or, given `base`, the commits from
+       base to it (what a line of the chat said was sent or brought). Named
+       by their identifier, whole or its first 7 characters at least, as a
+       line of the chat shows them. Never sent from here. */
+    async commit(name, id, base) {
         const r = this.#repository(name);
         const asked = String(id ?? '');
-        if (!isId(asked)) throw new Refusal(400, 'A commit is named by its full identifier.');
+        const from = base === null || base === undefined || base === '' ? '' : String(base);
+        const SHORT = /^[0-9a-f]{7,40}$/;
+        if (!SHORT.test(asked) || (from && !SHORT.test(from))) throw new Refusal(400, 'A commit is named by its identifier (7 to 40 hexadecimal characters).');
         return this.#withRead(r, async (got) => {
             const p = await this.#runner.in(got.path, ['rev-list', '--parents', '--max-count=1', '--end-of-options', asked], { deadlineMs: 60_000 });
             const ids = p.stdout.toString('latin1').trim().split(' ');
-            if (p.code !== 0 || ids[0] !== asked) throw new Refusal(404, 'This commit is not in the repository.');
+            if (p.code !== 0 || !isId(ids[0]) || !ids[0].startsWith(asked)) throw new Refusal(404, 'This commit is not in the repository.');
+            const whole = ids[0];
+            if (from) {
+                const q = await this.#runner.in(got.path, ['rev-list', '--max-count=1', '--end-of-options', from], { deadlineMs: 60_000 });
+                const was = q.stdout.toString('latin1').trim();
+                if (q.code !== 0 || !isId(was) || !was.startsWith(from)) throw new Refusal(404, 'This commit is not in the repository.');
+                const shown = await this.#compare(got.path, { head: whole, base: was, range: [whole], negatives: [was] });
+                return { ...shown, id: whole, base: was, parents: [was], head: whole, state: 'commit', message: '' };
+            }
             const parents = ids.slice(1).filter(isId);
-            const shown = await this.#compare(got.path, { head: asked, base: parents[0] ?? EMPTY_TREE, range: [asked], negatives: parents });
-            return { ...shown, id: asked, parents, head: asked, state: 'commit', message: parents.length > 1 ? 'A merge: its changes against its first parent.' : '' };
+            const shown = await this.#compare(got.path, { head: whole, base: parents[0] ?? EMPTY_TREE, range: [whole], negatives: parents });
+            return { ...shown, id: whole, parents, head: whole, state: 'commit', message: parents.length > 1 ? 'A merge: its changes against its first parent.' : '' };
         });
     }
 
@@ -578,7 +591,7 @@ export class GitReview {
         if (!isId(head) || (review.remoteTip !== null && review.remoteTip !== undefined && !isId(review.remoteTip))) throw new GitFailure(409, 'look', 'Look again at what would be sent.');
         let remoteTip = review.remoteTip ?? null;
         let count = review.count;
-        const sent = (extra) => ({ ok: true, branch: target, from: branch, head, commits: count ?? 0, made: !remoteTip, already: false, ...extra });
+        const sent = (extra) => ({ ok: true, branch: target, from: branch, head, base: remoteTip, commits: count ?? 0, made: !remoteTip, already: false, ...extra });
         /* (1) What the agent has now, read again into a fresh workspace. */
         let got;
         try { got = await this.#read(r); } catch (error) {

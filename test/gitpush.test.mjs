@@ -68,7 +68,7 @@ test('what would go out is shown -- commits, files, changes -- and exactly that 
     assert.equal(git(b.remote, 'for-each-ref'), '', 'nothing was sent');
     const again = await b.review.outgoing('site');
     assert.equal(again.count, 2);
-    assert.deepEqual(await b.review.push('site', { head: second }), { ok: true, branch: 'main', from: 'main', head: second, commits: 2, made: true, already: false });
+    assert.deepEqual(await b.review.push('site', { head: second }), { ok: true, branch: 'main', from: 'main', head: second, base: null, commits: 2, made: true, already: false });
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), second, 'the remote has exactly that commit');
     assert.deepEqual(b.refreshes.at(-1).rewritten, [], 'the refresh after the push is a fast-forward: no rewrite alert');
     assert.equal((await b.review.outgoing('site')).state, 'up-to-date');
@@ -352,7 +352,9 @@ test('the branch to send to: the remote\'s branches are listed, the same name is
     const staging = await b.review.outgoing('site', { target: 'staging' });
     assert.deepEqual([staging.state, staging.target, staging.commits.map((c) => c.subject)], ['ahead', 'staging', ['two']]);
     assert.match(staging.message, /1 commit\(s\) would be sent to staging/);
-    assert.deepEqual(await b.review.push('site', { head: mine, target: 'staging' }), { ok: true, branch: 'staging', from: 'main', head: mine, commits: 1, made: false, already: false });
+    const { base: was, ...pushed } = await b.review.push('site', { head: mine, target: 'staging' });
+    assert.deepEqual(pushed, { ok: true, branch: 'staging', from: 'main', head: mine, commits: 1, made: false, already: false });
+    assert.match(was, /^[0-9a-f]{40}$/, 'the tip the branch had before, for "See the commits"');
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/staging'), mine);
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first, 'only the branch that was shown');
     const third = b.commit('c.txt', 'c\n', 'three');
@@ -513,7 +515,12 @@ test('the branch diagram: the agent\'s branches and the remote\'s, their last co
     assert.match(one.diff, /^\+<h1>hi<\/h1>$/m);
     assert.doesNotMatch(one.diff, /README/, 'against its parent only');
     assert.match((await b.review.commit('site', first)).diff, /^\+# site$/m, 'the first commit, against nothing');
-    await assert.rejects(b.review.commit('site', 'HEAD'), /full identifier/);
+    await assert.rejects(b.review.commit('site', 'HEAD'), /7 to 40 hexadecimal/);
+    /* Named as a line of the chat names it (its first seven characters), and from one commit to another. */
+    assert.deepEqual((await b.review.commit('site', second.slice(0, 7))).commits.map((c) => c.id), [second]);
+    const range = await b.review.commit('site', second, first.slice(0, 7));
+    assert.deepEqual([range.count, range.commits.map((c) => c.id), range.base], [1, [second], first]);
+    await assert.rejects(b.review.commit('site', second, 'zz'), /7 to 40 hexadecimal/);
     await assert.rejects(b.review.commit('site', 'f'.repeat(40)), /not in the repository/);
     assert.deepEqual(readdirSync(b.workRoot), [], 'each workspace is gone');
 });

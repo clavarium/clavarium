@@ -33,7 +33,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('it says what was typed', async () => /Typed in its terminal/.test(await me.page.locator('#guide-said').innerText()));
     /* Asked: one line typed in its terminal. A shell takes it for a command, and runs nothing of it. */
     await me.page.locator('#talk-invite').click();
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await me.sees('/etc/clavarium/conversation.md again: your setup changed.');
     await me.sees('Write to them in French.');
     /* Its Enter comes a moment after the line (talk.mjs, ENTER_AFTER_MS): the shell has run it once its prompt is back. */
@@ -234,6 +234,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.until('a code is shown', async () => me.page.locator('#sharing-qr').isVisible());
     const code = (await me.page.locator('#sharing-link').innerText()).replace(/^https?:\/\/[^/]+/, '');
     await me.page.locator('#sharing-close').click();
+    /* Back where it was opened from, its settings; then its chat. */
+    await me.until('its settings again', async () => (await me.page.locator('#folders').getAttribute('aria-pressed')) === 'true');
+    await me.page.goBack();
     const device = await b.person({ phone: true, at: code, locale: 'fr-FR' });
     await device.until('the device is welcomed to a chat', async () => /as in a messaging app/.test(await device.page.locator('#notice-text').innerText().catch(() => '')));
     await device.page.locator('#notice-action', { hasText: 'Start' }).click();

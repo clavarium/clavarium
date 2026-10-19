@@ -30,7 +30,7 @@ test('a free name: the identifier drawn from it, the name changed later and show
     /* Hidden: it stays in sight while it is open; gone from the list once another place is shown. */
     await me.page.locator('#hide-on button[data-on=true]').click();
     await me.until('it is hidden', async () => (await list())[0].hidden === true);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     const made = await me.api('/api/conversations', { title: 'Other', tool: 'shell' });
     assert.equal(made.status, 201, JSON.stringify(made.body));
     await me.until('the other one is listed', async () => (await me.page.locator('#items .item').count()) >= 1 && /Other/.test(await me.page.locator('#items').innerText()));

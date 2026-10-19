@@ -718,7 +718,6 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
   #app:has(input:not([type=checkbox]):not([type=radio]):not([type=file]):focus, textarea:not(.xterm-helper-textarea):focus) #nav { display: none; }
   /* Access and Settings take the whole screen: the bar of the conversation behind them is not theirs. */
   #app:is([data-place="access"], [data-place="assets"], [data-place="settings"]) #room > :is(header, #health-strip, #signin-strip, #voice-line, #shortcuts, #keys) { display: none !important; }
-  #access-close, #settings-close { display: none; }
 }
 
 /* ---------- Access: one page, three tabs ---------- */
@@ -1210,3 +1209,9 @@ select.pill { appearance: auto; }
   html:not([data-door="device"]) #room > header .views button, html:not([data-door="device"]) #room > header #folders, html:not([data-door="device"]) #room > header #back { min-height: 36px; height: 36px; padding: 0 9px; }
   .views { padding: 2px; }
 }
+#copy-close, #files-close, #preview-close { font-size: 1.375rem; line-height: 1; min-width: 40px; padding: 4px 10px; }
+/* The title of a column of the map, and its round "+" (a new device, conversation, asset): always there. */
+.lk-col h3.lk-colh, .lk-phead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lk-col h3.lk-colh .lk-add { width: 26px; height: 26px; font-size: .95rem; letter-spacing: 0; }
+.lk-phead { margin: 4px 0 6px; }
+.as-kinds { display: flex; flex-wrap: wrap; gap: 8px; } .as-kinds button { display: inline-flex; align-items: center; gap: 8px; }

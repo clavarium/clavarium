@@ -130,16 +130,19 @@ test('a path the tool printed is clicked in the terminal and opens in Files, sho
     /* A file of an attached folder. */
     await click('/resources/reports/brief.txt');
     await me.until('the text is shown', async () => (await me.page.locator('#preview-body pre').innerText().catch(() => '')).includes('for the phone'));
-    /* From the window, a way to the folder the file sits in. */
+    /* From the window, a way to the folder the file sits in: the Assets tab of the conversation, on it. */
+    assert.equal(await me.page.locator('#preview-where').innerText(), 'Show in Assets');
     await me.page.locator('#preview-where').click();
-    await me.until('its folder is listed', async () => (await me.page.locator('#files').isVisible()) && (await me.page.locator('#files-rows').innerText()).includes('brief.txt'));
-    assert.match(await me.page.locator('#files-tabs button[aria-selected=true]').innerText(), /reports/);
+    await me.until('its folder is listed, in the Assets tab', async () => (await me.page.locator('#cassets-detail').getAttribute('data-asset')) === 'folder:reports' && (await me.page.locator('#cassets-detail #files-rows').innerText()).includes('brief.txt'));
+    assert.equal(await me.page.locator('#view-assets').getAttribute('aria-pressed'), 'true');
     assert.equal(await me.page.locator('#viewer').isVisible(), false);
-    await me.page.locator('#files-close').click();
-    /* A folder is listed. */
+    /* Back: the terminal, as it was. */
+    await me.page.goBack(); await me.page.goBack();
+    await me.until('the terminal again', async () => (await me.page.locator('#view-terminal').getAttribute('aria-pressed')) === 'true');
+    /* A folder is listed, there too. */
     await click('/work/out');
-    await me.until('the folder is listed', async () => (await me.page.locator('#files-rows').innerText()).includes('q3.txt') && (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'work/out');
-    await me.page.locator('#files-close').click();
+    await me.until('the folder is listed', async () => (await me.page.locator('#cassets-detail #files-rows').innerText().catch(() => '')).includes('q3.txt') && (await me.page.locator('#files-path').innerText()).replace(/\s+/g, '') === 'work/out');
+    await me.page.locator('#view-terminal').click();
     /* Any other path of the machine is not a link: a click there opens nothing. */
     await click('/etc/hostname');
     await new Promise((r) => setTimeout(r, 500));

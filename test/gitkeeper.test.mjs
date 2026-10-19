@@ -705,7 +705,9 @@ test('what happens to a repository is said in the chat of the conversations it i
     await settle(b); b.later(1); await b.keeper.tick();
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/try/one'), git(b.work, 'rev-parse', 'HEAD'));
     /* The sending: alpha's alone, whose settings sent it; its own refresh brings nothing "new". */
-    assert.deepEqual(b.lines, [['alpha', { kind: 'sent', text: 'Sent to try/one of site: 2 commits (a new branch), checks passed.', topic: 'Sent', brief: 'try/one', actions: ['review:site'] }]]);
+    const tip = git(b.work, 'rev-parse', 'HEAD');
+    /* The commit it names is its first seven characters (the page makes them a link); a new branch has no "See the commits". */
+    assert.deepEqual(b.lines, [['alpha', { kind: 'sent', text: `Sent to try/one of site: 2 commits (up to ${tip.slice(0, 7)}) (a new branch), checks passed.`, topic: 'Sent', brief: 'try/one', actions: ['review:site'] }]]);
     /* Refused: checks that failed, with what to do; once for that commit. */
     b.lines.length = 0; verdict = 'failed';
     b.commit('c.txt', 'c\n', 'three');
@@ -727,16 +729,21 @@ test('what happens to a repository is said in the chat of the conversations it i
     /* Sent by hand from the review: said wherever it is attached, reading included. */
     b.lines.length = 0;
     git(b.work, 'checkout', '--quiet', 'main');
+    const before = git(b.remote, 'rev-parse', 'refs/heads/main');
     const head = b.commit('e.txt', 'e\n', 'five');
     await b.review.outgoing('site');
     await b.keeper.send('site', { head, target: 'main' });
-    assert.deepEqual(b.lines.map(([c, e]) => [c, e.kind, e.text, e.brief]), [['alpha', 'sent-by-hand', 'Sent by hand to main of site: 1 commit.', 'main'], ['beta', 'sent-by-hand', 'Sent by hand to main of site: 1 commit.', 'main']]);
+    const byHand = `Sent by hand to main of site: 1 commit (up to ${head.slice(0, 7)}).`;
+    assert.deepEqual(b.lines.map(([c, e]) => [c, e.kind, e.text, e.brief]), [['alpha', 'sent-by-hand', byHand, 'main'], ['beta', 'sent-by-hand', byHand, 'main']]);
+    /* "See the commit(s)": from the tip the remote had to the one sent. */
+    assert.deepEqual(b.lines[0][1].actions, [`commits:site.${head.slice(0, 12)}.${before.slice(0, 12)}.1`, 'review:site']);
     /* The origin brings commits made elsewhere: said, for the record, wherever it is attached; detached, nothing. */
     b.lines.length = 0;
     b.theirs('main', 'x.txt'); b.theirs('main', 'y.txt'); b.theirs('try/one', 'z.txt');
     await b.resources.attach('beta', 'site', 'none');
     await b.keeper.refresh('site');
-    assert.deepEqual(b.lines, [['alpha', { kind: 'origin', text: 'Origin of site updated: 3 new commits (2 on main, 1 on try/one).', topic: 'Origin updated', brief: 'site', actions: ['review:site'] }]]);
+    const tipOf = (branch) => git(b.remote, 'rev-parse', `refs/heads/${branch}`).slice(0, 7);
+    assert.deepEqual(b.lines, [['alpha', { kind: 'origin', text: `Origin of site updated: 3 new commits (2 on main (up to ${tipOf('main')}), 1 on try/one (up to ${tipOf('try/one')})).`, topic: 'Origin updated', brief: 'site', actions: ['review:site'] }]]);
     b.lines.length = 0;
     await b.keeper.refresh('site');
     assert.deepEqual(b.lines, [], 'nothing new: nothing said');

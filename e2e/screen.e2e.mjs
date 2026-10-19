@@ -162,7 +162,7 @@ test('the settings of a conversation are chapters that fold, all folded at first
     await me.until('General says what it is', async () => /Identifier\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
     await me.page.locator('#chapter-wakeups > summary').click();
     assert.equal(await me.page.locator('#sleep').isVisible(), false, 'folded away');
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();

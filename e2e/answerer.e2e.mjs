@@ -39,7 +39,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.page.fill('#answerer-limit', '5');
     await me.page.locator('#answerer-on button[data-on=true]').click();
     await me.until('it is on', async () => /0 answer\(s\) in a row of 5/.test(await me.page.locator('#answerer-state').innerText()));
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     /* The tool asks; nobody types the answer. */
     await me.type('read -p "Shall I go on? (y/n) " a; echo "it got: $a"');
     await me.sees('it got: y', 30_000);
@@ -59,7 +59,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     const log = await me.page.locator('#answerer-log').innerText();
     assert.match(log, /left to you: reader-two: the charter does not allow deleting/);
     assert.match(log, /answered y, enter/);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     /* The owner answers: one key, and the answerer is in service again. */
     await me.page.locator('#terminal').click(); await me.page.keyboard.type('n'); await me.page.keyboard.press('Enter');
     await me.sees('it got: n');

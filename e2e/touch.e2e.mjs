@@ -197,7 +197,7 @@ test('with the lock on, nothing the page does brings the on-screen keyboard back
     await me.page.selectOption('#wakeup-kind', 'cron');
     await me.page.selectOption('#wakeup-often', 'custom');
     await holds('a wake-up "by the clock", written by hand');
-    await tap('#panel-close');
+    await tap('#view-terminal');
     await holds('the panel closed');
     await me.more(); await tap('#copy-open');
     /* The browser does not let the page read the clipboard here: it says

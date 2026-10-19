@@ -163,6 +163,96 @@
     };
     const view = (which) => { app.dataset.view = which; };
 
+    /* ---------- ONE WAY BACK ----------
+       Everything that opens takes a step: a conversation picked in the list,
+       a tab of it other than the one it opened on, an asset, a review, a
+       place of the menu and what opens inside it, and what opens over the
+       screen (one thing at a time). Back (the phone's, the browser's), Escape
+       and the "<" links close the step on top, and nothing else. Each step is
+       an entry of the history ({ nav: depth }); what closes it is kept here.
+       A step the page closes itself (a link, another tab) is taken back from
+       the history at once, and a step opened meanwhile waits for that. Steps
+       this page did not make (a reload, an address from elsewhere) are
+       walked by their address. `close({ quiet })`: quiet when what replaces
+       it is drawn by whoever closed it; returning false keeps it open. */
+    const nav = (() => {
+        const steps = [];
+        const depthOf = (state) => (Number.isInteger(state?.nav) && state.nav > 0 ? state.nav : 0);
+        let base = depthOf(history.state);
+        let waiting = 0; let later = []; let stuck;
+        const write = (step) => { history.pushState({ nav: base + steps.indexOf(step) + 1 }, '', step.address ?? location.href); step.written = true; };
+        const run = (job) => { if (waiting) later.push(job); else job(); };
+        const flush = () => { clearTimeout(stuck); waiting = 0; const jobs = later; later = []; for (const job of jobs) job(); };
+        const goBack = (n) => { if (n <= 0) return; waiting += 1; clearTimeout(stuck); stuck = setTimeout(flush, 1500); history.go(-n); };
+        const shut = (step, how) => { try { return step.close(how); } catch (error) { console.error(error); return undefined; } };
+        function push(kind, close, { address, name = '' } = {}) {
+            const step = { kind, name, close, address, written: false };
+            steps.push(step);
+            run(() => { if (steps.includes(step)) write(step); });
+            return step;
+        }
+        /* The steps from `at` up, closed by the page, and taken back from the
+           history. `quiet`: what comes instead is drawn by the caller (another
+           tab, another conversation); not quiet, each gives back what it covered. */
+        function cut(at, { quiet = true, loud = false } = {}) {
+            if (at < 0 || at >= steps.length) return;
+            const bottom = steps[at];
+            const gone = steps.splice(at).reverse();
+            /* `loud`: only the step asked for gives back what it covered; those above it simply go. */
+            for (const step of gone) shut(step, { quiet: loud ? step !== bottom : quiet });
+            goBack(gone.filter((step) => step.written).length);
+        }
+        const last = (kinds) => steps.findLastIndex((step) => kinds.includes(step.kind));
+        const first = (kinds) => steps.findIndex((step) => kinds.includes(step.kind));
+        /* `outside`: Back or Forward to an entry this page did not make. */
+        let outside = () => {};
+        addEventListener('popstate', (event) => {
+            if (waiting > 0) { waiting -= 1; if (waiting === 0) flush(); return; }
+            const depth = depthOf(event.state) - base;
+            if (depth < 0 || depth > steps.length) {
+                for (const step of steps.splice(0).reverse()) shut(step, { quiet: true });
+                base = depthOf(event.state);
+                outside(event);
+                return;
+            }
+            while (steps.length > depth) {
+                const step = steps.pop();
+                if (shut(step, { quiet: false, history: true }) === false) { steps.push(step); write(step); break; }
+            }
+        });
+        return {
+            push, cut, last, first,
+            get size() { return steps.length; },
+            top: () => steps.at(-1),
+            has: (kind) => last([kind]) >= 0,
+            step: (i) => steps[i],
+            /* The address of what is shown, kept on the step it belongs to. */
+            replace(address) { run(() => { const state = history.state ?? null; if ((location.search || location.pathname) !== address) history.replaceState(state, '', address); }); },
+            /* The step on top, closed (Escape, a "<" link): false when there is none. */
+            back() { if (steps.length === 0) return false; cut(steps.length - 1, { quiet: false }); return true; },
+            /* Closes the step of that kind (and what is above it); false when there is none. */
+            close(kind) { const i = last([kind]); if (i < 0) return false; cut(i, { loud: true }); return true; },
+            /* OVER THE SCREEN: one thing at a time; `stack`: kept above another (a picture opened from the media of a chat). */
+            over(name, close, { stack = false } = {}) {
+                const there = steps.findIndex((step) => step.kind === 'over' && (!stack || step.name === name));
+                if (there >= 0) cut(there);
+                return push('over', close, { name });
+            },
+            drop(step) { const i = steps.indexOf(step); if (i >= 0) cut(i, { loud: true }); },
+            dropOver(name) { const i = steps.findLastIndex((step) => step.kind === 'over' && step.name === name); if (i < 0) return false; cut(i, { loud: true }); return true; },
+            set outside(f) { outside = f; },
+        };
+    })();
+    /* Escape closes what is on top, as Back does -- never while typing (it
+       leaves the field), never in the terminal (its tool needs Escape). */
+    document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest('#terminal')) return;
+        if (target?.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]), textarea, select, [contenteditable]:not([contenteditable=false])')) { target.blur(); return; }
+        if (nav.back()) event.preventDefault();
+    });
+
     /* ---------- the terminal ---------- */
     const terminal = new Terminal({
         cursorBlink: true, scrollback: 5000,
@@ -655,7 +745,7 @@
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
-        if (!keepSheets) { closeRoomAssets(); $('panel').hidden = $('files').hidden = $('copy').hidden = true; }
+        if (!keepSheets) resetTabs();
         paintChips();
         $('keys').hidden = !current;
         if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
@@ -712,12 +802,21 @@
         paintSimple();
         void readTalk().then(paintThread);
     }
-    function select(name) {
+    /* `step`: picked in the list -- a step of its own, so that Back comes
+       back to the list. Another one picked while one is open takes the
+       place of the first (the list is still one Back away). */
+    function select(name, { step = false } = {}) {
         if (name !== current) { disconnect(); terminal.reset(); }
         current = name;
-        /* A conversation chosen: the place that was open (Access, Settings) gives way to it. */
-        if (place !== 'conversations') { showPlace('conversations'); pushed = 0; backToPanel = false; }
-        history.replaceState(null, '', name ? `?c=${encodeURIComponent(name)}` : location.pathname);
+        /* What was open over the one before -- its tab, an asset, a review,
+           what was over it, a place of the menu (Access, Settings) -- gives way. */
+        const room = nav.last(['room']);
+        nav.cut(name && room >= 0 ? room + 1 : 0);
+        if (place !== 'conversations') showPlace('conversations');
+        resetTabs();
+        const address = name ? `?c=${encodeURIComponent(name)}` : location.pathname;
+        if (step && name && !DEVICE && nav.last(['room']) < 0) nav.push('room', ({ quiet }) => { if (!quiet) select(''); }, { address });
+        else if (!DEVICE) nav.replace(address);
         view(name ? 'room' : 'list');
         paint();
         enter();
@@ -770,7 +869,7 @@
             /* Seen at a glance: this conversation is in other hands too. */
             const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
             if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
-            b.addEventListener('click', () => select(c.name));
+            b.addEventListener('click', () => select(c.name, { step: true }));
             items.append(b);
         }
         const toggle = $('hidden-toggle');
@@ -826,7 +925,7 @@
             if (before !== now || now.startsWith('building') || now.startsWith('restarting') || now.startsWith('moving')) enter(true);
         } catch { /* a server without VMs has no list: the page is one terminal */ }
         /* The panel is open: what the answerer did meanwhile is said there. */
-        if (!DEVICE && !$('panel').hidden) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
+        if (!DEVICE && panelShown) { void paintAnswerer(); paintWakeups(); paintMachine(conversations.find((x) => x.name === current)); }
         /* A start told step by step is asked about more often: its tool appears soon after its last step. */
         if (home) pollTimer = setTimeout(refresh, conversations.some(holds) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
@@ -854,7 +953,13 @@
     }
     $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
     $('new').addEventListener('click', () => { void openCreate(); });
-    $('create-cancel').addEventListener('click', () => { $('create').hidden = true; });
+    $('create-cancel').addEventListener('click', () => { if (!nav.close('create')) $('create').hidden = true; });
+    /* From the map's "+" of Conversations: the same form as the list's "+ New", a step over the map (on a phone, the list is shown for it). */
+    function createFromMap() {
+        void openCreate();
+        if (narrow()) view('list');
+        if (nav.last(['create']) < 0) nav.push('create', ({ quiet }) => { $('create').hidden = true; if (!quiet && place !== 'conversations') view('room'); });
+    }
     /* The identifier drawn from the name, as the server draws it (names.mjs), shown before it is made; the server decides. */
     const identifierOf = (title) => String(title).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 32).replace(/-+$/, '') || 'conversation';
     $('create-name').addEventListener('input', () => { $('create-id').placeholder = identifierOf($('create-name').value.trim()); });
@@ -1017,18 +1122,56 @@
     let roomSig = '';
     function paintViews() {
         if (DEVICE) return;
-        $('view-chat').setAttribute('aria-pressed', String(simple && !assetsShown));
-        $('view-terminal').setAttribute('aria-pressed', String(!simple && !assetsShown));
-        $('view-assets').setAttribute('aria-pressed', String(assetsShown));
+        const now = tabNow();
+        for (const [id, tab] of [['view-chat', 'chat'], ['view-terminal', 'terminal'], ['view-assets', 'assets'], ['folders', 'settings']]) $(id).setAttribute('aria-pressed', String(now === tab));
     }
-    function chooseView(which) {
-        if (which === 'assets') { void openRoomAssets(); return; }
-        closeRoomAssets();
-        if ((which === 'chat') !== simple) toggleSimple(); else if (!simple) focusTerminal();
+    /* THE FOUR TABS: Chat, Terminal, Assets, Settings. The one it opened on
+       takes no step; any other is one step (one only, whichever other tab is
+       shown), and Back comes back to the first. Changing tab closes what was
+       open in the one before, and anything over the screen. */
+    let panelShown = false;
+    const tabNow = () => (assetsShown ? 'assets' : panelShown ? 'settings' : simple ? 'chat' : 'terminal');
+    const TAB_WORD = { chat: 'Chat', terminal: 'Terminal', assets: 'Assets', settings: 'Settings' };
+    function openPanelZone() { if (panelShown) return; panelShown = true; $('panel').hidden = false; paintViews(); }
+    function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; $('attach-picker').hidden = true; paintViews(); }
+    function showTab(which, pick) {
+        if (which === 'assets') { closePanelZone(); void openRoomAssets(pick); return; }
+        if (which === 'settings') { closeRoomAssets(); openPanelZone(); return; }
+        closeRoomAssets(); closePanelZone();
+        if ((which === 'chat') !== simple) toggleSimple(); else { paintViews(); if (!simple) focusTerminal(); }
     }
-    $('view-chat').addEventListener('click', () => chooseView('chat'));
-    $('view-terminal').addEventListener('click', () => chooseView('terminal'));
-    $('view-assets').addEventListener('click', () => chooseView('assets'));
+    /* The tab it opened on: the one shown before any step of a tab, or the one a review came from. */
+    function homeTab() {
+        const t = nav.last(['tab']);
+        if (t >= 0) return nav.step(t).home;
+        const r = nav.first(['review']);
+        return (r >= 0 && nav.step(r).home) || tabNow();
+    }
+    function goTab(which, { pick } = {}) {
+        if (DEVICE || !current) { showTab(which, pick); return; }
+        const home = homeTab();
+        const t = nav.last(['tab']);
+        if (which === home) nav.cut(nav.first(['tab', 'asset', 'review', 'over']));
+        else if (t >= 0) nav.cut(t + 1);
+        else {
+            nav.cut(nav.first(['asset', 'review', 'over']));
+            const step = nav.push('tab', ({ quiet }) => { if (!quiet) showTab(step.home); });
+            step.home = home;
+        }
+        showTab(which, pick);
+    }
+    /* Another conversation, or the same one started again: its first tab, nothing open over it. */
+    function resetTabs() {
+        if (!DEVICE) nav.cut(nav.first(['tab', 'asset', 'review', 'over']));
+        else nav.cut(nav.first(['over']));
+        closeRoomAssets(); closePanelZone();
+        $('files').hidden = $('copy').hidden = true;
+    }
+    /* Its settings closed for a question asked over its screen (a restart, a move). */
+    function leavePanel() { if (panelShown && !nav.close('tab')) showTab(simple ? 'chat' : 'terminal'); }
+    $('view-chat').addEventListener('click', () => goTab('chat'));
+    $('view-terminal').addEventListener('click', () => goTab('terminal'));
+    $('view-assets').addEventListener('click', () => goTab('assets'));
     /* ONE RULE: the left column is the platform, the bar is this conversation.
          Its Access chapter  what THIS conversation has: attached folders,
                    repositories and mailboxes, secrets handed to its tool,
@@ -1221,7 +1364,7 @@
         $('work-move').onclick = () => {
             const to = kept ? 'disk' : 'kept';
             /* The question is asked over the terminal, not under this panel. */
-            $('panel').hidden = true;
+            leavePanel();
             show(`Move the work of "${current}" ${kept ? 'to the disk of its machine' : 'into a folder kept here'}? THE TOOL IS STOPPED AND STARTED AGAIN: what it is doing now is interrupted, and a tool that keeps a conversation must be asked to resume it. Its files are copied; the move is refused if less than 1 GB would stay free${kept ? '' : ', or if the work holds symbolic links that a kept folder refuses'}.`,
                 'Move it', async () => {
                     try { await post(`${API}/conversations/${encodeURIComponent(current)}/work`, { to }); await refresh(); enter(); }
@@ -1330,7 +1473,7 @@
         disk.focus({ preventScroll: true });
     }
     /* Its terminal, asked for: never shown by itself in place of its chat. */
-    function seeTerminal() { simple = false; paintSimple(); paintHealth(); focusTerminal(); }
+    function seeTerminal() { if (DEVICE) { simple = false; paintSimple(); focusTerminal(); } else goTab('terminal'); paintHealth(); }
     $('health-memory').addEventListener('click', () => { void openMemory(); });
     $('health-terminal').addEventListener('click', seeTerminal);
     $('health-room').addEventListener('click', seeTerminal);
@@ -1395,7 +1538,7 @@
     async function restartMachine(confirmed) {
         const name = current;
         if (!name) return;
-        $('panel').hidden = true;
+        leavePanel();
         if (!confirmed) {
             const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
             show(`Restart the machine of "${name}"? It is stopped cleanly (by force if it does not stop), then started again. THE TOOL IS STOPPED AND STARTED AGAIN: what it is doing now is interrupted. Its work folder, its folders and its branches stay.`,
@@ -1473,7 +1616,7 @@
         if (!here) return;
         const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value);
         if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8)) { $('panel-error').textContent = 'Nothing to change: choose another memory or disk first.'; $('panel-error').hidden = false; return; }
-        $('panel').hidden = true;
+        leavePanel();
         const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
         const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         show(`Give "${name}" ${changes}? ITS MACHINE IS STOPPED CLEANLY, SET, AND STARTED AGAIN: what the tool is doing now is interrupted. Its work folder, its folders and its branches stay.`,
@@ -1676,13 +1819,15 @@
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); },
+            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
+            back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
             open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
-            ...(noTerminal() ? {} : { terminal: () => { simple = false; paintSimple(); focusTerminal(); } }),
+            ...(noTerminal() ? {} : { terminal: () => seeTerminal() }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
             /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
             markdown: true, agentName: conversations.find((x) => x.name === name)?.chatName ?? '', agentTool: conversations.find((x) => x.name === name)?.toolLabel ?? '',
@@ -1739,12 +1884,29 @@
        use them -- its memory and a restart are the owner's; its terminal, a
        screen's that was given it. */
     /* "review:<repository>": the git review of a repository the line is about (the owner's). */
+    /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
+       line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
+       a repository; the agent's own messages are never read for this. */
     const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review' };
+    const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
+    const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
+    function openCommits(id) {
+        if (DEVICE) return;
+        const many = COMMITS.exec(id); const one = COMMIT.exec(id);
+        if (many) void openGit(many[1], { commit: many[2], base: many[3], tab: Number(many[4]) > 1 ? 'commits' : 'changes' });
+        else if (one) void openGit(one[1], { commit: one[2] });
+    }
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id)) && !DEVICE);
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: ACTIONS[kindOf(id)] })) } : m)) };
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
+        const linksOf = (m) => {
+            const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);
+            if (!repo) return [];
+            return [...new Set(String(m.text ?? '').match(/\b[0-9a-f]{7,40}\b/g) ?? [])].filter((x) => /\d/.test(x)).slice(0, 8).map((x) => ({ text: x, id: `commit:${repo}.${x}` }));
+        };
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: label(id) })), links: linksOf(m) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
     function withMachine(data, name) {
@@ -2084,22 +2246,19 @@
     }
     /* `picking`: open on what can be attached (the "+ Attach" of the bar). */
     async function openAccess(picking = false) {
-        $('files').hidden = true;
-        leavePlace({ keepView: true, panel: false });
+        if (DEVICE || !current) return;
+        if (place !== 'conversations') leavePlace();
+        goTab('settings');
         /* What is attached may have changed from another screen: asked again before it is shown. */
         await refresh();
         await paintPanel();
         $('attach-picker').hidden = !picking;
-        if (picking) openChapter('access');
-        $('panel').hidden = false;
-        if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
+        if (picking) { openChapter('access'); $('attach-picker').scrollIntoView({ block: 'nearest' }); }
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
     $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
     $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
     $('attach-manage').addEventListener('click', () => { void openAssets(); });
-    $('chips').addEventListener('click', () => { if (!DEVICE && current) void openAccess(false); });
-    $('panel-close').addEventListener('click', () => { $('panel').hidden = true; focusTerminal(); });
 
     /* ---------- ASSETS: one design, two pages (G and H) ----------
        The server's (a place, beside Access and Settings): everything kept
@@ -2143,7 +2302,7 @@
     /* The top of a detail: "All assets" (a phone), the icon, the name, a badge. */
     function asTitle(item, back) {
         const top = el('div', 'as-title');
-        const all = el('button', 'as-link as-back', '‹ All assets'); all.type = 'button'; all.addEventListener('click', back);
+        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
         const h = el('h2'); h.append(kindIcon(item.kind), el('span', '', item.name));
         if (item.badge) h.append(el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badgeLong ?? item.badge));
         top.append(all, h);
@@ -2164,7 +2323,7 @@
         if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
         const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint', 'Drawing the branches...'));
         holder.append(facts, chapter('Branches', acts), diagram);
-        const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: 'Assets', go: () => { void paintRoomAssets(); } };
+        const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: name, go: () => { void paintRoomAssets(); } };
         review.addEventListener('click', () => { void openGit(name, { back }); });
         const [out, graph] = await Promise.all([getJson(`/git/${name}/outgoing`, null), getJson(`/git/${name}/graph`, null)]);
         facts.replaceChildren();
@@ -2219,7 +2378,7 @@
         const chosen = items.find((i) => i.key === roomPick) ?? (narrow() ? null : byKind(items)[0] ?? null);
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
-        paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => { roomPick = key; void paintRoomAssets(); }, empty: 'Nothing is given to it yet.' });
+        paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
         const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
         $('cassets-rows').prepend(top);
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
@@ -2242,9 +2401,24 @@
             detail.append(list);
         }
     }
+    /* One asset opened: a step (another one opened takes its place); Back, the list. */
+    const assetStep = () => { if (nav.last(['asset']) < 0) nav.push('asset', ({ quiet }) => { roomPick = ''; if (!quiet && assetsShown) void paintRoomAssets(); }); };
+    function pickRoomAsset(key) {
+        const a = nav.last(['asset']);
+        if (a >= 0) nav.cut(a + 1); else assetStep();
+        roomPick = key; void paintRoomAssets();
+    }
+    /* A folder or a file of it, asked for from the terminal or the viewer: its folder, in the Assets tab, on that path. */
+    function showInAssets(tab, inner) {
+        const c = conversations.find((x) => x.name === current);
+        const r = (c?.resources ?? []).find((x) => x.name === tab);
+        filesOf = tab; filesAt = inner;
+        goTab('assets', { pick: `${r ? kindOf(r) : 'folder'}:${tab}` });
+        assetStep();
+    }
     async function openRoomAssets(pick) {
         if (DEVICE || !current) return;
-        for (const id of ['panel', 'copy']) $(id).hidden = true;
+        $('copy').hidden = true;
         if (!$('files').classList.contains('embedded')) $('files').hidden = true;
         if (pick !== undefined) roomPick = pick;
         assetsShown = true; $('cassets').hidden = false; paintViews();
@@ -2273,14 +2447,35 @@
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? (narrow() ? null : byKind(shown)[0] ?? null);
         $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
-        paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(false); void paintAssets(); }, add: (kind) => { assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { placeAssetStep(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); }, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
         const detail = $('assets-detail');
         /* The forms go back to where they wait before the detail is drawn again. */
         for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
         detail.replaceChildren();
-        const back = () => { assetOpen = ''; assetsAdding = ''; void paintAssets(); };
+        const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
+        if (assetsAdding === 'choose' || (assetsAdding && assetsFromMap)) {
+            /* From the map's "+" of Assets: which kind, then its form; "<" goes back to the map. */
+            const out = el('button', 'as-link', '‹ Access'); out.type = 'button'; out.addEventListener('click', () => { if (!nav.close('compose')) back(); });
+            detail.append(out);
+            if (assetsAdding === 'choose') {
+                detail.append(el('h3', '', 'New asset'));
+                const kinds = el('div', 'as-kinds');
+                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['secret', 'Secret']]) {
+                    const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
+                    b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
+                    b.prepend(kindIcon(kind)); kinds.append(b);
+                }
+                detail.append(kinds);
+                return;
+            }
+            const form = $(`${assetsAdding}-box`); form.hidden = false;
+            detail.append(form);
+            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
+            focusField(form.querySelector('input:not([type=radio])'));
+            return;
+        }
         if (assetsAdding) {
-            const all2 = el('button', 'as-link as-back', '‹ All assets'); all2.type = 'button'; all2.addEventListener('click', back);
+            const all2 = el('button', 'as-link as-back', '‹ Assets'); all2.type = 'button'; all2.addEventListener('click', () => { if (!nav.close('asset')) back(); });
             const form = $(`${assetsAdding}-box`); form.hidden = false;
             detail.append(all2, form);
             if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
@@ -2354,6 +2549,26 @@
         const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' ? [] : [share, el('br')]), remove, why);
         detail.append(foot);
     }
+    /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
+    let assetsFromMap = false;
+    function newAssetFromMap() {
+        if (place !== 'access') { void openAssetsPlace(); return; }
+        assetOpen = ''; assetsAdding = 'choose'; assetsFromMap = true; remoteEditing = false;
+        showPlace('assets');
+        nav.push('compose', ({ quiet }) => {
+            assetsAdding = ''; assetsFromMap = false;
+            if (quiet) return;
+            showPlace('access'); accessTab = 'map'; paintTabs(); void links?.open({ pin: accessFor ? `conversation:${accessFor}` : null });
+        });
+        $('assets-error').hidden = true;
+        void paintAssets();
+    }
+    /* One asset of the place opened (or a form to make one): a step; another one takes its place. */
+    function placeAssetStep() {
+        const a = nav.last(['asset']);
+        if (a >= 0 && a > nav.last(['place'])) { nav.cut(a + 1); return; }
+        nav.push('asset', ({ quiet }) => { assetOpen = ''; assetsAdding = ''; remoteEditing = false; if (!quiet && place === 'assets') { remember(); void paintAssets(); } });
+    }
     /* The remote form of a repository, filled for it. */
     async function fillRemote(name, settings) {
         $('gitview-url').value = settings.remote ?? ''; $('gitview-user').value = settings.user ?? ''; $('gitview-key').value = '';
@@ -2365,7 +2580,6 @@
     }
     $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
     $('assets-close').addEventListener('click', () => leavePlace());
-    $('assets').addEventListener('keydown', (event) => { if (event.key === 'Escape' && !event.defaultPrevented && event.target.tagName !== 'INPUT') leavePlace(); });
     /* The Assets place, on one asset (`key`), its remote form open (`remote`). */
     async function openAssetsPlace(key, { remote = false, push = true } = {}) {
         if (DEVICE) return;
@@ -2486,33 +2700,36 @@
     /* What those sheets share with the rest of the page: the requests, the
        automatic sending form of Access, the share sheet for a device to pair. */
     const links = DEVICE ? undefined : window.clavariumLinks?.({
-        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => { leavePlace({ list: true }); void openCreate(); },
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => createFromMap(),
+        newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
         deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? deviceCard(d, '', true) : null; },
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
-        modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); remember(true); } },
+        modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); subStep(); } },
+        /* Its box rising from the bottom on a phone: over the screen, closed by Back. */
+        sheetOpened: (close) => { nav.over('map-sheet', () => close()); },
+        sheetClosed: () => { nav.dropOver('map-sheet'); },
         toFlows: () => openAccessPage('map', { mode: 'flows' }),
         leave: () => leavePlace(),
-        pairNew: async (grants, label) => { await openCompose(grants.map((g) => [g.asset, g.rights]), '', 'map'); $('sharing-label').value = label; sayChoice(); },
+        pairNew: async (grants, label) => { await openCompose(grants.map((g) => [g.asset, g.rights])); $('sharing-label').value = label; sayChoice(); },
     });
 
-    /* ---------- THE THREE PLACES: Conversations, Access, Settings ---------- */
-    /* Conversations is the list itself, and brings back to it. Access is one
-       page in three tabs: the map (with its flows), the devices, the assets;
-       opened from a conversation, it is filtered on it, and a badge takes the
-       filter away. Settings is as it was. Each place has an address of its
-       own (?open=access&tab=devices&for=garden): a reload, a link and Back
-       find it again, and the names of the screens that came before (links,
-       flows, assets, sharing) lead to their tab. */
-    const TABS = ['map', 'devices', 'assets'];
+    /* ---------- THE PLACES OF THE MENU: Assets, Access, Settings ---------- */
+    /* Each fills the screen beside the list (the whole screen on a phone),
+       with an address of its own (?open=access&tab=flows&for=garden): a
+       reload, a link and Back find it again, and the names of the screens
+       that came before (links, flows, devices, sharing) lead to it. Opened
+       from the conversations, a place is one step; another place of the menu
+       takes the place of the first, so that the conversations stay one Back
+       away. Inside Access, its flows and the list of all devices are a step
+       over the map; inside Assets, one asset opened. */
+    const TABS = ['map', 'devices'];
     const FORMER = { access: ['map', 'map'], map: ['map', 'map'], links: ['map', 'map'], 'who-gets-what': ['map', 'map'], flows: ['map', 'flows'], devices: ['map', 'map'], sharing: ['map', 'map'] };
     let place = 'conversations';
     let accessTab = 'map'; let mapMode = 'map'; let accessFor = '';
     let placeFrom = 'list';      /* the screen (list or room) a place goes back to */
-    let backToPanel = false;     /* opened from a shortcut of a conversation's own sheet: closing goes back there */
-    let pushed = 0;              /* entries of the history this place added: Back walks them, Close takes them all */
-    let skipPop = false;
+    let composing = false;       /* what a device gets, being chosen (a step of its own, or the place itself) */
     function showPlace(which) {
         place = which;
         app.dataset.place = which;
@@ -2521,7 +2738,9 @@
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
-        if (which !== 'conversations') { closeRoomAssets(); for (const id of ['panel', 'files', 'copy']) $(id).hidden = true; view('room'); }
+        if (which !== 'access') composing = false;
+        /* What the conversation had open (its tab) waits under the place, as it was. */
+        if (which !== 'conversations') { for (const id of ['files', 'copy']) $(id).hidden = true; view('room'); }
         if (which !== 'assets' || !$('assets').contains($('gitview'))) shutGit();
     }
     function placeAddress() {
@@ -2533,31 +2752,42 @@
         const query = q.toString();
         return query ? `?${query}` : location.pathname;
     }
-    function remember(push) {
-        const address = placeAddress();
-        if (address === (location.search || location.pathname)) return;
-        if (push) { pushed += 1; history.pushState({ depth: pushed }, '', address); } else history.replaceState({ depth: pushed }, '', address);
+    const remember = () => { if (!DEVICE) nav.replace(placeAddress()); };
+    /* `push`: false when the address itself asked for it (a reload, Back to an entry of before). */
+    function enterPlace(which, push = true) {
+        if (place === 'conversations') {
+            placeFrom = app.dataset.view === 'room' ? 'room' : 'list';
+            nav.cut(nav.first(['review', 'over', 'create']));
+            showPlace(which);
+            if (push && !DEVICE) { nav.push('place', ({ quiet }) => leftPlace(quiet), { address: placeAddress() }); return; }
+        } else {
+            /* Another place of the menu: what was open in the one before goes. */
+            const p = nav.last(['place']);
+            nav.cut(p >= 0 ? p + 1 : nav.first(['sub', 'asset', 'compose', 'create', 'review', 'over']));
+            showPlace(which);
+        }
+        remember();
     }
-    function enterPlace(which, push = true, fromPanel = false) {
-        if (place === 'conversations') { placeFrom = app.dataset.view === 'room' ? 'room' : 'list'; backToPanel = fromPanel && !$('panel').hidden; pushed = 0; }
-        showPlace(which);
-        remember(push);
-    }
-    /* `list`: to the list itself (the item Conversations). `keepView`: something
-       of the conversation is opened in its place (Files, its own sheet). */
-    function leavePlace({ list = false, keepView = false, panel = true, fromHistory = false } = {}) {
-        if (place === 'conversations') { if (list) view('list'); return; }
-        const reopen = backToPanel && panel && !list;
+    /* The place closed: what it covered is there again. */
+    function leftPlace(quiet) {
+        if (place === 'conversations') return;
         showPlace('conversations');
-        if (!keepView) view(list || placeFrom === 'list' || !current ? 'list' : 'room');
-        if (!fromHistory) { if (pushed > 0) { skipPop = true; history.go(-pushed); } else remember(false); }
-        pushed = 0; backToPanel = false;
-        if (reopen && current) void openAccess(false); else focusTerminal();
+        if (quiet) return;
+        view(placeFrom === 'list' || !current ? 'list' : 'room');
+        focusTerminal();
     }
-    /* How many devices were given something: said on the tab of Access that lists them. */
-    function paintDeviceCount() { $('tab-devices').textContent = sharedDevices.length > 0 ? `Devices (${sharedDevices.length})` : 'Devices'; }
+    /* "< Conversations", Escape, the item Conversations of the menu (`list`: the list itself). */
+    function leavePlace({ list = false } = {}) {
+        if (place !== 'conversations') {
+            const p = nav.last(['place']);
+            if (p >= 0) nav.cut(p, { loud: true });
+            else { nav.cut(nav.first(['sub', 'asset', 'compose', 'create', 'review', 'over'])); leftPlace(false); remember(); }
+        }
+        if (list && !nav.close('room')) view('list');
+    }
+    /* How many devices were given something: said on the link of the map that lists them. */
+    function paintDeviceCount() { $('map-all-devices').textContent = sharedDevices.length > 0 ? `All devices (${sharedDevices.length})` : 'All devices'; }
     function paintTabs() {
-        for (const b of $('access-tabs').querySelectorAll('[data-tab]')) { const on = b.dataset.tab === accessTab; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
         $('access-map').hidden = accessTab !== 'map';
         $('sharing').hidden = accessTab !== 'devices';
         for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.setAttribute('aria-pressed', String(b.dataset.mode === mapMode));
@@ -2565,32 +2795,42 @@
         $('access-for').hidden = !accessFor;
         $('access-for-name').textContent = accessFor;
     }
+    /* Inside Access: the flows, or all the devices, are a step over the map; the map again closes it. */
+    const deeper = () => accessTab === 'devices' || mapMode === 'flows';
+    function subStep() {
+        const sub = nav.last(['sub']);
+        if (deeper()) {
+            if (sub >= 0) nav.cut(sub + 1);
+            else nav.push('sub', ({ quiet }) => {
+                accessTab = 'map'; mapMode = 'map'; face('manage');
+                if (!quiet && place === 'access') { paintTabs(); remember(); void links?.open({ pin: accessFor ? `conversation:${accessFor}` : null }); }
+            }, { address: placeAddress() });
+        } else if (sub >= 0) nav.cut(sub);
+        remember();
+    }
     /* `of`: the conversation it is filtered on ('' for none; left as it is when not given).
        `face`: on the devices tab, 'compose' keeps what openCompose prepared. */
-    async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, fromPanel = false, pin } = {}) {
+    async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, pin } = {}) {
         if (DEVICE) return;
         /* Assets left Access: a conversation's own, or the server's. */
-        if (tab === 'assets') { if (of) { leavePlace({ keepView: true, panel: false }); await openRoomAssets(); } else await openAssetsPlace(undefined, { push }); return; }
+        if (tab === 'assets') { if (of) { leavePlace(); goTab('assets'); } else await openAssetsPlace(undefined, { push }); return; }
         if (of !== undefined) accessFor = of;
+        const arriving = place !== 'access';
         accessTab = TABS.includes(tab) ? tab : 'map';
         if (mode) mapMode = mode;
-        const arriving = place !== 'access';
-        enterPlace('access', push, fromPanel);
+        else if (accessTab === 'devices') mapMode = 'map';
+        if (arriving) enterPlace('access', push);
+        else if (shown !== 'compose') { nav.cut(nav.first(['compose'])); composing = false; if (push) subStep(); else remember(); }
         paintTabs();
         /* A device may have been paired meanwhile: counted again on the way in. */
         if (arriving) void readDevices().then(paintDeviceCount);
         if (accessTab === 'map') {
             if (mapMode === 'flows') await links?.openFlows();
             else await links?.open({ pin: pin ?? (accessFor ? `conversation:${accessFor}` : null) });
-        } else if (accessTab === 'devices') {
-            if (shown === 'compose') { paintCompose(); face('compose'); }
-            else { face('manage'); await paintManage(); }
-        } else {
-            $('assets-error').hidden = true;
-            await paintAssets();
-        }
+        } else if (shown === 'compose') { paintCompose(); face('compose'); }
+        else { face('manage'); await paintManage(); }
     }
-    /* Back and forward walk the places, the tabs, and out to where it started. */
+    /* Back and forward to an entry this page did not make: walked by its address. */
     async function followAddress() {
         const q = new URLSearchParams(location.search);
         const wanted = q.get('c') ?? '';
@@ -2607,42 +2847,23 @@
         if (open === 'assets' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
         if (former) { await openAccessPage(former[0], { mode: former[1], of: q.get('for') ?? '', push: false }); return; }
-        leavePlace({ fromHistory: true });
+        leftPlace(false);
     }
-    addEventListener('popstate', (event) => {
-        if (DEVICE) return;
-        /* Back while a review is shown: the review closes, as with its own "‹" link. */
-        if (reviewInHistory && !event.state?.review) {
-            reviewInHistory = false;
-            const back = gitBack; shutGit(); if (back?.go) back.go(); else focusTerminal();
-            return;
-        }
-        pushed = event.state?.depth ?? 0;
-        /* Walked back on purpose (Close): the address is set to what is shown. */
-        if (skipPop) { skipPop = false; remember(false); return; }
-        void followAddress();
-    });
+    nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map') void openAccessPage('map'); });
+    $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
     $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
     $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    /* Every device and what each was given, by device or by thing: a step over the map. */
+    $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
+    $('share-manage-close').addEventListener('click', () => { if (!nav.close('sub')) void openAccessPage('map', { push: false }); });
     $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
-    for (const b of $('access-tabs').querySelectorAll('[data-tab]')) b.addEventListener('click', () => { void openAccessPage(b.dataset.tab); });
-    /* The tabs, from the keyboard: the arrows go from one to the next. */
-    $('access-tabs').addEventListener('keydown', (event) => {
-        const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-        if (!step) return;
-        event.preventDefault();
-        const next = TABS[(TABS.indexOf(accessTab) + step + TABS.length) % TABS.length];
-        void openAccessPage(next).then(() => $(`tab-${next}`).focus());
-    });
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
-    $('access').addEventListener('keydown', (event) => { if (event.key === 'Escape' && !event.defaultPrevented && event.target.closest?.('#links') === null) leavePlace(); });
     /* From a conversation's own sheet: Access, on that conversation alone. */
-    $('access-assets-here').addEventListener('click', () => { void openRoomAssets(); });
-    $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current, fromPanel: true }); });
+    $('access-assets-here').addEventListener('click', () => { goTab('assets'); });
+    $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
     async function openSettings({ push = true } = {}) {
@@ -3137,7 +3358,7 @@
        diagram), never sent from here; otherwise what would go. The diff is
        drawn by diff2html from its text: each line escaped there, a subject
        or a path set as text here -- nothing the agent wrote becomes markup. */
-    let gitCommit = ''; let gitBack = null; let gitLayout = 'side-by-side'; let gitTab = 'changes'; let gitFile = 0; let gitFiles = [];
+    let gitCommit = ''; let gitBase = ''; let gitBack = null; let gitLayout = 'side-by-side'; let gitTab = 'changes'; let gitFile = 0; let gitFiles = [];
     const reviewNarrow = () => matchMedia('(max-width: 700px)').matches;
     /* The files of a diff, from its text: path, lines added and removed, and what became of it. */
     function diffFiles(text) {
@@ -3203,7 +3424,7 @@
         const name = gitShown;
         const commit = gitCommit;
         $('gitview-name').textContent = name;
-        $('gitview-back').textContent = gitBack?.label ?? 'Back';
+        $('gitview-back').textContent = gitBack?.label ?? 'Assets';
         $('gitview-error').hidden = true; $('gitview-push').hidden = true; $('gitview-check').hidden = true; $('gitview-checks').hidden = true;
         $('gitview-offer-row').hidden = true; $('gitview-guards').hidden = true; $('gitview-dropped').hidden = true; $('gitview-remote-go').hidden = true;
         $('gitview-state').textContent = commit ? 'Looking at this commit...' : 'Looking at what was committed...';
@@ -3219,6 +3440,7 @@
         try {
             const query = new URLSearchParams();
             if (commit) query.set('id', commit);
+            if (commit && gitBase) query.set('base', gitBase);
             if (!commit && gitAsked) query.set('target', gitAsked);
             if (!commit && gitAskedBranch) query.set('branch', gitAskedBranch);
             const r = await fetch(`${API}/git/${name}/${commit ? 'commit' : 'outgoing'}${query.size ? `?${query}` : ''}`);
@@ -3235,7 +3457,7 @@
         gitHead = commit ? null : out.head; gitTarget = out.target ?? null; gitState = out.state; gitCommits = out.count === undefined ? out.commits.length : out.count; gitBranch = out.branch ?? null; gitConfirm = Boolean(out.guards?.confirm);
         if (commit) {
             const c = out.commits[0];
-            $('gitview-from').textContent = commit.slice(0, 7); $('gitview-from').hidden = false; $('gitview-from').title = c?.subject ?? '';
+            $('gitview-from').textContent = gitBase ? `${String(out.base ?? gitBase).slice(0, 7)}..${String(out.id ?? commit).slice(0, 7)}` : String(out.id ?? commit).slice(0, 7); $('gitview-from').hidden = false; $('gitview-from').title = gitBase ? `${out.count ?? out.commits.length} commits` : c?.subject ?? '';
         } else {
             fillBranches(out);
             if ($('gitview-branch-row').hidden && out.branch) { $('gitview-from').textContent = out.branch; $('gitview-from').hidden = false; }
@@ -3281,36 +3503,42 @@
        in the server's Assets (its header stays), or in a conversation's Assets
        view (the list of conversations and the bar Chat | Terminal | Assets
        stay, and leave it). */
-    async function openGit(name, { commit = '', back = null, target = '', branch = '' } = {}) {
-        for (const id of ['panel', 'files']) if (!$(id).classList.contains('embedded')) $(id).hidden = true;
-        let host = null;
+    /* `commit`: one commit; with `base`, the commits from base to it (a line of the chat). A step of its own: Back, Escape and its "<" give back what it was opened from. */
+    async function openGit(name, { commit = '', base = '', back = null, target = '', branch = '', tab = 'changes' } = {}) {
+        if (!$('files').classList.contains('embedded')) $('files').hidden = true;
+        let host = null; let home = '';
         if (place === 'assets') host = $('assets');
         else if (!DEVICE && current) {
-            /* From the chat or a sheet: the Assets view opened on it; closing gives back the view it was in. */
-            if (!assetsShown) { back ??= { label: 'Back', go: () => { closeRoomAssets(); focusTerminal(); } }; roomPick = `git:${name}`; await openRoomAssets(); }
+            /* From the chat or another tab: the Assets tab opened on it; closing gives back the tab it was in. */
+            if (!assetsShown) {
+                const from = tabNow();
+                back ??= { label: TAB_WORD[from], go: () => showTab(from) };
+                if (nav.last(['tab']) < 0) home = from;
+                nav.cut(nav.first(['asset', 'review', 'over']));
+                roomPick = `git:${name}`;
+                closePanelZone(); await openRoomAssets();
+            }
             host = $('cassets');
         }
         const g = $('gitview');
         if (host && g.parentNode !== host) host.append(g);
         g.classList.toggle('inset', Boolean(host));
-        /* The device's own Back (a phone's gesture, the browser's button) closes the review: it is a step of its own in the history. */
-        if (!DEVICE && !reviewInHistory) { history.pushState({ depth: pushed, review: true }, '', location.href); reviewInHistory = true; }
-        gitShown = name; gitCommit = commit; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = 'changes';
+        if (!DEVICE) {
+            const r = nav.last(['review']);
+            if (r >= 0) nav.cut(r + 1);
+            else { const step = nav.push('review', ({ quiet }) => { const to = gitBack; shutGit(); if (!quiet) { if (to?.go) to.go(); else focusTerminal(); } }); step.home = home; }
+        }
+        gitShown = name; gitCommit = commit; gitBase = commit ? base : ''; gitAsked = target; gitAskedBranch = branch; gitBack = back; gitTab = tab;
         g.hidden = false; g.scrollTop = 0;
         await paintGit();
     }
-    /* Left without its own button (Chat, Terminal, another conversation, another place). */
-    let reviewInHistory = false;
-    function shutGit() {
-        $('gitview').hidden = true; gitShown = ''; gitBack = null;
-        /* Closed by a click: its step in the history stays, as the place it was opened from. */
-        if (reviewInHistory) { reviewInHistory = false; if (history.state?.review) history.replaceState({ depth: history.state.depth ?? 0 }, '', location.href); }
-    }
+    /* Hidden (its step closed, or left for another tab, conversation or place). */
+    function shutGit() { $('gitview').hidden = true; gitShown = ''; gitBack = null; }
     for (const b of $('gitview-tabs').querySelectorAll('[data-tab]')) b.addEventListener('click', () => { gitTab = b.dataset.tab; paintReviewTab(); });
     for (const b of $('gitview-layout').querySelectorAll('[data-layout]')) b.addEventListener('click', () => { gitLayout = b.dataset.layout; paintReviewTab(); drawDiff(gitText.replace(/\n$/, '')); });
     for (const b of $('gitview-picker').querySelectorAll('[data-step]')) b.addEventListener('click', () => { showFile(gitFile + Number(b.dataset.step)); $('gitview-diff').scrollIntoView({ block: 'start' }); });
-    $('gitview-set-remote').addEventListener('click', () => { const name = gitShown; shutGit(); void openAssetsPlace(`git:${name}`, { remote: true }); });
-    $('gitview-close').addEventListener('click', () => { const back = gitBack; shutGit(); if (back?.go) back.go(); else focusTerminal(); });
+    $('gitview-set-remote').addEventListener('click', () => { const name = gitShown; nav.cut(nav.first(['review'])); shutGit(); void openAssetsPlace(`git:${name}`, { remote: true }); });
+    $('gitview-close').addEventListener('click', () => { if (nav.close('review')) return; const back = gitBack; shutGit(); if (back?.go) back.go(); else focusTerminal(); });
     $('gitview-again').addEventListener('click', () => { void paintGit(); });
     $('gitview-check').addEventListener('click', () => { void runChecks(); });
     $('gitview-branch').addEventListener('change', () => { gitAskedBranch = $('gitview-branch').value; gitAsked = ''; void paintGit(); });
@@ -3402,16 +3630,17 @@
         while (lines.length > 0 && lines.at(-1).trim() === '') lines.pop();
         return lines.join('\n');
     }
+    /* COPY / PASTE: over the screen, a step of its own. */
+    const showCopy = () => { nav.over('copy', () => { $('copy').hidden = true; focusTerminal(); }); $('copy').hidden = false; };
     $('copy-open').addEventListener('click', () => {
-        $('files').hidden = $('panel').hidden = true;
-        leavePlace({ keepView: true, panel: false });
+        $('files').hidden = true;
         $('copy-text').value = screenText();
         $('copy-status').textContent = ''; $('paste-status').textContent = '';
-        $('copy').hidden = false;
+        showCopy();
         /* Shown from its end: the last lines are what one comes for. */
         $('copy-text').scrollTop = $('copy-text').scrollHeight;
     });
-    $('copy-close').addEventListener('click', () => { $('copy').hidden = true; focusTerminal(); });
+    $('copy-close').addEventListener('click', () => { if (!nav.dropOver('copy')) { $('copy').hidden = true; focusTerminal(); } });
     $('copy-all').addEventListener('click', async () => {
         const field = $('copy-text');
         try { await navigator.clipboard.writeText(field.value); $('copy-status').textContent = 'Copied.'; }
@@ -3429,7 +3658,7 @@
         /* The button that was pressed gives the focus back first: left on it,
            the next Enter pressed it again and pasted twice (caught by a test). */
         document.activeElement?.blur?.();
-        $('copy').hidden = true;
+        if (!nav.dropOver('copy')) $('copy').hidden = true;
         focusTerminal();
         if (text) terminal.paste(text);
     };
@@ -3527,7 +3756,7 @@
         try { await navigator.clipboard.writeText(text); flash(`Copied: ${text.length} character${text.length > 1 ? 's' : ''}`, action); }
         catch {
             /* The browser did not let the page write: the same text, as ordinary text, to copy by hand. */
-            $('copy-text').value = text; $('copy').hidden = false; focusField($('copy-text')); $('copy-text').select();
+            $('copy-text').value = text; showCopy(); focusField($('copy-text')); $('copy-text').select();
         }
     }
     area.addEventListener('touchstart', (event) => {
@@ -4190,7 +4419,9 @@
         offerCopy(null);
         const was = !$('viewer').hidden;
         $('viewer').hidden = true;
-        if ($('files').hidden && $('panel').hidden) focusTerminal();
+        /* Its step goes with it, whoever closed it. */
+        nav.dropOver('viewer');
+        if ($('files').hidden && !panelShown) focusTerminal();
         if (was && filesChanged && !$('files').hidden) { filesChanged = false; void paintFiles(); }
     }
     /* COPY, in the window: all the text of a text file, or the picture.
@@ -4253,12 +4484,22 @@
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
         /* From the terminal, a way to the folder it sits in. */
-        $('preview-where').hidden = Boolean(from) || !$('files').hidden || noTerminal();
+        /* From the terminal or the chat, a way to the folder it sits in: the Assets tab, on it (Files, on a device). */
+        $('preview-where').hidden = Boolean(from) || (!$('files').hidden && !$('files').classList.contains('embedded')) || noTerminal() || (!DEVICE && assetsShown);
+        $('preview-where').textContent = DEVICE ? 'Show in Files' : 'Show in Assets';
         $('preview-where').onclick = async () => {
             closePreview();
-            filesOf = tab; filesAt = inner.split('/').slice(0, -1).join('/');
-            $('panel').hidden = true; await paintFiles(); $('files').hidden = false;
+            const folder = inner.split('/').slice(0, -1).join('/');
+            if (!DEVICE) { showInAssets(tab, folder); return; }
+            filesOf = tab; filesAt = folder;
+            await paintFiles(); showFiles();
         };
+        nav.over('viewer', ({ history: back }) => {
+            /* Back with changes not saved: asked first, never lost by a stray gesture. */
+            if (back && dirty()) { askDiscard(); return false; }
+            if (!$('viewer').hidden) closePreview();
+            return undefined;
+        });
         $('viewer').hidden = false;
         /* Text in a folder this conversation may write in: editable here. */
         $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
@@ -4339,7 +4580,8 @@
     $('preview-close').addEventListener('click', () => leavePreview());
     /* Outside the window, or Escape: closed too -- unless what is edited is not saved. */
     $('viewer').addEventListener('click', (event) => { if (event.target === $('viewer')) leavePreview(); });
-    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('viewer').hidden) { event.preventDefault(); event.stopPropagation(); leavePreview(); } }, true);
+    /* Escape, even from the text being edited: the window is left as with its button (asked first if not saved). */
+    document.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !$('viewer').hidden && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); leavePreview(); } }, true);
 
     /* ---------- a text file, edited here ---------- */
     /* A plain editor: the text, its lines, Save and Cancel. It is saved at the
@@ -4550,10 +4792,11 @@
         /* A folder is listed in Files; a file is shown in its window, over the terminal. */
         const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: inner })}`);
         if (asFolder.ok) {
-            notice.hidden = true; $('panel').hidden = true;
+            notice.hidden = true;
+            if (!DEVICE) { showInAssets(tab, inner); return; }
             filesOf = tab; filesAt = inner;
             await paintFiles();
-            $('files').hidden = false;
+            showFiles();
             return;
         }
         const parent = inner.split('/').slice(0, -1).join('/');
@@ -4602,8 +4845,10 @@
         },
     });
 
-    $('files-open').addEventListener('click', async () => { for (const id of ['panel', 'gitview']) $(id).hidden = true; leavePlace({ keepView: true, panel: false }); await paintFiles(); $('files').hidden = false; });
-    $('files-close').addEventListener('click', () => { $('files').hidden = true; focusTerminal(); });
+    /* FILES, a sheet over the screen: on a device's page only (the owner's are in the Assets tab of a conversation). */
+    function showFiles() { nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
+    $('files-open').addEventListener('click', async () => { await paintFiles(); showFiles(); });
+    $('files-close').addEventListener('click', () => { if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
 
     /* ---------- sign-in mailbox ---------- */
     /* While a conversation with a mailbox is open, the page asks every few
@@ -4815,16 +5060,39 @@
         sayChoice();
     }
     /* `start`: [[asset, rights], ...] put in the basket; `target`: a paired device to change instead of a new one.
-       `from`: where "Back" leads -- the tab of Access it was opened from, or the conversation. */
-    let composeFrom = 'devices';
-    async function openCompose(start = [], target = '', from = place === 'access' ? accessTab : 'conversation') {
+       A step of its own over where it was opened (the map, all devices, an asset of Assets); from a
+       conversation, it is the place itself. Its "<" says where it goes back to, and goes there. */
+    async function openCompose(start = [], target = '') {
         await Promise.all([loadCatalog(), readDevices()]);
-        shareTarget = target; shareKind = ''; composeFrom = from;
+        shareTarget = target; shareKind = '';
         basket = new Map(target ? sharedDevices.find((d) => d.id === target)?.grants.map((g) => [g.asset, g.rights]) ?? [] : []);
         for (const [asset, rights] of start) basket.set(asset, rights);
         $('sharing-label').value = ''; $('share-search').value = ''; $('sharing-error').hidden = true;
         $('sharing-title').textContent = target ? `What ${sharedDevices.find((d) => d.id === target)?.label ?? 'this device'} gets` : 'Share with a new device';
-        await openAccessPage('devices', { face: 'compose' });
+        if (!composing) {
+            let back;
+            if (place === 'conversations') {
+                const c = conversations.find((x) => x.name === current);
+                back = current ? shownName(c) || current : 'Conversations';
+                accessTab = 'devices'; mapMode = 'map';
+                enterPlace('access');
+            } else {
+                const from = place === 'assets' ? 'assets' : accessTab === 'devices' ? 'devices' : 'map';
+                back = { assets: 'Assets', devices: 'All devices', map: 'Access' }[from];
+                if (place !== 'access') showPlace('access');
+                accessTab = 'devices';
+                nav.push('compose', ({ quiet }) => {
+                    composing = false; face('manage');
+                    if (quiet) return;
+                    if (from === 'assets') { showPlace('assets'); void paintAssets(); return; }
+                    accessTab = from === 'devices' ? 'devices' : 'map'; paintTabs();
+                    if (from === 'devices') void paintManage(); else void links?.open({ pin: accessFor ? `conversation:${accessFor}` : null });
+                });
+            }
+            $('sharing-close').textContent = `‹ ${back}`;
+            composing = true;
+        }
+        paintTabs(); paintCompose(); face('compose');
     }
     $('sharing-label').addEventListener('input', sayChoice);
     $('share-search').addEventListener('input', paintCompose);
@@ -4959,7 +5227,7 @@
     /* Filtered on a conversation, a new device is offered that conversation. */
     $('share-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
     /* From a conversation: that conversation, and nothing else, is in the basket. */
-    $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]], '', 'conversation'); });
+    $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]]); });
     /* The Sharing chapter of a conversation: who has it, and which parts -- changed there, at once. */
     async function paintShareHere() {
         if (DEVICE) return;
@@ -4983,11 +5251,9 @@
         }
         $('share-here-none').hidden = box.children.length > 0;
     }
-    /* Back from choosing or from the code: where it was opened from. */
-    $('sharing-close').addEventListener('click', () => {
-        face('manage'); void refresh();
-        if (composeFrom === 'conversation') leavePlace(); else void openAccessPage(composeFrom === 'devices' ? 'map' : composeFrom);
-    });
+    /* Back from choosing or from the code: where it was opened from, as Back and Escape. */
+    const leaveCompose = () => { void refresh(); if (!nav.close('compose')) leavePlace(); };
+    $('sharing-close').addEventListener('click', leaveCompose);
 
     $('sharing-new').addEventListener('click', async () => {
         $('sharing-error').hidden = true;
@@ -4997,8 +5263,10 @@
                 const before = new Map(sharedDevices.find((d) => d.id === shareTarget).grants.map((g) => [g.asset, g.rights]));
                 for (const [asset, rights] of basket) if (before.get(asset) !== rights) await post(`${API}/devices/${shareTarget}/give`, { asset, rights });
                 for (const asset of before.keys()) if (!basket.has(asset)) await post(`${API}/devices/${shareTarget}/take`, { asset });
-                /* Back on the map, on that device's card. */
-                await readDevices(); await openAccessPage('map', { pin: `device:${shareTarget}` }); void refresh();
+                /* Back where it was opened, on that device's card when that is the map. */
+                const device = shareTarget;
+                await readDevices(); leaveCompose();
+                if (place === 'access' && accessTab === 'map') void links?.open({ pin: `device:${device}` });
                 return;
             }
             const label = $('sharing-label').value.trim();
@@ -5029,12 +5297,13 @@
             $('share-cancel').onclick = async () => { await post(`${API}/shares/cancel`, { code: new URL(shared.url).hash.slice(1) }).catch(() => {}); await openCompose([...basket]); $('sharing-label').value = label; sayChoice(); };
         } catch (error) { $('sharing-error').textContent = error.message; $('sharing-error').hidden = false; }
     });
-    $('share-done').addEventListener('click', () => { void openAccessPage('map'); void refresh(); });
+    /* Done: the device is paired; back where it was opened. */
+    $('share-done').addEventListener('click', leaveCompose);
 
     /* ---------- resting and archiving ---------- */
     $('sleep').addEventListener('click', async () => {
         const name = current;
-        $('panel').hidden = true;
+        leavePanel();
         disconnect();
         say('going to sleep', 'connecting');
         show('Going to sleep...');
@@ -5050,7 +5319,7 @@
     }
     async function archive(confirmed) {
         const name = current;
-        $('panel').hidden = true;
+        leavePanel();
         if (!confirmed) {
             const resume = socket ? () => { notice.hidden = true; focusTerminal(); } : enter;
             show(`Archive "${name}"? Its machine is deleted, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.`, 'Archive', () => archive(true), resume);
@@ -5062,7 +5331,8 @@
         catch (error) { show(error.message, 'Close', enter); }
     }
     $('archive').addEventListener('click', () => { void archive(false); });
-    $('back').addEventListener('click', () => select(''));
+    /* "<" of a conversation (a phone): the list, as Back does. */
+    $('back').addEventListener('click', () => { if (!nav.close('room')) select(''); });
 
     /* A device whose door is closed: say why, and leave nothing on screen
        that can no longer work (a tester found Files still offered after the
@@ -5191,6 +5461,11 @@
         await refresh();
         if (!home) { view('room'); if (!NAME.test(current)) current = ''; }
         enter();
+        /* Arriving on a conversation: the list is one Back away, as if it had been picked there. */
+        if (home && current && !new URLSearchParams(location.search).has('open') && !Number.isInteger(history.state?.nav)) {
+            history.replaceState(null, '', location.pathname);
+            nav.push('room', ({ quiet }) => { if (!quiet) select(''); }, { address: `?c=${encodeURIComponent(current)}` });
+        }
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();
     }

@@ -26,7 +26,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.page.locator('#wakeups-new button[type=submit]').click();
     await me.until('it is listed', async () => /When something new arrives in handoff, still for 1 s/.test(await me.page.locator('#wakeups-rows').innerText()));
     assert.match(await me.page.locator('#wakeups-rows .wakeup-last').innerText(), /Not yet/);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     assert.match(await me.page.locator('#items .item[aria-current=true]').innerText(), /1 wake-up/);
     /* The other tool leaves its request. Nobody touches the painter. */
     await me.page.goto(`${b.origin}/?c=writer`);
@@ -52,7 +52,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.page.fill('#wakeup-message', 'echo monthly');
     await me.page.locator('#wakeups-new button[type=submit]').click();
     await me.until('it is listed', async () => /By the clock: 0 8 1 \* \*/.test(await me.page.locator('#wakeups-rows').innerText()));
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     /* A call from outside: its address is shown once, and calling it wakes the tool. No account is needed: the address is the right. */
     await me.page.locator('#folders').click();
     await me.chapter('wakeups');
@@ -64,7 +64,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     const address = await me.page.inputValue('#wakeup-address');
     await me.page.locator('#wakeup-address-done').click();
     assert.equal(await me.page.inputValue('#wakeup-address'), '');
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     const outside = await b.browser.newContext();
     const called = await outside.request.post(address, { data: 'order 12' });
     assert.equal(called.status(), 202); assert.deepEqual(await called.json(), { woken: true, why: 'typed' });
@@ -78,7 +78,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));
     await me.page.locator('#wakeups-rows .wakeup .levels button', { hasText: 'Off' }).first().click();
     await me.until('it is off', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'painter').wakeups.items[0].on === false);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await me.type('echo "another" > ../resources/handoff/second.md; sleep 3; echo quiet');
     await me.sees('\nquiet', 30_000);
     assert.equal((await me.screen()).includes('told of: second.md'), false);

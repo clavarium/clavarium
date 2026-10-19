@@ -198,6 +198,11 @@ const TODO = Object.freeze({
 /* Reasons whose sending stays stuck until somebody looks. */
 const GRAVE_WHY = new Set(['refused-forced', 'refused-unknown-unreachable', 'refused-workspace']);
 const commitsOf = (n) => `${n} commit${n === 1 ? '' : 's'}`;
+/* A commit as a line of the chat names it: its first seven characters (the page makes them a link to it). */
+const short = (id) => (typeof id === 'string' && /^[0-9a-f]{40}$/.test(id) ? id.slice(0, 7) : '');
+const upTo = (id) => (short(id) ? ` (up to ${short(id)})` : '');
+/* "See the N commits": from the tip before to the tip now, as the review shows them; none for a new branch. */
+const seeCommits = (name, head, base, n) => (short(head) && short(base) && Number.isInteger(n) && n > 0 ? [`commits:${name}.${head.slice(0, 12)}.${base.slice(0, 12)}.${Math.min(n, 9999)}`] : []);
 
 export class GitKeeper {
     #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
@@ -366,7 +371,7 @@ export class GitKeeper {
     #say(name, conversations, event) {
         let attached;
         try { attached = Object.keys(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}); } catch { return; }
-        for (const c of conversations) if (attached.includes(c)) { try { this.#thread(c, { ...event, actions: [`review:${name}`] }); } catch { /* a chat never stops git */ } }
+        for (const c of conversations) if (attached.includes(c)) { try { this.#thread(c, { ...event, actions: [...(event.actions ?? []), `review:${name}`] }); } catch { /* a chat never stops git */ } }
     }
     #attached(name) { try { return Object.entries(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}).filter(([, access]) => access && access !== 'none').map(([c]) => c).sort(); } catch { return []; } }
     /* Marked as told only once somebody was: a line typed to no machine
@@ -427,8 +432,8 @@ export class GitKeeper {
         const brought = result.ok ? (result.brought ?? []) : [];
         if (brought.length) {
             const total = brought.reduce((n, x) => n + x.commits, 0);
-            const where = brought.slice(0, 4).map((x) => `${x.commits} on ${x.branch}`).join(', ') + (brought.length > 4 ? `, and ${brought.length - 4} more branch(es)` : '');
-            this.#say(name, this.#attached(name), { kind: 'origin', text: `Origin of ${name} updated: ${total} new commit${total === 1 ? '' : 's'} (${where}).`, topic: 'Origin updated', brief: name });
+            const where = brought.slice(0, 4).map((x) => `${x.commits} on ${x.branch}${upTo(x.head)}`).join(', ') + (brought.length > 4 ? `, and ${brought.length - 4} more branch(es)` : '');
+            this.#say(name, this.#attached(name), { kind: 'origin', text: `Origin of ${name} updated: ${total} new commit${total === 1 ? '' : 's'} (${where}).`, topic: 'Origin updated', brief: name, actions: brought.length === 1 ? seeCommits(name, brought[0].head, brought[0].base, brought[0].commits) : [] });
         }
         if (result.ok && Object.keys(record.blocked ?? {}).length > 0) void this.#settle(name).catch(() => {});
     }
@@ -490,7 +495,7 @@ export class GitKeeper {
         }
         try {
             const sent = await this.#review.push(r.name, body);
-            if (!sent.already) this.#say(r.name, this.#attached(r.name), { kind: 'sent-by-hand', text: `Sent by hand to ${sent.branch} of ${r.name}: ${commitsOf(sent.commits)}${sent.made ? ' (a new branch)' : ''}.`, topic: 'Sent', brief: sent.branch });
+            if (!sent.already) this.#say(r.name, this.#attached(r.name), { kind: 'sent-by-hand', text: `Sent by hand to ${sent.branch} of ${r.name}: ${commitsOf(sent.commits)}${upTo(sent.head)}${sent.made ? ' (a new branch)' : ''}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(r.name, sent.head, sent.base, sent.commits) });
             return sent;
         } catch (error) {
             if (error instanceof GitFailure) this.#sendFailed(r.name, error, { branch: body?.target, head: body?.head });
@@ -604,7 +609,7 @@ export class GitKeeper {
             if (sent.already) { this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Already on the remote: ${b}.` }, { sent: true, by: conversation }); return true; }
             this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Sent automatically for ${conversation}: ${sent.commits} commit(s) to ${sent.branch}${sent.made ? ' (a new branch)' : ''}, ${checked}.${sent.note ? ` ${sent.note}` : ''}` }, { sent: true, by: conversation });
             if (alert) this.#tell(`${name}: sent to ${sent.branch}`, `${sent.commits} commit(s), automatically for ${conversation}, ${checked}.`);
-            this.#say(name, [conversation], { kind: 'sent', text: `Sent to ${sent.branch} of ${name}: ${commitsOf(sent.commits)}${sent.made ? ' (a new branch)' : ''}, ${checked}.`, topic: 'Sent', brief: sent.branch });
+            this.#say(name, [conversation], { kind: 'sent', text: `Sent to ${sent.branch} of ${name}: ${commitsOf(sent.commits)}${upTo(sent.head)}${sent.made ? ' (a new branch)' : ''}, ${checked}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(name, sent.head, sent.base, sent.commits) });
             return true;
         } catch (error) {
             const kind = error instanceof GitFailure ? error.kind : 'error';

@@ -21,7 +21,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
     await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
     await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').count()) === 1);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
 
     const restart = async () => {
         await me.type('exit');
@@ -38,7 +38,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.page.locator('#folders').click();
     await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Detach' }).click();
     await me.until('it is no longer handed', async () => (await me.page.locator('#access-secrets .folder').count()) === 0);
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     await restart();
     await me.type('echo "off=[$MODEL_KEY]"');
     await me.sees('off=[]');

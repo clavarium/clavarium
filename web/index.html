@@ -48,17 +48,17 @@
   </nav>
   <section id="room">
     <header>
-      <button type="button" id="back" aria-label="All conversations" hidden>&lsaquo;</button>
+      <button type="button" id="back" aria-label="Conversations" title="Conversations" hidden>&lsaquo;</button>
       <button type="button" id="fold" aria-label="Hide the list of conversations" aria-pressed="false" title="Hide or show the list of conversations">&laquo;</button>
       <span id="state" data-state="connecting" role="status">connecting</span>
       <b id="name"></b>
-      <!-- THE BAR: its chat, its terminal, what it was given; its settings (G). -->
+      <!-- THE BAR: its chat, its terminal, what it was given, its settings (G): four tabs. -->
       <div id="views" class="views" role="group" aria-label="What to see">
         <button type="button" id="view-chat" aria-pressed="false" title="Its chat"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Chat</span></button>
         <button type="button" id="view-terminal" aria-pressed="false" title="Its terminal"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></svg><span>Terminal</span></button>
         <button type="button" id="view-assets" aria-pressed="false" title="What it was given"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span><b id="assets-count" class="count"></b></button>
+        <button type="button" id="folders" aria-pressed="false" aria-label="Settings" title="Settings of this conversation" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span class="sr">Settings</span></button>
       </div>
-      <button type="button" id="folders" aria-label="Settings of this conversation" title="Settings of this conversation" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
     </header>
     <div id="health-strip" role="status" hidden>
       <span id="health-text"></span>
@@ -113,7 +113,7 @@
         </div>
       </div>
       <div id="panel" class="sheet" hidden>
-        <div class="panel-top"><b id="panel-title">This conversation</b><button type="button" id="panel-close">Close</button></div>
+        <div class="panel-top"><b id="panel-title">This conversation</b></div>
         <p id="panel-error" class="error" role="alert" hidden></p>
         <details class="chapter" id="chapter-general" data-chapter="general">
           <summary><span class="chapter-title">General</span><span class="chapter-about">What it is, and how you talk with it.</span></summary>
@@ -338,7 +338,7 @@
         <div class="panel-top access-top">
           <b>Access</b>
           <span id="access-for" class="for-badge" hidden><span class="hint">Only</span> <b id="access-for-name"></b><button type="button" id="access-for-clear" aria-label="Show everything, not only this conversation" title="Show everything">&times;</button></span>
-          <button type="button" id="access-close">Close</button>
+          <button type="button" id="access-close" class="as-link place-back">&lsaquo; Conversations</button>
         </div>
         <div id="access-map" class="pane">
           <div class="row map-bar">
@@ -350,6 +350,7 @@
               <button type="button" role="tab" data-view="devices">Devices</button>
             </div>
             <label class="lk-switch"><input type="checkbox" id="links-all"> All links at once</label>
+            <button type="button" id="map-all-devices" class="as-link">All devices</button>
             <button type="button" id="map-new-device">+ New device</button>
           </div>
         <!-- THE MAP (once "Who gets what"): every device, conversation and asset, and the rights between them (links.js). -->
@@ -371,7 +372,7 @@
         </div>
         </div>
       <div id="sharing" class="pane" hidden>
-        <div class="panel-top" id="sharing-top" hidden><b id="sharing-title">Share</b><button type="button" id="sharing-close">Back</button></div>
+        <div class="panel-top" id="sharing-top" hidden><b id="sharing-title">Share</b><button type="button" id="sharing-close" class="as-link">&lsaquo; Access</button></div>
         <!-- Choosing what a device gets: a basket you add to. -->
         <div id="share-compose">
           <b>Who is it for?</b>
@@ -409,6 +410,7 @@
         </div>
         <!-- Who has what. -->
         <div id="share-manage" hidden>
+          <div class="panel-top"><b>All devices</b><button type="button" id="share-manage-close" class="as-link">&lsaquo; Access</button></div>
           <div class="row">
             <div class="choices" id="share-by" role="group" aria-label="How it is listed"><button type="button" id="share-by-device" aria-pressed="true">By device</button><button type="button" id="share-by-thing" aria-pressed="false">By thing</button></div>
             <span class="sp"></span><button type="button" id="share-new-device" class="primary">+ New device</button>
@@ -425,7 +427,7 @@
            one, and a repository's remote, wait in #assets-forms and are moved
            into the detail when asked for. -->
       <div id="assets" class="sheet as-place" hidden>
-        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close">Close</button></div>
+        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <div class="as" id="assets-as">
           <div class="as-list"><input type="search" id="assets-search" placeholder="Search assets" aria-label="Search assets" spellcheck="false" autocomplete="off"><div id="assets-rows"></div></div>
@@ -524,7 +526,7 @@
         </div>
       </div>
       <div id="settings" class="sheet" hidden>
-        <div class="panel-top"><b>Settings</b><button type="button" id="settings-close">Close</button></div>
+        <div class="panel-top"><b>Settings</b><button type="button" id="settings-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <h3 class="chapter-group">This device</h3>
         <details class="chapter" id="settings-ch-screen" data-chapter="s-screen">
           <summary><span class="chapter-title">Screen</span><span class="chapter-about">Light or dark, text size, the app.</span></summary>
@@ -685,7 +687,7 @@
         </details>
       </div>
       <div id="copy" class="sheet" hidden>
-        <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close">Close</button></div>
+        <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close" aria-label="Close" title="Close">&times;</button></div>
         <p class="hint">The terminal draws its text itself, so it cannot be selected by touch. Here is the same text as ordinary text: select what you need, or copy it all.</p>
         <div class="row"><button type="button" id="copy-all" class="primary">Copy everything</button><span id="copy-status" class="hint" role="status"></span></div>
         <textarea id="copy-text" readonly spellcheck="false" aria-label="Text of the screen"></textarea>
@@ -696,7 +698,7 @@
         <div class="row"><button type="button" id="paste-send">Send to the terminal</button></div>
       </div>
       <div id="files" class="sheet" hidden>
-        <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
+        <div class="panel-top"><b>Files</b><button type="button" id="files-close" aria-label="Close" title="Close">&times;</button></div>
         <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
         <p id="files-none" class="hint" hidden>This conversation works on the disk of its machine, and no folder is attached to it. Attach one with "Folders".</p>
         <div class="files-bar">
@@ -803,7 +805,7 @@
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
         <div id="viewer-card">
-          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close" title="Close">&times;</button></div>
           <p id="preview-note" class="hint" hidden></p>
           <div id="preview-body"></div>
         </div>

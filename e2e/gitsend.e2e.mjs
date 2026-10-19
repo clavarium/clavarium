@@ -110,7 +110,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     await me.page.fill('#panel-rows .auto-send [name=quietSeconds]', '0');
     await line.locator('button[type=submit]').click();
     await me.until('saved again', async () => (await line.locator('.auto-state').innerText()) === 'on: try/*');
-    await me.page.locator('#panel-close').click();
+    await me.page.goBack();
     git(work, 'checkout', '--quiet', '-b', 'try/idea');
     writeFileSync(join(work, 'three.html'), '<p>three</p>\n'); git(work, 'add', 'three.html'); git(work, 'commit', '--quiet', '-m', 'Third page');
     const third = git(work, 'rev-parse', 'HEAD');

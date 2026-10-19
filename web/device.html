@@ -37,7 +37,7 @@
         <div id="chat-off" hidden><p><b>The chat is not turned on.</b></p><p>The person who shared this conversation with you has not turned its chat on yet. This page shows it as soon as they do.</p></div></div>
       <div id="flash" role="status" hidden><span id="flash-text"></span><button type="button" id="flash-act" class="primary" hidden></button></div>
       <div id="copy" class="sheet" hidden>
-        <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close">Close</button></div>
+        <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close" aria-label="Close" title="Close">&times;</button></div>
         <p class="hint">The terminal draws its text itself, so it cannot be selected by touch. Here is the same text as ordinary text: select what you need, or copy it all.</p>
         <div class="row"><button type="button" id="copy-all" class="primary">Copy everything</button><span id="copy-status" class="hint" role="status"></span></div>
         <textarea id="copy-text" readonly spellcheck="false" aria-label="Text of the screen"></textarea>
@@ -60,7 +60,7 @@
         </form>
       </div>
       <div id="files" class="sheet" hidden>
-        <div class="panel-top"><b>Files</b><button type="button" id="files-close">Close</button></div>
+        <div class="panel-top"><b>Files</b><button type="button" id="files-close" aria-label="Close" title="Close">&times;</button></div>
         <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
         <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
         <div class="files-bar">
@@ -104,7 +104,7 @@
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->
       <div id="viewer" role="dialog" aria-modal="true" aria-labelledby="preview-name" hidden>
         <div id="viewer-card">
-          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close">Close</button></div>
+          <div class="row"><b id="preview-name"></b><span class="sp"></span><button type="button" id="preview-where" hidden>Show in Files</button><button type="button" id="preview-edit" hidden>Edit</button><button type="button" id="preview-copy" hidden>Copy</button><a id="preview-download" class="button">Download</a><button type="button" id="preview-close" aria-label="Close" title="Close">&times;</button></div>
           <p id="preview-note" class="hint" hidden></p>
           <div id="preview-body"></div>
         </div>
