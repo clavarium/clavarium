@@ -40,7 +40,12 @@ fi
 if [ ! -d node_modules ]; then
     echo "--- npm ci (no installed dependencies here)"
     npm ci --no-audit --no-fund --loglevel=error || { echo "REFUSED: the dependencies could not be installed. Nothing goes out."; exit 1; }
+    # The tools folder's archive of Parley is made from them, not kept in git.
+    npm run toolbox --silent >/dev/null || { echo "REFUSED: the tools folder could not be made. Nothing goes out."; exit 1; }
 fi
+# Git runs this hook with its own variables (GIT_DIR...): the tests make
+# repositories of their own, which must not be taken for this one.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR
 echo "--- npm run check"
 if ! npm run check --silent; then
     echo

@@ -218,7 +218,7 @@ test('held: the check before each use refuses a link, a component of another acc
     } finally { rmSync(dir, { recursive: true, force: true }); }
     /* A component that belongs to this account (the checkout itself, under a home). */
     const mine = fileURLToPath(new URL('..', import.meta.url)).replace(/\/$/, '');
-    assert.match(held(`${mine}/test`).err, /does not belong to root|has an access list/, "refused: not root's, or a list lets others write it");
+    assert.match(held(`${mine}/test`).err, /does not belong to root|has an access list|may be written by others than root/, "refused: not root's, or a list lets others write it (a checkout under /tmp: /tmp itself)");
     /* A link anywhere on the way (merged /usr: /bin is one). */
     let binIsLink = false; try { binIsLink = lstatSync('/bin').isSymbolicLink(); } catch { /* none */ }
     if (binIsLink) assert.match(held('/bin/anything').err, /\/bin is not a plain directory/);
