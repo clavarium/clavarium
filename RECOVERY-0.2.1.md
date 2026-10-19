@@ -61,3 +61,20 @@ word, 0.2.1 stable.
 - Version is already 0.2.1-next.1. Rehearsal on test-c through `next`, acceptance 22/22, then the operator's word for stable.
 - Note: the changes help only once 0.2.1 runs; the update that brings it is applied by 0.2.0's
   updater (old busy(), 60 s health, plain restart).
+
+## Where it stopped (19-10, ~17:10 UTC, stopped on the operator's request)
+- Branch `recovery-0.2.1` = d1b4d05 on GitHub, version 0.2.1-next.1, full check green (495 unit + 90 e2e).
+- NOT merged into main, NOTHING published: npm latest = 0.2.0, next = 0.2.0-next.13. Local main reset to be3bfef.
+- test-c: service active, on 0.2.0, update mode asap, channel next. The failure rehearsal was NOT run.
+- Next steps (operator already said GO for these, next only):
+  1. merge recovery-0.2.1 into main (no force), push with CLAVARIUM_E2E_PLAYWRIGHT set → npm next 0.2.1-next.1;
+  2. before it lands on npm, put test-c's clavarium.service in the failed state; let test-c's own 0.2.0 updater
+     timer apply 0.2.1-next.1 by itself; record time and path to recovery;
+  3. full acceptance suite on test-c (22/22), conversation intranet-website, restored after;
+  4. check "See the log" on a failed history line;
+  5. stable 0.2.1 ONLY with the operator's explicit word; production is on 0.1.5, mode "Ask me": the operator
+     installs it himself, present.
+- Then the broader requirement (see the handover file 02_incident-et-exigence-mise-a-jour.md): an update that can
+  never stay blocked, whatever blocks (multipass, FUSE views, stuck process): separate what can hang from the web
+  server, a robust root-driven update sequence with deadlines and fallbacks, "reboot needed" as last resort,
+  logs always readable from the UI, per-operation deadlines, upgrade-from-previous-stable tests enforced by hooks.
