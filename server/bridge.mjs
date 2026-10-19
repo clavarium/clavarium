@@ -88,7 +88,17 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        what devices were given (recheck), and before anything it types is typed. A right taken
        back used to end only at the next connection -- an open terminal went on (found 19-10). */
     const deviceSeats = new Map();      /* viewer -> () => still allowed */
-    const allowed = (viewer) => { const still = deviceSeats.get(viewer); if (!still || still()) return true; deviceSeats.delete(viewer); viewer.close(CLOSE_REVOKED, 'not given any more'); return false; };
+    const revoked = new WeakSet();
+    const allowed = (viewer) => {
+        if (revoked.has(viewer)) return false;
+        const still = deviceSeats.get(viewer);
+        if (!still || still()) return true;
+        revoked.add(viewer); deviceSeats.delete(viewer);
+        viewer.close(CLOSE_REVOKED, 'not given any more');
+        /* A device that does not answer the close is not waited for. */
+        setTimeout(() => viewer.terminate(), 2000).unref?.();
+        return false;
+    };
 
     server.on('upgrade', (request, socket, head) => {
         const url = new URL(request.url ?? '/', 'http://local');
