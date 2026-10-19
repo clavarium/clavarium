@@ -34,6 +34,13 @@ done
 if [ "$pushing" = 0 ]; then
     node "$(dirname "$0")/../tools/check-ai-names.mjs" range HEAD || exit 1
 fi
+# A copy made only to check what is sent (Clavarium makes one at the exact
+# commit, see server/gitchecks.mjs) has no installed dependencies: installed
+# from the lock file, as CI does, or the suite cannot even start.
+if [ ! -d node_modules ]; then
+    echo "--- npm ci (no installed dependencies here)"
+    npm ci --no-audit --no-fund --loglevel=error || { echo "REFUSED: the dependencies could not be installed. Nothing goes out."; exit 1; }
+fi
 echo "--- npm run check"
 if ! npm run check --silent; then
     echo
