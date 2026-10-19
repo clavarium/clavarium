@@ -15,7 +15,7 @@ const TOOLS = readTools(JSON.stringify([
     { id: 'plain', label: 'Plain', command: ['plain'], memoryMb: 768, install: [] },
 ]));
 
-function bench(t, { stuck = false, refuseSet = false, unread = false } = {}) {
+function bench(t, { stuck = false, refuseSet = false, unread = false, startFailsRunning = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-machine-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = [];
@@ -28,7 +28,7 @@ function bench(t, { stuck = false, refuseSet = false, unread = false } = {}) {
         if (verb === 'info') return states.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: states.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         if (verb === 'stop') { if (stuck) return { code: 1, stdout: '', stderr: 'timed out' }; states.set(vm, 'Stopped'); }
         if (verb === 'kill') { if (unread) { states.delete(vm); return { code: 1, stdout: '', stderr: 'timed out' }; } states.set(vm, 'Stopped'); }
-        if (verb === 'start') states.set(vm, 'Running');
+        if (verb === 'start') { states.set(vm, 'Running'); if (startFailsRunning) return { code: 2, stdout: '', stderr: "Please install the 'multipass-sshfs' snap manually inside the instance." }; }
         if (verb === 'suspend') states.set(vm, 'Suspended');
         if (verb === 'size') { const s = sizes.get(vm) ?? { memory: '1.0GiB', disk: '8.0GiB' }; return { code: 0, stdout: `memory ${s.memory}\ndisk ${s.disk}\n`, stderr: '' }; }
         if (verb === 'set') {
@@ -93,6 +93,16 @@ test('folders being mounted again are left to finish before the machine is stopp
     await b.all.restarted;
     assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
+});
+
+test('a start the VM manager calls failed for its own mounts, the machine running, is a start: its size is said changed', async (t) => {
+    const b = bench(t, { startFailsRunning: true });
+    b.ready('demo');
+    await b.all.resize('demo', { memoryMb: 3072 });
+    await b.all.resized;
+    assert.equal(b.store.get('demo').phase, 'ready');
+    assert.match(b.store.get('demo').restarted, /^It now has 3072 MB of memory/);
+    assert.deepEqual(b.readied, ['demo'], 'started again as after any start');
 });
 
 test('a machine whose state cannot be read after a stop by force is not said to be gone', async (t) => {

@@ -798,7 +798,8 @@ export class Conversations {
             step('Starting the machine');
             this.#reach(name, 'starting');
             const started = await this.#watched(name, 'start', this.#vms.start(name));
-            if (started.code !== 0) return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
+            /* The VM manager may fail its start for its own mounts while the machine runs: those are mounted again here. */
+            if (started.code !== 0 && (await this.#vms.state(name).catch(() => undefined)) !== 'Running') return `${failed ? `${failed} And ` : ''}the machine did not start (${firstLine(started.stderr) || firstLine(started.stdout) || `exit ${started.code}`}).`;
             /* Whatever was put in its memory is gone: the next opening prepares it again, its folders first. */
             this.#fresh.add(name);
             this.#mountAgain.add(name);

@@ -36,12 +36,18 @@ CLAVARIUM_ACCEPT_EMAIL=... CLAVARIUM_ACCEPT_PASSWORD=... \
   Never inside this repository.
 - `--chat-minutes N`: how long the agent has to answer (5 by default).
 
-It exits 0 when every check passed. A full run takes about a quarter of an
+It exits 0 when every check passed (a check skipped says why).
+The phone is simulated in Chromium (mobile emulation, touch events through
+the DevTools protocol, the browser's own installability verdict and manifest):
+what that cannot reach is in `phone.md`. A full run takes about a quarter of an
 hour; most of it is the machine restarting three times.
 
 Then the two checks it cannot make:
 
-- [`phone.md`](phone.md): ten minutes on a real Android phone and a real iPhone.
+- [`phone.md`](phone.md): three minutes on a real Android phone and a real
+  iPhone, for what a simulated phone cannot show: the name under the icon, the
+  system's Back gesture in the installed app, a notification really delivered,
+  the feel of the fingers.
 - [`claude-for-chrome.md`](claude-for-chrome.md): optional, a second pair of
   eyes on clarity, given as it is to a browser agent on a real desktop Chrome.
 
@@ -54,16 +60,22 @@ Then the two checks it cannot make:
 | 3 | Search (`/`) finds the conversation; Escape empties, then closes | tablet |
 | 4 | The conversation goes into a folder "Acceptance" | tablet |
 | 5 | Navigation contract on a phone: Back and Escape on the search, Assets, Access, Settings, the conversation and each of its tabs | phone |
-| 6 | Chat: the labelled message, "Received, thinking...", then its agent's status and answer | tablet, phone |
-| 7 | Assets: the Git repository, its branch diagram, its review, Back | tablet, phone |
-| 8 | The "Last checks" card (run once if none was kept yet; nothing is sent) | tablet |
-| 9 | Settings tab, Machine: its sizes | tablet |
-| 10 | Restart: the tool comes back on its last session, never "No conversation found" | tablet |
-| 11 | Resize: one step more memory; it comes back with it | tablet |
-| 12 | Access map: three "+" and "All devices" | tablet, phone |
-| 13 | Settings: the name of the instance, changed and put back | tablet |
-| 14 | Settings, Updates: the version and the channel | tablet |
-| 15 | Restore: its folder, its memory, the name of the instance, as they were | tablet |
+| 6 | Phone, by touch: search, a folder folded and opened | phone |
+| 7 | Phone: a long press then a drag takes a conversation; nothing is opened | phone |
+| 8 | Phone: two fingers grow the text, laid out again, never sideways | phone |
+| 9 | Phone: a pinch on a picture in the viewer zooms the picture alone; Back closes the viewer (skipped when the chat shows no picture) | phone |
+| 10 | Phone: installable (Chromium's own verdict); the name chosen in "Name on this device" is in the manifest, for the owner's page and a device's page | phone |
+| 11 | Phone: notification permission, push subscription (taken back at once), a notification shown by the service worker | phone |
+| 12 | Chat: the labelled message, "Received, thinking...", then its agent's status and answer | tablet, phone |
+| 13 | Assets: the Git repository, its branch diagram, its review, Back | tablet, phone |
+| 14 | The "Last checks" card (run once if none was kept yet; nothing is sent) | tablet |
+| 15 | Settings tab, Machine: its sizes | tablet |
+| 16 | Restart: the tool comes back on its last session, never "No conversation found" | tablet |
+| 17 | Resize: one step more memory; it comes back with it | tablet |
+| 18 | Access map: three "+" and "All devices" | tablet, phone |
+| 19 | Settings: the name of the instance, changed and put back | tablet |
+| 20 | Settings, Updates: the version and the channel | tablet |
+| 21 | Restore: its folder, its memory, the name of the instance, as they were | tablet |
 
 ## Ready means
 

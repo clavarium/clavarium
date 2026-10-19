@@ -1,40 +1,24 @@
-# Ten minutes on a real phone
+# Three minutes on a real phone
 
-What a driven browser cannot prove: the system's Back gesture, installing the
-app, notifications, the pinch, a finger's long press. Once on Android
-(Chrome), once on an iPhone (Safari), on the test deployment, signed in as the
-operator. Tick each line; write what differs.
+The acceptance run already simulates a phone (Chromium's mobile emulation,
+390x844, touch): Back on every screen, search and folders by touch, a long
+press then a drag, two fingers growing the text, a pinch in the viewer, the
+page being installable, the name chosen on this device in its manifest, the
+notification permission, the push subscription and a notification shown by
+the service worker. What only a real phone shows is below. Once on Android
+(Chrome), once on an iPhone (Safari), on the test deployment. Tick each line;
+write what differs.
 
-## Back, everywhere (Android gesture or button; iPhone: the "<" of each screen)
+1. [ ] **Install**: Settings -> Screen -> Install, keep or change the name, confirm.
+   The name **under the icon** on the home screen is that name; the app opens
+   full screen. (iPhone: Share -> Add to Home Screen, the name offered is the instance's.)
+2. [ ] **Back gesture** in the installed app: conversation -> Back -> the list;
+   Back on the list leaves the app like any app, never a blank page.
+3. [ ] **A real notification**: Settings -> Alerts -> On, allow; "Send a test":
+   it arrives on the locked phone, with the instance's name; tapping it opens the app.
+4. [ ] **Fingers**: a pinch on a picture in the viewer and on the page feels
+   right (no jump, no page zoom); a long press then a drag of a conversation
+   follows the finger. Android: with Chrome's "Force enable zoom"
+   (Settings -> Accessibility) on, the viewer still fits the screen.
 
-- [ ] List -> a conversation -> Back: the list. Back again on the list: the app stays (or closes like any app), never a blank page.
-- [ ] Conversation: Terminal, Assets, Settings tabs -> Back each time: its chat.
-- [ ] Assets of the conversation -> a repository -> Open the review -> Back: the repository; Back: Assets; Back: the chat.
-- [ ] A file opened in the viewer -> Back: closes the viewer only.
-- [ ] Search open -> Back: closed, the list as it was.
-- [ ] Assets, Access, Settings (bottom bar) -> Back: the list.
-
-## Install, with its name
-
-- [ ] Settings -> Screen -> Install: a step "Name on this device", filled with the instance's name; change it, confirm.
-- [ ] The home screen shows that name; the app opens full screen, on the list.
-- [ ] iPhone: Share -> Add to Home Screen; the name offered is the instance's name.
-
-## Notifications
-
-- [ ] Settings -> Alerts -> On; allow; "Send a test": it arrives, with the instance's name.
-- [ ] Phone locked: a question from an agent (or a "needs you") arrives; tapping it opens that conversation's chat.
-
-## Fingers
-
-- [ ] In the viewer (an image or a PDF from Assets): pinch zooms the picture; the page around it does not move.
-- [ ] Elsewhere, pinch changes the text size of the whole app, without sideways scrolling; it is kept after a reload.
-- [ ] Long press on a conversation, then drag: it moves up/down or into a folder; the order is the same on another device.
-- [ ] Search: the magnifier opens it with the keyboard up; typing filters at once (accents and case ignored); the first result opens with Enter/Go.
-
-## The chat, by hand
-
-- [ ] Write to the agent of the test conversation; "Received, thinking..." then its answer; the keyboard does not close by itself while writing.
-- [ ] Dictation (microphone button) fills the box.
-
-Ready: every line ticked on both phones, or what differs written down with a reason.
+Ready: the four lines ticked on both phones, or what differs written down with a reason.

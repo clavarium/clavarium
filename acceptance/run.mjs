@@ -96,6 +96,8 @@ async function loadPlaywright() {
     }
     throw new Error('no browser: install the "playwright" package, or set CLAVARIUM_E2E_PLAYWRIGHT');
 }
+/* A check that cannot be made here, and says why (not a failure). */
+class Skip extends Error {}
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(what, check, ms = 20_000, every = 400) {
     const end = Date.now() + ms;
@@ -132,6 +134,7 @@ export async function run(o, log = console.log) {
             const said = await fn((p, label) => shot(p, label).then((f) => { c.shots.push(f); return f; }));
             if (typeof said === 'string') c.detail = said;
         } catch (e) {
+            if (e instanceof Skip) { c.result = 'skip'; c.detail = e.message; c.ms = Date.now() - t0; checks.push(c); log(`- ${name}: skipped (${e.message})`); return c; }
             c.result = 'fail'; c.detail = e.message.split('\n').slice(0, 4).join('\n');
             for (const p of [page, ppage]) if (p && !p.isClosed()) c.shots.push(await shot(p, `${name}-failed`));
         }
@@ -285,6 +288,186 @@ export async function run(o, log = console.log) {
             }
             await p.locator('#back').click();
             await until('"<": the list', () => shown(p, '#list'));
+        });
+
+        /* ---------- WHAT A PHONE DOES, simulated: a touch screen (Chromium's mobile emulation) ---------- */
+        const fingers = async (p) => {
+            const cdp = await phone.newCDPSession(p);
+            return (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : points.map(([x, y], i) => ({ x, y, id: i + 1 })) });
+        };
+        await check('Phone: search and folders by touch', async (pic) => {
+            const p = ppage;
+            await p.goto(`${o.target}/`, { waitUntil: 'domcontentloaded' });
+            await until('the list', () => shown(p, `#items .item[data-name="${o.conversation}"]`), 30_000);
+            await p.locator('#search-open').tap();
+            await until('the field, focused (the keyboard comes up)', async () => (await shown(p, '#search-field')) && await p.locator('#search-field').evaluate((f) => f === document.activeElement));
+            await p.keyboard.type(o.conversation.slice(0, 4));
+            await until('found', () => shown(p, `#items .item[data-name="${o.conversation}"]`));
+            await pic(p, 'phone-search');
+            await item(p).tap();
+            await until('a tap opens it', () => shown(p, '#views'));
+            await p.goBack();
+            await until('Back: the list', () => onList(p, true));
+            if (await shown(p, '#search')) { await p.goBack(); await until('Back closes the search', async () => !(await shown(p, '#search'))); }
+            const head = p.locator(`.group-head[data-group="${FOLDER}"]`);
+            await until(`the folder "${FOLDER}"`, () => shown(p, `.group-head[data-group="${FOLDER}"]`), 20_000);
+            await head.tap();
+            await until('folded by a tap', async () => (await p.locator(`.group[data-group="${FOLDER}"] .item`).count()) === 0);
+            await pic(p, 'phone-folder-folded');
+            await head.tap();
+            await until('open again', () => shown(p, `.group[data-group="${FOLDER}"] .item[data-name="${o.conversation}"]`));
+        });
+
+        await check('Phone: a long press then a drag takes a conversation to move it; nothing is opened', async (pic) => {
+            const p = ppage;
+            const box = await item(p).boundingBox();
+            const x = box.x + 30; const y = box.y + box.height / 2;
+            const touch = await fingers(p);
+            await touch('touchStart', [[x, y]]);
+            await wait(700);
+            let held = false;
+            for (let i = 1; i <= 4; i++) { await touch('touchMove', [[x, y + i * 6]]); await wait(40); held = held || (await p.locator('#items[data-dragging="true"]').count()) === 1; }
+            await pic(p, 'phone-long-press');
+            for (let i = 3; i >= 0; i--) { await touch('touchMove', [[x, y + i * 6]]); await wait(40); }
+            await touch('touchEnd', []);
+            if (!held) throw new Error('a long press then a drag did not take it');
+            await wait(500);
+            if (new URL(p.url()).searchParams.get('c') !== null) throw new Error('held and dragged, it was opened');
+            if ((await conv()).group !== FOLDER) throw new Error('dropped where it was, it changed folder');
+            return 'taken and put back where it was (one conversation here: no other to move it past)';
+        });
+
+        await check('Phone: two fingers grow the text of the page, laid out again, never sideways', async (pic) => {
+            const p = ppage;
+            const before = await p.evaluate(() => window.clavariumText?.().scale);
+            if (typeof before !== 'number') throw new Error('the text size cannot be read');
+            const touch = await fingers(p);
+            await touch('touchStart', [[195 - 40, 300], [195 + 40, 300]]);
+            for (const d of [55, 70, 85]) { await touch('touchMove', [[195 - d, 300], [195 + d, 300]]); await wait(30); }
+            await touch('touchEnd', []);
+            await until('the text is larger', async () => (await p.evaluate(() => window.clavariumText().scale)) > before * 1.3);
+            const sideways = await p.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1);
+            const page = await p.evaluate(() => window.visualViewport.scale);
+            await pic(p, 'phone-text-larger');
+            await p.evaluate(() => { try { localStorage.clear(); } catch { /* this test browser only */ } });
+            if (sideways) throw new Error('the page scrolls sideways once the text is larger');
+            if (page !== 1) throw new Error('the browser zoomed the page instead');
+            return `text ${before} -> ${(await p.evaluate(() => window.clavariumText().scale)).toFixed(2)}`;
+        });
+
+        await check('Phone: a pinch on a picture in the viewer zooms the picture alone', async (pic) => {
+            const p = ppage;
+            await p.goto(`${o.target}/?c=${encodeURIComponent(o.conversation)}`, { waitUntil: 'domcontentloaded' });
+            await until('its chat', () => inChat(p), 30_000);
+            const pictures = p.locator('#simple-thread .parley-said[data-kind=show] img');
+            await wait(2000);
+            if ((await pictures.count()) === 0) throw new Skip('no picture shown in this chat to pinch: ask its agent to show one (parley show) and run again');
+            await pictures.last().scrollIntoViewIfNeeded();
+            await pictures.last().tap();
+            const zoom = p.locator('#simple-thread .parley-zoom');
+            await until('the viewer', () => zoom.isVisible());
+            await until('the picture, loaded', () => zoom.locator('.parley-zoom-stage img').evaluate((i) => i.complete && i.naturalWidth > 0), 30_000);
+            await wait(300);
+            const scaleOf = () => zoom.locator('.parley-zoom-stage img').evaluate((i) => new DOMMatrix(getComputedStyle(i).transform).a);
+            const fitted = await scaleOf();
+            const b = await zoom.locator('.parley-zoom-stage img').boundingBox();
+            const cx = b.x + b.width / 2; const cy = b.y + b.height / 2;
+            const touch = await fingers(p);
+            await touch('touchStart', [[cx - 20, cy], [cx + 20, cy]]);
+            for (let d = 30; d <= 120; d += 10) { await touch('touchMove', [[cx - d, cy], [cx + d, cy]]); await wait(16); }
+            await touch('touchEnd', []);
+            await until('the picture is zoomed', async () => (await scaleOf()) > fitted * 2);
+            if ((await p.evaluate(() => window.visualViewport.scale)) !== 1) throw new Error('the page zoomed too');
+            await pic(p, 'phone-viewer-pinch');
+            await p.goBack();
+            await until('Back closes the viewer only', async () => !(await zoom.isVisible()) && await inChat(p));
+        });
+
+        await check('Phone: installable, and the name chosen on this device is in its manifest (owner, then a device page)', async (pic) => {
+            const p = await phone.newPage();
+            try {
+                await p.goto(`${o.target}/`, { waitUntil: 'domcontentloaded' });
+                await until('the list', () => shown(p, '#items .item'), 30_000);
+                await p.evaluate(() => navigator.serviceWorker?.ready);
+                const cdp = await phone.newCDPSession(p);
+                const errors = (await cdp.send('Page.getInstallabilityErrors')).installabilityErrors.map((e) => e.errorId);
+                if (errors.length) throw new Error(`not installable: ${errors.join(', ')}`);
+                /* The browser's offer, as Chrome makes it on Android (a stand-in event: an emulated phone is never offered one). */
+                await p.evaluate(() => { const e = new Event('beforeinstallprompt', { cancelable: true }); e.prompt = () => { window.__offered = (window.__offered ?? 0) + 1; }; e.userChoice = Promise.resolve({ outcome: 'dismissed' }); dispatchEvent(e); });
+                await p.locator('#nav-settings').tap();
+                await until('Settings', () => shown(p, '#settings'), 20_000);
+                await chapter(p, 'settings-ch-screen', '#install');
+                await p.locator('#install').tap();
+                await until('"Name on this device", filled with the name of the instance', async () => (await shown(p, '#install-name-form')) && (await p.locator('#install-name').inputValue()) === instance.name);
+                await pic(p, 'phone-install-name');
+                const chosen = 'Acceptance phone';
+                await p.locator('#install-name').fill(chosen);
+                await p.locator('#install-name-form button[type=submit]').tap();
+                await until('the browser is asked to install', () => p.evaluate(() => window.__offered === 1), 10_000);
+                await until('the page points at a manifest with that name', async () => new URL(await p.locator('link[rel="manifest"]').getAttribute('href'), o.target).searchParams.get('name') === chosen);
+                /* As the browser reads it, kept by this device: the page opened again. */
+                await p.reload({ waitUntil: 'domcontentloaded' });
+                const manifestOf = async () => { const m = await cdp.send('Page.getAppManifest'); return { url: m.url, data: JSON.parse(m.data || '{}') }; };
+                await until('the browser\'s manifest says the chosen name', async () => (await manifestOf()).data.name === chosen, 20_000);
+                const owner = await manifestOf();
+                /* A device's page (no pairing needed to read its manifest): its own chosen name. */
+                const dev = await phone.newPage();
+                try {
+                    await dev.goto(`${o.target}/c/`, { waitUntil: 'domcontentloaded' });
+                    await dev.evaluate((n) => { try { localStorage.setItem('clavarium-install-name', n); } catch { /* said below */ } }, 'Acceptance tablet');
+                    await dev.reload({ waitUntil: 'domcontentloaded' });
+                    const dcdp = await phone.newCDPSession(dev);
+                    await until('the device page\'s manifest says its chosen name', async () => JSON.parse((await dcdp.send('Page.getAppManifest')).data || '{}').name === 'Acceptance tablet', 20_000);
+                    await dev.evaluate(() => { try { localStorage.removeItem('clavarium-install-name'); } catch { /* this test browser only */ } });
+                } finally { await dev.close(); }
+                await p.evaluate(() => { try { localStorage.removeItem('clavarium-install-name'); } catch { /* this test browser only */ } });
+                return `installable; owner manifest name "${owner.data.name}", short "${owner.data.short_name}"; device page too`;
+            } finally { await p.close(); }
+        });
+
+        await check('Phone: alerts -- permission, push subscription, a notification shown by the service worker', async (pic) => {
+            const p = await phone.newPage();
+            try {
+                await phone.grantPermissions(['notifications'], { origin: o.target });
+                await p.goto(`${o.target}/`, { waitUntil: 'domcontentloaded' });
+                await until('the list', () => shown(p, '#items .item'), 30_000);
+                const ready = await p.evaluate(async () => { const r = await navigator.serviceWorker.ready; return Boolean(r.active) && 'PushManager' in window; });
+                if (!ready) throw new Error('no active service worker, or no push in this browser');
+                if ((await p.evaluate(() => Notification.permission)) !== 'granted') {
+                    /* Chromium's headless shell refuses notifications whatever is granted: what remains is said, and left to phone.md. */
+                    await p.locator('#nav-settings').tap();
+                    await until('Settings', () => shown(p, '#settings'), 20_000);
+                    await chapter(p, 'settings-ch-alerts', '#alerts-state');
+                    if (!(await shown(p, '#alerts-on')) && !(await shown(p, '#alerts-off'))) throw new Error(`alerts not offered: ${await p.locator('#alerts-state').innerText()}`);
+                    await pic(p, 'phone-alerts');
+                    return 'service worker active, push available, alerts offered; this browser refuses the permission itself (headless): subscription and delivery are left to phone.md';
+                }
+                const shownBySw = await p.evaluate(async () => {
+                    const r = await navigator.serviceWorker.ready;
+                    await r.showNotification('Clavarium acceptance', { body: 'A test from the acceptance run', tag: 'clavarium-acceptance' });
+                    const n = await r.getNotifications({ tag: 'clavarium-acceptance' });
+                    n.forEach((x) => x.close());
+                    return n.length;
+                });
+                if (shownBySw !== 1) throw new Error('its service worker could not show a notification');
+                await p.locator('#nav-settings').tap();
+                await until('Settings', () => shown(p, '#settings'), 20_000);
+                await chapter(p, 'settings-ch-alerts', '#alerts-state');
+                if (!(await shown(p, '#alerts-on'))) throw new Error(`no "On": ${await p.locator('#alerts-state').innerText()}`);
+                await p.locator('#alerts-on').tap();
+                let said = '';
+                await until('subscribed, or said why not', async () => { said = await p.locator('#alerts-state').innerText(); return (await shown(p, '#alerts-off')) || /could not|refused|cannot/.test(said); }, 30_000);
+                await pic(p, 'phone-alerts');
+                const subscribed = await shown(p, '#alerts-off');
+                if (subscribed) {
+                    /* Taken back at once: this test browser is not a device to alert. (No "Send a test": it would reach the real devices.) */
+                    await p.locator('#alerts-off').tap();
+                    await until('unsubscribed', () => shown(p, '#alerts-on'), 20_000);
+                    return 'permission granted; subscribed then removed; a notification shown by its service worker';
+                }
+                if (/push service/i.test(said)) return `permission granted; a notification shown by its service worker; the subscription needs a real push service, absent from this test browser ("${said.slice(0, 90)}")`;
+                throw new Error(said);
+            } finally { await p.close(); }
         });
 
         await check('Chat: a labelled message, "Received, thinking...", then its agent answers', async (pic) => {
