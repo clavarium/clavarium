@@ -33,7 +33,7 @@ async function setup(t) {
     const calls = []; const broken = new Set();
     let clock = new Date(2026, 9, 18, 12, 0);
     /* What systemd says of the server, and whether it answers: up, unless a test says otherwise. */
-    const service = { state: 'active', answers: true };
+    const service = { state: 'active', answers: true, restarts: 0 };
     const u = new Updater({
         ...dirs, registry: reg.origin, log: () => {}, now: () => clock, minFreeMb: 1,
         verifySignatures: async (dir) => { calls.push(`signatures ${basename(dir)}`); return { code: 0 }; },
@@ -48,6 +48,7 @@ async function setup(t) {
         dropIn: join(root, 'systemd', 'clavarium.service.d', 'restart.conf'),
         serviceState: async () => service.state,
         answers: async () => service.answers,
+        restarts: async () => service.restarts,
     });
     return { reg, u, dirs, calls, broken, publish, parley, service, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
 }
@@ -333,11 +334,17 @@ test('the watchdog restarts the release that runs first: what blocked the old se
     s.at(new Date(2026, 9, 18, 13, 0));
     const r = await s.u.watchdog();
     assert.equal(r.acted, true);
-    assert.match(r.said, /^the server was down \(activating\): restarted by itself$/);
+    assert.match(r.said, /^the server was down \(starting again and again\): restarted by itself$/);
     assert.equal(s.current(), '1.0.1', 'not sent back: the version was not the cause');
     assert.deepEqual(s.calls, ['restart', 'health 1.0.1']);
     assert.equal(s.u.about().history[0].action, 'restart');
     assert.equal(s.u.about().history[0].result, 'done');
+    /* Seen "active" for the second before it dies again: its restarts by systemd say it loops. */
+    s.calls.length = 0;
+    s.service.state = 'active'; s.service.answers = false; s.service.restarts = 7;
+    s.at(new Date(2026, 9, 18, 14, 30));
+    assert.match((await s.u.watchdog()).said, /^the server was down \(starting again and again\): restarted by itself$/);
+    assert.deepEqual(s.calls, ['restart', 'health 1.0.1']);
 });
 
 test('the watchdog does not go back to a release that cannot read the data, nor after a day', async (t) => {

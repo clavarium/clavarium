@@ -69,6 +69,8 @@ const BUSY = ['building', 'moving', 'restarting'];
 const BUSY_STALE_MS = 30 * 60_000;
 /* THE WATCHDOG (each timer turn): down this many turns in a row, or its service failed: one action, at most one an hour. */
 const WATCH_MISSES = 3;
+/* Restarts by systemd, the server not answering: it is looping (a port held, a view broken). */
+const WATCH_LOOP = 3;
 const WATCH_EVERY_MS = 3600_000;
 /* An update this recent is the first suspect when the server will not stay up. */
 const WATCH_RECENT_MS = 24 * 3600_000;
@@ -155,7 +157,7 @@ const toHex = (integrity) => Buffer.from(String(integrity).replace(/^sha512-/, '
 export class Updater {
     #o; #run; #fetch;
     constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
-        verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
+        verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, restarts, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
         clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000 } = {}) {
         this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
@@ -172,6 +174,8 @@ export class Updater {
         this.serviceState = serviceState ?? (async () => (await this.#run(['systemctl', 'show', '-p', 'ActiveState', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim() || 'unknown');
         /* Does the server answer, on its port, here? */
         this.answers = answers ?? (() => this.#fetch(`http://127.0.0.1:${readConf(this.#o.conf).PORT}/`, { signal: AbortSignal.timeout(5000), redirect: 'manual' }).then((r) => r.status < 500).catch(() => false));
+        /* How many times systemd started it again by itself since it was last started. */
+        this.restarts = restarts ?? (async () => Number((await this.#run(['systemctl', 'show', '-p', 'NRestarts', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim()) || 0);
         this.mainPid = mainPid ?? (async () => (await this.#run(['systemctl', 'show', '-p', 'MainPID', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim());
         this.pidCwd = pidCwd ?? ((pid) => { try { return realpathSync(`/proc/${pid}/cwd`); } catch { return ''; } });
     }
@@ -546,8 +550,10 @@ export class Updater {
         if (up) { if (w.misses) this.#save({ watch: { ...w, misses: 0 } }); return { acted: false, said: 'up' }; }
         const misses = (w.misses ?? 0) + 1;
         this.#save({ watch: { ...w, misses, seen: state } });
-        /* "activating" at a timer turn: systemd starting it again and again (a start takes seconds). */
-        const down = state === 'failed' || state === 'inactive' || state === 'activating' || misses >= WATCH_MISSES;
+        /* Started again and again by systemd (seen "activating", or "active" for the second before it
+           dies again: many restarts by itself) is down at once, like failed or stopped. */
+        const looping = state === 'activating' || await this.restarts().catch(() => 0) >= WATCH_LOOP;
+        const down = state === 'failed' || state === 'inactive' || looping || misses >= WATCH_MISSES;
         this.#o.log(`watchdog: the server is ${state === 'active' ? 'active but does not answer' : state} (turn ${misses})`);
         if (!down) return { acted: false, said: `the server does not answer (turn ${misses} of ${WATCH_MISSES})` };
         const now = this.#o.now();
@@ -559,7 +565,7 @@ export class Updater {
             const log = await this.#seen(`the server was down (${state})`);
             const current = this.current();
             const v = current?.version ?? null;
-            const was = state === 'active' ? 'no answer' : state;
+            const was = looping ? 'starting again and again' : state === 'active' ? 'no answer' : state;
             this.#o.log(`watchdog: the server is ${state}: restarted once`);
             const failed = current ? await this.#restartAndCheck(current) : await this.restart().then((r) => (r?.code ? lastLine(r) : '')).catch((e) => e.message);
             /* The last update or return (a restart by the watchdog is not one). */
