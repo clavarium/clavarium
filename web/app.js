@@ -2561,14 +2561,14 @@
 
     /* A repository, on the right: its branch, what would go, the diagram. */
     async function gitDetail(holder, name, { place = false } = {}) {
-        const facts = el('div', 'as-facts'); facts.append(el('p', 'hint', 'Looking at its branches...'));
+        const facts = el('div', 'as-facts'); facts.append(el('p', 'hint busy', 'Looking at its branches...'));
         const acts = el('div', 'as-acts');
         const review = el('button', '', 'Open the review'); review.type = 'button'; review.dataset.act = 'review';
         const send = el('button', 'primary', 'Send...'); send.type = 'button'; send.dataset.act = 'send'; send.hidden = true;
         acts.append(review, send);
         /* In a conversation, its files too, below. */
         if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
-        const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint', 'Drawing the branches...'));
+        const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint busy', 'Drawing the branches...'));
         holder.append(facts, chapter('Branches', acts), diagram);
         const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: name, go: () => { void paintRoomAssets(); } };
         review.addEventListener('click', () => { void openGit(name, { back }); });
@@ -3693,6 +3693,7 @@
         $('gitview-error').hidden = true; $('gitview-push').hidden = true; $('gitview-check').hidden = true; $('gitview-checks').hidden = true;
         $('gitview-offer-row').hidden = true; $('gitview-guards').hidden = true; $('gitview-dropped').hidden = true; $('gitview-remote-go').hidden = true;
         $('gitview-state').textContent = commit ? 'Looking at this commit...' : 'Looking at what was committed...';
+        $('gitview-state').classList.add('busy');
         $('gitview-numbers').replaceChildren();
         $('gitview-commits').replaceChildren(); $('gitview-stat').textContent = ''; $('gitview-diff').replaceChildren(); $('gitview-tree').replaceChildren();
         $('gitview-n-files').textContent = ''; $('gitview-n-commits').textContent = ''; $('gitview-n-checks').textContent = '';
@@ -3711,7 +3712,9 @@
             const r = await fetch(`${API}/git/${name}/${commit ? 'commit' : 'outgoing'}${query.size ? `?${query}` : ''}`);
             out = await r.json();
             if (!r.ok) throw Object.assign(new Error(out.error || 'The repository could not be read.'), { offer: out.offer });
+            $('gitview-state').classList.remove('busy');
         } catch (error) {
+            $('gitview-state').classList.remove('busy');
             if (gitShown !== name || gitCommit !== commit) return;
             $('gitview-state').textContent = ''; $('gitview-error').textContent = error.message; $('gitview-error').hidden = false;
             /* An fsck refusal the owner may waive (old histories only): offered, never done for them. */
