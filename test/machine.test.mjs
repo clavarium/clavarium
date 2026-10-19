@@ -15,7 +15,7 @@ const TOOLS = readTools(JSON.stringify([
     { id: 'plain', label: 'Plain', command: ['plain'], memoryMb: 768, install: [] },
 ]));
 
-function bench(t, { stuck = false, refuseSet = false } = {}) {
+function bench(t, { stuck = false, refuseSet = false, unread = false } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-machine-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = [];
@@ -27,7 +27,7 @@ function bench(t, { stuck = false, refuseSet = false } = {}) {
         if (area !== 'vm') return { code: 0, stdout: '', stderr: '' };
         if (verb === 'info') return states.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: states.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         if (verb === 'stop') { if (stuck) return { code: 1, stdout: '', stderr: 'timed out' }; states.set(vm, 'Stopped'); }
-        if (verb === 'kill') states.set(vm, 'Stopped');
+        if (verb === 'kill') { if (unread) { states.delete(vm); return { code: 1, stdout: '', stderr: 'timed out' }; } states.set(vm, 'Stopped'); }
         if (verb === 'start') states.set(vm, 'Running');
         if (verb === 'suspend') states.set(vm, 'Suspended');
         if (verb === 'size') { const s = sizes.get(vm) ?? { memory: '1.0GiB', disk: '8.0GiB' }; return { code: 0, stdout: `memory ${s.memory}\ndisk ${s.disk}\n`, stderr: '' }; }
@@ -78,6 +78,30 @@ test('a clean stop that hangs is followed by a stop by force', async (t) => {
     await b.all.restarted;
     assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'kill clv-demo', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
+});
+
+test('folders being mounted again are left to finish before the machine is stopped', async (t) => {
+    const b = bench(t);
+    b.ready('demo');
+    let done; const mounting = new Promise((r) => { done = r; });
+    b.all.quiet = (name) => (name === 'demo' ? mounting : null);
+    await b.all.restart('demo');
+    await new Promise((r) => setTimeout(r, 50));
+    assert.equal(b.calls.some((c) => c.startsWith('stop')), false, 'not stopped while a folder is mounted');
+    assert.equal(b.store.get('demo').step, 'Waiting for its folders to be mounted');
+    done();
+    await b.all.restarted;
+    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'start clv-demo']);
+    assert.equal(b.store.get('demo').restarted, 'Restarted.');
+});
+
+test('a machine whose state cannot be read after a stop by force is not said to be gone', async (t) => {
+    const b = bench(t, { stuck: true, unread: true });
+    b.ready('demo');
+    await b.all.restart('demo');
+    await b.all.restarted;
+    assert.match(b.store.get('demo').restarted, /did not stop \(its state could not be read\)/);
+    assert.doesNotMatch(b.store.get('demo').restarted, /gone/);
 });
 
 test('a machine asleep is stopped by force (it cannot be stopped cleanly), then started; it is no longer asleep', async (t) => {

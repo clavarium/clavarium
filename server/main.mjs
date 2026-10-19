@@ -337,6 +337,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A machine just started: its folders are mounted again (after a build,
        a restart, a move) or looked at and put back if they came loose (after
        a wake), before its tool starts in them. */
+    all.quiet = (name) => health.busy(name);
     all.mounted = async (name, again) => { if (again) await folders.remount(name).catch(() => {}); await health.check(name).catch(() => {}); };
     /* What the VM manager says each machine has is what is recorded (a record
        may say otherwise: set by hand, or by an earlier version). Not waited for. */

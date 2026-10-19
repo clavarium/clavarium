@@ -120,6 +120,9 @@ export class Health {
     of(name) { return this.#records.get(name) ?? null; }
     forget(name) { this.#records.delete(name); }
 
+    /* The look under way (it may be mounting a folder again), or null. */
+    busy(name) { return this.#running.get(name) ?? null; }
+
     /* Looks now. One look at a time per conversation: a second caller gets the same. */
     check(name, { repair = true } = {}) {
         const going = this.#running.get(name);

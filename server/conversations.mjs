@@ -38,6 +38,8 @@ export const STARTING_MS = 180_000;
 export const ANSWER_MS = 90_000;
 /* What the folders of a machine just started are waited for, at most, before its tool starts. */
 const MOUNTED_MS = 30_000;
+/* How long a stop waits for folders being mounted (six folders took a minute on a real host). */
+const CALM_MS = 180_000;
 const POLL_MS = 2000;
 /* The tool's screen not drawn this long after its terminal was opened: its
    start is said to be over all the same (the page then opens it itself). */
@@ -79,6 +81,13 @@ export class Conversations {
        when it was just built, restarted or its work moved; otherwise only
        looked at, and put back if they came loose (health.mjs). */
     mounted = async () => {};
+    /* Set by the server: what is being done to its machine's folders just
+       now (a look of health.mjs that may mount one again), or null. */
+    quiet = () => null;
+    /* Folders being mounted again after a start, by name: a stop waits for
+       them (#calm). Stopping a machine while the VM manager mounts a folder
+       in it was seen to hang the VM manager itself, for every machine. */
+    #mounting = new Map();
     /* Set by the server: told when its machine was restarted or built again
        by this server, in words for its chat, and whether the tool runs again
        (its chat says it, and the tool is told to read it again: talk.mjs). */
@@ -426,7 +435,10 @@ export class Conversations {
         const again = this.#mountAgain.delete(name);
         if (again || stopped) {
             this.#reach(name, 'folders'); tell();
-            await Promise.race([Promise.resolve().then(() => this.mounted(name, again)).catch(() => {}), new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
+            const mounting = Promise.resolve().then(() => this.mounted(name, again)).catch(() => {});
+            this.#mounting.set(name, mounting);
+            void mounting.finally(() => { if (this.#mounting.get(name) === mounting) this.#mounting.delete(name); });
+            await Promise.race([mounting, new Promise((r) => { setTimeout(r, MOUNTED_MS).unref?.(); })]);
         }
         /* Woken from sleep: its tool is still there when its session is. */
         if (asleep) {
@@ -766,6 +778,7 @@ export class Conversations {
     async #cycle(name, c, between, restart) {
         const step = (text) => { if (this.#store.get(name)) this.#store.patch(name, { step: text }); };
         try {
+            await this.#calm(name, step);
             this.drop(name);
             let state = await this.#vms.state(name);
             if (state !== 'Stopped') {
@@ -778,7 +791,7 @@ export class Conversations {
                     await this.#watched(name, 'stop', this.#vms.kill(name));
                     state = await this.#vms.state(name);
                 }
-                if (state !== 'Stopped') return `the machine did not stop (it is ${state ?? 'gone'}).`;
+                if (state !== 'Stopped') return `the machine did not stop (${state ? `it is ${state}` : 'its state could not be read'}).`;
             }
             const failed = await between();
             if (!restart) return failed;
@@ -792,6 +805,18 @@ export class Conversations {
             this.#reach(name, 'answering');
             return failed;
         } catch { return 'it stopped on an unexpected error.'; }
+    }
+
+    /* Before its machine is stopped: its folders being mounted again are
+       left to finish, within a bound (a new look does not start meanwhile:
+       health.mjs leaves a machine that is not `ready` alone). */
+    async #calm(name, step) {
+        const pending = [this.#mounting.get(name), this.quiet(name)].filter(Boolean);
+        if (pending.length === 0) return;
+        step('Waiting for its folders to be mounted');
+        let timer;
+        await Promise.race([Promise.allSettled(pending), new Promise((r) => { timer = setTimeout(r, CALM_MS); timer.unref?.(); })]);
+        clearTimeout(timer);
     }
 
     /* `chat`: the same, as its chat says it. */
