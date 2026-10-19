@@ -25,7 +25,7 @@ word, 0.2.1 stable.
 2. multipassd wedged (calls hang), cleared by the reboot.
 3. Memory/disk pressure during the switch (backup, npm install).
 
-## Done (on this branch, `npm run check` green before the last additions; see below)
+## Done (on this branch; full `npm run check` green: 495 + 90 pass, 8 e2e skipped)
 - Updater (deploy/updater.mjs), with unit tests (test/updater.test.mjs):
   - busy(): conversation phases ignored when clavarium.service is not active, and any busy phase
     older than 30 min (logged).
@@ -58,7 +58,6 @@ word, 0.2.1 stable.
   - Startup reconcile of busy phases already existed (conversations.mjs constructor): unchanged.
 
 ## Remains
-- Full `npm run check` on the last additions (log capture, reset-failed, drop-in, EADDRINUSE).
-- Rehearsal on test-c through `next`, acceptance 22/22, then the operator's word for stable.
+- Version is already 0.2.1-next.1. Rehearsal on test-c through `next`, acceptance 22/22, then the operator's word for stable.
 - Note: the changes help only once 0.2.1 runs; the update that brings it is applied by 0.2.0's
   updater (old busy(), 60 s health, plain restart).
