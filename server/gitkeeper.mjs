@@ -91,6 +91,9 @@ export const DEFAULTS = Object.freeze({
    change, so a few seconds more are enough to let a commit series finish.
    `confirmed`: the patterns of the list that needed the owner's word and
    had it. `perHour` 0: no cap. */
+/* The last checks kept per repository: the end of their output, and how many targets. */
+export const LAST_OUTPUT_MAX = 20_000;
+export const LAST_TARGETS = 20;
 export const AUTO_DEFAULTS = Object.freeze({ branches: [], confirmed: [], quietSeconds: 5, perHour: 20, create: false, checks: true });
 export const QUIET_MAX = 86_400;
 export const PER_HOUR_MAX = 1000;
@@ -205,7 +208,7 @@ const upTo = (id) => (short(id) ? ` (up to ${short(id)})` : '');
 const seeCommits = (name, head, base, n) => (short(head) && short(base) && Number.isInteger(n) && n > 0 ? [`commits:${name}.${head.slice(0, 12)}.${base.slice(0, 12)}.${Math.min(n, 9999)}`] : []);
 
 export class GitKeeper {
-    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
+    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
 
     /* `review`: GitReview (reads, the reference, Send). `checks`: GitChecks.
        `alerts`: what tells the owner's phone. `tellAgent(repository, line,
@@ -213,8 +216,11 @@ export class GitKeeper {
        repository (only to that conversation's, when one is named); it
        resolves false when nobody could be told (then it is tried again).
        `thread(conversation, event)`: one line in that conversation's chat
-       (Talk.event: kept only where its chat is on). */
-    constructor({ store, review, resources, checks, alerts, now = () => new Date(), tellAgent = async () => {}, thread = () => {} }) {
+       (Talk.event: kept only where its chat is on). `last`: a Store where
+       the last checks of each repository and target are kept, so that they
+       outlive a restart (none: only in memory). */
+    constructor({ store, review, resources, checks, alerts, now = () => new Date(), tellAgent = async () => {}, thread = () => {}, last = null }) {
+        this.#last = last;
         this.#store = store; this.#review = review; this.#resources = resources; this.#checks = checks; this.#alerts = alerts; this.#now = now; this.#tellAgent = tellAgent; this.#thread = thread;
         review.listen({ read: (name, failure, got) => this.#readOutcome(name, failure, got), refresh: (name, result) => this.#refreshOutcome(name, result) });
         review.useWaivers?.((name) => this.settings(name).fsck);
@@ -257,6 +263,7 @@ export class GitKeeper {
             auto,
             origin: hasRemote ? { path: `/resources/${folder}`, kept: this.#resources.hasOrigin(r.name), ...(record.mirror ?? {}) } : null,
             checks: this.#results.get(r.name) ?? null,
+            last: this.lastChecks(r.name),
             read: record.lastRead ?? null,
             blocked: Object.keys(record.blocked ?? {}),
             log: record.log ?? [],
@@ -361,7 +368,7 @@ export class GitKeeper {
     /* A conversation archived: all its settings, whatever the repository. */
     forgetConversation(conversation) { for (const record of this.#store.all()) this.forgetAttachment(record.name, conversation); }
 
-    forget(name) { this.#store.remove(name); this.#held.delete(name); this.#results.delete(name); }
+    forget(name) { this.#store.remove(name); this.#held.delete(name); this.#results.delete(name); this.#last?.remove(name); }
 
     /* ---------- what every read and every refresh says ---------- */
 
@@ -479,7 +486,37 @@ export class GitKeeper {
         const s = this.settings(name);
         const result = await this.#checks.run(name, { head: seen.head, branch: seen.branch, target: seen.target, remoteTip: seen.remoteTip, remote: this.#review.remoteOf(name), command: s.checkCommand, hook: s.runHook, seconds: s.checkSeconds, ...(machine ? { machine } : {}) });
         this.#results.set(name, result);
+        this.#keepLast(name, result);
         return result;
+    }
+
+    /* THE LAST CHECKS, kept: one per target of the repository (the newest
+       LAST_TARGETS), with the end of their output. Said "outdated" when the
+       agent's branch they ran on has moved since. */
+    #keepLast(name, result) {
+        if (!this.#last) return;
+        const target = typeof result.target === 'string' ? result.target : '';
+        const kept = { status: result.status, head: result.head ?? null, branch: result.branch ?? null, target: target || null, at: result.at, machine: result.machine ?? null, output: String(result.output ?? '').slice(-LAST_OUTPUT_MAX) };
+        const before = Object.entries(this.#last.get(name)?.targets ?? {}).filter(([t]) => t !== target);
+        const targets = Object.fromEntries([...before, [target, kept]].sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, LAST_TARGETS));
+        try { this.#last.put({ name, targets }); } catch { /* kept in memory still: a full disk does not stop the checks */ }
+    }
+    /* [{ status, head, branch, target, at, machine, output, outdated }], the newest first. */
+    lastChecks(name) {
+        const targets = this.#last?.get(name)?.targets ?? {};
+        let tips = {};
+        try { tips = this.#review.tips?.(name) ?? {}; } catch { /* not read yet */ }
+        return Object.values(targets).filter((x) => x && typeof x === 'object').sort((a, b) => String(b.at).localeCompare(String(a.at)))
+            .map((x) => ({ ...x, outdated: Boolean(x.branch && x.head && tips[x.branch]?.id && tips[x.branch].id !== x.head) }));
+    }
+    /* "Run again", from the last checks: on the tip of that branch now, for that target. */
+    async checkAgain(name, body) {
+        const r = this.#repository(name);
+        const target = typeof body?.target === 'string' && body.target ? body.target : undefined;
+        const branch = typeof body?.branch === 'string' && body.branch ? body.branch : undefined;
+        const out = await this.#review.outgoing(r.name, { target, branch });
+        if (!out?.head || !out.target) throw new Refusal(409, out?.message || 'There is no commit to check on this branch.');
+        return this.#check(r.name, { head: out.head, branch: out.branch, target: out.target, remoteTip: out.remoteTip ?? null });
     }
 
     /* Send, from the page: as GitReview.push, and refused when the owner

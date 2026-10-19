@@ -1086,6 +1086,12 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-card b { font-size: 1.05rem; }
 .as-card b.warn { color: var(--warn); } .as-card b.ok { color: var(--ok); } .as-card b.bad { color: var(--danger); }
 .as-acts { display: flex; gap: 8px; flex-wrap: wrap; }
+.as-lastchecks { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.as-lastchecks-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.as-lastchecks-head small { color: var(--ink2); }
+.as-badge.check.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+.as-badge.check.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.as-badge.check.warn, .as-badge.outdated { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
 .as-users { display: flex; flex-direction: column; gap: 6px; }
 .as-picker { padding: 8px; border: 1px dashed var(--line); border-radius: 10px; }
 .as-chips { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -313,7 +313,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         return heard;
     };
     /* What happened to a repository is said in the chat of the conversations it is attached to (talk.mjs). */
-    const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), review: gitReview, resources: folders, alerts, tellAgent,
+    const gitKeeper = new GitKeeper({ store: new Store(`${dataDir}/git-keep.json`), last: new Store(`${dataDir}/git-checks.json`), review: gitReview, resources: folders, alerts, tellAgent,
         thread: (conversation, event) => talk.event(conversation, event),
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);

@@ -86,7 +86,7 @@ export function commonText() {
         '- Check out branches in the main folder of the repository or under /work, never in /tmp: /tmp is emptied when the machine restarts.',
         '- Secrets are environment variables: never print them, never write them to a file or a commit.',
         /* Installed by the server in every machine (toolbox.mjs): the tool is never asked to install it. */
-        '- To talk to the person, when their chat is on: parley --help.',
+        '- To talk to the person, when their chat is on: parley guide says how (parley --help, every command).',
         /* Dictation into the terminal is marked once per message (app.js); in the chat, parley read says it. */
         '- A message in your terminal that starts with a microphone sign (U+1F3A4), or that parley read says was dictated, came by voice: a word may be misheard; when a key word seems wrong, ask rather than guess.',
         '- The rest is yours to explore (ls, --help).',
@@ -113,9 +113,9 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         out.push(`- ${repo}: its origin, read-only and kept up to date, is ${origin}. Its branches: git -C ${repo} fetch ${origin} '+refs/heads/*:refs/remotes/origin/*'`);
     }
     out.push(!chat ? '- Chat with the person: off. Do not use parley.'
-        : '- Chat with the person: on. Parley is installed: run parley --help.');
-    /* How to write there: the chat renders Markdown; what matters stays in sight. */
-    if (chat) out.push('- In the chat, write as in this terminal (Markdown: short lists, a bold label per point, tables); a long message gets --short, a title that holds any action or decision; one key sentence in "> [!IMPORTANT]"; a picture of /work where it belongs: ![before](/work/a.png); close the questions they answered another way (parley close).');
+        : '- Chat with the person: on. Parley is installed: run parley guide.');
+    /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
+    if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);

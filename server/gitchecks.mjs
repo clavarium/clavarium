@@ -101,14 +101,14 @@ export class GitChecks {
         return Boolean(await this.#conversations.running(conversation).catch(() => false));
     }
 
-    /* -> { status: 'passed' | 'failed' | 'none' | 'unavailable', output, machine, at, head, target }.
+    /* -> { status: 'passed' | 'failed' | 'none' | 'unavailable', output, machine, at, head, branch, target }.
        'none': nothing to run (no hook, no command). 'unavailable': no
        machine to run them in, or it did not answer.
        `machine`: the conversation whose machine must run them (automatic
        sending: the one whose settings decided), else any that has it. */
     async run(repository, { head, branch, target, remoteTip, remote, command = '', hook = true, seconds = 600, machine: wanted }) {
         const at = this.#now().toISOString();
-        const base = { head, target, at, machine: null };
+        const base = { head, branch, target, at, machine: null };
         if (!hook && !command) return { ...base, status: 'none', output: 'No check is set: no pre-push hook asked for, no check command.' };
         const machine = wanted === undefined ? await this.machineFor(repository) : (await this.runs(wanted, repository) ? wanted : undefined);
         if (!machine) return { ...base, status: 'unavailable', output: 'No machine that has this repository attached is running: the checks could not run. Open a conversation it is attached to, then look again.' };

@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { GitReview } from '../server/gitpush.mjs';
-import { GitKeeper, DEFAULTS, AUTO_DEFAULTS, allowed, patternProblem, readAuto, needsConfirmation, mayAutoSend, withoutOldSetting, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
+import { GitKeeper, LAST_OUTPUT_MAX, LAST_TARGETS, DEFAULTS, AUTO_DEFAULTS, allowed, patternProblem, readAuto, needsConfirmation, mayAutoSend, withoutOldSetting, READ_DELAY_MS, SAFETY_READ_MS, RETRY_MS } from '../server/gitkeeper.mjs';
 import { GitRunner, runGit } from '../server/gitrunner.mjs';
 import { Resources, originFolder } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
@@ -24,7 +24,7 @@ import { git, standInRead, ENV } from './git-stand-in.mjs';
    `readCode`: an exit code every read of the host program gives. `wrap`: around the builder's git.
    `reserve`: free room the runner keeps (huge: every read refused for room). `heard`: what telling the agent resolves to. */
 /* `attach`: alpha writes in the repository from the start (its automatic sending can be set). `runs(conversation, name)`: does its machine run. */
-async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true } = {}) {
+async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-keep-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const remote = join(dir, 'remote.git');
@@ -59,9 +59,9 @@ async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', r
     const fakeChecks = {
         machineFor: (name) => machineFor(name, resources),
         runs: runs ? (c, name) => runs(c, name, resources) : async (c, name) => (await machineFor(name, resources)) === c && resources.of(c).some((x) => x.name === name && x.access === 'write'),
-        run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: 'stand-in', head: asked.head, target: asked.target, machine: asked.machine ?? 'alpha', at: clock.toISOString() }; },
+        run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: typeof output === 'function' ? output() : output, head: asked.head, branch: asked.branch, target: asked.target, machine: asked.machine ?? 'alpha', at: clock.toISOString() }; },
     };
-    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to) => { agent.push(line); agentTo.push([line, to]); return heard ? heard() : undefined; }, thread: (conversation, event) => lines.push([conversation, event]) });
+    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to) => { agent.push(line); agentTo.push([line, to]); return heard ? heard() : undefined; }, thread: (conversation, event) => lines.push([conversation, event]) });
     const commit = (file, text, subject) => { writeFileSync(join(work, file), text); git(work, 'add', file); git(work, 'commit', '--quiet', '-m', subject); return git(work, 'rev-parse', 'HEAD'); };
     /* Time passes; marks written by git have a resolution that a fast test can beat: the clock moves on. */
     const later = (minutes) => { clock = new Date(clock.getTime() + minutes * 60_000); };
@@ -70,7 +70,8 @@ async function bench(t, { checks = 'passed', machineFor = async () => 'alpha', r
     /* Alpha's automatic sending; the tests send to main (the default
        branch: confirmed) and make branches unless they say otherwise. */
     const auto = (body, conversation = 'alpha') => keeper.setAuto('site', conversation, { sure: true, create: true, ...body });
-    return { dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto, lines };
+    const again = () => new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async () => 1 }, now });
+    return { again, dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto, lines };
 }
 /* Ticks until a read has happened and its tips were weighed: the read waits READ_DELAY_MS after the last change. */
 async function settle(b) { await b.keeper.tick(); b.later(READ_DELAY_MS / 60_000); await b.keeper.tick(); }
@@ -747,4 +748,38 @@ test('what happens to a repository is said in the chat of the conversations it i
     b.lines.length = 0;
     await b.keeper.refresh('site');
     assert.deepEqual(b.lines, [], 'nothing new: nothing said');
+});
+
+test('the last checks are kept per repository and target, outlive a restart, end with the newest output, say "outdated" once the branch moved, and run again on its tip', async (t) => {
+    let verdict = 'failed'; let text = `${'x'.repeat(LAST_OUTPUT_MAX)}END <b>`;
+    const b = await bench(t, { checks: () => verdict, output: () => text });
+    assert.deepEqual(b.keeper.about('site').last, [], 'none yet');
+    const head = b.commit('a.txt', 'a\n', 'one');
+    await b.review.outgoing('site');
+    await b.keeper.check('site', { head });
+    const kept = JSON.parse(readFileSync(join(b.dir, 'git-checks.json'), 'utf8'));
+    assert.equal(kept.length, 1); assert.equal(kept[0].name, 'site');
+    assert.ok(!existsSync(join(b.dir, 'git-checks.json.tmp')), 'written whole, then renamed');
+    /* A restart: a new keeper reads them back. */
+    const [last] = b.again().about('site').last;
+    assert.deepEqual([last.status, last.head, last.branch, last.target, last.outdated, last.at], ['failed', head, 'main', 'main', false, '2026-03-02T10:00:00.000Z']);
+    assert.equal(last.output.length, LAST_OUTPUT_MAX, 'the end of the output only');
+    assert.ok(last.output.endsWith('END <b>'), 'as it was: the page shows it as text');
+    /* Another target: one each; the same target again: replaced. */
+    verdict = 'passed'; text = 'all good';
+    await b.review.outgoing('site', { target: 'other' });
+    b.later(1); await b.keeper.check('site', { head, target: 'other' });
+    b.later(1); await b.keeper.check('site', { head, target: 'main' });
+    assert.deepEqual(b.keeper.about('site').last.map((x) => [x.target, x.status, x.output]), [['main', 'passed', 'all good'], ['other', 'passed', 'all good']], 'the newest first');
+    /* The branch moves: outdated, until run again on its new tip. */
+    const next = b.commit('b.txt', 'b\n', 'two');
+    await b.keeper.refresh('site').catch(() => {}); await b.review.outgoing('site');
+    assert.deepEqual(b.keeper.about('site').last.map((x) => x.outdated), [true, true]);
+    const ran = await b.keeper.checkAgain('site', { target: 'main', branch: 'main' });
+    assert.deepEqual([ran.head, ran.target], [next, 'main']);
+    assert.deepEqual(b.keeper.about('site').last.map((x) => [x.target, x.head === next, x.outdated]), [['main', true, false], ['other', false, true]]);
+    /* Forgotten with the repository. */
+    b.keeper.forget('site');
+    assert.deepEqual(b.again().lastChecks('site'), []);
+    assert.equal(LAST_TARGETS, 20);
 });

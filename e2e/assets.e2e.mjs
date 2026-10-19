@@ -5,7 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, chmodSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
 
@@ -176,4 +176,54 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     await shot(phone.page, 'phone-server-assets');
     assert.deepEqual(me.errors, []);
     assert.deepEqual(phone.errors, []);
+});
+
+test('the last checks of a repository are kept and shown in its detail: their result, the commit, "outdated" once the branch moved, run again, the output as text', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    const { work, head } = await setUp(b, me);
+    const page = me.page;
+    await page.setViewportSize({ width: 1024, height: 768 });
+    const hook = join(work, '.git', 'hooks', 'pre-push');
+    writeFileSync(hook, '#!/bin/sh\necho "<img src=x onerror=\\"document.title=1\\"> red"\nexit 1\n'); chmodSync(hook, 0o755);
+    /* Checks run once for main, before anything is shown. */
+    assert.equal((await me.api('/api/git/site/outgoing?branch=main&target=main')).body.head, head);
+    assert.equal((await me.api('/api/git/site/check', { head, target: 'main' })).body.status, 'failed');
+    const kept = JSON.parse(readFileSync(join(b.dir, 'data', 'git-checks.json'), 'utf8'));
+    assert.deepEqual([kept[0].name, kept[0].targets.main.status, kept[0].targets.main.head], ['site', 'failed', head], 'kept in the data folder');
+    /* In the conversation's Assets. */
+    await page.locator('#view-assets').click();
+    const card = page.locator('#cassets-detail .as-lastchecks');
+    await me.until('the last checks are shown', async () => await card.isVisible(), 20_000);
+    assert.match(await card.innerText(), new RegExp(`Last checks\\s*Failed[\\s\\S]*on ${head.slice(0, 7)} · just now · to main`));
+    assert.equal(await card.locator('.outdated').count(), 0);
+    /* Its output: the Checks tab of the review, as text. */
+    await card.locator('[data-act="checks-output"]').click();
+    await me.until('the review on its Checks tab', async () => await page.locator('#gitview-pane-checks').isVisible() && /red/.test(await page.locator('#gitview-checks-output').innerText()), 20_000);
+    assert.match(await page.locator('#gitview-checks-output').innerText(), /<img src=x onerror="document\.title=1"> red/);
+    assert.equal(await page.locator('#gitview-checks-output img').count(), 0, 'never markup');
+    assert.notEqual(await page.title(), '1');
+    await page.locator('#gitview-close').click();
+    /* The branch moves: outdated. */
+    writeFileSync(join(work, 'more.txt'), 'more\n'); git(work, 'add', '.'); git(work, 'commit', '--quiet', '-m', 'More');
+    const next = git(work, 'rev-parse', 'main');
+    await me.until('it is said outdated', async () => {
+        await me.api('/api/git/site/outgoing?branch=main&target=main');
+        await page.locator('#cassets-rows .as-row[data-asset="folder:notes"]').click();
+        await page.locator('#cassets-rows .as-row[data-asset="git:site"]').click();
+        await me.until('the detail is drawn', async () => (await page.locator('#cassets-detail .as-facts .busy').count()) === 0 && (await page.locator('#cassets-detail .as-facts').count()) === 1, 20_000);
+        return (await card.locator('.outdated').count().catch(() => 0)) === 1;
+    }, 40_000);
+    /* Run again: on the tip now, and it passes. */
+    writeFileSync(hook, '#!/bin/sh\necho fine\nexit 0\n');
+    await card.locator('[data-act="checks-again"]').click();
+    await me.until('run again, passed', async () => /Passed/.test(await page.locator('#cassets-detail .as-lastchecks').innerText().catch(() => '')), 20_000);
+    assert.match(await page.locator('#cassets-detail .as-lastchecks').innerText(), new RegExp(`on ${next.slice(0, 7)}`));
+    assert.equal(await page.locator('#cassets-detail .as-lastchecks .outdated').count(), 0);
+    /* The server's Assets show it too. */
+    await page.locator('#nav-assets').click();
+    await me.until('the Assets place', async () => await page.locator('#assets').isVisible());
+    await page.locator('#assets-rows .as-row[data-asset="git:site"]').click();
+    await me.until('the last checks there too', async () => /Last checks\s*Passed/.test(await page.locator('#assets-detail .as-lastchecks').innerText().catch(() => '')), 20_000);
+    assert.deepEqual(me.errors, []);
 });

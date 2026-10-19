@@ -2572,7 +2572,7 @@
         holder.append(facts, chapter('Branches', acts), diagram);
         const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: name, go: () => { void paintRoomAssets(); } };
         review.addEventListener('click', () => { void openGit(name, { back }); });
-        const [out, graph] = await Promise.all([getJson(`/git/${name}/outgoing`, null), getJson(`/git/${name}/graph`, null)]);
+        const [out, graph, keep] = await Promise.all([getJson(`/git/${name}/outgoing`, null), getJson(`/git/${name}/graph`, null), getJson(`/git/${name}/keep`, null)]);
         facts.replaceChildren();
         if (out) {
             const line = el('p', 'as-line');
@@ -2585,9 +2585,47 @@
                 card('State', { ahead: 'ahead', 'up-to-date': 'up to date', diverged: 'behind: pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' }[out.state] ?? out.state, out.state === 'diverged' || out.state === 'unreachable' ? 'bad' : ''),
                 card('Remote', out.remote ? hostOf(out.remote) : 'none'));
             facts.append(line, cards);
+            const last = lastFor(keep?.last, out);
+            if (last) facts.append(lastChecksCard(name, { ...last, outdated: moved(last, out) }, back));
             if (out.state === 'ahead' && out.target) { send.hidden = false; send.textContent = `Send to ${out.target}...`; send.addEventListener('click', () => { void openGit(name, { back, target: out.target, branch: out.branch ?? '' }); }); }
         }
         diagram.replaceChildren(graph ? window.clavariumGraph.draw(graph, { pick: (c) => { void openGit(name, { commit: c.id, back }); } }) : el('p', 'hint', 'The branches could not be read.'));
+    }
+    /* THE LAST CHECKS of a repository (gitkeeper.mjs keeps them): those for the
+       branch and target shown, else the newest. Their output is text, always. */
+    const CHECK_WORDS = { passed: ['Passed', 'ok'], failed: ['Failed', 'bad'], none: ['Nothing to check', ''], unavailable: ['Could not run', 'warn'] };
+    function lastFor(list, out) {
+        if (!Array.isArray(list) || list.length === 0) return null;
+        return list.find((x) => x.target === out?.target && x.branch === out?.branch) ?? list.find((x) => x.target === out?.target) ?? list[0];
+    }
+    /* Outdated: the branch they ran on has another tip now, as the server last read it or as just seen. */
+    const moved = (last, out) => {
+        const tip = (out?.agentBranches ?? []).find((x) => x.name === last.branch)?.id;
+        return Boolean(last.outdated || (tip && last.head && tip !== last.head));
+    };
+    function lastChecksCard(name, last, back) {
+        const box = el('div', 'as-lastchecks'); box.dataset.status = String(last.status ?? '');
+        const head = el('div', 'as-lastchecks-head');
+        const [word, tone] = CHECK_WORDS[last.status] ?? [String(last.status ?? ''), ''];
+        head.append(el('small', '', 'Last checks'), el('span', `as-badge check${tone ? ` ${tone}` : ''}`, word));
+        if (last.outdated) { const old = el('span', 'as-badge outdated', 'outdated'); old.title = `${last.branch ?? 'The branch'} has moved since they ran.`; head.append(old); }
+        const shortId = typeof last.head === 'string' ? last.head.slice(0, 7) : '';
+        const line = el('p', 'as-line', `${shortId ? `on ${shortId}` : 'on no commit'} \u00b7 ${last.at ? sinceWords(last.at) : ''}${last.target ? ` \u00b7 to ${last.target}` : ''}`);
+        if (last.at) line.title = when(last.at);
+        const acts = el('div', 'as-acts');
+        const again = el('button', '', 'Run again'); again.type = 'button'; again.dataset.act = 'checks-again';
+        const see = el('button', 'as-link', 'See the output'); see.type = 'button'; see.dataset.act = 'checks-output';
+        see.addEventListener('click', () => { void openGit(name, { back, target: last.target ?? '', branch: last.branch ?? '', tab: 'checks' }); });
+        again.addEventListener('click', async () => {
+            again.disabled = true; again.textContent = 'Running...';
+            let result;
+            try { result = await post(`${API}/git/${name}/check`, { again: true, target: last.target ?? '', branch: last.branch ?? '' }); }
+            catch (error) { result = { ...last, status: 'unavailable', output: error.message, at: new Date().toISOString(), outdated: false }; }
+            box.replaceWith(lastChecksCard(name, { ...result, outdated: false }, back));
+        });
+        acts.append(again, see);
+        box.append(head, line, acts);
+        return box;
     }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;
@@ -3511,7 +3549,7 @@
        else the one that moved last). `gitConfirm`: more than the page could
        show, so Send asks once more. `gitFsck`: the owner's fsck waivers. */
     let gitShown = ''; let gitHead = null; let gitTarget = null; let gitAsked = ''; let gitState = ''; let gitRequire = false;
-    let gitBranch = null; let gitAskedBranch = ''; let gitConfirm = false; let gitFsck = {};
+    let gitBranch = null; let gitAskedBranch = ''; let gitConfirm = false; let gitFsck = {}; let gitLast = [];
     const NEW_BRANCH = '\u0000new';
     function paintChecks(result) {
         const state = $('gitview-checks-state'); state.className = '';
@@ -3555,7 +3593,7 @@
         try { const r = await fetch(`${API}/git/${name}/keep`); keep = await r.json(); if (!r.ok) throw new Error(keep.error); } catch { return; }
         if (gitShown !== name) return;
         const s = keep.settings;
-        gitRequire = s.requireForSend; gitFsck = s.fsck ?? {};
+        gitRequire = s.requireForSend; gitFsck = s.fsck ?? {}; gitLast = Array.isArray(keep.last) ? keep.last : [];
         $('gitview-runhook').checked = s.runHook; $('gitview-checkcommand').value = s.checkCommand; $('gitview-checkseconds').value = String(s.checkSeconds);
         $('gitview-require').checked = s.requireForSend; $('gitview-refreshminutes').value = String(s.refreshMinutes);
         $('gitview-alert').checked = s.alert;
@@ -3701,6 +3739,7 @@
         if (commit) $('gitview-target-row').hidden = $('gitview-branch-row').hidden = true;
         gitHead = null; gitTarget = null; gitState = ''; gitConfirm = false;
         paintReviewTab();
+        gitLast = [];
         if (!commit) await paintKeep();
         let out;
         try {
@@ -3765,6 +3804,12 @@
            is shown, and Send waits for them (it is refused without them only
            if the owner asked for that). */
         if (!commit && out.state === 'ahead') await runChecks();
+        else if (!commit) {
+            /* Nothing to send now: the last checks kept for this branch and target, as they were. */
+            const found = lastFor(gitLast.filter((x) => x.target === out.target), out);
+            const last = found ? { ...found, outdated: moved(found, out) } : null;
+            if (last) { $('gitview-checks').hidden = false; paintChecks(last); $('gitview-checks-state').textContent += ` On ${String(last.head ?? '').slice(0, 7)}, ${sinceWords(last.at)}${last.outdated ? ' (outdated: the branch moved since)' : ''}.`; }
+        }
     }
     /* `commit`: one commit of the diagram. `back`: {label, go} -- where the page goes back to. */
     /* The review is shown inside the page it was opened from, never over it:

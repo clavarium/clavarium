@@ -382,7 +382,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (kept && gitKeeper) {
             if (kept[2] === 'keep') return send(200, gitKeeper.set(kept[1], body)), true;
             if (kept[2] === 'refresh') return send(200, await gitKeeper.refresh(kept[1])), true;
-            return send(200, await gitKeeper.check(kept[1], body)), true;
+            return send(200, body?.again === true ? await gitKeeper.checkAgain(kept[1], body) : await gitKeeper.check(kept[1], body)), true;
         }
         /* Automatic sending belongs to the attachment: set in the conversation's panel. */
         const sending = /^\/api\/conversations\/([^/]+)\/git\/([a-z0-9-]{1,32})\/auto$/.exec(pathname);
