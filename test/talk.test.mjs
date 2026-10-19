@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
-import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
+import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, enterCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
 import { WAKE, REREAD } from 'clavarium-parley/host';
 import { packageFile } from '../server/parley.mjs';
@@ -32,6 +32,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
         exec: async (name, argv) => {
             calls.push('exec');
             if (!world.tmux) return { code: 1 };
+            if (argv.length === enterCommand().length) { assert.deepEqual(argv, enterCommand()); typed.push('Enter'); return { code: 0 }; }
             assert.deepEqual(argv, typeCommand(argv[8]), 'one command: the line, a pause, Enter');
             typed.push(argv[8], 'Enter');
             return { code: 0 };
@@ -43,7 +44,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const toolbox = tools ? { find: (name) => (name === 'parley' ? { name, path: '/tools/clavarium-parley-0.3.0.tgz' } : undefined), installIn: async (name) => { installs.push(name); return world.install ?? ''; } } : null;
     /* The terminal the bridge keeps open (`world.open`), and what health last saw (`world.seen`). */
     const channel = [];
-    const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, settled: () => (world.open === true ? world.settled ?? { openFor: 1e9, quietFor: 1e9 } : null), type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
+    const terminal = { open: () => world.open === true, droppedAt: () => world.droppedAt, settled: () => (world.open === true ? world.settled ?? { openFor: 1e9, quietFor: 1e9 } : null), type: async (name, line, ms) => { calls.push('channel'); if (world.channelFails) return false; if (world.enterLost) { channel.push([line, ms]); typed.push(line); return 'enter'; } channel.push([line, ms]); typed.push(line, 'Enter'); return true; } };
     const health = { of: () => world.seen ?? null };
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox, terminal, health,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
@@ -421,6 +422,15 @@ test('the line goes down the terminal already open when there is one: nothing se
     b.talk.typed('helper');
     assert.equal((await b.talk.say('helper', 'wait')).told, 'typing');
     assert.equal(b.typed.length, 4);
+});
+
+test('the line went down the channel but its Enter could not (the channel closed meanwhile): the Enter alone, never the line twice', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.world.open = true; b.world.enterLost = true;
+    assert.equal((await b.talk.say('helper', 'hello')).told, 'typed');
+    assert.deepEqual(b.calls, ['channel', 'exec']);
+    assert.deepEqual(b.typed, [WAKE, 'Enter'], 'the line once, then Enter');
 });
 
 test('the one tmux command: the line as it is, a pause, Enter; a last ";" kept as text', () => {

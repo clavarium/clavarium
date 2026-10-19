@@ -117,6 +117,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
      */
     const live = new Map();          /* name -> { terminal, sink, cols, rows, prefixAt } */
     const reopened = new Map();      /* name -> times of recent automatic reopenings */
+    const opening = new Map();       /* name -> the opening under way */
     /* name -> when its terminal was last closed for its machine's sake (put
        to sleep, stopped, deleted) or ended by itself: what was known of its
        machine before that is not known any more (talk.mjs). */
@@ -138,7 +139,20 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
 
     /* Opens the terminal of `name` and keeps it; `sink` is the screen that
        receives its output, if there is one. */
-    async function open(name, cols, rows, sink, say = () => {}) {
+    /* ONE OPENING AT A TIME. Opening takes seconds (into the machine, then
+       tmux); a second one asked meanwhile -- the server's own `warm` after a
+       restart, a line to type, a screen -- used to open another terminal,
+       and the newest closed the first: a line typed into the first lost its
+       Enter, and was typed again (seen on a real deployment). The one being
+       opened is waited for instead (`opening`). */
+    function open(name, cols, rows, sink, say = () => {}) {
+        const run = openNow(name, cols, rows, sink, say);
+        opening.set(name, run);
+        const done = () => { if (opening.get(name) === run) opening.delete(name); };
+        run.then(done, done);
+        return run;
+    }
+    async function openNow(name, cols, rows, sink, say) {
         const terminal = await spawn(name, cols, rows, say);
         /* While it was being opened another one may have been: the newest wins. */
         if (live.has(name)) close(name);
@@ -189,6 +203,11 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
         const say = (text, progress) => { if (viewer.readyState === 1) viewer.send(JSON.stringify({ type: 'status', ...(text ? { text } : {}), ...(progress ? { progress } : {}) })); };
 
         let kept = live.get(name);
+        /* Being opened already (by the server, before any screen): that one is taken. */
+        if (!kept && opening.has(name)) {
+            kept = await opening.get(name).then(() => live.get(name), () => undefined);
+            if (gone) return;
+        }
         if (kept) {
             /* Taken as it is. The size is set a line short, then right: that
                makes the tool draw its whole screen for the newcomer. */
@@ -240,6 +259,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        first screen then shows it at once. Does nothing if it is open already. */
     async function warm(name) {
         if (live.has(name)) return;
+        if (opening.has(name)) { await opening.get(name).catch(() => {}); return; }
         try { await open(name, 120, 40, null); onLeft(name); } catch { /* it will be opened when a screen asks */ }
     }
 
@@ -249,15 +269,19 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
        The line, then Enter `enterAfterMs` later (apart: see ENTER_AFTER_MS in
        talk.mjs). Resolves false when there is no such channel, or when a
        screen pressed tmux's prefix key lately; the caller then uses its
-       other way. Nothing of it is told to `onTyped`: nobody typed. */
+       other way; 'enter' when the line went but its Enter could not. Nothing
+       of it is told to `onTyped`: nobody typed. */
     async function type(name, line, enterAfterMs = 0) {
         const kept = live.get(name);
         if (!kept || Date.now() - (kept.prefixAt ?? -Infinity) < PREFIX_QUIET_MS) return false;
         try { kept.terminal.write(String(line)); } catch { return false; }
         if (enterAfterMs > 0) await new Promise((r) => { setTimeout(r, enterAfterMs).unref?.(); });
-        if (live.get(name) !== kept) return false;
-        try { kept.terminal.write('\r'); } catch { return false; }
-        return true;
+        /* The line is in the tool's input now: its Enter goes down whichever
+           terminal is open on the same pane by then. None: 'enter', the
+           caller sends the Enter alone -- never the line again. */
+        const now = live.get(name);
+        try { if (now) { now.terminal.write('\r'); return true; } } catch { /* closed meanwhile */ }
+        return 'enter';
     }
 
     server.on('close', () => { for (const name of [...live.keys()]) close(name); });

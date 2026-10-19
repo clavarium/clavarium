@@ -85,6 +85,7 @@ export const HEALTH_KNOWN_MS = 150_000;
    argument vector, no shell. tmux reads an argument that ENDS with ";" as the
    end of a command: such a last ";" is written "\;", which tmux gives back
    as ";" (tried). */
+export const enterCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Enter'];
 export function typeCommand(line) {
     const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
     return ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];
@@ -287,8 +288,10 @@ export class Talk {
        else one command in the machine. */
     async #type(name, line) {
         await this.#warm(name);
-        if (this.#terminal?.open(name) && await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false)) { this.#ranAt.set(name, this.#now()); return true; }
-        const ok = (await this.#vms.exec(name, typeCommand(line), { timeoutMs: 30_000 })).code === 0;
+        const down = this.#terminal?.open(name) ? await Promise.resolve(this.#terminal.type(name, line, ENTER_AFTER_MS)).catch(() => false) : false;
+        if (down === true) { this.#ranAt.set(name, this.#now()); return true; }
+        /* The line went, its Enter did not (the channel closed meanwhile): the Enter alone, never the line twice. */
+        const ok = (await this.#vms.exec(name, down === 'enter' ? enterCommand() : typeCommand(line), { timeoutMs: 30_000 })).code === 0;
         if (ok) this.#ranAt.set(name, this.#now());
         return ok;
     }

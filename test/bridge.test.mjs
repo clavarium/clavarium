@@ -205,3 +205,32 @@ test('a line of the server goes down the terminal kept open, Enter apart; not af
     assert.equal(await b.bridge.type('demo', 'gone', 0), false);
     ws.close();
 });
+
+test('one opening at a time: the server\'s warm, a line to type and a screen asked meanwhile all get the SAME terminal; a line\'s Enter goes down whichever is open by then', async (t) => {
+    const terminals = fakeTerminals();
+    let release;
+    const slow = (...args) => new Promise((done) => { release = () => done(terminals.spawn(...args)); });
+    const b = await bench(t, { spawn: slow });
+    const first = b.bridge.warm('demo');
+    const second = b.bridge.warm('demo');
+    const ws = b.open('c=demo');
+    await once(ws, 'open');
+    await new Promise((r) => setTimeout(r, 50));
+    release();
+    await Promise.all([first, second]);
+    await b.until(() => terminals.made[0]?.sizes.length >= 1);
+    assert.equal(terminals.made.length, 1, 'opened once, never one closing the other');
+    assert.equal(terminals.made[0].killed, 0);
+    /* The terminal is replaced while a line waits for its Enter: the Enter goes down the new one, the line is not typed again. */
+    const typing = b.bridge.type('demo', 'Read everything.', 60);
+    ws.close();
+    b.bridge.drop('demo');
+    const again = b.bridge.warm('demo');
+    release(); await again;
+    assert.equal(await typing, true);
+    assert.deepEqual([terminals.made[0].written.filter((x) => x !== '\x1b[?1004h'), terminals.made[1].written], [['Read everything.'], ['\r']]);
+    /* None open by then: said, for the caller to send the Enter alone. */
+    const lost = b.bridge.type('demo', 'One more.', 40);
+    b.bridge.drop('demo');
+    assert.equal(await lost, 'enter');
+});
