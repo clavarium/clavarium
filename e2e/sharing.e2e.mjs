@@ -360,10 +360,13 @@ test('a phone whose terminal is taken back while it is open loses it at once: no
     await owner.until('family is live again', async () => (await owner.state()) === 'live');
     await owner.sees('given-yet');
     assert.equal((await owner.screen()).includes('taken-back'), false, 'nothing typed after the right was taken back');
-    /* Once the page knows (its next look, or a reload): no terminal to show, no button to open it. */
+    /* Once the page knows (its next look, or a reload): no button to open the terminal, and no
+       terminal channel that brings anything. */
+    let received = 0;
+    phone.page.on('websocket', (ws) => { if (ws.url().includes('/c/terminal')) ws.on('framereceived', () => { received += 1; }); });
     await phone.page.reload();
     await phone.until('the page is back', async () => (await phone.page.locator('#state').count()) > 0);
     await wait(1500);
     assert.equal(await phone.page.evaluate(() => [...document.querySelectorAll('button')].some((x) => x.offsetParent !== null && /See the terminal/.test(x.textContent))), false);
-    assert.equal(await phone.page.locator('#terminal').isVisible(), false, 'its terminal is not shown');
+    assert.equal(received, 0, 'nothing of the terminal reaches the page');
 });
