@@ -83,6 +83,8 @@ async function walk(t, { phone }) {
         await until('coder is open, on its chat', inChat);
     };
 
+    /* In a folder of the list. */
+    assert.equal((await me.api('/api/conversations/coder/group', { group: 'Work' })).status, 200);
     /* THE LIST, THEN A CONVERSATION: a step; Back comes back to the list (and never out of the app). */
     await page.goto(`${b.origin}/`);
     await until('the list', async () => await shown('#items .item'));
@@ -91,6 +93,25 @@ async function walk(t, { phone }) {
     await until('Back: the list', async () => new URL(page.url()).searchParams.get('c') === null && (!phone || await shown('#list')));
     assert.equal(new URL(page.url()).origin, b.origin, 'still in the app');
     if (phone) assert.equal(await page.locator('#back').getAttribute('aria-label'), 'Conversations', 'its "<" says where it leads');
+    /* THE SEARCH: a step; Back and Escape close it; Escape in its field empties it first, then closes it. */
+    const onList = async () => new URL(page.url()).searchParams.get('c') === null && (!phone || await shown('#list'));
+    await bothWays(() => page.locator('#search-open').click(), () => shown('#search-field'), async () => !(await shown('#search')) && await onList(), 'the search');
+    await page.locator('#search-open').click();
+    await page.locator('#search-field').fill('COD');
+    await until('found', async () => (await page.locator('#items .item').count()) === 1);
+    await page.locator('#search-field').press('Escape');
+    await until('Escape empties the field', async () => (await page.locator('#search-field').inputValue()) === '' && await shown('#search'));
+    await page.locator('#search-field').press('Escape');
+    await until('Escape again closes it', async () => !(await shown('#search')) && await onList());
+    /* A folder folded and opened again: no step; Back still leaves nothing behind. */
+    const work = page.locator('.group-head[data-group="Work"]');
+    await work.click();
+    await until('Work folded', async () => (await page.locator('.group[data-group="Work"] .item').count()) === 0);
+    await work.click();
+    await until('Work open', async () => (await page.locator('.group[data-group="Work"] .item').count()) === 1);
+    await openCoder();
+    await page.goBack();
+    await until('Back: the list, past the folder', onList);
     await openCoder();
     if (phone) { await page.locator('#back').click(); await until('"<": the list', async () => shown('#list')); await openCoder(); }
 

@@ -39,3 +39,38 @@ export function identifierFrom(title, taken = () => false) {
         if (isConversationName(id) && !taken(id)) return id;
     }
 }
+
+/* A FOLDER of the list, and the name of this Clavarium, are names a person
+   reads too: the same rules, in their own words. '' is no folder. */
+export const GROUP_MAX = 40;
+export function groupProblem(value) {
+    if (typeof value !== 'string') return 'Give a folder name, or nothing for none.';
+    if (value === '') return '';
+    const problem = titleProblem(value);
+    if (problem) return problem.replace('A name', 'A folder name');
+    if ([...value].length > GROUP_MAX) return `A folder name is ${GROUP_MAX} characters at most.`;
+    return '';
+}
+export const APP_NAME_MAX = 30;
+export function appNameProblem(value) {
+    const problem = titleProblem(value);
+    if (problem) return problem;
+    if ([...value].length > APP_NAME_MAX) return `A name is ${APP_NAME_MAX} characters at most.`;
+    return '';
+}
+/* The name drawn from an address: clav.example.com -> Clav; none -> Clavarium. */
+export function appNameFrom(origin) {
+    let host = '';
+    try { host = origin ? new URL(origin).hostname : ''; } catch { host = ''; }
+    const first = host.split('.')[0] ?? '';
+    if (!/^[a-z][a-z0-9-]*$/i.test(first) || /^\d/.test(host) || host === 'localhost') return 'Clavarium';
+    return (first.charAt(0).toUpperCase() + first.slice(1)).slice(0, APP_NAME_MAX);
+}
+/* The short name under an icon: the name when it fits, else its first word, else its start. */
+export function shortAppName(name) {
+    const chars = [...name];
+    if (chars.length <= 12) return name;
+    const word = name.split(' ')[0];
+    if ([...word].length <= 12) return word;
+    return chars.slice(0, 12).join('').trim();
+}

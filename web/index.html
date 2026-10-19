@@ -13,7 +13,9 @@
 <link rel="stylesheet" href="/vendor/diff2html.css">
 <div id="app" data-place="conversations">
   <aside id="list" hidden>
-    <div class="top"><b>Conversations</b><button type="button" id="new" class="primary">+ New</button></div>
+    <div class="top"><b id="list-title" title="Conversations">Clavarium</b><span class="top-acts"><button type="button" id="search-open" class="icon-btn" aria-label="Search conversations" title="Search (/ or Ctrl+K)" aria-expanded="false" aria-controls="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button><button type="button" id="new" class="primary">+ New</button></span></div>
+    <!-- SEARCH, discreet: opened by the magnifier, "/" or Ctrl+K; filters as it is typed. -->
+    <div id="search" role="search" hidden><input id="search-field" type="search" placeholder="Search" aria-label="Search conversations: name, folder, identifier, tool" autocomplete="off" spellcheck="false" maxlength="60" aria-controls="items"></div>
     <form id="create" hidden autocomplete="off">
       <label for="create-name">Name</label>
       <input id="create-name" name="name" required maxlength="60" placeholder="Website redesign" spellcheck="false">
@@ -22,6 +24,9 @@
         <input id="create-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
         <p class="hint">Used for its machine, its folders, its address and what is given to it. Drawn from the name when empty; it cannot be changed later. The name can.</p>
       </details>
+      <label for="create-group">Folder <span class="hint">(optional)</span></label>
+      <input id="create-group" maxlength="40" list="group-names" placeholder="None" spellcheck="false" autocomplete="off">
+      <datalist id="group-names"></datalist>
       <span class="legend">What runs in it</span>
       <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
       <label class="check"><input type="checkbox" id="create-disk"> Work on the machine's own disk</label>
@@ -31,6 +36,7 @@
         <span class="hint">a new machine takes a few minutes</span></div>
     </form>
     <div id="items"></div>
+    <p id="search-none" class="hint" hidden>Nothing found.</p>
     <!-- Hidden conversations still run; this shows them, and says when one needs you. -->
     <button type="button" id="hidden-toggle" class="inline" hidden aria-expanded="false"></button>
     <p id="empty" class="hint" hidden>No conversation yet. A conversation is a machine of its own with one tool running in it.</p>
@@ -122,6 +128,13 @@
             <div id="title-box" hidden>
             <form id="title-form" class="row" autocomplete="off"><label for="title-name">Name</label><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></form>
             </div>
+            <div id="group-box" hidden>
+            <form id="group-form" class="row" autocomplete="off"><label for="group-name">Folder</label><input id="group-name" maxlength="40" list="group-names" placeholder="None" spellcheck="false"><button type="submit">Save</button></form>
+            <p class="hint">A folder of the list, shared by every device: choose one, type a new one, or empty it for none.</p>
+            <form id="group-rename-form" class="row" autocomplete="off" hidden><label for="group-rename">Rename its folder</label><input id="group-rename" maxlength="40" spellcheck="false"><button type="submit">Rename for all</button></form>
+            <div class="row" id="order-row"><span>Its place</span><button type="button" id="move-up">Move up</button><button type="button" id="move-down">Move down</button><button type="button" id="group-up" hidden>Folder up</button><button type="button" id="group-down" hidden>Folder down</button></div>
+            <p class="hint" id="order-hint">The same order on every device. In the list: drag it (on a phone or tablet, hold it, then drag), or Alt and an arrow key.</p>
+            </div>
             <div id="hide-box" hidden>
             <div class="row"><span>In the list</span><div class="levels" id="hide-on" role="group" aria-label="Hidden from the list"><button type="button" data-on="false">Shown</button><button type="button" data-on="true">Hidden</button></div></div>
             <p class="hint">Hidden, it runs as before, keeps what it was given and stays in Access; "hidden" at the bottom of the list shows it.</p>
@@ -184,6 +197,7 @@
               <select id="machine-memory"></select>
               <label for="machine-disk">Disk</label>
               <select id="machine-disk"></select>
+              <p class="hint" id="machine-size-wait" role="status" hidden></p>
               <p class="hint" id="machine-size-hint">Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.</p>
               <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
             </form>
@@ -532,6 +546,7 @@
           <summary><span class="chapter-title">Screen</span><span class="chapter-about">Light or dark, text size, the app.</span></summary>
           <div class="chapter-body">
         <div class="row"><span>Screen</span><button type="button" id="theme" aria-label="Light or dark screen">Light</button><button type="button" id="install" class="primary" hidden>Install the app</button></div>
+        <form id="install-name-form" class="row" autocomplete="off" hidden><label for="install-name">Name on this device</label><input id="install-name" maxlength="30" spellcheck="false"><button type="submit" class="primary">Install</button><button type="button" id="install-name-cancel">Cancel</button></form>
         <div class="row"><span>Text size</span><span class="text-size" id="settings-text" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span></div>
         <p class="hint">All text, the terminal's too, on this device only. Also: two fingers pinched, Ctrl and the wheel, Ctrl + and Ctrl -.</p>
           </div>
@@ -544,6 +559,14 @@
           </div>
         </details>
         <h3 class="chapter-group">This server</h3>
+        <details class="chapter" id="settings-ch-general" data-chapter="s-general">
+          <summary><span class="chapter-title">General</span><span class="chapter-about">The name of this Clavarium.</span></summary>
+          <div class="chapter-body">
+        <form id="instance-form" class="row" autocomplete="off"><label for="instance-name">Name of this Clavarium</label><input id="instance-name" maxlength="30" spellcheck="false"><button type="submit">Save</button></form>
+        <p class="hint" id="instance-hint">In the title of its tab, above its list, in its alerts, and under its icon once installed. Empty: the name drawn from its address.</p>
+        <p class="error" id="instance-error" role="alert" hidden></p>
+          </div>
+        </details>
         <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
           <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">The ready-made answers under the terminal.</span></summary>
           <div class="chapter-body">

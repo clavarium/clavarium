@@ -49,7 +49,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     await me.until('the list says it waits for its owner', async () => /asks for you/.test(await me.page.locator('#items .item[aria-current=true]').innerText()), 30_000);
     assert.equal((await me.screen()).includes('it got: y\nready> read -p "Delete') && /it got: [yn]\s*$/.test((await me.screen()).trim().split('Delete everything?').at(-1)), false, 'nothing was answered');
     /* And the owner's phone is told, with where to go. */
-    assert.deepEqual(alerted, [{ title: 'worker waits for you', body: 'reader-two: the charter does not allow deleting', url: '/?c=worker' }]);
+    assert.deepEqual(alerted, [{ title: 'Clavarium: worker waits for you', body: 'reader-two: the charter does not allow deleting', url: '/?c=worker' }]);
     await me.page.locator('#folders').click();
     await me.chapter('answerer');
     await me.until('it says why', async () => /It stopped and waits for you\. reader-two: the charter does not allow deleting/.test(await me.page.locator('#answerer-state').innerText()));

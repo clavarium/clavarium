@@ -205,11 +205,11 @@ test('where the tool works: kept by the server unless asked otherwise; put aside
     const all = b.make();
     all.create({ name: 'kept', tool: 'tool' });
     await all.built;
-    assert.equal(all.list()[0].work, 'kept');
+    assert.equal(all.list().find((c) => c.name === 'kept').work, 'kept');
     b.calls.length = 0;
     all.create({ name: 'fast', tool: 'tool', workOnDisk: true });
     await all.built;
-    assert.equal(all.list()[1].work, 'disk');
+    assert.equal(all.list().find((c) => c.name === 'fast').work, 'disk');
     assert.ok(b.calls.includes('exec clv-fast -- sudo -n mkdir -p /work'));
     assert.ok(!b.calls.some((c) => c.startsWith('work ') || c.includes(' work ')), 'nothing of it is kept here');
     b.calls.length = 0;

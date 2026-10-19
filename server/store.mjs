@@ -46,3 +46,24 @@ export class Store {
         renameSync(tmp, this.#path);
     }
 }
+
+/* ONE SMALL JSON VALUE in a file (the order of the list, the name of this
+   Clavarium), written the same way. Without a path, kept in memory. */
+export class JsonFile {
+    #path; #value;
+    constructor(path, fallback) {
+        this.#path = path;
+        this.#value = fallback;
+        if (!path) return;
+        mkdirSync(dirname(path), { recursive: true });
+        try { const read = JSON.parse(readFileSync(path, 'utf8')); if (read && typeof read === 'object') this.#value = read; } catch { /* none yet */ }
+    }
+    get() { return structuredClone(this.#value); }
+    set(value) {
+        this.#value = structuredClone(value);
+        if (!this.#path) return;
+        const tmp = `${this.#path}.tmp`;
+        writeFileSync(tmp, JSON.stringify(this.#value, null, 2), { mode: 0o600 });
+        renameSync(tmp, this.#path);
+    }
+}

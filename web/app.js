@@ -741,7 +741,7 @@
         if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
         $('name').textContent = (c ? shownName(c) : current) || 'No conversation';
-        document.title = current ? `${c ? shownName(c) : current} - Clavarium` : 'Clavarium';
+        pageTitle = current ? (c ? shownName(c) : current) : ''; paintTitle();
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
         $('copy-open').hidden = !current || (home && (!c || c.phase !== 'ready'));
@@ -823,6 +823,25 @@
         void chatFirst();
     }
 
+    /* ---------- THE NAME OF THIS CLAVARIUM (server/instance.mjs) ----------
+       Read from its manifest, the same for the owner's page and a device's:
+       in the title of the tab and above the list. The name chosen on this
+       device when installing goes in the address of the manifest (kept
+       here, put back at each start), so that the app is installed under it. */
+    let appName = 'Clavarium';
+    let pageTitle = '';
+    const INSTALL_NAME = 'clavarium-install-name';
+    const MANIFEST = DEVICE ? '/c/manifest.webmanifest' : '/manifest.webmanifest';
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    const installName = () => { try { return localStorage.getItem(INSTALL_NAME) ?? ''; } catch { return ''; } };
+    const pointManifest = (name) => { if (manifestLink) manifestLink.href = name ? `${MANIFEST}?name=${encodeURIComponent(name)}` : MANIFEST; };
+    function paintTitle() { document.title = pageTitle ? `${pageTitle} - ${appName}` : appName; $('list-title').textContent = appName; }
+    async function readAppName() {
+        try { const m = await (await fetch(MANIFEST)).json(); if (typeof m.name === 'string' && m.name) appName = m.name; } catch { /* the usual name */ }
+        paintTitle();
+    }
+    pointManifest(installName());
+
     /* ---------- the list ---------- */
     const post = async (path, body) => {
         const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
@@ -837,43 +856,96 @@
         || (c.phase === 'ready' && !c.asleep && ['warn', 'bad'].includes(c.health?.level)));
     /* Hidden conversations are shown on a click on "N hidden", for this page only. */
     let showHidden = false;
+    /* ---------- FOLDERS, ORDER, SEARCH ----------
+       One level of folders: a word on each conversation, kept by the server
+       with the order, so that every device shows the same list. Those in no
+       folder first, then the folders, each folded or open on this device
+       only. A search filters as it is typed, hidden ones too (marked), and
+       opens the folders it finds something in. */
+    const FOLDED = 'clavarium-folded';
+    const folded = new Set((() => { try { const v = JSON.parse(localStorage.getItem(FOLDED) ?? '[]'); return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []; } catch { return []; } })());
+    const keepFolded = () => { try { localStorage.setItem(FOLDED, JSON.stringify([...folded])); } catch { /* a private window: this page only */ } };
+    let query = '';
+    let chosenHit = 0;
+    const plain = (text) => String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    const matches = (c) => [shownName(c), c.name, c.group, c.toolLabel].some((x) => plain(x).includes(plain(query)));
+    const byRank = (a, b) => (a.rank ?? 0) - (b.rank ?? 0);
+    const groupsInOrder = () => [...new Set(conversations.filter((c) => c.group).sort((a, b) => (a.groupRank ?? 0) - (b.groupRank ?? 0)).map((c) => c.group))];
+    function itemButton(c) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.className = 'item'; b.dataset.phase = c.phase; b.dataset.name = c.name;
+        if (c.group) b.dataset.group = c.group;
+        /* Ready, but its tool not there yet: it still reads as under way. */
+        if (holds(c)) b.dataset.busy = 'true';
+        if (c.name === current) b.setAttribute('aria-current', 'true');
+        const title = document.createElement('b');
+        const dot = document.createElement('span'); dot.className = 'dot';
+        title.append(dot, shownName(c));
+        if (c.title) b.title = c.name;
+        if (c.hidden === true) b.dataset.hidden = 'true';
+        const sub = document.createElement('small');
+        /* Under way: the step the panel shows, in its words (the tool named once). */
+        const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
+        sub.textContent = under ? (c.toolLabel && under.includes(c.toolLabel) ? under : `${c.toolLabel} - ${under}`) : holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
+        if (c.asleep) b.dataset.asleep = 'true';
+        b.append(title, sub);
+        /* Found by a search while hidden: said. */
+        if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
+        /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
+        const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
+        if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
+        /* It talks through the app, and asks or waits for its owner there. */
+        if (c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
+        if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
+        /* Seen at a glance: this conversation is in other hands too. */
+        const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
+        if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
+        b.addEventListener('click', () => select(c.name, { step: true }));
+        return b;
+    }
+    function groupBox(g, inside, all, open) {
+        const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g;
+        const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g;
+        head.setAttribute('aria-expanded', String(open));
+        const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = '›';
+        const label = document.createElement('span'); label.className = 'group-name'; label.textContent = g;
+        const count = document.createElement('small'); count.className = 'count'; count.textContent = String(all.length);
+        count.setAttribute('aria-label', `${all.length} conversation${all.length > 1 ? 's' : ''}`);
+        /* A small dot for each (up to six); the one that needs you is said even folded. */
+        const dots = document.createElement('span'); dots.className = 'group-dots'; dots.setAttribute('aria-hidden', 'true');
+        for (const c of all.slice(0, 6)) { const d = document.createElement('span'); d.className = 'mini'; d.dataset.phase = holds(c) ? 'building' : c.phase; if (c.asleep) d.dataset.asleep = 'true'; dots.append(d); }
+        head.append(caret, label, count, dots);
+        if (all.some(needsYou)) { const n = document.createElement('span'); n.className = 'needs-dot'; n.setAttribute('aria-label', 'one needs you'); head.append(n); head.dataset.needs = 'true'; }
+        head.addEventListener('click', () => {
+            if (query) return;
+            if (folded.has(g)) folded.delete(g); else folded.add(g);
+            keepFolded(); paint();
+        });
+        box.append(head);
+        if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map(itemButton)); box.append(body); }
+        return box;
+    }
     function paint() {
         const items = $('items');
         items.replaceChildren();
         const hidden = conversations.filter((c) => c.hidden === true);
-        for (const c of conversations) {
-            /* The one open stays in sight, hidden or not. */
-            if (c.hidden === true && !showHidden && c.name !== current) continue;
-            const b = document.createElement('button');
-            b.type = 'button'; b.className = 'item'; b.dataset.phase = c.phase;
-            /* Ready, but its tool not there yet: it still reads as under way. */
-            if (holds(c)) b.dataset.busy = 'true';
-            if (c.name === current) b.setAttribute('aria-current', 'true');
-            const title = document.createElement('b');
-            const dot = document.createElement('span'); dot.className = 'dot';
-            title.append(dot, shownName(c));
-            if (c.title) b.title = c.name;
-            if (c.hidden === true) b.dataset.hidden = 'true';
-            const sub = document.createElement('small');
-            /* Under way: the step the panel shows, in its words (the tool named once). */
-            const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
-            sub.textContent = under ? (c.toolLabel && under.includes(c.toolLabel) ? under : `${c.toolLabel} - ${under}`) : holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
-            if (c.asleep) b.dataset.asleep = 'true';
-            b.append(title, sub);
-            /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
-            const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
-            if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
-            /* It talks through the app, and asks or waits for its owner there. */
-            if (c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
-            if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
-            /* Seen at a glance: this conversation is in other hands too. */
-            const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
-            if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
-            b.addEventListener('click', () => select(c.name, { step: true }));
-            items.append(b);
+        /* The one open stays in sight, hidden or not; a search finds hidden ones too. */
+        const shown = conversations.filter((c) => (query ? matches(c) : c.hidden !== true || showHidden || c.name === current)).sort(byRank);
+        items.append(...shown.filter((c) => !c.group).map(itemButton));
+        for (const g of groupsInOrder()) {
+            const inside = shown.filter((c) => c.group === g);
+            /* Nothing of it in sight (all hidden, or nothing found): not shown. */
+            if (inside.length === 0) continue;
+            items.append(groupBox(g, inside, conversations.filter((c) => c.group === g).sort(byRank), Boolean(query) || !folded.has(g)));
         }
+        /* The folders there are, offered where one is chosen. */
+        $('group-names').replaceChildren(...groupsInOrder().map((g) => { const o = document.createElement('option'); o.value = g; return o; }));
+        const hits = [...items.querySelectorAll('.item')];
+        chosenHit = Math.max(0, Math.min(chosenHit, hits.length - 1));
+        if (query) hits.forEach((h, i) => { h.toggleAttribute('data-chosen', i === chosenHit); if (i === chosenHit) h.scrollIntoView?.({ block: 'nearest' }); });
+        $('search-none').hidden = !query || hits.length > 0;
         const toggle = $('hidden-toggle');
-        toggle.hidden = DEVICE || hidden.length === 0;
+        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query);
         toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
         toggle.setAttribute('aria-expanded', String(showHidden));
         const calling = hidden.some(needsYou);
@@ -883,6 +955,151 @@
         $('empty').hidden = conversations.length > 0;
         paintDeviceCount();
     }
+
+    /* THE SEARCH: a step of its own (Back closes it); Escape empties it, then closes it. */
+    function openSearch() {
+        if (DEVICE) return;
+        /* Asked for: the keyboard comes with it, lock or not. */
+        if (!$('search').hidden) { $('search-field').focus(); return; }
+        $('search').hidden = false; $('search-open').setAttribute('aria-expanded', 'true');
+        nav.push('search', () => closeSearch());
+        $('search-field').focus();
+    }
+    function closeSearch() {
+        $('search').hidden = true; $('search-open').setAttribute('aria-expanded', 'false');
+        $('search-field').value = ''; query = ''; chosenHit = 0;
+        paint();
+    }
+    $('search-open').addEventListener('click', () => { if ($('search').hidden) openSearch(); else if (!nav.close('search')) closeSearch(); });
+    $('search-field').addEventListener('input', () => { query = $('search-field').value.trim(); chosenHit = 0; paint(); });
+    $('search-field').addEventListener('keydown', (event) => {
+        if (event.isComposing) return;
+        const hits = [...$('items').querySelectorAll('.item')];
+        if (event.key === 'Escape') {
+            event.preventDefault(); event.stopPropagation();
+            if ($('search-field').value) { $('search-field').value = ''; query = ''; chosenHit = 0; paint(); return; }
+            if (!nav.close('search')) closeSearch();
+            $('search-open').focus();
+        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+            event.preventDefault();
+            chosenHit += event.key === 'ArrowDown' ? 1 : -1;
+            paint();
+        } else if (event.key === 'Enter') {
+            event.preventDefault();
+            const hit = hits[chosenHit] ?? hits[0];
+            if (hit) select(hit.dataset.name, { step: true });
+        }
+    });
+    /* "/" or Ctrl+K, from anywhere but a field and the terminal (its tool needs its keys). */
+    document.addEventListener('keydown', (event) => {
+        if (DEVICE || event.defaultPrevented || event.isComposing || event.altKey) return;
+        const slash = event.key === '/' && !event.ctrlKey && !event.metaKey;
+        const k = (event.ctrlKey || event.metaKey) && (event.key === 'k' || event.key === 'K');
+        if (!slash && !k) return;
+        const target = event.target instanceof Element ? event.target : null;
+        if (target?.closest('#terminal') || target?.matches('input, textarea, select, [contenteditable]:not([contenteditable=false])')) return;
+        if ($('list').hidden || (narrow() && app.dataset.view !== 'list')) return;
+        event.preventDefault();
+        openSearch();
+    });
+
+    /* MOVED BY HAND: dragged with a mouse; held, then dragged, with a finger;
+       Alt and an arrow key from the keyboard. The server keeps the order. */
+    let drag = null; let justDragged = false;
+    const dropTarget = (d, x, y) => {
+        const under = document.elementFromPoint(x, y);
+        let el = under?.closest('#items .item, #items .group-head');
+        if (!el || el === d.el) return null;
+        if (d.kind === 'group') {
+            if (el.classList.contains('item')) { if (!el.dataset.group) return null; el = el.closest('.group').querySelector('.group-head'); }
+            if (el === d.el) return null;
+        }
+        const box = el.getBoundingClientRect();
+        const where = d.kind === 'item' && el.classList.contains('group-head') ? 'into' : y < box.top + box.height / 2 ? 'before' : 'after';
+        return { el, where };
+    };
+    const unmark = () => { for (const x of $('items').querySelectorAll('[data-drop]')) x.removeAttribute('data-drop'); };
+    function endDrag() {
+        if (!drag) return;
+        clearTimeout(drag.timer);
+        drag.el.removeAttribute('data-dragging'); $('items').removeAttribute('data-dragging');
+        unmark(); drag = null;
+    }
+    function startDrag() {
+        if (!drag) return;
+        drag.on = true; drag.el.setAttribute('data-dragging', 'true'); $('items').setAttribute('data-dragging', 'true');
+        if (drag.touch) navigator.vibrate?.(15);
+    }
+    async function dropped(d, target) {
+        if (!target) return;
+        try {
+            if (d.kind === 'group') {
+                const groups = groupsInOrder().filter((g) => g !== d.el.dataset.group);
+                const at = groups.indexOf(target.el.dataset.group) + (target.where === 'after' ? 1 : 0);
+                groups.splice(at, 0, d.el.dataset.group);
+                await post(`${API}/order`, { groups });
+            } else {
+                const name = d.el.dataset.name;
+                const was = conversations.find((c) => c.name === name)?.group ?? '';
+                const group = target.where === 'into' ? target.el.dataset.group : target.el.dataset.group ?? '';
+                const order = [...conversations].sort(byRank).map((c) => c.name).filter((n) => n !== name);
+                const firstOf = order.findIndex((n) => (conversations.find((c) => c.name === n)?.group ?? '') === group);
+                const at = target.where === 'into' ? (firstOf < 0 ? 0 : firstOf) : order.indexOf(target.el.dataset.name) + (target.where === 'after' ? 1 : 0);
+                order.splice(at, 0, name);
+                if (group !== was) await post(`${API}/conversations/${encodeURIComponent(name)}/group`, { group });
+                await post(`${API}/order`, { order });
+                if (target.where === 'into' && folded.has(group)) { folded.delete(group); keepFolded(); }
+            }
+        } catch (error) { show(error.message, 'Back', () => { notice.hidden = true; }); }
+        await refresh();
+    }
+    $('items').addEventListener('pointerdown', (event) => {
+        if (DEVICE || query || event.button !== 0) return;
+        const el = event.target.closest('.item, .group-head');
+        if (!el) return;
+        endDrag();
+        drag = { el, kind: el.classList.contains('item') ? 'item' : 'group', x: event.clientX, y: event.clientY, id: event.pointerId, on: false, touch: event.pointerType !== 'mouse' };
+        if (drag.touch) drag.timer = setTimeout(startDrag, 450);
+    });
+    addEventListener('pointermove', (event) => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const far = Math.hypot(event.clientX - drag.x, event.clientY - drag.y) > 8;
+        /* A finger that moves before it was held scrolls the list: no drag. */
+        if (!drag.on) { if (drag.touch) { if (far) endDrag(); return; } if (!far) return; startDrag(); }
+        event.preventDefault();
+        unmark();
+        const target = dropTarget(drag, event.clientX, event.clientY);
+        if (target) target.el.dataset.drop = target.where;
+    }, { passive: false });
+    addEventListener('pointerup', (event) => {
+        if (!drag || event.pointerId !== drag.id) return;
+        const d = drag; const target = d.on ? dropTarget(d, event.clientX, event.clientY) : null;
+        endDrag();
+        if (!d.on) return;
+        /* The click that ends a drag opens nothing. */
+        justDragged = true; setTimeout(() => { justDragged = false; }, 0);
+        void dropped(d, target);
+    });
+    addEventListener('pointercancel', () => endDrag());
+    /* Held: the page neither scrolls nor offers its own menu under the finger. */
+    document.addEventListener('touchmove', (event) => { if (drag?.on) event.preventDefault(); }, { passive: false });
+    $('items').addEventListener('contextmenu', (event) => { if (drag) event.preventDefault(); });
+    $('items').addEventListener('click', (event) => { if (justDragged) { event.stopPropagation(); event.preventDefault(); } }, true);
+    $('items').addEventListener('keydown', async (event) => {
+        if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
+        const el = event.target.closest('.item, .group-head');
+        if (!el) return;
+        event.preventDefault();
+        const to = event.key === 'ArrowUp' ? 'up' : 'down';
+        try {
+            if (el.classList.contains('item')) await post(`${API}/conversations/${encodeURIComponent(el.dataset.name)}/move`, { to });
+            else await post(`${API}/groups/move`, { group: el.dataset.group, to });
+        } catch { /* said by the list as it is */ }
+        await refresh();
+        const again = el.classList.contains('item') ? `.item[data-name="${CSS.escape(el.dataset.name)}"]` : `.group-head[data-group="${CSS.escape(el.dataset.group)}"]`;
+        $('items').querySelector(again)?.focus();
+    });
+
     async function refresh() {
         clearTimeout(pollTimer);
         try {
@@ -968,8 +1185,9 @@
         const title = $('create-name').value.trim();
         const id = $('create-id').value.trim();
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), tool: chosenTool, workOnDisk: $('create-disk').checked });
-            $('create').hidden = true; $('create-name').value = ''; $('create-id').value = ''; $('create-disk').checked = false;
+            const group = $('create-group').value.trim();
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: $('create-disk').checked });
+            $('create').hidden = true; $('create-name').value = ''; $('create-id').value = ''; $('create-group').value = ''; $('create-disk').checked = false;
             await refresh();
             select(made.name);
         } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
@@ -1587,7 +1805,12 @@
             disk.value = String(now);
             memory.dataset.of = of;
         }
-        $('machine-size').hidden = DEVICE || !here || here.phase !== 'ready';
+        /* Not ready (built, restarted, moved): its sizes are shown, and chosen once it is. */
+        $('machine-size').hidden = DEVICE || !here || here.phase === 'failed';
+        const waiting = here && (here.phase !== 'ready' || holds(here)) ? (here.phase === 'moving' ? 'Available once it has moved.' : here.phase === 'restarting' || (here.phase === 'ready' && here.progress?.kind !== 'build') ? 'Available once it has restarted.' : 'Available once its machine is built.') : '';
+        for (const id of ['machine-memory', 'machine-disk', 'machine-size-apply']) $(id).disabled = Boolean(waiting);
+        $('machine-size').toggleAttribute('data-waiting', Boolean(waiting));
+        $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
@@ -1947,7 +2170,11 @@
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
         if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
-        $('title-box').hidden = $('hide-box').hidden = DEVICE || !here;
+        $('title-box').hidden = $('hide-box').hidden = $('group-box').hidden = DEVICE || !here;
+        if (document.activeElement !== $('group-name')) $('group-name').value = here?.group ?? '';
+        $('group-rename-form').hidden = !here?.group;
+        if (document.activeElement !== $('group-rename')) $('group-rename').value = here?.group ?? '';
+        $('group-up').hidden = $('group-down').hidden = !here?.group;
         for (const b of $('hide-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.hidden === true)));
         $('voice-mark-box').hidden = !here?.ai;
         for (const b of $('voice-mark').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.voiceMark === true)));
@@ -1967,6 +2194,26 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    const panelTry = async (job) => {
+        $('panel-error').hidden = true;
+        try { await job(); await refresh(); await paintTalkBox(); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    };
+    $('group-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        void panelTry(async () => { await post(`${API}/conversations/${encodeURIComponent(current)}/group`, { group: $('group-name').value.trim() }); $('group-name').blur(); });
+    });
+    $('group-rename-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const from = conversations.find((x) => x.name === current)?.group;
+        void panelTry(async () => {
+            const to = $('group-rename').value.trim();
+            await post(`${API}/groups/rename`, { from, to }); $('group-rename').blur();
+            if (folded.delete(from)) { folded.add(to); keepFolded(); }
+        });
+    });
+    for (const [id, to] of [['move-up', 'up'], ['move-down', 'down']]) $(id).addEventListener('click', () => void panelTry(() => post(`${API}/conversations/${encodeURIComponent(current)}/move`, { to })));
+    for (const [id, to] of [['group-up', 'up'], ['group-down', 'down']]) $(id).addEventListener('click', () => void panelTry(() => post(`${API}/groups/move`, { group: conversations.find((x) => x.name === current)?.group, to })));
     $('title-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;
@@ -2886,8 +3133,26 @@
             ? `Who may sign in: ${platform.operators.join(', ')}. Address: ${platform.address ?? 'not declared'}. Both were set when this was installed.`
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
+        void paintInstance();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
+
+    /* ---------- the name of this Clavarium, in Settings ---------- */
+    async function paintInstance() {
+        const about = await fetch(`${API}/instance`).then((r) => r.json()).catch(() => null);
+        if (!about) return;
+        $('instance-name').placeholder = about.defaultName;
+        if (document.activeElement !== $('instance-name')) $('instance-name').value = about.given ? about.name : '';
+    }
+    $('instance-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('instance-error').hidden = true;
+        try {
+            const about = await post(`${API}/instance`, { name: $('instance-name').value.trim() });
+            appName = about.name; paintTitle(); $('instance-name').blur(); await paintInstance();
+            if (!installName()) pointManifest('');
+        } catch (error) { $('instance-error').textContent = error.message; $('instance-error').hidden = false; }
+    });
 
     /* ---------- Updates: what runs, what is out, how it updates itself (server/updates.mjs) ---------- */
     let updatesTimer; let updatesBusy = false;
@@ -5359,23 +5624,50 @@
     let installEvent = null;
     let installOffered = false;
     const offerInstall = () => { installOffered = true; $('install').hidden = false; };
-    addEventListener('beforeinstallprompt', (event) => { event.preventDefault(); installEvent = event; offerInstall(); });
-    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; });
+    /* Chrome reads the manifest again when its address changes, and may then
+       offer the install anew: that offer, if it comes soon, is the one used. */
+    let freshOffer = null;
+    addEventListener('beforeinstallprompt', (event) => {
+        event.preventDefault(); installEvent = event; offerInstall();
+        if (freshOffer) { const take = freshOffer; freshOffer = null; take(event); }
+    });
+    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-name-form').hidden = true; });
     if (apple && !asApp) offerInstall();
+    /* FIRST A NAME FOR THIS DEVICE, then the browser's own question. */
     $('install').addEventListener('click', async () => {
         const back = () => { notice.hidden = true; focusTerminal(); };
         if (installEvent) {
-            const asked = installEvent; installEvent = null;
-            asked.prompt();
-            const choice = await asked.userChoice.catch(() => ({ outcome: 'dismissed' }));
-            if (choice.outcome === 'accepted') { installOffered = false; $('install').hidden = true; }
-            else installEvent = asked;
+            $('install-name').value = installName() || appName;
+            $('install-name-form').hidden = false;
+            focusField($('install-name'));
             return;
         }
         show(DEVICE
             ? 'To install it: touch the Share button of the browser (the square with an arrow), then "Add to Home Screen". IMPORTANT, on an iPhone or iPad: the installed app does not share anything with this page, so it will ask to be paired again -- ask the person who shared this conversation for a new code, and open it once the app is installed.'
             : 'To install it: touch the Share button of the browser (the square with an arrow), then "Add to Home Screen". The app will ask you to sign in once.',
         'Back', back);
+    });
+
+    $('install-name-cancel').addEventListener('click', () => { $('install-name-form').hidden = true; });
+    $('install-name-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        if (!installEvent) { $('install-name-form').hidden = true; return; }
+        /* Text only, as the server takes it; anything else falls back to the name of this Clavarium. */
+        const name = $('install-name').value.trim().replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').slice(0, 30).trim();
+        const chosen = name && name !== appName ? name : '';
+        $('install-name-form').hidden = true;
+        let asked = installEvent;
+        if (chosen !== installName()) {
+            try { if (chosen) localStorage.setItem(INSTALL_NAME, chosen); else localStorage.removeItem(INSTALL_NAME); } catch { /* the address carries it all the same */ }
+            pointManifest(chosen);
+            asked = await new Promise((resolve) => { const t = setTimeout(() => { freshOffer = null; resolve(installEvent); }, 1200); freshOffer = (e) => { clearTimeout(t); resolve(e); }; });
+        }
+        if (!asked) return;
+        installEvent = null;
+        asked.prompt();
+        const choice = await asked.userChoice.catch(() => ({ outcome: 'dismissed' }));
+        if (choice.outcome === 'accepted') { installOffered = false; $('install').hidden = true; }
+        else installEvent = asked;
     });
 
     /* ---------- the other conversations of this device ---------- */
@@ -5417,6 +5709,7 @@
     });
 
     async function start() {
+        void readAppName();
         if (DEVICE) {
             view('room');
             const fresh = location.hash.length > 1;      /* arriving with a code: a first visit */
@@ -5431,7 +5724,7 @@
             if (door.conversation === null) {
                 /* Given folders and no conversation: this page is their files, and nothing else. */
                 for (const id of ['keys', 'shortcuts', 'copy-open', 'theme', 'files-close']) $(id).hidden = true;
-                $('name').textContent = 'Shared files'; document.title = 'Shared files - Clavarium';
+                $('name').textContent = 'Shared files'; pageTitle = 'Shared files'; paintTitle();
                 say('', 'ended'); $('state').hidden = true; notice.hidden = true;
                 await paintFiles(); $('files').hidden = false;
                 $('files-none').textContent = 'Nothing is shared with this device any more.';

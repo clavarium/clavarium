@@ -38,6 +38,9 @@
 #                      server mode)
 #   --relay-installed  the relay was set up already (by `clavarium online`):
 #                      do not print the command to run on it
+#   --name NAME        the name of this Clavarium, under its icon and in its
+#                      tab (default: drawn from --domain); changed in Settings.
+#                      Letters, digits, spaces, dots, hyphens: 30 at most
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # AFTER --local, going online is one command: `sudo clavarium online --relay
@@ -107,12 +110,12 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
 DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
-VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""
+VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
@@ -129,6 +132,7 @@ while [ $# -gt 0 ]; do
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value" ;;
         --keep-release) KEEP_RELEASE="yes"; shift ;;
         --relay-installed) RELAY_INSTALLED="yes"; shift ;;
+        --name) APP_NAME="${2:-}"; [ -n "$APP_NAME" ] || bad "--name needs a value"; shift 2 ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -170,6 +174,8 @@ fi
 [ -z "$UPDATES" ] || [[ "$UPDATES" =~ ^(auto|asap|ask|off)$ ]] || bad "--updates is auto, asap, ask or off"
 [ -z "$WINDOW" ] || { [[ "$WINDOW" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && [ "${WINDOW%-*}" != "${WINDOW#*-}" ]; } || bad "--update-window is two times, like 02:00-05:00"
 [ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
+# It goes in the unit file, between quotes: plain characters only (any other is chosen in Settings).
+[ -z "$APP_NAME" ] || [[ "$APP_NAME" =~ ^[A-Za-z0-9]([A-Za-z0-9\ ._-]{0,28}[A-Za-z0-9.])?$ ]] || bad "--name is letters, digits, spaces, dots and hyphens, 30 at most, like \"Home lab\""
 # What the updates will be, as the settings file has them or as asked now.
 had() { { sed -n "s/^$1=//p" "$UPDATE_CONF" 2>/dev/null || true; } | head -1; }
 SHOW_MODE="${UPDATES:-$(had MODE)}"; SHOW_MODE="${SHOW_MODE:-auto}"
@@ -188,6 +194,7 @@ if [ "$DRY" = "yes" ]; then
 would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
+  name        $([ -n "$APP_NAME" ] && echo "$APP_NAME" || echo "drawn from the address; changed in Settings")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
   release     $([ "$KEEP_RELEASE" = "yes" ] && echo "the one that runs, kept (--keep-release)" || [ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
   updates     $(case "$SHOW_MODE" in auto) echo "automatic, between ${SHOW_WINDOW%-*} and ${SHOW_WINDOW#*-}" ;; asap) echo "as soon as a version is out" ;; ask) echo "said in Settings, done when you say" ;; off) echo "off" ;; esac), channel $SHOW_CHANNEL
@@ -335,7 +342,7 @@ User=$ACCOUNT
 Group=$ACCOUNT
 WorkingDirectory=$CODE/current/app
 EnvironmentFile=$ETC/server.env
-ExecStart=$CODE/current/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT$([ "$LOCAL" = "yes" ] || echo " --operators $OPERATORS --public-origin https://$DOMAIN")
+ExecStart=$CODE/current/node/bin/node server/main.mjs --host "sudo -n $HOST_PROGRAM" --data $DATA --vault-key $VAULT/vault.key --port $PORT$([ "$LOCAL" = "yes" ] || echo " --operators $OPERATORS --public-origin https://$DOMAIN")$([ -z "$APP_NAME" ] || echo " --name \"$APP_NAME\"")
 Restart=on-failure
 RestartSec=3
 

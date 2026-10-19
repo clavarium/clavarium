@@ -6,7 +6,8 @@
  *   - Sleep is a button, never a guess: telling a long job from an idle tool
  *     cannot be done without reading the tool, and this server does not read.
  */
-import { isConversationName, identifierFrom, titleProblem } from './names.mjs';
+import { isConversationName, identifierFrom, titleProblem, groupProblem } from './names.mjs';
+import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
@@ -60,7 +61,7 @@ const buildProgress = (since) => ({ kind: 'build', steps: ['starting', 'preparin
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
-    #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
+    #layout; #store; #vms; #tools; #stopDelayMs; #timers = new Map(); #watching = new Map(); #fresh = new Set(); #mountAgain = new Set(); #uid; #gid;
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
@@ -90,8 +91,8 @@ export class Conversations {
     /* `uid`/`gid`: the account this server runs as; files the tool writes in
        its kept work folder belong to it on the host. */
     #startingMs; #answerMs; #pollMs;
-    constructor({ store, vms, tools, stopDelayMs = STOP_DELAY_MS, uid = process.getuid(), gid = process.getgid(), startingMs = STARTING_MS, answerMs = ANSWER_MS, pollMs = POLL_MS }) {
-        this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs; this.#uid = uid; this.#gid = gid;
+    constructor({ store, vms, tools, layout = new JsonFile(undefined, {}), stopDelayMs = STOP_DELAY_MS, uid = process.getuid(), gid = process.getgid(), startingMs = STARTING_MS, answerMs = ANSWER_MS, pollMs = POLL_MS }) {
+        this.#layout = layout; this.#store = store; this.#vms = vms; this.#tools = tools; this.#stopDelayMs = stopDelayMs; this.#uid = uid; this.#gid = gid;
         this.#startingMs = startingMs; this.#answerMs = answerMs; this.#pollMs = pollMs;
         /* A build interrupted by a restart of this server cannot be resumed
            blindly: it is marked failed, and says so. */
@@ -177,11 +178,30 @@ export class Conversations {
     /* The sign-in rules of a conversation's tool, or undefined. */
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }
 
+    /* THE ORDER OF THE LIST, the same on every device: the conversations
+     * (one order; a folder shows its own in it) and the folders. Kept in a
+     * file of its own; what is not in it (made before, or by an older
+     * version) comes after, in the order it was made. A folder is only a
+     * word on its conversations: with none left, it is gone. */
+    #order() {
+        const all = this.#store.all();
+        const names = new Set(all.map((c) => c.name));
+        const kept = this.#layout.get();
+        const order = [...new Set((Array.isArray(kept.order) ? kept.order : []).filter((n) => names.has(n)))];
+        for (const c of all) if (!order.includes(c.name)) order.push(c.name);
+        const present = [...new Set(all.map((c) => c.group).filter(Boolean))];
+        const groups = [...new Set((Array.isArray(kept.groups) ? kept.groups : []).filter((g) => present.includes(g)))];
+        for (const g of present) if (!groups.includes(g)) groups.push(g);
+        return { order, groups };
+    }
+    #keepOrder({ order, groups }) { this.#layout.set({ order, groups }); }
+
     list() {
-        return this.#store.all().map((c) => {
+        const { order, groups } = this.#order();
+        return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false };
+            return { ...c, rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false };
         });
     }
 
@@ -211,8 +231,9 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, workOnDisk }) {
+    create({ name: given, title: read, tool, memoryMb, workOnDisk, group }) {
         const { name, title } = this.#naming({ name: given, title: read });
+        if (group !== undefined) { const problem = groupProblem(group); if (problem) throw new Refusal(400, problem); }
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
         const chosen = this.#tools.find((t) => t.id === tool);
         if (!chosen) throw new Refusal(400, 'Unknown tool.');
@@ -222,8 +243,11 @@ export class Conversations {
         }
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        /* A new one comes first in its folder (or first of those in none). */
+        const { order, groups } = this.#order();
         this.#store.put(conversation);
+        this.#keepOrder({ order: [name, ...order], groups: group && !groups.includes(group) ? [...groups, group] : groups });
         this.built = this.#build(name, chosen, memory);
         return conversation;
     }
@@ -481,6 +505,78 @@ export class Conversations {
         if (typeof on !== 'boolean') throw new Refusal(400, 'Say true (hidden from the list) or false (shown).');
         this.#store.patch(name, { hidden: on ? true : undefined });
         return this.#store.get(name);
+    }
+
+    /* ITS FOLDER in the list ('' for none): first among those of that folder. */
+    setGroup(name, group) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        const problem = groupProblem(group);
+        if (problem) throw new Refusal(400, problem);
+        if ((c.group ?? '') === group) return c;
+        const { order, groups } = this.#order();
+        this.#store.patch(name, { group: group || undefined });
+        this.#keepOrder({ order: [name, ...order.filter((n) => n !== name)], groups: group && !groups.includes(group) ? [...groups, group] : groups });
+        return this.#store.get(name);
+    }
+
+    /* A folder renamed, for all its conversations; to the name of another, they join it. */
+    renameGroup(from, to) {
+        const problem = groupProblem(to);
+        if (problem) throw new Refusal(400, problem);
+        if (!to) throw new Refusal(400, 'Give the new name of the folder.');
+        const inside = this.#store.all().filter((c) => typeof from === 'string' && from && c.group === from);
+        if (inside.length === 0) throw new Refusal(404, 'No such folder.');
+        const { order, groups } = this.#order();
+        for (const c of inside) this.#store.patch(c.name, { group: to });
+        const renamed = groups.includes(to) ? groups.filter((g) => g !== from) : groups.map((g) => (g === from ? to : g));
+        this.#keepOrder({ order, groups: renamed });
+        return { renamed: inside.length, group: to };
+    }
+
+    /* One place up or down among the others of its folder (`to`: 'up' or 'down').
+       A hidden one is passed over by one that is shown: it is not in sight. */
+    move(name, to) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (to !== 'up' && to !== 'down') throw new Refusal(400, 'Say up or down.');
+        const { order, groups } = this.#order();
+        const byName = new Map(this.#store.all().map((x) => [x.name, x]));
+        const peers = order.filter((n) => (byName.get(n).group ?? '') === (c.group ?? '') && (c.hidden === true || byName.get(n).hidden !== true || n === name));
+        const at = peers.indexOf(name);
+        const other = peers[to === 'up' ? at - 1 : at + 1];
+        if (other === undefined) return { order: this.list().map((x) => x.name) };
+        const i = order.indexOf(name); const j = order.indexOf(other);
+        [order[i], order[j]] = [order[j], order[i]];
+        this.#keepOrder({ order, groups });
+        return { order };
+    }
+
+    /* A folder one place up or down among the folders. */
+    moveGroup(group, to) {
+        if (to !== 'up' && to !== 'down') throw new Refusal(400, 'Say up or down.');
+        const { order, groups } = this.#order();
+        const at = groups.indexOf(group);
+        if (typeof group !== 'string' || at < 0) throw new Refusal(404, 'No such folder.');
+        const j = to === 'up' ? at - 1 : at + 1;
+        if (j >= 0 && j < groups.length) [groups[at], groups[j]] = [groups[j], groups[at]];
+        this.#keepOrder({ order, groups });
+        return { groups };
+    }
+
+    /* A whole order, as a drag and drop leaves it: names it does not know are
+       left out, and those it forgets keep their places after the others. */
+    setOrder({ order: wanted, groups: wantedGroups } = {}) {
+        const { order, groups } = this.#order();
+        const pick = (list, known) => {
+            if (list === undefined) return known;
+            if (!Array.isArray(list) || list.length > 10_000 || list.some((x) => typeof x !== 'string')) throw new Refusal(400, 'Give a list of names.');
+            const chosen = [...new Set(list.filter((x) => known.includes(x)))];
+            return [...chosen, ...known.filter((x) => !chosen.includes(x))];
+        };
+        const next = { order: pick(wanted, order), groups: pick(wantedGroups, groups) };
+        this.#keepOrder(next);
+        return next;
     }
 
     /* What is dictated into its terminal starts with a microphone sign, once

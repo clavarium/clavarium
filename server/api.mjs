@@ -22,6 +22,13 @@
  *   GET  /api/conversations/<name>/guide         what its tool is told about where it is: the exact texts, the owner's lines
  *   POST /api/conversations/<name>/guide         {lines}: the owner's own lines for it (short, plain text)
  *   POST /api/conversations/<name>/guide/tell    its guide written again, and one line typed in its terminal to read it
+ *   POST /api/conversations/<name>/group    {group}: its folder in the list ('' none); first in it
+ *   POST /api/conversations/<name>/move     {to: up|down}: one place among those of its folder
+ *   POST /api/groups/rename                 {from, to}: for all its conversations
+ *   POST /api/groups/move                   {group, to: up|down}
+ *   POST /api/order                         {order?, groups?}: the whole order, as a drag and drop leaves it
+ *   GET  /api/instance                      {name, defaultName, given}: the name of this Clavarium
+ *   POST /api/instance                      {name}: '' for the one drawn from its address
  *   GET  /api/resources
  *   POST /api/resources                     {name} | {name, type: 'git', from?, via?: {method, key?, user?, secret?}}
  *   GET  /api/git-keys                      SSH keys made here: the public half only
@@ -104,7 +111,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -194,6 +201,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
             if (pathname === '/api/git-hosts' && gitAccess) return send(200, gitAccess.hosts()), true;
             if (pathname === '/api/platform' && platform) return send(200, platform), true;
+            if (pathname === '/api/instance' && instance) return send(200, instance.about()), true;
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
@@ -293,7 +301,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
         if (pathname === '/api/alerts/remove' && alerts) return send(200, alerts.remove(String(body.endpoint ?? ''))), true;
-        if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
+        if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: instance?.name() ?? 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
         if (pathname === '/api/talk/settings' && talk) return send(200, talk.setWords({ lang: body.lang, own: body.own })), true;
         if (pathname === '/api/talk/thread' && talk) return send(200, talk.setThread({ levels: body.levels })), true;
         const guiding = /^\/api\/conversations\/([^/]+)\/guide(\/tell)?$/.exec(pathname);
@@ -428,6 +436,13 @@ export async function handleApi(request, response, conversations, headers, resou
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
+        /* The list: folders and order, the same on every device (conversations.mjs). */
+        if (pathname === '/api/instance' && instance) return send(200, instance.setName(body.name)), true;
+        if (pathname === '/api/order') return send(200, conversations.setOrder({ order: body.order, groups: body.groups })), true;
+        if (pathname === '/api/groups/rename') return send(200, conversations.renameGroup(body.from, body.to)), true;
+        if (pathname === '/api/groups/move') return send(200, conversations.moveGroup(body.group, body.to)), true;
+        const grouping = /^\/api\/conversations\/([^/]+)\/(group|move)$/.exec(pathname);
+        if (grouping) return send(200, grouping[2] === 'group' ? conversations.setGroup(decodeURIComponent(grouping[1]), body.group) : conversations.move(decodeURIComponent(grouping[1]), body.to)), true;
         const titling = /^\/api\/conversations\/([^/]+)\/title$/.exec(pathname);
         if (titling) return send(200, conversations.setTitle(decodeURIComponent(titling[1]), body.title)), true;
         const hiding = /^\/api\/conversations\/([^/]+)\/hidden$/.exec(pathname);

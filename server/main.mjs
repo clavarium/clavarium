@@ -21,7 +21,8 @@ import { attachBridge } from './bridge.mjs';
 import { attachCommand } from './tmux.mjs';
 import { handleApi } from './api.mjs';
 import { Conversations, DRAWN_MS } from './conversations.mjs';
-import { Store } from './store.mjs';
+import { Store, JsonFile } from './store.mjs';
+import { Instance } from './instance.mjs';
 import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
 import { Resources } from './resources.mjs';
@@ -114,7 +115,9 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance() } = {}) {
+    /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
+    const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
         /* Several files are one, in their order. */
         const body = Array.isArray(file[0]) ? Buffer.concat((await Promise.all(file[0].map((f) => readFile(f.startsWith('/') ? f : ROOT + f)))).flatMap((b) => [b, Buffer.from('\n;\n')])) : await readFile(file[0].startsWith('/') ? file[0] : ROOT + file[0]);
@@ -139,6 +142,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         }
         if (door && pathname.startsWith('/c/')) {
             if (await handleDoor(request, response, door)) return;
+            if (pathname === '/c/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
             const file = DEVICE_FILES[pathname];
             if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) { response.writeHead(404, HEADERS).end(); return; }
             await sendFile(response, file);
@@ -149,7 +153,8 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance)) return;
+        if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
             response.writeHead(404, HEADERS).end();
@@ -179,16 +184,17 @@ const PARLEY_WAIT_MS = 20_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
     const gate = makeGate(operators);
     const originOk = makeOriginCheck(publicOrigin);
+    const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
     const asHost = runner(host);
     const vms = new Vms(asHost, host);
-    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
+    const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
     const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
@@ -287,7 +293,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* The owner's devices are told when something waits for them: see alerts.mjs. */
     const alerts = new Alerts({ store: new Store(`${dataDir}/alerts.json`), keyFile: `${dataDir}/alerts-keys.json`, subject: publicOrigin, ...(alertSend ? { send: alertSend } : {}) });
     const answerer = new Answerer({ store: new Store(`${dataDir}/answerer.json`), vms, config: answererConfig(env), conversations: all, dataDir, ...(answerFetcher ? { fetcher: answerFetcher } : {}),
-        onNeeds: (name, why) => { void alerts.tell({ title: `${name} waits for you`, body: why, url: `/?c=${name}` }); } });
+        onNeeds: (name, why) => { void alerts.tell({ title: `${instance.name()}: ${name} waits for you`, body: why, url: `/?c=${name}` }); } });
     const answerTimer = answerer.start(answerEveryMs);
     /* A tool is told to get to work when something arrives, or by the clock: see wakeups.mjs. */
     let bridge;
@@ -348,7 +354,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
     const stopWatch = capacity.start();
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
@@ -418,7 +424,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         /* Where the shared folders live: $MNT, declared to the host program in
            its own settings, read here so that both agree (see clavarium-host). */
         const mntDir = hostSetting('MNT') || dataDir;
-        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey });
+        /* --name: the name of this Clavarium until one is chosen in Settings (instance.mjs). */
+        const name = option(argv, 'name', '') || undefined;
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

@@ -170,3 +170,12 @@ test('install.sh of the site will not go further unless it is root', { skip: pro
     assert.equal(r.code, 78);
     assert.match(r.err, /sudo bash/);
 });
+
+test('--name: the name of this Clavarium, plain characters only, said in the plan and passed to the server', () => {
+    const r = install(...GOOD, '--name', 'Home lab 2');
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /name\s+Home lab 2/);
+    assert.match(install(...GOOD).out, /name\s+drawn from the address/);
+    for (const bad of ['', 'a"b', 'x$(id)', 'two\nlines', ' lead', 'x'.repeat(31), 'Été']) assert.equal(install(...GOOD, '--name', bad).code, 64, JSON.stringify(bad));
+    assert.match(readFileSync(SCRIPT, 'utf8'), /--name \\"\$APP_NAME\\"/);
+});
