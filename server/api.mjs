@@ -215,7 +215,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
-            if (pathname === '/api/server/brief' && capacity) return send(200, await capacity.brief()), true;
+            if (pathname === '/api/server/brief' && capacity) return send(200, { ...(await capacity.brief()), machines: platform?.machines ?? true }), true;
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
             if (pathname === '/api/setup/import' && setup) return send(200, setup.job()), true;

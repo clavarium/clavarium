@@ -48,7 +48,7 @@
  * --------------------------------------------------------------------------- */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync, existsSync, symlinkSync, realpathSync, cpSync, openSync, closeSync, statfsSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync, existsSync, symlinkSync, realpathSync, cpSync, openSync, closeSync, statfsSync, statSync, chmodSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
@@ -65,9 +65,22 @@ export const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 export const DEFAULTS = { MODE: 'auto', CHANNEL: 'latest', WINDOW: '02:00-05:00', PORT: '7717' };
 /* A conversation in one of these phases is in the middle of something the restart would cut. */
 const BUSY = ['building', 'moving', 'restarting'];
+/* A busy phase older than this was cut short (the server died under it): it does not hold an update back. */
+const BUSY_STALE_MS = 30 * 60_000;
+/* THE WATCHDOG (each timer turn): down this many turns in a row, or its service failed: one action, at most one an hour. */
+const WATCH_MISSES = 3;
+const WATCH_EVERY_MS = 3600_000;
+/* An update this recent is the first suspect when the server will not stay up. */
+const WATCH_RECENT_MS = 24 * 3600_000;
 const HISTORY_MAX = 30;
 const ASK_EVERY_MS = 6 * 3600_000;
 const PROVENANCE = 'https://slsa.dev/provenance/v1';
+/* What the log of a failure keeps, at most (history entry `log`, shown behind "See the log"). */
+const LOG_MAX = 12_000;
+/* Set beside the server's unit by the updater (root): a crash loop never locks the service out, so a
+   restart asked later (an update, the watchdog) still starts it. */
+export const DROP_IN = '/etc/systemd/system/clavarium.service.d/restart.conf';
+export const DROP_IN_TEXT = '# Written by the Clavarium updater: a crash loop never locks the service out.\n[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestartSec=3\n';
 
 export class Refused extends Error {}
 
@@ -142,16 +155,25 @@ const toHex = (integrity) => Buffer.from(String(integrity).replace(/^sha512-/, '
 export class Updater {
     #o; #run; #fetch;
     constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
-        verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, minFreeMb = 1024, healthMs = 60_000, settleMs = 10_000 } = {}) {
-        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, settleMs };
+        verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
+        clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000 } = {}) {
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
         this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
-        this.restart = restart ?? (() => this.#run(['systemctl', 'restart', 'clavarium.service'], { timeoutMs: 120_000 }));
+        this.restart = restart ?? (() => this.#restart());
+        /* What was seen when the server did not come up: its journal, its unit, who holds its port. */
+        this.diagnose = diagnose ?? (() => this.#diagnose());
         this.health = health ?? ((release) => this.#health(release));
         this.backup = backup ?? ((app) => this.#backup(app));
         this.restoreData = restoreData ?? ((app, archive) => this.#restoreData(app, archive));
         this.installPrivileged = installPrivileged ?? ((app) => this.#installPrivileged(app));
         this.ensureNode = ensureNode ?? ((app) => this.#ensureNode(app));
+        /* What systemd says of the server: 'active', 'activating', 'failed', 'inactive'... */
+        this.serviceState = serviceState ?? (async () => (await this.#run(['systemctl', 'show', '-p', 'ActiveState', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim() || 'unknown');
+        /* Does the server answer, on its port, here? */
+        this.answers = answers ?? (() => this.#fetch(`http://127.0.0.1:${readConf(this.#o.conf).PORT}/`, { signal: AbortSignal.timeout(5000), redirect: 'manual' }).then((r) => r.status < 500).catch(() => false));
+        this.mainPid = mainPid ?? (async () => (await this.#run(['systemctl', 'show', '-p', 'MainPID', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim());
+        this.pidCwd = pidCwd ?? ((pid) => { try { return realpathSync(`/proc/${pid}/cwd`); } catch { return ''; } });
     }
 
     get releasesDir() { return join(this.#o.code, 'releases'); }
@@ -340,12 +362,26 @@ export class Updater {
         renameSync(`${link}.new`, link);
     }
 
-    /* A conversation in the middle of a build, a move or a restart: '' or why not now. */
-    busy() {
+    /* A conversation in the middle of a build, a move or a restart: '' or why not now.
+       Only while the server runs (a phase in the file of a server that is down is not going on), and
+       only a phase younger than BUSY_STALE_MS (older: cut short; the server settles it when it starts). */
+    async busy() {
+        const file = join(this.#o.data, 'conversations.json');
         let all = [];
-        try { all = JSON.parse(readFileSync(join(this.#o.data, 'conversations.json'), 'utf8')); } catch { return ''; }
-        const busy = (Array.isArray(all) ? all : []).filter((c) => BUSY.includes(c.phase)).map((c) => c.name);
-        return busy.length ? `a machine is being built or restarted (${busy.slice(0, 3).join(', ')}): the update waits` : '';
+        try { all = JSON.parse(readFileSync(file, 'utf8')); } catch { return ''; }
+        const busy = (Array.isArray(all) ? all : []).filter((c) => c && BUSY.includes(c.phase));
+        if (!busy.length) return '';
+        const names = (list) => list.slice(0, 3).map((c) => c.name).join(', ');
+        const state = await this.serviceState().catch(() => 'unknown');
+        if (state !== 'active') { this.#o.log(`busy phases not waited for: the server is ${state} (${names(busy)})`); return ''; }
+        let written = this.#o.now().getTime();
+        try { written = statSync(file).mtimeMs; } catch { /* now */ }
+        const now = this.#o.now().getTime();
+        const since = (c) => { const t = Date.parse(c.restartingSince ?? c.buildingSince ?? c.movingSince ?? ''); return Number.isFinite(t) ? t : written; };
+        const stale = busy.filter((c) => now - since(c) > BUSY_STALE_MS);
+        if (stale.length) this.#o.log(`busy phases older than 30 minutes not waited for: ${names(stale)}`);
+        const live = busy.filter((c) => !stale.includes(c));
+        return live.length ? `a machine is being built or restarted (${names(live)}): the update waits` : '';
     }
     #dataFormat() { try { return JSON.parse(readFileSync(join(this.#o.data, 'data-format.json'), 'utf8')).format; } catch { return undefined; } }
 
@@ -356,7 +392,9 @@ export class Updater {
             try { const fd = openSync(file, 'wx'); writeFileSync(fd, String(process.pid)); closeSync(fd); return () => rmSync(file, { force: true }); } catch (error) {
                 if (error.code !== 'EEXIST') throw error;
                 const pid = Number(readFileSync(file, 'utf8')) || 0;
-                let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch { /* gone */ }
+                /* A lock left by a process that is gone (killed, the machine stopped) is taken over. */
+                let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch (e) { alive = e.code === 'EPERM'; }
+                if (!alive) this.#o.log(`a stale lock (process ${pid || '?'} is gone): taken over`);
                 if (alive) throw new Refused('an update or an installation is running already');
                 rmSync(file, { force: true });
             }
@@ -371,7 +409,7 @@ export class Updater {
         /* Asked for the version that runs (a request that waited while it came by itself): done already. */
         if (from && compareVersions(version, from.version) === 0) return;
         if (from && compareVersions(version, from.version) < 0) throw new Refused(`${version} is not newer than ${from.version}`);
-        const why = this.busy(); if (why) throw new Refused(why);
+        const why = await this.busy(); if (why) throw new Refused(why);
         const unlock = this.#lock();
         try {
             let release;
@@ -382,7 +420,7 @@ export class Updater {
                 this.#step('update', version, 'Backing up');
                 archive = await this.backup(from?.app ?? release.app);
             } catch (error) { rmSync(release.dir, { recursive: true, force: true }); this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: `the backup failed: ${error.message}` }); throw error; }
-            const late = this.busy();
+            const late = await this.busy();
             if (late) { this.#history({ action: 'update', from: from?.version ?? null, to: version, result: 'failed', why: late }); throw new Refused(late); }
             const failed = await this.#switchAndCheck(release, 'update', version);
             if (!failed) {
@@ -390,18 +428,19 @@ export class Updater {
                 this.prune();
                 return this.about();
             }
-            /* IT DID NOT COME UP: back to what ran, its data too if it moved. */
+            /* IT DID NOT COME UP: what was seen kept, then back to what ran, its data too if it moved. */
             let why2 = failed;
+            let log = await this.#seen(`${version} did not come up: ${failed}`);
             if (from) {
                 this.#step('update', version, 'Going back');
                 this.switchTo(from.id);
                 await this.installPrivileged(from.app).catch(() => {});
                 if (archive && this.#dataFormat() !== before) { const r = await this.restoreData(from.app, archive).catch((e) => ({ code: 1, stderr: e.message })); if (r?.code) why2 += `; the data backup could not be put back (${lastLine(r)}): ${archive}`; }
                 const back = await this.#restartAndCheck(from);
-                if (back) why2 += `; ${from.version} did not come back either (${back}): journalctl -u clavarium`;
+                if (back) { why2 += `; ${from.version} did not come back either (${back}): journalctl -u clavarium`; log = `${log}\n\n${await this.#seen(`${from.version} did not come back: ${back}`)}`; }
                 rmSync(release.dir, { recursive: true, force: true });
             }
-            this.#history({ action: 'update', from: from?.version ?? null, to: version, result: from ? 'rolled-back' : 'failed', why: why2 });
+            this.#history({ action: 'update', from: from?.version ?? null, to: version, result: from ? 'rolled-back' : 'failed', why: why2, log: log.slice(-LOG_MAX) });
             this.prune();
             return this.about();
         } finally { unlock(); }
@@ -416,19 +455,20 @@ export class Updater {
         if (to.current) throw new Refused(`${id} is the release that runs`);
         const format = this.#dataFormat();
         if (format !== undefined && to.dataFormat < format) throw new Refused(`${to.version} cannot read the data of this version (format ${format}; it reads ${to.dataFormat})`);
-        const why = this.busy(); if (why) throw new Refused(why);
+        const why = await this.busy(); if (why) throw new Refused(why);
         const unlock = this.#lock();
         try {
             const failed = await this.#switchAndCheck(to, 'back', to.version);
             if (!failed) { this.#history({ action: 'back', from: from?.version ?? null, to: to.version, result: 'done' }); return this.about(); }
             let why2 = failed;
+            let log = await this.#seen(`${to.version} did not come up: ${failed}`);
             if (from) {
                 this.switchTo(from.id);
                 await this.installPrivileged(from.app).catch(() => {});
                 const back = await this.#restartAndCheck(from);
-                if (back) why2 += `; ${from.version} did not come back either (${back})`;
+                if (back) { why2 += `; ${from.version} did not come back either (${back})`; log = `${log}\n\n${await this.#seen(`${from.version} did not come back: ${back}`)}`; }
             }
-            this.#history({ action: 'back', from: from?.version ?? null, to: to.version, result: 'failed', why: why2 });
+            this.#history({ action: 'back', from: from?.version ?? null, to: to.version, result: 'failed', why: why2, log: log.slice(-LOG_MAX) });
             return this.about();
         } finally { unlock(); }
     }
@@ -455,7 +495,7 @@ export class Updater {
         const all = this.releases();
         const current = all.find((r) => r.current);
         /* The one gone from at the last update or return that worked; else the newest other one. */
-        const last = (this.#state().history ?? []).find((h) => h.result === 'done');
+        const last = (this.#state().history ?? []).find((h) => h.result === 'done' && h.action !== 'restart');
         const previous = all.find((r) => !r.current && last && r.version === last.from) ?? all.find((r) => !r.current);
         const keep = new Set([current?.id, previous?.id].filter(Boolean));
         for (const r of all) if (!keep.has(r.id)) rmSync(r.dir, { recursive: true, force: true });
@@ -482,11 +522,61 @@ export class Updater {
         if (conf.MODE === 'ask') return `${available} is out: waiting for the owner`;
         /* A version that failed here is not tried again by itself: the owner can, from Settings. */
         if ((state.history ?? []).some((h) => h.to === available && h.action === 'update' && h.result !== 'done')) return `${available} failed here before: not tried again by itself`;
-        if (this.busy()) return this.busy();
+        const why = await this.busy(); if (why) return why;
         await this.apply(available);
         /* What the history says, not what was hoped: a version that did not start was undone. */
-        const last = (this.#state().history ?? []).at(-1);
+        const last = (this.#state().history ?? [])[0];
         return last?.to === available && last.result !== 'done' ? `${available} did not work: back to ${last.from ?? 'nothing'} (${last.why ?? last.result})` : `updated to ${available}`;
+    }
+
+    /* THE WATCHDOG, at each timer turn: the server down (its service failed or stopped, or no answer
+       WATCH_MISSES turns in a row) is acted on, once, and said in the history:
+       - after an update of less than WATCH_RECENT_MS, with the release before it kept (and able to
+         read the data): back to it, by itself ("did not stay up"), not tried again by itself;
+       - otherwise: one restart.
+       Never more than one action in WATCH_EVERY_MS, so that it never loops. { acted, said } */
+    async watchdog() {
+        const state = await this.serviceState().catch(() => 'unknown');
+        const up = state === 'active' && await this.answers().catch(() => false);
+        const w = this.#state().watch ?? {};
+        if (up) { if (w.misses) this.#save({ watch: { ...w, misses: 0 } }); return { acted: false, said: 'up' }; }
+        const misses = (w.misses ?? 0) + 1;
+        this.#save({ watch: { ...w, misses, seen: state } });
+        const down = state === 'failed' || state === 'inactive' || misses >= WATCH_MISSES;
+        this.#o.log(`watchdog: the server is ${state === 'active' ? 'active but does not answer' : state} (turn ${misses})`);
+        if (!down) return { acted: false, said: `the server does not answer (turn ${misses} of ${WATCH_MISSES})` };
+        const now = this.#o.now();
+        if (w.actedAt && now - new Date(w.actedAt) < WATCH_EVERY_MS) return { acted: false, said: 'the server is down; something was done less than an hour ago: nothing more by itself' };
+        let unlock;
+        try { unlock = this.#lock(); } catch (error) { if (error instanceof Refused) return { acted: false, said: 'the server is down, but an update runs' }; throw error; }
+        try {
+            this.#save({ watch: { misses: 0, actedAt: now.toISOString(), seen: state } });
+            const log = await this.#seen(`the server was down (${state})`);
+            const current = this.current();
+            /* The last update or return (a restart by the watchdog is not one). */
+            const last = (this.#state().history ?? []).find((h) => h.action !== 'restart');
+            const recent = current && last && last.action === 'update' && last.result === 'done' && last.to === current.version && now - new Date(last.at) < WATCH_RECENT_MS;
+            const previous = recent ? this.releases().find((r) => !r.current && r.version === last.from) : undefined;
+            const format = this.#dataFormat();
+            if (previous && (format === undefined || previous.dataFormat >= format)) {
+                let why = `${current.version} did not stay up (its service ${state === 'active' ? 'did not answer' : `was ${state}`}): back to ${previous.version}`;
+                this.#o.log(`watchdog: ${why}`);
+                this.#step('update', current.version, 'Going back');
+                let back;
+                try { this.switchTo(previous.id); await this.installPrivileged(previous.app).catch(() => {}); back = await this.#restartAndCheck(previous); } catch (error) { back = error.message; }
+                if (back) why += `; ${previous.version} did not come back either (${back}): journalctl -u clavarium`;
+                else rmSync(current.dir, { recursive: true, force: true });
+                this.#history({ action: 'update', from: previous.version, to: current.version, result: 'rolled-back', by: 'watchdog', why, log: log.slice(-LOG_MAX) });
+                this.prune();
+                return { acted: true, said: why };
+            }
+            const v = current?.version ?? null;
+            this.#o.log(`watchdog: the server is ${state}: restarted once`);
+            const failed = current ? await this.#restartAndCheck(current) : await this.restart().then((r) => (r?.code ? lastLine(r) : '')).catch((e) => e.message);
+            const why = `the server was down (${state === 'active' ? 'no answer' : state}): restarted by itself${failed ? `; it did not come back (${failed}): journalctl -u clavarium` : ''}`;
+            this.#history({ action: 'restart', from: v, to: v, result: failed ? 'failed' : 'done', by: 'watchdog', why, log: log.slice(-LOG_MAX) });
+            return { acted: true, said: why };
+        } finally { unlock(); }
     }
 
     /* What the host program asked (a request file), or the timer's turn. */
@@ -502,6 +592,9 @@ export class Updater {
                 await this.check().catch(() => {});
                 return r;
             }
+            /* The timer's turn: first, is the server up? (it may have died after an update that looked well) */
+            const watched = await this.watchdog();
+            if (watched.acted) return watched.said;
             return await this.tick();
         } catch (error) {
             if (error instanceof Refused && request) this.#save({ refused: { at: this.#o.now().toISOString(), why: error.message } });
@@ -509,28 +602,103 @@ export class Updater {
         }
     }
 
+    /* What was seen, as text: never fails (a log that could not be read says so). */
+    async #seen(title) {
+        const text = await Promise.resolve().then(() => this.diagnose()).catch((e) => `the log could not be read: ${e.message}`);
+        return `== ${this.#o.now().toISOString()} ${title}\n${String(text ?? '').trim()}`;
+    }
+
+    /* THE DROP-IN beside the server's unit: written when it differs, then systemd told. true when written. */
+    async ensureDropIn() {
+        const file = this.#o.dropIn;
+        try { if (readFileSync(file, 'utf8') === DROP_IN_TEXT) return false; } catch { /* not there */ }
+        mkdirSync(dirname(file), { recursive: true, mode: 0o755 });
+        writeFileSync(`${file}.new`, DROP_IN_TEXT, { mode: 0o644 });
+        renameSync(`${file}.new`, file);
+        if (process.getuid?.() === 0) await this.#run(['systemctl', 'daemon-reload'], { timeoutMs: 60_000 });
+        return true;
+    }
+
     /* ------------------------- the real machine's ways ------------------------- */
-    async #health(release) {
+    /* The processes still there after a stop: in the unit's cgroup, or holding its port. [{ pid, state, port }] */
+    async #leftovers() {
         const port = readConf(this.#o.conf).PORT;
-        const end = Date.now() + this.#o.healthMs;
+        const pids = new Map();
+        try { for (const p of readFileSync('/sys/fs/cgroup/system.slice/clavarium.service/cgroup.procs', 'utf8').split('\n')) if (/^\d+$/.test(p.trim())) pids.set(p.trim(), false); } catch { /* none */ }
+        const ss = await this.#run(['ss', '-Hltnp', `sport = :${port}`], { timeoutMs: 10_000 });
+        for (const m of String(ss.stdout).matchAll(/pid=(\d+)/g)) pids.set(m[1], true);
+        return [...pids].map(([pid, holds]) => {
+            let state = '?';
+            try { state = /^State:\s+(\S)/m.exec(readFileSync(`/proc/${pid}/status`, 'utf8'))?.[1] ?? '?'; } catch { state = 'gone'; }
+            return { pid: Number(pid), state, port: holds };
+        }).filter((p) => p.state !== 'gone');
+    }
+
+    /* A RESTART that does not trust the stop: its failures forgotten (reset-failed), stopped, and
+       what is left of the old server looked at -- killed, or, when it cannot be (state D: waiting on
+       the kernel), said precisely: then nothing would answer on the port before a reboot. */
+    async #restart() {
+        await this.#run(['systemctl', 'reset-failed', 'clavarium.service'], { timeoutMs: 30_000 });
+        await this.#run(['systemctl', 'stop', 'clavarium.service'], { timeoutMs: 120_000 });
+        let left = await this.#leftovers();
+        for (const p of left.filter((x) => x.state !== 'D')) { try { process.kill(p.pid, 'SIGKILL'); this.#o.log(`a process of the old server was still there: ${p.pid} (state ${p.state}): killed`); } catch { /* gone */ } }
+        if (left.length) { await this.#o.sleep(2000); left = await this.#leftovers(); }
+        const stuck = left.filter((x) => x.state === 'D' && x.port);
+        if (stuck.length) return { code: 1, stderr: `a stuck process holds the port: ${stuck.map((p) => `pid ${p.pid}, state D`).join('; ')} (it waits on the kernel and cannot be killed): the server needs a reboot` };
+        if (left.some((x) => x.state === 'D')) this.#o.log(`processes of the old server stuck in state D (not on the port): ${left.map((p) => p.pid).join(', ')}`);
+        await this.#run(['systemctl', 'reset-failed', 'clavarium.service'], { timeoutMs: 30_000 });
+        return this.#run(['systemctl', 'start', 'clavarium.service'], { timeoutMs: 120_000 });
+    }
+
+    async #diagnose() {
+        const port = readConf(this.#o.conf).PORT;
+        const part = async (title, argv) => { const r = await this.#run(argv, { timeoutMs: 20_000 }); return `-- ${title}\n${String(r.stdout || r.stderr || `exit ${r.code}`).trim()}`; };
+        const left = await this.#leftovers().catch(() => []);
+        return [
+            await part('systemctl status clavarium', ['systemctl', 'status', 'clavarium.service', '--no-pager', '-n', '0']),
+            await part(`who listens on ${port}`, ['ss', '-Hltnp', `sport = :${port}`]),
+            `-- processes of the server's unit or on its port\n${left.map((p) => `pid ${p.pid} state ${p.state}${p.port ? ' (holds the port)' : ''}`).join('\n') || 'none'}`,
+            await part('journalctl -u clavarium -n 80', ['journalctl', '-u', 'clavarium.service', '-n', '80', '--no-pager', '-o', 'short-iso']),
+        ].join('\n');
+    }
+
+    /* Comes up (answers, from this release) within healthMs, then STAYS up: watched until watchMs after
+       the restart; one restart by systemd is forgiven if it answers at the end, not two. */
+    async #health(release) {
+        const { clock, sleep } = this.#o;
+        const start = clock();
         const target = realpathSync(release.dir);
+        const mine = async () => { const pid = await this.mainPid(); return { pid, ok: !!pid && pid !== '0' && this.pidCwd(pid).startsWith(target) }; };
         let said = 'it did not answer';
+        let pid = '';
         for (;;) {
-            const active = await this.#run(['systemctl', 'is-active', '--quiet', 'clavarium.service'], { timeoutMs: 10_000 });
-            const answered = active.code === 0 && await this.#fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(3000), redirect: 'manual' }).then((r) => r.status < 500).catch(() => false);
+            const state = await this.serviceState().catch(() => 'unknown');
+            const answered = state === 'active' && await this.answers().catch(() => false);
             if (answered) {
-                const pid = (await this.#run(['systemctl', 'show', '-p', 'MainPID', '--value', 'clavarium.service'], { timeoutMs: 10_000 })).stdout.trim();
-                let cwd = ''; try { cwd = realpathSync(`/proc/${pid}/cwd`); } catch { /* gone */ }
-                if (cwd.startsWith(target)) break;
+                const m = await mine();
+                if (m.ok) { pid = m.pid; break; }
                 said = 'the server that answers is not this release';
-            } else if (active.code !== 0) said = 'its service stopped';
-            if (Date.now() > end) return said;
-            await new Promise((r) => setTimeout(r, 1000));
+            } else if (state !== 'active' && state !== 'activating') said = 'its service stopped';
+            if (clock() - start > this.#o.healthMs) return said;
+            await sleep(1000);
         }
         /* And it stays up. */
-        await new Promise((r) => setTimeout(r, this.#o.settleMs));
-        const still = await this.#run(['systemctl', 'is-active', '--quiet', 'clavarium.service'], { timeoutMs: 10_000 });
-        return still.code === 0 ? '' : 'the server stopped soon after it started';
+        const until = Math.max(start + this.#o.watchMs, clock() + this.#o.settleMs);
+        let restarts = 0;
+        while (clock() < until) {
+            await sleep(Math.min(5000, Math.max(1, until - clock())));
+            const now = await this.mainPid().catch(() => '');
+            if (now && now !== '0' && now !== pid) { restarts += 1; pid = now; }
+            if (restarts > 1) return 'the server stopped more than once in its first minutes';
+        }
+        /* At the end: it answers, from this release (a moment given if it is in its one restart). */
+        const last = clock() + this.#o.settleMs;
+        for (;;) {
+            const state = await this.serviceState().catch(() => 'unknown');
+            if (state === 'active' && await this.answers().catch(() => false) && (await mine()).ok) return '';
+            if (clock() > last) return restarts ? 'the server stopped soon after it started, and did not answer again' : 'the server stopped soon after it started';
+            await sleep(1000);
+        }
     }
 
     async #backup(app) {
@@ -554,6 +722,7 @@ export class Updater {
             const r = await this.#run(['install', '-o', 'root', '-g', 'root', '-m', '0755', from, to], { timeoutMs: 30_000 });
             if (r.code !== 0) throw new Error(`${to}: ${lastLine(r)}`);
         }
+        await this.ensureDropIn().catch((error) => this.#o.log(`the drop-in of the server's unit could not be written: ${error.message}`));
         /* What a release sets up beside itself (the certificate timer): an update does not run install.sh again.
            Best effort: the update does not depend on it; `sudo clavarium doctor` says when it is missing. */
         const node = join(dirname(app), 'node', 'bin', 'node');
@@ -599,6 +768,7 @@ async function main(argv) {
             /* What this release sets up beside itself (the certificate timer), at its first turn: the
                update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
+            try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }

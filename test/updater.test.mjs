@@ -6,11 +6,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 
@@ -31,6 +32,8 @@ async function setup(t) {
     mkdirSync(dirs.data, { recursive: true });
     const calls = []; const broken = new Set();
     let clock = new Date(2026, 9, 18, 12, 0);
+    /* What systemd says of the server, and whether it answers: up, unless a test says otherwise. */
+    const service = { state: 'active', answers: true };
     const u = new Updater({
         ...dirs, registry: reg.origin, log: () => {}, now: () => clock, minFreeMb: 1,
         verifySignatures: async (dir) => { calls.push(`signatures ${basename(dir)}`); return { code: 0 }; },
@@ -41,8 +44,12 @@ async function setup(t) {
         installPrivileged: async (app) => { calls.push(`privileged ${realpathSync(app).split('/releases/')[1].split('/')[0]}`); },
         /* The Node.js of this test, for every release. */
         ensureNode: async () => dirname(dirname(process.execPath)),
+        diagnose: async () => 'journal: it said why',
+        dropIn: join(root, 'systemd', 'clavarium.service.d', 'restart.conf'),
+        serviceState: async () => service.state,
+        answers: async () => service.answers,
     });
-    return { reg, u, dirs, calls, broken, publish, parley, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
+    return { reg, u, dirs, calls, broken, publish, parley, service, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
 }
 
 /* The first installation, as install.sh makes it: a release, then the link. */
@@ -146,6 +153,7 @@ test('an update that does not come up: back to what ran, by itself, and said; no
     assert.deepEqual(s.calls, ['signatures .1.0.1.partial', 'backup', 'privileged 1.0.1', 'restart', 'health 1.0.1', 'privileged 1.0.0', 'restart', 'health 1.0.0']);
     const [last] = s.u.about().history;
     assert.equal(last.result, 'rolled-back'); assert.equal(last.why, 'it did not answer');
+    assert.match(last.log, /1\.0\.1 did not come up: it did not answer\njournal: it said why/, 'what was seen is kept, for "See the log"');
     assert.deepEqual(readdirSync(join(s.dirs.code, 'releases')), ['1.0.0'], 'the release that failed is removed');
     /* The timer sees it again: not tried by itself. */
     s.u.set('mode', 'asap');
@@ -244,4 +252,138 @@ test('for development, a release from a working tree: copied, installed from its
     assert.ok(existsSync(join(r.app, 'node_modules', 'clavarium-parley', 'package.json')));
     assert.ok(existsSync(join(r.app, 'toolbox', 'clavarium-parley-0.9.0.tgz')));
     assert.deepEqual(s.calls, [], 'no signature check: it is not from the registry');
+});
+
+test('a busy phase holds an update back only while the server runs, and only for 30 minutes', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    s.u.set('mode', 'asap');
+    const at = (min) => new Date(new Date(2026, 9, 18, 12, 0).getTime() - min * 60_000).toISOString();
+    writeFileSync(join(s.dirs.data, 'conversations.json'), JSON.stringify([{ name: 'beta', phase: 'restarting', restartingSince: at(5) }, { name: 'gamma', phase: 'building', buildingSince: at(45) }]));
+    assert.match(await s.u.busy(), /\(beta\): the update waits/, 'a phase of 45 minutes is not waited for');
+    /* The server is down: what its file says is not going on. */
+    s.service.state = 'failed';
+    assert.equal(await s.u.busy(), '');
+    s.service.state = 'activating';
+    assert.equal(await s.u.busy(), '');
+    s.service.state = 'active';
+    writeFileSync(join(s.dirs.data, 'conversations.json'), JSON.stringify([{ name: 'gamma', phase: 'building', buildingSince: at(45) }]));
+    assert.equal(await s.u.tick(), 'updated to 1.0.1');
+});
+
+test('the watchdog: a server that did not stay up after an update goes back by itself, once; otherwise one restart an hour', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    s.u.set('mode', 'asap');
+    assert.equal(await s.u.runOnce(), 'updated to 1.0.1');
+    s.calls.length = 0;
+    /* Up: nothing. */
+    assert.equal(await s.u.runOnce(), 'up to date');
+    assert.deepEqual(s.calls, []);
+    /* It died after the update looked well (its service failed): back to 1.0.0, by itself. */
+    s.at(new Date(2026, 9, 18, 13, 0));
+    s.service.state = 'failed';
+    assert.match(await s.u.runOnce(), /^1\.0\.1 did not stay up \(its service was failed\): back to 1\.0\.0$/);
+    assert.equal(s.current(), '1.0.0');
+    assert.deepEqual(s.calls, ['privileged 1.0.0', 'restart', 'health 1.0.0']);
+    const [last] = s.u.about().history;
+    assert.equal(last.result, 'rolled-back'); assert.equal(last.by, 'watchdog'); assert.equal(last.from, '1.0.0'); assert.equal(last.to, '1.0.1');
+    /* Up again on 1.0.0: 1.0.1 is not tried again by itself. */
+    s.service.state = 'active';
+    s.at(new Date(2026, 9, 18, 13, 15));
+    assert.equal(await s.u.runOnce(), '1.0.1 failed here before: not tried again by itself');
+    /* Down again within the hour: nothing more by itself (it never loops). */
+    s.calls.length = 0;
+    s.service.state = 'inactive';
+    s.at(new Date(2026, 9, 18, 13, 30));
+    await s.u.runOnce();
+    assert.deepEqual(s.calls.filter((c) => c === 'restart'), []);
+    /* An hour later, no recent update to suspect: one restart, said. */
+    s.at(new Date(2026, 9, 18, 14, 5));
+    assert.match(await s.u.runOnce(), /^the server was down \(inactive\): restarted by itself$/);
+    assert.deepEqual(s.calls, ['restart', 'health 1.0.0']);
+    assert.equal(s.u.about().history[0].action, 'restart');
+    /* Active but not answering: only on the third turn in a row. */
+    s.calls.length = 0;
+    s.service.state = 'active'; s.service.answers = false;
+    s.at(new Date(2026, 9, 18, 15, 10));
+    assert.match((await s.u.watchdog()).said, /turn 1 of 3/);
+    assert.match((await s.u.watchdog()).said, /turn 2 of 3/);
+    s.service.answers = true;
+    assert.equal((await s.u.watchdog()).said, 'up', 'the count starts again');
+    s.service.answers = false;
+    await s.u.watchdog(); await s.u.watchdog();
+    const third = await s.u.watchdog();
+    assert.equal(third.acted, true); assert.match(third.said, /no answer/);
+    assert.deepEqual(s.calls, ['restart', 'health 1.0.0']);
+});
+
+test('the watchdog does not go back to a release that cannot read the data, nor after a day', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1', { dataFormat: 2 });
+    await s.u.apply('1.0.1');
+    writeFileSync(join(s.dirs.data, 'data-format.json'), '{"format":2}');
+    s.calls.length = 0;
+    s.service.state = 'failed';
+    s.at(new Date(2026, 9, 18, 13, 0));
+    assert.match((await s.u.watchdog()).said, /restarted by itself/);
+    assert.equal(s.current(), '1.0.1');
+    rmSync(join(s.dirs.data, 'data-format.json'));
+    s.at(new Date(2026, 9, 20, 13, 0));
+    assert.match((await s.u.watchdog()).said, /restarted by itself/, 'an update of two days ago is not suspected');
+    assert.equal(s.current(), '1.0.1');
+});
+
+test('a lock left by a process that is gone is taken over', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    const gone = spawnSync(process.execPath, ['-e', '']).pid;
+    mkdirSync(s.dirs.stateDir, { recursive: true });
+    writeFileSync(join(s.dirs.stateDir, 'lock'), String(gone));
+    await s.u.apply('1.0.1');
+    assert.equal(s.current(), '1.0.1');
+    writeFileSync(join(s.dirs.stateDir, 'lock'), String(process.pid));
+    s.publish('1.0.2');
+    await assert.rejects(s.u.apply('1.0.2'), /running already/, 'a lock of a living process is not');
+    rmSync(join(s.dirs.stateDir, 'lock'));
+});
+
+test('health after a switch: it must stay up two minutes; one restart by systemd is forgiven if it answers at the end', async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'clv-health-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const release = { dir: join(root, 'r') }; mkdirSync(release.dir);
+    /* A story in seconds: what systemd says (pid; 0 = down) at each moment. */
+    const run = async (story, answersAtEnd = true) => {
+        let ms = 0;
+        const at = () => story.filter(([sec]) => sec * 1000 <= ms).at(-1)[1];
+        const u = new Updater({
+            code: join(root, 'opt'), conf: join(root, 'conf'), stateDir: join(root, 'st'), data: root, log: () => {},
+            restart: async () => ({ code: 0 }),
+            clock: () => ms, sleep: async (d) => { ms += d; },
+            serviceState: async () => (at() ? 'active' : 'activating'),
+            answers: async () => !!at() && (answersAtEnd || ms < 120_000),
+            mainPid: async () => String(at()),
+            pidCwd: () => release.dir,
+        });
+        return u.health(release);
+    };
+    assert.equal(await run([[0, 0], [3, 100]]), '');
+    assert.equal(await run([[0, 0], [3, 100], [40, 0], [44, 101]]), '', 'one restart, answering at the end');
+    assert.match(await run([[0, 0], [3, 100], [40, 0], [44, 101], [80, 0], [84, 102]]), /more than once/);
+    assert.match(await run([[0, 0], [3, 100], [100, 0]]), /stopped soon after it started/);
+    assert.match(await run([[0, 0]]), /did not answer|stopped/);
+    assert.match(await run([[0, 0], [3, 100]], false), /stopped soon after/);
+});
+
+test('the drop-in beside the server unit: a crash loop never locks it out; written once', async (t) => {
+    const s = await setup(t);
+    assert.equal(await s.u.ensureDropIn(), true);
+    assert.equal(await s.u.ensureDropIn(), false);
+    const text = readFileSync(join(dirname(s.dirs.code), 'systemd', 'clavarium.service.d', 'restart.conf'), 'utf8');
+    assert.equal(text, DROP_IN_TEXT);
+    assert.match(text, /StartLimitIntervalSec=0/); assert.match(text, /RestartSec=3/);
 });

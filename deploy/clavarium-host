@@ -255,6 +255,16 @@ case "$AREA $VERB" in
         [ $# -ge 3 ] || usage
         vm="$1"; shift 2
         run "$MULTIPASS" exec "$vm" -- "$@" ;;
+    "vm ping")
+        # Does the VM manager answer at all? Asked now and then by the server
+        # (vmwatch.mjs); bounded, so that a VM manager that hangs is an answer.
+        [ $# -eq 0 ] || usage
+        run timeout 25 "$MULTIPASS" list --format csv ;;
+    "vm revive")
+        # The VM manager has not answered for minutes: its daemon restarted.
+        # Asked by the server at most once in hours (vmwatch.mjs), never by a page.
+        [ $# -eq 0 ] || usage
+        run timeout 170 snap restart multipass.multipassd ;;
     "vm info")
         [ $# -eq 1 ] || usage; vm_of "$1"
         run "$MULTIPASS" info "$1" --format json ;;

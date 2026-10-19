@@ -56,6 +56,7 @@ import { Capacity } from './capacity.mjs';
 import { packageFile, PARLEY } from './parley.mjs';
 import { Updates } from './updates.mjs';
 import { migrateData } from './dataformat.mjs';
+import { VmWatch } from './vmwatch.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 export const FILES = {
@@ -162,7 +163,12 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         }
         await sendFile(response, file);
     });
-    return { server, listening: new Promise((ready) => server.listen(port, '127.0.0.1', () => ready(server))) };
+    /* Its port taken (an old server that did not die on its stop): said plainly, and the start fails. */
+    const listening = new Promise((ready, fail) => {
+        server.once('error', (error) => { if (error.code === 'EADDRINUSE') console.error(`start: port ${port} is in use by another process (an old server that did not stop?): see ss -ltnp 'sport = :${port}'`); fail(error); });
+        server.listen(port, '127.0.0.1', () => ready(server));
+    });
+    return { server, listening };
 }
 
 /* Development: one tool on this machine, no VM. */
@@ -184,7 +190,7 @@ const PARLEY_WAIT_MS = 20_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
@@ -215,11 +221,23 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        as one that is itself a virtual machine on a small disk. */
     const stopShelf = shelf.start(env.CLAVARIUM_SHELF === 'off' ? 0 : shelfEveryMs, shelfFirstMs);
     if (all.shelf) all.shelf = shelf;
-    /* Before anything can start a VM: see resources.mjs. */
-    await folders.ensureViews();
-    /* Not in place is said, not fatal: no machine is then given /tools. */
-    await toolbox.prepare().catch((error) => console.error(error.message));
-    await all.ensureWork?.();
+    /* What the host must have before a machine starts (its views, /tools, the work disks, the
+       network rules, further down). Waited for at start, but never long: this server listens
+       and serves its pages even when the host program or the VM manager does not answer;
+       a machine that starts waits for it (all.prepare). */
+    const hostSteps = (async () => {
+        /* Before anything can start a VM: see resources.mjs. */
+        await folders.ensureViews().catch((error) => console.error(`views: ${error.message}`));
+        /* Not in place is said, not fatal: no machine is then given /tools. */
+        await toolbox.prepare().catch((error) => console.error(error.message));
+        await Promise.resolve(all.ensureWork?.()).catch((error) => console.error(`work folders: ${error.message}`));
+    })();
+    const bounded = (promise, ms, what) => {
+        let timer;
+        const late = new Promise((r) => { timer = setTimeout(() => { console.error(`start: ${what} still going after ${ms / 1000} s: the server starts without waiting for it`); r(); }, ms); timer.unref?.(); });
+        return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+    };
+    await bounded(hostSteps, startWaitMs, 'the host program');
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     /* The engine of dictation: chosen in Settings, else the environment's (voice.mjs). */
     const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name) });
@@ -242,7 +260,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const network = new Network({ host: asHost, offline: () => all.offline() });
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
-    await network.apply();
+    const hostReady = (async () => { await hostSteps; await network.apply().catch((error) => console.error(`network rules: ${error.message}`)); })();
+    await bounded(hostReady, startWaitMs, 'the network rules');
     /* OPENING MUST BE QUICK. Each command sent into a VM costs a noticeable
        part of a second, and delivering secrets takes several: done at every
        opening, it made each page load wait for seconds (felt by the owner).
@@ -258,6 +277,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
     all.prepare = async (name, woke) => {
+        await hostReady;
         const wanted = secrets.signature(name);
         const rules = network.apply();
         if (woke || delivered.get(name) !== wanted) {
@@ -343,7 +363,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* What the VM manager says each machine has is what is recorded (a record
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
-    const platform = { answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
+    /* The VM manager, watched: said to the pages when it does not answer, restarted once when stuck (vmwatch.mjs). */
+    const vmWatch = new VmWatch({ run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { void alerts.tell(payload)?.catch?.(() => {}); } });
+    const stopVmWatch = vmWatch.start(vmWatchEveryMs);
+    const platform = { get machines() { return vmWatch.ok; }, answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
     /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
     const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });
@@ -357,7 +380,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.room = (ask) => capacity.check(ask);
     const stopWatch = capacity.start();
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
@@ -413,6 +436,9 @@ function hostSetting(key) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    /* A promise rejected that nobody waited for is said, not fatal: one unlucky
+       call must not take every conversation's server down with it. */
+    process.on('unhandledRejection', (reason) => { console.error(`unhandled: ${reason?.stack ?? reason}`); });
     const argv = process.argv.slice(2);
     const port = Number(option(argv, 'port', '7717'));
     const host = option(argv, 'host', '');
@@ -428,7 +454,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
         const mntDir = hostSetting('MNT') || dataDir;
         /* --name: the name of this Clavarium until one is chosen in Settings (instance.mjs). */
         const name = option(argv, 'name', '') || undefined;
-        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name });
+        const server = await startHome({ port, host: host.split(' ').filter(Boolean), dataDir, mntDir, operators, publicOrigin, vaultKey, appName: name }).catch((error) => { console.error(`start: FAILED: ${error.message}`); process.exit(1); });
         console.log(`http://127.0.0.1:${server.address().port}/`);
     } else {
         const command = option(argv, 'command', 'bash').split(' ').filter(Boolean);

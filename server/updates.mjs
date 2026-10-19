@@ -62,7 +62,7 @@ export class Updates {
             refused: s.refused ?? null,
             /* What can be gone back to: the kept releases that do not run. */
             back: releases.filter((r) => !r.current && (VERSION.test(r.id) || LOCAL.test(r.id))).map((r) => ({ id: r.id, version: r.version })),
-            history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why }) => ({ at, action, from, to, result, why: why ?? null })),
+            history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null })),
         };
     }
 
@@ -110,7 +110,7 @@ export class Updates {
             const key = `${last.at}|${last.to}`;
             if (this.#store.get('told')?.key === key) return;
             this.#store.put({ name: 'told', key });
-            const title = last.result === 'rolled-back' ? `The update to ${last.to} did not work: back on ${last.from}` : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed`;
+            const title = last.action === 'restart' ? 'The server was down: restarting it did not work' : last.result === 'rolled-back' ? `The update to ${last.to} did not work: back on ${last.from}` : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed`;
             void this.#alerts?.tell({ title, body: String(last.why ?? '').slice(0, 180), url: '/?open=settings&at=updates' })?.catch?.(() => {});
         };
         look();

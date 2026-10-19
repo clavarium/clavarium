@@ -3351,9 +3351,11 @@
         for (const h of u.history) {
             const li = document.createElement('li'); li.dataset.result = h.result;
             const t = document.createElement('time'); t.dateTime = h.at; t.textContent = when(h.at);
-            const what = document.createElement('span'); what.textContent = `${h.from ?? '?'} → ${h.to} · ${h.action === 'back' && h.result === 'done' ? 'Went back' : RESULT_WORDS[h.result] ?? h.result}`;
+            const what = document.createElement('span'); what.textContent = `${h.from ?? '?'} → ${h.to} · ${h.action === 'back' && h.result === 'done' ? 'Went back' : h.action === 'restart' ? (h.result === 'done' ? 'Restarted by itself' : 'Restart by itself failed') : RESULT_WORDS[h.result] ?? h.result}`;
             li.append(t, what);
             if (h.why) { const why = document.createElement('small'); why.textContent = h.why; li.append(why); }
+            /* What the updater saw when it went wrong: the journal, the unit, who held the port. */
+            if (h.log) { const d = document.createElement('details'); d.className = 'update-log'; const sum = document.createElement('summary'); sum.textContent = 'See the log'; const pre = document.createElement('pre'); pre.textContent = h.log; d.append(sum, pre); li.append(d); }
             list.append(li);
         }
         $('updates-history-box').hidden = u.history.length === 0;
@@ -3525,8 +3527,15 @@
         if (DEVICE) return;
         const r = await fetch(`${API}/server/brief`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         const g = $('server-gauge');
-        if (!r?.high) { g.hidden = true; return; }
+        /* The VM manager does not answer: said here, whatever the room. */
+        const away = r?.machines === false;
+        if (!r?.high && !away) { g.hidden = true; return; }
         g.replaceChildren();
+        if (away) {
+            const t = document.createElement('span'); t.className = 'gauge-title'; t.textContent = 'The machines cannot be reached just now';
+            g.append(t); g.setAttribute('aria-label', 'The machines cannot be reached just now: the server keeps trying.'); g.hidden = false;
+            if (!r.high) return;
+        }
         const row = (label, f) => {
             const line = document.createElement('span'); line.className = 'gauge-line'; line.dataset.level = f.level;
             const word = document.createElement('span'); word.className = 'gauge-word'; word.textContent = label;
