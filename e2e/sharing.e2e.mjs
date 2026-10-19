@@ -333,3 +333,37 @@ test('a device given a folder and no conversation shows its files, and nothing e
     await viewer.until('the file is shown', async () => (await viewer.page.locator('#preview-body pre').innerText().catch(() => '')).includes('a picture'));
     assert.equal(await viewer.page.locator('#files-import').isVisible(), true, 'given to write: it can add a file');
 });
+
+test('a phone whose terminal is taken back while it is open loses it at once: nothing it types gets through, and nothing of the terminal is left to tap', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('family');
+    await owner.page.locator('#items .item', { hasText: 'family' }).click();
+    await owner.until('family is live', async () => (await owner.state()) === 'live');
+    const shared = await owner.api('/api/shares', { grants: [{ asset: 'conversation:family', rights: 'rwx' }], label: 'A phone' });
+    const phone = await b.person({ phone: true, at: shared.body.url.replace(/^https?:\/\/[^/]+/, '') });
+    await phone.until('the welcome is shown', async () => phone.page.locator('#notice-action', { hasText: 'Start' }).isVisible());
+    await phone.page.locator('#notice-action', { hasText: 'Start' }).click();
+    await phone.until('the phone is live', async () => (await phone.state()) === 'live');
+    await phone.type('echo given-yet');
+    await phone.sees('given-yet');
+    /* The owner gives it the chat alone, while its terminal is open. */
+    const id = (await owner.api('/api/conversations/family/devices')).body[0].id;
+    assert.equal((await owner.api(`/api/devices/${id}/give`, { asset: 'conversation:family', rights: 'rw' })).status, 200);
+    await wait(1000);
+    /* What it types now never reaches the machine: the owner's screen does not show it. */
+    await phone.page.locator('#terminal').click().catch(() => {});
+    await phone.page.keyboard.type('echo taken-back'); await phone.page.keyboard.press('Enter');
+    await wait(1500);
+    /* The owner takes the terminal again: what it shows is what reached the machine. */
+    await owner.page.reload();
+    await owner.until('family is live again', async () => (await owner.state()) === 'live');
+    await owner.sees('given-yet');
+    assert.equal((await owner.screen()).includes('taken-back'), false, 'nothing typed after the right was taken back');
+    /* Once the page knows (its next look, or a reload): no terminal to show, no button to open it. */
+    await phone.page.reload();
+    await phone.until('the page is back', async () => (await phone.page.locator('#state').count()) > 0);
+    await wait(1500);
+    assert.equal(await phone.page.evaluate(() => [...document.querySelectorAll('button')].some((x) => x.offsetParent !== null && /See the terminal/.test(x.textContent))), false);
+    assert.equal(await phone.page.locator('#terminal').isVisible(), false, 'its terminal is not shown');
+});
