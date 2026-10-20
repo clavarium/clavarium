@@ -57,6 +57,7 @@ import { packageFile, PARLEY } from './parley.mjs';
 import { Updates } from './updates.mjs';
 import { Certificate } from './certificate.mjs';
 import { Operators } from './operators.mjs';
+import { HealthReact } from './healthreact.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 
@@ -118,7 +119,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -156,7 +157,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -366,7 +367,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
     /* What is wrong with its machine is said in its chat too, where it happened. */
-    health.judged = (name, record) => talk.machine(name, record);
+    /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
+    const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
+        isAgent: (name) => all.list().find((c) => c.name === name)?.ai === true, event: (name, line) => talk.event(name, line) });
+    health.judged = (name, record) => { talk.machine(name, record); void reacting.judged(name, record).catch(() => {}); };
     /* A machine just started: its folders are mounted again (after a build,
        a restart, a move) or looked at and put back if they came loose (after
        a wake), before its tool starts in them. */
@@ -398,7 +402,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {

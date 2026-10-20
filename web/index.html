@@ -207,6 +207,15 @@
             <p id="work-moved" class="hint" hidden></p>
             <button type="button" id="work-move"></button>
             </div>
+            <!-- WHEN ITS MACHINE IS SHORT (server/healthreact.mjs): you are told either way. -->
+            <form id="react-box" autocomplete="off">
+            <div class="panel-top"><b>When its machine is short of room or memory</b></div>
+            <label class="check"><input type="checkbox" id="react-on"> <span id="react-on-label">Also tell its agent</span></label>
+            <input id="react-message" maxlength="500" spellcheck="false" aria-label="What its agent is told ({problem}: what was found)">
+            <input id="react-command" maxlength="500" spellcheck="false" placeholder="a command, run in its machine: rm -rf ~/.cache/*" aria-label="The command run in its machine" hidden>
+            <p class="hint" id="react-hint">You are told either way. Once each time it happens; what was said or run shows in its chat.</p>
+            <div class="row"><button type="submit">Save</button><span class="hint" id="react-said" role="status"></span></div>
+            </form>
           </div>
         </details>
         <details class="chapter" id="chapter-access" data-chapter="access">

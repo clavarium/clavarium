@@ -1779,7 +1779,24 @@
     });
     const MEMORY_CHOICES = [768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384];
     const DISK_CHOICES = [8, 10, 16, 20, 32, 48, 64, 96, 128, 192, 256];
+    /* WHEN ITS MACHINE IS SHORT: its agent told (a line you can change), or a command run when it has no agent. */
+    async function paintReact(here) {
+        if (!here || DEVICE) return;
+        const s = await fetch(`${API}/conversations/${encodeURIComponent(here.name)}/health-react`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!s) return;
+        $('react-on').checked = s.on;
+        $('react-on-label').textContent = s.agent ? 'Also tell its agent' : 'Also run a command in its machine';
+        $('react-message').hidden = !s.agent; $('react-command').hidden = s.agent;
+        $('react-message').value = s.message; $('react-command').value = s.command;
+        $('react-said').textContent = '';
+    }
+    $('react-box').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/health-react`, { on: $('react-on').checked, message: $('react-message').value, command: $('react-command').value }); $('react-said').textContent = 'Saved.'; }
+        catch (error) { $('react-said').textContent = error.message; }
+    });
     function paintMachine(here) {
+        void paintReact(here);
         /* General: what it is. */
         const facts = $('general-facts'); facts.replaceChildren();
         const fact = (term, value) => { const dt = document.createElement('dt'); dt.textContent = term; const dd = document.createElement('dd'); dd.textContent = value; facts.append(dt, dd); };

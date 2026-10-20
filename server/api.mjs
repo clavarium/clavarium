@@ -66,6 +66,7 @@
  *   POST /api/secrets                       {name, value}  create or replace
  *   POST /api/secrets/<NAME>/remove
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
+ *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
  *   POST /api/conversations/<name>/secrets  {secret, attached}
@@ -118,7 +119,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -219,6 +220,8 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
             /* Who may sign in (operators.mjs): none in local mode. */
+            const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
+            if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
@@ -313,6 +316,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
+        const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
+        if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {
