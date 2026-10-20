@@ -527,8 +527,11 @@ export async function run(o, log = console.log) {
             /* The same on a phone: the review unified, then Back. */
             await ppage.goto(`${o.target}/?c=${encodeURIComponent(o.conversation)}`, { waitUntil: 'domcontentloaded' });
             await until('phone: its views', () => shown(ppage, '#views'), 30_000);
-            await ppage.locator('#view-assets').click();
-            await ppage.locator(`#cassets-rows .as-row[data-asset="git:${repo}"]`).click();
+            /* A tap while the page is still choosing its first view (its chat) may be undone by
+               it: tapped again until the assets are there, as a person would. */
+            const row = ppage.locator(`#cassets-rows .as-row[data-asset="git:${repo}"]`);
+            await until('phone: its assets', async () => { if (await row.isVisible().catch(() => false)) return true; await ppage.locator('#view-assets').click().catch(() => {}); return row.isVisible({ timeout: 3000 }).catch(() => false); }, 30_000);
+            await row.click();
             await until('phone: its branches', async () => (await ppage.locator('#cassets-detail .gg-row').count()) > 0, 45_000);
             await ppage.locator('#cassets-detail button[data-act="review"]').click();
             await until('phone: the review, read', () => reviewRead(ppage), 90_000);

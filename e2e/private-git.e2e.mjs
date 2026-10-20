@@ -82,7 +82,8 @@ test('a private repository is added with a new key: its public half is shown and
     /* The tool reads the repository; it never sees the key. */
     await me.access('site', 'Read');
     /* (Written in two halves, so that the command itself on the screen does not say it.) */
-    await me.type('cat ../resources/site/README.md; grep -rl "PRIVATE"" KEY" ../resources /work 2>/dev/null | wc -l');
+    /* Its own folders: its attachments and where it works ("."; "/work" would be the host's own here). */
+    await me.type('cat ../resources/site/README.md; grep -rl "PRIVATE"" KEY" ../resources . 2>/dev/null | wc -l');
     await me.sees('# private site');
     await me.sees('\n0\n');
     /* Nor does the page, nor anything the server answered. */
