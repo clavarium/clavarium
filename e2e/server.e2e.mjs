@@ -22,6 +22,8 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
     assert.equal(await disk.locator('.server-note').innerText(), '55 GB above the 5.0 GB reserve');
     assert.equal(await me.page.locator('#server-memory-figures').innerText(), '12 GB free of 16 GB');
     await me.until('what takes the disk is said', async () => /This server's data[\s\S]*Shared folders[\s\S]*folders given to machines[\s\S]*Machines[\s\S]*alpha[\s\S]*images[\s\S]*The system and other programs/.test(await disk.locator('.server-parts').innerText()));
+    /* Where each work folder is: here, one disk holds them all. */
+    assert.match(await disk.locator('.server-parts').innerText(), /Work folders on this disk\s+alpha/);
     assert.match(await me.page.locator('#server-memory-parts').innerText(), /Running machines \(1\)[\s\S]*alpha\s+uses 0\.9 GB · given 0\.8 GB/);
     /* The reserve: a fixed amount or a share, the larger kept. */
     assert.deepEqual(await Promise.all(['#reserve-disk', '#reserve-disk-percent', '#reserve-memory', '#reserve-memory-percent'].map((id) => me.page.inputValue(id))), ['5', '5', '1', '5']);

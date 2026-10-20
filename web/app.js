@@ -3546,6 +3546,9 @@
                     rows.push(['Machines', sum(each)], ...each);
                     if (m.othersMb) rows.push(['Other machines', m.othersMb]);
                 }
+                /* WHERE EACH WORK FOLDER IS: kept with the shared folders, or on its machine's own disk. */
+                const here = conversations.filter((x) => (x.work === 'disk' ? machines : d.holds.includes('folders'))).map((x) => x.title || x.name);
+                if (here.length) rows.push(['Work folders on this disk', here.length > 6 ? `${here.slice(0, 6).join(', ')} and ${here.length - 6} more` : here.join(', ')]);
                 const known = sum(rows.filter(([, , sub]) => !sub));
                 const rest = d.sizeMb - d.freeMb - known;
                 if (rest > 50) rows.push(['The system and other programs', rest]);
