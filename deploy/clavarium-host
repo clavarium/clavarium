@@ -210,6 +210,26 @@ folder_of() {
     held "$MNT/resources/$1"
 }
 
+# A VIEW IN A SERVICE OF ITS OWN (clavarium-view-<name>, transient): bindfs
+# runs there, not in the server's service, so that stopping or updating the
+# server never cuts a view from under the machines (19-10: a stop killed them
+# all, and a view left broken stopped the next start). Asked again at each
+# start of the server; a reboot ends them, the server makes them again.
+# Arguments: the unit, the folder, the view. Waits until the view is mounted.
+view_service() {
+    local unit="$1" source="$2" target="$3" i
+    if [ "$SAY" = "yes" ]; then printf '%s\n' "systemd-run --unit=$unit --collect bindfs -f -r -o allow_other $source $target"; return 0; fi
+    # One left from before (failed, or its mount taken off): out of the way first.
+    systemctl stop "$unit.service" >/dev/null 2>&1 || true
+    systemctl reset-failed "$unit.service" >/dev/null 2>&1 || true
+    systemd-run --quiet --unit="$unit" --collect --description="Clavarium - the read-only view $target" \
+        --property=Restart=no bindfs -f -r -o allow_other "$source" "$target" \
+        || refuse "the read-only view could not be started: $target"
+    for i in $(seq 1 50); do mountpoint -q "$target" && return 0; sleep 0.2; done
+    systemctl stop "$unit.service" >/dev/null 2>&1 || true
+    refuse "the read-only view did not come up: $target"
+}
+
 # A VIEW WHOSE PROGRAM IS GONE (bindfs killed or crashed) stays mounted, but
 # everything done there fails with "Transport endpoint is not connected": the
 # view cannot be made again, and before 0.2.1 the server died at its start on
@@ -562,7 +582,8 @@ case "$AREA $VERB" in
             held "$MNT/views/$1"
             mountpoint -q "$MNT/views/$1" && exit 0
         fi
-        run bindfs -r -o allow_other "$MNT/resources/$1" "$MNT/views/$1" ;;
+        view_service "clavarium-view-$1" "$MNT/resources/$1" "$MNT/views/$1"
+        exit 0 ;;
     "tools make")
         # THE TOOLS FOLDER: what every machine is given to install by itself
         # (an archive and an index, put there by the server), seen in each
@@ -573,7 +594,7 @@ case "$AREA $VERB" in
         # stays as it is.
         [ $# -eq 0 ] || usage
         files="$MNT/toolbox/files"; view="$MNT/toolbox/view"
-        if [ "$SAY" = "yes" ]; then printf '%s\n' "install -d -o OWNER -g GROUP -m 0755 $files" "bindfs -r -o allow_other $files $view"; exit 0; fi
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "install -d -o OWNER -g GROUP -m 0755 $files"; view_service clavarium-tools-view "$files" "$view"; exit 0; fi
         kept toolbox
         unstale "$view"
         [ ! -L "$files" ] && [ ! -L "$view" ] || refuse "the tools folder is not what it should be"
@@ -582,7 +603,8 @@ case "$AREA $VERB" in
         [ -e "$view" ] || install -d -o root -g root -m 0755 "$view"
         held "$view"
         mountpoint -q "$view" && exit 0
-        exec bindfs -r -o allow_other "$files" "$view" ;;
+        view_service clavarium-tools-view "$files" "$view"
+        exit 0 ;;
     "view close")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         kept views
