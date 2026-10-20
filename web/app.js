@@ -3320,6 +3320,19 @@
     const when = (iso) => new Date(iso).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
     function updatesError(text) { $('updates-error').textContent = text ?? ''; $('updates-error').hidden = !text; }
     let lastUpdates = null;
+    /* THE CERTIFICATE browsers are given (none in local mode): its end, its issuer; a warning when they would not trust it, or it ends soon. */
+    async function paintCertificate() {
+        const c = await fetch(`${API}/certificate`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const line = $('updates-certificate');
+        if (!c || c.local) { line.hidden = true; return; }
+        const day = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+        const bad = c.none || !c.trusted || c.daysLeft < 10;
+        line.className = bad ? 'error' : 'hint';
+        line.textContent = c.none ? `Certificate of ${c.domain}: none is served (${c.why}).`
+            : !c.trusted ? `Certificate of ${c.domain}: browsers do not trust it (${c.why})${c.local ? ', it is the machine\'s own until Let\'s Encrypt gives one: sudo clavarium doctor --certificate' : ''}.`
+            : `Certificate of ${c.domain}: by ${c.issuer}, valid until ${day(c.validTo)} (${c.daysLeft} days); renewed by itself.${c.daysLeft < 10 ? ' It should have been renewed already: sudo clavarium doctor --certificate.' : ''}`;
+        line.hidden = false;
+    }
     async function paintUpdates() {
         clearTimeout(updatesTimer);
         const u = await fetch(`${API}/updates`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -3327,6 +3340,7 @@
         if (!u) { if (updatesBusy && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000); return; }
         lastUpdates = u;
         $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
+        void paintCertificate();
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
         if (!u.installed) {
             $('updates-state').textContent = 'Not installed with install.sh: no updates here.';
