@@ -12,6 +12,7 @@ import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
 import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
+import { availableParallelism } from 'node:os';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -213,7 +214,7 @@ export class Conversations {
         return this.#store.all().sort((a, b) => order.indexOf(a.name) - order.indexOf(b.name)).map((c) => {
             const tool = this.#tools.find((t) => t.id === c.tool);
             /* An AI tool has an instruction file; a shell has none: what is dictated there is never marked. */
-            return { ...c, rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false };
+            return { ...c, rank: order.indexOf(c.name), ...(c.group ? { groupRank: groups.indexOf(c.group) } : {}), toolLabel: tool?.label ?? c.tool, memoryMinMb: tool?.memoryMb, resumes: Boolean(tool?.resume), rights: Boolean(tool?.rights), ai: Boolean(tool?.instructions), voiceMark: Boolean(tool?.instructions) && c.voiceMark !== false, cpus: c.cpus ?? 1, hostCpus: availableParallelism() };
         });
     }
 
@@ -700,19 +701,23 @@ export class Conversations {
        stopped (cleanly first), set, and started again -- its work folder,
        its folders and its branches are not touched. A disk only grows.
        What is recorded afterwards is what the VM manager says it has. */
-    async resize(name, { memoryMb, diskGb } = {}) {
+    async resize(name, { memoryMb, diskGb, cpus: cpusAsked } = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
         const memory = memoryMb === undefined || memoryMb === null || memoryMb === '' ? c.memoryMb : Number(memoryMb);
         const disk = diskGb === undefined || diskGb === null || diskGb === '' ? c.diskGb ?? DISK_GB : Number(diskGb);
+        const cpusNow = c.cpus ?? 1;
+        const cpus = cpusAsked === undefined || cpusAsked === null || cpusAsked === '' ? cpusNow : Number(cpusAsked);
+        const hostCpus = availableParallelism();
+        if (cpus !== cpusNow && (!Number.isInteger(cpus) || cpus < 1 || cpus > hostCpus)) throw new Refusal(400, `Cores: 1 to ${hostCpus}, those of this server, which its machines share.`);
         const least = tool?.memoryMb ?? 512;
         /* Memory is checked only when it changes: a machine made when its tool
            needed less keeps what it has, and its disk can still grow. */
         if (memory !== c.memoryMb && (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB)) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
         if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
         if (disk < (c.diskGb ?? DISK_GB)) throw new Refusal(400, `A disk can only grow: it has ${c.diskGb ?? DISK_GB} GB.`);
-        if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB)) throw new Refusal(409, 'Nothing to change: it already has this.');
-        if (c.asleep === true) throw new Refusal(409, 'It is asleep: wake it first, then change its memory or its disk.');
+        if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB) && cpus === cpusNow) throw new Refusal(409, 'Nothing to change: it already has this.');
+        if (c.asleep === true) throw new Refusal(409, 'It is asleep: wake it first, then change its memory, cores or disk.');
         const release = this.#claim(name, 'restarting', 'Looking at the machine');
         let state;
         try {
@@ -733,6 +738,11 @@ export class Conversations {
                 const r = await this.#vms.setMemory(name, memory);
                 if (r.code !== 0) return `its memory could not be set (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
             }
+            if (cpus !== cpusNow) {
+                this.#store.patch(name, { step: `Setting its cores to ${cpus}` });
+                const r = await this.#vms.setCpus(name, cpus);
+                if (r.code !== 0) return `its cores could not be set (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+            }
             if (disk !== (c.diskGb ?? DISK_GB)) {
                 this.#store.patch(name, { step: `Growing its disk to ${disk} GB` });
                 const r = await this.#vms.setDisk(name, disk);
@@ -743,7 +753,7 @@ export class Conversations {
         this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
             await this.reconcile(name);
             const now = this.#store.get(name);
-            const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.diskGb ?? disk} GB of disk`;
+            const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.cpus ?? cpus} core${(now?.cpus ?? cpus) > 1 ? 's' : ''}, ${now?.diskGb ?? disk} GB of disk`;
             await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
         });
         return this.#store.get(name);
@@ -756,6 +766,7 @@ export class Conversations {
         const patch = {};
         if (real.memoryMb !== undefined && real.memoryMb !== this.#store.get(name).memoryMb) patch.memoryMb = real.memoryMb;
         if (real.diskGb !== undefined && real.diskGb !== this.#store.get(name).diskGb) patch.diskGb = real.diskGb;
+        if (real.cpus !== undefined && real.cpus !== (this.#store.get(name).cpus ?? 1)) patch.cpus = real.cpus;
         if (Object.keys(patch).length > 0 && this.#store.get(name)) this.#store.patch(name, patch);
     }
     async reconcileAll() {

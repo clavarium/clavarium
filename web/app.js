@@ -1810,9 +1810,13 @@
         healthLines($('machine-health'), here?.health ?? null);
         $('machine-restarted').textContent = here?.restarted ?? ''; $('machine-restarted').hidden = !here?.restarted;
         /* The choices are not painted over while somebody is choosing. */
-        const memory = $('machine-memory'); const disk = $('machine-disk');
-        const of = `${here?.name}/${here?.memoryMb}/${here?.diskGb}/${here?.memoryMinMb}`;
-        if (here && memory.dataset.of !== of && document.activeElement !== memory && document.activeElement !== disk) {
+        const memory = $('machine-memory'); const disk = $('machine-disk'); const cores = $('machine-cpus');
+        const of = `${here?.name}/${here?.memoryMb}/${here?.diskGb}/${here?.memoryMinMb}/${here?.cpus}`;
+        if (here && memory.dataset.of !== of && document.activeElement !== memory && document.activeElement !== disk && document.activeElement !== cores) {
+            /* Cores: 1 to those of the server, which its machines share. */
+            const most = Math.max(here.hostCpus ?? 1, here.cpus ?? 1);
+            cores.replaceChildren(...Array.from({ length: most }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === (here.cpus ?? 1) ? ' (now)' : ''}${n === most && n > 1 ? ' (all of this server)' : ''}`; return o; }));
+            cores.value = String(here.cpus ?? 1);
             const least = here.memoryMinMb ?? 512;
             const mems = [...new Set([...MEMORY_CHOICES.filter((m) => m >= least), here.memoryMb])].sort((a, b) => a - b);
             memory.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = `${sizeWords(m)}${m === here.memoryMb ? ' (now)' : ''}${m === least ? ' (least for its tool)' : ''}`; return o; }));
@@ -1826,7 +1830,7 @@
         /* Not ready (built, restarted, moved): its sizes are shown, and chosen once it is. */
         $('machine-size').hidden = DEVICE || !here || here.phase === 'failed';
         const waiting = here && (here.phase !== 'ready' || holds(here)) ? (here.phase === 'moving' ? 'Available once it has moved.' : here.phase === 'restarting' || (here.phase === 'ready' && here.progress?.kind !== 'build') ? 'Available once it has restarted.' : 'Available once its machine is built.') : '';
-        for (const id of ['machine-memory', 'machine-disk', 'machine-size-apply']) $(id).disabled = Boolean(waiting);
+        for (const id of ['machine-memory', 'machine-cpus', 'machine-disk', 'machine-size-apply']) $(id).disabled = Boolean(waiting);
         $('machine-size').toggleAttribute('data-waiting', Boolean(waiting));
         $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
@@ -1855,15 +1859,15 @@
         const name = current;
         const here = conversations.find((x) => x.name === name);
         if (!here) return;
-        const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value);
-        if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8)) { $('panel-error').textContent = 'Nothing to change: choose another memory or disk first.'; $('panel-error').hidden = false; return; }
+        const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value); const cpus = Number($('machine-cpus').value) || (here.cpus ?? 1);
+        if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8) && cpus === (here.cpus ?? 1)) { $('panel-error').textContent = 'Nothing to change: choose another memory, cores or disk first.'; $('panel-error').hidden = false; return; }
         leavePanel();
         const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
-        const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
+        const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         show(`Give "${name}" ${changes}? ITS MACHINE IS STOPPED CLEANLY, SET, AND STARTED AGAIN: what the tool is doing now is interrupted. Its work folder, its folders and its branches stay.`,
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;
-                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb }); await refresh(); enter(); }
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb, cpus }); await refresh(); enter(); }
                 catch (error) { show(error.message, 'Back', enter); }
             }, resume);
     });

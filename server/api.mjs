@@ -461,7 +461,7 @@ export async function handleApi(request, response, conversations, headers, resou
                 return send(200, await health.check(conversation)), true;
             }
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
-            return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb })), true;
+            return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus })), true;
         }
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;

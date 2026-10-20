@@ -142,7 +142,7 @@ test('memory and disk: the machine is stopped, set, started, and the record hold
     assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'set clv-demo memory 4096', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
     const c = b.store.get('demo');
     assert.equal(c.memoryMb, 4096); assert.equal(c.diskGb, 20); assert.equal(c.phase, 'ready');
-    assert.equal(c.restarted, 'It now has 4096 MB of memory, 20 GB of disk.');
+    assert.equal(c.restarted, 'It now has 4096 MB of memory, 1 core, 20 GB of disk.');
     assert.deepEqual(b.readied, ['demo']);
 });
 
@@ -176,7 +176,7 @@ test('a setting refused by the VM manager is said, the machine is started again,
     await b.all.resize('demo', { memoryMb: 4096 });
     await b.all.resized;
     const c = b.store.get('demo');
-    assert.match(c.restarted, /^Not changed: its memory could not be set \(instance must be stopped\)\. It has 2048 MB of memory, 8 GB of disk\.$/);
+    assert.match(c.restarted, /^Not changed: its memory could not be set \(instance must be stopped\)\. It has 2048 MB of memory, 1 core, 8 GB of disk\.$/);
     assert.equal(c.memoryMb, 2048);
     assert.equal(b.states.get('clv-demo'), 'Running');
 });

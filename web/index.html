@@ -191,10 +191,12 @@
             <div class="row"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div>
             <p class="hint" id="rights-hint">Off (the default): <b>the tool acts without asking you</b>, with every right inside its own machine: it installs, changes and deletes there as it sees fit. Outside its machine it reaches only what you attached to it, as you attached it. On: it asks you before it acts, as it does by itself. Taken into account the next time the tool starts: restart the machine to apply it now.</p>
             </div>
-            <div class="panel-top"><b>Memory and disk</b></div>
+            <div class="panel-top"><b>Memory, cores and disk</b></div>
             <form id="machine-size" autocomplete="off">
               <label for="machine-memory">Memory</label>
               <select id="machine-memory"></select>
+              <label for="machine-cpus">Cores</label>
+              <select id="machine-cpus"></select>
               <label for="machine-disk">Disk</label>
               <select id="machine-disk"></select>
               <p class="hint" id="machine-size-wait" role="status" hidden></p>

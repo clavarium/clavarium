@@ -562,7 +562,7 @@ test('a restart, a new size or a machine built again is told, in words for its c
     await all.restart('demo'); await all.restarted;
     assert.deepEqual(told.at(-1), ['demo', 'Its machine was restarted: the tool started again.', true]);
     await all.resize('demo', { memoryMb: 2048 }); await all.resized;
-    assert.deepEqual(told.at(-1), ['demo', 'Its machine was restarted with 1024 MB of memory, 8 GB of disk: the tool started again.', true]);
+    assert.deepEqual(told.at(-1), ['demo', 'Its machine was restarted with 1024 MB of memory, 1 core, 8 GB of disk: the tool started again.', true]);
     b.states.delete(vmName('demo'));
     await all.rebuild('demo'); await all.built;
     assert.match(told.at(-1)[1], /^Its machine was built again/);

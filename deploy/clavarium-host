@@ -319,12 +319,15 @@ case "$AREA $VERB" in
         [ $# -eq 1 ] || usage; vm_of "$1"
         run "$MULTIPASS" stop --force "$1" ;;
     "vm set")
-        # <vm> memory <megabytes> | <vm> disk <gigabytes>. The VM manager
+        # <vm> memory <megabytes> | <vm> disk <gigabytes> | <vm> cpus <n>. The VM manager
         # takes it only from a stopped machine, and a disk only ever grows:
         # both are its own refusals, passed on as they are.
         vm_of "${1:-}"; [ $# -eq 3 ] || usage
         case "$2" in
             memory) memory_ok "$3"; run "$MULTIPASS" set "local.$1.memory=${3}M" ;;
+            # Cores: at most those of the host, which they share.
+            cpus)   [[ "$3" =~ ^[0-9]{1,3}$ ]] && [ "$3" -ge 1 ] && [ "$3" -le "$(nproc)" ] || refuse "cpus out of bounds: $3 (the host has $(nproc))"
+                    run "$MULTIPASS" set "local.$1.cpus=$3" ;;
             disk)   [[ "$3" =~ ^[0-9]{1,4}$ ]] && [ "$3" -ge 5 ] && [ "$3" -le "$DISK_MAX_GB" ] || refuse "disk out of bounds: $3"
                     # Refused when the host has not the room for it, whatever
                     # the server said (its size unknown: counted from nothing).
@@ -340,8 +343,8 @@ case "$AREA $VERB" in
         # for its memory, one for its disk. Anything of an unexpected shape
         # is left out rather than passed on.
         [ $# -eq 1 ] || usage; vm_of "$1"
-        if [ "$SAY" = "yes" ]; then printf '%s\n' "$MULTIPASS get local.$1.memory" "$MULTIPASS get local.$1.disk"; exit 0; fi
-        for key in memory disk; do
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "$MULTIPASS get local.$1.memory" "$MULTIPASS get local.$1.disk" "$MULTIPASS get local.$1.cpus"; exit 0; fi
+        for key in memory disk cpus; do
             value="$("$MULTIPASS" get "local.$1.$key" 2>/dev/null | head -1 | tr -d ' ')" || value=""
             if [[ "$value" =~ ^[0-9]{1,12}(\.[0-9]{1,3})?[A-Za-z]{0,3}$ ]]; then printf '%s %s\n' "$key" "$value"; fi
         done

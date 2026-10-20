@@ -124,6 +124,7 @@ export class Vms {
     kill(conversation) { return this.run(['vm', 'kill', vmName(conversation)], { timeoutMs: 300_000 }); }
     /* Memory in megabytes, disk in gigabytes: only on a stopped machine. */
     setMemory(conversation, mb) { return this.run(['vm', 'set', vmName(conversation), 'memory', String(mb)], { timeoutMs: 120_000 }); }
+    setCpus(conversation, n) { return this.run(['vm', 'set', vmName(conversation), 'cpus', String(n)], { timeoutMs: 120_000 }); }
     setDisk(conversation, gb) { return this.run(['vm', 'set', vmName(conversation), 'disk', String(gb)], { timeoutMs: 600_000 }); }
     /* What the machine really has: { memoryMb, diskGb }, each undefined when it cannot be told. */
     async size(conversation) {
@@ -132,7 +133,8 @@ export class Vms {
         const line = (key) => new RegExp(`^${key} (\\S+)$`, 'm').exec(r.stdout ?? '')?.[1];
         const mb = megabytes(line('memory'));
         const disk = megabytes(line('disk'));
-        return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024) };
+        const cpus = /^\d{1,3}$/.test(line('cpus') ?? '') ? Number(line('cpus')) : undefined;
+        return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024), cpus };
     }
     suspend(conversation) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
     remove(conversation) { return this.run(['vm', 'delete', vmName(conversation)], { timeoutMs: 300_000 }); }
