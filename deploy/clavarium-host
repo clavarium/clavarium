@@ -73,6 +73,11 @@ SHELF_MEMORY="1536M"
 # less than this is free there, so that a new copy cannot fill the host.
 SHELF_STORE="/var/snap/multipass/common"
 SHELF_INSTANCES="$SHELF_STORE/data/multipassd/vault/instances"
+SHELF_CACHE="$SHELF_STORE/cache"
+# Moved to another disk (deploy/move-machines.sh, Multipass's own way: its
+# MULTIPASS_STORAGE in a drop-in of its service): <path>/data, <path>/cache.
+MOVED_TO="$(sed -n 's/^Environment=MULTIPASS_STORAGE=\(\/[A-Za-z0-9/._-]*\)$/\1/p' /etc/systemd/system/snap.multipass.multipassd.service.d/override.conf 2>/dev/null | head -1)"
+if [ -n "$MOVED_TO" ] && [ -d "$MOVED_TO/data" ]; then SHELF_STORE="$MOVED_TO"; SHELF_INSTANCES="$MOVED_TO/data/vault/instances"; SHELF_CACHE="$MOVED_TO/cache"; fi
 SHELF_MIN_FREE_MB="6144"
 CONF="/etc/clavarium/host.conf"
 # THE GIT READER (verb "git read"): an empty root-owned directory used as the
@@ -470,7 +475,7 @@ case "$AREA $VERB" in
         #   used <data|folders|work|removed|tools|shelf|images|others> <MB>
         #   used machine <one of our VMs> <MB>
         [ $# -eq 0 ] || usage
-        if [ "$SAY" = "yes" ]; then printf '%s\n' "du $DATA $MNT/resources $MNT/work-disks $MNT/removed $MNT/toolbox/files" "du $SHELF_INSTANCES $SHELF_STORE/cache"; exit 0; fi
+        if [ "$SAY" = "yes" ]; then printf '%s\n' "du $DATA $MNT/resources $MNT/work-disks $MNT/removed $MNT/toolbox/files" "du $SHELF_INSTANCES $SHELF_CACHE"; exit 0; fi
         mb() { { timeout 60 du -smx "$@" 2>/dev/null || true; } | awk '$1 ~ /^[0-9]+$/ {s+=$1} END{print s+0}'; }
         # The data directory may hold the shared folders (MNT the same, or
         # under it): they are counted once, in their own lines.
@@ -491,7 +496,7 @@ case "$AREA $VERB" in
             printf 'used shelf %s\n' "$shelf"
             printf 'used others %s\n' "$(( all > ours ? all - ours : 0 ))"
         fi
-        [ -d "$SHELF_STORE/cache" ] && printf 'used images %s\n' "$(mb -- "$SHELF_STORE/cache")"
+        [ -d "$SHELF_CACHE" ] && printf 'used images %s\n' "$(mb -- "$SHELF_CACHE")"
         exit 0 ;;
     "folder make")
         # The folder is made here, and given to the account that owns the data
