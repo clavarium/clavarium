@@ -89,7 +89,7 @@ UPDATER="$CODE/current/app/deploy/updater.mjs"
 UPDATE_STATE="/var/lib/clavarium/update"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -626,6 +626,13 @@ case "$AREA $VERB" in
             case "$at" in "$MNT"/views/*|"$MNT"/toolbox/view) unstale "$at" ;; esac
         done
         exit 0 ;;
+    "operator list"|"operator add"|"operator password"|"operator disable"|"operator enable"|"operator remove"|"operator failures")
+        # WHO MAY SIGN IN (deploy/operators.mjs): the operators of the identity
+        # provider. A password comes on standard input, never as an argument.
+        if [ "$VERB" = "list" ]; then [ $# -eq 0 ] || usage
+        elif [ "$VERB" = "failures" ]; then [ $# -eq 1 ] && number "$1" || usage
+        else [ $# -eq 1 ] && [[ "$1" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || refuse "not an e-mail address: ${1:-<empty>}"; fi
+        run "$UPDATER_NODE" "$CODE/current/app/deploy/operators.mjs" "$VERB" "$@" ;;
     "net taps")
         [ $# -eq 0 ] || usage
         run pgrep -a qemu-system ;;

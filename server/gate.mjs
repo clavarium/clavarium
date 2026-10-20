@@ -25,10 +25,13 @@ export function readOperators(text) {
 
 /* Returns a function: (headers) -> the operator's address, or undefined when
    the request is not from an operator. In development mode it returns 'local'. */
+/* `operators`: the list, or a function that gives it as it is now (they are
+   added and disabled from the page: see operators.mjs). */
 export function makeGate(operators = []) {
-    if (operators.length === 0) return () => 'local';
-    const allowed = new Set(operators);
+    if (typeof operators !== 'function' && operators.length === 0) return () => 'local';
+    const now = typeof operators === 'function' ? operators : () => operators;
     return (headers) => {
+        const allowed = new Set(now());
         const value = headers[IDENTITY_HEADER];
         /* A header sent twice arrives as one string joined by commas: two
            identities is not an identity. */

@@ -3188,6 +3188,41 @@
     $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
+    /* ADMINISTRATORS: who may sign in (server/operators.mjs); a password is shown once, then never again. */
+    async function paintOperators() {
+        const got = await fetch(`${API}/operators`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        $('settings-ch-operators').hidden = !got || got.local === true;
+        if (!got || got.local) return;
+        const rows = $('operators-rows'); rows.replaceChildren();
+        const act = async (path) => {
+            $('operators-error').hidden = true;
+            try { const r = await post(`${API}/operators/${encodeURIComponent(path[0])}/${path[1]}`, {}); if (r?.password) showPassword(r.email, r.password); }
+            catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
+            await paintOperators();
+        };
+        for (const o of got.operators) {
+            const row = el('div', 'folder'); row.dataset.email = o.email;
+            const name = el('b', '', o.email);
+            const state = el('small', 'hint', o.locked ? ` locked until ${new Date(o.locked).toLocaleTimeString([], { timeStyle: 'short' })}` : o.enabled ? (o.email === got.me ? ' you' : '') : ' disabled');
+            name.append(state);
+            const buttons = [['password', 'New password']];
+            if (o.email !== got.me) buttons.push(o.enabled ? ['disable', 'Disable'] : ['enable', 'Enable'], ['remove', 'Remove']);
+            row.append(name, ...buttons.map(([verb, label]) => { const b = el('button', verb === 'remove' ? 'danger' : '', label); b.type = 'button'; b.dataset.act = verb; b.addEventListener('click', () => void act([o.email, verb])); return b; }));
+            rows.append(row);
+        }
+    }
+    function showPassword(email, password) {
+        $('operators-password-for').textContent = email; $('operators-password-value').value = password; $('operators-password').hidden = false;
+    }
+    $('operators-password-copy').addEventListener('click', () => { void copyField($('operators-password-value'), $('operators-password-copy')); });
+    $('operators-password-done').addEventListener('click', () => { $('operators-password-value').value = ''; $('operators-password').hidden = true; });
+    $('operators-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('operators-error').hidden = true;
+        try { const r = await post(`${API}/operators`, { email: $('operators-email').value.trim() }); showPassword(r.email, r.password); $('operators-email').value = ''; }
+        catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
+        await paintOperators();
+    });
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
         void paintAlerts().catch(() => {});
@@ -3204,6 +3239,7 @@
             row.append(label, remove); list.append(row);
         }
         void paintDictation();
+        void paintOperators();
         /* With no shortcut, one line: how to add one (this is the only place to remove them). */
         $('settings-shortcuts-hint').textContent = saved.length ? 'The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.' : 'No shortcut yet: add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length

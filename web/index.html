@@ -570,6 +570,17 @@
         <p class="error" id="instance-error" role="alert" hidden></p>
           </div>
         </details>
+        <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
+        <details class="chapter" id="settings-ch-operators" data-chapter="s-operators" hidden>
+          <summary><span class="chapter-title">Administrators</span><span class="chapter-about">Who may sign in, and their passwords.</span></summary>
+          <div class="chapter-body">
+        <div id="operators-rows"></div>
+        <form id="operators-new" class="row" autocomplete="off"><label for="operators-email">Add an administrator</label><input id="operators-email" type="email" placeholder="someone@example.com" spellcheck="false" autocapitalize="off" required><button type="submit">Add</button></form>
+        <div id="operators-password" class="as-form" hidden><p><b id="operators-password-for"></b>: its password, shown <b>this once</b>. Give it to them yourself.</p><div class="row"><input id="operators-password-value" readonly spellcheck="false"><button type="button" id="operators-password-copy">Copy</button><button type="button" id="operators-password-done">Done</button></div></div>
+        <p class="hint">Five failed sign-ins within 15 minutes lock that address for 15 minutes; you are told. The last administrator is never locked out nor removed.</p>
+        <p class="error" id="operators-error" role="alert" hidden></p>
+          </div>
+        </details>
         <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
           <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">The ready-made answers under the terminal.</span></summary>
           <div class="chapter-body">

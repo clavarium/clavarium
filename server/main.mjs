@@ -56,6 +56,7 @@ import { Capacity } from './capacity.mjs';
 import { packageFile, PARLEY } from './parley.mjs';
 import { Updates } from './updates.mjs';
 import { Certificate } from './certificate.mjs';
+import { Operators } from './operators.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 
@@ -117,7 +118,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -155,7 +156,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -195,7 +196,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
-    const gate = makeGate(operators);
+    /* Who may sign in, kept up to date from the page (operators.mjs); none: this machine only. */
+    const team = operators.length ? new Operators({ host: runner(host), store: new Store(`${dataDir}/operators.json`), initial: operators }) : null;
+    const gate = makeGate(team ? () => team.allowed() : []);
     const originOk = makeOriginCheck(publicOrigin);
     const instance = new Instance({ file: new JsonFile(`${dataDir}/instance.json`, {}), origin: publicOrigin, given: appName });
     let repairTerminal = async () => { throw new Error('not ready'); };
@@ -390,7 +393,12 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const stopWatch = capacity.start();
     /* The certificate the front serves, said in Settings (certificate.mjs). */
     const certificate = new Certificate({ origin: publicOrigin, alerts });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, repair: (name) => repairTerminal(name) });
+    if (team) {
+        team.useAlerts(alerts);
+        void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
+        const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
+    }
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {

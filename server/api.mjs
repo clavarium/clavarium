@@ -66,6 +66,8 @@
  *   POST /api/secrets                       {name, value}  create or replace
  *   POST /api/secrets/<NAME>/remove
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
+ *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
+ *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
  *   POST /api/conversations/<name>/secrets  {secret, attached}
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
@@ -116,7 +118,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -125,6 +127,8 @@ export async function handleApi(request, response, conversations, headers, resou
     /* Files are reached THROUGH a conversation: only a folder attached to it,
        and writing only where the attachment says "write". */
     const query = new URL(request.url ?? '/', 'http://local').searchParams;
+    /* Who asks (behind the edge; '' on this machine alone): see gate.mjs. */
+    const identity = String(request.headers['x-forwarded-email'] ?? '').trim().toLowerCase();
     const attached = (need) => {
         /* The conversation's own work folder, when the server keeps it. */
         if (query.get('r') === WORK_TAB && resources) {
@@ -214,6 +218,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/shelf' && shelf) return send(200, shelf.about()), true;
             /* Settings, Updates (updates.mjs): what runs, what is out, the mode, what happened. */
             if (pathname === '/api/updates' && updates) return send(200, updates.about()), true;
+            /* Who may sign in (operators.mjs): none in local mode. */
+            if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
@@ -307,6 +313,14 @@ export async function handleApi(request, response, conversations, headers, resou
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
+        if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
+        const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
+        if (op && team) {
+            const email = decodeURIComponent(op[1]);
+            /* Not oneself out: another operator does it, or nobody would see it was a mistake. */
+            if (op[2] !== 'password' && op[2] !== 'enable' && email.toLowerCase() === identity) throw new Refusal(409, 'You cannot do that to your own account: ask another operator.');
+            return send(200, op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) }), true;
+        }
         const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
         if (renaming && secrets) return send(200, secrets.rename(renaming[1], String(body.name ?? '').trim())), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
