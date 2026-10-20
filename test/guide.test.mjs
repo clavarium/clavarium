@@ -262,7 +262,7 @@ test('isolation: one conversation\'s part goes into its own machine only, on its
     const files = join(tools, 'toolbox', 'files');
     const notes = readFileSync(join(files, 'CLAVARIUM.md'), 'utf8');
     assert.equal(notes, commonText({ parley: box.find('parley').path }));
-    for (const f of readdirSync(files)) assert.ok(!readFileSync(join(files, f)).toString('latin1').includes('alpha'), f);
+    for (const f of readdirSync(files, { recursive: true })) if (statSync(join(files, f)).isFile()) assert.ok(!readFileSync(join(files, f)).toString('latin1').includes('alpha'), f);
     assert.ok(statSync(join(files, 'CLAVARIUM.md')).isFile() && !lstatSync(join(files, 'CLAVARIUM.md')).isSymbolicLink());
 });
 

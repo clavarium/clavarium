@@ -69,7 +69,9 @@ test('the folder is made by the host program, then filled: each archive, and an 
     writeFileSync(join(files, 'clavarium-parley-0.0.1.tgz'), 'an old one');
     mkdirSync(join(files, 'stray'));
     await b.box.prepare();
-    assert.deepEqual(readdirSync(files).sort(), [archive, 'index.json'].sort());
+    assert.deepEqual(readdirSync(files).sort(), [archive, 'index.json', 'launch'].sort());
+    /* The launchers, as they are in launch/ of this code. */
+    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../launch', import.meta.url)).sort());
     /* The host program refuses: said, and nothing is offered. */
     const refused = bench(t, { make: 78 });
     await assert.rejects(refused.box.prepare(), /could not be made: REFUSED: the tools folder is not what it should be/);
@@ -163,4 +165,23 @@ test('Parley is not installed from an archive that is not the one of the index, 
     const later = machine(b);
     assert.equal(await b.box.installIn('helper'), '');
     assert.ok(later.calls.some((c) => c.includes('npm install')));
+});
+
+test('a launcher missing in its machine: /tools is mounted again and looked at again; still missing, it says why, and the tool is not started', async (t) => {
+    let mounted = false;
+    const b = bench(t, { mount: () => { mounted = true; return { code: 0 }; } });
+    b.vms.exec = async (name, argv) => { b.asked.push(`exec ${name} ${argv.join(' ')}`); return { code: mounted ? 0 : 1 }; };
+    await b.box.prepare();
+    b.asked.length = 0;
+    assert.equal(await b.box.launcherIn('demo', 'claude-code.sh'), '');
+    assert.deepEqual(b.asked, ['exec demo test -r /tools/launch/claude-code.sh', 'unmount demo', 'tools make', 'mount demo 994 985', 'exec demo test -r /tools/launch/claude-code.sh']);
+    /* There already: nothing else is asked. */
+    b.asked.length = 0;
+    assert.equal(await b.box.launcherIn('demo', 'claude-code.sh'), '');
+    assert.deepEqual(b.asked, ['exec demo test -r /tools/launch/claude-code.sh']);
+    /* It cannot be mounted: why, in words. */
+    const c = bench(t, { mount: { code: 1, stderr: 'mount failed: no such device' } });
+    c.vms.exec = async () => ({ code: 1 });
+    await c.box.prepare();
+    assert.equal(await c.box.launcherIn('demo', 'claude-code.sh'), '/tools could not be put in place: mount failed: no such device');
 });

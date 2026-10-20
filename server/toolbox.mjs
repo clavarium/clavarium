@@ -12,6 +12,8 @@
  *   /tools/index.json                  { tools: [{ name, version, file, sha256, usage }] }
  *   /tools/clavarium-parley-0.9.0.tgz  Parley, the first of them, as the registry
  *                                      served it (checked: parley.mjs)
+ *   /tools/launch/<tool>.sh            how each tool is started (config/tools.json,
+ *                                      "launch"), and json-set.mjs for their settings
  *   /tools/CLAVARIUM.md                where a tool is, the same for every
  *                                      machine (see guide.mjs): `notes`
  *
@@ -26,10 +28,14 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { APP, ARCHIVES, PARLEY, archiveName, locked, parleyDir, parleyVersion } from './parley.mjs';
 
 export const TOOLS_PATH = '/tools';
 export const NOTES = 'CLAVARIUM.md';
+/* THE LAUNCHERS of the tools (launch/ of this code): copied as they are into /tools/launch. */
+export const LAUNCH = 'launch';
+export const LAUNCHERS = fileURLToPath(new URL('../launch', import.meta.url));
 /* What is put there: { name, archive (a path here), integrity, usage(file) }.
    Parley's archive as the registry served it, next to the code (see
    parley.mjs), with the integrity npm recorded for the version installed:
@@ -51,7 +57,7 @@ export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(byte
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Toolbox {
-    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #index = null;
+    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #launchers; #index = null;
     /* What is known of Parley in each machine, as the index is now:
        conversation -> { sha256, why } (why: '' installed, or why it cannot be,
        such as a machine without npm: not asked again at each opening). */
@@ -61,8 +67,8 @@ export class Toolbox {
        `notes(find)`: the text of /tools/CLAVARIUM.md, given how to find a
        tool of the index; none when not given. Nothing of one conversation
        may be in it: every machine reads it. */
-    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null }) {
-        this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes;
+    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null, launchers = LAUNCHERS }) {
+        this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes; this.#launchers = launchers;
     }
 
     folder() { return `${this.#mnt}/toolbox/files`; }
@@ -92,7 +98,17 @@ export class Toolbox {
             const version = /-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.tgz$/.exec(file)?.[1] ?? '';
             tools.push({ name: source.name, version, file, sha256, usage: source.usage(`${TOOLS_PATH}/${file}`) });
         }
-        const kept = new Set([...tools.map((t) => t.file), 'index.json', ...(this.#notes ? [NOTES] : [])]);
+        /* The launchers, each copied when it differs; one no longer here taken away. */
+        const launch = `${dir}/${LAUNCH}`;
+        mkdirSync(launch, { recursive: true });
+        const wanted = existsSync(this.#launchers) ? readdirSync(this.#launchers).filter((n) => /^[a-z][a-z0-9-]*\.(sh|mjs)$/.test(n)) : [];
+        for (const n of wanted) {
+            const bytes = readFileSync(join(this.#launchers, n));
+            const there = existsSync(`${launch}/${n}`) ? readFileSync(`${launch}/${n}`) : null;
+            if (!there || !there.equals(bytes)) { writeFileSync(`${launch}/.${n}.new`, bytes, { mode: 0o755 }); renameSync(`${launch}/.${n}.new`, `${launch}/${n}`); }
+        }
+        for (const n of readdirSync(launch)) if (!wanted.includes(n)) rmSync(`${launch}/${n}`, { recursive: true, force: true });
+        const kept = new Set([...tools.map((t) => t.file), 'index.json', LAUNCH, ...(this.#notes ? [NOTES] : [])]);
         for (const name of readdirSync(dir)) if (!kept.has(name)) rmSync(`${dir}/${name}`, { recursive: true, force: true });
         const index = { tools };
         writeFileSync(`${dir}/.index.json.new`, `${JSON.stringify(index, null, 2)}\n`);
@@ -153,6 +169,18 @@ export class Toolbox {
         if (!(await there())) return 'installed, but "parley --version" does not say the version of the index';
         this.#installed.set(conversation, { sha256: tool.sha256, why: '' });
         return '';
+    }
+
+    /* THE LAUNCHER OF A TOOL, there in its machine before the tool starts: when /tools is
+       missing or came loose, it is repaired (below) and looked at again. '' or why not --
+       then the tool does not start: never a start in a half-made state. */
+    async launcherIn(conversation, file) {
+        const at = `${TOOLS_PATH}/${LAUNCH}/${file}`;
+        const there = async () => (await this.#vms.exec(conversation, ['test', '-r', at], { timeoutMs: 15_000 }).catch(() => ({ code: 1 }))).code === 0;
+        if (await there()) return '';
+        const why = await this.repair(conversation);
+        if (await there()) return '';
+        return why ? `/tools could not be put in place: ${why}` : `${at} is not in its machine, even after /tools was mounted again`;
     }
 
     /* It came loose: unmounted whatever the VM manager believes, its view

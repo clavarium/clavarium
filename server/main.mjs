@@ -298,6 +298,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         await Promise.race([toolbox.installIn(name).then((why) => { if (why && parleySaid.get(name) !== why) console.error(`${name}: Parley not installed: ${why}`); parleySaid.set(name, why); }), new Promise((r) => { setTimeout(r, PARLEY_WAIT_MS).unref?.(); })]);
         await rules;
     };
+    /* The launcher of its tool, in /tools, before it starts: repaired when missing. */
+    all.launcherReady = (name, file) => toolbox.launcherIn(name, file);
     all.through = [RUNNER];
     /* Mailboxes kept as folders: brought up to date now and then, never
        because a tool asked. */

@@ -3,6 +3,7 @@
     "id": "claude-code",
     "instructions": ".claude/CLAUDE.md",
     "label": "Claude Code",
+    "launch": "claude-code.sh",
     "command": [
       "claude"
     ],
@@ -15,7 +16,7 @@
       "full": [
         "--dangerously-skip-permissions",
         "--settings",
-        "{\"skipDangerousModePermissionPrompt\":true,\"permissions\":{\"allow\":[\"Bash(parley:*)\"]}}"
+        "{\"permissions\":{\"allow\":[\"Bash(parley:*)\"]}}"
       ],
       "ask": [
         "--settings",

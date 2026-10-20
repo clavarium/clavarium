@@ -11,6 +11,7 @@ import { JsonFile } from './store.mjs';
 import { attachCommand, SOCKET } from './tmux.mjs';
 import { WORK, VM_USER, SHARING_STEP } from './vm.mjs';
 import { resumeOrFresh } from './tools.mjs';
+import { TOOLS_PATH, LAUNCH } from './toolbox.mjs';
 
 export const SESSION = 'main';
 export const STOP_DELAY_MS = 60_000;
@@ -67,6 +68,8 @@ export class Conversations {
     /* Set by the server: prepares the VM before the tool is attached, and
        names the program the tool is started through. See secrets.mjs. */
     prepare = async () => {};
+    /* (name, file) -> '' when the launcher of its tool is in its machine (toolbox.mjs, launcherIn). */
+    launcherReady = async () => '';
     through = [];
     /* Set by the server: closes at once a terminal kept open for a screen
        that might come back. Called before a machine is slept, stopped or deleted. */
@@ -453,6 +456,11 @@ export class Conversations {
         /* A machine built before a repair was part of the recipe gets it
            once, beside the opening, not in its way. */
         if ((c.fixed ?? 0) < FIXES && tool.fixups.length > 0) void this.#fixup(name, tool);
+        /* Its launcher, in /tools: repaired if missing; not there, the tool does not start. */
+        if (tool.launch) {
+            const why = await this.launcherReady(name, tool.launch).catch((error) => error.message || 'not there');
+            if (why) { this.left(name); throw new Refusal(503, `Its tool cannot start: ${why}. Try again.`, { retry: true }); }
+        }
         const argv = this.#vms.execArgv(name, attachCommand(SESSION, [...this.through, ...this.#command(name, tool)], WORK));
         for (const id of ['resume', 'fresh', 'first']) this.#reach(name, id);
         tell();
@@ -472,7 +480,9 @@ export class Conversations {
            first: added at EVERY start, a resume included (a tool does not
            keep it from its last session). */
         const rights = tool.rights ? (c.askFirst === true ? tool.rights.ask : tool.rights.full) : [];
-        return resume ? resumeOrFresh([...tool.resume, ...rights], [...tool.command, ...rights]) : [...tool.command, ...rights];
+        const run = resume ? resumeOrFresh([...tool.resume, ...rights], [...tool.command, ...rights]) : [...tool.command, ...rights];
+        /* Through its launcher: told the rights chosen, it sets what the tool needs, then runs it. */
+        return tool.launch ? ['sh', `${TOOLS_PATH}/${LAUNCH}/${tool.launch}`, c.askFirst === true ? 'ask' : 'full', ...run] : run;
     }
 
     /* Whether its tool asks before acting (true), or acts without asking in

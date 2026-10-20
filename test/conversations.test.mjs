@@ -510,6 +510,25 @@ test('every right in its own machine by default, at EVERY start of its tool (fir
     }
 });
 
+test('a tool with a launcher starts through it, told the rights chosen; its launcher missing and not repaired, it does not start at all', async (t) => {
+    const b = bench(t);
+    const tools = readTools(JSON.stringify([{ id: 'bold', label: 'Bold', command: ['bold'], launch: 'bold.sh', rights: { full: ['--every-right'], ask: ['--asks'] }, memoryMb: 1024, install: [] }]));
+    let why = '';
+    const asked = [];
+    const all = b.make({ tools });
+    all.launcherReady = async (name, file) => { asked.push(`${name} ${file}`); return why; };
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    const tool = async () => { const argv = await all.open('demo'); all.left('demo'); return argv.slice(argv.indexOf('/work') + 1, argv.indexOf(';')); };
+    assert.deepEqual(await tool(), ['sh', '/tools/launch/bold.sh', 'full', 'bold', '--every-right']);
+    all.setAskFirst('demo', true);
+    assert.deepEqual(await tool(), ['sh', '/tools/launch/bold.sh', 'ask', 'bold', '--asks']);
+    assert.deepEqual(asked, ['demo bold.sh', 'demo bold.sh'], 'looked at before each start');
+    /* Not there, and /tools could not be put back: refused, said, nothing half started. */
+    why = '/tools could not be put in place: mount failed';
+    await assert.rejects(all.open('demo'), (error) => error.status === 503 && /cannot start: \/tools could not be put in place: mount failed/.test(error.message));
+});
+
 test('a terminal that does not come is repaired: its channel closed, its tmux kept when it answers, made again when it does not; refused when that cannot help', async (t) => {
     let session = 0; let answers = true;
     const b = bench(t, { exec: (argv) => (argv.includes('list-panes') ? { code: session, stdout: '', stderr: '' } : argv.slice(-3).join(' ') === 'test -d /' && !answers ? { code: 255, stdout: '', stderr: 'timed out' } : undefined) });

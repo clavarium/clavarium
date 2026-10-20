@@ -63,9 +63,11 @@ test('every tool but the shell is started with every right in its own machine, b
     assert.deepEqual(rights.opencode.full, ['--auto']);
     const claude = rights['claude-code'];
     assert.equal(claude.full[0], '--dangerously-skip-permissions');
-    /* Given on the command line, not written in its settings file: the owner's file is never rewritten. */
     assert.equal(claude.full[1], '--settings');
-    assert.deepEqual(JSON.parse(claude.full[2]), { skipDangerousModePermissionPrompt: true, permissions: { allow: ['Bash(parley:*)'] } });
+    /* skipDangerousModePermissionPrompt is not here: on the command line Claude Code ignores it, and the
+       flag above with it. Its launcher writes it in its settings file (launch/claude-code.sh). */
+    assert.deepEqual(JSON.parse(claude.full[2]), { permissions: { allow: ['Bash(parley:*)'] } });
+    assert.equal(loadTools().find((t) => t.id === 'claude-code').launch, 'claude-code.sh');
     assert.deepEqual(claude.ask[0], '--settings');
     assert.deepEqual(JSON.parse(claude.ask[1]), { permissions: { allow: ['Bash(parley:*)'] } });
     for (const id of ['codex', 'gemini', 'opencode']) assert.deepEqual(rights[id].ask, [], `${id}: asks as it does by itself`);
