@@ -428,11 +428,31 @@ export async function picture(root, relative) {
  * the caller's own rules (who may write where) are in it. The caller has
  * already checked that a POST comes from this site.
  * Answers [status, body], or { picture }, or undefined: not one of these. */
+/* WHAT THE PERSON ATTACHES IN A CHAT is kept in its bridge folder, hidden on purpose (Parley's
+   .parley/files/<id>/<name>): no listing ever shows it, but its picture is shown in the message it
+   came with. Only that shape, walked from that folder, each step looked at: never a link. */
+const ATTACHED_PICTURE = /^\.parley\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/([^/]+)$/;
+async function bridgeFiles(root) {
+    let here = await realpath(root);
+    for (const part of ['.parley', 'files']) {
+        const next = join(here, part);
+        const info = await lstat(next).catch(() => undefined);
+        if (!info || info.isSymbolicLink() || !info.isDirectory()) throw new Refusal(404, 'No such file.');
+        here = next;
+    }
+    return here;
+}
+
 export const CHANGE_ROUTES = ['/files/thumb', '/files/text', '/files/save', '/files/make', '/files/rename', '/files/move', '/files/remove', '/files/taken'];
 export async function changeRoute(method, route, params, request, folder) {
     if (!CHANGE_ROUTES.includes(route)) return undefined;
     const p = params.get('p') ?? '';
-    if (method === 'GET' && route === '/files/thumb') return { picture: await picture(folder(), p) };
+    if (method === 'GET' && route === '/files/thumb') {
+        /* A picture the person attached in its chat: shown in their own message too, by that one shape. */
+        const attached = ATTACHED_PICTURE.exec(p);
+        if (attached) return { picture: await picture(await bridgeFiles(folder()), `${attached[1]}/${attached[2]}`) };
+        return { picture: await picture(folder(), p) };
+    }
     if (method === 'GET' && route === '/files/text') return [200, await readText(folder(), p)];
     if (method !== 'POST') return [405, { error: 'Not this way.' }];
     const type = String(request.headers['content-type'] ?? '');

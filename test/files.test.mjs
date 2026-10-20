@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, readFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { list, download, importFile, inside, isFileName, make, renameIn, move, remove, readText, saveText, picture, taken, walk, EDIT_MAX, THUMB_MAX, DEPTH_MAX, BATCH_FILES } from '../server/files.mjs';
+import { list, download, importFile, inside, isFileName, make, renameIn, move, remove, readText, saveText, picture, taken, walk, changeRoute, EDIT_MAX, THUMB_MAX, DEPTH_MAX, BATCH_FILES } from '../server/files.mjs';
 import { existsSync, statSync, utimesSync } from 'node:fs';
 
 function folder(t) {
@@ -225,4 +225,28 @@ test('a drop: subfolders made, a taken name kept beside, replaced or skipped as 
     await assert.rejects(importFile(root, 'out', 'one-more.txt', body('x'), { batch: '../x' }), (e) => e.status === 400);
     assert.equal(existsSync(join(root, 'out', 'one-more.txt')), false);
     assert.deepEqual(readdirSync(join(root, 'out')).filter((n) => n.startsWith('.')), [], 'no partial file left');
+});
+
+test('a picture the person attached in a chat has its thumbnail, by that one shape in the hidden bridge folder; nothing else hidden, and never through a link', async (t) => {
+    const root = mkdtempSync(join(tmpdir(), 'clv-attached-'));
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const id = '0f350d03-5980-4933-909f-7e60ba9e727a';
+    mkdirSync(join(root, '.parley', 'files', id), { recursive: true });
+    const png = Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex');
+    writeFileSync(join(root, '.parley', 'files', id, 'shot.png'), png);
+    writeFileSync(join(root, '.parley', 'to-agent.jsonl'), '{}');
+    const thumb = (p) => changeRoute('GET', '/files/thumb', new URLSearchParams({ p }), {}, () => root);
+    const got = await thumb(`.parley/files/${id}/shot.png`);
+    assert.equal(got.picture.type, 'image/png');
+    await assert.rejects(thumb('.parley/to-agent.jsonl'), /hidden/);
+    await assert.rejects(thumb(`.parley/files/${id}/../../to-agent.jsonl`), /hidden|leaves/);
+    await assert.rejects(thumb('.parley/files/not-an-id/shot.png'), /hidden/);
+    /* Its bridge folder made a link elsewhere: refused. */
+    const other = mkdtempSync(join(tmpdir(), 'clv-elsewhere-'));
+    t.after(() => rmSync(other, { recursive: true, force: true }));
+    mkdirSync(join(other, 'files', id), { recursive: true });
+    writeFileSync(join(other, 'files', id, 'shot.png'), png);
+    rmSync(join(root, '.parley'), { recursive: true, force: true });
+    symlinkSync(other, join(root, '.parley'));
+    await assert.rejects(thumb(`.parley/files/${id}/shot.png`), /No such file/);
 });
