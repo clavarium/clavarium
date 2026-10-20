@@ -33,9 +33,9 @@ import { APP, ARCHIVES, PARLEY, archiveName, locked, parleyDir, parleyVersion } 
 
 export const TOOLS_PATH = '/tools';
 export const NOTES = 'CLAVARIUM.md';
-/* THE LAUNCHERS of the tools (launch/ of this code): copied as they are into /tools/launch. */
+/* THE LAUNCHERS of the tools (config/launch of this code: config/ is in every release, also one made by an older updater): copied as they are into /tools/launch. */
 export const LAUNCH = 'launch';
-export const LAUNCHERS = fileURLToPath(new URL('../launch', import.meta.url));
+export const LAUNCHERS = fileURLToPath(new URL('../config/launch', import.meta.url));
 /* What is put there: { name, archive (a path here), integrity, usage(file) }.
    Parley's archive as the registry served it, next to the code (see
    parley.mjs), with the integrity npm recorded for the version installed:

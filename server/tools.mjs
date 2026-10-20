@@ -98,10 +98,10 @@ export function readTools(text) {
            machine's user (".claude/CLAUDE.md"): a marked block in it points
            the tool to its guide (see guide.mjs). A plain relative path. */
         if (t.instructions !== undefined && !INSTRUCTIONS.test(t.instructions)) throw new Error(`${t.id}: instructions is a relative path in the home, without ".."`);
-        /* Optional: ITS LAUNCHER, a script of launch/ shown at /tools/launch: run at each start,
+        /* Optional: ITS LAUNCHER, a script of config/launch shown at /tools/launch: run at each start,
            given the rights chosen (full, ask) then the command; it sets what the tool needs,
            then runs it. Clavarium knows nothing more of the tool. */
-        if (t.launch !== undefined && !/^[a-z][a-z0-9-]{0,40}\.sh$/.test(t.launch)) throw new Error(`${t.id}: launch is the name of a script of launch/, such as "${t.id}.sh"`);
+        if (t.launch !== undefined && !/^[a-z][a-z0-9-]{0,40}\.sh$/.test(t.launch)) throw new Error(`${t.id}: launch is the name of a script of config/launch, such as "${t.id}.sh"`);
         /* Repairs an existing machine is given once (see FIXES in conversations.mjs). */
         const fixups = t.install.includes('npm-writable') ? NPM_WRITABLE : [];
         return Object.freeze({ id: t.id, label: t.label, ...(t.instructions ? { instructions: t.instructions } : {}), command: Object.freeze([...t.command]), ...(t.launch ? { launch: t.launch } : {}), ...(t.resume ? { resume: Object.freeze([...t.resume]) } : {}), memoryMb: t.memoryMb, ...(rights ? { rights } : {}), steps: Object.freeze(steps), fixups: Object.freeze(fixups), signin });

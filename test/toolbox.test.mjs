@@ -70,8 +70,8 @@ test('the folder is made by the host program, then filled: each archive, and an 
     mkdirSync(join(files, 'stray'));
     await b.box.prepare();
     assert.deepEqual(readdirSync(files).sort(), [archive, 'index.json', 'launch'].sort());
-    /* The launchers, as they are in launch/ of this code. */
-    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../launch', import.meta.url)).sort());
+    /* The launchers, as they are in config/launch of this code. */
+    assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../config/launch', import.meta.url)).sort());
     /* The host program refuses: said, and nothing is offered. */
     const refused = bench(t, { make: 78 });
     await assert.rejects(refused.box.prepare(), /could not be made: REFUSED: the tools folder is not what it should be/);

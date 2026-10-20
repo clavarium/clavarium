@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadTools, readTools } from '../server/tools.mjs';
 
-const LAUNCH = fileURLToPath(new URL('../launch', import.meta.url));
+const LAUNCH = fileURLToPath(new URL('../config/launch', import.meta.url));
 function home(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-launch-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -57,8 +57,8 @@ test('the launcher of Claude Code: its settings file says the rights chosen, the
     assert.match(said.stderr, /were not changed: it may ask before acting/);
 });
 
-test('a launcher named in the configuration is a script of launch/; every launcher there parses', () => {
-    for (const t of loadTools()) if (t.launch) assert.ok(existsSync(join(LAUNCH, t.launch)), `${t.id}: ${t.launch} is in launch/`);
+test('a launcher named in the configuration is a script of config/launch; every launcher there parses', () => {
+    for (const t of loadTools()) if (t.launch) assert.ok(existsSync(join(LAUNCH, t.launch)), `${t.id}: ${t.launch} is in config/launch`);
     for (const f of readdirSync(LAUNCH)) {
         if (f.endsWith('.sh')) assert.equal(spawnSync('sh', ['-n', join(LAUNCH, f)]).status, 0, f);
         if (f.endsWith('.mjs')) assert.equal(spawnSync(process.execPath, ['--check', join(LAUNCH, f)]).status, 0, f);
