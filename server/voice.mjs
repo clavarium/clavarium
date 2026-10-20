@@ -154,6 +154,11 @@ export class Dictation {
     constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch } = {}) {
         this.#file = file; this.#env = env; this.#secret = secret; this.#lookup = lookup; this.#fetcher = fetcher;
     }
+    /* A secret renamed: the key of dictation follows it. */
+    secretRenamed(from, to) {
+        const kept = this.#file.get();
+        if (kept?.secret === from) this.#file.set({ ...kept, secret: to });
+    }
     #saved() { const kept = this.#file.get(); return kept?.on === true && !dictationProblem(kept) ? kept : undefined; }
     #configOf(c) {
         return { url: c.url, model: c.model, language: c.language || undefined, key: c.secret ? this.#secret(c.secret) : undefined, provider: c.provider };

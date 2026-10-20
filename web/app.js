@@ -2776,7 +2776,22 @@
         const r = chosen.resource;
         /* State, in a line. */
         if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-        if (chosen.kind === 'secret') detail.append(el('p', 'hint', 'Its value is never shown again. A change takes effect the next time the tool starts.'));
+        if (chosen.kind === 'secret') {
+            detail.append(el('p', 'hint', 'Its value is never shown again. A change takes effect the next time the tool starts.'));
+            /* Renamed: its value and the conversations it is handed to go with it. */
+            const form = el('form', 'row secret-rename'); form.autocomplete = 'off';
+            const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
+            const go = el('button', '', 'Rename'); go.type = 'submit';
+            form.append(name, go);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                $('assets-error').hidden = true;
+                try { const done = await post(`${API}/secrets/${chosen.name}/rename`, { name: name.value.trim() }); assetOpen = `secret:${done.name}`; }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                await paintAssets();
+            });
+            detail.append(form);
+        }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
         const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
         const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : r.attachments?.[c.name] ?? 'none');

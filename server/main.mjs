@@ -258,6 +258,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     };
     const door = { devices, conversations: all, resources: folders, shortcuts, voice, originOk, headers: HEADERS, secure: Boolean(publicOrigin?.startsWith('https:')), repair: (name) => repairTerminal(name) };
     const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms, grants });
+    /* A secret renamed: what names it follows (the key of dictation). `voice` is made below. */
+    secrets.renamed = (from, to) => voice.secretRenamed(from, to);
     const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */

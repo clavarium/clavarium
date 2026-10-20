@@ -83,6 +83,32 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
     await me.sees('\n4\n');
 });
 
+test('a secret is renamed: its value and the conversation it is handed to go with it; its tool sees it under the new name at its next start', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('renamer');
+    await me.api('/api/secrets', { name: 'OLD_KEY', value: 'kept-value' });
+    await me.api('/api/conversations/renamer/secrets', { secret: 'OLD_KEY', attached: true });
+    await me.page.reload();
+    await me.until('live', async () => (await me.state()) === 'live');
+    await me.openAsset('secret', 'OLD_KEY');
+    await me.page.fill('#secret-rename-name', 'NEW_KEY');
+    await me.page.locator('.secret-rename button[type=submit]').click();
+    await me.until('listed under its new name', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:NEW_KEY"]').count()) === 1);
+    const list = (await me.api('/api/secrets')).body;
+    assert.deepEqual(list.map((x) => [x.name, x.conversations]), [['NEW_KEY', ['renamer']]]);
+    assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'A B' })).status, 400);
+    await me.api('/api/secrets', { name: 'TAKEN', value: 'x' });
+    assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'TAKEN' })).status, 409);
+    await me.page.locator('#assets-close').click();
+    await me.type('exit');
+    await me.until('the tool has exited', async () => (await me.state()) === 'ended');
+    await me.page.locator('#notice-action').click();
+    await me.until('live again', async () => (await me.state()) === 'live');
+    await me.type('echo "new=[$NEW_KEY] old=[$OLD_KEY]"');
+    await me.sees('new=[kept-value] old=[]');
+});
+
 test('reloading the page sends nothing into the machine: its terminal is already open', { skip: SKIP }, async (t) => {
     /* Asked by the owner: "when I reload, the terminal takes time to connect;
        the tunnel should stay open while the machine runs". Asking the VM

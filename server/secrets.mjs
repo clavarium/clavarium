@@ -80,6 +80,24 @@ export class Secrets {
         return { name };
     }
 
+    /* RENAMED: its value (still sealed, never opened) and the conversations it is handed to go with
+       it; `renamed(from, to)` tells what else names it (dictation's key). Delivered under its new
+       name at each conversation's next start. */
+    rename(from, to) {
+        const secret = this.#store.get(from);
+        if (!secret) throw new Refusal(404, 'No such secret.');
+        if (!isSecretName(to)) throw new Refusal(400, 'A secret is named like a variable: capitals, digits and underscores, starting with a letter.');
+        if (to === from) return { name: to };
+        if (this.#store.get(to)) throw new Refusal(409, `A secret is already named ${to}.`);
+        this.#store.put({ ...secret, name: to });
+        for (const g of this.#grants.on(`secret:${from}`)) this.#grants.give(g.subject, `secret:${to}`, g.rights);
+        this.#grants.forgetAsset(`secret:${from}`);
+        this.#store.remove(from);
+        this.renamed(from, to);
+        return { name: to };
+    }
+    renamed = () => {};
+
     remove(name) {
         if (!this.#store.get(name)) throw new Refusal(404, 'No such secret.');
         this.#store.remove(name);

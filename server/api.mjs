@@ -65,6 +65,7 @@
  *   GET  /api/secrets                       names only: a value never comes back
  *   POST /api/secrets                       {name, value}  create or replace
  *   POST /api/secrets/<NAME>/remove
+ *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
  *   POST /api/conversations/<name>/secrets  {secret, attached}
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
@@ -305,6 +306,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
+        const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
+        if (renaming && secrets) return send(200, secrets.rename(renaming[1], String(body.name ?? '').trim())), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;

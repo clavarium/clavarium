@@ -106,3 +106,21 @@ test('the signature of a delivery changes when, and only when, a delivery would 
     assert.notEqual(b.secrets.signature('alpha'), attached, 'a new value is a new delivery');
     assert.ok(!b.secrets.signature('alpha').includes('two'), 'and the signature carries no value in clear');
 });
+
+test('renamed: its value (still sealed) and the conversations it is handed to go with it; what else names it is told', (t) => {
+    const { secrets } = bench(t);
+    secrets.set({ name: 'OLD_KEY', value: 'v1' });
+    secrets.attach('alpha', 'OLD_KEY', true);
+    const told = [];
+    secrets.renamed = (from, to) => told.push(`${from}>${to}`);
+    assert.deepEqual(secrets.rename('OLD_KEY', 'NEW_KEY'), { name: 'NEW_KEY' });
+    assert.deepEqual(secrets.list().map((s) => [s.name, s.conversations]), [['NEW_KEY', ['alpha']]]);
+    assert.equal(secrets.reveal('NEW_KEY'), 'v1');
+    assert.equal(secrets.reveal('OLD_KEY'), undefined);
+    assert.deepEqual(secrets.of('alpha'), ['NEW_KEY']);
+    assert.deepEqual(told, ['OLD_KEY>NEW_KEY']);
+    secrets.set({ name: 'TAKEN', value: 'x' });
+    assert.throws(() => secrets.rename('NEW_KEY', 'TAKEN'), /already named TAKEN/);
+    assert.throws(() => secrets.rename('NEW_KEY', 'bad name'), /named like a variable/);
+    assert.throws(() => secrets.rename('NOPE', 'OTHER'), /No such secret/);
+});
