@@ -3243,7 +3243,7 @@
         /* With no shortcut, one line: how to add one (this is the only place to remove them). */
         $('settings-shortcuts-hint').textContent = saved.length ? 'The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.' : 'No shortcut yet: add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length
-            ? `Who may sign in: ${platform.operators.join(', ')} (set when this was installed).`
+            ? `Who may sign in: ${platform.operators.join(', ')} (Settings, Administrators).`
             : 'Development mode: anyone on this machine is the operator.';
         $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}.`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;

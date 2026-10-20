@@ -378,7 +378,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* The VM manager, watched: said to the pages when it does not answer, restarted once when stuck (vmwatch.mjs). */
     const vmWatch = new VmWatch({ run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { void alerts.tell(payload)?.catch?.(() => {}); } });
     const stopVmWatch = vmWatch.start(vmWatchEveryMs);
-    const platform = { get machines() { return vmWatch.ok; }, answerer: answerer.about(), operators: [...operators], address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
+    const platform = { get machines() { return vmWatch.ok; }, answerer: answerer.about(), get operators() { return team ? team.allowed() : [...operators]; }, address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
     /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
     const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });
