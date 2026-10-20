@@ -650,6 +650,13 @@
         <div id="settings-server" tabindex="-1">
           <p id="server-unknown" class="hint" hidden>This server's disk and memory cannot be read just now. Nothing is refused for lack of room while they cannot.</p>
           <div id="server-disks"></div>
+          <!-- ALL THE MACHINES TO ANOTHER DISK (server/machinesmove.mjs). -->
+          <details id="move-machines-box">
+            <summary>Move all the machines to another disk...</summary>
+            <p class="hint">Every machine is stopped, its disk copied to the disk you choose, and started again as its conversation is opened. <b>This server stops meanwhile</b>: this page comes back by itself. It takes from a few minutes to much longer, with the size of the machines. The copy on the disk of now is kept until you remove it.</p>
+            <div id="move-machines-rows"></div>
+            <p class="hint" id="move-machines-said" role="status"></p>
+          </details>
           <div class="server-block" id="server-memory" hidden>
             <div class="server-head"><b>Memory</b><span id="server-memory-state" class="server-state"></span><span id="server-memory-figures" class="server-figures"></span></div>
             <div class="server-meter" id="server-memory-meter" role="meter" aria-label="Memory taken" aria-valuemin="0" aria-valuemax="100"><span class="fill"></span><span class="zone"></span><span class="mark"></span></div>

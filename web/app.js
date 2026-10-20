@@ -3579,6 +3579,26 @@
             box.append(block);
         }
     }
+    /* ALL THE MACHINES TO ANOTHER DISK: the disks they may go to, those they may not and why; then how it went. */
+    async function paintMoveMachines() {
+        const [p, m] = await Promise.all([fetch(`${API}/machines/places`).then((r) => (r.ok ? r.json() : null)).catch(() => null), fetch(`${API}/machines/moving`).then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
+        const rows = $('move-machines-rows'); rows.replaceChildren();
+        if (m?.said?.length) $('move-machines-said').textContent = m.done ? `The last move: ${m.said.find((l) => l.startsWith('Done:'))}` : m.failed ? `The last move did not happen: ${m.said.filter(Boolean).at(-1)}` : m.state === 'active' ? `Moving: ${m.said.at(-1)}` : '';
+        if (!p) return;
+        if (!p.places.length) rows.append(el('p', 'hint', 'No other disk is mounted under /mnt or /media: the VM manager can only keep its machines there (or under /home).'));
+        for (const x of p.places) {
+            const row = el('div', 'folder');
+            row.append(el('b', '', x.at), el('small', 'hint', ` ${Math.round(x.freeMb / 1024)} GB free of ${Math.round(x.sizeMb / 1024)} GB${x.why ? ` -- ${x.why}` : ''}`));
+            const go = el('button', 'danger', 'Move them here...'); go.type = 'button'; go.disabled = Boolean(x.why);
+            go.addEventListener('click', () => {
+                if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = `Yes: stop every machine and this server, and move them to ${x.at}`; return; }
+                go.disabled = true;
+                void post(`${API}/machines/move`, { to: x.at }).then(() => { $('move-machines-said').textContent = 'Moving: this server stops now, and comes back by itself. Reload this page in a few minutes.'; }).catch((error) => { $('move-machines-said').textContent = error.message; go.disabled = false; });
+            });
+            row.append(go); rows.append(row);
+        }
+    }
+    $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);

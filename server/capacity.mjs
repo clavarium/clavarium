@@ -87,6 +87,8 @@ export const gb = (mb) => `${(mb / 1024).toFixed(1)} GB`;
 const percent = (part, all) => (all > 0 ? Math.round((part / all) * 100) : 0);
 
 export class Capacity {
+    /* What the machines take on their disk, as last measured (MB), or undefined. */
+    machinesUsedMb() { const u = this.#usage; if (!u) return undefined; return Object.values(u.machines ?? {}).reduce((a, b) => a + b, 0) + (u.shelf ?? 0) + (u.images ?? 0); }
     #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
 
     /* `run(argv)`: the host program. `store`: where the reserve is kept.

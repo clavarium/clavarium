@@ -95,7 +95,7 @@ UPDATER="$CODE/current/app/deploy/updater.mjs"
 UPDATE_STATE="/var/lib/clavarium/update"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -642,6 +642,39 @@ case "$AREA $VERB" in
         elif [ "$VERB" = "failures" ]; then [ $# -eq 1 ] && number "$1" || usage
         else [ $# -eq 1 ] && [[ "$1" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || refuse "not an e-mail address: ${1:-<empty>}"; fi
         run "$UPDATER_NODE" "$CODE/current/app/deploy/operators.mjs" "$VERB" "$@" ;;
+    "machines places")
+        # WHERE ALL THE MACHINES COULD GO (deploy/move-machines.sh), for the
+        # page: each disk mounted where the VM manager may keep them (/mnt,
+        # /media, /home), and the one they are on now. Read-only.
+        #   now <place> <device> <size MB> <free MB>
+        #   place <mount point> <device> <size MB> <free MB>
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "findmnt of /mnt /media /home; df $SHELF_STORE"; exit 0; fi
+        printf 'now %s %s %s\n' "$SHELF_STORE" "$(stat -c %d -- "$SHELF_STORE")" "$(df -Pm -- "$SHELF_STORE" | awk 'NR==2 {print $2, $4}')"
+        findmnt -rn -o TARGET,FSTYPE | while read -r at fs; do
+            case "$fs" in ext2|ext3|ext4|xfs|btrfs|f2fs) : ;; *) continue ;; esac
+            case "$at" in /mnt|/mnt/*|/media/*|/home) : ;; *) continue ;; esac
+            [[ "$at" =~ ^/[A-Za-z0-9/._-]*$ ]] || continue
+            printf 'place %s %s %s\n' "$at" "$(stat -c %d -- "$at")" "$(df -Pm -- "$at" | awk 'NR==2 {print $2, $4}')"
+        done
+        exit 0 ;;
+    "machines move")
+        # ALL THE MACHINES TO <mount point>/clavarium-machines, in a service of
+        # its own: it stops this server on its way (deploy/move-machines.sh).
+        [ $# -eq 1 ] || usage
+        case "$1" in /mnt|/mnt/*|/media/?*|/home) : ;; *) refuse "not a place the VM manager may use: $1" ;; esac
+        [[ "$1" =~ ^/[A-Za-z0-9/._-]+$ ]] && [[ "$1" != *..* ]] || refuse "not a plain path: $1"
+        [ "$SAY" = "yes" ] || mountpoint -q "$1" || refuse "not a disk mounted there: $1"
+        target="${1%/}/clavarium-machines"
+        run systemd-run --quiet --unit=clavarium-move-machines --collect --description="Clavarium - all the machines to $target" \
+            bash "$CODE/current/app/deploy/move-machines.sh" --to "$target" ;;
+    "machines moving")
+        # How the move goes: the state of its service and the end of what it said.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "systemctl show clavarium-move-machines; journalctl -u clavarium-move-machines"; exit 0; fi
+        printf 'state %s\n' "$(systemctl show -p ActiveState --value clavarium-move-machines.service 2>/dev/null || echo unknown)"
+        journalctl -u clavarium-move-machines.service -n 12 -o cat --no-pager 2>/dev/null | sed 's/^/said /' || true
+        exit 0 ;;
     "net taps")
         [ $# -eq 0 ] || usage
         run pgrep -a qemu-system ;;
