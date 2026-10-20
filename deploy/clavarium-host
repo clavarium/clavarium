@@ -76,7 +76,8 @@ SHELF_INSTANCES="$SHELF_STORE/data/multipassd/vault/instances"
 SHELF_CACHE="$SHELF_STORE/cache"
 # Moved to another disk (deploy/move-machines.sh, Multipass's own way: its
 # MULTIPASS_STORAGE in a drop-in of its service): <path>/data, <path>/cache.
-MOVED_TO="$(sed -n 's/^Environment=MULTIPASS_STORAGE=\(\/[A-Za-z0-9/._-]*\)$/\1/p' /etc/systemd/system/snap.multipass.multipassd.service.d/override.conf 2>/dev/null | head -1)"
+# (No drop-in is the usual case: under pipefail a missing file must not stop this program.)
+MOVED_TO="$( { sed -n 's/^Environment=MULTIPASS_STORAGE=\(\/[A-Za-z0-9/._-]*\)$/\1/p' /etc/systemd/system/snap.multipass.multipassd.service.d/override.conf 2>/dev/null || true; } | head -1)"
 if [ -n "$MOVED_TO" ] && [ -d "$MOVED_TO/data" ]; then SHELF_STORE="$MOVED_TO"; SHELF_INSTANCES="$MOVED_TO/data/vault/instances"; SHELF_CACHE="$MOVED_TO/cache"; fi
 SHELF_MIN_FREE_MB="6144"
 CONF="/etc/clavarium/host.conf"
