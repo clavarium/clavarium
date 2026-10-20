@@ -2976,10 +2976,29 @@
     });
     $('git-key-copy').addEventListener('click', () => { void copyField($('git-key-public'), $('git-key-copy')); });
     /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
+    /* A VALUE OF SEVERAL LINES (a PEM or SSH key, a certificate): a box of its own, masked like the
+       line. Pasted into the line, whose input keeps one line only, it comes there whole by itself. */
+    const secretLines = (on, text) => {
+        $('secret-lines').hidden = !on; $('secret-value').hidden = on;
+        $('secret-value').required = !on; $('secret-lines').required = on;
+        $('secret-lines-switch').textContent = on ? 'One line' : 'Several lines (a key, a certificate)';
+        if (on) { $('secret-lines').value = text ?? $('secret-value').value; $('secret-value').value = ''; $('secret-lines').focus(); }
+        else { $('secret-value').value = (text ?? $('secret-lines').value).split('\n')[0]; $('secret-lines').value = ''; }
+    };
+    $('secret-lines-switch').addEventListener('click', () => secretLines($('secret-lines').hidden));
+    $('secret-value').addEventListener('paste', (event) => {
+        const text = event.clipboardData?.getData('text') ?? '';
+        if (!/[\r\n]/.test(text.replace(/[\r\n]+$/, ''))) return;
+        event.preventDefault();
+        secretLines(true, text.replace(/\r\n?/g, '\n'));
+    });
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value: $('secret-value').value }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; $('secret-value').value = ''; }
+        const lines = !$('secret-lines').hidden;
+        /* A key's last line ends with a line break: kept as it was pasted. */
+        const value = lines ? $('secret-lines').value.replace(/\r\n?/g, '\n') : $('secret-value').value;
+        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; secretLines(false, ''); }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await paintAssets();
     });

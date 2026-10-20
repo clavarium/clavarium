@@ -44,6 +44,45 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.sees('off=[]');
 });
 
+test('a secret of several lines (a key) pasted into the line comes whole into its own box, masked, and arrives in the machine exactly as it was', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('with-pem');
+    await me.addAsset('secret');
+    await me.page.fill('#secret-name', 'DEPLOY_KEY');
+    const key = '-----BEGIN TEST KEY-----\nAAAA line one\nBBBB line two\n-----END TEST KEY-----\n';
+    /* Pasted into the line: the line keeps one line only, so the box of several lines takes it. */
+    await me.page.locator('#secret-value').focus();
+    await me.page.evaluate((text) => {
+        const data = new DataTransfer(); data.setData('text/plain', text);
+        document.getElementById('secret-value').dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    }, key.replace(/\n/g, '\r\n'));
+    await me.until('its own box is shown', async () => me.page.locator('#secret-lines').isVisible());
+    assert.equal(await me.page.locator('#secret-value').isVisible(), false);
+    assert.equal(await me.page.locator('#secret-lines').inputValue(), key, 'whole, its line breaks those of Unix');
+    assert.equal(await me.page.locator('#secret-lines').evaluate((x) => getComputedStyle(x).webkitTextSecurity ?? getComputedStyle(x).getPropertyValue('-webkit-text-security')), 'disc', 'masked as it is typed');
+    await me.page.locator('#secret-new button[type=submit]').click();
+    await me.until('the secret is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:DEPLOY_KEY"]').count()) === 1);
+    assert.equal((await me.page.content()).includes('line one'), false, 'the value is nowhere in the page');
+    assert.equal(await me.page.locator('#secret-lines').isVisible(), false, 'back to one line for the next one');
+    await me.page.locator('#assets-close').click();
+    await me.page.locator('#folders').click();
+    await me.page.locator('#attach-open').click();
+    await me.page.locator('#attach-rows .folder[data-name="DEPLOY_KEY"]').locator('button', { hasText: 'Use' }).click();
+    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="DEPLOY_KEY"]').count()) === 1);
+    await me.page.goBack();
+    await me.type('exit');
+    await me.until('the tool has exited', async () => (await me.state()) === 'ended');
+    await me.page.locator('#notice-action').click();
+    await me.until('live again', async () => (await me.state()) === 'live');
+    /* Its variable holds it, line breaks and all (the shell drops the last one, as $(cat) does:
+       put back here; the file /run/secrets/DEPLOY_KEY keeps it as it is). */
+    await me.type('printf "%s\\n" "$DEPLOY_KEY" | wc -l; printf "%s\\n" "$DEPLOY_KEY" | sha256sum | cut -c1-16');
+    const { createHash } = await import('node:crypto');
+    await me.sees(createHash('sha256').update(key).digest('hex').slice(0, 16));
+    await me.sees('\n4\n');
+});
+
 test('reloading the page sends nothing into the machine: its terminal is already open', { skip: SKIP }, async (t) => {
     /* Asked by the owner: "when I reload, the terminal takes time to connect;
        the tunnel should stay open while the machine runs". Asking the VM

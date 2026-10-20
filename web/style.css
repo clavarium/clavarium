@@ -1270,3 +1270,6 @@ select.pill { appearance: auto; }
 /* Something is being fetched: a small turning ring before the words (a still ring without motion). */
 .busy::before { content: ""; display: inline-block; width: .95em; height: .95em; margin-right: .5em; vertical-align: -.17em; border-radius: 50%; border: 2px solid color-mix(in srgb, currentColor 25%, transparent); border-top-color: var(--brass); }
 @media (prefers-reduced-motion: no-preference) { .busy::before { animation: busy-turn .8s linear infinite; } @keyframes busy-turn { to { transform: rotate(360deg); } } }
+
+/* A secret of several lines (a key): masked as the line is, never shown as it is typed. */
+.secret-lines { width: 100%; min-height: 6rem; margin-top: .5rem; font: .8rem ui-monospace, Menlo, Consolas, monospace; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; -webkit-text-security: disc; }
