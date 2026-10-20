@@ -52,6 +52,9 @@ test('an operator added comes in at once, with a password shown once and sent on
     assert.equal(b.as('second@example.com'), undefined);
     await assert.rejects(b.team.disable('owner@example.com'), /last operator/);
     await assert.rejects(b.team.add('not an address'), /e-mail address/);
+    /* A host that says yes and does nothing: refused, no password given for nobody. */
+    const quiet = new Operators({ host: async (argv) => ({ code: 0, stdout: argv[1] === 'list' ? 'owner@example.com\tenabled' : '', stderr: '' }), store: { get: () => undefined, put: () => {} }, initial: ['owner@example.com'] });
+    await assert.rejects(quiet.add('ghost@example.com'), /was not added/);
     assert.notEqual(newPassword(), newPassword());
 });
 

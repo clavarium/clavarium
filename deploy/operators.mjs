@@ -15,7 +15,8 @@
  * change, and must come back: otherwise the file is put back as it was.
  * A password never sits on a command line: hashed by Caddy, from standard input.
  */
-import { readFileSync, writeFileSync, renameSync, statSync, chownSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, statSync, chownSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 
@@ -135,7 +136,8 @@ function dexJournal(minutes) {
     return String(r.stdout ?? '');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/* Run as a command (the path may go through the link "current": compared once resolved). */
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
     const [verb, arg] = process.argv.slice(2);
     const ops = operators();
     const stdin = () => { try { return readFileSync(0, 'utf8').replace(/\r?\n$/, ''); } catch { return ''; } };

@@ -62,6 +62,8 @@ export class Operators {
     async add(email) {
         const e = this.#email(email); const password = newPassword();
         await this.#do(['operator', 'add', e], `${password}\n`);
+        /* What the identity provider now says, not what was hoped: a password given for nobody is no use. */
+        if (!this.#list.some((o) => o.email === e && o.enabled)) throw new Refusal(502, `${e} was not added: the identity provider does not list it.`);
         return { email: e, password };
     }
     async password(email) {
