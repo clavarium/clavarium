@@ -22,12 +22,12 @@ async function setup(t) {
     const parley = reg.publish('clavarium-parley', '0.9.0', { 'bin/parley.mjs': 'console.log("0.9.0")\n' }, { repo: PARLEY_REPO });
     const shrink = (version) => JSON.stringify({ name: 'clavarium', version, lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version, dependencies: { 'clavarium-parley': '0.9.0' } }, 'node_modules/clavarium-parley': { version: '0.9.0', resolved: parley.tarball, integrity: parley.integrity } } });
     /* A Clavarium as small as can be: its smoke test passes, or fails on purpose. */
-    const publish = (version, { smoke = true, dataFormat = 1, repo, attest, tag } = {}) => reg.publish('clavarium', version, {
+    const publish = (version, { smoke = true, dataFormat = 1, repo, attest, tag, ref } = {}) => reg.publish('clavarium', version, {
         'npm-shrinkwrap.json': shrink(version),
         'server/smoke.mjs': smoke ? 'console.log("smoke: ok")\n' : 'console.error("broken on purpose"); process.exit(1);\n',
         'server/tools.mjs': "export const NODE_VERSION = 'v24.20.0';\n",
         'deploy/clavarium-host': '#!/bin/bash\n',
-    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }) });
+    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }), ...(ref === undefined ? {} : { ref }) });
     const dirs = { code: join(root, 'opt'), conf: join(root, 'etc', 'update.conf'), stateDir: join(root, 'state'), data: join(root, 'data') };
     mkdirSync(dirs.data, { recursive: true });
     const calls = []; const broken = new Set();
@@ -103,12 +103,17 @@ test('refused before anything changes: built elsewhere, no provenance, a smoke t
     await assert.rejects(s.u.apply('1.1.0'), /was built from https:\/\/github\.com\/someone\/fork, not https:\/\/github\.com\/clavarium\/clavarium/);
     s.publish('1.1.1', { attest: false });
     await assert.rejects(s.u.apply('1.1.1'), /has no provenance/);
+    /* A version for everybody comes from main only; one to try, from next (or main). */
+    s.publish('1.1.4', { ref: 'refs/heads/next' });
+    await assert.rejects(s.u.apply('1.1.4'), /was built from refs\/heads\/next: a version for everybody comes from refs\/heads\/main/);
+    s.publish('1.1.5-next.1', { ref: 'refs/heads/feature' });
+    await assert.rejects(s.u.apply('1.1.5-next.1'), /was built from refs\/heads\/feature: a version to try comes from refs\/heads\/next or refs\/heads\/main/);
     s.publish('1.1.2', { smoke: false });
     await assert.rejects(s.u.apply('1.1.2'), /smoke test failed: broken on purpose/);
     assert.equal(s.current(), '1.0.0');
     assert.deepEqual(s.calls.filter((c) => !c.startsWith('signatures')), [], 'no backup, no restart');
     assert.deepEqual(readdirSync(join(s.dirs.code, 'releases')), ['1.0.0'], 'nothing half made is left');
-    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.1 failed', '1.1.0 failed']);
+    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.5-next.1 failed', '1.1.4 failed', '1.1.1 failed', '1.1.0 failed']);
     /* Not newer, not a version: refused by name. */
     await assert.rejects(s.u.apply('0.9.0'), /not newer than 1\.0\.0/);
     await assert.rejects(s.u.apply('1.0.0; id'), Refused);

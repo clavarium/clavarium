@@ -2,7 +2,15 @@
 # token (trusted publishing, OIDC) and with provenance: each installation
 # checks that what it updates to was built here (deploy/updater.mjs).
 #
-# On every push to main: the gate first (the checks a GitHub runner can run,
+# TWO BRANCHES. "next" publishes the versions to try (with a "-": 1.3.0-next.1,
+# under the tag "next"); "main" publishes the versions for everybody, and only
+# them. main is moved to a commit of next that was validated, never given a
+# commit of its own: what everybody gets is what was tried, byte for byte. So a
+# version without "-" on next is not published from there (main will), and a
+# version with "-" on main is refused: a forgotten "-" can no longer send a
+# version nobody tried to everybody.
+#
+# On every push to main or next: the gate first (the checks a GitHub runner can run,
 # and the unit tests); then the declared version is looked up on the
 # registry, and only a version that is not online is published -- from the
 # repository root, with the lock file as npm-shrinkwrap.json so that every
@@ -24,7 +32,7 @@ name: publish
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
 
 permissions:
@@ -76,6 +84,13 @@ jobs:
           elif printf '%s' "$out" | grep -q E404; then echo "publish=yes" >> "$GITHUB_OUTPUT"; echo "::notice::publishing clavarium-relay@${version}"
           else echo "::error::the registry did not answer: $out"; exit 1; fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # The branch says what may go out (see the top of this file); the last "publish" said counts.
+          case "${GITHUB_REF_NAME}:${version}" in
+            main:*-*) echo "::error::clavarium-relay@${version} is a version to try: it goes out from next, never from main"; exit 1 ;;
+            next:*-*|main:*) : ;;
+            next:*) echo "::notice::clavarium-relay@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::published from main or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
+          esac
       - name: The relay's package holds its program, and nothing else
         if: steps.relay.outputs.publish == 'yes'
         working-directory: relay
@@ -107,6 +122,13 @@ jobs:
           elif printf '%s' "$out" | grep -q E404; then echo "publish=yes" >> "$GITHUB_OUTPUT"; echo "::notice::publishing ${name}@${version}"
           else echo "::error::the registry did not answer: $out"; exit 1; fi
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          # The same rule as for the relay (see the top of this file).
+          case "${GITHUB_REF_NAME}:${version}" in
+            main:*-*) echo "::error::${name}@${version} is a version to try: it goes out from next, never from main"; exit 1 ;;
+            next:*-*|main:*) : ;;
+            next:*) echo "::notice::${name}@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::published from main or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
+          esac
       - name: The package holds what a server needs, and nothing else
         if: steps.target.outputs.publish == 'yes'
         run: |

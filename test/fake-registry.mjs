@@ -21,7 +21,7 @@ export async function fakeRegistry() {
     const asked = [];
     let origin = '';
 
-    function publish(name, version, files, { tag = version.includes('-') ? 'next' : 'latest', repo = 'https://github.com/clavarium/clavarium', packageJson = {}, attest = true } = {}) {
+    function publish(name, version, files, { tag = version.includes('-') ? 'next' : 'latest', repo = 'https://github.com/clavarium/clavarium', packageJson = {}, attest = true, ref = 'refs/heads/main' } = {}) {
         const stage = join(dir, 'stage', `${name}-${version}`);
         rmSync(stage, { recursive: true, force: true });
         const manifest = { name, version, ...packageJson };
@@ -39,7 +39,7 @@ export async function fakeRegistry() {
         p.versions[version] = { ...manifest, ...('npm-shrinkwrap.json' in files ? { _hasShrinkwrap: true } : {}), dist: { tarball: `${origin}/${name}/-/${name}-${version}.tgz`, integrity: `sha512-${sha512.toString('base64')}`, shasum: createHash('sha1').update(bytes).digest('hex'), ...(attest ? { attestations: { url: `${origin}/-/npm/v1/attestations/${name}@${version}`, provenance: { predicateType: 'https://slsa.dev/provenance/v1' } } } : {}) } };
         if (tag) p['dist-tags'][tag] = version;
         if (attest) {
-            const statement = { _type: 'https://in-toto.io/Statement/v1', subject: [{ name: `pkg:npm/${name}@${version}`, digest: { sha512: sha512.toString('hex') } }], predicateType: 'https://slsa.dev/provenance/v1', predicate: { buildDefinition: { externalParameters: { workflow: { repository: repo, path: '.github/workflows/publish.yml', ref: 'refs/heads/main' } } } } };
+            const statement = { _type: 'https://in-toto.io/Statement/v1', subject: [{ name: `pkg:npm/${name}@${version}`, digest: { sha512: sha512.toString('hex') } }], predicateType: 'https://slsa.dev/provenance/v1', predicate: { buildDefinition: { externalParameters: { workflow: { repository: repo, path: '.github/workflows/publish.yml', ref } } } } };
             p.attestations[version] = { attestations: [{ predicateType: 'https://slsa.dev/provenance/v1', bundle: { dsseEnvelope: { payloadType: 'application/vnd.in-toto+json', payload: Buffer.from(JSON.stringify(statement)).toString('base64') } } }] };
         }
         packages.set(name, p);
