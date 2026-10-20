@@ -25,6 +25,8 @@
  * Bounded: a time limit (killed after it), and only the end of the output
  * comes back.
  */
+import { originFolder } from './resources.mjs';
+
 export const OUTPUT_MAX = 8000;
 export const SECONDS_MIN = 10;
 export const SECONDS_MAX = 3600;
@@ -35,6 +37,21 @@ const NOT_THERE = 90; const MOVED = 91; const NOTHING = 95; const TIMED_OUT = 12
 
 /* Runs in the machine, as `sh -c SCRIPT clavarium-check <repo> <head> <line> <url> <command> <hook>`.
    Everything it is given is an argument: nothing is pasted into the script. */
+/* Run in the machine, as `sh -c FETCH_SCRIPT clavarium-fetch <repository> <its reference>`: a local
+   fetch into origin/*, hooks off; prints "<branch> <upstream> <old> <new>" for each branch whose
+   upstream moved. Not a repository there (attached only now, not cloned yet): exit 90, nothing done. */
+export const FETCH_SCRIPT = `exec 2>/dev/null
+repo="$1"; origin="$2"
+cd "$repo" && [ -d .git ] && [ -d "$origin" ] || exit 90
+before="$(git for-each-ref --format='%(refname) %(objectname)' refs/remotes/origin)"
+git -c core.hooksPath=/dev/null fetch --quiet --no-tags --no-write-fetch-head "$origin" '+refs/heads/*:refs/remotes/origin/*' || exit 1
+git for-each-ref --format='%(refname:short) %(upstream)' refs/heads | while read -r branch up; do
+  case "$up" in refs/remotes/origin/*) : ;; *) continue ;; esac
+  old="$(printf '%s\\n' "$before" | awk -v r="$up" '$1 == r { print $2 }')"
+  new="$(git rev-parse -q --verify "$up")"
+  [ -n "$old" ] && [ -n "$new" ] && [ "$old" != "$new" ] && echo "$branch \${up#refs/remotes/} $old $new"
+done
+exit 0`;
 export const SCRIPT = `exec 2>&1
 repo="$1"; head="$2"; line="$3"; url="$4"; cmd="$5"; hook="$6"
 cd "$repo" 2>/dev/null || { echo "The repository is not at $repo in this machine."; exit ${NOT_THERE}; }
@@ -90,6 +107,19 @@ export class GitChecks {
         holders.sort((a, b) => (a.access === b.access ? 0 : a.access === 'write' ? -1 : 1));
         for (const h of holders) if (await this.#conversations.running(h.name).catch(() => false)) return h.name;
         return undefined;
+    }
+
+    /* THE AGENT'S OWN COPY BROUGHT UP TO DATE, in its machine, as its user, with no network and no
+       key: from the reference this server keeps, shown read-only beside it (/resources/<name>-origin).
+       origin/* only: its branches, its files and what it left uncommitted are not touched.
+       -> { ok, moved: [{ branch, upstream, from, to }] }: the branches it follows whose upstream moved. */
+    async fetchIn(conversation, repository) {
+        const r = await this.#vms.exec(conversation, ['timeout', '-k', '10', '120', 'sh', '-c', FETCH_SCRIPT, 'clavarium-fetch', `/resources/${repository}`, `/resources/${originFolder(repository)}`], { timeoutMs: 180_000 })
+            .catch(() => ({ code: -1, stdout: '' }));
+        if (r.code !== 0) return { ok: false, moved: [] };
+        const moved = String(r.stdout ?? '').split('\n').map((l) => l.trim().split(' ')).filter((x) => x.length === 4 && /^[0-9a-f]{40,64}$/.test(x[2]) && /^[0-9a-f]{40,64}$/.test(x[3]))
+            .map(([branch, upstream, from, to]) => ({ branch: printable(branch), upstream: printable(upstream), from, to }));
+        return { ok: true, moved };
     }
 
     /* Does this conversation's machine run, with the repository attached

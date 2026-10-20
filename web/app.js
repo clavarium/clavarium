@@ -3723,7 +3723,7 @@
         gitRequire = s.requireForSend; gitFsck = s.fsck ?? {}; gitLast = Array.isArray(keep.last) ? keep.last : [];
         $('gitview-runhook').checked = s.runHook; $('gitview-checkcommand').value = s.checkCommand; $('gitview-checkseconds').value = String(s.checkSeconds);
         $('gitview-require').checked = s.requireForSend; $('gitview-refreshminutes').value = String(s.refreshMinutes);
-        $('gitview-alert').checked = s.alert;
+        $('gitview-alert').checked = s.alert; $('gitview-tellmoves').checked = s.tellMoves !== false;
         /* Which conversations send by themselves: set in each one's Access panel. */
         const senders = Object.entries(keep.auto ?? {});
         $('gitview-auto-where').textContent = `Automatic sending is set for each conversation, under its access to this repository (Write), in the conversation's Access panel. ${senders.length ? `Now: ${senders.map(([c, list]) => `${c} (${list.join(', ')})`).join('; ')}.` : 'Now: none.'}`;
@@ -4022,7 +4022,7 @@
         try {
             await post(`${API}/git/${gitShown}/keep`, {
                 runHook: $('gitview-runhook').checked, checkCommand: $('gitview-checkcommand').value, checkSeconds: Number($('gitview-checkseconds').value),
-                requireForSend: $('gitview-require').checked, refreshMinutes: Number($('gitview-refreshminutes').value), alert: $('gitview-alert').checked,
+                requireForSend: $('gitview-require').checked, refreshMinutes: Number($('gitview-refreshminutes').value), alert: $('gitview-alert').checked, tellMoves: $('gitview-tellmoves').checked,
             });
             $('gitview-keep-said').textContent = 'Saved.';
             await paintKeep();

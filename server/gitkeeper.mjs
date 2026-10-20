@@ -83,7 +83,7 @@ const FINAL = new Set(['diverged', 'remote-moved', 'refused', 'forced', 'no-addr
 const VARYING = new Set(['space', 'cap']);
 export const PATTERNS_MAX = 20;
 export const DEFAULTS = Object.freeze({
-    refreshMinutes: 5, alert: true,
+    refreshMinutes: 5, alert: true, tellMoves: true,
     checkCommand: '', checkSeconds: 600, runHook: true, requireForSend: false, fsck: {},
 });
 /* Automatic sending, for one conversation and one repository. A quiet
@@ -299,7 +299,7 @@ export class GitKeeper {
             if (why) throw new Refusal(400, why);
             next.fsck = { ...body.fsck };
         }
-        for (const flag of ['alert', 'runHook', 'requireForSend']) if (body?.[flag] !== undefined) next[flag] = body[flag] === true;
+        for (const flag of ['alert', 'runHook', 'requireForSend', 'tellMoves']) if (body?.[flag] !== undefined) next[flag] = body[flag] === true;
         this.#store.put({ ...this.#record(r.name), ...next });
         /* Settings just set start from now: what was decided before is looked at again. */
         this.#held.delete(r.name);
@@ -714,6 +714,7 @@ export class GitKeeper {
         const last = this.#record(r.name).mirror?.at;
         if (s.refreshMinutes > 0 && (!last || now - new Date(last).getTime() >= s.refreshMinutes * 60_000)) {
             await this.#review.refresh(r.name).catch(() => {});
+            await this.#fetchInMachines(r.name, s).catch(() => {});
             const upkeep = this.#record(r.name).upkeepAt;
             if (!upkeep || now - new Date(upkeep).getTime() >= UPKEEP_MS) {
                 await this.#review.upkeep(r.name).catch(() => {});
@@ -730,6 +731,20 @@ export class GitKeeper {
         let held = this.#held.get(r.name);
         if (!held) { held = { said: new Map(), done: new Map(), lacks: new Map(), retry: new Map() }; this.#held.set(r.name, held); }
         await this.#autoSend(r.name, listed, running, held).catch(() => {});
+    }
+
+    /* THE AGENTS' OWN COPIES, after each refresh of the reference: brought up to date in each machine
+       that runs with the repository attached for writing (gitchecks.mjs, fetchIn), origin/* only.
+       A branch it follows that moved is said to its agent, once per move, unless the owner turned
+       that line off (tellMoves). */
+    async #fetchInMachines(name, s) {
+        for (const c of this.#writers(name)) {
+            if (!await this.#runs(c, name)) continue;
+            const got = await this.#checks.fetchIn?.(c, name).catch(() => undefined);
+            if (!got?.ok || !s.tellMoves || got.moved.length === 0) continue;
+            const said = got.moved.slice(0, 3).map((m) => `${plain(m.upstream)} moved (${m.from.slice(0, 7)} -> ${m.to.slice(0, 7)}), your branch ${plain(m.branch)} follows it`).join('; ');
+            this.#toAgent(name, `${said}; fetched for you into origin/*, nothing of yours changed`, c);
+        }
     }
 
     async #staleLocks(name) {

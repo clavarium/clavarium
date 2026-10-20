@@ -110,7 +110,9 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
     if (read.length) out.push(`- Read-only: ${list(read.map(where))}.`);
     for (const r of resources.filter((x) => x.type === 'git' && x.origin)) {
         const repo = `/resources/${plain(r.name, 40)}`; const origin = `/resources/${plain(r.origin, 40)}`;
-        out.push(`- ${repo}: its origin, read-only and kept up to date, is ${origin}. Its branches: git -C ${repo} fetch ${origin} '+refs/heads/*:refs/remotes/origin/*'`);
+        /* Read-write: its origin/* is fetched for it every few minutes (gitkeeper.mjs, fetchInMachines). */
+        const auto = r.access === 'write' ? ' Its origin/* is fetched into it by itself every few minutes; to have it at once:' : ' Its branches:';
+        out.push(`- ${repo}: its origin, read-only and kept up to date, is ${origin}.${auto} git -C ${repo} fetch ${origin} '+refs/heads/*:refs/remotes/origin/*'`);
     }
     out.push(!chat ? '- Chat with the person: off. Do not use parley.'
         : '- Chat with the person: on. Parley is installed: run parley guide.');

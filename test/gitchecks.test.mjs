@@ -5,10 +5,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, chmodSync, readFileSync, existsSync } from 'node:fs';
-import { execFileSync, execFile } from 'node:child_process';
+import { execFileSync, execFile, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GitChecks, SCRIPT } from '../server/gitchecks.mjs';
+import { GitChecks, SCRIPT, FETCH_SCRIPT } from '../server/gitchecks.mjs';
 
 const ENV = { PATH: process.env.PATH, HOME: '/nonexistent', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 'Tool', GIT_AUTHOR_EMAIL: 'tool@example.com', GIT_COMMITTER_NAME: 'Tool', GIT_COMMITTER_EMAIL: 'tool@example.com' };
 const git = (cwd, ...argv) => execFileSync('git', argv, { cwd, env: ENV, encoding: 'utf8' }).trim();
@@ -133,4 +133,29 @@ test('automatic sending runs the checks in the machine of the conversation whose
     assert.equal((await b.ask({ command: 'true', machine: 'reader' })).status, 'unavailable');
     const asleep = bench(t, { running: false });
     assert.equal(await asleep.checks.runs('alpha', 'site'), false);
+});
+
+test('the local fetch in the machine: origin/* brought up to date from the reference, nothing of the agent changed, the branches it follows that moved said', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-fetch-'));
+    try {
+        const g = (cwd, ...a) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.com', ...a], { cwd, encoding: 'utf8' }).trim();
+        const origin = join(dir, 'site-origin'); mkdirSync(origin);
+        g(origin, 'init', '-q', '-b', 'main'); writeFileSync(join(origin, 'a'), '1'); g(origin, 'add', 'a'); g(origin, 'commit', '-qm', 'one');
+        const repo = join(dir, 'site');
+        g(dir, 'clone', '-q', origin, repo);
+        writeFileSync(join(repo, 'mine.txt'), 'not committed');
+        const mainBefore = g(repo, 'rev-parse', 'main'); const old = g(repo, 'rev-parse', 'origin/main');
+        writeFileSync(join(origin, 'a'), '2'); g(origin, 'commit', '-qam', 'two'); const tip = g(origin, 'rev-parse', 'HEAD');
+        const run = () => { try { return { code: 0, out: execFileSync('sh', ['-c', FETCH_SCRIPT, 'clavarium-fetch', repo, origin], { encoding: 'utf8' }) }; } catch (e) { return { code: e.status, out: String(e.stdout ?? '') }; } };
+        const r = run();
+        assert.equal(r.code, 0);
+        assert.equal(r.out.trim(), `main origin/main ${old} ${tip}`);
+        assert.equal(g(repo, 'rev-parse', 'origin/main'), tip, 'origin/main moved');
+        assert.equal(g(repo, 'rev-parse', 'main'), mainBefore, 'its branch did not');
+        assert.equal(readFileSync(join(repo, 'mine.txt'), 'utf8'), 'not committed', 'nor its files');
+        assert.equal(run().out, '', 'nothing moved since: nothing said');
+        /* Not a repository there yet (attached, not cloned): nothing done, said by its exit. */
+        const none = spawnSync('sh', ['-c', FETCH_SCRIPT, 'clavarium-fetch', join(dir, 'nothing'), origin]);
+        assert.equal(none.status, 90);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
 });

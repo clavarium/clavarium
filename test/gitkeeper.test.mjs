@@ -24,7 +24,7 @@ import { git, standInRead, ENV } from './git-stand-in.mjs';
    `readCode`: an exit code every read of the host program gives. `wrap`: around the builder's git.
    `reserve`: free room the runner keeps (huge: every read refused for room). `heard`: what telling the agent resolves to. */
 /* `attach`: alpha writes in the repository from the start (its automatic sending can be set). `runs(conversation, name)`: does its machine run. */
-async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true } = {}) {
+async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = async () => 'alpha', runs, readCode, wrap, reserve = 0, heard, attach = true, moved = () => [] } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-keep-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const remote = join(dir, 'remote.git');
@@ -55,10 +55,11 @@ async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = a
     review.setRemote('site', { url: remote });
     git(work, 'fetch', '--quiet', remote, '+refs/heads/*:refs/remotes/origin/*');
     git(work, 'reset', '--quiet', '--hard', 'origin/main');
-    const ran = []; const told = []; const agent = []; const agentTo = []; const lines = [];
+    const ran = []; const told = []; const agent = []; const agentTo = []; const lines = []; const fetched = [];
     const fakeChecks = {
         machineFor: (name) => machineFor(name, resources),
         runs: runs ? (c, name) => runs(c, name, resources) : async (c, name) => (await machineFor(name, resources)) === c && resources.of(c).some((x) => x.name === name && x.access === 'write'),
+        fetchIn: async (c, name) => { fetched.push(`${c} ${name}`); return { ok: true, moved: moved() }; },
         run: async (name, asked) => { ran.push(asked); return { status: typeof checks === 'function' ? checks() : checks, output: typeof output === 'function' ? output() : output, head: asked.head, branch: asked.branch, target: asked.target, machine: asked.machine ?? 'alpha', at: clock.toISOString() }; },
     };
     const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to) => { agent.push(line); agentTo.push([line, to]); return heard ? heard() : undefined; }, thread: (conversation, event) => lines.push([conversation, event]) });
@@ -71,7 +72,7 @@ async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = a
        branch: confirmed) and make branches unless they say otherwise. */
     const auto = (body, conversation = 'alpha') => keeper.setAuto('site', conversation, { sure: true, create: true, ...body });
     const again = () => new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async () => 1 }, now });
-    return { again, dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto, lines };
+    return { again, dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto, lines, fetched };
 }
 /* Ticks until a read has happened and its tips were weighed: the read waits READ_DELAY_MS after the last change. */
 async function settle(b) { await b.keeper.tick(); b.later(READ_DELAY_MS / 60_000); await b.keeper.tick(); }
@@ -782,4 +783,29 @@ test('the last checks are kept per repository and target, outlive a restart, end
     b.keeper.forget('site');
     assert.deepEqual(b.again().lastChecks('site'), []);
     assert.equal(LAST_TARGETS, 20);
+});
+
+test("after each refresh, the agent's own copy is fetched into origin/* in its machine; a branch it follows that moved is said once, unless the owner turned that off", async (t) => {
+    let moves = [];
+    const b = await bench(t, { moved: () => moves });
+    const a = '1'.repeat(40); const z = '2'.repeat(40);
+    moves = [{ branch: 'main', upstream: 'origin/main', from: a, to: z }];
+    await b.keeper.tick();
+    assert.deepEqual(b.fetched, ['alpha site'], 'in the machine that runs with it, for writing');
+    assert.equal(b.agent.length, 1);
+    assert.match(b.agent[0], /^Clavarium, repository site: origin\/main moved \(1111111 -> 2222222\), your branch main follows it; fetched for you into origin\/\*, nothing of yours changed\.$/);
+    assert.deepEqual(b.agentTo[0][1], 'alpha', 'to that conversation');
+    /* The same move: not said again. Not due yet: not fetched again either. */
+    await b.keeper.tick();
+    assert.equal(b.agent.length, 1);
+    b.later(6); await b.keeper.tick();
+    assert.equal(b.fetched.length, 2);
+    assert.equal(b.agent.length, 1, 'once per move');
+    /* Turned off by the owner: fetched all the same, nothing said. */
+    b.keeper.set('site', { tellMoves: false });
+    assert.equal(b.keeper.about('site').settings.tellMoves, false);
+    moves = [{ branch: 'main', upstream: 'origin/main', from: z, to: a }];
+    b.later(6); await b.keeper.tick();
+    assert.equal(b.fetched.length, 3);
+    assert.equal(b.agent.length, 1);
 });
