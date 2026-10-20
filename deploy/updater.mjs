@@ -84,6 +84,23 @@ const LOG_MAX = 12_000;
 export const DROP_IN = '/etc/systemd/system/clavarium.service.d/restart.conf';
 export const DROP_IN_TEXT = '# Written by the Clavarium updater: a crash loop never locks the service out.\n[Unit]\nStartLimitIntervalSec=0\n\n[Service]\nRestartSec=3\n';
 
+/* THE SIGN-IN PROXY, kept by the updater: two sign-ins started at once (two tabs, a page reloaded
+   during it, the installed app and the browser) shared one CSRF cookie, and the first to come back
+   was refused ("Unable to find a valid CSRF token", found 20-10). One cookie per sign-in, and time
+   to type a password. Added to a file that lacks them, the proxy restarted; nothing else touched. */
+export const PROXY_CFG = '/etc/oauth2-proxy/oauth2-proxy.cfg';
+export const PROXY_LINES = ['cookie_csrf_per_request = true', 'cookie_csrf_expire = "30m"'];
+export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand } = {}) {
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch { return false; }
+    const missing = PROXY_LINES.filter((l) => !text.split('\n').some((x) => x.trim().startsWith(l.split(' =')[0])));
+    if (!missing.length) return false;
+    writeFileSync(`${file}.new`, `${text.replace(/\n*$/, '\n')}# Added by the Clavarium updater: one CSRF cookie per sign-in.\n${missing.join('\n')}\n`, { mode: 0o600 });
+    renameSync(`${file}.new`, file);
+    if (process.getuid?.() === 0) await run(['systemctl', 'try-restart', 'oauth2-proxy.service'], { timeoutMs: 60_000 });
+    return true;
+}
+
 export class Refused extends Error {}
 
 /* SEMANTIC VERSIONS, compared as npm does: a pre-release comes before its release. */
@@ -785,6 +802,7 @@ async function main(argv) {
                update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
+            try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }

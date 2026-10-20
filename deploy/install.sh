@@ -536,6 +536,10 @@ upstreams = ["http://127.0.0.1:$PORT/"]
 # identity headers are stripped there, so nobody can claim to be an operator.
 skip_auth_routes = ["^/c/"]
 skip_auth_strip_headers = true
+# Two sign-ins at once (two tabs, a reload during it) each have their own CSRF
+# cookie; and there is time to type a password (deploy/updater.mjs, PROXY_LINES).
+cookie_csrf_per_request = true
+cookie_csrf_expire = "30m"
 PROXY
     install -o root -g root -m 0600 "$proxy" /etc/oauth2-proxy/oauth2-proxy.cfg; rm -f -- "$proxy"
 else

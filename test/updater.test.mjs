@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 
@@ -413,4 +413,25 @@ test('the drop-in beside the server unit: a crash loop never locks it out; writt
     const text = readFileSync(join(dirname(s.dirs.code), 'systemd', 'clavarium.service.d', 'restart.conf'), 'utf8');
     assert.equal(text, DROP_IN_TEXT);
     assert.match(text, /StartLimitIntervalSec=0/); assert.match(text, /RestartSec=3/);
+});
+
+test('the sign-in proxy: one CSRF cookie per sign-in, added once to a file that lacks it; nothing else of it touched', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-proxy-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'oauth2-proxy.cfg');
+    const before = 'provider = "oidc"\ncookie_secret = "kept"\nupstreams = ["http://127.0.0.1:7717/"]\n';
+    writeFileSync(file, before);
+    const ran = [];
+    const run = async (argv) => { ran.push(argv.join(' ')); return { code: 0 }; };
+    assert.equal(await ensureProxySettings({ file, run }), true);
+    const after = readFileSync(file, 'utf8');
+    assert.ok(after.startsWith(before), 'what was there, as it was');
+    for (const line of PROXY_LINES) assert.ok(after.includes(`\n${line}\n`), line);
+    assert.equal(await ensureProxySettings({ file, run }), false, 'once');
+    assert.equal(readFileSync(file, 'utf8'), after);
+    assert.equal(await ensureProxySettings({ file: join(dir, 'none.cfg'), run }), false, 'no proxy here: nothing');
+    /* Written by install.sh already: nothing to add. */
+    writeFileSync(file, `${before}cookie_csrf_per_request = true\ncookie_csrf_expire = "30m"\n`);
+    assert.equal(await ensureProxySettings({ file, run }), false);
+    assert.ok(readFileSync(new URL('../deploy/install.sh', import.meta.url), 'utf8').includes(PROXY_LINES.join('\n')), 'install.sh writes the same lines');
 });
