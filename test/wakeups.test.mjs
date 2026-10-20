@@ -243,3 +243,10 @@ test('a wake-up typed is said in its chat, once per wake-up; one capped, asleep 
     assert.equal(b.fired.at(-1)[1].length, 'Wake-up "" typed.'.length + 120);
     assert.match(b.fired.at(-1)[1], /\.\.\." typed\.$/);
 });
+
+test('two lines said at once are typed one after the other, each with its Enter: never into each other', async (t) => {
+    const b = bench(t);
+    const both = await Promise.all([b.wakeups.say('worker', 'first line'), b.wakeups.say('worker', 'second line')]);
+    assert.deepEqual(both, [true, true]);
+    assert.deepEqual(b.typed, ['first line', 'Enter', 'second line', 'Enter']);
+});

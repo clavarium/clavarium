@@ -258,9 +258,16 @@ export class Wakeups {
        see gitkeeper.mjs), typed as a wake-up is: only into a conversation
        that is awake, cleaned the same way. Not counted in the owner's cap:
        the server says each such line once. */
+    /* One line at a time into a terminal: two said at once were typed into each other, then sent
+       as one (two repositories moving together, seen 20-10). */
+    #queue = new Map();
     async say(name, text) {
         if (!this.#conversations.awake().includes(name)) return false;
-        return this.#type(name, cleanMessage(text)).catch(() => false);
+        const before = this.#queue.get(name) ?? Promise.resolve();
+        const mine = before.then(() => this.#type(name, cleanMessage(text)).catch(() => false));
+        this.#queue.set(name, mine);
+        void mine.finally(() => { if (this.#queue.get(name) === mine) this.#queue.delete(name); });
+        return mine;
     }
 
     /* The address was called. Resolves with 'typed', 'capped', 'asleep',
