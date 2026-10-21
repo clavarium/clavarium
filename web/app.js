@@ -890,6 +890,30 @@
        full -- not marked "Seen"; a program stopped for lack of memory (its files safe) is only said. */
     const healthNeeds = (c) => c.phase === 'ready' && !c.asleep && (c.health?.problems ?? []).some((p) => (p.level === 'bad' || (p.level === 'warn' && ['memory', 'disk'].includes(p.kind) && !String(p.key).startsWith('oom:'))) && !(c.health.seen ?? []).includes(p.key));
     const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
+    /* ONE STATE PER CONVERSATION, one point for it: it needs you (red), something to watch (yellow: being built,
+       restarted, moved), fine (green), asleep (a hollow ring). */
+    const STATE_WORDS = { need: 'needs you', watch: 'to watch', ok: 'fine', sleep: 'asleep' };
+    const stateOf = (c) => (needsYou(c) ? 'need' : c.asleep ? 'sleep' : holds(c) || ['building', 'restarting', 'moving'].includes(c.phase) ? 'watch' : 'ok');
+    const statePoint = (state) => { const d = document.createElement('span'); d.className = 'state-dot'; d.dataset.state = state; return d; };
+    /* Folded, a heading says how its conversations are: at most four points, shared out like them -- every state
+       there keeps at least one, the worst first -- and the same in words for a screen reader and the pointer. */
+    const STATE_ORDER = ['need', 'watch', 'ok', 'sleep'];
+    function stateSummary(list) {
+        const count = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
+        for (const c of list) count[stateOf(c)] += 1;
+        const slots = Math.min(4, list.length);
+        const present = STATE_ORDER.filter((k) => count[k] > 0);
+        const got = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
+        for (const k of present.slice(0, slots)) got[k] = 1;
+        for (let left = slots - Math.min(slots, present.length); left > 0; left -= 1) {
+            const k = [...present].sort((a, b) => (count[b] / (got[b] + 1)) - (count[a] / (got[a] + 1)))[0]; got[k] += 1;
+        }
+        const box = document.createElement('span'); box.className = 'state-sum'; box.setAttribute('role', 'img');
+        for (const k of STATE_ORDER) for (let i = 0; i < got[k]; i += 1) box.append(statePoint(k));
+        const words = present.map((k) => `${count[k]} ${STATE_WORDS[k]}`).join(', ') || 'none';
+        box.setAttribute('aria-label', words); box.title = words;
+        return box;
+    }
     /* Hidden conversations are shown on a click on "N hidden", for this page only. */
     let showHidden = false;
     /* Recent: a few, or all of them (for this page only). */
@@ -912,8 +936,9 @@
     const matches = (c) => [shownName(c), c.name, c.group, c.toolLabel].some((x) => plain(x).includes(plain(query)));
     const byRank = (a, b) => (a.rank ?? 0) - (b.rank ?? 0);
     const groupsInOrder = () => [...new Set(conversations.filter((c) => c.group).sort((a, b) => (a.groupRank ?? 0) - (b.groupRank ?? 0)).map((c) => c.group))];
-    /* WHEN IT WAS LAST USED: its last message (sent or received), or a key typed in its terminal. */
-    const activityOf = (c) => Math.max(...[c.talk?.lastAt, c.lastActiveAt, c.createdAt].map((x) => (x ? new Date(x).getTime() : 0)));
+    /* WHEN IT WAS LAST USED: what was said in its chat, and what its agent said it does (Parley) -- never what
+       its terminal shows. A tool with no chat (a plain terminal): the keys typed in it by hand. */
+    const activityOf = (c) => Math.max(...[c.talk?.lastAt, c.talk?.stepAt, c.talk ? null : c.lastActiveAt, c.createdAt].map((x) => (x ? new Date(x).getTime() : 0)));
     const whenWords = (t) => {
         if (!t) return '';
         const d = new Date(t); const now = new Date();
@@ -932,24 +957,29 @@
         if (holds(c)) b.dataset.busy = 'true';
         if (c.name === current) b.setAttribute('aria-current', 'true');
         const title = document.createElement('b');
-        const dot = document.createElement('span'); dot.className = 'dot';
-        title.append(dot, shownName(c));
+        title.append(shownName(c));
         if (c.title) b.title = c.name;
         if (c.hidden === true) b.dataset.hidden = 'true';
         const sub = document.createElement('small');
         /* Under way: the step the panel shows, in its words (the tool named once). */
         const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
-        sub.textContent = under ? (c.toolLabel && under.includes(c.toolLabel) ? under : `${c.toolLabel} - ${under}`) : holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
+        /* What it is doing, when it says something: its tool is not named on every row. */
+        sub.textContent = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? 'starting' : 'restarting') : c.phase === 'ready' ? (c.asleep ? 'asleep, wakes when opened' : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? 'moving its work' : c.phase === 'restarting' ? 'restarting' : 'failed');
         if (c.asleep) b.dataset.asleep = 'true';
+        /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
+        const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
         if (told) {
             /* In words, not a symbol: what a tap on it will do. */
-            if (c.asleep) sub.textContent = `${c.toolLabel} - asleep, wakes when opened`;
             /* Beside its name, never in it: the name reads (and is read) as it is. */
             const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
-            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; last.textContent = `${c.talk.lastFrom === 'person' ? 'you: ' : ''}${c.talk.lastText}`; b.append(title, last, sub); }
-            else b.append(title, sub);
+            b.append(title);
+            /* Its last message, and who said it: so it reads as the last message, not as a subject. */
+            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; const who = c.talk.lastFrom === 'person' ? 'You' : (c.chatName || (c.ai ? 'Agent' : c.toolLabel)); last.textContent = `${who}: ${c.talk.lastText}`; b.append(last); }
+            if (!plain) b.append(sub);
             b.append(when); b.dataset.when = 'true';
-        } else b.append(title, sub);
+        } else b.append(title, ...(plain ? [] : [sub]));
+        /* Its state: one point, on the right. */
+        const point = statePoint(stateOf(c)); point.title = STATE_WORDS[point.dataset.state]; b.append(point); b.dataset.state = point.dataset.state;
         /* Found by a search while hidden: said. */
         if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
         /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
@@ -958,9 +988,7 @@
         /* It talks through the app, and asks or waits for its owner there. */
         if (talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
         if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
-        /* Seen at a glance: this conversation is in other hands too. */
-        const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
-        if (holders > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `shared with ${holders} device${holders > 1 ? 's' : ''}`; b.append(mark); }
+        /* Who else holds it is said in its Access, not in the list (where it said the same on every row). */
         b.addEventListener('click', () => select(c.name, { step: true }));
         return b;
     }
@@ -968,6 +996,9 @@
     const NONE = '\u0000none';
     /* The two sections above the groups, folded or not like a group (never a group's name: those are plain words). */
     const NEEDS = '\u0001needs'; const RECENT = '\u0001recent'; const GROUPS = '\u0001groups';
+    /* What was just unfolded comes in gently, once (the next paints show it as it is). */
+    let justOpened = null;
+    const unfolding = (key, els) => { if (justOpened === key) { for (const e of els) e.classList.add('unfolding'); justOpened = null; } return els; };
     function groupBox(g, inside, all, open, label = g) {
         const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g === NONE ? '' : g;
         const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g === NONE ? '' : g;
@@ -975,21 +1006,17 @@
         head.setAttribute('aria-expanded', String(open));
         const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = '›';
         const name = document.createElement('span'); name.className = 'group-name'; name.textContent = label;
-        /* A number only: the name keeps the room (its words for a screen reader). */
-        const count = document.createElement('small'); count.className = 'count'; count.textContent = String(all.length);
-        count.setAttribute('aria-label', `${all.length} conversation${all.length > 1 ? 's' : ''}`);
-        /* A small dot for each (up to six); the one that needs you is said even folded. */
-        const dots = document.createElement('span'); dots.className = 'group-dots'; dots.setAttribute('aria-hidden', 'true');
-        for (const c of all.slice(0, 6)) { const d = document.createElement('span'); d.className = 'mini'; d.dataset.phase = holds(c) ? 'building' : c.phase; if (c.asleep) d.dataset.asleep = 'true'; dots.append(d); }
-        head.append(caret, name, count, dots);
-        if (all.some(needsYou)) { const n = document.createElement('span'); n.className = 'needs-dot'; n.setAttribute('aria-label', 'one needs you'); head.append(n); head.dataset.needs = 'true'; }
+        head.append(caret, name);
+        /* Folded: how its conversations are, in points; open, each row says its own. */
+        if (!open) head.append(stateSummary(all));
+        if (all.some(needsYou)) head.dataset.needs = 'true';
         head.addEventListener('click', () => {
             if (query) return;
-            if (folded.has(g)) folded.delete(g); else folded.add(g);
+            if (folded.has(g)) { folded.delete(g); justOpened = g; } else folded.add(g);
             keepFolded(); paint();
         });
         box.append(head);
-        if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); box.append(body); }
+        if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); unfolding(g, [body]); box.append(body); }
         return box;
     }
     function paint() {
@@ -1016,21 +1043,23 @@
                 const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
                 /* How many, only when folded: open, its rows (and "Show more") say it. */
                 b.append(chevron, document.createTextNode(label));
-                if (!open) { const n = document.createElement('span'); n.className = 'list-count'; n.textContent = String(count); b.append(n); }
-                b.addEventListener('click', () => { if (folded.has(key)) folded.delete(key); else folded.add(key); keepFolded(); paint(); });
+                if (!open) b.append(stateSummary(count));
+                b.addEventListener('click', () => { if (folded.has(key)) { folded.delete(key); justOpened = key; } else folded.add(key); keepFolded(); paint(); });
                 top.append(b);
                 return open;
             };
             /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
             const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
-            if (needs.length && section(NEEDS, 'Needs you', needs.length)) top.append(...needs.map((c) => itemButton(c, true)));
+            if (needs.length && section(NEEDS, 'Needs you', needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
             /* RECENT: by when it was last used; the last four, then all. Never a hidden one. Only once there
                are groups: before, the one list below says the same, in the order chosen by hand. */
             /* One in Needs you just above is not said twice. */
-            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c)).sort((a, b) => activityOf(b) - activityOf(a));
+            /* The last day only: what is older is found in its group. */
+            const dayAgo = Date.now() - 24 * 3600_000;
+            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo).sort((a, b) => activityOf(b) - activityOf(a));
             const few = 4;
-            if (recent.length && groups.length && section(RECENT, 'Recent', recent.length)) {
-                top.append(...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
+            if (recent.length && groups.length && section(RECENT, 'Recent', recent)) {
+                top.append(...unfolding(RECENT, recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true))));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
                     /* A chevron, centred: the words for the pointer and for a screen reader. */
@@ -1044,7 +1073,7 @@
             /* GROUPS: the order chosen by hand, and those in no group as one of their own. */
             if (groups.length) {
                 const loose = shown.filter((c) => !c.group);
-                groupsOpen = section(GROUPS, 'Groups', groups.length + (loose.length ? 1 : 0));
+                groupsOpen = section(GROUPS, 'Groups', conversations.filter((c) => c.hidden !== true));
                 if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
             } else {
                 /* No group yet: one list, each with what was said last and when -- without those in Needs you
@@ -1064,6 +1093,7 @@
             if (inside.length === 0) continue;
             items.append(groupBox(g, inside, conversations.filter((c) => c.group === g).sort(byRank), Boolean(query) || !folded.has(g)));
         }
+        if (groupsOpen) unfolding(GROUPS, [...items.children]);
         /* The folders there are, offered where one is chosen. */
         $('group-names').replaceChildren(...groupsInOrder().map((g) => { const o = document.createElement('option'); o.value = g; return o; }));
         const hits = [...items.querySelectorAll('.item')];
@@ -1827,7 +1857,7 @@
     /* "Seen": what its machine says now no longer puts it in Needs you (health.mjs). */
     async function markSeen() {
         if (!current || DEVICE) return;
-        try { const record = await post(`${API}/conversations/${encodeURIComponent(current)}/health/seen`, {}); const c = conversations.find((x) => x.name === current); if (c) c.health = record; paint(); paintHealth(); }
+        try { const record = await post(`${API}/conversations/${encodeURIComponent(current)}/health/seen`, {}); const c = conversations.find((x) => x.name === current); if (c) c.health = record; paint(); paintHealth(); if (thread && threadOf === current) void thread.refresh(); }
         catch (error) { show(error.message, 'Back', () => { notice.hidden = true; }); }
     }
     function seeTerminal() { if (DEVICE) { simple = false; paintSimple(); focusTerminal(); } else goTab('terminal'); paintHealth(); }
@@ -2206,7 +2236,7 @@
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -2286,14 +2316,18 @@
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || id === 'seen-done' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
         const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
         const linksOf = (m) => {
             const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);
             if (!repo) return [];
             return [...new Set(String(m.text ?? '').match(/\b[0-9a-f]{7,40}\b/g) ?? [])].filter((x) => /\d/.test(x)).slice(0, 8).map((x) => ({ text: x, id: `commit:${repo}.${x}` }));
         };
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: (m.actions ?? []).filter(may).map((id) => ({ id, label: label(id) })), links: linksOf(m) } : m)) };
+        /* ONE "Seen" for its machine: marked on the strip or here, every line it covers says so, and offers it no more. */
+        const seenAt = conversations.find((x) => x.name === current)?.health?.seenAt ?? '';
+        const seenWords = seenAt ? `\u2713 Seen ${new Date(seenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
+        const actionsOf = (m) => (m.actions ?? []).filter(may).map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
     function withMachine(data, name) {

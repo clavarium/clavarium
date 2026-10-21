@@ -27,7 +27,7 @@ const record = (page) => page.evaluate(() => {
         /* The line of the list says the step the panel says. */
         const line = document.querySelector('#items .item[aria-current="true"] small')?.textContent ?? '';
         const label = now?.querySelector('span:not(.spin)')?.textContent ?? '';
-        if (label && line === `Shell - ${label}`) window.clavariumSame = (window.clavariumSame ?? 0) + 1;
+        if (label && line === label) window.clavariumSame = (window.clavariumSame ?? 0) + 1;
         window.clavariumWords.add(notice.innerText); window.clavariumWords.add(document.getElementById('state').innerText);
     }, 40);
 });

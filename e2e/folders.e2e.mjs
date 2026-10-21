@@ -28,8 +28,9 @@ test('folders: made at creation and in General, folded on this device only, rena
     /* Those in no group are a group of their own, "Not filed", before the groups. */
     await me.until('the list, groups after the others', async () => (await me.page.locator('#items .group').count()) === 3);
     assert.deepEqual(await me.page.locator('#items > *').evaluateAll((all) => all.map((x) => x.dataset.name ?? `[${x.dataset.group}]`)), ['[]', '[Perso]', '[Clients]']);
-    assert.match(await me.page.locator('.group[data-group=""] .group-head').innerText(), /Not filed\s*1\s*$/);
-    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*2\s*$/);
+    /* Open, a heading is its name alone: its rows say how they are. */
+    assert.match(await me.page.locator('.group[data-group=""] .group-head').innerText(), /Not filed\s*$/);
+    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*$/);
     assert.deepEqual(await names(me.page), ['site-web', 'taxes', 'ete-plans', 'invoices'], 'the newest first in its folder');
     /* Made in a folder from the form, with the folders there are offered. */
     await me.page.locator('#new').click();
@@ -54,7 +55,7 @@ test('folders: made at creation and in General, folded on this device only, rena
         await route.fulfill({ response: r, json: list });
     });
     await me.page.reload();
-    await me.until('the folded folder says one needs you', async () => (await me.page.locator('.group[data-group="Perso"] .group-head .needs-dot').count()) === 1);
+    await me.until('the folded folder says one needs you', async () => (await me.page.locator('.group[data-group="Perso"] .group-head .state-sum .state-dot[data-state="need"]').count()) === 1);
     await me.page.unroute('**/api/conversations');
     /* In General: moved to another folder; the folder renamed for all its conversations. */
     await me.page.locator('#items .item[data-name="site-web"]').click();
@@ -249,12 +250,13 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     await me.until('asleep, in words', async () => /asleep, wakes when opened/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
     /* The groups below it: Box, and those in no group. */
     assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.replace(/[^A-Za-z ]/g, '').trim().toLowerCase())), ['recent', 'groups']);
-    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .list-count').count(), 0, 'open: no count, its rows say it');
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').count(), 0, 'open: nothing, its rows say it');
     /* Recent folds, on this device, and stays folded; the groups stay. */
     await me.page.locator('#recent .list-fold[data-section="recent"]').click();
     await me.until('folded', async () => (await me.page.locator('#recent .item').count()) === 0);
     assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"]').getAttribute('aria-expanded'), 'false');
-    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .list-count').innerText(), '3', 'folded: how many it holds');
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum .state-dot').count(), 3, 'folded: a point each, up to four');
+    assert.match(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').getAttribute('aria-label'), /^(\d+ (needs you|to watch|fine|asleep)(, )?)+$/);
     await me.page.reload();
     await me.until('still folded after a reload', async () => (await me.page.locator('#recent .list-fold[data-section="recent"]').count()) === 1 && (await me.page.locator('#recent .item').count()) === 0);
     assert.ok((await me.page.locator('#items .item').count()) >= 3, 'the groups are still there');
@@ -263,7 +265,7 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     /* The groups fold as a whole too: how many said, kept on this device. */
     await me.page.locator('#recent .list-fold[data-section="groups"]').click();
     await me.until('groups folded', async () => (await me.page.locator('#items .item, #items .group').count()) === 0);
-    assert.equal(await me.page.locator('#recent .list-fold[data-section="groups"] .list-count').innerText(), '2', 'Box, and those in no group');
+    assert.ok((await me.page.locator('#recent .list-fold[data-section="groups"] .state-sum .state-dot').count()) >= 1, 'folded: how they are, in points');
     await me.page.reload();
     await me.until('still folded', async () => (await me.page.locator('#recent .list-fold[data-section="groups"]').getAttribute('aria-expanded')) === 'false');
     await me.page.locator('#recent .list-fold[data-section="groups"]').click();
@@ -317,5 +319,27 @@ test('the list\'s width: dragged on its edge, kept on this device, bounded; a do
     /* None on a phone: the list is the whole screen there. */
     const phone = await b.person({ phone: true });
     assert.equal(await phone.page.locator('#list-resize').isVisible(), false);
+    assert.deepEqual(me.errors, []);
+});
+
+test('the points: one on the right of each conversation, its state; a folded group says how its conversations are in at most four, every state kept, the worst first', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await made(me, [['A1', 'Big'], ['A2', 'Big'], ['A3', 'Big'], ['A4', 'Big'], ['A5', 'Big'], ['A6', 'Big'], ['Z', 'Small']]);
+    await me.api('/api/conversations/a1/sleep', {});
+    await me.page.reload();
+    await me.until('listed', async () => (await me.page.locator('#items .item').count()) === 7);
+    await me.until('a1 asleep, a2 fine', async () => (await me.page.locator('#items .item[data-name="a1"] > .state-dot').getAttribute('data-state')) === 'sleep' && (await me.page.locator('#items .item[data-name="a2"] > .state-dot').getAttribute('data-state')) === 'ok', 30_000);
+    await me.until('all of Big settled', async () => (await me.page.locator('.group[data-group="Big"] .item > .state-dot[data-state="watch"]').count()) === 0, 30_000);
+    await me.page.locator('.group[data-group="Big"] .group-head').click();
+    const sum = me.page.locator('.group[data-group="Big"] .group-head .state-sum');
+    await me.until('folded: points', async () => (await sum.count()) === 1);
+    assert.deepEqual(await sum.locator('.state-dot').evaluateAll((all) => all.map((x) => x.dataset.state)), ['ok', 'ok', 'ok', 'sleep'], 'six: four points, five fine, one asleep kept');
+    assert.equal(await sum.getAttribute('aria-label'), '5 fine, 1 asleep');
+    /* Unfolded: gently, and the rows say their own. */
+    await me.page.locator('.group[data-group="Big"] .group-head').click();
+    await me.until('open', async () => (await me.page.locator('.group[data-group="Big"] .group-body').count()) === 1);
+    assert.equal(await me.page.locator('.group[data-group="Big"] .group-body').evaluate((e) => e.classList.contains('unfolding')), true);
+    assert.equal(await me.page.locator('.group[data-group="Big"] .group-head .state-sum').count(), 0);
     assert.deepEqual(me.errors, []);
 });

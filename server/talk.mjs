@@ -268,14 +268,18 @@ export class Talk {
         try {
             const now = this.#parley(name).read();
             /* Its last message, either way: the list says when it last spoke, and what (app.js, Recent). */
-            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing').at(-1);
+            /* What the person or the tool said -- never a line of this server (a restart, a machine put to sleep):
+               those are no one using it, and would lift it in Recent. */
+            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing' && (m.from === 'person' || m.from === 'agent')).at(-1);
             /* IT NEEDS ITS OWNER only if it asked, or said it waits, AFTER the owner last wrote: answered (with
                the buttons or in a message of one's own), the turn is the tool's again. */
             const messages = now.messages ?? [];
             const personAt = messages.filter((m) => m.from === 'person').map((m) => m.at).sort().at(-1) ?? '';
             const askedAt = messages.filter((m) => m.from !== 'person' && m.kind === 'ask' && !m.closed).map((m) => m.at).sort().at(-1) ?? '';
             const needs = (now.waiting > 0 && askedAt > personAt) || (now.status?.state === 'waiting' && String(now.status.at ?? '') > personAt);
-            return { waiting: now.waiting, state: now.status?.state ?? null, needs, ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
+            /* What it said it does (status, doing): it is at work, even without a message. */
+            const stepAt = (now.steps ?? []).map((m) => m.at).sort().at(-1) ?? null;
+            return { waiting: now.waiting, state: now.status?.state ?? null, needs, ...(stepAt ? { stepAt } : {}), ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
         } catch { return { waiting: 0, state: null }; }
     }
 

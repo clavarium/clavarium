@@ -91,6 +91,14 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.page.keyboard.press('Enter');
     await me.until('sent with Enter', async () => (await chatBox.inputValue()) === '' && (await me.page.locator('#simple-thread .parley-said[data-from=person]').count()) === 2);
     assert.equal(await me.page.evaluate(() => document.activeElement?.className), 'parley-box');
+    /* A keyboard's own dictation, still composing when Send is touched, puts the words back as it ends: taken out again. */
+    await me.page.fill('#simple-thread .parley-box', 'Dictated on the tablet');
+    await me.page.locator('#simple-thread .parley-send').click();
+    await me.page.evaluate(() => { const box = document.querySelector('#simple-thread .parley-box'); box.value = 'Dictated on the tablet'; box.dispatchEvent(new Event('input', { bubbles: true })); box.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'Dictated on the tablet' })); });
+    await me.until('sent once, the box empty again', async () => (await chatBox.inputValue()) === '' && (await me.page.locator('#simple-thread .parley-said[data-from=person]').count()) === 3);
+    await me.page.locator('#simple-thread .parley-box').pressSequentially('next one');
+    assert.equal(await chatBox.inputValue(), 'next one', 'what is typed after it stays');
+    await me.page.fill('#simple-thread .parley-box', '');
     /* The size of the text, the page's one setting, is the chat's too. */
     const size = () => me.page.locator('#simple-thread .parley-said .parley-text').first().evaluate((e) => Number.parseFloat(getComputedStyle(e).fontSize));
     const before = await size();
@@ -165,7 +173,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     assert.deepEqual(steps, ['Au travail - on the cover', 'counting the late orders'], 'every step unfolded where it came, with its state; "done", said at the top, not again');
     assert.equal(await me.page.locator('#simple-thread .parley-steps .parley-trail[hidden]').count(), 0);
     assert.equal(await me.page.locator('#simple-thread .parley-steps .parley-time').count(), 2, 'each with its time');
-    assert.equal(await me.page.locator('#simple-thread .parley-sign-state[data-state=done]').count(), 2, 'detailed: every message of the person signed, handled ones too');
+    assert.equal(await me.page.locator('#simple-thread .parley-sign-state[data-state=done]').count(), 3, 'detailed: every message of the person signed, handled ones too');
     assert.equal(await mine.locator('.parley-time').evaluate((e) => getComputedStyle(e).opacity), '1', 'detailed: the time of every message');
     assert.ok((await me.page.locator('#simple-thread .parley-thread').innerText()).includes("Pas dans un dossier partagé : il ne peut pas être ouvert d'ici."), 'the file it cannot share is said to be outside');
     assert.equal(await me.page.locator('#simple-thread .parley-files li').count(), 2);

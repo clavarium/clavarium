@@ -282,8 +282,9 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.page.locator('#links-card .device button.danger').click();
     await owner.until('recipes is shared with nobody', async () => !(await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes'));
     await owner.page.locator('#access-close').click();
-    /* Seen at a glance, outside Access: the list; and how many devices there are, on the tab that lists them. */
-    await owner.until('the list marks both conversations as shared', async () => (await owner.page.locator('#items .shared-mark').count()) === 2);
+    /* Said in Access, not on every row of the list (where it said the same again and again). */
+    await owner.until('Access closed', async () => !(await owner.page.locator('#access').isVisible()));
+    assert.equal(await owner.page.locator('#list .shared-mark').filter({ hasText: /shared with/ }).count(), 0);
     assert.equal(await owner.page.locator('#access').isVisible(), false);
     /* The tablet finds the changes by itself: accounts given, recipes gone. */
     await tablet.page.reload();

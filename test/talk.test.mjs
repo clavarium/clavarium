@@ -521,3 +521,16 @@ test('it needs its owner only until the owner writes: answered with a button or 
     b.parley('status', 'waiting', 'one more thing');
     await until('waits again', () => b.talk.brief('helper')?.needs === true);
 });
+
+test('what this server says in a chat (a restart, a machine put to sleep) is no one using it: the last message stays the last one said', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.parley('tell', 'Half written.');
+    await until('read', () => b.talk.brief('helper')?.lastText === 'Half written.');
+    const before = b.talk.brief('helper');
+    await new Promise((r) => setTimeout(r, 20));
+    b.talk.event('helper', { kind: 'restarted', text: 'Its machine was restarted: the tool started again.', topic: 'Restarted' });
+    const after = b.talk.brief('helper');
+    assert.equal(after.lastText, 'Half written.');
+    assert.equal(after.lastAt, before.lastAt);
+});

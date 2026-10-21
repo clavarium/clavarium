@@ -81,6 +81,12 @@ export const sameOrigin = makeOriginCheck();
    still running, in which case only the channel dropped; `onRejoin(name)`
    when a screen takes a terminal that was already open. `originOk` and
    `gate` decide who may attach at all: see gate.mjs. */
+/* WHAT A TERMINAL SAYS BY ITSELF, shown on a screen: the focus coming and going, its answers to the
+   program asking what it is, where its cursor is, which colours it has. Sent like keys, they are no
+   one typing: never "used just now" (a conversation nobody touched rose in Recent with them). */
+const BY_ITSELF = /\x1b\[[IO]|\x1b\[\??[>=]?[\d;]*c|\x1b\[\d+;\d+R|\x1b\][\d;]*(?:rgb:[0-9a-fA-F/]+)?(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+export const byHand = (typed) => String(typed ?? '').replace(BY_ITSELF, '').length > 0;
+
 export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () => {}, originOk = sameOrigin, gate = () => 'local', deviceName = () => undefined, onRejoin = () => {}, onTyped = () => {} }) {
     const sockets = new WebSocketServer({ noServer: true });
     const seats = new Seats();
@@ -265,7 +271,7 @@ export function attachBridge(server, { spawn, onLeft = () => {}, onEnded = () =>
                    a tmux command, not by the tool. A line of this server is
                    then not typed through this channel for a while (`type`). */
                 if (typed.includes(PREFIX)) mine.prefixAt = Date.now();
-                mine.terminal.write(typed); onTyped(name, typed); return;
+                mine.terminal.write(typed); if (byHand(typed)) onTyped(name, typed); return;
             }
             let message;
             try { message = JSON.parse(data.toString()); } catch { return; }

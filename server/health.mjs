@@ -135,13 +135,13 @@ export class Health {
     }
 
     /* The last thing known, or null. Cheap: nothing is asked. */
-    of(name) { const r = this.#records.get(name); return r ? { ...r, seen: this.#seen?.get(name)?.keys ?? [] } : null; }
+    of(name) { const r = this.#records.get(name); const seen = this.#seen?.get(name); return r ? { ...r, seen: seen?.keys ?? [], ...(seen?.at ? { seenAt: seen.at } : {}) } : null; }
     /* "Seen": what it says now no longer calls its owner (Needs you); a problem of another kind, or one
        that comes back after it went away, does. */
     markSeen(name) {
         const r = this.#records.get(name);
         const keys = (r?.problems ?? []).filter((p) => p.level === 'warn' || p.level === 'bad').map((p) => p.key);
-        this.#seen?.put({ name, keys });
+        this.#seen?.put({ name, keys, at: new Date().toISOString() });
         return this.of(name);
     }
     forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); }
@@ -217,7 +217,7 @@ export class Health {
         const kept = { ...record, ...judge(record) };
         /* What was marked seen and is gone is forgotten: back later, it calls its owner again. */
         const seen = this.#seen?.get(name);
-        if (seen && record.state === 'Running' && record.answering === true) { const still = seen.keys.filter((k) => kept.problems.some((p) => p.key === k)); if (still.length !== seen.keys.length) this.#seen.put({ name, keys: still }); }
+        if (seen && record.state === 'Running' && record.answering === true) { const still = seen.keys.filter((k) => kept.problems.some((p) => p.key === k)); if (still.length !== seen.keys.length) this.#seen.put(still.length ? { ...seen, keys: still } : { name, keys: [] }); }
         this.#records.set(name, kept);
         try { this.judged(name, kept); } catch { /* told, nothing more */ }
         return kept;

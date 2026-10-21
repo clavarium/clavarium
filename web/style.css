@@ -32,12 +32,21 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item small { color: var(--ink2); }
-.item .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--ink2); }
-.item[data-phase="ready"] .dot { background: var(--ok); }
-.item[data-phase="building"] .dot, .item[data-phase="restarting"] .dot, .item[data-busy="true"] .dot { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
-.item[data-phase="failed"] .dot { background: var(--danger); }
+/* ITS STATE, one point on the right of its row: needs you, to watch, fine, asleep (a hollow ring). */
+.item { position: relative; padding-right: 26px; }
+.state-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; background: var(--ok); }
+.state-dot[data-state="need"] { background: var(--danger); }
+.state-dot[data-state="watch"] { background: var(--warn); }
+.state-dot[data-state="sleep"] { background: transparent; border: 1.5px solid var(--ink2); }
+.item > .state-dot { position: absolute; right: 10px; top: 13px; }
+.item[data-state="watch"] > .state-dot { animation: pulse 1.6s ease-in-out infinite; }
+/* Folded: up to four points, how its conversations are. */
+.state-sum { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
+/* Unfolded: it comes in gently, once. */
+.unfolding { animation: unfold .18s ease-out; }
+@keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes pulse { 50% { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) { .item .dot { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .item > .state-dot, .unfolding { animation: none !important; } }
 #create { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bar); border: 1px solid var(--line); border-radius: 8px; }
 #create label, #create .legend { font-size: .75rem; color: var(--ink2); }
 #create input { font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; }
@@ -1283,8 +1292,8 @@ select.pill { appearance: auto; }
 .list-head { margin: 10px 2px 2px; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
 .list-head:first-child { margin-top: 2px; }
 .item[data-when] { position: relative; }
-.item[data-when] > b { padding-right: 5.5em; }
-.item .when { position: absolute; top: 9px; right: 10px; max-width: 5em; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--ink2); }
+.item[data-when] > b { padding-right: 5em; }
+.item .when { position: absolute; top: 9px; right: 26px; max-width: 5em; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--ink2); }
 .item .last { display: block; color: var(--ink); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more-recent { align-self: center; display: inline-flex; align-items: center; gap: 4px; padding: 2px 14px; border-radius: 999px; text-decoration: none; color: var(--ink2); }
 .more-recent:hover { color: var(--ink); background: var(--bar); }
@@ -1358,3 +1367,5 @@ select.pill { appearance: auto; }
 .parley-act[data-act="seen"], #health-dismiss { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
 .parley-act[data-act="seen"]:hover, #health-dismiss:hover { background: color-mix(in srgb, var(--ok) 14%, transparent); }
 button.inline.more-recent { text-decoration: none; }
+/* Marked seen: said, not offered again. */
+.parley-act[data-act="seen-done"] { color: var(--ok); border-color: transparent; background: transparent; cursor: default; opacity: .85; }

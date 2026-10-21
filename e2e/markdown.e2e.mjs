@@ -94,6 +94,18 @@ test('the chat renders what the tool writes: Markdown built element by element, 
     await me.until('the next picture', async () => /after/.test(await zoom.locator('.parley-zoom-name').innerText()));
     await me.page.keyboard.press('Escape');
     await me.until('closed', async () => !(await zoom.isVisible()));
+    /* One tap on the picture opens it, one tap on it closes it -- zoomed in too; dragging it moves it, never closes it. */
+    await pictures.first().click();
+    await me.until('large again', async () => zoom.isVisible());
+    await zoom.locator('.parley-zoom-plus').click(); await zoom.locator('.parley-zoom-plus').click();
+    await me.until('zoomed again', async () => (await zoom.getAttribute('data-zoomed')) === 'true');
+    const big = await zoom.locator('img[draggable="false"]').boundingBox();
+    const cx = Math.min(big.x + big.width / 2, 600); const cy = Math.min(big.y + big.height / 2, 400);
+    await me.page.mouse.move(cx, cy); await me.page.mouse.down(); await me.page.mouse.move(cx + 60, cy + 30, { steps: 5 }); await me.page.mouse.up();
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(await zoom.isVisible(), true, 'moved, not closed');
+    await me.page.mouse.click(cx, cy);
+    await me.until('closed by a tap on the picture, zoomed in', async () => !(await zoom.isVisible()));
     /* ATTACKS: nothing it wrote ran, loaded from elsewhere, or became a link elsewhere. */
     const second = thread.locator('.parley-said[data-from=agent]').nth(1);
     await me.until('the second message', async () => (await second.innerText().catch(() => '')).includes('<script>window.'));
