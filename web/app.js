@@ -3747,6 +3747,37 @@
         if (!p.disks.some((d) => !d.system)) rows.append(el('p', 'hint', 'No other disk: plug one in (or add one to this server), then open this again.'));
     }
     $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
+    /* WHAT HAPPENED: newest first, a page at a time; chosen by kind, searched. */
+    const EVENT_WORDS = { conversation: 'Conversation', machine: 'Machine', access: 'Access', asset: 'Asset', update: 'Update', server: 'Server', 'sign-in': 'Sign-in' };
+    let eventsShown = []; let eventsAsk = 0;
+    async function paintEvents({ more = false } = {}) {
+        const ask = ++eventsAsk;
+        const before = more && eventsShown.length ? eventsShown.at(-1).at : '';
+        const q = new URLSearchParams({ kind: $('events-kind').value, q: $('events-q').value.trim(), limit: '100', ...(before ? { before } : {}) });
+        const got = await fetch(`${API}/events?${q}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (ask !== eventsAsk) return;
+        if (!got) { $('events-said').textContent = 'What happened cannot be read just now.'; return; }
+        eventsShown = more ? [...eventsShown, ...got] : got;
+        const list = $('events-list'); if (!more) list.replaceChildren();
+        for (const e of got) {
+            const li = el('li', 'event'); li.dataset.kind = e.kind;
+            const when = el('time', 'event-when', new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })); when.dateTime = e.at;
+            li.append(when, el('span', 'event-kind', EVENT_WORDS[e.kind] ?? e.kind), el('span', 'event-text', e.text));
+            if (e.who && !e.text.includes(e.who)) li.append(el('span', 'event-who', e.who));
+            list.append(li);
+        }
+        $('events-said').textContent = eventsShown.length ? '' : 'Nothing yet.';
+        $('events-more').hidden = got.length < 100;
+    }
+    $('settings-events-top').addEventListener('toggle', () => { if ($('settings-events-top').open) void paintEvents(); });
+    $('events-kind').addEventListener('change', () => { void paintEvents(); });
+    let eventsTyping;
+    $('events-q').addEventListener('input', () => { clearTimeout(eventsTyping); eventsTyping = setTimeout(() => { void paintEvents(); }, 250); });
+    $('events-more').addEventListener('click', () => { void paintEvents({ more: true }); });
+    $('events-copy').addEventListener('click', async () => {
+        const text = eventsShown.map((e) => `${e.at}\t${e.kind}\t${e.text}${e.who ? `\t${e.who}` : ''}`).join('\n');
+        try { await navigator.clipboard.writeText(text); $('events-said').textContent = `Copied: ${eventsShown.length} lines.`; } catch { $('events-said').textContent = 'The clipboard is not available here.'; }
+    });
     /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */
     let logsShown = null;
     $('logs-show').addEventListener('click', async () => {

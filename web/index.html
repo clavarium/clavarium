@@ -729,6 +729,22 @@
         </div>
           </div>
         </details>
+        <!-- WHAT HAPPENED: the owner's actions and what the server did by itself, dated (server/events.mjs). -->
+        <details class="chapter" id="settings-events-top" data-chapter="s-events">
+          <summary><span class="chapter-title">What happened</span><span class="chapter-about">Conversations, machines, access, updates, sign-ins: dated.</span></summary>
+          <div class="chapter-body">
+          <div class="row events-pick">
+            <label>Show <select id="events-kind" class="pill">
+              <option value="">everything</option><option value="conversation">conversations</option><option value="machine">machines</option><option value="access">access and devices</option><option value="asset">folders, repositories, secrets</option><option value="update">updates</option><option value="server">this server</option><option value="sign-in">sign-ins and administrators</option>
+            </select></label>
+            <input type="search" id="events-q" placeholder="Search" aria-label="Search what happened" maxlength="60" autocomplete="off">
+            <button type="button" id="events-copy">Copy all</button>
+          </div>
+          <ol id="events-list" class="events-list" aria-live="polite"></ol>
+          <p class="hint" id="events-said" role="status"></p>
+          <button type="button" id="events-more" hidden>Show older</button>
+          </div>
+        </details>
         <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);
              and this server started again. -->
         <details class="chapter" id="settings-logs-top" data-chapter="s-logs">
@@ -764,7 +780,7 @@
         <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
           <summary><span class="chapter-title">Storage &amp; backup</span><span class="chapter-about">Disk sizes, and how to back up.</span></summary>
           <div class="chapter-body">
-        <div class="row"><span id="export-note" class="hint">Secrets are never exported, only their names.</span>           <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json" hidden></span> <span id="flows-said" class="hint" role="status"></span></div>
+        <div class="row"><span id="export-note" class="hint">Secrets are never exported, only their names.</span> <label class="check" title="The files of the folders too, in a .tar.gz: to move a flow to another Clavarium with what it holds"><input type="checkbox" id="flows-with-files"> and the files of its folders</label>           <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json,.gz,.tgz,application/gzip" hidden></span> <span id="flows-said" class="hint" role="status"></span></div>
         <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
           </div>
         </details>

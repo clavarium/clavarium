@@ -856,9 +856,23 @@
             if (traceOf === '*') islands(); else trace();
         }
 
-        /* A setup to a file: the configuration, never the data. */
+        /* A setup to a file: the configuration, never the data -- or, with "and the files of its folders" ticked,
+           the configuration and those files, as a .tar.gz (server/bundle.mjs), told first how large. */
         async function exportFile(flow) {
             flowsErr('');
+            if ($('flows-with-files').checked) {
+                try {
+                    const q = flow ? `flow=${encodeURIComponent(flow)}&` : '';
+                    const r = await fetch(`${env.API()}/setup/bundle?${q}stats=1`); const s = await r.json();
+                    if (!r.ok) throw new Error(s.error ?? 'The files could not be counted.');
+                    const files = s.folders.reduce((a, x) => a + x.files, 0); const bytes = s.folders.reduce((a, x) => a + x.bytes, 0);
+                    const size = bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 1024 ** 2))} MB`;
+                    const a = h('a', { href: `${env.API()}/setup/bundle?${q.replace(/&$/, '')}`, download: `${(s.name || 'setup').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'setup'}.clavarium.tar.gz` });
+                    document.body.append(a); a.click(); a.remove();
+                    $('flows-said').textContent = `Exporting ${s.name} with ${files} file${files === 1 ? '' : 's'} from ${s.folders.length} folder${s.folders.length === 1 ? '' : 's'} (about ${size}): your browser saves it as it comes. Names of secrets only, no key, no password.`;
+                } catch (e) { flowsErr(e.message); }
+                return;
+            }
             try {
                 const made = await request('/setup/export', flow ? { flow } : {});
                 const a = h('a', { href: URL.createObjectURL(new Blob([made.text], { type: 'application/json' })), download: `${(made.name || 'setup').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'setup'}.clavarium.json` });
@@ -945,7 +959,7 @@
         }
         async function runImport() {
             const box = $('flows-preview');
-            try { await request('/setup/import', { text: importing.text, choices: importing.choices }); } catch (e) { flowsErr(e.message); return; }
+            try { await request('/setup/import', { text: importing.text, choices: importing.choices, ...(importing.bundle ? { bundle: importing.bundle } : {}) }); } catch (e) { flowsErr(e.message); return; }
             const steps = h('ol', { class: 'lk-job', id: 'flows-job' });
             box.replaceChildren(h('h3', { text: `Importing ${importing.file}` }), h('p', { class: 'hint', text: 'Machines are built one at a time: a few minutes each. This can be closed; it goes on.' }), steps);
             importing = null;
@@ -1000,6 +1014,21 @@
             flowsErr('');
             /* Imported from any tab: what it holds is shown in Flows. */
             await env.toFlows();
+            /* A flow with its files: sent whole first, checked there; what it holds is shown as for a setup. */
+            if (/\.tar\.gz$|\.tgz$/i.test(file.name)) {
+                $('flows-said').textContent = `Sending ${file.name}...`;
+                try {
+                    const r = await fetch(`${env.API()}/setup/bundle`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file });
+                    const got = await r.json().catch(() => ({}));
+                    if (!r.ok) throw new Error(got.error ?? `It could not be sent (${r.status}).`);
+                    const files = got.folders.reduce((a, x) => a + x.files, 0);
+                    importing = { text: got.text, file: file.name, choices: {}, bundle: got.id };
+                    $('flows-said').textContent = `${file.name}: ${files} file${files === 1 ? '' : 's'} for ${got.folders.length} folder${got.folders.length === 1 ? '' : 's'}. A folder made new gets its files; one already here keeps its own.`;
+                } catch (e) { $('flows-said').textContent = ''; flowsErr(e.message); return; }
+                await previewFile();
+                $('flows-preview').scrollIntoView({ block: 'start' });
+                return;
+            }
             if (file.size > 512 * 1024) { flowsErr(`${file.name} is too large: a setup is at most 512 KB.`); return; }
             importing = { text: await file.text(), file: file.name, choices: {} };
             await previewFile();

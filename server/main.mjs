@@ -61,6 +61,8 @@ import { HealthReact } from './healthreact.mjs';
 import { MachinesMove } from './machinesmove.mjs';
 import { ServerLogs } from './serverlogs.mjs';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
+import { Events } from './events.mjs';
+import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 
@@ -122,7 +124,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -160,7 +162,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -211,6 +213,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const all = conversations ?? new Conversations({ store: new Store(`${dataDir}/conversations.json`), layout: new JsonFile(`${dataDir}/layout.json`, {}), vms, tools, ...(stopDelayMs === undefined ? {} : { stopDelayMs }) });
     /* Who may do what with what: ONE table, shared by everything below. */
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
+    /* What happened, in one dated list (events.mjs): the owner's actions, and what the server did by itself. */
+    const events = new Events({ file: `${dataDir}/events.log` });
     const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
     /* How private repositories are reached: keys and tokens kept and used here only (gitaccess.mjs).
        `gitSsh`: a stand-in for the ssh program, for tests. */
@@ -373,7 +377,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
     const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
         isAgent: (name) => all.list().find((c) => c.name === name)?.ai === true, event: (name, line) => talk.event(name, line) });
-    health.judged = (name, record) => { talk.machine(name, record); void reacting.judged(name, record).catch(() => {}); };
+    /* A machine's problems worth keeping in What happened: said once, until they went away. */
+    const problemsSaid = new Map();
+    health.judged = (name, record) => {
+        talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
+        const now = (record?.problems ?? []).filter((x) => x.level === 'bad' || (x.level === 'warn' && ['memory', 'disk'].includes(x.kind)));
+        const before = problemsSaid.get(name) ?? new Set();
+        for (const x of now) if (!before.has(x.key)) events.add({ kind: 'machine', text: `${name}: ${x.text}`, conversation: name });
+        problemsSaid.set(name, new Set(now.map((x) => x.key)));
+    };
     /* A machine just started: its folders are mounted again (after a build,
        a restart, a move) or looked at and put back if they came loose (after
        a wake), before its tool starts in them. */
@@ -383,7 +395,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
     /* The VM manager, watched: said to the pages when it does not answer, restarted once when stuck (vmwatch.mjs). */
-    const vmWatch = new VmWatch({ run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { void alerts.tell(payload)?.catch?.(() => {}); } });
+    const vmWatch = new VmWatch({ run: asHost, store: new Store(`${dataDir}/vm-manager.json`), alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload)?.catch?.(() => {}); } });
     const stopVmWatch = vmWatch.start(vmWatchEveryMs);
     const platform = { get machines() { return vmWatch.ok; }, answerer: answerer.about(), get operators() { return team ? team.allowed() : [...operators]; }, address: publicOrigin ?? null, version: JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version, get dictation() { return voice.current() ? (voice.model ?? 'set') : null; } };
     /* Who gets what, and a whole setup in one file: see setup.mjs. */
@@ -394,7 +406,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* This server's disk and memory, and the reserve no machine may eat into: see capacity.mjs. */
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
         /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
-        sleep: (name) => all.sleep(name), alert: (payload) => { void alerts.tell(payload); },
+        sleep: (name) => { events.add({ kind: 'machine', text: `Machine of ${name} put to sleep: this server was short of room`, conversation: name }); return all.sleep(name); }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
     const stopWatch = capacity.start();
@@ -413,7 +425,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {

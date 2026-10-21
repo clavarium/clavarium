@@ -70,6 +70,7 @@
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
  *   GET  /api/machines/disks: every disk, whole   POST /api/machines/mount {path}   POST /api/machines/prepare {path, typed}: erased
+ *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
@@ -89,7 +90,9 @@
  *   POST /api/flows/name                    {around, name}: a flow named by the owner ('' gives it back its own)
  *   POST /api/setup/export                  {flow?} -> {name, text}: the configuration as one file, never the data
  *   POST /api/setup/preview                 {text, choices?}: what an import would do, said before anything is done
- *   POST /api/setup/import                  {text, choices?}: made in the background; GET says how far it is
+ *   POST /api/setup/import                  {text, choices?, bundle?}: made in the background; GET says how far it is
+ *   GET  /api/setup/bundle?flow=            the flow WITH the files of its folders, a .tar.gz (bundle.mjs)   &stats=1: their sizes only
+ *   POST /api/setup/bundle                  the body IS such a file -> {id, text, folders}: then preview and import with {bundle: id}
  *   POST /api/setup/pair                    {label}: what a device to pair will get (the code is made by /api/shares)
  *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
@@ -125,10 +128,10 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
-    const send = (status, body) => {
+    let send = (status, body) => {
         response.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
     };
     /* Files are reached THROUGH a conversation: only a folder attached to it,
@@ -136,6 +139,8 @@ export async function handleApi(request, response, conversations, headers, resou
     const query = new URL(request.url ?? '/', 'http://local').searchParams;
     /* Who asks (behind the edge; '' on this machine alone): see gate.mjs. */
     const identity = String(request.headers['x-forwarded-email'] ?? '').trim().toLowerCase();
+    /* A sign-in, said once in a while for the same person (events.mjs). */
+    events?.seen(identity);
     const attached = (need) => {
         /* The conversation's own work folder, when the server keeps it. */
         if (query.get('r') === WORK_TAB && resources) {
@@ -228,6 +233,15 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Who may sign in (operators.mjs): none in local mode. */
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
+            if (pathname === '/api/events' && events) {
+                const ask = { kind: query.get('kind') ?? '', conversation: query.get('conversation') ?? '', q: query.get('q') ?? '', before: query.get('before') ?? '', limit: Math.min(1000, Number(query.get('limit')) || 200) };
+                const said = events.list(ask);
+                /* What the updater did is in its own history (updates.mjs): said here too, as it said it. */
+                const words = { done: 'done', failed: 'failed', 'rolled-back': 'did not work: went back' };
+                const updated = !ask.conversation && (!ask.kind || ask.kind === 'update') ? (updates?.about().history ?? []).map((h) => ({ at: h.at, kind: 'update', text: `${h.action === 'rollback' ? 'Back' : 'Update'} ${h.from ?? '?'} → ${h.to ?? '?'}: ${words[h.result] ?? h.result ?? ''}${h.why ? ` (${h.why})` : ''}` }))
+                    .filter((e) => e.at && (!ask.before || e.at < ask.before) && (!ask.q || e.text.toLowerCase().includes(ask.q.toLowerCase()))) : [];
+                return send(200, [...said, ...updated].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, ask.limit)), true;
+            }
             if (pathname === '/api/history' && history) {
                 const of = query.get('of') ?? 'server';
                 if (of !== 'server' && !conversations.list().some((c) => c.name === of)) throw new Refusal(404, 'No such conversation.');
@@ -255,6 +269,16 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/alerts' && alerts) return send(200, alerts.about()), true;
             if (pathname === '/api/flows' && setup) return send(200, setup.graph()), true;
             if (pathname === '/api/setup/import' && setup) return send(200, setup.job()), true;
+            if (pathname === '/api/setup/bundle' && setup && bundles) {
+                const flow = query.get('flow') || undefined;
+                const made = setup.exportText({ flow });
+                const folders = JSON.parse(made.text).nodes.filter((n) => n.kind === 'folder').map((n) => n.name);
+                if (query.get('stats') === '1') return send(200, { name: made.name, folders: bundles.folderStats(folders) }), true;
+                const file = `${(made.name || 'setup').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'setup'}.clavarium.tar.gz`;
+                response.writeHead(200, { ...headers, 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${file}"` });
+                await bundles.pack(made.text, folders, response).catch((error) => { console.error(`bundle: ${error.message}`); response.destroy(); });
+                return true;
+            }
             const looked = /^\/api\/conversations\/([^/]+)\/health$/.exec(pathname);
             if (looked && health) return send(200, health.of(decodeURIComponent(looked[1]))), true;
             /* The words of the chat screen, for a screen whose language is `lang`; and the owner's choice of them. */
@@ -294,10 +318,18 @@ export async function handleApi(request, response, conversations, headers, resou
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
             return send(201, await talk.attach(decodeURIComponent(attaching[1]), query.get('name') ?? '', request)), true;
         }
+        /* A flow with its files, sent from the page: the body is the .tar.gz. */
+        if (pathname === '/api/setup/bundle' && setup && bundles) {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            const got = await bundles.receive(request);
+            try { return send(200, { id: got.id, bytes: got.bytes, ...bundles.open(got.id) }), true; } catch (error) { bundles.forget(got.id); throw error; }
+        }
         if (!originOk(request.headers) || !String(request.headers['content-type'] ?? '').startsWith('application/json')) {
             return send(403, { error: 'This request does not come from this site.' }), true;
         }
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
+        /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
+        if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
         if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
         /* Who gets what, and a whole setup in one file: see setup.mjs. */
         if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
@@ -306,7 +338,14 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/flows/name') return send(200, setup.rename(body.around, body.name)), true;
             if (pathname === '/api/setup/export') return send(200, setup.exportText({ flow: typeof body.flow === 'string' ? body.flow : undefined })), true;
             if (pathname === '/api/setup/preview') return send(200, setup.preview(body.text, choices)), true;
-            if (pathname === '/api/setup/import') return send(202, setup.start(body.text, choices)), true;
+            if (pathname === '/api/setup/import') {
+                /* With the files of a flow sent before: each new folder gets its own, then the file sent goes. */
+                const id = typeof body.bundle === 'string' ? body.bundle : null;
+                const fill = id && bundles && resources ? (fileName, name) => bundles.fill(id, fileName, resources.folder(name)) : null;
+                const started = setup.start(body.text, choices, { fill });
+                if (id) void setup.done?.finally(() => bundles.forget(id));
+                return send(202, started), true;
+            }
             if (pathname === '/api/setup/pair') return send(200, setup.toPair(body.label)), true;
             if (pathname === '/api/setup/drop') { setup.drop(body.id); return send(200, { ok: true }), true; }
             return send(404, { error: 'Not found.' }), true;

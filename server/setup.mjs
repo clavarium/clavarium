@@ -262,7 +262,7 @@ function wakeWords(w) {
 }
 
 export class Setup {
-    #store; #p; #tools; #version; #job = null; #pollMs;
+    #store; #p; #tools; #version; #job = null; #pollMs; #fill = null;
 
     /* `parts`: what keeps each thing (conversations, resources, secrets,
        devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess,
@@ -557,8 +557,10 @@ export class Setup {
     job() { return this.#job ? { ...this.#job, steps: this.#job.steps.map((s) => ({ ...s })) } : null; }
 
     /* Starts making what the preview said; one import at a time. */
-    start(text, choices = {}) {
+    /* `fill(fileName, name)`: the files of a folder put in once it is made (bundle.mjs), -> how many; or none. */
+    start(text, choices = {}, { fill = null } = {}) {
         if (this.#job?.running) throw new Refusal(409, 'An import is already being made.');
+        this.#fill = fill;
         const plan = this.preview(text, choices);
         if (!plan.ready) throw new Refusal(400, 'Some names are still to choose.');
         const { doc } = readSetup(text, this.#tools());
@@ -584,8 +586,16 @@ export class Setup {
         /* Assets first: folders and repositories made, the rest remembered. */
         for (const i of items.filter((x) => ['folder', 'git', 'mailbox', 'secret'].includes(x.kind))) {
             const n = node.get(i.id);
-            if (i.status === 'exists') continue;
-            if (i.kind === 'folder') await this.#try(job, `Folder ${nm(i.id)}: made, empty`, () => p.resources.create({ name: nm(i.id) }));
+            if (i.status === 'exists') { if (i.kind === 'folder' && this.#fill) this.#step(job, `Folder ${nm(i.id)} is here already: its files were not put in`, 'skipped'); continue; }
+            if (i.kind === 'folder') {
+                const fill = this.#fill;
+                await this.#try(job, fill ? `Folder ${nm(i.id)}: made, with its files` : `Folder ${nm(i.id)}: made, empty`, async () => {
+                    await p.resources.create({ name: nm(i.id) });
+                    if (!fill) return undefined;
+                    const files = await fill(nameOf(i.id), nm(i.id));
+                    return Number.isInteger(files) ? `${files} file${files === 1 ? '' : 's'}` : undefined;
+                });
+            }
             else if (i.kind === 'git' && i.status === 'new') {
                 await this.#try(job, n.source ? `Repository ${nm(i.id)}: cloned from ${n.source}` : `Repository ${nm(i.id)}: made, empty`, async () => {
                     const made = await p.resources.create({ name: nm(i.id), type: 'git', from: n.source ?? undefined, ...(n.source && n.access === 'ssh-key' ? { via: { method: 'ssh-key', key: n.key } } : {}), ...(n.source && n.pin ? { pin: n.pin } : {}) });

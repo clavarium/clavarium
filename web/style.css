@@ -1324,3 +1324,16 @@ select.pill { appearance: auto; }
 .curve-tip { position: absolute; top: 0; right: 0; padding: 1px 6px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); font-size: .75rem; color: var(--ink); font-variant-numeric: tabular-nums; pointer-events: none; }
 .curve-foot { display: flex; justify-content: space-between; font-size: .6875rem; color: var(--ink2); margin-top: 2px; }
 .curve-legend { display: block; margin-top: 2px; font-size: .6875rem; }
+
+/* Settings, What happened: one line each -- when, what kind, what; who when it is not said. */
+.events-pick { flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.events-pick input[type=search] { flex: 1 1 10rem; min-width: 0; }
+.events-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; font-size: .875rem; }
+.event { display: grid; grid-template-columns: 7.5rem 6.5rem 1fr; gap: 2px 10px; padding: 4px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.event-when { color: var(--ink2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.event-kind { color: var(--ink2); font-size: .75rem; text-transform: uppercase; letter-spacing: .03em; }
+.event-text { min-width: 0; overflow-wrap: anywhere; }
+.event-who { grid-column: 3; color: var(--ink2); font-size: .75rem; }
+@media (max-width: 600px) { .event { grid-template-columns: 1fr auto; } .event-text, .event-who { grid-column: 1 / -1; } }
+/* The choices of Logs and What happened: as wide as their words, in the colours of the page. */
+.events-pick select, .logs-pick select { width: auto; max-width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }

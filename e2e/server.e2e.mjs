@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
 
@@ -163,5 +163,60 @@ test('the curves: memory, CPU and disk over time, of this server (with its reser
     assert.equal(await mine.locator('.curve-reserve').count(), 0, 'a machine has no reserve of its own');
     if (process.env.SHOTS) await mine.screenshot({ path: join(process.env.SHOTS, 'curves-machine.png') });
     assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+    assert.deepEqual(me.errors, []);
+});
+
+test('What happened: what was done from the page, dated and in words; chosen by kind, searched; a secret by its name only', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('alpha');
+    await me.api('/api/secrets', { name: 'DEPLOY_KEY', value: 'never-shown-anywhere' });
+    await me.api('/api/resources', { name: 'notes' });
+    await me.api('/api/conversations/alpha/resources', { resource: 'notes', access: 'write' });
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-events');
+    const lines = () => me.page.locator('#events-list .event-text').allInnerTexts();
+    await me.until('said, newest first', async () => (await lines()).length >= 4);
+    assert.deepEqual((await lines()).slice(0, 4), ['notes given to alpha (write)', 'Folder notes added', 'Secret DEPLOY_KEY set', 'Conversation "alpha" made (shell)']);
+    assert.doesNotMatch(await me.page.locator('#events-list').innerText(), /never-shown/);
+    await me.page.locator('#events-kind').selectOption('asset');
+    await me.until('only folders, repositories, secrets', async () => (await lines()).join('|') === 'Folder notes added|Secret DEPLOY_KEY set');
+    await me.page.locator('#events-kind').selectOption('');
+    await me.page.fill('#events-q', 'alpha');
+    await me.until('searched', async () => (await lines()).join('|') === 'notes given to alpha (write)|Conversation "alpha" made (shell)');
+    if (process.env.SHOTS) await me.page.locator('#settings-events-top').screenshot({ path: join(process.env.SHOTS, 'events.png') });
+    assert.deepEqual(me.errors, []);
+});
+
+test('a flow exported with the files of its folders, and imported: the folder made again with its files, its conversation with it', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('alpha');
+    await me.api('/api/resources', { name: 'notes' });
+    await me.api('/api/conversations/alpha/resources', { resource: 'notes', access: 'write' });
+    const notes = join(b.dir, 'data', 'resources', 'notes');
+    mkdirSync(join(notes, 'deep'), { recursive: true });
+    writeFileSync(join(notes, 'hello.txt'), 'kept across'); writeFileSync(join(notes, 'deep', 'more.txt'), 'and this');
+    await me.page.locator('#nav-settings').click();
+    await me.page.locator('#settings-ch-backup > summary').click();
+    await me.page.locator('#flows-with-files').check();
+    const [download] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#flows-export').click()]);
+    assert.match(download.suggestedFilename(), /\.clavarium\.tar\.gz$/);
+    const file = join(b.dir, 'flow.clavarium.tar.gz'); await download.saveAs(file);
+    await me.until('said how much', async () => /with 2 files from 1 folder/.test(await me.page.locator('#flows-said').innerText()));
+    /* Gone from here: the conversation archived, the folder removed. */
+    assert.equal((await me.api('/api/conversations/alpha/archive', {})).status, 200);
+    assert.equal((await me.api('/api/resources/notes/remove', {})).status, 200);
+    /* Imported back: shown first, then made. */
+    await me.page.locator('#flows-file').setInputFiles(file);
+    await me.until('shown first', async () => /2 files for 1 folder/.test(await me.page.locator('#flows-said').innerText()) && await me.page.locator('#flows-import-go').isVisible(), 30_000);
+    await me.page.locator('#flows-import-go').click();
+    await me.until('the files are back', async () => existsSync(join(notes, 'deep', 'more.txt')), 120_000);
+    assert.equal(readFileSync(join(notes, 'hello.txt'), 'utf8'), 'kept across');
+    await me.until('alpha made again', async () => (await me.api('/api/conversations')).body.some((c) => c.name === 'alpha'), 120_000);
+    await me.until('the import done', async () => (await me.api('/api/setup/import')).body?.done === true, 180_000);
+    const job = (await me.api('/api/setup/import')).body;
+    assert.equal(job.failed, 0, JSON.stringify(job.steps));
+    assert.ok(job.steps.some((s) => /^Folder notes: made, with its files$/.test(s.text) && s.why === '2 files'), JSON.stringify(job.steps));
     assert.deepEqual(me.errors, []);
 });
