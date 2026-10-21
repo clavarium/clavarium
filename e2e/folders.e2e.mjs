@@ -248,9 +248,36 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     assert.match(await me.page.locator('#recent .list-head').first().innerText(), /recent/i);
     await me.until('asleep, in words', async () => /asleep, wakes when opened/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
     /* The groups below it: Box, and those in no group. */
-    assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.toLowerCase())), ['recent', 'groups']);
+    assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.replace(/[^A-Za-z ]/g, '').trim().toLowerCase())), ['recent', 'groups']);
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .list-count').count(), 0, 'open: no count, its rows say it');
+    /* Recent folds, on this device, and stays folded; the groups stay. */
+    await me.page.locator('#recent .list-fold[data-section="recent"]').click();
+    await me.until('folded', async () => (await me.page.locator('#recent .item').count()) === 0);
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"]').getAttribute('aria-expanded'), 'false');
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .list-count').innerText(), '3', 'folded: how many it holds');
+    await me.page.reload();
+    await me.until('still folded after a reload', async () => (await me.page.locator('#recent .list-fold[data-section="recent"]').count()) === 1 && (await me.page.locator('#recent .item').count()) === 0);
+    assert.ok((await me.page.locator('#items .item').count()) >= 3, 'the groups are still there');
+    await me.page.locator('#recent .list-fold[data-section="recent"]').click();
+    await me.until('open again', async () => (await me.page.locator('#recent .item').count()) === 3);
     /* A tap on a row of Recent opens it. */
     await me.page.locator('#recent .item[data-name="second"]').click();
     await me.until('opened', async () => new URL(me.page.url()).searchParams.get('c') === 'second');
+    assert.deepEqual(me.errors, []);
+});
+
+test('Recent: the last four, then "Show more"; the list scrolls as one, never a box of its own', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await made(me, [['One', 'Box'], ['Two', ''], ['Three', ''], ['Four', ''], ['Five', ''], ['Six', 'Box']]);
+    await me.page.reload();
+    await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 4);
+    assert.equal(await me.page.locator('#recent .more-recent').innerText(), 'Show more (2)');
+    await me.page.locator('#recent .more-recent').click();
+    await me.until('all of them', async () => (await me.page.locator('#recent .item').count()) === 6);
+    assert.equal(await me.page.locator('#recent .more-recent').innerText(), 'Show fewer');
+    /* No box scrolls on its own inside the list. */
+    const inner = await me.page.evaluate(() => [...document.querySelectorAll('#list *')].filter((e) => { const s = getComputedStyle(e); return /auto|scroll/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 1; }).map((e) => e.id || e.className));
+    assert.deepEqual(inner, []);
     assert.deepEqual(me.errors, []);
 });

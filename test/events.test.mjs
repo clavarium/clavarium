@@ -43,4 +43,6 @@ test('chosen by kind, by conversation, by words; older ones a page at a time; a 
     assert.equal(e.seen('ops@example.org'), null, 'not again so soon');
     assert.equal(e.seen(''), null, 'nobody: this machine alone');
     assert.equal(e.add({ kind: 'nonsense', text: 'x' }), null);
+    assert.equal(e.fromRequest('/api/instance', { name: '' }).text, 'This Clavarium given back the name drawn from its address');
+    assert.equal(e.fromRequest('/api/instance', { name: 'Home' }).text, 'This Clavarium named "Home"');
 });

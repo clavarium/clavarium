@@ -294,7 +294,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .given > .parts-off { color: var(--warn); margin: 6px 0 2px; font-size: .8125rem; }
 
 /* The left column: conversations, then the platform's three entries, always in sight. */
-#list #items { flex: 1 1 auto; overflow-y: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+/* One scroll for the whole list (#list): never a box scrolled on its own inside it. */
+#list #items { flex: 0 0 auto; display: flex; flex-direction: column; gap: 8px; }
+/* The gauge, when shown: at the bottom of the list, and kept in sight while it scrolls. */
+#list #server-gauge { margin-top: auto; position: sticky; bottom: 0; z-index: 1; }
 /* Assets: one row per thing; opened, it says who may do what with it. */
 #assets section { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
 #assets section .panel-top small { margin-left: 8px; }
@@ -1337,3 +1340,8 @@ select.pill { appearance: auto; }
 @media (max-width: 600px) { .event { grid-template-columns: 1fr auto; } .event-text, .event-who { grid-column: 1 / -1; } }
 /* The choices of Logs and What happened: as wide as their words, in the colours of the page. */
 .events-pick select, .logs-pick select { width: auto; max-width: 100%; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; }
+/* Needs you and Recent: a heading that folds its rows, with how many it holds. */
+.list-fold { display: flex; align-items: center; gap: 6px; width: 100%; background: none; border: 0; padding: 2px; cursor: pointer; text-align: left; font: inherit; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+.list-fold:hover { color: var(--ink); }
+.list-chevron { width: 1em; text-align: center; }
+.list-count { margin-left: auto; font-weight: 400; letter-spacing: 0; font-variant-numeric: tabular-nums; }

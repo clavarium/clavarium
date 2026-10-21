@@ -507,3 +507,17 @@ test('reactions: "stop" wakes it at once, even told already; "go" as a message d
     await b.talk.say('helper', 'delete them', undefined, undefined, 'voice');
     assert.match(b.parley('read').out, /Message \(dictated: may hold recognition mistakes/);
 });
+
+test('it needs its owner only until the owner writes: answered with a button or in a message of one\'s own', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.parley('ask', 'Blue or red cover?', 'blue', 'red'); b.parley('status', 'waiting', 'on the cover');
+    await until('read', () => b.talk.brief('helper')?.waiting === 1);
+    assert.equal(b.talk.brief('helper').needs, true);
+    await b.talk.say('helper', 'red, and bigger letters');
+    assert.equal(b.talk.brief('helper').waiting, 1, 'the question is still open: answered another way');
+    assert.equal(b.talk.brief('helper').needs, false, 'but the turn is its own again');
+    await new Promise((r) => setTimeout(r, 20));
+    b.parley('status', 'waiting', 'one more thing');
+    await until('waits again', () => b.talk.brief('helper')?.needs === true);
+});

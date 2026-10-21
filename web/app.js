@@ -853,7 +853,9 @@
     /* The name a person reads; a conversation made before free names is read by its identifier. */
     const shownName = (c) => (c && typeof c.title === 'string' && c.title ? c.title : c?.name ?? '');
     /* It needs its owner: it asks or waits, its answerer asks, it failed, its machine is unwell. Said even when it is hidden. */
-    const needsYou = (c) => Boolean((c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) || c.answerer?.needs || c.phase === 'failed'
+    /* Its tool asks or waits for its owner, and the owner has not written since (talk.mjs, brief). */
+    const talkNeeds = (c) => Boolean(c.talk && (c.talk.needs ?? (c.talk.waiting > 0 || c.talk.state === 'waiting')));
+    const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed'
         || (c.phase === 'ready' && !c.asleep && ['warn', 'bad'].includes(c.health?.level)));
     /* Hidden conversations are shown on a click on "N hidden", for this page only. */
     let showHidden = false;
@@ -921,7 +923,7 @@
         const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
         if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
         /* It talks through the app, and asks or waits for its owner there. */
-        if (c.talk && (c.talk.waiting > 0 || c.talk.state === 'waiting')) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
+        if (talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
         if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
         /* Seen at a glance: this conversation is in other hands too. */
         const holders = sharedDevices.filter((d) => d.grants.some((g) => g.asset === `conversation:${c.name}`)).length;
@@ -931,6 +933,8 @@
     }
     /* `label`: the name shown; the conversations in no group are one of their own ("Not filed", key NONE). */
     const NONE = '\u0000none';
+    /* The two sections above the groups, folded or not like a group (never a group's name: those are plain words). */
+    const NEEDS = '\u0001needs'; const RECENT = '\u0001recent';
     function groupBox(g, inside, all, open, label = g) {
         const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g === NONE ? '' : g;
         const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g === NONE ? '' : g;
@@ -968,18 +972,31 @@
             /* A search: everything found, in its place. */
             items.append(...shown.filter((c) => !c.group).map((c) => itemButton(c)));
         } else {
+            /* A section that folds: open at first, folded or not on this device as its owner leaves it. */
+            const section = (key, label, count) => {
+                const open = !folded.has(key);
+                const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = key === NEEDS ? 'needs' : 'recent';
+                b.setAttribute('aria-expanded', String(open));
+                const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
+                /* How many, only when folded: open, its rows (and "Show more") say it. */
+                b.append(chevron, document.createTextNode(label));
+                if (!open) { const n = document.createElement('span'); n.className = 'list-count'; n.textContent = String(count); b.append(n); }
+                b.addEventListener('click', () => { if (folded.has(key)) folded.delete(key); else folded.add(key); keepFolded(); paint(); });
+                top.append(b);
+                return open;
+            };
             /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
             const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
-            if (needs.length) top.append(heading('Needs you'), ...needs.map((c) => itemButton(c, true)));
-            /* RECENT: by when it was last used; a few, then all. Never a hidden one. Only once there are
-               groups: before, the one list below says the same, in the order chosen by hand. */
+            if (needs.length && section(NEEDS, 'Needs you', needs.length)) top.append(...needs.map((c) => itemButton(c, true)));
+            /* RECENT: by when it was last used; the last four, then all. Never a hidden one. Only once there
+               are groups: before, the one list below says the same, in the order chosen by hand. */
             const recent = conversations.filter((c) => c.hidden !== true || c.name === current).sort((a, b) => activityOf(b) - activityOf(a));
-            const few = 5;
-            if (recent.length && groups.length) {
-                top.append(heading('Recent'), ...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
+            const few = 4;
+            if (recent.length && groups.length && section(RECENT, 'Recent', recent.length)) {
+                top.append(...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
-                    more.textContent = showAllRecent ? 'Show fewer' : `Show all ${recent.length}`;
+                    more.textContent = showAllRecent ? 'Show fewer' : `Show more (${recent.length - few})`;
                     more.addEventListener('click', () => { showAllRecent = !showAllRecent; paint(); });
                     top.append(more);
                 }
