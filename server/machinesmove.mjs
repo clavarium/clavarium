@@ -6,11 +6,58 @@
  *              why: '' when they may go there, or why not (the same disk, too small)
  *   move(at)   started; the page loses this server for a while, and finds it again
  *   moving()   { state, said: [lines] }: how it goes, or how it went
+ *   forgetOld() the copy a move left on the first disk removed (oldMb in places():
+ *              its size, null when there is none)
+ *   disks()    the disks of this server, WHOLE, formatted or not (lsblk): for each,
+ *              what can be done -- move the machines to one of its file systems,
+ *              mount one, or prepare (erase) the disk; and why not
+ *   mount(path) / prepare(path, typed)   a file system mounted under /mnt for good;
+ *              a whole disk erased, one ext4 on it, mounted (its name typed again)
  */
 import { Refusal } from './conversations.mjs';
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.replace(/^REFUSED: /, '').slice(0, 200) ?? '';
 const whole = (x) => (/^\d+$/.test(x ?? '') ? Number(x) : undefined);
+const MB = (bytes) => Math.round(Number(bytes ?? 0) / 1048576);
+export const FILE_SYSTEMS = ['ext4', 'xfs', 'btrfs'];
+const PLACES = /^\/(mnt|media)(\/|$)|^\/home$/;
+const SYSTEM_MOUNTS = /^(\/|\/boot(\/efi)?|\/usr|\/var|\[SWAP\])$/;
+const PART_OF_MORE = /^(LVM2_member|crypto_LUKS|linux_raid_member|zfs_member)$/;
+/* A disk the machines could live on: not a floppy or a CD, not read-only, not tiny; a loop
+   device only when it is a disk mounted under /mnt or /media (a snap's is read-only squashfs). */
+function aDisk(d) {
+    if (d.ro || /^(fd|sr|zram|ram)\d*/.test(d.name)) return false;
+    /* (A conversation's own work disk is a loop device too, mounted elsewhere: never listed.) */
+    if (d.type === 'loop') return FILE_SYSTEMS.includes(d.fstype) && /^\/(mnt|media)\//.test(d.mountpoint ?? '');
+    return d.type === 'disk' && MB(d.size) >= 4096;
+}
+/* lsblk -J (deploy/clavarium-host, "disks list") as the page needs it. */
+export function readDisks(json) {
+    let all;
+    try { all = JSON.parse(json).blockdevices ?? []; } catch { return []; }
+    const flat = (d) => [d, ...(d.children ?? []).flatMap(flat)];
+    return all.filter(aDisk).map((d) => {
+        const inside = flat(d);
+        const parts = (d.children?.length ? d.children : [d]).map((p) => {
+            const deeper = flat(p);
+            const mount = deeper.map((x) => x.mountpoint).find(Boolean) ?? null;
+            const state = PART_OF_MORE.test(p.fstype ?? '') || deeper.some((x) => ['lvm', 'crypt', 'raid0', 'raid1', 'raid5', 'raid6', 'raid10'].includes(x.type)) ? 'part-of-more'
+                : mount && SYSTEM_MOUNTS.test(mount) ? 'system'
+                : mount && PLACES.test(mount) && FILE_SYSTEMS.includes(p.fstype) ? 'place'
+                : mount ? 'in-use'
+                : FILE_SYSTEMS.includes(p.fstype) ? 'mountable'
+                : p.fstype ? 'other' : 'empty';
+            return { name: p.name, path: p.path, sizeMb: MB(p.size), fstype: p.fstype ?? null, label: p.label ?? null, mount, state };
+        });
+        const system = parts.some((p) => p.state === 'system') || inside.some((x) => x.mountpoint && SYSTEM_MOUNTS.test(x.mountpoint));
+        const busy = parts.some((p) => p.mount || p.state === 'part-of-more');
+        return {
+            name: d.name, path: d.path, sizeMb: MB(d.size), model: (d.model ?? '').trim() || null, removable: Boolean(d.rm), loop: d.type === 'loop',
+            system, parts, prepare: system ? 'it is the system\'s disk' : busy ? 'something on it is in use' : d.type === 'loop' ? 'not a whole disk' : '',
+            erases: parts.some((p) => p.fstype),
+        };
+    });
+}
 
 export class MachinesMove {
     #host; #usedMb;
@@ -31,7 +78,9 @@ export class MachinesMove {
                 : need !== undefined && p.freeMb < need ? `too small: ${Math.round(p.freeMb / 1024)} GB free, about ${Math.ceil(need / 1024)} GB needed`
                 : '';
         }
-        return { now, places, needMb: need ?? null };
+        const old = await this.#host(['machines', 'old']).catch(() => ({ code: 1 }));
+        const oldMb = old.code === 0 ? whole(/^old (\d+)$/m.exec(String(old.stdout ?? ''))?.[1]) ?? null : null;
+        return { now, places, needMb: need ?? null, oldMb };
     }
     async move(at) {
         const { places } = await this.places();
@@ -41,6 +90,44 @@ export class MachinesMove {
         const r = await this.#host(['machines', 'move', at]);
         if (r.code !== 0) throw new Refusal(r.code === 78 ? 400 : 502, firstLine(r.stderr) || `exit ${r.code}`);
         return { started: true, to: `${at.replace(/\/$/, '')}/clavarium-machines` };
+    }
+    async forgetOld() {
+        const r = await this.#host(['machines', 'forget-old']);
+        if (r.code !== 0) throw new Refusal(r.code === 78 ? 409 : 502, firstLine(r.stderr) || `exit ${r.code}`);
+        return { removed: true };
+    }
+    async disks() {
+        const [r, places] = await Promise.all([this.#host(['disks', 'list']), this.places().catch(() => null)]);
+        if (r.code !== 0) throw new Refusal(502, `The disks could not be listed: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        const disks = readDisks(r.stdout);
+        const now = places?.now?.place ?? null;
+        for (const d of disks) for (const p of d.parts) {
+            const at = places?.places.find((x) => x.at === p.mount);
+            if (p.state === 'place') { p.freeMb = at?.freeMb ?? null; p.why = at ? at.why : 'not a place the VM manager may use'; }
+            if (now && p.mount && (now === p.mount || now.startsWith(`${p.mount.replace(/\/$/, '')}/`))) p.machines = true;
+        }
+        /* The machines' disk first, then the others by size. */
+        disks.sort((a, b) => Number(b.parts.some((p) => p.machines)) - Number(a.parts.some((p) => p.machines)) || b.sizeMb - a.sizeMb);
+        return { disks, needMb: places?.needMb ?? null, now };
+    }
+    async mount(path) {
+        const { disks } = await this.disks();
+        const p = disks.flatMap((d) => d.parts).find((x) => x.path === path);
+        if (!p) throw new Refusal(404, 'Not a disk of this server.');
+        if (p.state !== 'mountable') throw new Refusal(409, 'This one cannot be mounted here: it is in use, or holds no file system the machines can live on.');
+        const r = await this.#host(['disks', 'mount', path], { timeoutMs: 120_000 });
+        if (r.code !== 0) throw new Refusal(r.code === 78 ? 409 : 502, firstLine(r.stderr) || `exit ${r.code}`);
+        return { mounted: String(r.stdout).trim().replace(/^mounted /, '') };
+    }
+    async prepare(path, typed) {
+        const { disks } = await this.disks();
+        const d = disks.find((x) => x.path === path);
+        if (!d) throw new Refusal(404, 'Not a disk of this server.');
+        if (d.prepare) throw new Refusal(409, `Not this one: ${d.prepare}.`);
+        if (String(typed ?? '') !== d.name) throw new Refusal(400, `Type its name, ${d.name}, to erase it.`);
+        const r = await this.#host(['disks', 'prepare', path, d.name], { timeoutMs: 600_000 });
+        if (r.code !== 0) throw new Refusal(r.code === 78 ? 409 : 502, firstLine(r.stderr) || `exit ${r.code}`);
+        return { prepared: String(r.stdout).trim() };
     }
     async moving() {
         const r = await this.#host(['machines', 'moving']);

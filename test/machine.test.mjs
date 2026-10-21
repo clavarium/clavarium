@@ -25,6 +25,7 @@ function bench(t, { stuck = false, refuseSet = false, unread = false, startFails
         calls.push(argv.slice(1).join(' '));
         const [area, verb, vm] = argv;
         if (area !== 'vm') return { code: 0, stdout: '', stderr: '' };
+        if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (verb === 'info') return states.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: states.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         if (verb === 'stop') { if (stuck) return { code: 1, stdout: '', stderr: 'timed out' }; states.set(vm, 'Stopped'); }
         if (verb === 'kill') { if (unread) { states.delete(vm); return { code: 1, stdout: '', stderr: 'timed out' }; } states.set(vm, 'Stopped'); }
@@ -39,7 +40,7 @@ function bench(t, { stuck = false, refuseSet = false, unread = false, startFails
         return { code: 0, stdout: '', stderr: '' };
     };
     const store = new Store(join(dir, 'conversations.json'));
-    const all = new Conversations({ store, vms: new Vms(run, ['vmm']), tools: TOOLS });
+    const all = new Conversations({ store, vms: new Vms(run, ['vmm'], { freshMs: 0 }), tools: TOOLS });
     const readied = [];
     all.ready = (name) => readied.push(name);
     /* A conversation as it is once built, its machine running. */
@@ -64,7 +65,7 @@ test('a restart stops the machine cleanly, starts it again, and gives the tool b
     assert.equal(answer.phase, 'restarting');
     await assert.rejects(b.all.restart('demo'), /being restarted already/);
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'start clv-demo']);
     assert.deepEqual(dropped, ['demo'], 'its terminal was closed before the stop');
     assert.deepEqual(b.readied, ['demo'], 'started again as after any start');
     const c = b.store.get('demo');
@@ -76,7 +77,7 @@ test('a clean stop that hangs is followed by a stop by force', async (t) => {
     b.ready('demo');
     await b.all.restart('demo');
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'kill clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'kill clv-demo', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
 });
 
@@ -91,7 +92,7 @@ test('folders being mounted again are left to finish before the machine is stopp
     assert.equal(b.store.get('demo').step, 'Waiting for its folders to be mounted');
     done();
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'start clv-demo']);
     assert.equal(b.store.get('demo').restarted, 'Restarted.');
 });
 
@@ -120,7 +121,7 @@ test('a machine asleep is stopped by force (it cannot be stopped cleanly), then 
     b.states.set('clv-demo', 'Suspended');
     await b.all.restart('demo');
     await b.all.restarted;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['kill clv-demo', 'start clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['kill clv-demo', 'start clv-demo']);
     assert.equal(b.store.get('demo').asleep, false);
 });
 
@@ -139,7 +140,7 @@ test('memory and disk: the machine is stopped, set, started, and the record hold
     b.sizes.set('clv-demo', { memory: '2048M', disk: '8.0GiB' });
     await b.all.resize('demo', { memoryMb: 4096, diskGb: 20 });
     await b.all.resized;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['stop clv-demo', 'set clv-demo memory 4096', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['stop clv-demo', 'set clv-demo memory 4096', 'set clv-demo disk 20', 'start clv-demo', 'size clv-demo']);
     const c = b.store.get('demo');
     assert.equal(c.memoryMb, 4096); assert.equal(c.diskGb, 20); assert.equal(c.phase, 'ready');
     assert.equal(c.restarted, 'It now has 4096 MB of memory, 1 core, 20 GB of disk.');
@@ -151,7 +152,7 @@ test('a stopped machine is set and left stopped', async (t) => {
     b.ready('demo'); b.states.set('clv-demo', 'Stopped');
     await b.all.resize('demo', { memoryMb: 3072 });
     await b.all.resized;
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), ['set clv-demo memory 3072', 'size clv-demo']);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), ['set clv-demo memory 3072', 'size clv-demo']);
     assert.equal(b.states.get('clv-demo'), 'Stopped');
     assert.deepEqual(b.readied, [], 'nothing is started');
 });
@@ -166,7 +167,7 @@ test('what cannot be is refused before anything is touched: less than the tool n
     await assert.rejects(b.all.resize('demo', { memoryMb: 'a lot' }), Refusal);
     b.ready('sleepy', { asleep: true }); b.states.set('clv-sleepy', 'Suspended');
     await assert.rejects(b.all.resize('sleepy', { memoryMb: 4096 }), /asleep: wake it first/);
-    assert.deepEqual(b.calls.filter((c) => !c.startsWith('info')), []);
+    assert.deepEqual(b.calls.filter((c) => !/^(info|states)\b/.test(c)), []);
 });
 
 test('a setting refused by the VM manager is said, the machine is started again, and the record keeps the real values', async (t) => {

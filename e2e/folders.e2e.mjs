@@ -25,9 +25,11 @@ test('folders: made at creation and in General, folded on this device only, rena
     const me = await b.person();
     await made(me, [['Site web', ''], ['Été plans', 'Perso'], ['Taxes', 'Perso'], ['Invoices', 'Clients']]);
     await me.page.reload();
-    await me.until('the list, folders after the others', async () => (await me.page.locator('#items .group').count()) === 2);
-    assert.deepEqual(await me.page.locator('#items > *').evaluateAll((all) => all.map((x) => x.dataset.name ?? `[${x.dataset.group}]`)), ['site-web', '[Perso]', '[Clients]']);
-    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*2/);
+    /* Those in no group are a group of their own, "Not filed", before the groups. */
+    await me.until('the list, groups after the others', async () => (await me.page.locator('#items .group').count()) === 3);
+    assert.deepEqual(await me.page.locator('#items > *').evaluateAll((all) => all.map((x) => x.dataset.name ?? `[${x.dataset.group}]`)), ['[]', '[Perso]', '[Clients]']);
+    assert.match(await me.page.locator('.group[data-group=""] .group-head').innerText(), /Not filed\s*1 conversation/);
+    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*2 conversations/);
     assert.deepEqual(await names(me.page), ['site-web', 'taxes', 'ete-plans', 'invoices'], 'the newest first in its folder');
     /* Made in a folder from the form, with the folders there are offered. */
     await me.page.locator('#new').click();
@@ -71,7 +73,7 @@ test('folders: made at creation and in General, folded on this device only, rena
     /* Emptied: the folder is gone. */
     for (const n of ['taxes', 'ete-plans']) await me.api(`/api/conversations/${n}/group`, { group: '' });
     await me.page.reload();
-    await me.until('Perso is gone', async () => (await me.page.locator('.group[data-group="Perso"]').count()) === 0 && (await me.page.locator('#items .group').count()) === 1);
+    await me.until('Perso is gone', async () => (await me.page.locator('.group[data-group="Perso"]').count()) === 0 && (await me.page.locator('#items .group').count()) === 2); // Clients, and those in no group
     assert.deepEqual(me.errors, []);
 });
 
@@ -112,8 +114,11 @@ test('the order: Move up and down in General, dragged with a mouse, held then dr
     const phone = await b.person({ phone: true });
     await phone.until('the same order', async () => (await names(phone.page)).join() === (await names(me.page)).join());
     const cdp = await phone.context.newCDPSession(phone.page);
-    const a = await phone.page.locator('#items .item[data-name="three"]').boundingBox();
-    const z = await phone.page.locator('#items .item[data-name="one"]').boundingBox();
+    /* Below "Needs you" and "Recent": the groups are scrolled to first, as a finger would. */
+    await phone.page.locator('#items .item[data-name="three"]').scrollIntoViewIfNeeded();
+    /* Measured again if the list was painted at that moment (a row replaced has no box). */
+    let a = null; let z = null;
+    await phone.until('both rows measured', async () => { a = await phone.page.locator('#items .item[data-name="three"]').boundingBox(); z = await phone.page.locator('#items .item[data-name="one"]').boundingBox(); return Boolean(a && z); });
     const touch = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
     await touch('touchStart', a.x + 30, a.y + a.height / 2);
     await new Promise((r) => setTimeout(r, 700));
@@ -137,7 +142,7 @@ for (const phone of [false, true]) {
         await made(me, [['Location voiture', ''], ['Été plans', 'Perso'], ['Taxes', 'Perso'], ['Secret', ''], ['Invoices', 'Clients']]);
         await me.api('/api/conversations/secret/hidden', { on: true });
         await me.page.reload();
-        await me.until('listed', async () => (await me.page.locator('#items .group').count()) === 2);
+        await me.until('listed', async () => (await me.page.locator('#items .group').count()) === 3);
         await me.page.locator('.group[data-group="Perso"] .group-head').click();
         assert.equal(await me.page.locator('#search').isVisible(), false, 'no bar until asked');
         /* A phone has no keyboard to speak of: the magnifier. */
@@ -227,4 +232,25 @@ test('the name of this Clavarium: in Settings, in the tab, above the list, in th
         assert.equal((await (await fetch(`${b.origin}/c/manifest.webmanifest?name=Kitchen`)).json()).name, 'Kitchen');
         assert.equal((await me.api('/api/instance', { name: 'two\nlines' })).status, 400);
     }
+});
+
+test('Recent above the groups: the last used first, with when; never a hidden one; a few, then all; one asleep says what a tap does', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await made(me, [['First', ''], ['Second', 'Box'], ['Third', ''], ['Secret', '']]);
+    await me.api('/api/conversations/secret/hidden', { on: true });
+    await me.api('/api/conversations/first/sleep', {});
+    await me.page.reload();
+    await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 3);
+    const recent = await me.page.locator('#recent .item').evaluateAll((all) => all.map((x) => x.dataset.name));
+    assert.deepEqual(recent, ['third', 'second', 'first'], 'the newest first; the hidden one never');
+    assert.match(await me.page.locator('#recent .item[data-name="third"] .when').innerText(), /^\d{1,2}:\d{2}/);
+    assert.match(await me.page.locator('#recent .list-head').first().innerText(), /recent/i);
+    await me.until('asleep, in words', async () => /asleep, wakes when opened/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
+    /* The groups below it: Box, and those in no group. */
+    assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.toLowerCase())), ['recent', 'groups']);
+    /* A tap on a row of Recent opens it. */
+    await me.page.locator('#recent .item[data-name="second"]').click();
+    await me.until('opened', async () => new URL(me.page.url()).searchParams.get('c') === 'second');
+    assert.deepEqual(me.errors, []);
 });

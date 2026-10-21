@@ -265,7 +265,12 @@ export class Talk {
         const r = this.#store.get(name);
         if (r?.on !== true) return null;
         /* On, but unreadable just now: still said to be on (the share sheet offers its chat by that). */
-        try { const now = this.#parley(name).read(); return { waiting: now.waiting, state: now.status?.state ?? null }; } catch { return { waiting: 0, state: null }; }
+        try {
+            const now = this.#parley(name).read();
+            /* Its last message, either way: the list says when it last spoke, and what (app.js, Recent). */
+            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing').at(-1);
+            return { waiting: now.waiting, state: now.status?.state ?? null, ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
+        } catch { return { waiting: 0, state: null }; }
     }
 
     async set(name, on) {

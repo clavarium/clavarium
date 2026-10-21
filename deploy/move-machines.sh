@@ -19,7 +19,7 @@
 #      back. If not, everything is put back as it was and said;
 #   5. Clavarium started again: its conversations start their machines as
 #      they are opened.
-# Then: once all works, the old copy can go:
+# Then: once all works, the old copy can go (Settings offers it), or by hand:
 #   sudo rm -rf /var/snap/multipass/common/data/multipassd/vault /var/snap/multipass/common/cache/multipassd
 #
 # Exit codes: 0 done (or would be, --dry-run); 64 bad parameters; 78 refused,
@@ -105,5 +105,5 @@ say "Clavarium started again: its conversations start their machines as they are
 systemctl start clavarium.service clavarium-update.timer 2>/dev/null || true
 echo
 echo "Done: the machines are on $TO ($(df -h --output=avail "$TO" | tail -1 | tr -d ' ') free there)."
-echo "Once everything works, the old copy can go:"
+echo "Once everything works, the old copy can go (Settings, Resources, The disks: Remove the old copy), or:"
 echo "    sudo rm -rf $OLD/data/multipassd/vault $OLD/cache/multipassd"

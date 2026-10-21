@@ -9,7 +9,9 @@
  *     within REVIVE_EVERY_MS, so that it never loops.
  */
 export const EVERY_MS = 60_000;
-export const STUCK_MS = 5 * 60_000;
+/* Restarting it suspends and resumes EVERY machine: every terminal drops (21-10). Only when it
+   has said nothing at all for this long. */
+export const STUCK_MS = 10 * 60_000;
 export const REVIVE_EVERY_MS = 6 * 3600_000;
 
 const said = (r) => String(r?.stderr || r?.stdout || '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) || `exit ${r?.code}`;
@@ -26,7 +28,7 @@ export class VmWatch {
 
     /* One look: 'ok', 'down', 'down; restarted already', 'revived' or 'revive failed'. */
     async look() {
-        const r = await this.#run(['vm', 'ping'], { timeoutMs: 30_000 }).catch((e) => ({ code: 1, stderr: e.message }));
+        const r = await this.#run(['vm', 'ping'], { timeoutMs: 100_000 }).catch((e) => ({ code: 1, stderr: e.message }));
         if (r.code === 0) {
             if (!this.ok) this.#log('vm manager: it answers again');
             this.ok = true; this.#downSince = null;

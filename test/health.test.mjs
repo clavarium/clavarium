@@ -30,7 +30,7 @@ test('a path is an argument of the probe, never shell text', () => {
 test('what is said: the state, a machine that does not answer, memory, disk, folders', () => {
     assert.equal(judge({ state: 'Running', answering: true, oomKills: 0, memory: { totalMb: 2048, availableMb: 1200 }, disks: { '/': { availableMb: 4000, sizeMb: 8000 } } }).level, 'ok');
     assert.deepEqual(judge({ state: 'Suspended' }), { level: 'info', problems: [{ level: 'info', kind: 'state', key: 'asleep', text: 'Its machine is asleep. It wakes when you open the conversation.' }] });
-    assert.equal(judge({ state: 'Unknown' }).level, 'bad');
+    assert.equal(judge({ state: 'Unknown' }).level, 'info', 'a VM manager that does not answer says nothing of the machine (vmwatch.mjs says it of all)');
     assert.equal(judge({ state: undefined }).problems[0].text, 'Its machine no longer exists.');
     assert.equal(judge({ state: 'Running', answering: false }).problems[0].text, 'Its machine does not answer. Restarting it usually helps.');
     const full = judge({ state: 'Running', answering: true, oomKills: 3, memory: { totalMb: 1024, availableMb: 30 }, disks: { '/': { availableMb: 100, sizeMb: 8000 }, '/work': { availableMb: 50, sizeMb: 10000 } } });
@@ -222,4 +222,18 @@ test('each judgment is told as it is made (its chat says what is wrong), and a h
     assert.deepEqual(told, [['demo', 'bad', ['silent']]]);
     m.health.judged = () => { throw new Error('the chat is gone'); };
     assert.equal((await m.health.check('demo')).level, 'bad');
+});
+
+test('a machine that does not answer is left alone a while, longer each time, unless its owner asks', async () => {
+    let probes = 0;
+    const vms = { state: async () => 'Running', exec: async () => { probes += 1; return { code: 255, stdout: '', stderr: 'timed out' }; } };
+    const conversations = { get: () => ({ phase: 'ready', work: 'disk' }) };
+    const { Health } = await import('../server/health.mjs');
+    const h = new Health({ vms, conversations, probeMs: 10 });
+    assert.equal((await h.check('demo')).answering, false);
+    assert.equal(probes, 1);
+    assert.equal((await h.check('demo')).answering, false);
+    assert.equal(probes, 1, 'not asked again at once: each question holds the VM manager');
+    await h.check('demo', { asked: true });
+    assert.equal(probes, 2, 'its owner asked: asked');
 });

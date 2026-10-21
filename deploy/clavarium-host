@@ -95,7 +95,7 @@ UPDATER="$CODE/current/app/deploy/updater.mjs"
 UPDATE_STATE="/var/lib/clavarium/update"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""
 while [ $# -gt 0 ]; do
@@ -138,6 +138,15 @@ run() { if [ "$SAY" = "yes" ]; then printf '%s\n' "$*"; else exec "$@"; fi; }
 is_name() { [[ "$1" =~ ^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$ ]]; }
 vm_of() { is_name "${1#clv-}" && [ "$1" != "${1#clv-}" ] || refuse "not one of our VMs: ${1:-<empty>}"; }
 number() { [[ "$1" =~ ^[0-9]{1,6}$ ]] || refuse "not a number: ${1:-<empty>}"; }
+# A disk or partition named by its device: /dev/sdX, /dev/vdX, /dev/nvmeNnN(pN),
+# /dev/xvdX, /dev/mmcblkN(pN), with a digit or two at the end; a loop device only
+# for the tests (CLAVARIUM_DISKS_LOOP=1, which sudo never passes). It must exist.
+disk_dev() {
+    local re='^/dev/((sd|vd|xvd|hd)[a-z]{1,2}[0-9]{0,2}|nvme[0-9]{1,2}n[0-9]{1,2}(p[0-9]{1,2})?|mmcblk[0-9]{1,2}(p[0-9]{1,2})?)$'
+    [ "${CLAVARIUM_DISKS_LOOP:-}" = "1" ] && re='^/dev/((sd|vd|xvd|hd)[a-z]{1,2}[0-9]{0,2}|nvme[0-9]{1,2}n[0-9]{1,2}(p[0-9]{1,2})?|mmcblk[0-9]{1,2}(p[0-9]{1,2})?|loop[0-9]{1,3}(p[0-9]{1,2})?)$'
+    [[ "${1:-}" =~ $re ]] || refuse "not a disk: ${1:-<empty>}"
+    [ "$SAY" = "yes" ] || [ -b "$1" ] || refuse "no such disk: $1"
+}
 # A ready-made machine: "clvshelf-" and the moment it was started, in UTC.
 # Never "clv-...": no conversation verb can reach it, and no shelf verb can
 # reach a conversation.
@@ -301,12 +310,19 @@ case "$AREA $VERB" in
         # Does the VM manager answer at all? Asked now and then by the server
         # (vmwatch.mjs); bounded, so that a VM manager that hangs is an answer.
         [ $# -eq 0 ] || usage
-        run timeout 25 "$MULTIPASS" list --format csv ;;
+        run timeout 90 "$MULTIPASS" list --format csv ;;
     "vm revive")
         # The VM manager has not answered for minutes: its daemon restarted.
         # Asked by the server at most once in hours (vmwatch.mjs), never by a page.
         [ $# -eq 0 ] || usage
         run timeout 170 snap restart multipass.multipassd ;;
+    "vm states")
+        # EVERY MACHINE'S STATE AT ONCE: one question to the VM manager instead of one per
+        # machine. It answers one question at a time, and a machine frozen inside makes each
+        # question about it wait 10 seconds: asked machine by machine, they queued up and held
+        # back every other machine too (21-10). Bounded.
+        [ $# -eq 0 ] || usage
+        run timeout 120 "$MULTIPASS" list --format json ;;
     "vm info")
         [ $# -eq 1 ] || usage; vm_of "$1"
         run "$MULTIPASS" info "$1" --format json ;;
@@ -443,6 +459,33 @@ case "$AREA $VERB" in
         [ $# -eq 0 ] || usage
         if [ "$SAY" = "yes" ]; then printf '%s\n' "$MULTIPASS list --format csv (ready-made machines only)"; exit 0; fi
         "$MULTIPASS" list --format csv | cut -d, -f1 | grep -E '^clvshelf-[0-9]{8}-[0-9]{6}$' || true
+        exit 0 ;;
+    "server logs")
+        # WHAT THE SERVER'S PROGRAMS SAID, for Settings (This server, Logs): one
+        # source, over a span; read-only, bounded. The page masks what looks
+        # like a secret before showing it.
+        #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <1|6|24|168|boot>
+        [ $# -eq 2 ] || usage
+        case "$1" in
+            clavarium) units=(-u clavarium.service -u 'clavarium-view-*' -u clavarium-tools-view.service -u clavarium-move-machines.service) ;;
+            machines)  units=(-u snap.multipass.multipassd.service) ;;
+            updates)   units=(-u clavarium-update.service -u clavarium-certificate.service) ;;
+            web)       units=(-u caddy.service -u oauth2-proxy.service) ;;
+            signin)    units=(-u dex.service) ;;
+            tunnel)    units=(-u clavarium-tunnel.service) ;;
+            system)    units=(-k) ;;
+            *) refuse "not a source of logs: $1" ;;
+        esac
+        case "$2" in 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; *) refuse "not a span: $2 (1, 6, 24, 168 hours, or boot)" ;; esac
+        if [ "$SAY" = "yes" ]; then echo "journalctl ${units[*]} ${since[*]} -o short-iso --no-pager (the last 200000 lines)"; exit 0; fi
+        journalctl "${units[@]}" "${since[@]}" -o short-iso --no-pager -n 200000 2>/dev/null | cut -c1-2000 || true
+        exit 0 ;;
+    "server restart")
+        # THIS SERVER STARTED AGAIN, asked from the page: in two seconds, by
+        # systemd, so that the page is answered first. Its machines go on.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "systemd-run --on-active=2 systemctl restart clavarium.service"; exit 0; fi
+        systemd-run --quiet --collect --unit="clavarium-restart-$(date +%s)" --on-active=2 /usr/bin/systemctl restart clavarium.service
         exit 0 ;;
     "server room")
         # WHAT THE SERVER HAS LEFT, for Settings (This server) and for the
@@ -642,6 +685,64 @@ case "$AREA $VERB" in
         elif [ "$VERB" = "failures" ]; then [ $# -eq 1 ] && number "$1" || usage
         else [ $# -eq 1 ] && [[ "$1" =~ ^[a-z0-9._+-]{1,64}@([a-z0-9-]{1,63}\.)+[a-z]{2,24}$ ]] || refuse "not an e-mail address: ${1:-<empty>}"; fi
         run "$UPDATER_NODE" "$CODE/current/app/deploy/operators.mjs" "$VERB" "$@" ;;
+    "disks list")
+        # THE DISKS OF THIS SERVER, whole, formatted or not, for Settings (This
+        # server, Move all the machines): lsblk, as JSON. Read-only. The page
+        # leaves out what is no disk to keep machines on (floppy, CD, read-only,
+        # tiny, loop devices).
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "lsblk -J -b -o NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,MODEL,RO,RM,PKNAME,TRAN"; exit 0; fi
+        lsblk -J -b -o NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,MODEL,RO,RM,PKNAME,TRAN
+        exit 0 ;;
+    "disks mount")
+        # A DISK (or a partition) THAT HOLDS A FILE SYSTEM, mounted under /mnt
+        # for good (/etc/fstab, by its UUID, "nofail": the server starts without
+        # it). Nothing on it is changed.
+        [ $# -eq 1 ] || usage
+        disk_dev "$1"
+        fs="$(lsblk -dno FSTYPE -- "$1")"; uuid="$(lsblk -dno UUID -- "$1")"
+        case "$fs" in ext4|xfs|btrfs) : ;; *) refuse "no file system the machines can live on in $1 (${fs:-none}): prepare the disk instead" ;; esac
+        [ -z "$(lsblk -dno MOUNTPOINT -- "$1")" ] || refuse "$1 is mounted already"
+        [ -n "$uuid" ] || refuse "$1 has no UUID"
+        at="/mnt/$(basename -- "$1")"
+        [ ! -e "$at" ] || [ -z "$(ls -A "$at" 2>/dev/null)" ] || refuse "$at exists and is not empty"
+        if [ "$SAY" = "yes" ]; then echo "mkdir $at; fstab UUID=$uuid $at $fs defaults,nofail 0 2; mount $at"; exit 0; fi
+        mkdir -p -- "$at"
+        grep -q "^UUID=$uuid " /etc/fstab || printf 'UUID=%s %s %s defaults,nofail 0 2\n' "$uuid" "$at" "$fs" >> /etc/fstab
+        systemctl daemon-reload; mount -- "$at"
+        echo "mounted $at"
+        exit 0 ;;
+    "disks prepare")
+        # A WHOLE DISK ERASED AND MADE READY FOR MACHINES: one partition, ext4,
+        # mounted under /mnt/<its name> for good. Its name must be given twice
+        # (the second time typed by the owner on the page). Refused for the
+        # system's disk, and for a disk with anything mounted or in use.
+        [ $# -eq 2 ] || usage
+        disk_dev "$1"
+        [ "$(lsblk -dno TYPE -- "$1")" = "disk" ] || [ "${CLAVARIUM_DISKS_LOOP:-}" = "1" ] || refuse "$1 is not a whole disk"
+        [ "$2" = "$(basename -- "$1")" ] || refuse "the name typed is not the disk's: ${2:-<empty>} (it is $(basename -- "$1"))"
+        lsblk -nro MOUNTPOINT -- "$1" | grep -q . && refuse "something on $1 is mounted: not erased"
+        lsblk -nro FSTYPE -- "$1" | grep -qx swap && refuse "$1 holds swap: not erased"
+        # A disk under LVM, RAID, encryption or ZFS is part of something larger (maybe the system): never.
+        lsblk -nro FSTYPE,TYPE -- "$1" | grep -qE 'LVM2_member|crypto_LUKS|linux_raid_member|zfs_member|[[:space:]](lvm|crypt|raid[0-9]*|dm)$' && refuse "$1 is part of a volume, an array or an encrypted disk: not erased here"
+        root_disk="$(lsblk -nro PKNAME "$(findmnt -nvo SOURCE /)" 2>/dev/null || true)"
+        [ "$(basename -- "$1")" != "$root_disk" ] || refuse "$1 is the system's disk"
+        at="/mnt/$(basename -- "$1")"
+        [ ! -e "$at" ] || [ -z "$(ls -A "$at" 2>/dev/null)" ] || refuse "$at exists and is not empty"
+        if [ "$SAY" = "yes" ]; then echo "wipefs -a $1; sfdisk --label gpt $1 (one partition); mkfs.ext4 -L clavarium; fstab; mount $at"; exit 0; fi
+        wipefs -a -- "$1" >/dev/null
+        echo 'type=linux' | sfdisk --quiet --label gpt -- "$1" >/dev/null
+        partprobe -- "$1" 2>/dev/null || true; udevadm settle
+        part="$(lsblk -lnpo NAME,TYPE -- "$1" | awk '$2=="part"{print $1; exit}')"
+        [ -n "$part" ] || refuse "no partition appeared on $1"
+        mkfs.ext4 -q -F -L clavarium -- "$part"
+        udevadm settle
+        uuid="$(lsblk -dno UUID -- "$part")"
+        mkdir -p -- "$at"
+        printf 'UUID=%s %s ext4 defaults,nofail 0 2\n' "$uuid" "$at" >> /etc/fstab
+        systemctl daemon-reload; mount -- "$at"
+        echo "prepared $part, mounted $at"
+        exit 0 ;;
     "machines places")
         # WHERE ALL THE MACHINES COULD GO (deploy/move-machines.sh), for the
         # page: each disk mounted where the VM manager may keep them (/mnt,
@@ -674,6 +775,26 @@ case "$AREA $VERB" in
         if [ "$SAY" = "yes" ]; then echo "systemctl show clavarium-move-machines; journalctl -u clavarium-move-machines"; exit 0; fi
         printf 'state %s\n' "$(systemctl show -p ActiveState --value clavarium-move-machines.service 2>/dev/null || echo unknown)"
         journalctl -u clavarium-move-machines.service -n 12 -o cat --no-pager 2>/dev/null | sed 's/^/said /' || true
+        exit 0 ;;
+    "machines old")
+        # THE COPY LEFT BEHIND by a move (deploy/move-machines.sh copies, never
+        # moves): its size, once the machines run from the new place. Read-only.
+        #   old <MB>      (nothing printed: no move, or nothing left)
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "du of /var/snap/multipass/common/data/multipassd/vault and cache/multipassd"; exit 0; fi
+        old="/var/snap/multipass/common"
+        if [ -n "$MOVED_TO" ] && [ "$SHELF_STORE" = "$MOVED_TO" ] && { [ -d "$old/data/multipassd/vault" ] || [ -d "$old/cache/multipassd" ]; }; then
+            printf 'old %s\n' "$(du -smx "$old/data/multipassd/vault" "$old/cache/multipassd" 2>/dev/null | awk '{s+=$1} END{print s+0}')"
+        fi
+        exit 0 ;;
+    "machines forget-old")
+        # That copy removed -- only when no running machine uses any file of it.
+        [ $# -eq 0 ] || usage
+        old="/var/snap/multipass/common"
+        [ -n "$MOVED_TO" ] && [ "$SHELF_STORE" = "$MOVED_TO" ] || refuse "the machines were not moved: there is no old copy"
+        if [ "$SAY" = "yes" ]; then echo "rm -rf $old/data/multipassd/vault $old/cache/multipassd"; exit 0; fi
+        { pgrep -a qemu-system 2>/dev/null || true; } | grep -q -- "$old/data/multipassd/vault" && refuse "a machine still runs from the old copy: not removed"
+        rm -rf -- "$old/data/multipassd/vault" "$old/cache/multipassd"
         exit 0 ;;
     "net taps")
         [ $# -eq 0 ] || usage

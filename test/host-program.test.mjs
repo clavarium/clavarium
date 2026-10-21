@@ -20,7 +20,7 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['vm', 'launch', 'clv-demo', '1024'], 'multipass launch 24.04 --name clv-demo --memory 1024M --disk 8G --cpus 1 --timeout 900'],
         [['vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'has-session'], 'multipass exec clv-demo -- tmux -L clavarium has-session'],
         [['vm', 'info', 'clv-demo'], 'multipass info clv-demo --format json'],
-        [['vm', 'ping'], 'timeout 25 multipass list --format csv'],
+        [['vm', 'ping'], 'timeout 90 multipass list --format csv'],
         [['vm', 'revive'], 'timeout 170 snap restart multipass.multipassd'],
         [['vm', 'start', 'clv-demo'], 'multipass start clv-demo'],
         [['vm', 'suspend', 'clv-demo'], 'multipass suspend clv-demo'],
@@ -391,4 +391,23 @@ test('updates: the updater of the release that runs, asked only in the forms it 
         assert.ok(r.status === 78 || r.status === 64, `${bad.join(' ')}: ${r.status}`);
         assert.equal(r.stdout, '', bad.join(' '));
     }
+});
+
+test('machines old / forget-old: read-only size, and no removal when nothing was moved', () => {
+    const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
+    assert.equal(say('machines', 'old').status, 0);
+    assert.equal(say('machines', 'old', 'x').status, 64);
+    const f = say('machines', 'forget-old');
+    assert.ok(f.status === 78 || f.status === 0, String(f.status));
+    if (f.status === 0) assert.match(f.stdout, /rm -rf \/var\/snap\/multipass\/common\/data\/multipassd\/vault/);
+});
+
+test('server logs / restart: a source and a span from fixed lists only', () => {
+    const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
+    assert.match(say('server', 'logs', 'system', 'boot').stdout, /journalctl -k -b/);
+    assert.match(say('server', 'logs', 'machines', '24').stdout, /snap\.multipass\.multipassd\.service --since -24h/);
+    for (const bad of [['clavarium', '2'], ['../x', '1'], ['clavarium', '1;id']]) assert.equal(say('server', 'logs', ...bad).status, 78, bad.join(' '));
+    assert.equal(say('server', 'logs', 'clavarium').status, 64);
+    assert.match(say('server', 'restart').stdout, /systemctl restart clavarium\.service/);
+    assert.equal(say('server', 'restart', 'now').status, 64);
 });

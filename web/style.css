@@ -27,7 +27,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 #app:has(> #list[hidden]) #room { grid-column: 1 / -1; }
 #list { grid-column: 1; grid-row: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
 #list .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-#items { display: flex; flex-direction: column; gap: 6px; }
+#items, #recent { display: flex; flex-direction: column; gap: 6px; }
 .item { display: block; width: 100%; text-align: left; padding: 9px 10px; background: var(--bar); font-weight: 400; }
 .item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -970,10 +970,12 @@ button.inline:hover { color: var(--brass); }
 .server-meter .zone { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--ink2) 45%, transparent) 3px 5px); }
 .server-meter .mark { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--ink); opacity: .7; }
 .server-note { margin: 0; font-size: .75rem; color: var(--ink2); }
-.server-parts { display: grid; grid-template-columns: 1fr auto; gap: 2px 16px; margin: 2px 0 0; font-size: .8125rem; max-width: 30rem; }
+/* The labels never squeezed by a long value: a value in words wraps in a column of its own width. */
+.server-parts { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(4.5rem, max-content); gap: 2px 16px; margin: 2px 0 0; font-size: .8125rem; max-width: 30rem; }
 .server-parts dt { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .server-parts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .server-parts .sub { font-weight: normal; color: var(--ink2); }
+.server-parts dd.words { white-space: normal; overflow-wrap: anywhere; max-width: 18rem; }
 .server-parts dt.sub { padding-left: 14px; }
 .reserve-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
 .reserve-what { min-width: 4.5em; font-weight: 600; }
@@ -1273,3 +1275,32 @@ select.pill { appearance: auto; }
 
 /* A secret of several lines (a key): masked as the line is, never shown as it is typed. */
 .secret-lines { width: 100%; min-height: 6rem; margin-top: .5rem; font: .8rem ui-monospace, Menlo, Consolas, monospace; padding: .5rem .6rem; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; -webkit-text-security: disc; }
+
+/* THE LIST: Needs you, Recent (copies, with what was said last and when), then the groups. */
+.list-head { margin: 10px 2px 2px; font-size: .78rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
+.list-head:first-child { margin-top: 2px; }
+.item[data-when] { position: relative; }
+.item[data-when] > b { padding-right: 5.5em; }
+.item .when { position: absolute; top: 9px; right: 10px; max-width: 5em; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--ink2); }
+.item .last { display: block; color: var(--ink); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.more-recent { align-self: flex-start; }
+.list-tip { margin: 8px 2px; }
+/* Needs you and Recent above the groups, in the list's own scroll: never a box scrolled inside it
+   (a row cut in half at its bottom). A few rows, then "Show all". */
+#list #recent { flex: 0 0 auto; }
+#list #recent:empty { display: none; }
+
+/* Settings, Logs: the lines as they were written, wide ones scrolled sideways, never wrapped into a column. */
+.logs-pick { flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.logs-text { max-height: 60vh; overflow: auto; margin: 8px 0; padding: 8px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; font: .75rem/1.4 ui-monospace, Menlo, Consolas, monospace; white-space: pre; color: var(--ink); }
+
+/* Settings, Move all the machines: a card per disk, what is on it, what can be done. */
+.disk-card { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; }
+.disk-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.disk-head b { min-width: 0; overflow-wrap: anywhere; }
+.disk-size { font-variant-numeric: tabular-nums; }
+.disk-name { color: var(--ink2); }
+.disk-part { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0; font-size: .875rem; }
+.disk-part > span { min-width: 0; overflow-wrap: anywhere; }
+.disk-prepare .row { flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.disk-prepare input { width: 9rem; }

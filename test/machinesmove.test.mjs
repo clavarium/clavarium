@@ -26,3 +26,22 @@ test('moved only to a disk they may go to; how it went is read back', async () =
     const how = await m.moving();
     assert.equal(how.done, true); assert.equal(how.failed, false);
 });
+
+test('the copy a move left behind: its size, and removed on request', async () => {
+    const asked = [];
+    let left = 'old 4300\n';
+    const host = async (argv) => {
+        asked.push(argv.join(' '));
+        if (argv[1] === 'places') return { code: 0, stdout: answer, stderr: '' };
+        if (argv[1] === 'old') return { code: 0, stdout: left, stderr: '' };
+        if (argv[1] === 'forget-old') { left = ''; return { code: 0, stdout: '', stderr: '' }; }
+        return { code: 0, stdout: '', stderr: '' };
+    };
+    const m = new MachinesMove({ host, usedMb: () => 4000 });
+    assert.equal((await m.places()).oldMb, 4300);
+    assert.deepEqual(await m.forgetOld(), { removed: true });
+    assert.ok(asked.includes('machines forget-old'));
+    assert.equal((await m.places()).oldMb, null);
+    const refusing = new MachinesMove({ host: async (argv) => (argv[1] === 'forget-old' ? { code: 78, stdout: '', stderr: 'REFUSED: a machine still runs from the old copy: not removed' } : { code: 0, stdout: '', stderr: '' }) });
+    await assert.rejects(refusing.forgetOld(), /still runs from the old copy/);
+});

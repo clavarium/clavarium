@@ -149,6 +149,12 @@ export class Conversations {
     /* Told by the server: the tool's screen is being drawn (or did not come
        in time). Its start is over. */
     attached(name) { this.#end(name); }
+    /* SOMEBODY USED IT (typed in its terminal): when, for the list (Recent), at most once a minute. */
+    touch(name) {
+        const c = this.#store.get(name);
+        if (!c || (c.lastActiveAt && Date.now() - new Date(c.lastActiveAt).getTime() < 60_000)) return;
+        this.#store.patch(name, { lastActiveAt: new Date().toISOString() });
+    }
 
     /* WHAT THE TOOL DOES AT ITS NEXT START, as the step after "The tool
        starts": takes up its last session ('resume'), starts a new one as its
@@ -279,7 +285,7 @@ export class Conversations {
             const cloned = await this.#vms.clone(name, from, memoryMb);
             const started = cloned.code === 0 ? await this.#vms.start(name) : cloned;
             readyMade = started.code === 0;
-            if (!readyMade && await this.#vms.state(name) !== undefined) await this.#vms.remove(name);
+            if (!readyMade && await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
         }
         if (!readyMade) {
@@ -358,7 +364,7 @@ export class Conversations {
         if (c.phase === 'building') throw new Refusal(409, 'This conversation is still being built.');
         const tool = this.#tools.find((t) => t.id === c.tool);
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
-        const state = await this.#vms.state(name);
+        const state = await this.#vms.state(name, { fresh: true });
         if (state !== undefined && c.phase !== 'failed') throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
         await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
         this.#cancelStop(name);
@@ -393,7 +399,7 @@ export class Conversations {
         /* Each step reached is told to the screen that opens, with the steps
            (the record has them too, for any other page). */
         const tell = (text) => say(text, this.#store.get(name)?.progress);
-        let state = await this.#vms.state(name);
+        let state = await this.#vms.state(name, { fresh: true });
         if (state === undefined) { this.left(name); throw new Refusal(410, 'The machine of this conversation no longer exists.'); }
         /* What a wake goes through, unless a build or a restart is already
            being told. From sleep, its tool is most likely there as it was
@@ -1060,7 +1066,7 @@ export class Conversations {
         this.drop(name);
         const kept = this.#store.get(name).work === 'kept';
         this.#store.remove(name);
-        if (await this.#vms.state(name) !== undefined) await this.#vms.remove(name);
+        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
         /* Its work is moved aside on the server, not erased. */
         if (kept) await this.#vms.workAside(name);
     }

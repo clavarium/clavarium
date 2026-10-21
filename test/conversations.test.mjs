@@ -36,11 +36,12 @@ function bench(t, answers = {}) {
         if (verb === 'stop') states.set(vm, 'Stopped');
         if (verb === 'suspend') states.set(vm, 'Suspended');
         if (verb === 'delete') states.delete(vm);
+        if (verb === 'states') return { code: 0, stdout: JSON.stringify({ list: [...states].map(([name, state]) => ({ name, state })) }), stderr: '' };
         if (verb === 'info') return states.has(vm) ? { code: 0, stdout: JSON.stringify({ info: { [vm]: { state: states.get(vm) } } }), stderr: '' } : { code: 2, stdout: '', stderr: 'does not exist' };
         return { code: 0, stdout: '', stderr: '' };
     };
     const store = new Store(join(dir, 'conversations.json'));
-    const make = (extra = {}) => new Conversations({ store, vms: new Vms(run, ['vmm']), tools: TOOLS, ...extra });
+    const make = (extra = {}) => new Conversations({ store, vms: new Vms(run, ['vmm'], { freshMs: 0 }), tools: TOOLS, ...extra });
     return { calls, states, store, make, dir };
 }
 
@@ -61,7 +62,7 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     assert.equal(all.list()[0].toolLabel, 'Tool');
 });
 
-test('a bad name, an unknown tool, too little memory and a name already taken are refused before any VM exists', (t) => {
+test('a bad name, an unknown tool, too little memory and a name already taken are refused before any VM exists', async (t) => {
     const b = bench(t);
     const all = b.make();
     for (const bad of [{ name: 'Bad Name', tool: 'tool' }, { name: 'ok', tool: 'nope' }, { name: 'ok', tool: 'tool', memoryMb: 256 }]) {
@@ -70,6 +71,7 @@ test('a bad name, an unknown tool, too little memory and a name already taken ar
     all.create({ name: 'demo', tool: 'tool' });
     assert.throws(() => all.create({ name: 'demo', tool: 'tool' }), /already/);
     assert.equal(b.calls.filter((c) => c.startsWith('launch')).length, 1);
+    await all.built;
 });
 
 test('a failed install is said in words, with the last line the machine gave', async (t) => {
@@ -92,7 +94,7 @@ test('opening wakes a stopped machine, and the terminal runs the tool alone in t
     /* Only what is said in words: a step told alone (its progress) is not kept here. */
     const said = [];
     const argv = await all.open('demo', (x) => { if (x) said.push(x); });
-    assert.deepEqual(b.calls, ['info clv-demo', 'start clv-demo', 'exec clv-demo -- test -d /'], 'started, and asked to answer before a terminal is opened into it');
+    assert.deepEqual(b.calls, ['states', 'start clv-demo', 'exec clv-demo -- test -d /'], 'started, and asked to answer before a terminal is opened into it');
     assert.deepEqual(said, ['Waking the machine...']);
     assert.deepEqual(argv.slice(0, 14), ['vmm', 'vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'new-session', '-A', '-s', SESSION, '-c', '/work']);
     assert.deepEqual(argv.slice(14, 16), ['tool', '--go']);
@@ -195,7 +197,7 @@ test('building again after a failed build clears away what the failure left', as
     fail = false; b.calls.length = 0;
     await all.rebuild('demo');
     await all.built;
-    assert.deepEqual(b.calls.slice(0, 2), ['info clv-demo', 'delete clv-demo']);
+    assert.deepEqual(b.calls.slice(0, 2), ['states', 'delete clv-demo']);
     assert.equal(all.list()[0].phase, 'ready');
     assert.equal(all.list()[0].error, undefined);
 });
@@ -343,7 +345,7 @@ test('a file of the machine\'s own disk is read for whoever asked to see it: und
     const file = await all.machineFile('demo', '/work/out/summary.pdf');
     assert.equal(file.name, 'summary.pdf');
     assert.deepEqual(file.bytes, content, 'raw bytes arrive whole');
-    assert.deepEqual(b.calls, ['info clv-demo', 'exec clv-demo -- stat -L -c %F %s -- /work/out/summary.pdf', 'exec clv-demo -- base64 -w 0 -- /work/out/summary.pdf']);
+    assert.deepEqual(b.calls, ['states', 'exec clv-demo -- stat -L -c %F %s -- /work/out/summary.pdf', 'exec clv-demo -- base64 -w 0 -- /work/out/summary.pdf']);
     assert.ok(!b.calls.some((c) => c.includes('sudo')), 'never as root');
     for (const path of ['/etc/shadow', '/work/../etc/shadow', '/work', '/work/', 'work/x', '/work/a b', '/work/x;id', '/work/$(id)', '/workx/y', '/work/./x', '/root/.ssh/id_ed25519', '']) {
         await assert.rejects(all.machineFile('demo', path), /Only a file under \/work/, path);
@@ -429,7 +431,7 @@ test('a machine the VM manager is starting already is waited for, not started ag
     await all.open('demo', (x) => { if (x) said.push(x); });
     assert.deepEqual(said, ['Its machine is starting...']);
     assert.equal(b.calls.filter((c) => c.startsWith('start')).length, 0, 'not started a second time');
-    assert.ok(b.calls.filter((c) => c.startsWith('info')).length >= 2, 'its state was asked until it ran');
+    assert.ok(b.calls.filter((c) => /^(info|states)\b/.test(c)).length >= 2, 'its state was asked until it ran');
     /* Started now, but its system is not up yet: refused, and the page is told it may try again. */
     b.states.set(vmName('demo'), 'Stopped');
     b.silent = true;

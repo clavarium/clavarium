@@ -24,7 +24,7 @@
         <input id="create-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
         <p class="hint">Used for its machine, its folders, its address and what is given to it. Drawn from the name when empty; it cannot be changed later. The name can.</p>
       </details>
-      <label for="create-group">Folder <span class="hint">(optional)</span></label>
+      <label for="create-group">Group <span class="hint">(optional)</span></label>
       <input id="create-group" maxlength="40" list="group-names" placeholder="None" spellcheck="false" autocomplete="off">
       <datalist id="group-names"></datalist>
       <span class="legend">What runs in it</span>
@@ -35,6 +35,8 @@
       <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
         <span class="hint">a new machine takes a few minutes</span></div>
     </form>
+    <!-- Needs you and Recent: copies of rows of the list below, by when they were last used (app.js, paint). -->
+    <div id="recent"></div>
     <div id="items"></div>
     <p id="search-none" class="hint" hidden>Nothing found.</p>
     <!-- Hidden conversations still run; this shows them, and says when one needs you. -->
@@ -129,10 +131,10 @@
             <form id="title-form" class="row" autocomplete="off"><label for="title-name">Name</label><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></form>
             </div>
             <div id="group-box" hidden>
-            <form id="group-form" class="row" autocomplete="off"><label for="group-name">Folder</label><input id="group-name" maxlength="40" list="group-names" placeholder="None" spellcheck="false"><button type="submit">Save</button></form>
+            <form id="group-form" class="row" autocomplete="off"><label for="group-name">Group</label><input id="group-name" maxlength="40" list="group-names" placeholder="None" spellcheck="false"><button type="submit">Save</button></form>
             <p class="hint">A folder of the list, shared by every device: choose one, type a new one, or empty it for none.</p>
-            <form id="group-rename-form" class="row" autocomplete="off" hidden><label for="group-rename">Rename its folder</label><input id="group-rename" maxlength="40" spellcheck="false"><button type="submit">Rename for all</button></form>
-            <div class="row" id="order-row"><span>Its place</span><button type="button" id="move-up">Move up</button><button type="button" id="move-down">Move down</button><button type="button" id="group-up" hidden>Folder up</button><button type="button" id="group-down" hidden>Folder down</button></div>
+            <form id="group-rename-form" class="row" autocomplete="off" hidden><label for="group-rename">Rename its group</label><input id="group-rename" maxlength="40" spellcheck="false"><button type="submit">Rename for all</button></form>
+            <div class="row" id="order-row"><span>Its place</span><button type="button" id="move-up">Move up</button><button type="button" id="move-down">Move down</button><button type="button" id="group-up" hidden>Group up</button><button type="button" id="group-down" hidden>Group down</button></div>
             <p class="hint" id="order-hint">The same order on every device. In the list: drag it (on a phone or tablet, hold it, then drag), or Alt and an arrow key.</p>
             </div>
             <div id="hide-box" hidden>
@@ -652,7 +654,7 @@
           <div id="server-disks"></div>
           <!-- ALL THE MACHINES TO ANOTHER DISK (server/machinesmove.mjs). -->
           <details id="move-machines-box">
-            <summary>Move all the machines to another disk...</summary>
+            <summary>The disks, and moving all the machines to another one...</summary>
             <p class="hint">Every machine is stopped, its disk copied to the disk you choose, and started again as its conversation is opened. <b>This server stops meanwhile</b>: this page comes back by itself. It takes from a few minutes to much longer, with the size of the machines. The copy on the disk of now is kept until you remove it.</p>
             <div id="move-machines-rows"></div>
             <p class="hint" id="move-machines-said" role="status"></p>
@@ -714,6 +716,38 @@
           <details id="updates-history-box" hidden><summary>History</summary><ul id="updates-history" class="updates-history"></ul></details>
           <p id="updates-error" class="error" role="alert" hidden></p>
         </div>
+          </div>
+        </details>
+        <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);
+             and this server started again. -->
+        <details class="chapter" id="settings-logs-top" data-chapter="s-logs">
+          <summary><span class="chapter-title">Logs and restart</span><span class="chapter-about">What the server's programs said; start it again.</span></summary>
+          <div class="chapter-body">
+          <div class="row logs-pick">
+            <label>Source <select id="logs-source" class="pill">
+              <option value="clavarium">Clavarium</option>
+              <option value="machines">The VM manager (machines)</option>
+              <option value="system">The system (kernel: memory, disks)</option>
+              <option value="updates">Updates and certificate</option>
+              <option value="web">Web front and its door</option>
+              <option value="signin">Sign-in</option>
+              <option value="tunnel">Tunnel</option>
+            </select></label>
+            <label>Over <select id="logs-span" class="pill">
+              <option value="1">the last hour</option>
+              <option value="6">the last 6 hours</option>
+              <option value="24" selected>the last 24 hours</option>
+              <option value="168">the last 7 days</option>
+              <option value="boot">since the server started</option>
+            </select></label>
+            <button type="button" id="logs-show">Show</button>
+          </div>
+          <p class="hint" id="logs-said" role="status"></p>
+          <div class="row" id="logs-acts" hidden><button type="button" id="logs-copy">Copy all</button><button type="button" id="logs-save">Download</button></div>
+          <pre id="logs-text" class="logs-text" tabindex="0" hidden></pre>
+          <p class="hint">What looks like a password, a token or a key is masked. The newest lines are at the bottom.</p>
+          <div class="row"><button type="button" class="danger" id="server-restart">Restart this server...</button><span class="hint" id="server-restart-said" role="status"></span></div>
+          <p class="hint">Its machines go on running; the page comes back by itself in a few seconds.</p>
           </div>
         </details>
         <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">

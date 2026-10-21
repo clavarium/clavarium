@@ -51,10 +51,47 @@ export function runner(prefix) {
     });
 }
 
+/* The verbs that change a machine: its state is asked again after them. */
+const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive']);
+export const STATES_FRESH_MS = 3000;
+/* The VM manager did not say what a machine is in: not an answer about the machine. */
+export class VmUnknown extends Error {
+    constructor(why) { super(`The VM manager does not answer just now (${why}): try again in a moment.`); this.status = 503; this.retry = true; }
+}
+
 export class Vms {
     /* `run(argv, options)` reaches the host program; `prefix` is the same
        route as an argument vector, for the one caller that needs a terminal. */
-    constructor(run, prefix) { this.run = run; this.prefix = prefix; }
+    #ask; #snapshot = null; #asking = null; #now; #freshMs;
+    /* `freshMs`: how long one answer serves every caller (0: only those asking meanwhile). */
+    constructor(run, prefix, { now = () => Date.now(), freshMs = STATES_FRESH_MS } = {}) {
+        this.#ask = run; this.prefix = prefix; this.#now = now; this.#freshMs = freshMs;
+        /* What changes a machine makes the states asked again (not taken from before it). */
+        this.run = async (argv, options) => {
+            const changes = argv[0] === 'vm' && CHANGES.has(argv[1]);
+            if (changes) this.#snapshot = null;
+            try { return await this.#ask(argv, options); } finally { if (changes) this.#snapshot = null; }
+        };
+    }
+
+    /* EVERY MACHINE'S STATE, in one question to the VM manager, shared by every caller for a
+       few seconds (and by those who ask while it is being asked). */
+    async #states(fresh = false) {
+        if (!fresh && this.#snapshot && this.#now() - this.#snapshot.at < this.#freshMs) return this.#snapshot;
+        if (this.#asking) return this.#asking;
+        this.#asking = (async () => {
+            const r = await this.#ask(['vm', 'states'], { timeoutMs: 130_000 }).catch((error) => ({ code: 1, stdout: '', stderr: String(error?.message ?? error) }));
+            let states = null; let why = '';
+            if (r.code === 0) {
+                try { states = new Map((JSON.parse(r.stdout).list ?? []).map((x) => [x.name, x.state])); } catch { why = 'its answer could not be read'; }
+            } else why = String(r.stderr || r.stdout || `exit ${r.code}`).trim().split('\n').pop().slice(0, 200);
+            const snap = { at: this.#now(), states, why };
+            /* Not kept when it did not answer: the next caller asks again. */
+            this.#snapshot = states ? snap : null;
+            return snap;
+        })().finally(() => { this.#asking = null; });
+        return this.#asking;
+    }
 
     launch(conversation, memoryMb) {
         return this.run(['vm', 'launch', vmName(conversation), String(memoryMb)], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
@@ -76,11 +113,16 @@ export class Vms {
     }
 
     /* "Running", "Stopped", "Suspended", ... or undefined when there is no VM. */
-    async state(conversation) {
+    /* Its state, or undefined when the VM manager lists every machine and not this one. A VM
+       manager that does not answer (busy, timed out, restarting) says nothing of the machine:
+       that throws (VmUnknown), and is never taken for a machine that is gone (21-10: a machine
+       frozen inside had "multipass info" fail, read as "no longer exists"). */
+    /* `fresh`: asked now (an owner opening it, building it again), not taken from a few seconds ago. */
+    async state(conversation, { fresh = false } = {}) {
         const name = vmName(conversation);
-        const r = await this.run(['vm', 'info', name]);
-        if (r.code !== 0) return undefined;
-        try { return JSON.parse(r.stdout).info?.[name]?.state; } catch { return undefined; }
+        const snap = await this.#states(fresh);
+        if (!snap.states) throw new VmUnknown(snap.why);
+        return snap.states.get(name);
     }
 
     /* Shows a folder kept by this server in the VM, under /resources/<name>.

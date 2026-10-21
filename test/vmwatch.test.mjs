@@ -26,16 +26,18 @@ test('the VM manager answers: nothing done, nothing said', async () => {
     assert.deepEqual(b.calls, ['vm ping']);
 });
 
-test('stuck for five minutes: its daemon restarted once, recorded, the owner told; never again within hours', async () => {
+test('stuck for ten minutes: its daemon restarted once, recorded, the owner told; never again within hours', async () => {
     const b = bench({ answers: false });
     assert.equal(await b.w.look(), 'down');
     assert.equal(b.w.ok, false, 'the pages are told');
     b.later(3);
     assert.equal(await b.w.look(), 'down');
     b.later(3);
+    assert.equal(await b.w.look(), 'down', 'six minutes: not yet (a restart drops every terminal)');
+    b.later(5);
     assert.equal(await b.w.look(), 'revived');
     assert.equal(b.host.revive, 1);
-    assert.match(b.w.last().why, /did not answer for 6 minutes/);
+    assert.match(b.w.last().why, /did not answer for 11 minutes/);
     assert.equal(b.w.last().result, 'done');
     assert.deepEqual(b.told, ['The machines could not be reached']);
     assert.equal(await b.w.look(), 'ok');

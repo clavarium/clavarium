@@ -72,6 +72,9 @@ export function readProbe(text, paths = []) {
 }
 /* What is kept and shown for one conversation, at most. */
 const PROBLEMS_MAX = 20;
+/* A machine that did not answer is left alone this long, twice as long each time, up to QUIET_MAX_MS. */
+export const QUIET_MS = 60_000;
+export const QUIET_MAX_MS = 10 * 60_000;
 const TEXT_MAX = 300;
 
 /* The sentences the page shows, and how serious they are: 'ok', 'info',
@@ -87,6 +90,8 @@ export function judge(record) {
     else if (s === 'Starting' || s === 'Restarting') add('info', 'state', 'starting', 'Its machine is starting.');
     else if (s === 'Suspended') add('info', 'state', 'asleep', 'Its machine is asleep. It wakes when you open the conversation.');
     else if (s === 'Stopped') add('info', 'state', 'stopped', 'Its machine is stopped. It starts when you open the conversation.');
+    /* The VM manager did not answer: nothing is known of the machine, and nothing is said of it. */
+    else if (s === 'Unknown') add('info', 'state', 'unknown', 'The VM manager does not answer just now: its machine is looked at again in a moment.');
     else if (s !== 'Running') add('bad', 'state', `state:${s}`, `The VM manager says its machine is "${s}".`);
     if (s === 'Running') {
         if (record.answering === false) add('bad', 'answer', 'silent', 'Its machine does not answer. Restarting it usually helps.');
@@ -105,7 +110,7 @@ export function judge(record) {
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #settleMs; #probeMs; #lookMs;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs;
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
 
@@ -118,21 +123,22 @@ export class Health {
 
     /* The last thing known, or null. Cheap: nothing is asked. */
     of(name) { return this.#records.get(name) ?? null; }
-    forget(name) { this.#records.delete(name); }
+    forget(name) { this.#records.delete(name); this.#quiet.delete(name); }
 
     /* The look under way (it may be mounting a folder again), or null. */
     busy(name) { return this.#running.get(name) ?? null; }
 
     /* Looks now. One look at a time per conversation: a second caller gets the same. */
-    check(name, { repair = true } = {}) {
+    /* `asked`: by its owner, or after its machine was started: even one left alone is asked. */
+    check(name, { repair = true, asked = false } = {}) {
         const going = this.#running.get(name);
         if (going) return going;
-        const look = this.#look(name, repair).finally(() => this.#running.delete(name));
+        const look = this.#look(name, repair, asked).finally(() => this.#running.delete(name));
         this.#running.set(name, look);
         return look;
     }
 
-    async #look(name, repair) {
+    async #look(name, repair, asked = false) {
         const c = this.#conversations.get(name);
         if (!c) return null;
         const at = new Date().toISOString();
@@ -141,8 +147,17 @@ export class Health {
         const state = await this.#vms.state(name).catch(() => 'Unknown');
         if (state !== 'Running') return this.#keep(name, { at, state });
         const paths = this.#resources ? this.#resources.expected(name, c.work === 'kept') : (c.work === 'kept' ? ['/work'] : []);
+        /* A machine that did not answer is not asked again at once: each question about it holds
+           the VM manager for seconds, and every other machine waits behind it (21-10). */
+        const quiet = this.#quiet.get(name);
+        if (quiet && !asked && Date.now() < quiet.until) return this.#keep(name, { at, state, answering: false });
         let facts = await this.#probe(name, paths);
-        if (!facts) return this.#keep(name, { at, state, answering: false });
+        if (!facts) {
+            const times = (quiet?.times ?? 0) + 1;
+            this.#quiet.set(name, { times, until: Date.now() + Math.min(QUIET_MAX_MS, QUIET_MS * 2 ** (times - 1)) });
+            return this.#keep(name, { at, state, answering: false });
+        }
+        this.#quiet.delete(name);
         const loose = () => paths.filter((p) => facts.mounts[p] !== 'ok');
         const remounted = []; const failed = [];
         if (loose().length > 0 && repair && this.#resources) {

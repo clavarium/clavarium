@@ -1,5 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
 
 const SHORT = ['place machines 2049 102400 4000', 'place data 2049 102400 4000', 'place folders 2049 102400 4000', 'memory 16384 1500', 'machine clv-alpha 800'].join('\n');
@@ -65,4 +67,69 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
     const box = await small.boundingBox();
     assert.ok(box.x >= 0 && box.x + box.width <= 390 && box.y + box.height <= 780, JSON.stringify(box));
     assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+});
+
+test('Settings, Logs and restart: a source over a span, secrets masked, copied whole, kept as a file; this server started again when asked twice', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-logs');
+    await me.page.locator('#logs-source').selectOption('system');
+    await me.page.locator('#logs-span').selectOption('boot');
+    await me.page.locator('#logs-show').click();
+    await me.until('the lines are shown', async () => /Out of memory: Killed process 4242/.test(await me.page.locator('#logs-text').innerText().catch(() => '')));
+    const text = await me.page.locator('#logs-text').innerText();
+    assert.match(text, /system\[1\]: started \(boot\)/);
+    assert.match(text, /password=\[masked\]/);
+    assert.doesNotMatch(text, /hunter2/);
+    assert.equal(await me.page.locator('#logs-said').innerText(), '3 lines.');
+    const [file] = await Promise.all([me.page.waitForEvent('download'), me.page.locator('#logs-save').click()]);
+    assert.match(file.suggestedFilename(), /^clavarium-system-since-start-.*\.log$/);
+    await me.page.locator('#logs-copy').click();
+    await me.until('copied, or selected for Ctrl+C', async () => /^(Copied: 3 lines\.|Selected: )/.test(await me.page.locator('#logs-said').innerText()));
+    /* No line folded into a narrow column: the box is as wide as the chapter. */
+    const box = await me.page.locator('#logs-text').boundingBox();
+    assert.ok(box.width > 300, JSON.stringify(box));
+    /* Restart: the first click asks, the second does. */
+    await me.page.locator('#server-restart').click();
+    assert.equal(existsSync(join(b.dir, 'restart-asked')), false, 'one click does nothing yet');
+    assert.match(await me.page.locator('#server-restart').innerText(), /Yes: restart this server now/);
+    await me.page.locator('#server-restart').click();
+    await me.until('asked of the host', async () => existsSync(join(b.dir, 'restart-asked')));
+    assert.deepEqual(me.errors, []);
+});
+
+test('Settings, the disks: every disk whole, formatted or not; the system one never erased; one prepared once its name is typed; one mounted; the machines offered a place', { skip: SKIP }, async (t) => {
+    const b = await bench(t, { serverRoomMs: 200 });
+    const me = await b.person();
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-resources');
+    await me.page.locator('#move-machines-box > summary').click();
+    const card = (name) => me.page.locator(`#move-machines-rows .disk-card[data-disk="${name}"]`);
+    await me.until('the disks are listed', async () => (await me.page.locator('#move-machines-rows .disk-card').count()) === 4);
+    assert.deepEqual(await me.page.locator('#move-machines-rows .disk-card').evaluateAll((all) => all.map((c) => c.dataset.disk)), ['sda', 'sdd', 'sdc', 'sdb'], 'never the floppy; the machines\' disk first, then the largest');
+    assert.match(await card('sda').innerText(), /The system's disk\. The machines are here now\./);
+    assert.equal(await card('sda').locator('.disk-prepare').count(), 0, 'the system disk is never offered to be erased');
+    assert.match(await card('sdb').innerText(), /Empty: never formatted/);
+    assert.match(await card('sdd').innerText(), /mounted at \/mnt\/data/);
+    assert.equal(await card('sdd').getByRole('button', { name: 'Move the machines here...' }).isEnabled(), true);
+    await me.page.screenshot({ path: join(b.dir, 'disks.png'), fullPage: true });
+    if (process.env.SHOTS) await me.page.locator('#move-machines-box').screenshot({ path: join(process.env.SHOTS, 'disks.png') });
+    /* Prepared: its name typed again, nothing before. */
+    await card('sdb').getByRole('button', { name: 'Prepare for the machines...' }).click();
+    const yes = card('sdb').getByRole('button', { name: 'Erase sdb' });
+    assert.equal(await yes.isEnabled(), false);
+    await card('sdb').locator('input').fill('sdc');
+    assert.equal(await yes.isEnabled(), false, 'another name does not do');
+    await card('sdb').locator('input').fill('sdb');
+    await yes.click();
+    await me.until('prepared and mounted', async () => /mounted at \/mnt\/sdb/.test(await card('sdb').innerText().catch(() => '')));
+    /* A file system mounted as it is: nothing changed on it. */
+    assert.match(await card('sdc').innerText(), /ext4, not mounted/);
+    assert.match(await card('sdc').innerText(), /Erase and prepare/, 'what is on it would be erased: said');
+    await card('sdc').getByRole('button', { name: 'Mount it' }).click();
+    await me.until('mounted', async () => /mounted at \/mnt\/sdc1/.test(await card('sdc').innerText().catch(() => '')));
+    assert.match(await card('sdc').innerText(), /too small/, 'too small for the machines: said, not offered');
+    assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+    assert.deepEqual(me.errors, []);
 });

@@ -68,6 +68,9 @@
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
+ *   POST /api/machines/forget-old: the copy a move left behind, removed
+ *   GET  /api/machines/disks: every disk, whole   POST /api/machines/mount {path}   POST /api/machines/prepare {path, typed}: erased
+ *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
  *   POST /api/conversations/<name>/secrets  {secret, attached}
@@ -97,6 +100,7 @@
  * another site cannot send. */
 import { sameOrigin } from './bridge.mjs';
 import { Refusal } from './conversations.mjs';
+import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
@@ -120,7 +124,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -223,6 +227,8 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Who may sign in (operators.mjs): none in local mode. */
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
+            if (pathname === '/api/server/logs' && serverLogs) return send(200, await serverLogs.read(query.get('source') ?? 'clavarium', query.get('span') ?? '1')), true;
+            if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
@@ -322,6 +328,10 @@ export async function handleApi(request, response, conversations, headers, resou
         const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
+        if (pathname === '/api/server/restart' && serverLogs) return send(202, await serverLogs.restart()), true;
+        if (pathname === '/api/machines/mount' && machinesMove) return send(200, await machinesMove.mount(String(body.path ?? ''))), true;
+        if (pathname === '/api/machines/prepare' && machinesMove) return send(200, await machinesMove.prepare(String(body.path ?? ''), body.typed)), true;
+        if (pathname === '/api/machines/forget-old' && machinesMove) return send(200, await machinesMove.forgetOld()), true;
         if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {
@@ -462,7 +472,7 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(machine[1]);
             if (machine[2] === 'health') {
                 if (!health || !conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
-                return send(200, await health.check(conversation)), true;
+                return send(200, await health.check(conversation, { asked: true })), true;
             }
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
             return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus })), true;
@@ -512,7 +522,7 @@ export async function handleApi(request, response, conversations, headers, resou
         return send(200, { ok: true }), true;
     } catch (error) {
         /* A git failure also says which (`kind`), and an fsck id the owner may waive (`offer`). */
-        if (error instanceof Refusal) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.offer ? { offer: error.offer } : {}), ...(error.retry ? { retry: true } : {}) }), true;
+        if (error instanceof Refusal || error instanceof VmUnknown) return send(error.status, { error: error.message, ...(error.kind ? { kind: error.kind } : {}), ...(error.offer ? { offer: error.offer } : {}), ...(error.retry ? { retry: true } : {}) }), true;
         return send(500, { error: 'Something failed on the server.' }), true;
     }
 }

@@ -179,7 +179,10 @@ test('the owner is alerted when the tool asks or says it waits, in the words of 
     const seen = b.talk.of('helper');
     assert.equal(seen.waiting, 1); assert.equal(seen.status.state, 'waiting');
     assert.deepEqual(seen.steps.map((x) => x.kind), ['status', 'doing', 'status'], 'what it does is on the page, and alerts nobody');
-    assert.deepEqual(b.talk.brief('helper'), { waiting: 1, state: 'waiting' });
+    const brief = b.talk.brief('helper');
+    assert.deepEqual({ waiting: brief.waiting, state: brief.state }, { waiting: 1, state: 'waiting' });
+    assert.equal(brief.lastFrom, 'agent', 'and what was said last, for the list');
+    assert.ok(brief.lastText && brief.lastAt);
     assert.equal((await b.talk.say('helper', 'blue', seen.messages.find((m) => m.kind === 'ask').id)).waiting, 0);
     /* After a restart of this server, it listens again without being asked. */
     b.talk.stop();

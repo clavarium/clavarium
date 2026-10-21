@@ -857,6 +857,11 @@
         || (c.phase === 'ready' && !c.asleep && ['warn', 'bad'].includes(c.health?.level)));
     /* Hidden conversations are shown on a click on "N hidden", for this page only. */
     let showHidden = false;
+    /* Recent: a few, or all of them (for this page only). */
+    let showAllRecent = false;
+    /* A row held or dragged: the list is not painted again under the finger (the browser would cancel
+       the touch on a row replaced); it is once the drag ends. */
+    let listHeld = false; let paintLater = false;
     /* ---------- FOLDERS, ORDER, SEARCH ----------
        One level of folders: a word on each conversation, kept by the server
        with the order, so that every device shows the same list. Those in no
@@ -872,9 +877,21 @@
     const matches = (c) => [shownName(c), c.name, c.group, c.toolLabel].some((x) => plain(x).includes(plain(query)));
     const byRank = (a, b) => (a.rank ?? 0) - (b.rank ?? 0);
     const groupsInOrder = () => [...new Set(conversations.filter((c) => c.group).sort((a, b) => (a.groupRank ?? 0) - (b.groupRank ?? 0)).map((c) => c.group))];
-    function itemButton(c) {
+    /* WHEN IT WAS LAST USED: its last message (sent or received), or a key typed in its terminal. */
+    const activityOf = (c) => Math.max(...[c.talk?.lastAt, c.lastActiveAt, c.createdAt].map((x) => (x ? new Date(x).getTime() : 0)));
+    const whenWords = (t) => {
+        if (!t) return '';
+        const d = new Date(t); const now = new Date();
+        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const y = new Date(now); y.setDate(now.getDate() - 1);
+        if (d.toDateString() === y.toDateString()) return 'yesterday';
+        return now - d < 6 * 86_400_000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
+    };
+    /* `copy`: a row of Needs you or Recent, beside its place in its group: it is not moved by hand.
+       `told`: it says what was said last, and when (a copy always; the one list when there is no group). */
+    function itemButton(c, copy = false, told = copy) {
         const b = document.createElement('button');
-        b.type = 'button'; b.className = 'item'; b.dataset.phase = c.phase; b.dataset.name = c.name;
+        b.type = 'button'; b.className = copy ? 'item copy' : 'item'; b.dataset.phase = c.phase; b.dataset.name = c.name;
         if (c.group) b.dataset.group = c.group;
         /* Ready, but its tool not there yet: it still reads as under way. */
         if (holds(c)) b.dataset.busy = 'true';
@@ -889,7 +906,15 @@
         const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
         sub.textContent = under ? (c.toolLabel && under.includes(c.toolLabel) ? under : `${c.toolLabel} - ${under}`) : holds(c) && c.phase !== 'building' ? `${c.toolLabel} - ${c.progress.kind === 'build' ? 'starting' : 'restarting'}` : c.phase === 'ready' ? `${c.toolLabel}${c.asleep ? ' - asleep' : ''}` : c.phase === 'building' ? `${c.toolLabel} - ${c.step ?? 'building'}` : c.phase === 'moving' ? `${c.toolLabel} - moving its work` : c.phase === 'restarting' ? `${c.toolLabel} - restarting` : `${c.toolLabel} - failed`;
         if (c.asleep) b.dataset.asleep = 'true';
-        b.append(title, sub);
+        if (told) {
+            /* In words, not a symbol: what a tap on it will do. */
+            if (c.asleep) sub.textContent = `${c.toolLabel} - asleep, wakes when opened`;
+            /* Beside its name, never in it: the name reads (and is read) as it is. */
+            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
+            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; last.textContent = `${c.talk.lastFrom === 'person' ? 'you: ' : ''}${c.talk.lastText}`; b.append(title, last, sub); }
+            else b.append(title, sub);
+            b.append(when); b.dataset.when = 'true';
+        } else b.append(title, sub);
         /* Found by a search while hidden: said. */
         if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
         /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
@@ -904,18 +929,21 @@
         b.addEventListener('click', () => select(c.name, { step: true }));
         return b;
     }
-    function groupBox(g, inside, all, open) {
-        const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g;
-        const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g;
+    /* `label`: the name shown; the conversations in no group are one of their own ("Not filed", key NONE). */
+    const NONE = '\u0000none';
+    function groupBox(g, inside, all, open, label = g) {
+        const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g === NONE ? '' : g;
+        const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g === NONE ? '' : g;
+        if (g === NONE) head.dataset.fixed = 'true';
         head.setAttribute('aria-expanded', String(open));
         const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = '›';
-        const label = document.createElement('span'); label.className = 'group-name'; label.textContent = g;
-        const count = document.createElement('small'); count.className = 'count'; count.textContent = String(all.length);
+        const name = document.createElement('span'); name.className = 'group-name'; name.textContent = label;
+        const count = document.createElement('small'); count.className = 'count'; count.textContent = `${all.length} conversation${all.length > 1 ? 's' : ''}`;
         count.setAttribute('aria-label', `${all.length} conversation${all.length > 1 ? 's' : ''}`);
         /* A small dot for each (up to six); the one that needs you is said even folded. */
         const dots = document.createElement('span'); dots.className = 'group-dots'; dots.setAttribute('aria-hidden', 'true');
         for (const c of all.slice(0, 6)) { const d = document.createElement('span'); d.className = 'mini'; d.dataset.phase = holds(c) ? 'building' : c.phase; if (c.asleep) d.dataset.asleep = 'true'; dots.append(d); }
-        head.append(caret, label, count, dots);
+        head.append(caret, name, count, dots);
         if (all.some(needsYou)) { const n = document.createElement('span'); n.className = 'needs-dot'; n.setAttribute('aria-label', 'one needs you'); head.append(n); head.dataset.needs = 'true'; }
         head.addEventListener('click', () => {
             if (query) return;
@@ -923,17 +951,54 @@
             keepFolded(); paint();
         });
         box.append(head);
-        if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map(itemButton)); box.append(body); }
+        if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); box.append(body); }
         return box;
     }
     function paint() {
+        if (listHeld) { paintLater = true; return; }
         const items = $('items');
         items.replaceChildren();
+        const top = $('recent'); top.replaceChildren();
         const hidden = conversations.filter((c) => c.hidden === true);
         /* The one open stays in sight, hidden or not; a search finds hidden ones too. */
         const shown = conversations.filter((c) => (query ? matches(c) : c.hidden !== true || showHidden || c.name === current)).sort(byRank);
-        items.append(...shown.filter((c) => !c.group).map(itemButton));
-        for (const g of groupsInOrder()) {
+        const heading = (text) => { const h = document.createElement('h3'); h.className = 'list-head'; h.textContent = text; return h; };
+        const groups = groupsInOrder();
+        if (query || DEVICE) {
+            /* A search: everything found, in its place. */
+            items.append(...shown.filter((c) => !c.group).map((c) => itemButton(c)));
+        } else {
+            /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
+            const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
+            if (needs.length) top.append(heading('Needs you'), ...needs.map((c) => itemButton(c, true)));
+            /* RECENT: by when it was last used; a few, then all. Never a hidden one. Only once there are
+               groups: before, the one list below says the same, in the order chosen by hand. */
+            const recent = conversations.filter((c) => c.hidden !== true || c.name === current).sort((a, b) => activityOf(b) - activityOf(a));
+            const few = 5;
+            if (recent.length && groups.length) {
+                top.append(heading('Recent'), ...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
+                if (recent.length > few) {
+                    const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
+                    more.textContent = showAllRecent ? 'Show fewer' : `Show all ${recent.length}`;
+                    more.addEventListener('click', () => { showAllRecent = !showAllRecent; paint(); });
+                    top.append(more);
+                }
+            }
+            /* GROUPS: the order chosen by hand, and those in no group as one of their own. */
+            if (groups.length) {
+                top.append(heading('Groups'));
+                const loose = shown.filter((c) => !c.group);
+                if (loose.length) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
+            } else {
+                /* No group yet: one list, each with what was said last and when. */
+                items.append(...shown.map((c) => itemButton(c, false, true)));
+                if (conversations.length > 1) {
+                    const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = 'Put conversations in groups to find them by subject: open one, then Settings, Group.';
+                    items.append(tip);
+                }
+            }
+        }
+        for (const g of groups) {
             const inside = shown.filter((c) => c.group === g);
             /* Nothing of it in sight (all hidden, or nothing found): not shown. */
             if (inside.length === 0) continue;
@@ -1013,6 +1078,7 @@
         if (!el || el === d.el) return null;
         if (d.kind === 'group') {
             if (el.classList.contains('item')) { if (!el.dataset.group) return null; el = el.closest('.group').querySelector('.group-head'); }
+            if (el.dataset.fixed) return null;
             if (el === d.el) return null;
         }
         const box = el.getBoundingClientRect();
@@ -1025,6 +1091,8 @@
         clearTimeout(drag.timer);
         drag.el.removeAttribute('data-dragging'); $('items').removeAttribute('data-dragging');
         unmark(); drag = null;
+        listHeld = false;
+        if (paintLater) { paintLater = false; paint(); }
     }
     function startDrag() {
         if (!drag) return;
@@ -1056,10 +1124,11 @@
     }
     $('items').addEventListener('pointerdown', (event) => {
         if (DEVICE || query || event.button !== 0) return;
-        const el = event.target.closest('.item, .group-head');
+        const el = event.target.closest('.item:not(.copy), .group-head:not([data-fixed])');
         if (!el) return;
         endDrag();
         drag = { el, kind: el.classList.contains('item') ? 'item' : 'group', x: event.clientX, y: event.clientY, id: event.pointerId, on: false, touch: event.pointerType !== 'mouse' };
+        listHeld = true;
         if (drag.touch) drag.timer = setTimeout(startDrag, 450);
     });
     addEventListener('pointermove', (event) => {
@@ -1088,7 +1157,7 @@
     $('items').addEventListener('click', (event) => { if (justDragged) { event.stopPropagation(); event.preventDefault(); } }, true);
     $('items').addEventListener('keydown', async (event) => {
         if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return;
-        const el = event.target.closest('.item, .group-head');
+        const el = event.target.closest('.item:not(.copy), .group-head:not([data-fixed])');
         if (!el) return;
         event.preventDefault();
         const to = event.key === 'ArrowUp' ? 'up' : 'down';
@@ -3528,7 +3597,7 @@
         for (const [label, value, sub] of rows) {
             if (value === null || value === undefined) continue;
             const dt = document.createElement('dt'); dt.textContent = label; if (sub) dt.className = 'sub';
-            const dd = document.createElement('dd'); dd.textContent = typeof value === 'number' ? GB(value) : value; if (sub) dd.className = 'sub';
+            const dd = document.createElement('dd'); dd.textContent = typeof value === 'number' ? GB(value) : value; dd.className = [sub ? 'sub' : '', typeof value === 'number' ? '' : 'words'].filter(Boolean).join(' ');
             dl.append(dt, dd);
         }
     }
@@ -3579,26 +3648,131 @@
             box.append(block);
         }
     }
-    /* ALL THE MACHINES TO ANOTHER DISK: the disks they may go to, those they may not and why; then how it went. */
+    /* ALL THE MACHINES TO ANOTHER DISK: every disk of this server, whole, formatted or not; for each,
+       what can be done -- move the machines to it, mount it, prepare (erase) it -- or why not. */
     async function paintMoveMachines() {
-        const [p, m] = await Promise.all([fetch(`${API}/machines/places`).then((r) => (r.ok ? r.json() : null)).catch(() => null), fetch(`${API}/machines/moving`).then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
+        const size = (mb) => (mb >= 1024 * 1024 ? `${(mb / 1024 / 1024).toFixed(1)} TB` : GB(mb));
+        const [p, m] = await Promise.all([fetch(`${API}/machines/disks`).then((r) => (r.ok ? r.json() : null)).catch(() => null), fetch(`${API}/machines/moving`).then((r) => (r.ok ? r.json() : null)).catch(() => null)]);
+        const old = await fetch(`${API}/machines/places`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const rows = $('move-machines-rows'); rows.replaceChildren();
-        if (m?.said?.length) $('move-machines-said').textContent = m.done ? `The last move: ${m.said.find((l) => l.startsWith('Done:'))}` : m.failed ? `The last move did not happen: ${m.said.filter(Boolean).at(-1)}` : m.state === 'active' ? `Moving: ${m.said.at(-1)}` : '';
-        if (!p) return;
-        if (!p.places.length) rows.append(el('p', 'hint', 'No other disk is mounted under /mnt or /media: the VM manager can only keep its machines there (or under /home).'));
-        for (const x of p.places) {
-            const row = el('div', 'folder');
-            row.append(el('b', '', x.at), el('small', 'hint', ` ${Math.round(x.freeMb / 1024)} GB free of ${Math.round(x.sizeMb / 1024)} GB${x.why ? ` -- ${x.why}` : ''}`));
-            const go = el('button', 'danger', 'Move them here...'); go.type = 'button'; go.disabled = Boolean(x.why);
-            go.addEventListener('click', () => {
-                if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = `Yes: stop every machine and this server, and move them to ${x.at}`; return; }
-                go.disabled = true;
-                void post(`${API}/machines/move`, { to: x.at }).then(() => { $('move-machines-said').textContent = 'Moving: this server stops now, and comes back by itself. Reload this page in a few minutes.'; }).catch((error) => { $('move-machines-said').textContent = error.message; go.disabled = false; });
+        const said = (text) => { $('move-machines-said').textContent = text; };
+        if (m?.said?.length) said(m.done ? `The last move: ${m.said.find((l) => l.startsWith('Done:'))}` : m.failed ? `The last move did not happen: ${m.said.filter(Boolean).at(-1)}` : m.state === 'active' ? `Moving: ${m.said.at(-1)}` : '');
+        /* A move copies, never moves: the copy left behind takes its room until it is removed. */
+        if (old?.oldMb) {
+            const row = el('div', 'folder'); row.id = 'move-machines-old';
+            row.append(el('b', '', 'The old copy'), el('small', 'hint', ` ${GB(old.oldMb)} left on the first disk by the move; the machines run from ${old.now?.place ?? 'the new place'}`));
+            const forget = el('button', 'danger', 'Remove the old copy...'); forget.type = 'button';
+            forget.addEventListener('click', () => {
+                if (forget.dataset.sure !== 'yes') { forget.dataset.sure = 'yes'; forget.textContent = `Yes: remove ${GB(old.oldMb)} for good`; return; }
+                forget.disabled = true;
+                void post(`${API}/machines/forget-old`, {}).then(() => { said(`The old copy was removed: ${GB(old.oldMb)} free again.`); void paintMoveMachines(); }).catch((error) => { said(error.message); forget.disabled = false; });
             });
-            row.append(go); rows.append(row);
+            row.append(forget); rows.append(row);
         }
+        if (!p) { rows.append(el('p', 'hint', 'The disks cannot be listed just now.')); return; }
+        for (const d of p.disks) {
+            const card = el('div', 'disk-card'); card.dataset.disk = d.name;
+            const head = el('div', 'disk-head');
+            head.append(el('b', '', d.model ? `${d.model}` : d.loop ? 'A disk image' : 'A disk'), el('span', 'disk-size', size(d.sizeMb)), el('code', 'disk-name', d.name));
+            card.append(head);
+            const notes = [];
+            if (d.system) notes.push("The system's disk.");
+            if (d.parts.some((x) => x.machines)) notes.push('The machines are here now.');
+            if (d.removable) notes.push('Removable: the machines would stop if it were unplugged.');
+            if (notes.length) card.append(el('p', 'hint', notes.join(' ')));
+            /* What is on it, without the little partitions a system keeps for starting. */
+            for (const x of d.parts.filter((q) => q.sizeMb >= 256 || d.parts.length === 1)) {
+                if (x.state === 'empty' && d.parts.length === 1 && x.name === d.name) { card.append(el('p', 'disk-part', 'Empty: never formatted.')); continue; }
+                const line = el('div', 'disk-part');
+                const what = { system: `used by the system (${x.mount})`, place: `mounted at ${x.mount}`, 'in-use': `in use at ${x.mount}`, mountable: `${x.fstype}, not mounted`, other: `${x.fstype}: not a file system the machines can live on`, empty: 'no file system', 'part-of-more': 'part of a volume, an array or an encrypted disk' }[x.state];
+                line.append(el('span', '', `${x.name === d.name ? 'The whole disk' : x.name}${x.label ? ` "${x.label}"` : ''}: ${size(x.sizeMb)}, ${what}${x.freeMb != null ? `, ${size(x.freeMb)} free` : ''}`));
+                if (x.state === 'place' && !x.machines) {
+                    const go = el('button', 'danger', 'Move the machines here...'); go.type = 'button'; go.disabled = Boolean(x.why);
+                    if (x.why) line.append(el('small', 'hint', ` -- ${x.why}`));
+                    go.addEventListener('click', () => {
+                        if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = `Yes: stop every machine and this server, and move them to ${x.mount}`; return; }
+                        go.disabled = true;
+                        void post(`${API}/machines/move`, { to: x.mount }).then(() => said('Moving: this server stops now, and comes back by itself. Reload this page in a few minutes.')).catch((error) => { said(error.message); go.disabled = false; });
+                    });
+                    line.append(go);
+                }
+                if (x.state === 'mountable') {
+                    const mount = el('button', '', 'Mount it'); mount.type = 'button';
+                    mount.addEventListener('click', () => { mount.disabled = true; void post(`${API}/machines/mount`, { path: x.path }).then((r) => { said(`Mounted at ${r.mounted}: nothing on it was changed.`); void paintMoveMachines(); }).catch((error) => { said(error.message); mount.disabled = false; }); });
+                    line.append(mount);
+                }
+                card.append(line);
+            }
+            /* PREPARE: erase it, one file system on it, mounted. Its name typed again. */
+            if (!d.prepare) {
+                const box = el('div', 'disk-prepare');
+                const go = el('button', 'danger', d.erases ? 'Erase and prepare for the machines...' : 'Prepare for the machines...'); go.type = 'button';
+                go.addEventListener('click', () => {
+                    go.hidden = true;
+                    const warn = el('p', 'error', d.erases ? `Everything on ${d.name} (${size(d.sizeMb)}) is erased for good: ${d.parts.filter((q) => q.fstype).map((q) => `${q.name}${q.label ? ` "${q.label}"` : ''} (${q.fstype})`).join(', ')}.` : `${d.name} (${size(d.sizeMb)}) gets one file system, mounted at /mnt/${d.name}.`);
+                    const field = el('input', ''); field.placeholder = d.name; field.setAttribute('aria-label', `Type ${d.name} to go on`); field.autocomplete = 'off'; field.spellcheck = false;
+                    const yes = el('button', 'danger', `Erase ${d.name}`); yes.type = 'button'; yes.disabled = true;
+                    field.addEventListener('input', () => { yes.disabled = field.value.trim() !== d.name; });
+                    const no = el('button', '', 'Cancel'); no.type = 'button'; no.addEventListener('click', () => { void paintMoveMachines(); });
+                    yes.addEventListener('click', () => { yes.disabled = true; said(`Preparing ${d.name}...`); void post(`${API}/machines/prepare`, { path: d.path, typed: field.value.trim() }).then((r) => { said(`${r.prepared}. The machines can be moved there now.`); void paintMoveMachines(); }).catch((error) => { said(error.message); yes.disabled = false; }); });
+                    const row = el('div', 'row'); row.append(el('span', 'hint', `Type ${d.name}:`), field, yes, no);
+                    box.append(warn, row);
+                });
+                box.append(go); card.append(box);
+            } else if (!d.system && !d.parts.some((x) => x.state === 'place')) card.append(el('p', 'hint', `Not prepared here: ${d.prepare}.`));
+            rows.append(card);
+        }
+        if (!p.disks.some((d) => !d.system)) rows.append(el('p', 'hint', 'No other disk: plug one in (or add one to this server), then open this again.'));
     }
     $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
+    /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */
+    let logsShown = null;
+    $('logs-show').addEventListener('click', async () => {
+        const source = $('logs-source').value; const span = $('logs-span').value;
+        $('logs-said').textContent = 'Reading...'; $('logs-show').disabled = true;
+        try {
+            const r = await fetch(`${API}/server/logs?source=${encodeURIComponent(source)}&span=${encodeURIComponent(span)}`);
+            const body = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(body.error ?? `The logs could not be read (${r.status}).`);
+            logsShown = body;
+            $('logs-text').textContent = body.text || '';
+            $('logs-text').hidden = !body.text; $('logs-acts').hidden = !body.text;
+            $('logs-said').textContent = body.lines ? `${body.lines} line${body.lines > 1 ? 's' : ''}${body.cut ? ' (the newest only: there were more)' : ''}.` : 'Nothing was said over that span.';
+            /* The newest at the bottom, in sight. */
+            $('logs-text').scrollTop = $('logs-text').scrollHeight;
+        } catch (error) { $('logs-said').textContent = error.message; }
+        $('logs-show').disabled = false;
+    });
+    $('logs-copy').addEventListener('click', async () => {
+        if (!logsShown?.text) return;
+        try { await navigator.clipboard.writeText(logsShown.text); $('logs-said').textContent = `Copied: ${logsShown.lines} lines.`; }
+        catch {
+            /* No clipboard (plain http, an old browser): all of it selected, for Ctrl+C. */
+            const range = document.createRange(); range.selectNodeContents($('logs-text'));
+            const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range);
+            $('logs-said').textContent = 'Selected: copy it with Ctrl+C (or the menu of your device).';
+        }
+    });
+    $('logs-save').addEventListener('click', () => {
+        if (!logsShown?.text) return;
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([logsShown.text], { type: 'text/plain' }));
+        a.download = `clavarium-${logsShown.source}-${logsShown.span === 'boot' ? 'since-start' : `${logsShown.span}h`}-${new Date().toISOString().slice(0, 16).replace(':', '')}.log`;
+        document.body.append(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
+    });
+    /* THIS SERVER STARTED AGAIN: asked twice (the second says what it does). */
+    $('server-restart').addEventListener('click', () => {
+        const go = $('server-restart');
+        if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = 'Yes: restart this server now'; return; }
+        go.disabled = true;
+        void post(`${API}/server/restart`, {}).then(() => {
+            $('server-restart-said').textContent = 'Restarting: this page comes back by itself.';
+            /* Back once it answers again. */
+            const back = async () => { try { if ((await fetch(`${API}/updates`, { cache: 'no-store' })).ok) { location.reload(); return; } } catch { /* not yet */ } setTimeout(back, 2000); };
+            setTimeout(back, 5000);
+        }).catch((error) => { $('server-restart-said').textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = 'Restart this server...'; });
+    });
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);

@@ -59,6 +59,7 @@ import { Certificate } from './certificate.mjs';
 import { Operators } from './operators.mjs';
 import { HealthReact } from './healthreact.mjs';
 import { MachinesMove } from './machinesmove.mjs';
+import { ServerLogs } from './serverlogs.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 
@@ -120,7 +121,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -158,7 +159,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -376,7 +377,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        a restart, a move) or looked at and put back if they came loose (after
        a wake), before its tool starts in them. */
     all.quiet = (name) => health.busy(name);
-    all.mounted = async (name, again) => { if (again) await folders.remount(name).catch(() => {}); await health.check(name).catch(() => {}); };
+    all.mounted = async (name, again) => { if (again) await folders.remount(name).catch(() => {}); await health.check(name, { asked: true }).catch(() => {}); };
     /* What the VM manager says each machine has is what is recorded (a record
        may say otherwise: set by hand, or by an earlier version). Not waited for. */
     void all.reconcileAll?.().catch(() => {});
@@ -400,17 +401,19 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const certificate = new Certificate({ origin: publicOrigin, alerts });
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
     const machinesMove = new MachinesMove({ host: asHost, usedMb: () => capacity.machinesUsedMb() });
+    /* What the server's programs said, and this server started again, from Settings (serverlogs.mjs). */
+    const serverLogs = new ServerLogs({ host: asHost });
     if (team) {
         team.useAlerts(alerts);
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
-        onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); },
+        onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); },
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
             const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });

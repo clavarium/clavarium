@@ -87,6 +87,36 @@ if (area === 'server' && verb === 'usage') {
     console.log(process.env.FAKE_SERVER_USAGE ?? ['used data 120', 'used folders 2300', 'used work 1800', 'used removed 0', 'used tools 3', ...made.map((vm) => `used machine ${vm} 1500`), 'used shelf 0', 'used others 0', 'used images 650'].join('\n'));
     process.exit(0);
 }
+/* THE DISKS: a system disk, an empty one, one with a file system not mounted, one mounted
+   under /mnt where the machines may go; what was prepared or mounted is kept in FAKE_VM_DIR/disks. */
+if (area === 'disks' || (area === 'machines' && ['places', 'old', 'moving'].includes(verb))) {
+    const G = 1024 ** 3;
+    const state = join(DIR, 'disks.json');
+    const done = existsSync(state) ? JSON.parse(readFileSync(state, 'utf8')) : {};
+    const keep = () => writeFileSync(state, JSON.stringify(done));
+    const dev = (name, type, size, extra = {}) => ({ name, path: `/dev/${name}`, type, size, fstype: null, label: null, uuid: null, mountpoint: null, model: null, ro: false, rm: false, pkname: null, tran: null, ...extra });
+    const list = () => [
+        dev('fd0', 'disk', 4096, { rm: true }),
+        dev('sda', 'disk', 100 * G, { model: 'QEMU HARDDISK', children: [dev('sda1', 'part', 99 * G, { fstype: 'ext4', mountpoint: '/' }), dev('sda15', 'part', 100 * 1024 ** 2, { fstype: 'vfat', mountpoint: '/boot/efi' })] }),
+        done.sdb ? dev('sdb', 'disk', 500 * G, { model: 'WD Blue', children: [dev('sdb1', 'part', 500 * G, { fstype: 'ext4', label: 'clavarium', mountpoint: '/mnt/sdb' })] }) : dev('sdb', 'disk', 500 * G, { model: 'WD Blue' }),
+        dev('sdc', 'disk', 1000 * G, { children: [dev('sdc1', 'part', 1000 * G, { fstype: 'ext4', label: 'photos', mountpoint: done.sdc1 ? '/mnt/sdc1' : null })] }),
+        dev('sdd', 'disk', 2000 * G, { model: 'Seagate Archive drive with a long name', children: [dev('sdd1', 'part', 2000 * G, { fstype: 'ext4', mountpoint: '/mnt/data' })] }),
+    ];
+    if (verb === 'list') { console.log(JSON.stringify({ blockdevices: list() })); process.exit(0); }
+    if (verb === 'places') {
+        console.log(['now /var/snap/multipass/common 2049 102400 61440', 'place /mnt/data 3000 2048000 1900000', ...(done.sdb ? ['place /mnt/sdb 3001 512000 500000'] : []), ...(done.sdc1 ? ['place /mnt/sdc1 3002 1024000 400'] : [])].join('\n'));
+        process.exit(0);
+    }
+    if (verb === 'old' || verb === 'moving') { if (verb === 'moving') console.log('state inactive'); process.exit(0); }
+    if (verb === 'prepare') { if (argv[0] !== '/dev/sdb' || argv[1] !== 'sdb') { console.error('REFUSED: not that one'); process.exit(78); } done.sdb = true; keep(); console.log('prepared /dev/sdb1, mounted /mnt/sdb'); process.exit(0); }
+    if (verb === 'mount') { if (argv[0] !== '/dev/sdc1') { console.error('REFUSED: not that one'); process.exit(78); } done.sdc1 = true; keep(); console.log('mounted /mnt/sdc1'); process.exit(0); }
+}
+/* LOGS: a few lines per source, one holding a secret the page must not show; a restart only noted. */
+if (area === 'server' && verb === 'logs') {
+    console.log([`2026-10-21T03:20:00+0000 host ${argv[0]}[1]: started (${argv[1]})`, '2026-10-21T03:21:00+0000 host x[1]: login password=hunter2hunter2', '2026-10-21T03:22:00+0000 host kernel: Out of memory: Killed process 4242 (qemu-system-x86)'].join('\n'));
+    process.exit(0);
+}
+if (area === 'server' && verb === 'restart') { writeFileSync(join(DIR, 'restart-asked'), new Date().toISOString()); process.exit(0); }
 /* UPDATES: the updater played on two files (the ones the server reads, as the
    real updater writes them): FAKE_VM_DIR/update/state.json and update.conf.
    What the registry has out: update/registry; a version that will not come up: update/broken. */
@@ -208,6 +238,11 @@ if (area === 'vm') {
         setState(vm, 'Stopped');
         setSize(vm, { memory: Number(argv[2]), disk: 8 });
         spawnSync('sleep', [process.env.FAKE_VM_STEP_SECONDS ?? '0']);
+        process.exit(0);
+    }
+    if (verb === 'states') {
+        const vms = existsSync(join(DIR, 'vms')) ? readdirSync(join(DIR, 'vms')).filter((vm) => stateOf(vm)) : [];
+        console.log(JSON.stringify({ list: vms.map((name) => ({ name, state: stateOf(name), ipv4: [] })) }));
         process.exit(0);
     }
     if (verb === 'info') {
