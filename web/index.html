@@ -177,6 +177,11 @@
           <div class="chapter-body">
             <div class="panel-top"><b>Health</b><button type="button" id="health-check">Look now</button></div>
             <ul id="machine-health" class="health-lines" aria-live="polite"></ul>
+            <!-- ITS CURVES: memory, CPU and disk over time (server/history.mjs). -->
+            <div class="curves" id="machine-curves" data-of="" hidden>
+              <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
+              <div class="curves-row"></div>
+            </div>
             <p id="machine-restarted" class="hint" role="status" hidden></p>
             <div class="row" id="machine-actions">
               <button type="button" id="restart" hidden>Restart the machine...</button>
@@ -651,6 +656,10 @@
           <div class="chapter-body">
         <div id="settings-server" tabindex="-1">
           <p id="server-unknown" class="hint" hidden>This server's disk and memory cannot be read just now. Nothing is refused for lack of room while they cannot.</p>
+          <div class="curves" id="server-curves" data-of="server" hidden>
+            <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
+            <div class="curves-row"></div>
+          </div>
           <div id="server-disks"></div>
           <!-- ALL THE MACHINES TO ANOTHER DISK (server/machinesmove.mjs). -->
           <details id="move-machines-box">
@@ -711,6 +720,8 @@
             <label for="updates-channel">Channel</label>
             <select id="updates-channel"><option value="latest">Stable</option><option value="next">Next (test versions)</option></select>
           </div>
+          <!-- WHEN: the updater's next look, and when a version that is out is installed (server/updates.mjs, schedule). -->
+          <p class="hint" id="updates-when" hidden></p>
           <p class="hint" id="updates-saved" role="status"></p>
           <div id="updates-back"></div>
           <details id="updates-history-box" hidden><summary>History</summary><ul id="updates-history" class="updates-history"></ul></details>

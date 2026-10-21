@@ -61,11 +61,13 @@ const whole = (text) => (/^\d{1,12}$/.test(String(text)) ? Number(text) : undefi
 
 /* What "server room" printed, as facts; any other line is left out. */
 export function readRoom(text) {
-    const facts = { places: [], memory: null, machines: [] };
+    const facts = { places: [], memory: null, machines: [], cpu: null, machineCpu: {} };
     for (const line of String(text ?? '').slice(0, 64 * 1024).split('\n').slice(0, 500)) {
         const p = line.trim().split(' ');
         if (p[0] === 'place' && p.length === 5 && PLACES.includes(p[1]) && [2, 3, 4].every((i) => whole(p[i]) !== undefined) && !facts.places.some((x) => x.what === p[1])) facts.places.push({ what: p[1], device: whole(p[2]), sizeMb: whole(p[3]), freeMb: whole(p[4]) });
         if (p[0] === 'memory' && p.length === 3 && whole(p[1]) > 0 && whole(p[2]) !== undefined) facts.memory = { totalMb: whole(p[1]), availableMb: whole(p[2]) };
+        if (p[0] === 'cpu' && p.length === 4 && [1, 2, 3].every((i) => whole(p[i]) !== undefined)) facts.cpu = { ticks: whole(p[1]), idle: whole(p[2]), cores: whole(p[3]) };
+        if (p[0] === 'machinecpu' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined) facts.machineCpu[p[1]] = whole(p[2]);
         if (p[0] === 'machine' && p.length === 3 && VM.test(p[1]) && whole(p[2]) !== undefined && !facts.machines.some((m) => m.vm === p[1])) facts.machines.push({ vm: p[1], rssMb: whole(p[2]) });
     }
     return facts;

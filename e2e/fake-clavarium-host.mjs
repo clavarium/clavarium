@@ -79,7 +79,10 @@ if (area === 'view' && verb === 'close') { rmSync(viewOf(argv[0]), { force: true
    verbs print). The machines that run here are given a little memory each. */
 if (area === 'server' && verb === 'room') {
     const running = existsSync(join(DIR, 'vms')) ? readdirSync(join(DIR, 'vms')).filter((vm) => { try { return readFileSync(join(DIR, 'vms', vm, 'state'), 'utf8').trim() === 'Running'; } catch { return false; } }) : [];
-    console.log(process.env.FAKE_SERVER_ROOM ?? ['place machines 2049 102400 61440', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288', ...running.map((vm) => `machine ${vm} 900`)].join('\n'));
+    /* The CPU time of the server and of each machine, growing with the clock: the curves have something to draw. */
+    const ticks = Math.floor(Date.now() / 10) * 4;
+    const cpu = [`cpu ${ticks} ${Math.floor(ticks * 0.6)} 4`, ...running.map((vm) => `machinecpu ${vm} ${Math.floor(ticks / 20)}`)];
+    console.log(process.env.FAKE_SERVER_ROOM ?? ['place machines 2049 102400 61440', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288', ...running.map((vm) => `machine ${vm} 900`), ...cpu].join('\n'));
     process.exit(0);
 }
 if (area === 'server' && verb === 'usage') {

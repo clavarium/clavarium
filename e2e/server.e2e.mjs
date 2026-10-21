@@ -133,3 +133,35 @@ test('Settings, the disks: every disk whole, formatted or not; the system one ne
     assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
     assert.deepEqual(me.errors, []);
 });
+
+test('the curves: memory, CPU and disk over time, of this server (with its reserve) and of a machine; the span chosen; the value under the pointer', { skip: SKIP }, async (t) => {
+    const b = await bench(t, { serverRoomMs: 100, historyEveryMs: 300 });
+    const me = await b.person();
+    await me.create('alpha');
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-resources');
+    const curves = me.page.locator('#server-curves');
+    await me.until('three curves, with a line drawn', async () => (await curves.locator('.curve').count()) === 3 && (await curves.locator('.curve[data-measure="cpu"] .curve-line').count()) === 1, 30_000);
+    assert.deepEqual(await curves.locator('.curve b').allInnerTexts(), ['Memory', 'CPU', 'Disk']);
+    assert.match(await curves.locator('.curve[data-measure="memory"] .curve-now').innerText(), /^\d+ %$/);
+    assert.equal(await curves.locator('.curve[data-measure="memory"] .curve-reserve').count(), 1, 'the reserve, dotted');
+    const plot = curves.locator('.curve[data-measure="memory"] svg');
+    await me.until('the value under the pointer', async () => {
+        await plot.hover({ position: { x: 5, y: 30 } }); await plot.hover({ position: { x: 250, y: 30 } });
+        return /: \d+ %$/.test(await curves.locator('.curve[data-measure="memory"] .curve-tip').innerText().catch(() => ''));
+    });
+    if (process.env.SHOTS) await curves.screenshot({ path: join(process.env.SHOTS, 'curves-server.png') });
+    await curves.locator('.curves-span button[data-span="7d"]').click();
+    await me.until('the week', async () => (await curves.locator('.curves-span button[aria-pressed="true"]').innerText()) === '7 days');
+    /* A machine's own, in its Machine chapter. */
+    await me.page.locator('#nav-conversations').click().catch(() => {});
+    await me.page.goto(`${b.origin}/?c=alpha`);
+    await me.page.locator('#folders').click();
+    await me.chapter('machine');
+    const mine = me.page.locator('#machine-curves');
+    await me.until('its curves', async () => (await mine.locator('.curve[data-measure="cpu"] .curve-line').count()) === 1, 30_000);
+    assert.equal(await mine.locator('.curve-reserve').count(), 0, 'a machine has no reserve of its own');
+    if (process.env.SHOTS) await mine.screenshot({ path: join(process.env.SHOTS, 'curves-machine.png') });
+    assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'no sideways scroll');
+    assert.deepEqual(me.errors, []);
+});

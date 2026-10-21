@@ -56,7 +56,7 @@ export const tmuxOf = (name) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}clv-${
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 /* `tools`: other tools than the two plain shells (the pictures of the site are
    taken on this bench, with the names a reader knows). */
-export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs } = {}) {
+export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs, historyEveryMs } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
     /* `engineKeys`: the authorization each request carried (Settings' key reaches the engine, and only it). */
@@ -93,6 +93,8 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         healthSettleMs: 200,
         /* `serverRoomMs`: what the server has left is taken as known this long (a test that changes it, FAKE_SERVER_ROOM, makes it short). */
         ...(serverRoomMs === undefined ? {} : { serverRoomMs }),
+        /* `historyEveryMs`: a look for the curves this often (one a minute otherwise). */
+        ...(historyEveryMs === undefined ? {} : { historyEveryMs }),
         env: { ...process.env, ...(answerFetcher ? { CLAVARIUM_ANSWERER_URL: 'http://127.0.0.1:9/v1/chat/completions', CLAVARIUM_ANSWERER_MODELS: 'reader-one,reader-two,reader-three' } : {}), CLAVARIUM_TRANSCRIPTION_URL: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` },
         host: [process.execPath, join(HERE, 'fake-clavarium-host.mjs')],
         /* What the updater would write: an installation only once a test writes update.conf (updates.e2e.mjs). */

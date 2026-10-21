@@ -26,6 +26,8 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     assert.equal(await p.locator('#updates-state').innerText(), 'Up to date · checked just now');
     assert.equal(await p.inputValue('#updates-mode'), 'auto');
     assert.deepEqual([await p.inputValue('#updates-from'), await p.inputValue('#updates-to')], ['02:00', '05:00']);
+    /* When: in the window only, said with when it opens (or, inside it, when it closes). */
+    assert.match(await p.locator('#updates-when').innerText(), /^(Updates are installed in the window only: it opens in \d+ (min|h) \(at .+, until .+\)\. Looked at every 15 minutes inside it\.|Inside the update window now: .+ The window closes at .+\.)$/);
     assert.equal(await p.locator('#updates-history-box').isVisible(), false, 'no history yet: nothing shown');
     /* The window, then the mode and the channel: saved through the host program. */
     await p.fill('#updates-from', '01:30');
@@ -33,6 +35,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     await p.selectOption('#updates-mode', 'ask');
     await me.until('the mode is saved', async () => /MODE=ask/.test(readFileSync(join(at, 'update.conf'), 'utf8')));
     await me.until('no window for "Ask me"', async () => !(await p.locator('#updates-from').isVisible()));
+    await me.until('said for "Ask me"', async () => /^The registry is asked about every 6 hours, next in \d+ h; nothing is installed until you choose Update\.$/.test(await p.locator('#updates-when').innerText()));
     await p.selectOption('#updates-channel', 'next');
     await me.until('the channel is saved', async () => /CHANNEL=next/.test(readFileSync(join(at, 'update.conf'), 'utf8')));
     assert.equal(await p.locator('#updates-saved').innerText(), 'Saved.');

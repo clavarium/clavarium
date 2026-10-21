@@ -21,8 +21,8 @@ function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 204
 }
 
 test('only lines of the expected shape are read: numbers, our machines, known places', () => {
-    const room = readRoom(['place machines 7 100 40', 'place elsewhere 7 1 1', 'place data x 1 1', 'memory 8192 4096', 'memory -1 2', 'machine clv-a 512', 'machine evil 1', 'machine clv-a 9', 'machine clvshelf-20261014-120000 300', 'junk'].join('\n'));
-    assert.deepEqual(room, { places: [{ what: 'machines', device: 7, sizeMb: 100, freeMb: 40 }], memory: { totalMb: 8192, availableMb: 4096 }, machines: [{ vm: 'clv-a', rssMb: 512 }, { vm: 'clvshelf-20261014-120000', rssMb: 300 }] });
+    const room = readRoom(['place machines 7 100 40', 'place elsewhere 7 1 1', 'place data x 1 1', 'memory 8192 4096', 'memory -1 2', 'machine clv-a 512', 'machine evil 1', 'machine clv-a 9', 'machine clvshelf-20261014-120000 300', 'cpu 1000 400 4', 'cpu x 1 1', 'machinecpu clv-a 120', 'machinecpu evil 5', 'junk'].join('\n'));
+    assert.deepEqual(room, { places: [{ what: 'machines', device: 7, sizeMb: 100, freeMb: 40 }], memory: { totalMb: 8192, availableMb: 4096 }, machines: [{ vm: 'clv-a', rssMb: 512 }, { vm: 'clvshelf-20261014-120000', rssMb: 300 }], cpu: { ticks: 1000, idle: 400, cores: 4 }, machineCpu: { 'clv-a': 120 } });
     assert.deepEqual(readUsage('used data 5\nused machine clv-a 7\nused machine ../x 1\nused nonsense 3\nused images 1e9'), { data: 5, machines: { a: 7 } });
 });
 

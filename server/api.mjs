@@ -70,6 +70,7 @@
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
  *   GET  /api/machines/disks: every disk, whole   POST /api/machines/mount {path}   POST /api/machines/prepare {path, typed}: erased
+ *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -124,7 +125,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     const send = (status, body) => {
@@ -227,6 +228,21 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Who may sign in (operators.mjs): none in local mode. */
             const reactOf = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
             if (reactOf && reacting) return send(200, reacting.settings(decodeURIComponent(reactOf[1]))), true;
+            if (pathname === '/api/history' && history) {
+                const of = query.get('of') ?? 'server';
+                if (of !== 'server' && !conversations.list().some((c) => c.name === of)) throw new Refusal(404, 'No such conversation.');
+                const curves = history.series(of, query.get('span') ?? '1h');
+                /* The reserve as a level of the curve: where what is used meets what must stay free. */
+                if (of === 'server' && capacity) {
+                    const a = await capacity.about().catch(() => null);
+                    const disk = a?.disk ?? a?.disks?.find?.((d) => d.holds?.includes('machines'));
+                    curves.reserve = {
+                        memory: a?.memory?.totalMb ? Math.max(0, 100 - (a.reserve.memoryMb / a.memory.totalMb) * 100) : null,
+                        disk: disk?.sizeMb ? Math.max(0, 100 - (a.reserve.diskMb / disk.sizeMb) * 100) : null,
+                    };
+                }
+                return send(200, curves), true;
+            }
             if (pathname === '/api/server/logs' && serverLogs) return send(200, await serverLogs.read(query.get('source') ?? 'clavarium', query.get('span') ?? '1')), true;
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;

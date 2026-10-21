@@ -13,8 +13,9 @@
  * asked for alerts (alerts.mjs), and the line in Settings.
  */
 import { readFileSync, existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { Refusal } from './conversations.mjs';
-import { compareVersions } from '../deploy/updater.mjs';
+import { compareVersions, inWindow } from '../deploy/updater.mjs';
 
 export const STATE_FILE = '/var/lib/clavarium/update/state.json';
 export const CONF_FILE = '/etc/clavarium/update.conf';
@@ -24,13 +25,43 @@ const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
 const LOCAL = /^local-\d{8}-\d{6}$/;
 const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 const HISTORY_SHOWN = 8;
+/* The updater's timer (install.sh): every 15 minutes, up to 3 more at random; the registry asked at most every 6 hours in mode "ask". */
+export const LOOK_EVERY_MS = 15 * 60_000;
+export const ASK_EVERY_MS = 6 * 3600_000;
+
+/* WHEN IT WILL HAPPEN, for Settings: the updater's next look, and when an update may be installed. All times in
+   milliseconds; the window is in this server's own time, as the updater reads it. */
+export function schedule({ mode, window, lastLookAt, checkedAt, now = new Date() }) {
+    const t = now.getTime();
+    let nextLookAt = Number.isFinite(lastLookAt) ? lastLookAt + LOOK_EVERY_MS : null;
+    if (nextLookAt !== null && nextLookAt < t) nextLookAt = null;
+    const out = { mode, lookEveryMs: LOOK_EVERY_MS, lastLookAt: Number.isFinite(lastLookAt) ? lastLookAt : null, nextLookAt };
+    if (mode === 'auto') {
+        const [from, to] = window.split('-');
+        const at = (hhmm, base) => { const [h, m] = hhmm.split(':').map(Number); const d = new Date(base); d.setHours(h, m, 0, 0); return d; };
+        out.inWindow = inWindow(window, now);
+        let opens = at(from, now); if (opens.getTime() <= t) opens = new Date(opens.getTime() + 86_400_000);
+        let closes = at(to, now); if (closes.getTime() <= t) closes = new Date(closes.getTime() + 86_400_000);
+        out.windowOpensAt = out.inWindow ? null : opens.getTime();
+        out.windowClosesAt = closes.getTime();
+    }
+    if (mode === 'ask') out.askNextAt = Number.isFinite(checkedAt) ? Math.max(t, checkedAt + ASK_EVERY_MS) : null;
+    return out;
+}
+/* When the updater's timer last ran (systemd says it to anybody), or null. */
+function timerLastRun() {
+    const r = spawnSync('systemctl', ['show', 'clavarium-update.timer', '-p', 'LastTriggerUSec', '--value'], { encoding: 'utf8', timeout: 5000 });
+    const at = Date.parse(String(r.stdout ?? '').trim().replace(/^\w{3} /, ''));
+    return Number.isFinite(at) && at > 0 ? at : null;
+}
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.replace(/^REFUSED: /, '').slice(0, 300) ?? '';
 
 export class Updates {
-    #host; #state; #conf; #version; #store; #alerts; #timer;
+    #host; #state; #conf; #version; #store; #alerts; #timer; #lastLook; #lastLookCache = { at: 0, value: null };
 
     /* `host(argv)`: the host program. `store`: what was told already. */
-    constructor({ host, version, stateFile = STATE_FILE, confFile = CONF_FILE, store, alerts }) {
+    constructor({ host, version, stateFile = STATE_FILE, confFile = CONF_FILE, store, alerts, lastLook = timerLastRun }) {
+        this.#lastLook = lastLook;
         this.#host = host; this.#version = version; this.#state = stateFile; this.#conf = confFile; this.#store = store; this.#alerts = alerts;
     }
 
@@ -57,6 +88,7 @@ export class Updates {
             ...this.#settings(),
             available: newer ? s.available : null,
             checkedAt: s.checkedAt ?? null,
+            when: schedule({ ...this.#settings(), lastLookAt: this.#timer_(), checkedAt: s.checkedAt ? Date.parse(s.checkedAt) : null }),
             checkError: s.checkError ?? null,
             running: s.running ?? null,
             refused: s.refused ?? null,
@@ -64,6 +96,12 @@ export class Updates {
             back: releases.filter((r) => !r.current && (VERSION.test(r.id) || LOCAL.test(r.id))).map((r) => ({ id: r.id, version: r.version })),
             history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null })),
         };
+    }
+
+    /* The timer's last run, asked of systemd at most once a minute. */
+    #timer_() {
+        if (Date.now() - this.#lastLookCache.at > 60_000) this.#lastLookCache = { at: Date.now(), value: (() => { try { return this.#lastLook(); } catch { return null; } })() };
+        return this.#lastLookCache.value;
     }
 
     async #ask(argv, what) {

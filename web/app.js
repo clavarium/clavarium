@@ -1866,6 +1866,10 @@
     });
     function paintMachine(here) {
         void paintReact(here);
+        /* Its curves: asked again when it changes, or once in a while (paintCurves). */
+        const curves = $('machine-curves');
+        if (curves.dataset.of !== (here?.name ?? '')) { curves.dataset.of = here?.name ?? ''; curves.dataset.span = '1h'; for (const x of curves.querySelectorAll('.curves-span button')) x.setAttribute('aria-pressed', String(x.dataset.span === '1h')); }
+        if (!DEVICE) void paintCurves(curves); else curves.hidden = true;
         /* General: what it is. */
         const facts = $('general-facts'); facts.replaceChildren();
         const fact = (term, value) => { const dt = document.createElement('dt'); dt.textContent = term; const dd = document.createElement('dd'); dd.textContent = value; facts.append(dt, dd); };
@@ -3459,6 +3463,23 @@
             : `Certificate of ${c.domain}: by ${c.issuer}, valid until ${day(c.validTo)} (${c.daysLeft} days); renewed by itself.${c.daysLeft < 10 ? ' It should have been renewed already: sudo clavarium doctor --certificate.' : ''}`;
         line.hidden = false;
     }
+    /* WHEN IT HAPPENS, in words: the next look of the updater, and when a version that is out gets installed. */
+    function paintUpdatesWhen(u) {
+        const box = $('updates-when'); const w = u.when;
+        box.hidden = !u.installed || !w; if (box.hidden) return;
+        const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const inWords = (ms) => { const m = Math.max(1, Math.round((ms - Date.now()) / 60_000)); return m < 60 ? `in ${m} min` : m < 36 * 60 ? `in ${Math.round(m / 60)} h` : `in ${Math.round(m / 1440)} days`; };
+        const look = w.nextLookAt ? `the next look ${inWords(w.nextLookAt)} (around ${clock(w.nextLookAt)})` : 'the next look in a few minutes';
+        const out = u.available ? `${u.available} is out. ` : '';
+        const lines = {
+            auto: w.inWindow ? `${out}Inside the update window now: ${u.available ? 'it is installed at' : 'a version that is out is installed at'} ${look}. The window closes at ${clock(w.windowClosesAt)}.`
+                : `${out}${u.available ? 'It is installed' : 'Updates are installed'} in the window only: it opens ${inWords(w.windowOpensAt)} (at ${clock(w.windowOpensAt)}, until ${clock(w.windowClosesAt)}). Looked at every 15 minutes inside it.`,
+            asap: `${out}Looked at every 15 minutes, ${look}: ${u.available ? 'it is installed then' : 'a version that is out is installed then'}.`,
+            ask: `${out}The registry is asked about every 6 hours${w.askNextAt ? `, next ${inWords(w.askNextAt)}` : ''}; nothing is installed until you choose Update.`,
+            off: 'Never by itself: use Check now, then Update.',
+        };
+        box.textContent = lines[w.mode] ?? '';
+    }
     async function paintUpdates() {
         clearTimeout(updatesTimer);
         const u = await fetch(`${API}/updates`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -3466,6 +3487,7 @@
         if (!u) { if (updatesBusy && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000); return; }
         lastUpdates = u;
         $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
+        paintUpdatesWhen(u);
         void paintCertificate();
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
         if (!u.installed) {
@@ -3773,11 +3795,75 @@
             setTimeout(back, 5000);
         }).catch((error) => { $('server-restart-said').textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = 'Restart this server...'; });
     });
+    /* THE CURVES (server/history.mjs): memory, CPU and disk over time, one small chart each, one
+       line each on one scale (0 to 100 %); the reserve as a dotted level; a dot where a program
+       was stopped for lack of memory. Hovered or touched: the value and the time under it. */
+    const CURVES = [['memory', 'Memory'], ['cpu', 'CPU'], ['disk', 'Disk']];
+    const svgEl = (tag, attrs) => { const e = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v)); return e; };
+    const curveTime = (t, span) => new Date(t).toLocaleString([], span === '7d' ? { weekday: 'short', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+    function drawCurve(r, key, label) {
+        const W = 300; const H = 72; const top = 4; const bottom = H - 4;
+        const box = el('figure', 'curve'); box.dataset.measure = key;
+        const values = r[key] ?? []; const known = values.filter((v) => v !== null);
+        const head = el('figcaption', 'curve-head');
+        const now = [...values].reverse().find((v) => v !== null);
+        head.append(el('b', '', label), el('span', 'curve-now', now === undefined ? 'not measured yet' : `${Math.round(now)} %`), el('span', 'curve-max', known.length ? `highest ${Math.round(Math.max(...known))} %` : ''));
+        const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: 'none', role: 'img', 'aria-label': `${label} over time: ${now === undefined ? 'not measured yet' : `${Math.round(now)} % now`}${known.length ? `, highest ${Math.round(Math.max(...known))} %` : ''}` });
+        const x = (t) => ((t - r.from) / Math.max(1, r.to - r.from)) * W;
+        const y = (v) => bottom - (v / 100) * (bottom - top);
+        svg.append(svgEl('line', { x1: 0, x2: W, y1: bottom, y2: bottom, class: 'curve-base' }));
+        const level = r.reserve?.[key];
+        if (Number.isFinite(level)) svg.append(svgEl('line', { x1: 0, x2: W, y1: y(level), y2: y(level), class: 'curve-reserve' }));
+        /* A gap in the looks (the server was down, the machine asleep) is a gap in the line. */
+        const step = r.span === '7d' ? 15 * 60_000 : 60_000;
+        let d = ''; let prev = null;
+        r.t.forEach((t, i) => { const v = values[i]; if (v === null) { prev = null; return; } d += `${prev === null || t - prev > 3 * step ? 'M' : 'L'}${x(t).toFixed(1)},${y(v).toFixed(1)}`; prev = t; });
+        if (d) svg.append(svgEl('path', { d, class: 'curve-line', 'vector-effect': 'non-scaling-stroke' }));
+        for (const t of r.marks ?? []) { const m = svgEl('circle', { cx: x(t), cy: top + 3, r: 3, class: 'curve-mark' }); const title = svgEl('title', {}); title.textContent = `${curveTime(t, r.span)}: a program was stopped for lack of memory`; m.append(title); svg.append(m); }
+        const cross = svgEl('line', { x1: 0, x2: 0, y1: top, y2: bottom, class: 'curve-cross' }); cross.style.display = 'none'; svg.append(cross);
+        const tip = el('span', 'curve-tip'); tip.hidden = true;
+        svg.addEventListener('pointermove', (event) => {
+            if (!r.t.length) return;
+            const at = svg.getBoundingClientRect(); const t = r.from + ((event.clientX - at.left) / at.width) * (r.to - r.from);
+            let best = 0; r.t.forEach((u, i) => { if (Math.abs(u - t) < Math.abs(r.t[best] - t)) best = i; });
+            cross.setAttribute('x1', x(r.t[best])); cross.setAttribute('x2', x(r.t[best])); cross.style.display = '';
+            tip.textContent = `${curveTime(r.t[best], r.span)}: ${values[best] === null ? 'not measured' : `${Math.round(values[best])} %`}`; tip.hidden = false;
+        });
+        svg.addEventListener('pointerleave', () => { cross.style.display = 'none'; tip.hidden = true; });
+        const plot = el('div', 'curve-plot'); plot.append(svg, tip);
+        const foot = el('div', 'curve-foot'); foot.append(el('span', '', curveTime(r.from, r.span)), el('span', '', 'now'));
+        box.append(head, plot, foot);
+        if (Number.isFinite(level)) box.append(el('small', 'hint curve-legend', '..... the reserve: what must stay free'));
+        return box;
+    }
+    const curvesAt = new WeakMap();
+    async function paintCurves(box, { force = false } = {}) {
+        const of = box.dataset.of; if (!of) { box.hidden = true; return; }
+        const span = box.dataset.span || '1h';
+        const was = curvesAt.get(box);
+        if (!force && was && was.of === of && was.span === span && Date.now() - was.at < 30_000) return;
+        curvesAt.set(box, { of, span, at: Date.now() });
+        const r = await fetch(`${API}/history?of=${encodeURIComponent(of)}&span=${span}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        if (box.dataset.of !== of) return;
+        box.hidden = !r; if (!r) return;
+        box.querySelector('.curves-row').replaceChildren(...CURVES.map(([key, label]) => drawCurve(r, key, label)));
+    }
+    for (const box of document.querySelectorAll('.curves')) {
+        box.querySelector('.curves-span').addEventListener('click', (event) => {
+            const b = event.target.closest('button[data-span]'); if (!b) return;
+            box.dataset.span = b.dataset.span;
+            for (const x of box.querySelectorAll('.curves-span button')) x.setAttribute('aria-pressed', String(x === b));
+            void paintCurves(box, { force: true });
+        });
+    }
+    /* Kept current while in sight: a new look a minute. */
+    setInterval(() => { for (const box of document.querySelectorAll('.curves')) if (box.offsetParent !== null) void paintCurves(box, { force: true }); }, 60_000);
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         $('settings-server-top').hidden = !r; $('settings-server').hidden = !r;
         if (!r) return;
+        void paintCurves($('server-curves'));
         /* The two settings of each: a fixed amount and a share; the larger is kept free. */
         const set = r.settings ?? { ...r.reserve, diskPercent: 0, memoryPercent: 0 };
         const editing = ['reserve-disk', 'reserve-disk-percent', 'reserve-memory', 'reserve-memory-percent'].some((id) => $(id) === document.activeElement);
