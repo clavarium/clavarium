@@ -41,8 +41,8 @@ test('what is said: the state, a machine that does not answer, memory, disk, fol
         'Its disk is almost full: 100 MB left of 8000 MB.',
         'Its work folder (/work) is almost full: 50 MB left of 10000 MB.',
     ]);
-    /* What each is about, and a name that stays the same whatever its numbers (one more time out of memory is a new one). */
-    assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
+    /* What each is about, and a name that stays the same whatever its numbers (programs stopped for lack of memory: one a day). */
+    assert.deepEqual(full.problems.map((p) => [p.kind, p.key.replace(/^oom:\d{4}-\d\d-\d\d$/, 'oom:DAY')]), [['memory', 'oom:DAY'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
     assert.equal(judge({ state: 'Running', answering: true, memory: { totalMb: 1024, availableMb: 12 } }).problems[0].key, 'memory-low');
     const folders = judge({ state: 'Running', answering: true, remounted: ['/work'], failed: [{ path: '/resources/a', why: 'refused' }], missing: ['/resources/a'] });
     assert.equal(folders.level, 'bad');
@@ -236,4 +236,27 @@ test('a machine that does not answer is left alone a while, longer each time, un
     assert.equal(probes, 1, 'not asked again at once: each question holds the VM manager');
     await h.check('demo', { asked: true });
     assert.equal(probes, 2, 'its owner asked: asked');
+});
+
+test('"Seen": what it says now no longer calls its owner; another problem does, and one gone and back does again', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-seen-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+    let disk = 'disk / 300 8000'; let memory = 'memory 2097152 1048576';
+    const vms = { state: async () => 'Running', exec: async () => ({ code: 0, stdout: `${memory}\noom 3\n${disk}\n`, stderr: '' }) };
+    const conversations = { get: () => ({ phase: 'ready', work: 'disk' }) };
+    const h = new Health({ vms, conversations, seen: new Store(join(dir, 'seen.json')) });
+    await h.check('demo');
+    const keys = () => h.of('demo').problems.filter((p) => p.level !== 'info').map((p) => p.key);
+    assert.deepEqual(keys().map((k) => k.replace(/\d{4}-\d\d-\d\d/, 'DAY')), ['oom:DAY', 'disk:/'], 'stopped programs: one line a day, whatever their number');
+    assert.deepEqual(h.of('demo').seen, []);
+    assert.deepEqual(h.markSeen('demo').seen, keys());
+    memory = 'memory 2097152 10000';
+    await h.check('demo', { asked: true });
+    assert.ok(keys().includes('memory-low'));
+    assert.ok(!h.of('demo').seen.includes('memory-low'), 'another problem: not seen');
+    disk = 'disk / 6000 8000';
+    await h.check('demo', { asked: true });
+    assert.ok(!h.of('demo').seen.includes('disk:/'), 'gone: forgotten');
+    disk = 'disk / 300 8000';
+    await h.check('demo', { asked: true });
+    assert.ok(keys().includes('disk:/') && !h.of('demo').seen.includes('disk:/'), 'back: it calls again');
 });

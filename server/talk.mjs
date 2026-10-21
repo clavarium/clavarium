@@ -445,7 +445,7 @@ export class Talk {
             topic: 'Machine',
             /* What can be done: a disk short of room is looked at (what takes it) or made larger --
                a restart frees nothing; otherwise more memory where memory is short, a restart, its terminal. */
-            actions: fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal'],
+            actions: [...(fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
         });
     }
 

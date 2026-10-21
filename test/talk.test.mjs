@@ -246,15 +246,15 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     /* The next look finds the same, with other numbers: not said twice. */
     b.talk.machine('helper', { level: 'warn', problems: [{ ...memory.problems[0], text: 'Its memory is almost full: 18 MB free of 768 MB.' }] });
     let lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
-    assert.deepEqual(lines.map((l) => [l.text, l.level, l.tone, l.event, l.actions]), [['Its memory is almost full: 20 MB free of 768 MB.', 'needs-you', 'warn', 'machine-problem', ['memory', 'restart', 'terminal']]]);
+    assert.deepEqual(lines.map((l) => [l.text, l.level, l.tone, l.event, l.actions]), [['Its memory is almost full: 20 MB free of 768 MB.', 'needs-you', 'warn', 'machine-problem', ['memory', 'restart', 'terminal', 'seen']]]);
     assert.equal(b.talk.of('helper').messages.at(-1).from, 'system', 'after the message it came after');
     /* Out of memory, and the machine no longer answers: what is new is said; a problem with no memory in it offers no memory. */
     b.talk.machine('helper', { level: 'bad', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }] });
     lines = b.talk.of('helper').messages.filter((m) => m.from === 'system');
-    assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'needs-you', tone: 'bad', actions: ['restart', 'terminal'] });
+    assert.deepEqual(lines.at(-1), { ...lines.at(-1), text: 'Its machine does not answer.', level: 'needs-you', tone: 'bad', actions: ['restart', 'terminal', 'seen'] });
     /* A disk short of room alone: a restart frees nothing -- what takes the room, and a larger disk. */
     b.talk.machine('helper', { level: 'warn', problems: [memory.problems[0], { level: 'bad', kind: 'answer', key: 'silent', text: 'Its machine does not answer.' }, { level: 'warn', kind: 'disk', key: 'disk:/', text: 'Its disk is almost full: 50 MB left of 8000 MB.' }] });
-    assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk']);
+    assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk', 'seen']);
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
     b.talk.machine('helper', memory);

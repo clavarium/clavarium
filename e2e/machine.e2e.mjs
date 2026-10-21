@@ -180,7 +180,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.page.goBack();
     assert.match(await me.page.locator('#health-text').innerText(), /ran out of memory 2 times/);
     /* Its disk short of room: what takes it (its terminal) and a larger disk are offered too. */
-    assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', '\u00d7']);
+    assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', 'Seen']);
     await me.page.locator('#health-disk').click();
     await me.until('its disk, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-disk');
     assert.equal(await me.page.locator('#machine-disk').inputValue(), '10');
@@ -193,7 +193,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.page.locator('#view-chat').click();
     const line = me.page.locator('#simple-thread .parley-system');
     await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
-    assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal']);
+    assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal', 'Seen']);
     assert.equal(await me.page.locator('#health-room').isVisible(), true, 'the strip offers its terminal over the chat');
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
@@ -227,5 +227,35 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.page.locator('#view-terminal').click();
     await me.type('echo still-here');
     await me.sees('\nstill-here');
+    assert.deepEqual(me.errors, []);
+});
+
+test('Needs you for a machine that needs a hand, not for programs once stopped for lack of memory; "Seen" takes it out until something else comes', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('quiet');
+    await me.create('short');
+    report(b, 'quiet', { oom: 5 });
+    report(b, 'short', { diskLeftMb: 50 });
+    for (const n of ['quiet', 'short']) await me.api(`/api/conversations/${n}/health`, {});
+    await me.page.reload();
+    await me.until('short needs you', async () => (await me.page.locator('#recent .list-fold[data-section="needs"]').count()) === 1);
+    const needsRows = () => me.page.evaluate(() => { const out = []; let on = false; for (const el of document.querySelectorAll('#recent > *')) { if (el.matches('.list-fold')) on = el.dataset.section === 'needs'; else if (on && el.matches('.item')) out.push(el.dataset.name); } return out; });
+    assert.deepEqual(await needsRows(), ['short'], 'programs stopped once for lack of memory: only said');
+    assert.ok(!(await me.page.evaluate(() => [...document.querySelectorAll('#recent .item.copy')].filter((x) => x.dataset.name === 'short').length > 1)), 'not said twice: not in Recent too');
+    /* Seen, from its strip. */
+    await me.page.locator('#items .item[data-name="short"]').click();
+    await me.until('its strip', async () => me.page.locator('#health-strip').isVisible());
+    await me.page.locator('#health-dismiss').click();
+    await me.until('seen, out of Needs you', async () => (await me.page.locator('#recent .list-fold[data-section="needs"]').count()) === 0);
+    await me.page.reload();
+    await me.until('still seen after a reload', async () => (await me.page.locator('#items .item').count()) === 2);
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="needs"]').count(), 0);
+    assert.equal(await me.page.locator('#health-strip').isVisible(), false);
+    /* Something else comes: it calls again. */
+    report(b, 'short', { diskLeftMb: 50, availableMb: 20 });
+    await me.api('/api/conversations/short/health', {});
+    await me.page.reload();
+    await me.until('memory short now: back in Needs you', async () => (await needsRows()).includes('short'));
     assert.deepEqual(me.errors, []);
 });

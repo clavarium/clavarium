@@ -95,7 +95,8 @@ export function judge(record) {
     else if (s !== 'Running') add('bad', 'state', `state:${s}`, `The VM manager says its machine is "${s}".`);
     if (s === 'Running') {
         if (record.answering === false) add('bad', 'answer', 'silent', 'Its machine does not answer. Restarting it usually helps.');
-        if (record.oomKills > 0) add('warn', 'memory', `oom:${record.oomKills}`, `It ran out of memory${record.oomKills === 1 ? '' : ` ${record.oomKills} times`} since it started: a program in it was stopped. Its files are safe.`);
+        /* Said once a day at most, with how many: a tool that runs out of memory again and again (on purpose, sometimes) is one line, not one a look. */
+        if (record.oomKills > 0) add('warn', 'memory', `oom:${String(record.at ?? new Date().toISOString()).slice(0, 10)}`, `It ran out of memory${record.oomKills === 1 ? '' : ` ${record.oomKills} times`} since it started: a program in it was stopped. Its files are safe.`);
         if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
             if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
@@ -110,20 +111,30 @@ export function judge(record) {
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen;
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
 
     /* `settleMs`: how long a missing folder is given before it is mounted
        again (a machine that has just started may still be mounting it).
        `lookMs`: how long the clock waits for one conversation's look. */
-    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS }) {
+    /* `seen`: a store of the problems its owner marked seen ("Seen"), by conversation. */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null }) {
+        this.#seen = seen;
         this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs; this.#lookMs = lookMs;
     }
 
     /* The last thing known, or null. Cheap: nothing is asked. */
-    of(name) { return this.#records.get(name) ?? null; }
-    forget(name) { this.#records.delete(name); this.#quiet.delete(name); }
+    of(name) { const r = this.#records.get(name); return r ? { ...r, seen: this.#seen?.get(name)?.keys ?? [] } : null; }
+    /* "Seen": what it says now no longer calls its owner (Needs you); a problem of another kind, or one
+       that comes back after it went away, does. */
+    markSeen(name) {
+        const r = this.#records.get(name);
+        const keys = (r?.problems ?? []).filter((p) => p.level === 'warn' || p.level === 'bad').map((p) => p.key);
+        this.#seen?.put({ name, keys });
+        return this.of(name);
+    }
+    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); }
 
     /* The look under way (it may be mounting a folder again), or null. */
     busy(name) { return this.#running.get(name) ?? null; }
@@ -194,6 +205,9 @@ export class Health {
 
     #keep(name, record) {
         const kept = { ...record, ...judge(record) };
+        /* What was marked seen and is gone is forgotten: back later, it calls its owner again. */
+        const seen = this.#seen?.get(name);
+        if (seen && record.state === 'Running' && record.answering === true) { const still = seen.keys.filter((k) => kept.problems.some((p) => p.key === k)); if (still.length !== seen.keys.length) this.#seen.put({ name, keys: still }); }
         this.#records.set(name, kept);
         try { this.judged(name, kept); } catch { /* told, nothing more */ }
         return kept;

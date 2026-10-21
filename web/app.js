@@ -855,8 +855,10 @@
     /* It needs its owner: it asks or waits, its answerer asks, it failed, its machine is unwell. Said even when it is hidden. */
     /* Its tool asks or waits for its owner, and the owner has not written since (talk.mjs, brief). */
     const talkNeeds = (c) => Boolean(c.talk && (c.talk.needs ?? (c.talk.waiting > 0 || c.talk.state === 'waiting')));
-    const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed'
-        || (c.phase === 'ready' && !c.asleep && ['warn', 'bad'].includes(c.health?.level)));
+    /* Its machine calls its owner for what needs a hand -- it does not serve, its memory or disk is almost
+       full -- not marked "Seen"; a program stopped for lack of memory (its files safe) is only said. */
+    const healthNeeds = (c) => c.phase === 'ready' && !c.asleep && (c.health?.problems ?? []).some((p) => (p.level === 'bad' || (p.level === 'warn' && ['memory', 'disk'].includes(p.kind) && !String(p.key).startsWith('oom:'))) && !(c.health.seen ?? []).includes(p.key));
+    const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
     /* Hidden conversations are shown on a click on "N hidden", for this page only. */
     let showHidden = false;
     /* Recent: a few, or all of them (for this page only). */
@@ -942,7 +944,8 @@
         head.setAttribute('aria-expanded', String(open));
         const caret = document.createElement('span'); caret.className = 'caret'; caret.setAttribute('aria-hidden', 'true'); caret.textContent = '›';
         const name = document.createElement('span'); name.className = 'group-name'; name.textContent = label;
-        const count = document.createElement('small'); count.className = 'count'; count.textContent = `${all.length} conversation${all.length > 1 ? 's' : ''}`;
+        /* A number only: the name keeps the room (its words for a screen reader). */
+        const count = document.createElement('small'); count.className = 'count'; count.textContent = String(all.length);
         count.setAttribute('aria-label', `${all.length} conversation${all.length > 1 ? 's' : ''}`);
         /* A small dot for each (up to six); the one that needs you is said even folded. */
         const dots = document.createElement('span'); dots.className = 'group-dots'; dots.setAttribute('aria-hidden', 'true');
@@ -990,7 +993,8 @@
             if (needs.length && section(NEEDS, 'Needs you', needs.length)) top.append(...needs.map((c) => itemButton(c, true)));
             /* RECENT: by when it was last used; the last four, then all. Never a hidden one. Only once there
                are groups: before, the one list below says the same, in the order chosen by hand. */
-            const recent = conversations.filter((c) => c.hidden !== true || c.name === current).sort((a, b) => activityOf(b) - activityOf(a));
+            /* One in Needs you just above is not said twice. */
+            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c)).sort((a, b) => activityOf(b) - activityOf(a));
             const few = 4;
             if (recent.length && groups.length && section(RECENT, 'Recent', recent.length)) {
                 top.append(...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
@@ -1734,14 +1738,16 @@
     function paintHealth() {
         const c = conversations.find((x) => x.name === current);
         const h = c?.health;
-        const serious = h && (h.level === 'warn' || h.level === 'bad') && c.phase === 'ready' && !c.asleep;
-        const key = serious ? `${current}:${h.problems.map((p) => p.text).join('|')}` : '';
+        /* What it says that was not marked "Seen" (health.mjs): the strip is for those only. */
+        const shown = (h?.problems ?? []).filter((p) => (p.level === 'warn' || p.level === 'bad') && !(h.seen ?? []).includes(p.key));
+        const serious = shown.length > 0 && c.phase === 'ready' && !c.asleep;
+        const level = shown.some((p) => p.level === 'bad') ? 'bad' : 'warn';
+        const key = serious ? `${current}:${shown.map((p) => p.text).join('|')}` : '';
         $('health-strip').hidden = !serious || key === healthDismissed;
         /* Running, but not well: the dot beside "live" says so too. */
-        state.dataset.health = serious ? h.level : '';
+        state.dataset.health = serious ? level : '';
         if (!serious) return;
-        $('health-strip').dataset.level = h.level;
-        const shown = h.problems.filter((p) => p.level === 'warn' || p.level === 'bad');
+        $('health-strip').dataset.level = level;
         $('health-text').textContent = shown.map((p) => p.text).join(' ');
         /* What can be done, from here: more memory where memory is short, a restart, its terminal when the chat is in front.
            A disk short of room: what takes it, in the terminal, and (on a wide screen) a larger disk -- a restart frees nothing. */
@@ -1751,7 +1757,8 @@
         $('health-disk').hidden = DEVICE || !disk || narrow();
         $('health-restart').hidden = DEVICE || diskOnly;
         $('health-terminal').hidden = !simple || noTerminal() || disk;
-        $('health-dismiss').onclick = () => { healthDismissed = key; $('health-strip').hidden = true; };
+        /* "Seen", for every screen: it no longer calls its owner until something else comes (a device: only here). */
+        $('health-dismiss').onclick = () => { healthDismissed = key; $('health-strip').hidden = true; if (!DEVICE) void markSeen(); };
     }
     /* "More memory...": its memory, ready to be chosen -- the next size up already picked, applied only once asked. */
     async function openMemory() {
@@ -1778,6 +1785,12 @@
         disk.focus({ preventScroll: true });
     }
     /* Its terminal, asked for: never shown by itself in place of its chat. */
+    /* "Seen": what its machine says now no longer puts it in Needs you (health.mjs). */
+    async function markSeen() {
+        if (!current || DEVICE) return;
+        try { const record = await post(`${API}/conversations/${encodeURIComponent(current)}/health/seen`, {}); const c = conversations.find((x) => x.name === current); if (c) c.health = record; paint(); paintHealth(); }
+        catch (error) { show(error.message, 'Back', () => { notice.hidden = true; }); }
+    }
     function seeTerminal() { if (DEVICE) { simple = false; paintSimple(); focusTerminal(); } else goTab('terminal'); paintHealth(); }
     $('health-memory').addEventListener('click', () => { void openMemory(); });
     $('health-terminal').addEventListener('click', seeTerminal);
@@ -2154,7 +2167,7 @@
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -2222,7 +2235,7 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: 'Seen' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {
@@ -2234,7 +2247,7 @@
     function machineLines(data) {
         if (!Array.isArray(data?.messages)) return data;
         const kindOf = (id) => String(id).split(':')[0];
-        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
+        const may = (id) => (id === 'terminal' || id === 'room' ? !noTerminal() : id === 'disk' ? !DEVICE && !narrow() : (id === 'memory' || id === 'restart' || id === 'seen' || /^review:[a-z0-9][a-z0-9._-]*$/.test(id) || COMMITS.test(id)) && !DEVICE);
         const label = (id) => { const n = Number(COMMITS.exec(id)?.[4] ?? 0); return n ? (n === 1 ? 'See the commit' : `See the ${n} commits`) : ACTIONS[kindOf(id)]; };
         const linksOf = (m) => {
             const repo = DEVICE ? null : (m.actions ?? []).map((id) => /^review:([a-z0-9][a-z0-9-]*)$/.exec(id)?.[1]).find(Boolean);

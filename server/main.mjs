@@ -371,7 +371,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
-    const health = new Health({ vms, conversations: all, resources: folders, ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    const health = new Health({ vms, conversations: all, resources: folders, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */

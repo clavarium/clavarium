@@ -28,8 +28,8 @@ test('folders: made at creation and in General, folded on this device only, rena
     /* Those in no group are a group of their own, "Not filed", before the groups. */
     await me.until('the list, groups after the others', async () => (await me.page.locator('#items .group').count()) === 3);
     assert.deepEqual(await me.page.locator('#items > *').evaluateAll((all) => all.map((x) => x.dataset.name ?? `[${x.dataset.group}]`)), ['[]', '[Perso]', '[Clients]']);
-    assert.match(await me.page.locator('.group[data-group=""] .group-head').innerText(), /Not filed\s*1 conversation/);
-    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*2 conversations/);
+    assert.match(await me.page.locator('.group[data-group=""] .group-head').innerText(), /Not filed\s*1\s*$/);
+    assert.match(await me.page.locator('.group[data-group="Perso"] .group-head').innerText(), /Perso\s*2\s*$/);
     assert.deepEqual(await names(me.page), ['site-web', 'taxes', 'ete-plans', 'invoices'], 'the newest first in its folder');
     /* Made in a folder from the form, with the folders there are offered. */
     await me.page.locator('#new').click();
