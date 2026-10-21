@@ -50,3 +50,24 @@ test('mount and prepare only what may be: the name typed again to erase', async 
     assert.ok(asked.includes('disks prepare /dev/sdb sdb') && asked.includes('disks mount /dev/sdc1'));
     assert.ok(!asked.some((a) => /prepare \/dev\/(sda|nvme)/.test(a)), 'never asked of the host');
 });
+
+test('room set aside and not used: read from the host, said on its disk, given only where there is some', async () => {
+    const { readRooms } = await import('../server/machinesmove.mjs');
+    assert.deepEqual(readRooms('lvroom / /dev/mapper/ubuntu--vg-ubuntu--lv ubuntu-vg 1740000 ext4\nlvroom ../x a b 1 ext4\njunk\n'), [{ mount: '/', volume: '/dev/mapper/ubuntu--vg-ubuntu--lv', group: 'ubuntu-vg', freeMb: 1740000, fs: 'ext4' }]);
+    const asked = [];
+    const host = async (argv) => {
+        asked.push(argv.join(' '));
+        if (argv.join(' ') === 'disks list') return { code: 0, stdout: LSBLK, stderr: '' };
+        if (argv.join(' ') === 'disks room') return { code: 0, stdout: 'lvroom / /dev/mapper/vg-root ubuntu-vg 1740000 ext4\nlvroom /mnt/data /dev/mapper/vg-data vg2 300 ext4\n', stderr: '' };
+        if (argv[1] === 'grow') return { code: 0, stdout: 'grown / 1840000\n', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+    };
+    const m = new MachinesMove({ host, usedMb: () => 4000 });
+    const { disks } = await m.disks();
+    assert.deepEqual(disks.find((d) => d.name === 'sda').unused.map((u) => [u.mount, u.freeMb]), [['/', 1740000]], 'the system\'s, on the system\'s disk');
+    assert.deepEqual(disks.find((d) => d.name === 'sdd').unused.map((u) => u.mount), ['/mnt/data']);
+    assert.deepEqual(await m.grow('/'), { grown: '/', sizeMb: 1840000 });
+    await assert.rejects(m.grow('/mnt/data'), /Less than 1 GB/);
+    await assert.rejects(m.grow('/etc'), /no room set aside/);
+    assert.equal(asked.filter((a) => a.startsWith('disks grow')).length, 1, 'asked of the host only where there is room');
+});

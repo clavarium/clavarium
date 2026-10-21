@@ -115,6 +115,14 @@ test('Settings, the disks: every disk whole, formatted or not; the system one ne
     assert.equal(await card('sdd').getByRole('button', { name: 'Move the machines here...' }).isEnabled(), true);
     await me.page.screenshot({ path: join(b.dir, 'disks.png'), fullPage: true });
     if (process.env.SHOTS) await me.page.locator('#move-machines-box').screenshot({ path: join(process.env.SHOTS, 'disks.png') });
+    /* The system's volume, made small at installation: its unused room offered, asked twice, given while it runs. */
+    assert.match(await card('sda').innerText(), /1\.7 TB of this disk is set aside but not used/);
+    const give = card('sda').getByRole('button', { name: /^Give 1\.7 TB to the system/ });
+    await give.click();
+    assert.match(await card('sda').getByRole('button', { name: /^Yes: grow \/ by 1\.7 TB$/ }).innerText(), /grow/);
+    await card('sda').getByRole('button', { name: /^Yes: grow/ }).click();
+    await me.until('grown', async () => /\/ has grown: 1\.8 TB now\./.test(await me.page.locator('#move-machines-said').innerText()));
+    await me.until('no room left to offer', async () => !/set aside but not used/.test(await card('sda').innerText().catch(() => '')));
     /* Prepared: its name typed again, nothing before. */
     await card('sdb').getByRole('button', { name: 'Prepare for the machines...' }).click();
     const yes = card('sdb').getByRole('button', { name: 'Erase sdb' });

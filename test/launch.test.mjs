@@ -57,6 +57,28 @@ test('the launcher of Claude Code: its settings file says the rights chosen, the
     assert.match(said.stderr, /were not changed: it may ask before acting/);
 });
 
+test('the launcher of Claude Code gives it the chat as its own tools (Parley, MCP) once, by Claude Code itself; none without a chat; never in the way', (t) => {
+    const dir = home(t);
+    const chat = join(dir, 'work', '.parley'); mkdirSync(chat, { recursive: true });
+    const bin = join(dir, 'bin'); mkdirSync(bin);
+    const asked = join(dir, 'asked.txt');
+    /* A Claude Code that only notes what it is asked, and records the server as the real one does. */
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
+    const run = (env = {}) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}`, PARLEY_DIR: chat, ...env }, encoding: 'utf8' });
+    assert.equal(run().status, 0);
+    assert.equal(existsSync(asked), false, 'no chat (no server in its folder): nothing asked');
+    writeFileSync(join(chat, 'server.mjs'), '');
+    assert.equal(run().status, 0);
+    assert.equal(readFileSync(asked, 'utf8'), `mcp add --scope user parley -- node ${chat}/server.mjs --dir ${chat}\n`);
+    assert.equal(run().status, 0);
+    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).length, 1, 'declared already: Claude Code not asked again');
+    /* Claude Code refusing: said, and the tool starts all the same. */
+    rmSync(join(dir, '.claude.json')); writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const refused = run();
+    assert.equal(refused.status, 0);
+    assert.match(refused.stderr, /Parley was not given to Claude Code as tools: the command parley still works/);
+});
+
 test('a launcher named in the configuration is a script of config/launch; every launcher there parses', () => {
     for (const t of loadTools()) if (t.launch) assert.ok(existsSync(join(LAUNCH, t.launch)), `${t.id}: ${t.launch} is in config/launch`);
     for (const f of readdirSync(LAUNCH)) {

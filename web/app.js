@@ -3828,6 +3828,19 @@
                 }
                 card.append(line);
             }
+            /* ROOM SET ASIDE AND NOT USED (a volume made small at installation): given to it, while in use. */
+            for (const u of (d.unused ?? []).filter((x) => x.freeMb >= 1024)) {
+                const box = el('div', 'disk-room');
+                const where = u.mount === '/' ? 'the system (and the machines on it)' : u.mount;
+                box.append(el('p', '', `${size(u.freeMb)} of this disk is set aside but not used. It can be given to ${where}, while it runs: nothing is erased.`));
+                const go = el('button', 'primary', `Give ${size(u.freeMb)} to ${u.mount === '/' ? 'the system' : u.mount}...`); go.type = 'button';
+                go.addEventListener('click', () => {
+                    if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = `Yes: grow ${u.mount} by ${size(u.freeMb)}`; return; }
+                    go.disabled = true; said(`Growing ${u.mount}...`);
+                    void post(`${API}/machines/grow`, { mount: u.mount }).then((r) => { said(`${u.mount} has grown${r.sizeMb ? `: ${size(r.sizeMb)} now` : ''}.`); void paintMoveMachines(); void paintServer(); }).catch((error) => { said(error.message); go.disabled = false; });
+                });
+                box.append(go); card.append(box);
+            }
             /* PREPARE: erase it, one file system on it, mounted. Its name typed again. */
             if (!d.prepare) {
                 const box = el('div', 'disk-prepare');

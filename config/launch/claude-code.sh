@@ -17,4 +17,13 @@ esac
 [ $# -gt 0 ] || { echo "launch: no command to run" >&2; exit 64; }
 node "$(dirname "$0")/json-set.mjs" .claude/settings.json "$keys" \
     || echo "launch: the settings of Claude Code were not changed: it may ask before acting" >&2
+# PARLEY AS ITS OWN TOOLS (MCP): the chat of the conversation, when it has one (its folder holds
+# Parley's server), given to Claude Code as tools always in its list -- the same as the command
+# "parley", which stays. Declared once, by Claude Code itself (its other servers kept); looked for
+# in its settings first, since asking Claude Code takes seconds. Nothing stops the start.
+chat="${PARLEY_DIR:-/work/.parley}"
+if [ -f "$chat/server.mjs" ] && ! grep -q "\"$chat/server.mjs\"" "$HOME/.claude.json" 2>/dev/null; then
+    claude mcp add --scope user parley -- node "$chat/server.mjs" --dir "$chat" >/dev/null 2>&1 \
+        || echo "launch: Parley was not given to Claude Code as tools: the command parley still works" >&2
+fi
 exec "$@"

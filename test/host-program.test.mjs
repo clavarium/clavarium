@@ -411,3 +411,11 @@ test('server logs / restart: a source and a span from fixed lists only', () => {
     assert.match(say('server', 'restart').stdout, /systemctl restart clavarium\.service/);
     assert.equal(say('server', 'restart', 'now').status, 64);
 });
+
+test('disks room / grow: read-only, and grown only at the system or under /mnt, /media, /home', () => {
+    const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
+    assert.equal(say('disks', 'room').status, 0);
+    assert.equal(say('disks', 'room', 'x').status, 64);
+    assert.match(say('disks', 'grow', '/').stdout, /lvextend -r -l \+100%FREE/);
+    for (const bad of ['/etc', '/var/lib', 'relative', '/mnt/../etc', '/mnt/a b']) assert.equal(say('disks', 'grow', bad).status, 78, bad);
+});

@@ -106,6 +106,9 @@ if (area === 'disks' || (area === 'machines' && ['places', 'old', 'moving'].incl
         dev('sdd', 'disk', 2000 * G, { model: 'Seagate Archive drive with a long name', children: [dev('sdd1', 'part', 2000 * G, { fstype: 'ext4', mountpoint: '/mnt/data' })] }),
     ];
     if (verb === 'list') { console.log(JSON.stringify({ blockdevices: list() })); process.exit(0); }
+    /* The system's volume made small at installation: room set aside until it is grown. */
+    if (verb === 'room') { console.log(`lvroom / /dev/mapper/vg-root vg ${done.grown ? 0 : 1740000} ext4`); process.exit(0); }
+    if (verb === 'grow') { if (argv[0] !== '/') { console.error('REFUSED: not that one'); process.exit(78); } done.grown = true; keep(); console.log('grown / 1840000'); process.exit(0); }
     if (verb === 'places') {
         console.log(['now /var/snap/multipass/common 2049 102400 61440', 'place /mnt/data 3000 2048000 1900000', ...(done.sdb ? ['place /mnt/sdb 3001 512000 500000'] : []), ...(done.sdc1 ? ['place /mnt/sdc1 3002 1024000 400'] : [])].join('\n'));
         process.exit(0);

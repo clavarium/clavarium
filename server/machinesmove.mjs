@@ -11,6 +11,8 @@
  *   disks()    the disks of this server, WHOLE, formatted or not (lsblk): for each,
  *              what can be done -- move the machines to one of its file systems,
  *              mount one, or prepare (erase) the disk; and why not
+ *   grow(mount) room set aside in a logical volume's group and not used, given to the
+ *              file system at `mount` while in use (disks() says it: unused, by disk)
  *   mount(path) / prepare(path, typed)   a file system mounted under /mnt for good;
  *              a whole disk erased, one ext4 on it, mounted (its name typed again)
  */
@@ -30,6 +32,16 @@ function aDisk(d) {
     /* (A conversation's own work disk is a loop device too, mounted elsewhere: never listed.) */
     if (d.type === 'loop') return FILE_SYSTEMS.includes(d.fstype) && /^\/(mnt|media)\//.test(d.mountpoint ?? '');
     return d.type === 'disk' && MB(d.size) >= 4096;
+}
+/* "disks room": [{ mount, volume, group, freeMb, fs }], only lines of the expected shape. */
+export function readRooms(text) {
+    const out = [];
+    for (const line of String(text ?? '').split('\n').slice(0, 50)) {
+        const p = line.trim().split(' ');
+        if (p[0] !== 'lvroom' || p.length !== 6 || !/^\/[A-Za-z0-9/._-]*$/.test(p[1]) || !/^\d+$/.test(p[4])) continue;
+        out.push({ mount: p[1], volume: p[2], group: p[3], freeMb: Number(p[4]), fs: p[5] });
+    }
+    return out;
 }
 /* lsblk -J (deploy/clavarium-host, "disks list") as the page needs it. */
 export function readDisks(json) {
@@ -97,9 +109,15 @@ export class MachinesMove {
         return { removed: true };
     }
     async disks() {
-        const [r, places] = await Promise.all([this.#host(['disks', 'list']), this.places().catch(() => null)]);
+        const [r, places, room] = await Promise.all([this.#host(['disks', 'list']), this.places().catch(() => null), this.#host(['disks', 'room']).catch(() => ({ code: 1 }))]);
         if (r.code !== 0) throw new Refusal(502, `The disks could not be listed: ${firstLine(r.stderr) || `exit ${r.code}`}`);
         const disks = readDisks(r.stdout);
+        /* Room set aside and not used (a logical volume made small at installation): said on its disk, offered. */
+        const rooms = room.code === 0 ? readRooms(room.stdout) : [];
+        for (const d of disks) {
+            const mounts = d.parts.map((p) => p.mount).filter(Boolean);
+            d.unused = rooms.filter((x) => mounts.includes(x.mount) || (d.system && x.mount === '/'));
+        }
         const now = places?.now?.place ?? null;
         for (const d of disks) for (const p of d.parts) {
             const at = places?.places.find((x) => x.at === p.mount);
@@ -109,6 +127,17 @@ export class MachinesMove {
         /* The machines' disk first, then the others by size. */
         disks.sort((a, b) => Number(b.parts.some((p) => p.machines)) - Number(a.parts.some((p) => p.machines)) || b.sizeMb - a.sizeMb);
         return { disks, needMb: places?.needMb ?? null, now };
+    }
+    /* That room given to the file system mounted at `mount`, while in use. */
+    async grow(mount) {
+        const { disks } = await this.disks();
+        const x = disks.flatMap((d) => d.unused).find((u) => u.mount === mount);
+        if (!x) throw new Refusal(404, 'There is no room set aside for that place.');
+        if (x.freeMb < 1024) throw new Refusal(409, 'Less than 1 GB is set aside there: nothing worth giving.');
+        const r = await this.#host(['disks', 'grow', mount], { timeoutMs: 600_000 });
+        if (r.code !== 0) throw new Refusal(r.code === 78 ? 409 : 502, firstLine(r.stderr) || `exit ${r.code}`);
+        const m = /^grown (\S+) (\d+)$/m.exec(String(r.stdout ?? ''));
+        return { grown: mount, sizeMb: m ? Number(m[2]) : null };
     }
     async mount(path) {
         const { disks } = await this.disks();

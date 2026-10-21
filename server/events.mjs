@@ -51,6 +51,7 @@ const SAID = [
     [/^\/api\/server\/reserve$/, 'server', (m, b) => `Reserve set${b.diskMb !== undefined ? `: disk ${b.diskMb} MB` : ''}${b.memoryMb !== undefined ? `, memory ${b.memoryMb} MB` : ''}`],
     [/^\/api\/machines\/move$/, 'server', (m, b) => `All the machines moved to ${clip(b.to, 60)}`],
     [/^\/api\/machines\/prepare$/, 'server', (m, b) => `Disk ${clip(b.path, 40)} erased and prepared for the machines`],
+    [/^\/api\/machines\/grow$/, 'server', (m, b, a) => `${clip(b.mount, 60)} grown with the room set aside on its disk${a?.sizeMb ? `: now ${Math.round(a.sizeMb / 1024)} GB` : ''}`],
     [/^\/api\/machines\/mount$/, 'server', (m, b) => `Disk ${clip(b.path, 40)} mounted`],
     [/^\/api\/machines\/forget-old$/, 'server', () => 'The old copy of the machines removed'],
     [/^\/api\/instance$/, 'server', (m, b) => (String(b.name ?? '').trim() ? `This Clavarium named "${clip(b.name, 40)}"` : 'This Clavarium given back the name drawn from its address')],

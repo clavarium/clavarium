@@ -699,6 +699,41 @@ case "$AREA $VERB" in
         if [ "$SAY" = "yes" ]; then echo "lsblk -J -b -o NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,MODEL,RO,RM,PKNAME,TRAN"; exit 0; fi
         lsblk -J -b -o NAME,PATH,TYPE,SIZE,FSTYPE,LABEL,UUID,MOUNTPOINT,MODEL,RO,RM,PKNAME,TRAN
         exit 0 ;;
+    "disks room")
+        # ROOM SET ASIDE AND NOT USED: a file system on a logical volume (LVM) whose group still has
+        # free space -- often the system's, made small at installation. Read-only.
+        #   lvroom <mount point> <volume> <group> <free MB> <file system>
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "findmnt; lvs; vgs (read-only)"; exit 0; fi
+        command -v lvs >/dev/null 2>&1 || exit 0
+        for at in / $(findmnt -rn -o TARGET | grep -E '^/(mnt|media)/[A-Za-z0-9/._-]+$|^/home$' || true); do
+            # (Most mounts are no logical volume: under pipefail, a refusal of lvs must not stop this program.)
+            src="$(findmnt -nvo SOURCE -- "$at" 2>/dev/null || true)"; [ -n "$src" ] || continue
+            fs="$(findmnt -nvo FSTYPE -- "$at" 2>/dev/null || true)"
+            vg="$( { lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
+            [ -n "$vg" ] || continue
+            free="$( { vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | cut -d. -f1)"
+            [[ "$free" =~ ^[0-9]+$ ]] || continue
+            printf 'lvroom %s %s %s %s %s\n' "$at" "$src" "$vg" "$free" "$fs"
+        done
+        exit 0 ;;
+    "disks grow")
+        # THAT ROOM GIVEN TO THE FILE SYSTEM, while it is in use (lvextend -r): the system's ("/"),
+        # or one under /mnt, /media, /home. Nothing on it is erased. Only ext4 and xfs.
+        [ $# -eq 1 ] || usage
+        case "$1" in /|/mnt/?*|/media/?*|/home) : ;; *) refuse "not a place that may be grown here: $1" ;; esac
+        [[ "$1" =~ ^/[A-Za-z0-9/._-]*$ ]] && [[ "$1" != *..* ]] || refuse "not a plain path: $1"
+        if [ "$SAY" = "yes" ]; then echo "lvextend -r -l +100%FREE <the volume of $1>"; exit 0; fi
+        mountpoint -q -- "$1" || refuse "nothing is mounted at $1"
+        src="$(findmnt -nvo SOURCE -- "$1")"; fs="$(findmnt -nvo FSTYPE -- "$1")"
+        case "$fs" in ext4|xfs) : ;; *) refuse "$1 holds $fs: only ext4 and xfs are grown here" ;; esac
+        vg="$( { lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
+        [ -n "$vg" ] || refuse "$1 is not on a logical volume: nothing set aside to give it"
+        free="$( { vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | cut -d. -f1)"
+        [ "${free:-0}" -ge 1024 ] || refuse "less than 1 GB set aside in $vg: nothing worth giving"
+        lvextend -q -r -l +100%FREE -- "$src" >/dev/null 2>&1 || refuse "the volume of $1 could not be grown"
+        printf 'grown %s %s\n' "$1" "$(df -Pm -- "$1" | awk 'NR==2 {print $2}')"
+        exit 0 ;;
     "disks mount")
         # A DISK (or a partition) THAT HOLDS A FILE SYSTEM, mounted under /mnt
         # for good (/etc/fstab, by its UUID, "nofail": the server starts without

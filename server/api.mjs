@@ -70,6 +70,7 @@
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
+ *   POST /api/machines/grow {mount}: room set aside and unused, given to that file system
  *   GET  /api/machines/disks: every disk, whole   POST /api/machines/mount {path}   POST /api/machines/prepare {path, typed}: erased
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
@@ -385,6 +386,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
         if (pathname === '/api/server/restart' && serverLogs) return send(202, await serverLogs.restart()), true;
+        if (pathname === '/api/machines/grow' && machinesMove) return send(200, await machinesMove.grow(String(body.mount ?? ''))), true;
         if (pathname === '/api/machines/mount' && machinesMove) return send(200, await machinesMove.mount(String(body.path ?? ''))), true;
         if (pathname === '/api/machines/prepare' && machinesMove) return send(200, await machinesMove.prepare(String(body.path ?? ''), body.typed)), true;
         if (pathname === '/api/machines/forget-old' && machinesMove) return send(200, await machinesMove.forgetOld()), true;
