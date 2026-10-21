@@ -43,10 +43,10 @@ test('away from the screen: the question of the tool is answered when all agree,
     /* The tool asks; nobody types the answer. */
     await me.type('read -p "Shall I go on? (y/n) " a; echo "it got: $a"');
     await me.sees('it got: y', 30_000);
-    await me.until('the list says who answered', async () => /answered in your place/.test(await me.page.locator('#items .item[aria-current=true]').innerText()), 20_000);
+    await me.until('the list says who answered', async () => /answered in your place/.test(await me.page.locator('#list .item[aria-current=true]').first().innerText()), 20_000);
     /* A question the charter does not cover: one reader doubts, nothing is typed, the owner is asked. */
     await me.type('read -p "Delete everything? (y/n) " a; echo "it got: $a"');
-    await me.until('the list says it waits for its owner', async () => /asks for you/.test(await me.page.locator('#items .item[aria-current=true]').innerText()), 30_000);
+    await me.until('the list says it waits for its owner', async () => /asks for you/.test(await me.page.locator('#list .item[aria-current=true]').first().innerText()), 30_000);
     assert.equal((await me.screen()).includes('it got: y\nready> read -p "Delete') && /it got: [yn]\s*$/.test((await me.screen()).trim().split('Delete everything?').at(-1)), false, 'nothing was answered');
     /* And the owner's phone is told, with where to go. */
     assert.deepEqual(alerted, [{ title: 'Clavarium: worker waits for you', body: 'reader-two: the charter does not allow deleting', url: '/?c=worker' }]);
@@ -63,7 +63,7 @@ test('away from the screen: the question of the tool is answered when all agree,
     /* The owner answers: one key, and the answerer is in service again. */
     await me.page.locator('#terminal').click(); await me.page.keyboard.type('n'); await me.page.keyboard.press('Enter');
     await me.sees('it got: n');
-    await me.until('it no longer asks for the owner', async () => /answered in your place/.test(await me.page.locator('#items .item[aria-current=true]').innerText()), 20_000);
+    await me.until('it no longer asks for the owner', async () => /answered in your place/.test(await me.page.locator('#list .item[aria-current=true]').first().innerText()), 20_000);
     /* Off: nobody answers. */
     assert.equal((await me.api('/api/conversations/worker/answerer', { on: false })).body.on, false);
     assert.deepEqual(me.errors, []);

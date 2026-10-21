@@ -33,16 +33,21 @@ test('what is said: the state, a machine that does not answer, memory, disk, fol
     assert.equal(judge({ state: 'Unknown' }).level, 'info', 'a VM manager that does not answer says nothing of the machine (vmwatch.mjs says it of all)');
     assert.equal(judge({ state: undefined }).problems[0].text, 'Its machine no longer exists.');
     assert.equal(judge({ state: 'Running', answering: false }).problems[0].text, 'Its machine does not answer. Restarting it usually helps.');
-    const full = judge({ state: 'Running', answering: true, oomKills: 3, memory: { totalMb: 1024, availableMb: 30 }, disks: { '/': { availableMb: 100, sizeMb: 8000 }, '/work': { availableMb: 50, sizeMb: 10000 } } });
+    const full = judge({ state: 'Running', answering: true, oomKills: 3, oomKinds: { machine: 3, limit: 0 }, memory: { totalMb: 1024, availableMb: 30 }, disks: { '/': { availableMb: 100, sizeMb: 8000 }, '/work': { availableMb: 50, sizeMb: 10000 } } });
     assert.equal(full.level, 'warn');
     assert.deepEqual(full.problems.map((p) => p.text), [
-        'It ran out of memory 3 times since it started: a program in it was stopped. Its files are safe.',
+        'The whole machine ran out of memory 3 times since it started: a program in it was stopped. Its files are safe.',
         'Its memory is almost full: 30 MB free of 1024 MB.',
         'Its disk is almost full: 100 MB left of 8000 MB.',
         'Its work folder (/work) is almost full: 50 MB left of 10000 MB.',
     ]);
-    /* What each is about, and a name that stays the same whatever its numbers (programs stopped for lack of memory: one a day). */
-    assert.deepEqual(full.problems.map((p) => [p.kind, p.key.replace(/^oom:\d{4}-\d\d-\d\d$/, 'oom:DAY')]), [['memory', 'oom:DAY'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
+    /* What each is about, and a name that stays the same whatever its numbers (the whole machine short again: a new one). */
+    assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom-machine:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
+    /* A program at the limit it was given: noted, quietly; the machine is fine. Not told apart: noted too. */
+    const limited = judge({ state: 'Running', answering: true, oomKills: 42, oomKinds: { machine: 0, limit: 42 }, memory: { totalMb: 4096, availableMb: 2200 } });
+    assert.equal(limited.level, 'info');
+    assert.deepEqual(limited.problems.map((p) => [p.level, p.key, p.text]), [['info', 'oom-limit', '42 programs were stopped at the memory limit given to them, since it started. The machine itself had room.']]);
+    assert.equal(judge({ state: 'Running', answering: true, oomKills: 2, memory: { totalMb: 4096, availableMb: 2200 } }).level, 'info');
     assert.equal(judge({ state: 'Running', answering: true, memory: { totalMb: 1024, availableMb: 12 } }).problems[0].key, 'memory-low');
     const folders = judge({ state: 'Running', answering: true, remounted: ['/work'], failed: [{ path: '/resources/a', why: 'refused' }], missing: ['/resources/a'] });
     assert.equal(folders.level, 'bad');
@@ -246,7 +251,7 @@ test('"Seen": what it says now no longer calls its owner; another problem does, 
     const h = new Health({ vms, conversations, seen: new Store(join(dir, 'seen.json')) });
     await h.check('demo');
     const keys = () => h.of('demo').problems.filter((p) => p.level !== 'info').map((p) => p.key);
-    assert.deepEqual(keys().map((k) => k.replace(/\d{4}-\d\d-\d\d/, 'DAY')), ['oom:DAY', 'disk:/'], 'stopped programs: one line a day, whatever their number');
+    assert.deepEqual(keys(), ['disk:/'], 'programs stopped (the kind not told): only noted');
     assert.deepEqual(h.of('demo').seen, []);
     assert.deepEqual(h.markSeen('demo').seen, keys());
     memory = 'memory 2097152 10000';
@@ -259,4 +264,11 @@ test('"Seen": what it says now no longer calls its owner; another problem does, 
     disk = 'disk / 300 8000';
     await h.check('demo', { asked: true });
     assert.ok(keys().includes('disk:/') && !h.of('demo').seen.includes('disk:/'), 'back: it calls again');
+});
+
+test('the probe tells the kernel\'s two kinds apart: the whole machine short, or a program at its own limit', () => {
+    const out = spawnSync('sh', ['-c', PROBE.split('\n').find((l) => l.includes('oomkinds')).replace('( sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null )', 'cat')], { input: ['[ 1.0] Memory cgroup out of memory: Killed process 3662 (python3) total-vm:59324kB', '[ 2.0] Memory cgroup out of memory: Killed process 3700 (node)', '[ 3.0] Out of memory: Killed process 812 (java) total-vm:9999kB', '[ 4.0] something else'].join('\n'), encoding: 'utf8' });
+    assert.equal(out.stdout.trim(), 'oomkinds 1 2');
+    assert.deepEqual(readProbe('oom 3\noomkinds 1 2\n', []).oomKinds, { machine: 1, limit: 2 });
+    assert.equal(readProbe('oom 3\n', []).oomKinds, undefined, 'not read: not said');
 });

@@ -48,6 +48,8 @@
   <!-- THE THREE PLACES of the owner's page: its conversations, who gets what
        (Access), and its settings. Bottom left on a wide screen; a bar along
        the bottom on a phone. -->
+  <!-- THE LIST'S WIDTH: dragged on its edge (or arrows), kept on this device; a double click gives it back. -->
+  <div id="list-resize" role="separator" aria-orientation="vertical" aria-label="Width of the list" title="Drag to widen or narrow the list; double click for its usual width" tabindex="0" hidden></div>
   <nav id="nav" aria-label="Places" hidden>
     <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="message-square"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Conversations</span></button>
     <button type="button" id="nav-assets" data-place="assets"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="layers"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span></button>
@@ -76,7 +78,7 @@
         <button type="button" id="health-disk" hidden>Give it more disk...</button>
         <button type="button" id="health-restart">Restart...</button>
         <button type="button" id="health-terminal" hidden>See the terminal</button>
-        <button type="button" id="health-dismiss" aria-label="Seen: no longer in Needs you" title="Seen: no longer in Needs you, until something else comes">Seen</button>
+        <button type="button" id="health-dismiss" aria-label="Seen: no longer in Needs you" title="Seen: no longer in Needs you, until something else comes">&#x2713; Seen</button>
       </span>
     </div>
     <div id="signin-strip" hidden>

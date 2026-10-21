@@ -334,7 +334,7 @@ if (area === 'vm') {
             /* A machine that does not answer: the channel into it fails. */
             if (h.silent) { console.error('exec failed: ssh connection timed out'); process.exit(2); }
             const { memory } = sizeOf(vm);
-            const lines = [`memory ${memory * 1024} ${(h.availableMb ?? Math.round(memory * 0.6)) * 1024}`, `oom ${h.oom ?? 0}`, `disk / ${h.diskLeftMb ?? 5000} 8000`];
+            const lines = [`memory ${memory * 1024} ${(h.availableMb ?? Math.round(memory * 0.6)) * 1024}`, `oom ${h.oom ?? 0}`, ...(h.oomMachine !== undefined || h.oomLimit !== undefined ? [`oomkinds ${h.oomMachine ?? 0} ${h.oomLimit ?? 0}`] : []), `disk / ${h.diskLeftMb ?? 5000} 8000`];
             for (const path of rest.slice(3)) {
                 const link = inVm(vm, path);
                 const there = lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink() && existsSync(link);

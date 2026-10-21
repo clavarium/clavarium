@@ -164,10 +164,10 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.create('roomy');
     /* It talks through the app: what is wrong with its machine is said in its chat too. */
     await me.api('/api/conversations/roomy/talk', { on: true });
-    report(b, 'roomy', { oom: 2, availableMb: 20, diskLeftMb: 50 });
+    report(b, 'roomy', { oom: 2, oomMachine: 2, availableMb: 20, diskLeftMb: 50 });
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();
-    await me.until('it is said', async () => /ran out of memory 2 times/.test(await me.page.locator('#machine-health').innerText()));
+    await me.until('it is said', async () => /whole machine ran out of memory 2 times/.test(await me.page.locator('#machine-health').innerText()));
     const said = await me.page.locator('#machine-health').innerText();
     assert.match(said, /Its memory is almost full: 20 MB free of 768 MB/);
     assert.match(said, /Its disk is almost full: 50 MB left/);
@@ -178,9 +178,9 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-disk option[value="8"]').innerText(), '8 GB (now)');
     /* Over its screen: "More memory..." opens its memory, the next size up picked, nothing applied yet. */
     await me.page.goBack();
-    assert.match(await me.page.locator('#health-text').innerText(), /ran out of memory 2 times/);
+    assert.match(await me.page.locator('#health-text').innerText(), /whole machine ran out of memory 2 times/);
     /* Its disk short of room: what takes it (its terminal) and a larger disk are offered too. */
-    assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', 'Seen']);
+    assert.deepEqual(await me.page.locator('#health-strip .health-actions button:visible').allInnerTexts(), ['More memory...', 'See what takes room', 'Give it more disk...', 'Restart...', '\u2713 Seen']);
     await me.page.locator('#health-disk').click();
     await me.until('its disk, ready to be chosen', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'machine-disk');
     assert.equal(await me.page.locator('#machine-disk').inputValue(), '10');
@@ -192,8 +192,8 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.page.goBack();
     await me.page.locator('#view-chat').click();
     const line = me.page.locator('#simple-thread .parley-system');
-    await me.until('a line of the machine in its chat', async () => /ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
-    assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal', 'Seen']);
+    await me.until('a line of the machine in its chat', async () => /whole machine ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
+    assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal', '\u2713 Seen']);
     assert.equal(await me.page.locator('#health-room').isVisible(), true, 'the strip offers its terminal over the chat');
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
@@ -235,7 +235,7 @@ test('Needs you for a machine that needs a hand, not for programs once stopped f
     const me = await b.person();
     await me.create('quiet');
     await me.create('short');
-    report(b, 'quiet', { oom: 5 });
+    report(b, 'quiet', { oom: 5, oomMachine: 0, oomLimit: 5 });
     report(b, 'short', { diskLeftMb: 50 });
     for (const n of ['quiet', 'short']) await me.api(`/api/conversations/${n}/health`, {});
     await me.page.reload();
@@ -244,8 +244,10 @@ test('Needs you for a machine that needs a hand, not for programs once stopped f
     assert.deepEqual(await needsRows(), ['short'], 'programs stopped once for lack of memory: only said');
     assert.ok(!(await me.page.evaluate(() => [...document.querySelectorAll('#recent .item.copy')].filter((x) => x.dataset.name === 'short').length > 1)), 'not said twice: not in Recent too');
     /* Seen, from its strip. */
-    await me.page.locator('#items .item[data-name="short"]').click();
+    assert.equal(await me.page.locator('#items .item[data-name="short"]').count(), 0, 'said once: in Needs you, not again in the list under it');
+    await me.page.locator('#recent .item[data-name="short"]').click();
     await me.until('its strip', async () => me.page.locator('#health-strip').isVisible());
+    if (process.env.SHOTS) { await me.page.waitForTimeout(800); await me.page.screenshot({ path: join(process.env.SHOTS, 'seen-strip.png') }); }
     await me.page.locator('#health-dismiss').click();
     await me.until('seen, out of Needs you', async () => (await me.page.locator('#recent .list-fold[data-section="needs"]').count()) === 0);
     await me.page.reload();

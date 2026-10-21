@@ -260,6 +260,14 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     assert.ok((await me.page.locator('#items .item').count()) >= 3, 'the groups are still there');
     await me.page.locator('#recent .list-fold[data-section="recent"]').click();
     await me.until('open again', async () => (await me.page.locator('#recent .item').count()) === 3);
+    /* The groups fold as a whole too: how many said, kept on this device. */
+    await me.page.locator('#recent .list-fold[data-section="groups"]').click();
+    await me.until('groups folded', async () => (await me.page.locator('#items .item, #items .group').count()) === 0);
+    assert.equal(await me.page.locator('#recent .list-fold[data-section="groups"] .list-count').innerText(), '2', 'Box, and those in no group');
+    await me.page.reload();
+    await me.until('still folded', async () => (await me.page.locator('#recent .list-fold[data-section="groups"]').getAttribute('aria-expanded')) === 'false');
+    await me.page.locator('#recent .list-fold[data-section="groups"]').click();
+    await me.until('groups open again', async () => (await me.page.locator('#items .group').count()) === 2);
     /* A tap on a row of Recent opens it. */
     await me.page.locator('#recent .item[data-name="second"]').click();
     await me.until('opened', async () => new URL(me.page.url()).searchParams.get('c') === 'second');
@@ -272,12 +280,42 @@ test('Recent: the last four, then "Show more"; the list scrolls as one, never a 
     await made(me, [['One', 'Box'], ['Two', ''], ['Three', ''], ['Four', ''], ['Five', ''], ['Six', 'Box']]);
     await me.page.reload();
     await me.until('Recent is there', async () => (await me.page.locator('#recent .item').count()) === 4);
-    assert.equal(await me.page.locator('#recent .more-recent').innerText(), 'Show more (2)');
+    assert.equal(await me.page.locator('#recent .more-recent').getAttribute('aria-label'), 'Show 2 more');
     await me.page.locator('#recent .more-recent').click();
     await me.until('all of them', async () => (await me.page.locator('#recent .item').count()) === 6);
-    assert.equal(await me.page.locator('#recent .more-recent').innerText(), 'Show fewer');
+    assert.equal(await me.page.locator('#recent .more-recent').getAttribute('aria-label'), 'Show fewer');
     /* No box scrolls on its own inside the list. */
     const inner = await me.page.evaluate(() => [...document.querySelectorAll('#list *')].filter((e) => { const s = getComputedStyle(e); return /auto|scroll/.test(s.overflowY) && e.scrollHeight > e.clientHeight + 1; }).map((e) => e.id || e.className));
     assert.deepEqual(inner, []);
+    assert.deepEqual(me.errors, []);
+});
+
+test('the list\'s width: dragged on its edge, kept on this device, bounded; a double click gives it back', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await made(me, [['Alpha', 'Box']]);
+    await me.page.reload();
+    const width = () => me.page.evaluate(() => Math.round(document.getElementById('list').getBoundingClientRect().width));
+    await me.until('listed', async () => (await me.page.locator('#items .item').count()) === 1);
+    assert.equal(await width(), 260);
+    const handle = await me.page.locator('#list-resize').boundingBox();
+    await me.page.mouse.move(handle.x + handle.width / 2, handle.y + 200);
+    await me.page.mouse.down(); await me.page.mouse.move(380, handle.y + 200, { steps: 5 }); await me.page.mouse.up();
+    assert.ok(Math.abs((await width()) - 380) <= 6, String(await width()));
+    await me.page.reload();
+    await me.until('kept after a reload', async () => Math.abs((await width()) - 380) <= 6);
+    /* Never wider than half the window. */
+    const h2 = await me.page.locator('#list-resize').boundingBox();
+    await me.page.mouse.move(h2.x + h2.width / 2, h2.y + 200); await me.page.mouse.down(); await me.page.mouse.move(1100, h2.y + 200, { steps: 5 }); await me.page.mouse.up();
+    assert.ok((await width()) <= 600, String(await width()));
+    /* The keyboard, then a double click: its usual width. */
+    await me.page.locator('#list-resize').focus(); await me.page.keyboard.press('Home');
+    assert.equal(await width(), 200);
+    await me.page.locator('#list-resize').dblclick();
+    assert.equal(await width(), 260);
+    assert.equal(await me.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    /* None on a phone: the list is the whole screen there. */
+    const phone = await b.person({ phone: true });
+    assert.equal(await phone.page.locator('#list-resize').isVisible(), false);
     assert.deepEqual(me.errors, []);
 });

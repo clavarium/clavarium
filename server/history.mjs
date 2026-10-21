@@ -68,9 +68,11 @@ export class History {
             const running = rss !== undefined;
             const key = this.#keys.get(m.name);
             /* A program stopped for lack of memory since the last look: a mark on the curve. */
-            const oom = Number.isInteger(h?.oomKills) && key?.oom !== null && key?.oom !== undefined && h.oomKills > key.oom;
+            /* The whole machine short of memory, when the kind is known; a program at its own limit is no mark. */
+            const kills = h?.oomKinds ? h.oomKinds.machine : h?.oomKills;
+            const oom = Number.isInteger(kills) && key?.oom !== null && key?.oom !== undefined && kills > key.oom;
             this.#push(m.name, t, running ? { memory, cpu, disk: d ? pct(d.sizeMb - d.availableMb, d.sizeMb) : null } : { memory: null, cpu: null, disk: null }, oom);
-            if (Number.isInteger(h?.oomKills)) this.#keys.get(m.name).oom = h.oomKills;
+            if (Number.isInteger(kills)) this.#keys.get(m.name).oom = kills;
         }
         if (this.#file && t - this.#savedAt >= SAVE_MS) this.save();
     }

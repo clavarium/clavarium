@@ -34,6 +34,37 @@
     const noTerminal = () => DEVICE && !deviceParts.terminal;
     /* A phone: what needs a wide screen (the Machine chapter's sizes) is not offered there. */
     const narrow = () => matchMedia('(max-width: 700px)').matches;
+    /* THE LIST'S WIDTH, on this device: between LIST_MIN and LIST_MAX (never more than half the window). */
+    const LIST_WIDTH = 'clavarium-list-width'; const LIST_MIN = 200; const LIST_MAX = 560; const LIST_USUAL = 260;
+    const listWidth = (px) => {
+        const w = Math.round(Math.max(LIST_MIN, Math.min(LIST_MAX, innerWidth / 2, px)));
+        document.getElementById('app')?.style.setProperty('--list-width', `${w}px`);
+        const handle = document.getElementById('list-resize');
+        if (!handle) return w;
+        handle.setAttribute('aria-valuenow', String(w)); handle.setAttribute('aria-valuemin', String(LIST_MIN)); handle.setAttribute('aria-valuemax', String(LIST_MAX));
+        return w;
+    };
+    const keepWidth = (w) => { try { if (w === LIST_USUAL) localStorage.removeItem(LIST_WIDTH); else localStorage.setItem(LIST_WIDTH, String(w)); } catch { /* this page only */ } };
+    (() => {
+        /* A page with no list of its own (a device's) has nothing to widen. */
+        const handle = document.getElementById('list-resize');
+        if (!handle) return;
+        let kept = LIST_USUAL; try { kept = Number(localStorage.getItem(LIST_WIDTH)) || LIST_USUAL; } catch { /* none */ }
+        listWidth(kept);
+        let drag = null;
+        handle.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; drag = { id: e.pointerId }; handle.setPointerCapture(e.pointerId); handle.dataset.dragging = 'true'; e.preventDefault(); });
+        handle.addEventListener('pointermove', (e) => { if (!drag || e.pointerId !== drag.id) return; listWidth(e.clientX - document.getElementById('app').getBoundingClientRect().left); });
+        const end = (e) => { if (!drag || e.pointerId !== drag.id) return; drag = null; delete handle.dataset.dragging; keepWidth(Number(handle.getAttribute('aria-valuenow'))); };
+        handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
+        handle.addEventListener('dblclick', () => keepWidth(listWidth(LIST_USUAL)));
+        handle.addEventListener('keydown', (e) => {
+            const now = Number(handle.getAttribute('aria-valuenow')) || LIST_USUAL;
+            const to = e.key === 'ArrowLeft' ? now - 16 : e.key === 'ArrowRight' ? now + 16 : e.key === 'Home' ? LIST_MIN : e.key === 'End' ? LIST_MAX : e.key === 'Enter' ? LIST_USUAL : null;
+            if (to === null) return;
+            e.preventDefault(); keepWidth(listWidth(to));
+        });
+        addEventListener('resize', () => listWidth(Number(handle.getAttribute('aria-valuenow')) || LIST_USUAL));
+    })();
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
     const $ = (id) => document.getElementById(id) ?? document.createElement('div');
@@ -936,7 +967,7 @@
     /* `label`: the name shown; the conversations in no group are one of their own ("Not filed", key NONE). */
     const NONE = '\u0000none';
     /* The two sections above the groups, folded or not like a group (never a group's name: those are plain words). */
-    const NEEDS = '\u0001needs'; const RECENT = '\u0001recent';
+    const NEEDS = '\u0001needs'; const RECENT = '\u0001recent'; const GROUPS = '\u0001groups';
     function groupBox(g, inside, all, open, label = g) {
         const box = document.createElement('div'); box.className = 'group'; box.dataset.group = g === NONE ? '' : g;
         const head = document.createElement('button'); head.type = 'button'; head.className = 'group-head'; head.dataset.group = g === NONE ? '' : g;
@@ -963,6 +994,8 @@
     }
     function paint() {
         if (listHeld) { paintLater = true; return; }
+        /* The groups, folded as a whole or not (a search shows them all). */
+        let groupsOpen = true;
         const items = $('items');
         items.replaceChildren();
         const top = $('recent'); top.replaceChildren();
@@ -978,7 +1011,7 @@
             /* A section that folds: open at first, folded or not on this device as its owner leaves it. */
             const section = (key, label, count) => {
                 const open = !folded.has(key);
-                const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = key === NEEDS ? 'needs' : 'recent';
+                const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = key === NEEDS ? 'needs' : key === RECENT ? 'recent' : 'groups';
                 b.setAttribute('aria-expanded', String(open));
                 const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
                 /* How many, only when folded: open, its rows (and "Show more") say it. */
@@ -1000,19 +1033,24 @@
                 top.append(...recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true)));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
-                    more.textContent = showAllRecent ? 'Show fewer' : `Show more (${recent.length - few})`;
+                    /* A chevron, centred: the words for the pointer and for a screen reader. */
+                    const words = showAllRecent ? 'Show fewer' : `Show ${recent.length - few} more`;
+                    more.replaceChildren(Object.assign(document.createElement('span'), { className: 'more-chevron', textContent: showAllRecent ? '\u2303' : '\u2304' }));
+                    more.title = words; more.setAttribute('aria-label', words); more.setAttribute('aria-expanded', String(showAllRecent));
                     more.addEventListener('click', () => { showAllRecent = !showAllRecent; paint(); });
                     top.append(more);
                 }
             }
             /* GROUPS: the order chosen by hand, and those in no group as one of their own. */
             if (groups.length) {
-                top.append(heading('Groups'));
                 const loose = shown.filter((c) => !c.group);
-                if (loose.length) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
+                groupsOpen = section(GROUPS, 'Groups', groups.length + (loose.length ? 1 : 0));
+                if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
             } else {
-                /* No group yet: one list, each with what was said last and when. */
-                items.append(...shown.map((c) => itemButton(c, false, true)));
+                /* No group yet: one list, each with what was said last and when -- without those in Needs you
+                   just above (said once), under a heading of its own when Needs you is there. */
+                if (needs.length) top.append(heading('Conversations'));
+                items.append(...shown.filter((c) => !needsYou(c)).map((c) => itemButton(c, false, true)));
                 if (conversations.length > 1) {
                     const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = 'Put conversations in groups to find them by subject: open one, then Settings, Group.';
                     items.append(tip);
@@ -1020,6 +1058,7 @@
             }
         }
         for (const g of groups) {
+            if (!groupsOpen) break;
             const inside = shown.filter((c) => c.group === g);
             /* Nothing of it in sight (all hidden, or nothing found): not shown. */
             if (inside.length === 0) continue;
@@ -1220,7 +1259,7 @@
                 if (!r.ok) throw new Error('no api');
                 conversations = await r.json();
                 await readDevices();
-                $('list').hidden = false; $('back').hidden = false; $('nav').hidden = false;
+                $('list').hidden = false; $('back').hidden = false; $('nav').hidden = false; $('list-resize').hidden = false;
             }
             home = true;
             if (conversations.find((x) => x.name === current)?.answerer?.needs) $('room').setAttribute('data-asking', '');
@@ -2235,7 +2274,7 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: 'Seen' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {

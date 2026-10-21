@@ -26,6 +26,9 @@
 export const PROBE = [
     'awk \'/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print "memory", t+0, a+0}\' /proc/meminfo',
     'awk \'$1=="oom_kill"{n=$2} END{print "oom", n+0}\' /proc/vmstat',
+    /* Which kind, from the kernel's own words: the whole machine short ("Out of memory"), or a program
+       at the limit it was given ("Memory cgroup out of memory"). Read with sudo when it may; else not said. */
+    '( sudo -n dmesg 2>/dev/null || dmesg 2>/dev/null ) | awk \'/Memory cgroup out of memory: Killed process/{l++; next} /Out of memory: Killed process/{g++} END{if (NR) print "oomkinds", g+0, l+0}\'',
     'df -Pm / | awk \'NR==2{print "disk /", $4, $2}\'',
     'for p in "$@"; do',
     '  if awk -v p="$p" \'$2==p{f=1} END{exit !f}\' /proc/mounts; then',
@@ -65,6 +68,7 @@ export function readProbe(text, paths = []) {
         const [a, b, c] = parts.slice(1).map(whole);
         if (parts[0] === 'memory' && parts.length === 3 && a !== undefined && b !== undefined) facts.memory = { totalMb: Math.round(a / 1024), availableMb: Math.round(b / 1024) };
         if (parts[0] === 'oom' && parts.length === 2 && a !== undefined) facts.oomKills = a;
+        if (parts[0] === 'oomkinds' && parts.length === 3 && a !== undefined && b !== undefined) facts.oomKinds = { machine: a, limit: b };
         if (parts[0] === 'disk' && parts.length === 4 && disks.has(parts[1]) && b !== undefined && c !== undefined) facts.disks[parts[1]] = { availableMb: b, sizeMb: c };
         if (parts[0] === 'mount' && parts.length === 3 && expected.has(parts[2]) && MOUNT_STATES.has(parts[1])) facts.mounts[parts[2]] = parts[1];
     }
@@ -96,7 +100,13 @@ export function judge(record) {
     if (s === 'Running') {
         if (record.answering === false) add('bad', 'answer', 'silent', 'Its machine does not answer. Restarting it usually helps.');
         /* Said once a day at most, with how many: a tool that runs out of memory again and again (on purpose, sometimes) is one line, not one a look. */
-        if (record.oomKills > 0) add('warn', 'memory', `oom:${String(record.at ?? new Date().toISOString()).slice(0, 10)}`, `It ran out of memory${record.oomKills === 1 ? '' : ` ${record.oomKills} times`} since it started: a program in it was stopped. Its files are safe.`);
+        /* THE WHOLE MACHINE short of memory is said, each time it happens again; a program stopped at the
+           limit it was given (on purpose, often) is only noted, quietly. When the kind cannot be told, noted. */
+        const kinds = record.oomKinds;
+        if (kinds && kinds.machine > 0) add('warn', 'memory', `oom-machine:${kinds.machine}`, `The whole machine ran out of memory${kinds.machine === 1 ? '' : ` ${kinds.machine} times`} since it started: a program in it was stopped. Its files are safe.`);
+        const limited = kinds ? kinds.limit : 0;
+        if (limited > 0) add('info', 'memory', 'oom-limit', `${limited} program${limited === 1 ? ' was' : 's were'} stopped at the memory limit given to ${limited === 1 ? 'it' : 'them'}, since it started. The machine itself had room.`);
+        if (!kinds && record.oomKills > 0) add('info', 'memory', 'oom', `${record.oomKills} program${record.oomKills === 1 ? ' was' : 's were'} stopped for lack of memory since it started (whether the machine or a limit of their own, it could not be told). Its files are safe.`);
         if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
             if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
@@ -189,7 +199,7 @@ export class Health {
             }
         }
         return this.#keep(name, {
-            at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, disks: facts.disks,
+            at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, ...(facts.oomKinds ? { oomKinds: facts.oomKinds } : {}), disks: facts.disks,
             missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}),
             /* What was put back stays said until a later look finds nothing to put back. */
         });

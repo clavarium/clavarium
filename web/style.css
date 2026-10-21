@@ -23,7 +23,7 @@ button { font: 600 .8125rem var(--sans); color: var(--ink); background: var(--bu
 button.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 /* The list on the left, the three places under it, the conversation beside them. */
-#app { display: grid; grid-template-columns: 260px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
+#app { display: grid; grid-template-columns: var(--list-width, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
 #app:has(> #list[hidden]) #room { grid-column: 1 / -1; }
 #list { grid-column: 1; grid-row: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--panel); border-right: 1px solid var(--line); overflow-y: auto; }
 #list .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -1286,7 +1286,9 @@ select.pill { appearance: auto; }
 .item[data-when] > b { padding-right: 5.5em; }
 .item .when { position: absolute; top: 9px; right: 10px; max-width: 5em; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--ink2); }
 .item .last { display: block; color: var(--ink); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.more-recent { align-self: flex-start; }
+.more-recent { align-self: center; display: inline-flex; align-items: center; gap: 4px; padding: 2px 14px; border-radius: 999px; text-decoration: none; color: var(--ink2); }
+.more-recent:hover { color: var(--ink); background: var(--bar); }
+.more-chevron { font-size: 1.1rem; line-height: 1; }
 .list-tip { margin: 8px 2px; }
 /* Needs you and Recent above the groups, in the list's own scroll: never a box scrolled inside it
    (a row cut in half at its bottom). A few rows, then "Show all". */
@@ -1345,3 +1347,14 @@ select.pill { appearance: auto; }
 .list-fold:hover { color: var(--ink); }
 .list-chevron { width: 1em; text-align: center; }
 .list-count { margin-left: auto; font-weight: 400; letter-spacing: 0; font-variant-numeric: tabular-nums; }
+
+/* The list's width, dragged on its edge: a strip of a few pixels over the border, wider to the touch. */
+#list-resize { grid-column: 1; grid-row: 1 / span 2; justify-self: end; width: 9px; margin-right: -5px; z-index: 5; cursor: col-resize; touch-action: none; background: transparent; }
+#list-resize:hover, #list-resize:focus-visible, #list-resize[data-dragging] { background: color-mix(in srgb, var(--brass) 45%, transparent); outline: none; }
+@media (pointer: coarse) { #list-resize { width: 18px; margin-right: -9px; } }
+@media (max-width: 700px) { #list-resize { display: none; } }
+#app[data-list="folded"] #list-resize { display: none; }
+/* "Seen" stands apart from what acts on the machine: in the colour of what is fine. */
+.parley-act[data-act="seen"], #health-dismiss { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
+.parley-act[data-act="seen"]:hover, #health-dismiss:hover { background: color-mix(in srgb, var(--ok) 14%, transparent); }
+button.inline.more-recent { text-decoration: none; }
