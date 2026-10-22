@@ -26,4 +26,10 @@ if [ -f "$chat/server.mjs" ] && ! grep -q "\"$chat/server.mjs\"" "$HOME/.claude.
     claude mcp add --scope user parley -- node "$chat/server.mjs" --dir "$chat" >/dev/null 2>&1 \
         || echo "launch: Parley was not given to Claude Code as tools: the command parley still works" >&2
 fi
+# ITS PULSE: Claude Code's own hooks say to the chat that it acts, and when its turn ends, so that
+# the person sees "Working..." while it works without a word (parley pulse; nothing posted).
+if [ -f "$chat/server.mjs" ]; then
+    node "$(dirname "$0")/claude-pulse.mjs" "$chat" \
+        || echo "launch: the chat will not say when Claude Code works without a word" >&2
+fi
 exec "$@"

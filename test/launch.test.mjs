@@ -39,7 +39,8 @@ test('the launcher of Claude Code: its settings file says the rights chosen, the
     const dir = home(t);
     mkdirSync(join(dir, '.claude'));
     writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ theme: 'dark-ansi' }));
-    const run = (...args) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), ...args], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    /* No chat: this test is about the rights alone (where it runs may have a chat of its own). */
+    const run = (...args) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), ...args], { env: { ...process.env, HOME: dir, PARLEY_DIR: join(dir, 'no-chat') }, encoding: 'utf8' });
     const full = run('full', 'sh', '-c', 'echo "ran: $*"', 'x', '--dangerously-skip-permissions', 'a b');
     assert.equal(full.status, 0, full.stderr);
     assert.equal(full.stdout, 'ran: --dangerously-skip-permissions a b\n', 'its arguments, untouched');
@@ -77,6 +78,44 @@ test('the launcher of Claude Code gives it the chat as its own tools (Parley, MC
     const refused = run();
     assert.equal(refused.status, 0);
     assert.match(refused.stderr, /Parley was not given to Claude Code as tools: the command parley still works/);
+});
+
+test('the launcher of Claude Code gives the chat its pulse: hooks of Claude Code, the others kept, written once; none without a chat; never in the way', (t) => {
+    const dir = home(t);
+    const chat = join(dir, 'work', '.parley'); mkdirSync(chat, { recursive: true });
+    const bin = join(dir, 'bin'); mkdirSync(bin);
+    writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    mkdirSync(join(dir, '.claude'));
+    const theirs = { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'echo mine' }] }], Notification: [{ hooks: [{ type: 'command', command: 'notify' }] }] };
+    writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ theme: 'dark-ansi', hooks: theirs }));
+    const run = () => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}`, PARLEY_DIR: chat }, encoding: 'utf8' });
+    assert.equal(run().status, 0);
+    assert.deepEqual(settings(dir).hooks, theirs, 'no chat (no server in its folder): nothing added');
+    writeFileSync(join(chat, 'server.mjs'), '');
+    assert.equal(run().status, 0);
+    const pulse = (end) => [{ type: 'command', command: `parley pulse${end ? ' --end' : ''} --dir ${chat} >/dev/null 2>&1 || true` }];
+    const wanted = {
+        PreToolUse: [theirs.PreToolUse[0], { matcher: '*', hooks: pulse(false) }],
+        Notification: [theirs.Notification[0], { hooks: pulse(true) }],
+        UserPromptSubmit: [{ hooks: pulse(false) }],
+        Stop: [{ hooks: pulse(true) }],
+    };
+    assert.deepEqual(settings(dir).hooks, wanted, 'theirs kept, ours after them');
+    assert.equal(settings(dir).theme, 'dark-ansi');
+    const once = readFileSync(join(dir, '.claude', 'settings.json'), 'utf8');
+    assert.equal(run().status, 0);
+    assert.equal(readFileSync(join(dir, '.claude', 'settings.json'), 'utf8'), once, 'started again: the same, not added twice');
+    /* Ours, from an older start with another folder: replaced, not doubled. */
+    const old = settings(dir); old.hooks.Stop = [{ hooks: [{ type: 'command', command: 'parley pulse --end --dir /old >/dev/null 2>&1 || true' }] }];
+    writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify(old));
+    assert.equal(run().status, 0);
+    assert.deepEqual(settings(dir).hooks.Stop, [{ hooks: pulse(true) }]);
+    /* Hooks that are not an object: left as they are, said, and the tool starts. */
+    writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ hooks: [] }));
+    const refused = spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'echo', 'started'], { env: { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}`, PARLEY_DIR: chat }, encoding: 'utf8' });
+    assert.equal(refused.stdout, 'started\n');
+    assert.match(refused.stderr, /will not say when Claude Code works without a word/);
+    assert.deepEqual(settings(dir).hooks, []);
 });
 
 test('a launcher named in the configuration is a script of config/launch; every launcher there parses', () => {
