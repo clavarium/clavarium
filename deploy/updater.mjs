@@ -37,7 +37,8 @@
  *
  * AN UPDATE (apply), never while a machine is being built, moved or restarted:
  * a release is made; a backup of the server's data is taken (backup.sh
- * --server-only); the link is switched; the privileged programs of the new
+ * --server-only); the open pages are told and given NOTICE_MS to show the
+ * maintenance page (MAINTENANCE_BLOCK); the link is switched; the privileged programs of the new
  * release are put in place; the server restarts and must come up (health).
  * If it does not: the link goes back, the previous programs too, the data
  * backup is put back if the data format moved, the server restarts, and the
@@ -48,8 +49,9 @@
  * --------------------------------------------------------------------------- */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync, existsSync, symlinkSync, realpathSync, cpSync, openSync, closeSync, statfsSync, statSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync, existsSync, symlinkSync, realpathSync, cpSync, openSync, closeSync, statfsSync, statSync, chmodSync, mkdtempSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
 import { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM } from './tunnel.mjs';
@@ -79,6 +81,10 @@ const WATCH_EVERY_MS = 3600_000;
 const WATCH_RECENT_MS = 24 * 3600_000;
 const HISTORY_MAX = 30;
 const ASK_EVERY_MS = 6 * 3600_000;
+/* Between "Switching" said in state.json and the server stopped: the pages ask the server every
+   10 seconds at most (app.js), and the server says it in each answer (updates.mjs, notice): each
+   gives way to the maintenance page before the server goes. */
+export const NOTICE_MS = 15_000;
 const PROVENANCE = 'https://slsa.dev/provenance/v1';
 /* What the log of a failure keeps, at most (history entry `log`, shown behind "See the log"). */
 const LOG_MAX = 12_000;
@@ -102,6 +108,85 @@ export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand }
     renameSync(`${file}.new`, file);
     if (process.getuid?.() === 0) await run(['systemctl', 'try-restart', 'oauth2-proxy.service'], { timeoutMs: 60_000 });
     return true;
+}
+
+/* THE MAINTENANCE PAGE, kept by the updater: while the server is down (an update, a restart) the
+   front (Caddy) answers it instead of the sign-in proxy's "Bad Gateway". The sign-in proxy answers
+   502 in HTML when the server does not; the server's own errors are JSON and pass as they are. A
+   page gets the page (deploy/maintenance.html, copied OUTSIDE the releases: it is there during the
+   switch); a request of the page (/api/, /c/api/) gets JSON. install.sh writes the same block. */
+export const CADDYFILE = '/etc/caddy/Caddyfile';
+export const CADDY = '/usr/local/bin/caddy';
+export const MAINTENANCE_DIR = '/var/lib/clavarium/maintenance';
+export const MAINTENANCE_PAGE = fileURLToPath(new URL('maintenance.html', import.meta.url));
+/* What install.sh wrote before the maintenance page: replaced, once, by MAINTENANCE_BLOCK. */
+export const PLAIN_BLOCK = '\thandle {\n\t\treverse_proxy 127.0.0.1:4180\n\t}\n';
+export const MAINTENANCE_BLOCK = [
+    '\thandle {',
+    '\t\t# The server down (an update, a restart): the maintenance page (deploy/updater.mjs, MAINTENANCE_BLOCK).',
+    '\t\treverse_proxy 127.0.0.1:4180 {',
+    '\t\t\t@down {',
+    '\t\t\t\tstatus 502 503 504',
+    '\t\t\t\theader Content-Type text/html*',
+    '\t\t\t}',
+    '\t\t\thandle_response @down {',
+    '\t\t\t\theader Cache-Control no-store',
+    '\t\t\t\theader Retry-After 3',
+    '\t\t\t\theader X-Clavarium-Down 1',
+    '\t\t\t\t@api path /api/* /c/api/*',
+    '\t\t\t\thandle @api {',
+    '\t\t\t\t\theader Content-Type "application/json; charset=utf-8"',
+    '\t\t\t\t\trespond "{\\"error\\":\\"Clavarium is being updated or restarted: it comes back by itself in a moment.\\",\\"down\\":true}" 503',
+    '\t\t\t\t}',
+    '\t\t\t\thandle {',
+    `\t\t\t\t\troot * ${MAINTENANCE_DIR}`,
+    '\t\t\t\t\trewrite * /index.html',
+    '\t\t\t\t\tfile_server {',
+    '\t\t\t\t\t\tstatus 503',
+    '\t\t\t\t\t}',
+    '\t\t\t\t}',
+    '\t\t\t}',
+    '\t\t}',
+    '\t}',
+    '',
+].join('\n');
+
+/* Idempotent, at each timer turn: the page copied when it differs; the block put in a Caddyfile
+   that has the plain one, checked by `caddy validate` first, then Caddy reloaded (a reload Caddy
+   refuses leaves the running site as it was: the file is put back). A Caddyfile changed by hand is
+   not touched. No Caddyfile (local mode, --core-only): nothing. { page, edge, why } */
+export async function ensureMaintenance({ caddyfile = CADDYFILE, caddy = CADDY, page = MAINTENANCE_PAGE, dir = MAINTENANCE_DIR, run = runCommand } = {}) {
+    let text;
+    try { text = readFileSync(caddyfile, 'utf8'); } catch { return { page: false, edge: false, why: '' }; }
+    const said = { page: false, edge: false, why: '' };
+    const html = readFileSync(page);
+    const file = join(dir, 'index.html');
+    let had = null;
+    try { had = readFileSync(file); } catch { /* not there */ }
+    if (!had?.equals(html)) {
+        mkdirSync(dir, { recursive: true, mode: 0o755 });
+        writeFileSync(`${file}.new`, html, { mode: 0o644 });
+        chmodSync(`${file}.new`, 0o644);
+        renameSync(`${file}.new`, file);
+        said.page = true;
+    }
+    if (text.includes(MAINTENANCE_BLOCK)) return said;
+    if (text.split(PLAIN_BLOCK).length !== 2) return { ...said, why: 'the Caddyfile is not the one install.sh wrote: the maintenance page is not added to it' };
+    const tmp = `${caddyfile}.new`;
+    writeFileSync(tmp, text.replace(PLAIN_BLOCK, MAINTENANCE_BLOCK), { mode: 0o644 });
+    /* Checked apart: what `caddy validate` keeps of its own goes to a folder of its own, never Caddy's. */
+    const own = mkdtempSync(join(tmpdir(), 'clavarium-caddy-'));
+    let checked;
+    try { checked = await run([caddy, 'validate', '--config', tmp, '--adapter', 'caddyfile'], { env: { ...process.env, XDG_DATA_HOME: own, XDG_CONFIG_HOME: own, HOME: own }, timeoutMs: 60_000 }); } finally { rmSync(own, { recursive: true, force: true }); }
+    if (checked.code !== 0) { rmSync(tmp, { force: true }); return { ...said, why: `caddy validate refused it: ${lastLine(checked)}` }; }
+    chmodSync(tmp, 0o644);
+    renameSync(tmp, caddyfile);
+    const reloaded = await run(['systemctl', 'try-reload-or-restart', 'caddy.service'], { timeoutMs: 60_000 });
+    if (reloaded.code === 0) return { ...said, edge: true };
+    writeFileSync(tmp, text, { mode: 0o644 });
+    renameSync(tmp, caddyfile);
+    await run(['systemctl', 'try-reload-or-restart', 'caddy.service'], { timeoutMs: 60_000 });
+    return { ...said, why: `Caddy did not take it (${lastLine(reloaded)}): the Caddyfile was put back` };
 }
 
 export class Refused extends Error {}
@@ -178,8 +263,8 @@ export class Updater {
     #o; #run; #fetch;
     constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, tunnelTarget = PATHS.tunnel, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
         verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, restarts, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
-        clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000 } = {}) {
-        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, clock, sleep, dropIn };
+        clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000, noticeMs = NOTICE_MS } = {}) {
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, noticeMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
         this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
         this.restart = restart ?? (() => this.#restart());
@@ -214,7 +299,8 @@ export class Updater {
         renameSync(`${file}.new`, file);
         return state;
     }
-    #step(action, version, step) { this.#o.log(`${action} ${version}: ${step}`); this.#save({ running: { action, version, step, since: (this.#state().running?.since) ?? this.#o.now().toISOString() } }); }
+    /* `since`: when the action began; `at`: when this step did (the server ignores an old step: updates.mjs, notice). */
+    #step(action, version, step) { this.#o.log(`${action} ${version}: ${step}`); this.#save({ running: { action, version, step, since: (this.#state().running?.since) ?? this.#o.now().toISOString(), at: this.#o.now().toISOString() } }); }
     #history(entry) {
         const state = this.#state();
         const history = [{ id: createHash('sha256').update(`${Date.now()}${Math.random()}`).digest('hex').slice(0, 12), at: this.#o.now().toISOString(), ...entry }, ...(state.history ?? [])].slice(0, HISTORY_MAX);
@@ -505,6 +591,8 @@ export class Updater {
     async #switchAndCheck(release, action, version) {
         try {
             this.#step(action, version, 'Switching');
+            /* The pages told first: they give way to the maintenance page while the server still answers. */
+            await this.#o.sleep(this.#o.noticeMs);
             this.switchTo(release.id);
             await this.installPrivileged(release.app);
         } catch (error) { return `it could not be put in place: ${error.message}`; }
@@ -823,6 +911,12 @@ async function main(argv) {
                 writeFileSync(join(PATHS.stateDir, 'relay.json.new'), `${JSON.stringify({ ...outcome, at: new Date().toISOString() })}\n`, { mode: 0o644 });
                 renameSync(join(PATHS.stateDir, 'relay.json.new'), join(PATHS.stateDir, 'relay.json'));
             } catch (error) { console.error(`updater: the relay could not be looked at: ${error.message}`); }
+            try {
+                const m = await ensureMaintenance();
+                if (m.page) console.error('updater: the maintenance page written');
+                if (m.edge) console.error('updater: the front serves the maintenance page while the server is down');
+                if (m.why) console.error(`updater: the maintenance page: ${m.why}`);
+            } catch (error) { console.error(`updater: the maintenance page could not be set: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }

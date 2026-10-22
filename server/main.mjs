@@ -13,6 +13,7 @@
  *       no VM: one tool on this machine, at /?c=<name>. For development.
  */
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -68,6 +69,7 @@ import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+const MAINTENANCE = 'deploy/maintenance.html';
 export const FILES = {
     '/': ['web/index.html', 'text/html; charset=utf-8'],
     '/app.js': ['web/app.js', 'text/javascript; charset=utf-8'],
@@ -82,6 +84,8 @@ export const FILES = {
     '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
     '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
+    /* The page shown while an update stops this server (app.js goes to it); the front serves the same file while it is down. */
+    '/maintenance.html': [MAINTENANCE, 'text/html; charset=utf-8'],
     /* The review's diff, drawn by diff2html (vendored, pinned: web/vendor/diff2html/LICENSE). */
     '/vendor/diff2html.js': ['web/vendor/diff2html/diff2html-ui-slim.min.js', 'text/javascript; charset=utf-8'],
     '/vendor/diff2html.css': ['web/vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
@@ -114,6 +118,13 @@ const HEADERS = {
     'referrer-policy': 'no-referrer',
     'cache-control': 'no-store',
 };
+/* The maintenance page is ONE file, its script in it: the front (Caddy) serves it alone while this
+   server is down. Here its script is allowed by its hash, and nothing else inline. */
+export const MAINTENANCE_HEADERS = (() => {
+    const script = /<script>([\s\S]*?)<\/script>/.exec(readFileSync(ROOT + MAINTENANCE, 'utf8'))?.[1] ?? '';
+    const hash = createHash('sha256').update(script).digest('base64');
+    return { ...HEADERS, 'content-security-policy': HEADERS['content-security-policy'].replace("default-src 'self';", `default-src 'self'; script-src 'sha256-${hash}';`) };
+})();
 
 export function option(argv, name, fallback) {
     const i = argv.indexOf(`--${name}`);
@@ -131,10 +142,15 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
     const sendFile = async (response, file) => {
         /* Several files are one, in their order. */
         const body = Array.isArray(file[0]) ? Buffer.concat((await Promise.all(file[0].map((f) => readFile(f.startsWith('/') ? f : ROOT + f)))).flatMap((b) => [b, Buffer.from('\n;\n')])) : await readFile(file[0].startsWith('/') ? file[0] : ROOT + file[0]);
-        response.writeHead(200, { ...HEADERS, 'content-type': file[1] }).end(body);
+        response.writeHead(200, { ...(file[0] === MAINTENANCE ? MAINTENANCE_HEADERS : HEADERS), 'content-type': file[1] }).end(body);
     };
     const server = createServer(async (request, response) => {
         const { pathname } = new URL(request.url ?? '/', 'http://local');
+        /* An update about to stop this server (updates.mjs, notice): said on every answer, so that
+           every page hears it at its next question, whatever it asks. */
+        try { const notice = updates?.notice(); if (notice) response.setHeader('x-clavarium-update', notice); } catch { /* never in the way of an answer */ }
+        /* The version that answers, to the page's own questions: a page loaded before an update starts again (app.js). */
+        if (platform?.version && (pathname.startsWith('/api/') || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
         /* The device door first, and apart: it never consults the gate. */
         /* An address that wakes a tool, called from outside by what its owner
            runs elsewhere: the address is the right. Nothing else is looked at,

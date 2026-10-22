@@ -77,6 +77,24 @@
     let socket;
     let wanted = false;          /* false while we closed the socket on purpose */
     let pollTimer;
+    /* AN UPDATE OR A RESTART (deploy/maintenance.html): the server says an update is about to stop
+       it (server/updates.mjs, notice), or the front says it is down: the page gives way to the
+       maintenance page, which comes back here by itself once the server answers again. And a page
+       older than the server (it slept through an update) starts again on the new one. True when
+       the page is leaving. */
+    let serverVersion = '';
+    const leaving = (r) => {
+        const update = r.headers.get('x-clavarium-update') ?? '';
+        if (update || r.headers.get('x-clavarium-down')) {
+            const [kind, to] = update ? update.split(' ') : ['', ''];
+            location.replace(`${DEVICE ? '/c' : ''}/maintenance.html?${new URLSearchParams({ kind, ...(to ? { to } : {}), back: location.pathname + location.search })}`);
+            return true;
+        }
+        const version = r.headers.get('x-clavarium-version') ?? '';
+        if (version && serverVersion && version !== serverVersion) { location.reload(); return true; }
+        serverVersion ||= version;
+        return false;
+    };
 
     const say = (label, kind) => { state.textContent = label; state.dataset.state = kind; };
     const show = (text, action, run, cancel) => {
@@ -1278,6 +1296,7 @@
             if (DEVICE) {
                 const mePath = () => `${API}/me?c=${encodeURIComponent(current)}`;
                 let r = await fetch(mePath());
+                if (leaving(r)) return;
                 if (r.status === 401) {
                     /* The session ended: the device signs again, quietly. */
                     const door = await window.clavariumDoor();
@@ -1296,6 +1315,7 @@
                 conversations = me.name ? [me] : []; current = me.name ?? '';
             } else {
                 const r = await fetch(`${API}/conversations`);
+                if (leaving(r)) return;
                 if (!r.ok) throw new Error('no api');
                 conversations = await r.json();
                 await readDevices();
@@ -4086,9 +4106,8 @@
         go.disabled = true;
         void post(`${API}/server/restart`, {}).then(() => {
             $('server-restart-said').textContent = 'Restarting: this page comes back by itself.';
-            /* Back once it answers again. */
-            const back = async () => { try { if ((await fetch(`${API}/updates`, { cache: 'no-store' })).ok) { location.reload(); return; } } catch { /* not yet */ } setTimeout(back, 2000); };
-            setTimeout(back, 5000);
+            /* The maintenance page waits for it (it answers a moment more before it stops), then comes back here. */
+            location.replace(`/maintenance.html?${new URLSearchParams({ kind: 'restart', back: location.pathname + location.search })}`);
         }).catch((error) => { $('server-restart-said').textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = 'Restart this server...'; });
     });
     /* THE CURVES (server/history.mjs): memory, CPU and disk over time, one small chart each, one

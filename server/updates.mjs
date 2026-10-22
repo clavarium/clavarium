@@ -11,6 +11,10 @@
  *
  * A failed update is told to the owner once: an alert on the devices that
  * asked for alerts (alerts.mjs), and the line in Settings.
+ *
+ * An update about to stop this server is told to every page (notice): a
+ * header on each answer, read by app.js, which gives way to the maintenance
+ * page (deploy/maintenance.html) until the new server answers.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
@@ -29,6 +33,12 @@ const HISTORY_SHOWN = 8;
 /* The updater's timer (install.sh): every 15 minutes, up to 3 more at random; the registry asked at most every 6 hours in mode "ask". */
 export const LOOK_EVERY_MS = 15 * 60_000;
 export const ASK_EVERY_MS = 6 * 3600_000;
+/* The updater's steps from which this server is about to stop (deploy/updater.mjs, #switchAndCheck). */
+export const STOPPING = ['Switching', 'Restarting'];
+/* A step older than this was not followed by a restart (an updater killed): no page is held by it. */
+export const NOTICE_STALE_MS = 10 * 60_000;
+/* state.json read for the notice at most this often: it is asked on every answer. */
+const NOTICE_READ_MS = 1000;
 
 /* WHEN IT WILL HAPPEN, for Settings: the updater's next look, and when an update may be installed. All times in
    milliseconds; the window is in this server's own time, as the updater reads it. */
@@ -60,11 +70,11 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 const RELAY_STATES = ['none', 'no-key', 'current', 'brought', 'refused', 'failed'];
 
 export class Updates {
-    #host; #state; #conf; #version; #store; #alerts; #timer; #lastLook; #lastLookCache = { at: 0, value: null };
+    #host; #state; #conf; #version; #store; #alerts; #timer; #lastLook; #lastLookCache = { at: 0, value: null }; #clock; #noticeCache = { at: -Infinity, value: '' };
 
     /* `host(argv)`: the host program. `store`: what was told already. */
-    constructor({ host, version, stateFile = STATE_FILE, confFile = CONF_FILE, store, alerts, lastLook = timerLastRun }) {
-        this.#lastLook = lastLook;
+    constructor({ host, version, stateFile = STATE_FILE, confFile = CONF_FILE, store, alerts, lastLook = timerLastRun, clock = () => Date.now() }) {
+        this.#lastLook = lastLook; this.#clock = clock;
         this.#host = host; this.#version = version; this.#state = stateFile; this.#conf = confFile; this.#store = store; this.#alerts = alerts;
     }
 
@@ -101,6 +111,21 @@ export class Updates {
             relay: (() => { try { const r = JSON.parse(readFileSync(join(dirname(this.#state), 'relay.json'), 'utf8')); return RELAY_STATES.includes(r.state) ? { state: r.state, version: typeof r.version === 'string' ? r.version : null, why: typeof r.why === 'string' ? r.why.slice(0, 300) : null, at: typeof r.at === 'string' ? r.at : null } : null; } catch { return null; } })(),
             history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null })),
         };
+    }
+
+    /* AN UPDATE ABOUT TO STOP THIS SERVER: 'update <version>', 'back <version>', or ''. Said only
+       from the step where the updater switches and restarts (it waits NOTICE_MS there, so that every
+       page hears it), only towards another version than this one (the new server, up while the
+       updater still watches it, says nothing), and only for a recent step. */
+    notice() {
+        const now = this.#clock();
+        if (now - this.#noticeCache.at < NOTICE_READ_MS) return this.#noticeCache.value;
+        const r = this.installed ? this.#read().running : null;
+        const at = Date.parse(r?.at ?? '');
+        const value = r && (r.action === 'update' || r.action === 'back') && STOPPING.includes(r.step) && VERSION.test(r.version ?? '') && r.version !== this.#version
+            && Number.isFinite(at) && now - at < NOTICE_STALE_MS ? `${r.action} ${r.version}` : '';
+        this.#noticeCache = { at: now, value };
+        return value;
     }
 
     /* The timer's last run, asked of systemd at most once a minute. */

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<!-- THE MAINTENANCE PAGE: one file, everything in it. Shown in two ways:
+     - by the edge (Caddy, see install.sh and deploy/updater.mjs, MAINTENANCE)
+       for any address while the server does not answer: an update, a restart.
+       It is kept outside the releases, so it is there during the switch;
+     - by the server itself (/maintenance.html), when a page learns that an
+       update is about to stop it (the header x-clavarium-update, app.js).
+     It asks the server every few seconds and goes back to where it was as
+     soon as the server answers again and no update is announced any more. -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#0f141a">
+<title>Clavarium</title>
+<style>
+  :root { --bg: #0f141a; --panel: #131a22; --line: #2b3745; --ink: #e7edf4; --ink2: #a3b1c2; --brass: #d2a94e; --on-brass: #1b1405; color-scheme: dark; }
+  @media (prefers-color-scheme: light) { :root { --bg: #fbfbfa; --panel: #ffffff; --line: #c5cdd8; --ink: #17202b; --ink2: #4f5d6d; --brass: #c79a3a; color-scheme: light; } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); }
+  body { min-height: 100dvh; display: grid; place-items: center; padding: 24px 16px; font: 1rem system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 30rem; text-align: center; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 18px 0 8px; overflow-wrap: anywhere; }
+  p { color: var(--ink2); margin: 6px 0; line-height: 1.45; }
+  .turning { width: 34px; height: 34px; margin: 0 auto; border-radius: 50%; border: 3px solid var(--line); border-top-color: var(--brass); animation: turn 1.1s linear infinite; }
+  @keyframes turn { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .turning { animation-duration: 4s; } }
+  #stuck { margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); text-align: left; }
+  #stuck p { margin: 0 0 10px; }
+  code { font: .8125rem ui-monospace, monospace; color: var(--ink); overflow-wrap: anywhere; }
+  button { font: 600 .875rem system-ui, sans-serif; color: var(--on-brass); background: var(--brass); border: 0; border-radius: 7px; padding: 8px 14px; cursor: pointer; }
+  [hidden] { display: none !important; }
+</style>
+<main>
+  <div class="turning" aria-hidden="true"></div>
+  <h1 id="title" aria-live="polite">Clavarium is being updated or restarted...</h1>
+  <p id="said">This page reloads by itself.</p>
+  <div id="stuck" hidden>
+    <p>This is taking longer than it should: something may have gone wrong.</p>
+    <p><button type="button" id="reload">Reload</button></p>
+    <p>On the server, what the updater did: <code>sudo journalctl -u clavarium-update -n 100</code>, and the server itself: <code>sudo journalctl -u clavarium -n 100</code>.</p>
+  </div>
+</main>
+<script>
+/* Asked this often; past STUCK_MS the page says something is wrong (and goes on asking). */
+const EVERY_MS = 2500;
+const STUCK_MS = 10 * 60_000;
+/* A restart asked from Settings: the server answers a moment more before it stops (two
+   seconds, serverlogs.mjs). That answer is not "back": it is, once it was seen down, or after this. */
+const RESTART_GRACE_MS = 20_000;
+const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
+
+/* WHAT IT DOES NEXT: 'back', 'wait' or 'stuck'. `answer`: null when nothing answered (the
+   network, or the edge itself), else { status, down, update }: down when the edge said the
+   server is down (or the sign-in proxy's bare 502, before the edge knew this page), update
+   when the server still announces an update about to stop it. */
+const next = ({ kind, startedAt, now, seenDown, answer }) => {
+    const up = !!answer && !answer.down && !answer.update && !(answer.status >= 502 && answer.status <= 504);
+    if (up && !(kind === 'restart' && !seenDown && now - startedAt < RESTART_GRACE_MS)) return 'back';
+    return now - startedAt > STUCK_MS ? 'stuck' : 'wait';
+};
+
+/* WHAT IT SAYS, from its address (?kind=update|back|restart&to=<version>): the edge serves
+   it at any address, with none of these: then it cannot know which. */
+const title = (kind, to) => {
+    const v = VERSION.test(to ?? '') ? to : '';
+    if (kind === 'update') return v ? `Updating Clavarium to ${v}...` : 'Updating Clavarium...';
+    if (kind === 'back') return v ? `Going back to Clavarium ${v}...` : 'Going back to the previous Clavarium...';
+    if (kind === 'restart') return 'Restarting Clavarium...';
+    return 'Clavarium is being updated or restarted...';
+};
+
+/* WHERE IT GOES BACK TO: the page it replaced (?back=, on this site only), else the address
+   it was served at (the edge's), else the start (this page asked for by its own name). */
+const backTo = (back, pathname, search) => {
+    if (/^\/(?![/\\])/.test(back ?? '')) return back;
+    if (pathname === '/maintenance.html') return '/';
+    if (pathname === '/c/maintenance.html') return '/c/';
+    return pathname + (search ?? '');
+};
+
+/* Only in a browser: the tests read the three functions above, and nothing starts. */
+if (typeof document !== 'undefined') {
+    const q = new URLSearchParams(location.search);
+    const kind = q.get('kind') ?? '';
+    const startedAt = Date.now();
+    let seenDown = false;
+    /* Something small the server answers without effort; a paired device's own door needs no sign-in. */
+    const ask = location.pathname.startsWith('/c/') ? '/c/manifest.webmanifest' : '/manifest.webmanifest';
+    const go = () => location.replace(backTo(q.get('back'), location.pathname, location.search));
+    document.getElementById('title').textContent = title(kind, q.get('to'));
+    document.getElementById('reload').addEventListener('click', go);
+    const look = async () => {
+        let answer = null;
+        try {
+            const r = await fetch(ask, { cache: 'no-store', redirect: 'manual', credentials: 'same-origin' });
+            /* A redirection (to sign in again) is an answer: it has no status to read. */
+            answer = { status: r.type === 'opaqueredirect' ? 0 : r.status, down: !!r.headers.get('x-clavarium-down'), update: r.headers.get('x-clavarium-update') ?? '' };
+        } catch { /* no answer */ }
+        if (!answer || answer.down || (answer.status >= 502 && answer.status <= 504)) seenDown = true;
+        const then = next({ kind, startedAt, now: Date.now(), seenDown, answer });
+        if (then === 'back') { go(); return; }
+        document.getElementById('stuck').hidden = then !== 'stuck';
+        setTimeout(look, EVERY_MS);
+    };
+    setTimeout(look, EVERY_MS);
+}
+</script>
+</html>

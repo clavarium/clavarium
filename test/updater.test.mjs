@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 
@@ -34,6 +34,8 @@ async function setup(t) {
     let clock = new Date(2026, 9, 18, 12, 0);
     /* What systemd says of the server, and whether it answers: up, unless a test says otherwise. */
     const service = { state: 'active', answers: true, restarts: 0 };
+    /* Waits take no time here; a test that wants to see one sets its own. */
+    const hooks = { sleep: async () => {} };
     const u = new Updater({
         ...dirs, registry: reg.origin, log: () => {}, now: () => clock, minFreeMb: 1,
         verifySignatures: async (dir) => { calls.push(`signatures ${basename(dir)}`); return { code: 0 }; },
@@ -49,8 +51,9 @@ async function setup(t) {
         serviceState: async () => service.state,
         answers: async () => service.answers,
         restarts: async () => service.restarts,
+        sleep: (ms) => hooks.sleep(ms),
     });
-    return { reg, u, dirs, calls, broken, publish, parley, service, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
+    return { reg, u, dirs, calls, broken, publish, parley, service, hooks, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
 }
 
 /* The first installation, as install.sh makes it: a release, then the link. */
@@ -439,4 +442,24 @@ test('the sign-in proxy: one CSRF cookie per sign-in, added once to a file that 
     writeFileSync(file, `${before}cookie_csrf_per_request = true\ncookie_csrf_expire = "30m"\n`);
     assert.equal(await ensureProxySettings({ file, run }), false);
     assert.ok(readFileSync(new URL('../deploy/install.sh', import.meta.url), 'utf8').includes(PROXY_LINES.join('\n')), 'install.sh writes the same lines');
+});
+
+test('the pages told before the server stops: "Switching" said in state.json, with its time, then a pause, then the switch and the restart', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.publish('1.0.1');
+    const seen = [];
+    s.hooks.sleep = async (ms) => { seen.push({ ms, running: s.u.about().running, current: s.current(), calls: [...s.calls] }); };
+    await s.u.apply('1.0.1');
+    assert.equal(seen.length, 1, 'one pause');
+    assert.equal(seen[0].ms, NOTICE_MS);
+    assert.ok(NOTICE_MS > 10_000, 'longer than the slowest question of a page (every 10 seconds, app.js)');
+    assert.equal(seen[0].running.step, 'Switching');
+    assert.equal(seen[0].running.version, '1.0.1');
+    assert.equal(seen[0].running.action, 'update');
+    assert.ok(Date.parse(seen[0].running.at) > 0, 'the time of the step, for the server to ignore an old one');
+    assert.equal(seen[0].current, '1.0.0', 'not switched yet');
+    assert.ok(!seen[0].calls.includes('restart'), 'not restarted yet');
+    assert.equal(s.current(), '1.0.1');
+    assert.equal(s.u.about().running, null, 'nothing announced once done');
 });

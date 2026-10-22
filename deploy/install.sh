@@ -554,6 +554,11 @@ fi
 # Caddy would keep that one for hours: clavarium-certificate.timer replaces it
 # with Let's Encrypt's as soon as it can (sudo clavarium doctor --certificate).
 BIND=""; [ -z "$RELAY" ] || BIND="	bind 127.0.0.1"
+# The page the front serves while the server is down (an update, a restart): kept outside the
+# releases, so it is there during the switch; kept up to date by the updater (ensureMaintenance).
+# A release from before it (--keep-release) has none: the updater writes it at its next turn.
+install -d -o root -g root -m 0755 /var/lib/clavarium/maintenance
+[ ! -f "$APP/deploy/maintenance.html" ] || install -o root -g root -m 0644 "$APP/deploy/maintenance.html" /var/lib/clavarium/maintenance/index.html
 # The probe's token: kept on a rerun (see deploy/doctor.mjs, probeBlock).
 # No Caddyfile yet (going online from local mode): no token, not a failure (pipefail).
 PROBE="$( { sed -n 's/.*respond "\([0-9a-f]\{32\}\)" 200.*/\1/p' /etc/caddy/Caddyfile 2>/dev/null || true; } | head -1)"
@@ -572,7 +577,30 @@ $BIND
 		reverse_proxy 127.0.0.1:5556
 	}
 	handle {
-		reverse_proxy 127.0.0.1:4180
+		# The server down (an update, a restart): the maintenance page (deploy/updater.mjs, MAINTENANCE_BLOCK).
+		reverse_proxy 127.0.0.1:4180 {
+			@down {
+				status 502 503 504
+				header Content-Type text/html*
+			}
+			handle_response @down {
+				header Cache-Control no-store
+				header Retry-After 3
+				header X-Clavarium-Down 1
+				@api path /api/* /c/api/*
+				handle @api {
+					header Content-Type "application/json; charset=utf-8"
+					respond "{\"error\":\"Clavarium is being updated or restarted: it comes back by itself in a moment.\",\"down\":true}" 503
+				}
+				handle {
+					root * /var/lib/clavarium/maintenance
+					rewrite * /index.html
+					file_server {
+						status 503
+					}
+				}
+			}
+		}
 	}
 }
 
