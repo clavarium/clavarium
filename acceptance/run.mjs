@@ -474,7 +474,7 @@ export async function run(o, log = console.log) {
             } finally { await p.close(); }
         });
 
-        await check('Chat: a labelled message, "Received, thinking...", then its agent answers', async (pic) => {
+        await check('Chat: a labelled message, "Received, thinking..." or "Working...", then its agent answers', async (pic) => {
             const before = await api(`/api/conversations/${encodeURIComponent(o.conversation)}/talk`);
             const known = new Set((before.messages ?? []).map((m) => m.id));
             const knownSteps = new Set((before.steps ?? []).map((s) => s.id));
@@ -484,9 +484,12 @@ export async function run(o, log = console.log) {
             await page.locator('#simple .parley-box').fill(MESSAGE);
             await page.locator('#simple .parley-send').click();
             const sentAt = Date.now();
-            let received = false; let working = false;
-            await until('"Received, thinking..." or its agent working', async () => {
+            let received = false; let working = false; let pulse = false;
+            /* Its tool's hooks say it works (Parley's pulse): "Working..." where "Received, thinking..." was. */
+            await until('"Received, thinking...", "Working..." or its agent working', async () => {
                 received = received || await shown(page, '#simple .parley-received');
+                pulse = pulse || await shown(page, '#simple .parley-now');
+                received = received || pulse;
                 working = working || (await page.locator('#simple .parley-status').getAttribute('data-state').catch(() => '')) === 'working';
                 return received || working;
             }, 3 * 60_000, 250);
@@ -506,7 +509,7 @@ export async function run(o, log = console.log) {
             await until('the chat on a phone', () => inChat(ppage), 30_000);
             await wait(1500);
             await pic(ppage, 'phone-chat-answer');
-            return `received shown: ${received}; status working: ${working}; answer "${said.text.slice(0, 60)}" after ${Math.round((Date.now() - sentAt) / 1000)} s; status done: ${done}`;
+            return `received or working shown: ${received}${pulse ? ' (its pulse: "Working...")' : ''}; status working: ${working}; answer "${said.text.slice(0, 60)}" after ${Math.round((Date.now() - sentAt) / 1000)} s; status done: ${done}`;
         });
 
         let repo = '';
