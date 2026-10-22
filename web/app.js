@@ -3601,6 +3601,17 @@
         if (!u) { if (updatesBusy && !$('settings').hidden) updatesTimer = setTimeout(() => { void paintUpdates(); }, 3000); return; }
         lastUpdates = u;
         $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
+        /* Its relay, kept at the version of each release by the updater -- or why not, and what to do once. */
+        const relay = u.relay;
+        const RELAY_SAID = {
+            brought: (r) => `The relay was brought to ${r.version} with this update.`,
+            current: (r) => `The relay is up to date (${r.version}).`,
+            refused: () => 'The relay does not take this server\'s maintenance key, so it is not kept up to date by itself. Once: on this server, sudo clavarium key gives its two keys; on the relay, run relay.sh again with --key and --keeper-key.',
+            'no-key': () => 'This server has no maintenance key for its relay: the relay is not kept up to date by itself (sudo clavarium online --relay HOST sets one up).',
+            failed: (r) => `The relay could not be brought up to date: ${r.why ?? 'unknown'}. Tried again at the next turn of the updater.`,
+        };
+        $('updates-relay').hidden = !relay || !RELAY_SAID[relay.state];
+        if (relay && RELAY_SAID[relay.state]) { $('updates-relay').textContent = RELAY_SAID[relay.state](relay); $('updates-relay').dataset.state = relay.state; }
         paintUpdatesWhen(u);
         void paintCertificate();
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;

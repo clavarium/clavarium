@@ -811,7 +811,15 @@ async function main(argv) {
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
             try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }
-            try { const { keepRelayCurrent, realSys } = await import('./online.mjs'); if (await keepRelayCurrent(realSys(), undefined, { done: join(PATHS.stateDir, 'relay-version') })) console.error('updater: the relay is at the version of this release'); } catch (error) { console.error(`updater: the relay could not be brought up to date: ${error.message}`); }
+            /* What became of the relay is kept beside the state, for Settings (server/updates.mjs: relay). */
+            try {
+                const { keepRelayCurrent, realSys } = await import('./online.mjs');
+                const outcome = await keepRelayCurrent(realSys(), undefined, { done: join(PATHS.stateDir, 'relay-version') }).catch((error) => ({ state: 'failed', why: error.message }));
+                if (outcome.state === 'brought') console.error('updater: the relay is at the version of this release');
+                if (outcome.state === 'refused' || outcome.state === 'failed') console.error(`updater: the relay could not be brought up to date: ${outcome.why}`);
+                writeFileSync(join(PATHS.stateDir, 'relay.json.new'), `${JSON.stringify({ ...outcome, at: new Date().toISOString() })}\n`, { mode: 0o644 });
+                renameSync(join(PATHS.stateDir, 'relay.json.new'), join(PATHS.stateDir, 'relay.json'));
+            } catch (error) { console.error(`updater: the relay could not be looked at: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }

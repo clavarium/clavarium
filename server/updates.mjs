@@ -14,6 +14,7 @@
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
 import { Refusal } from './conversations.mjs';
 import { compareVersions, inWindow } from '../deploy/updater.mjs';
 
@@ -56,6 +57,8 @@ function timerLastRun() {
 }
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.replace(/^REFUSED: /, '').slice(0, 300) ?? '';
 
+const RELAY_STATES = ['none', 'no-key', 'current', 'brought', 'refused', 'failed'];
+
 export class Updates {
     #host; #state; #conf; #version; #store; #alerts; #timer; #lastLook; #lastLookCache = { at: 0, value: null };
 
@@ -94,6 +97,8 @@ export class Updates {
             refused: s.refused ?? null,
             /* What can be gone back to: the kept releases that do not run. */
             back: releases.filter((r) => !r.current && (VERSION.test(r.id) || LOCAL.test(r.id))).map((r) => ({ id: r.id, version: r.version })),
+            /* What became of the relay at the updater's last turn (deploy/updater.mjs, relay.json beside the state). */
+            relay: (() => { try { const r = JSON.parse(readFileSync(join(dirname(this.#state), 'relay.json'), 'utf8')); return RELAY_STATES.includes(r.state) ? { state: r.state, version: typeof r.version === 'string' ? r.version : null, why: typeof r.why === 'string' ? r.why.slice(0, 300) : null, at: typeof r.at === 'string' ? r.at : null } : null; } catch { return null; } })(),
             history: (Array.isArray(s.history) ? s.history : []).slice(0, HISTORY_SHOWN).map(({ at, action, from, to, result, why, log }) => ({ at, action, from, to, result, why: why ?? null, log: typeof log === 'string' ? log : null })),
         };
     }

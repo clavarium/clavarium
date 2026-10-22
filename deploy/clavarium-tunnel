@@ -30,9 +30,11 @@ trap 'rm -f "$said"' EXIT
 started=$SECONDS
 ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o "IdentityFile=$home/key" -o "UserKnownHostsFile=$home/known_hosts" \
     -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -o ConnectTimeout=15 \
-    -R '*:8443:127.0.0.1:443' -R '*:8080:127.0.0.1:80' -p "$port" "clavarium-tunnel@$relay" 2> >(tee "$said" >&2)
+    -R '*:8443:127.0.0.1:443' -R '*:8080:127.0.0.1:80' -p "$port" "clavarium-tunnel@$relay" 2>"$said"
 code=$?
-wait 2>/dev/null
+# Said to the journal once it ended -- read through a second writer (tee) it could still be on its way
+# when it was looked at (found on a CI runner): the refusal then passed for a cut.
+cat "$said" >&2 2>/dev/null || true
 
 if grep -qE 'Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No matching host key|Too many authentication failures' "$said" 2>/dev/null; then
     n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))

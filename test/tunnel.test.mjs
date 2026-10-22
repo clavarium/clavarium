@@ -85,23 +85,26 @@ test('after an update, the relay is brought to the version this release names, o
     const sys = { run: async (argv) => { asked.push(argv.at(-1)); return { code: 0, stdout: '', stderr: '' }; } };
     const done = join(d, 'relay-version');
     const unit = join(d, 'tunnel.service');
-    assert.equal(await keepRelayCurrent(sys, P, { done, unit }), false, 'no relay');
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done, unit }), { state: 'none' }, 'no relay');
     /* An older install: no relay.conf, the relay read from its tunnel. */
     writeFileSync(join(P.access, 'keeper-key'), 'x');
     writeFileSync(unit, OLD);
     const seen = [];
-    assert.equal(await keepRelayCurrent({ run: async (argv) => { seen.push(argv.join(' ')); return { code: 0 }; } }, P, { done: join(d, 'v-old'), unit }), true);
+    assert.deepEqual(await keepRelayCurrent({ run: async (argv) => { seen.push(argv.join(' ')); return { code: 0 }; } }, P, { done: join(d, 'v-old'), unit }), { state: 'brought', version: '0.1.1' });
     assert.match(seen[0], new RegExp(`${at('clavarium-keeper').replace(/\./g, '\\.')} update-relay 0\\.1\\.1$`));
     rmSync(join(P.access, 'keeper-key'));
     writeFileSync(P.relayConf, 'HOST=relay.example.com\nPORT=22\n');
-    assert.equal(await keepRelayCurrent(sys, P, { done }), false, 'no maintenance key: nothing asked');
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'no-key' }, 'no maintenance key: nothing asked');
     writeFileSync(join(P.access, 'keeper-key'), 'x');
-    assert.equal(await keepRelayCurrent(sys, P, { done }), true);
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'brought', version: '0.1.1' });
     assert.deepEqual(asked, ['update-relay 0.1.1']);
-    assert.equal(await keepRelayCurrent(sys, P, { done }), false, 'once per version');
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'current', version: '0.1.1' }, 'once per version');
     assert.equal(asked.length, 1);
     writeFileSync(join(P.code, 'current', 'app', 'deploy', 'relay.sh'), 'RELAY_VERSION="0.1.2"\n');
     sys.run = async () => ({ code: 1, stdout: '', stderr: '' });
-    await assert.rejects(keepRelayCurrent(sys, P, { done }), /did not take 0\.1\.2/);
+    assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'failed', version: '0.1.2', why: 'the relay did not take 0.1.2 (exit 1)' });
+    /* A relay set up without this key (found on the test deployment): said for what it is. */
+    sys.run = async () => ({ code: 255, stdout: '', stderr: `${at('clavarium-keeper')}: Permission denied (publickey).` });
+    assert.equal((await keepRelayCurrent(sys, P, { done })).state, 'refused');
     assert.equal(readFileSync(done, 'utf8').trim(), '0.1.1', 'tried again at the next turn');
 });

@@ -23,3 +23,20 @@ test('as soon as out: the next look; ask: the registry asked every six hours; a 
     assert.equal(schedule({ mode: 'ask', window: '02:00-05:00', checkedAt: at(9).getTime(), now: at(10) }).askNextAt, at(9).getTime() + ASK_EVERY_MS);
     assert.equal(schedule({ mode: 'off', window: '02:00-05:00', now: at(10) }).windowOpensAt, undefined);
 });
+
+test('what became of the relay at the updater\'s last turn is said with the rest; anything else in that file is not', async (t) => {
+    const { mkdtempSync, rmSync, writeFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const { Updates } = await import('../server/updates.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-relay-state-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    writeFileSync(join(dir, 'state.json'), JSON.stringify({ version: '0.2.18' }));
+    writeFileSync(join(dir, 'update.conf'), 'MODE=auto\n');
+    const u = new Updates({ host: async () => ({ code: 0 }), version: '0.2.18', stateFile: join(dir, 'state.json'), confFile: join(dir, 'update.conf'), lastLook: () => null });
+    assert.equal(u.about().relay, null, 'nothing said yet');
+    writeFileSync(join(dir, 'relay.json'), JSON.stringify({ state: 'refused', version: '0.1.1', why: 'the relay does not take this server\'s maintenance key', at: '2026-10-22T20:00:00.000Z' }));
+    assert.deepEqual(u.about().relay, { state: 'refused', version: '0.1.1', why: 'the relay does not take this server\'s maintenance key', at: '2026-10-22T20:00:00.000Z' });
+    writeFileSync(join(dir, 'relay.json'), JSON.stringify({ state: '<script>' }));
+    assert.equal(u.about().relay, null, 'a state it does not know: nothing');
+});

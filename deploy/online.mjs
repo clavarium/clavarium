@@ -188,21 +188,28 @@ export function relayVersion(P = PATHS) {
 
 /* THE RELAY KEPT AT THE VERSION THIS RELEASE NAMES, by the updater after an update (a relay change, such as
    noticing a dead tunnel sooner, reaches it with no one typing "relay update-relay"). Only with the
-   maintenance key, and once per version (`done`: the file that keeps the last one brought). true when brought. */
+   maintenance key, and once per version (`done`: the file that keeps the last one brought). Resolves with
+   { state, version?, why? }: none (no relay), no-key, current, brought, refused (the relay does not take
+   this key: set up without it), failed. */
 export async function keepRelayCurrent(sys, P = PATHS, { done, unit = TUNNEL_UNIT } = {}) {
     /* An older install kept no relay.conf: the relay is the one its tunnel goes to. */
     let conf = readRelayConf(P);
     if (!conf) { try { const at = relayOfUnit(readFileSync(unit, 'utf8')); if (at) conf = { HOST: at.relay, PORT: at.port }; } catch { /* no tunnel */ } }
-    if (!conf || !existsSync(keyFiles(P).keeper)) return false;
+    if (!conf) return { state: 'none' };
+    if (!existsSync(keyFiles(P).keeper)) return { state: 'no-key' };
     const version = relayVersion(P);
-    if (!version) return false;
+    if (!version) return { state: 'none' };
     let last = '';
     try { last = readFileSync(done, 'utf8').trim(); } catch { /* never brought */ }
-    if (last === version) return false;
+    if (last === version) return { state: 'current', version };
     const r = await keeper(sys, P, conf, ['update-relay', version]);
-    if (r.code !== 0) throw new Failed(`the relay did not take ${version} (exit ${r.code})`);
+    if (r.code !== 0) {
+        const said = `${r.stderr ?? ''}${r.stdout ?? ''}`;
+        if (/Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION/i.test(said)) return { state: 'refused', version, why: 'the relay does not take this server\'s maintenance key' };
+        return { state: 'failed', version, why: `the relay did not take ${version} (exit ${r.code})` };
+    }
     writeFileSync(`${done}.new`, `${version}\n`); renameSync(`${done}.new`, done);
-    return true;
+    return { state: 'brought', version };
 }
 
 /* Takes the setup key out of the relay account it was put in, and checks it no longer opens it. */
