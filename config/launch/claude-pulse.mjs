@@ -6,8 +6,8 @@
  * Written only when it changes, readable by its owner alone. A file that is
  * not a JSON object is not touched (exit 3), like json-set.
  *
- * The hooks print nothing and never fail: a hook's output may reach the
- * agent, and a failing one may stop it.
+ * The hooks never fail, and print nothing but the Stop hook's answer: a
+ * hook's output may reach the agent, and a failing one may stop it.
  */
 import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join, isAbsolute } from 'node:path';
@@ -16,8 +16,11 @@ import { homedir } from 'node:os';
 const [chat] = process.argv.slice(2);
 if (!chat || !isAbsolute(chat) || !/^[A-Za-z0-9._/-]+$/.test(chat)) { console.error('usage: claude-pulse <the chat folder, a whole path>'); process.exit(64); }
 const ours = (end) => `parley pulse${end ? ' --end' : ''} --dir ${chat} >/dev/null 2>&1 || true`;
+/* Stopping while its chat still says it works, it is asked once to say where it is: what parley prints
+   there is that hook's answer (a decision), so it is not thrown away; it never fails. */
+const stopping = `parley pulse --end --stop-check --dir ${chat} 2>/dev/null || true`;
 /* Notification: it asks the person in its terminal (leave to act), or waits for them: not working. */
-const WANTED = { PreToolUse: ours(false), UserPromptSubmit: ours(false), Stop: ours(true), Notification: ours(true) };
+const WANTED = { PreToolUse: ours(false), UserPromptSubmit: ours(false), Stop: stopping, Notification: ours(true) };
 const isOurs = (h) => typeof h?.command === 'string' && /^parley pulse\b/.test(h.command);
 
 const at = join(homedir(), '.claude', 'settings.json');

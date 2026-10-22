@@ -125,6 +125,8 @@ export const EVENT_LEVELS = Object.freeze({
     wakeup: 'trace',
     'machine-problem': 'needs-you',
     restarted: 'news',
+    /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
+    'tools-updated': 'news',
 });
 const TONES = ['warn', 'bad'];
 /* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */

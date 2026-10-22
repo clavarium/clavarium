@@ -57,7 +57,7 @@ export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(byte
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Toolbox {
-    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #launchers; #index = null;
+    #host; #vms; #mnt; #uid; #gid; #sources; #notes; #launchers; #launched; #launches; #index = null; #launchHash = '';
     /* What is known of Parley in each machine, as the index is now:
        conversation -> { sha256, why } (why: '' installed, or why it cannot be,
        such as a machine without npm: not asked again at each opening). */
@@ -67,7 +67,10 @@ export class Toolbox {
        `notes(find)`: the text of /tools/CLAVARIUM.md, given how to find a
        tool of the index; none when not given. Nothing of one conversation
        may be in it: every machine reads it. */
-    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null, launchers = LAUNCHERS }) {
+    /* `launched`: a Store of what each tool was started with (its launchers' fingerprint): see stale(). */
+    /* `launches(name)`: does its tool start through a launcher? (only those read one) */
+    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null, launchers = LAUNCHERS, launched = null, launches = () => false }) {
+        this.#launched = launched; this.#launches = launches;
         this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes; this.#launchers = launchers;
     }
 
@@ -108,6 +111,7 @@ export class Toolbox {
             if (!there || !there.equals(bytes)) { writeFileSync(`${launch}/.${n}.new`, bytes, { mode: 0o755 }); renameSync(`${launch}/.${n}.new`, `${launch}/${n}`); }
         }
         for (const n of readdirSync(launch)) if (!wanted.includes(n)) rmSync(`${launch}/${n}`, { recursive: true, force: true });
+        this.#launchHash = createHash('sha256').update(wanted.sort().map((n) => `${n}\n${readFileSync(join(this.#launchers, n), 'utf8')}`).join('\n')).digest('hex');
         const kept = new Set([...tools.map((t) => t.file), 'index.json', LAUNCH, ...(this.#notes ? [NOTES] : [])]);
         for (const name of readdirSync(dir)) if (!kept.has(name)) rmSync(`${dir}/${name}`, { recursive: true, force: true });
         const index = { tools };
@@ -140,6 +144,20 @@ export class Toolbox {
         this.#installing.set(conversation, run);
         return run;
     }
+
+    /* WHAT ITS TOOL WAS STARTED WITH. A tool reads its launcher's settings (its hooks, its MCP servers)
+       only when it starts; the tools themselves (parley, docket) are installed again in a machine that
+       runs, and serve at once. `started(name)`: its tool starts with the launchers there now.
+       `stale(name)`: it was started with others, older -- a restart gives it what is new; said once
+       (`told`) for each version of the launchers. */
+    started(name) { if (this.#launched && this.#launchHash) this.#launched.put({ name, hash: this.#launchHash, told: '' }); }
+    /* Started before any was recorded (an older Clavarium): older too. */
+    stale(name) {
+        if (!this.#launched || !this.#launchHash || !this.#launches(name)) return false;
+        const r = this.#launched.get(name);
+        return r?.hash !== this.#launchHash && r?.told !== this.#launchHash;
+    }
+    told(name) { if (this.#launched) this.#launched.put({ ...(this.#launched.get(name) ?? { name, hash: '' }), told: this.#launchHash }); }
 
     /* Its machine was built again, or restarted: looked at again at its next opening. */
     forget(conversation) { this.#installed.delete(conversation); }

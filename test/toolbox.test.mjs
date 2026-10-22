@@ -185,3 +185,34 @@ test('a launcher missing in its machine: /tools is mounted again and looked at a
     await c.box.prepare();
     assert.equal(await c.box.launcherIn('demo', 'claude-code.sh'), '/tools could not be put in place: mount failed: no such device');
 });
+
+test('what its tool was started with: a tool started with older launchers is told once that a restart gives it the rest; one started before any record too; one without a launcher never', async (t) => {
+    const b = bench(t);
+    const dir = mkdtempSync(join(tmpdir(), 'clv-launched-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const launchers = join(dir, 'launch'); mkdirSync(launchers);
+    writeFileSync(join(launchers, 'claude-code.sh'), 'exec "$@"\n');
+    const launched = new Store(join(dir, 'launched.json'));
+    const make = () => new Toolbox({ host: b.host, vms: b.vms, mntDir: join(dir, 'mnt'), launchers, launched, launches: (name) => name !== 'shell' });
+    let box = make();
+    await box.prepare();
+    assert.equal(box.stale('old'), true, 'started before any record: older');
+    box.told('old');
+    assert.equal(box.stale('old'), false, 'told once');
+    assert.equal(box.stale('shell'), false, 'no launcher: nothing to tell');
+    box.started('fresh');
+    assert.equal(box.stale('fresh'), false);
+    /* An update: the launchers changed. */
+    writeFileSync(join(launchers, 'claude-code.sh'), 'echo hooks\nexec "$@"\n');
+    box = make();
+    await box.prepare();
+    assert.deepEqual([box.stale('fresh'), box.stale('old')], [true, true], 'both started with older launchers');
+    box.told('fresh');
+    assert.equal(box.stale('fresh'), false);
+    box.started('old');
+    assert.equal(box.stale('old'), false, 'restarted: it has them');
+    /* Prepared again with the same launchers (a restart of this server): nothing said again. */
+    box = make();
+    await box.prepare();
+    assert.deepEqual([box.stale('fresh'), box.stale('old')], [false, false]);
+});

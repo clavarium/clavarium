@@ -98,7 +98,7 @@ test('the launcher of Claude Code gives the chat its pulse: hooks of Claude Code
         PreToolUse: [theirs.PreToolUse[0], { matcher: '*', hooks: pulse(false) }],
         Notification: [theirs.Notification[0], { hooks: pulse(true) }],
         UserPromptSubmit: [{ hooks: pulse(false) }],
-        Stop: [{ hooks: pulse(true) }],
+        Stop: [{ hooks: [{ type: 'command', command: `parley pulse --end --stop-check --dir ${chat} 2>/dev/null || true` }] }],
     };
     assert.deepEqual(settings(dir).hooks, wanted, 'theirs kept, ours after them');
     assert.equal(settings(dir).theme, 'dark-ansi');
@@ -109,7 +109,7 @@ test('the launcher of Claude Code gives the chat its pulse: hooks of Claude Code
     const old = settings(dir); old.hooks.Stop = [{ hooks: [{ type: 'command', command: 'parley pulse --end --dir /old >/dev/null 2>&1 || true' }] }];
     writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify(old));
     assert.equal(run().status, 0);
-    assert.deepEqual(settings(dir).hooks.Stop, [{ hooks: pulse(true) }]);
+    assert.deepEqual(settings(dir).hooks.Stop, wanted.Stop);
     /* Hooks that are not an object: left as they are, said, and the tool starts. */
     writeFileSync(join(dir, '.claude', 'settings.json'), JSON.stringify({ hooks: [] }));
     const refused = spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'echo', 'started'], { env: { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}`, PARLEY_DIR: chat }, encoding: 'utf8' });

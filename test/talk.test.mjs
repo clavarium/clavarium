@@ -109,7 +109,7 @@ test('the line that wakes it: typed once until it has read, and the message itse
     assert.deepEqual(b.typed, [WAKE, 'Enter']);
     assert.equal((await b.talk.say('helper', 'And in French.')).told, 'told', 'not typed again before it has read');
     assert.equal(b.typed.length, 2);
-    assert.equal(b.parley('read').out, 'Message: Keep it under two pages.\nMessage: And in French.\nForgot how to work with them? parley guide\n');
+    assert.equal(b.parley('read').out, 'Message: Keep it under two pages.\nMessage: And in French.\nWhen you start on it, say so: parley doing "what you do"; when you finish: parley status done.\nForgot how to work with them? parley guide\n');
     assert.equal(b.talk.of('helper').unread, 0);
     await until('it is known to have read', () => b.talk.of('helper').unread === 0 && JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
     assert.equal((await b.talk.say('helper', 'One more thing.')).told, 'typed', 'read, so the next message wakes it again');
@@ -458,7 +458,7 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
     assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
     const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
-    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news' });
+    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news' });
     assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
     assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
     /* Bounds: topic, brief, text; a tone only of the two. */

@@ -221,7 +221,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const gitAccess = new GitAccess({ vault, dataDir, ...(gitSsh ? { ssh: gitSsh } : {}) });
     /* The tools every machine sees at /tools, read-only: see toolbox.mjs. */
     /* With /tools/CLAVARIUM.md in it: where a tool is, the same for all (guide.mjs). */
-    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText() });
+    const toolbox = new Toolbox({ host: asHost, vms, mntDir, notes: () => commonText(), launched: new Store(`${dataDir}/launched.json`),
+        launches: (name) => Boolean(tools.find((t) => t.id === all.list().find((c) => c.name === name)?.tool)?.launch) });
     const folders = resources ?? new Resources({ store: new Store(`${dataDir}/resources.json`), vms, host: asHost, dataDir, mntDir, grants, access: gitAccess, toolbox });
     /* The ready-made machine new conversations are copied from, kept fresh
        in the background: see shelf.mjs. Tidied up at start, without making
@@ -313,7 +314,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         await rules;
     };
     /* The launcher of its tool, in /tools, before it starts: repaired when missing. */
-    all.launcherReady = (name, file) => toolbox.launcherIn(name, file);
+    all.launcherReady = async (name, file) => { const why = await toolbox.launcherIn(name, file); if (!why) toolbox.started(name); return why; };
     all.through = [RUNNER];
     /* Mailboxes kept as folders: brought up to date now and then, never
        because a tool asked. */
@@ -370,6 +371,16 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
+    /* AFTER AN UPDATE, the machines that run get the new tools at once (parley, docket: they serve from
+       their next command); a tool started with older launchers is told, in its chat, that a restart
+       gives it the rest (its hooks, its MCP servers: read only when it starts). Nothing is restarted. */
+    void hostSteps.then(async () => {
+        for (const name of all.awake()) {
+            await toolbox.installIn(name).catch(() => {});
+            if (!toolbox.stale(name)) continue;
+            try { if (talk.event(name, { kind: 'tools-updated', text: 'New tools are installed in its machine; some of them reach its tool only when it starts again: restart it to have them all (its session is taken up again).', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
+        }
+    });
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
     const health = new Health({ vms, conversations: all, resources: folders, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);

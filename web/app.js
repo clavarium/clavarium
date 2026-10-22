@@ -2475,6 +2475,7 @@
         ['wakeup', 'Wake-up', 'A wake-up was typed'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
+        ['tools-updated', 'New tools', 'After an update: a restart gives its tool all of them'],
     ];
     const THREAD_LEVELS = [['needs-you', 'Needs you'], ['news', 'News'], ['trace', 'Trace']];
     async function paintThreadLevels() {
