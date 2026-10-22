@@ -378,7 +378,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         for (const name of all.awake()) {
             await toolbox.installIn(name).catch(() => {});
             if (!toolbox.stale(name)) continue;
-            try { if (talk.event(name, { kind: 'tools-updated', text: 'New tools are installed in its machine; some of them reach its tool only when it starts again: restart it to have them all (its session is taken up again).', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
+            try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
         }
     });
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
