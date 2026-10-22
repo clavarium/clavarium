@@ -522,6 +522,22 @@ test('it needs its owner only until the owner writes: answered with a button or 
     await until('waits again', () => b.talk.brief('helper')?.needs === true);
 });
 
+test('two questions open, one answered: it still needs its owner for the other', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.parley('ask', 'Blue or red cover?', 'blue', 'red');
+    await new Promise((r) => setTimeout(r, 20));
+    b.parley('ask', 'Print it today?', 'yes', 'no');
+    await until('read', () => b.talk.brief('helper')?.waiting === 2);
+    const first = b.talk.of('helper').messages.find((m) => m.kind === 'ask' && m.text === 'Blue or red cover?');
+    await b.talk.say('helper', 'red', first.id);
+    assert.equal(b.talk.brief('helper').waiting, 1);
+    assert.equal(b.talk.brief('helper').needs, true, 'the answer to the first says nothing of the second');
+    const second = b.talk.of('helper').messages.find((m) => m.kind === 'ask' && m.text === 'Print it today?');
+    await b.talk.say('helper', 'yes', second.id);
+    assert.equal(b.talk.brief('helper').needs, false);
+});
+
 test('what this server says in a chat (a restart, a machine put to sleep) is no one using it: the last message stays the last one said', async (t) => {
     const b = bench(t);
     await b.talk.set('helper', true);

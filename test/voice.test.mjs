@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost } from '../server/voice.mjs';
-import { Detector, Segmenter, toWav, loudness, BLOCK, BLOCK_MS, RATE } from '../web/voice-core.js';
+import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds } from '../server/voice.mjs';
+import { Detector, Segmenter, toWav, loudness, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
 
 const wav = Buffer.from(toWav([new Float32Array(BLOCK).fill(0.1)]));
 
@@ -9,7 +9,7 @@ test('what an engine returns is cleaned before it can be typed: nothing a termin
     assert.equal(cleanDictation('hello\r\nrm -rf /\n'), 'hello rm -rf /', 'a line break is Enter: it becomes a space');
     assert.equal(cleanDictation('a\x1b[2Jb\x00c‮d​e'), 'a[2Jbcde');
     assert.equal(cleanDictation('  spaced   out  '), 'spaced out');
-    assert.equal(cleanDictation('x'.repeat(5000)).length, 2000);
+    assert.equal(cleanDictation('ab cd '.repeat(1000)).length <= 2000, true);
     assert.equal(cleanDictation(undefined), '');
 });
 
@@ -141,4 +141,114 @@ test('where it may send: https, never this server\'s own network but with "Other
     d.set(ok);
     await assert.rejects(d.transcribe(wav), /own network/);
     assert.equal(sent.length, 0, 'nothing was sent');
+});
+
+/* WHAT AN ENGINE GETS WRONG, whichever it is: nothing here is known of one model alone (asked 22-10). */
+test('a loop inside a word is brought back to once', () => {
+    assert.equal(cleanDictation(`il parle de l'${'érit'.repeat(300)} et voilà`), "il parle de l'érit et voilà");
+    assert.equal(withoutCharLoop('bonjour, ça va'), 'bonjour, ça va');
+    assert.equal(withoutCharLoop('haha'), 'haha');
+    assert.equal(withoutCharLoop('1000 personnes en 2020'), '1000 personnes en 2020');
+});
+test('the credits an engine writes on silence (learned from subtitles) are removed, and only those', () => {
+    assert.equal(withoutPhantoms("Sous-titrage ST' 501"), '');
+    assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
+    assert.equal(withoutPhantoms("Lance les tests. Sous-titrage ST' 501"), 'Lance les tests.');
+    assert.equal(withoutPhantoms('Le sous-titrage de la vidéo est faux'), 'Le sous-titrage de la vidéo est faux');
+});
+test('those credits in any language the engine learned them in', () => {
+    for (const credit of ['Untertitel der Amara.org-Community', 'Subtítulos por la comunidad de Amara.org', 'Sottotitoli creati dalla comunità Amara.org', 'Ondertiteling door de Amara.org gemeenschap', 'Untertitelung im Auftrag des ZDF, 2017']) assert.equal(withoutPhantoms(credit), '', credit);
+    assert.equal(withoutPhantoms('Starte die Tests. Untertitel der Amara.org-Community'), 'Starte die Tests.');
+});
+test('no more text than the audio could hold', () => {
+    assert.equal(capToDuration('a b c', 0.5), 'a b c');
+    assert.ok(capToDuration('mot '.repeat(500), 2).length <= 80);
+    assert.equal(Math.round(wavSeconds(Buffer.from(toWav([new Float32Array(RATE)])))), 1);
+});
+
+/* WHAT A PERSON SAYS IS LEFT AS IT IS: sentences any engine may return, French and English, through the whole
+   cleaning, at the length of audio they would take (about 12 characters a second, slower than anyone speaks). */
+const SAID = [
+    "Lance les tests unitaires, puis les tests navigateur, et dis-moi ce qui casse.",
+    "Non, non, pas celui-là : l'autre fichier, celui de la configuration.",
+    "Oui.",
+    "Hahaha, d'accord, c'est drôle.",
+    "Le sous-titrage de la vidéo est décalé de deux secondes.",
+    "On a 1000 utilisateurs en 2020, 2500 en 2024, et 10 000 visés en 2026.",
+    "Ajoute trois points : un, deux, trois.",
+    "Very very good, ship it.",
+    "Please run npm test and tell me what fails.",
+    "Le numéro est le 06 12 34 56 78.",
+    "Bonbon, dodo, coucou : des mots qui se répètent.",
+    "C'est bien bien mieux comme ça.",
+    /* Other languages, other scripts: the cleaning knows none of them. */
+    'Starte bitte die Tests und sag mir, was fehlschlägt.',
+    'Los subtítulos de la película están desfasados.',
+    'Esegui i test, per favore.',
+    'Запусти тесты и скажи, что не работает.',
+    'テストを実行して、失敗した箇所を教えてください。',
+    '请运行测试，然后告诉我哪里失败了。',
+    'اختبر التطبيق من فضلك.',
+];
+test('what a person says comes back as it was said: no cleaning takes a word away', () => {
+    for (const said of SAID) assert.equal(cleanDictation(said, said.length / 12), said, said);
+});
+/* WHAT ENGINES ARE KNOWN TO RETURN WRONG, whichever model: each comes back short and readable. */
+test('what engines return wrong is brought back: loops in a word, loops of words, credits on silence, text longer than the audio', () => {
+    const cases = [
+        [`On parle de l'${'éritér'.repeat(200)}`, 2, /^On parle de l'éritér$/],
+        [`${'je vais voir '.repeat(40)}demain`, 3, /^je vais voir/],
+        ["Sous-titrage ST' 501", 0.8, /^$/],
+        ['Subtitles by the Amara.org community', 0.8, /^$/],
+        [`Bonjour. ${'Merci. '.repeat(100)}`, 1.5, /^Bonjour\. Merci\./],
+    ];
+    for (const [raw, seconds, wanted] of cases) {
+        const out = cleanDictation(raw, seconds);
+        assert.match(out, wanted, raw.slice(0, 40));
+        assert.ok(out.length <= 30 + 25 * seconds, `${raw.slice(0, 30)}: ${out.length} characters for ${seconds} s`);
+    }
+});
+
+/* EVERY PROVIDER OFFERED gets the same request, one any OpenAI-compatible engine reads. */
+test('every provider gets the same request: its file, its model, the language when set, JSON, greedy decoding', async () => {
+    for (const [id, p] of Object.entries(PROVIDERS)) {
+        if (!p.url) continue;
+        let got;
+        const text = await transcribe({ url: p.url, model: p.model, language: 'fr', provider: id }, wav, async (url, init) => { got = { url, fields: Object.fromEntries([...init.body.entries()].map(([k, v]) => [k, typeof v === 'string' ? v : 'a file'])) }; return new Response('{"text":"Bonjour."}'); });
+        assert.equal(text, 'Bonjour.', id);
+        assert.deepEqual(got, { url: p.url, fields: { file: 'a file', model: p.model, language: 'fr', response_format: 'json', temperature: '0' } }, id);
+    }
+});
+test('an engine that refuses greedy decoding is asked again at once without it, and not asked with it again', async () => {
+    const config = { url: 'https://stt.example.com/refuses', model: 'm', provider: 'other' };
+    const asked = [];
+    const engine = async (url, init) => { const t = init.body.get('temperature'); asked.push(t); return t === null ? new Response('{"text":"Bonjour."}') : new Response('{"error":"unknown field temperature"}', { status: 422 }); };
+    assert.equal(await transcribe(config, wav, engine), 'Bonjour.');
+    assert.deepEqual(asked, ['0', null]);
+    assert.equal(await transcribe(config, wav, engine), 'Bonjour.');
+    assert.deepEqual(asked, ['0', null, null], 'remembered');
+    /* Another refusal is not that: said as it is. */
+    await assert.rejects(transcribe({ ...config, url: 'https://stt.example.com/down' }, wav, async () => new Response('', { status: 401 })), /answered 401/);
+});
+
+/* THE PAGE SENDS PIECES THE ENGINE CAN TAKE: never longer than the server accepts, never a near-silence. */
+test('a phrase is cut at a short pause past 12 s, and at 15 s whatever: never longer than the server takes', () => {
+    const second = Math.round(1000 / BLOCK_MS);
+    const talk = (pattern) => { const sizes = []; const d = new Detector(); const sg = new Segmenter({ onPhrase: (b) => sizes.push(b.length) }); let n = 0;
+        for (const [level, count] of pattern) for (let i = 0; i < count; i++) { const x = new Float32Array(BLOCK).fill(level); sg.feed(d.hear(loudness(x)), n++ * BLOCK_MS, x); } return sizes; };
+    const longest = Math.max(...talk([[0.005, 2 * second], [0.2, 40 * second], [0.005, second]]));
+    assert.ok(longest * BLOCK_MS <= MAXIMUM_MS + 400, String(longest * BLOCK_MS));
+    assert.ok(Buffer.from(toWav([new Float32Array(Math.ceil((MAXIMUM_MS + 400) / 1000 * RATE))])).length <= 512 * 1024, 'within AUDIO_MAX');
+    /* Speech with short breaths: cut at a breath once past 12 s. */
+    const breaths = []; for (let i = 0; i < 20; i++) breaths.push([0.2, second], [0.005, 8]);
+    const pieces = talk([[0.005, 2 * second], ...breaths, [0.005, second]]);
+    assert.ok(pieces.length >= 2 && pieces[0] * BLOCK_MS >= SOFT_MAXIMUM_MS - 1000 && pieces[0] * BLOCK_MS <= MAXIMUM_MS + 400, String(pieces.map((p) => p * BLOCK_MS)));
+});
+test('clicks and keys in a quiet room are not a phrase; a short word is', () => {
+    const second = Math.round(1000 / BLOCK_MS);
+    const talk = (pattern) => { let count = 0; const d = new Detector(); const sg = new Segmenter({ onPhrase: () => { count++; } }); let n = 0;
+        for (const [level, k] of pattern) for (let i = 0; i < k; i++) { const x = new Float32Array(BLOCK).fill(level); sg.feed(d.hear(loudness(x)), n++ * BLOCK_MS, x); } return count; };
+    const typing = []; for (let i = 0; i < 12; i++) typing.push([0.3, 2], [0.005, 6]);
+    assert.equal(talk([[0.005, 2 * second], ...typing, [0.005, second]]), 0, 'keys: loud, short, many: no phrase');
+    assert.equal(talk([[0.005, 2 * second], [0.2, 9], [0.005, second]]), 1, '"oui": about 300 ms');
 });

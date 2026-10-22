@@ -62,9 +62,55 @@ export function withoutLoop(text) {
     return out.join(' ');
 }
 
-export function cleanDictation(raw) {
-    return withoutLoop(String(raw ?? '').replace(/[\r\n\t]+/gu, ' ').replace(NOT_TYPED, '')).slice(0, TEXT_MAX).trim();
+/* A LOOP INSIDE A WORD: "l'éritéritéritérit..." has no space, so withoutLoop
+   cannot see it. A run of 2 to 20 characters repeated 4 times or more in a
+   row is kept once. */
+export function withoutCharLoop(text) {
+    return text.replace(/(.{2,20}?)\1{3,}/gsu, '$1');
 }
+
+/* WHAT WHISPER WRITES ON SILENCE: credits of the subtitles it learned from.
+   Nobody dictates these; they are removed wherever they appear. */
+const PHANTOMS = [
+    /* Any sentence that credits Amara.org, in whatever language ("Sous-titres réalisés par la communauté
+       d'Amara.org", "Untertitel der Amara.org-Community", "Subtítulos por la comunidad de Amara.org"...). */
+    /[^.!?。]*amara\.org[^.!?。]*[.!?。]?/giu,
+    /sous[- ]titrage\s*st\s*'?\s*\d+[.!]?/giu,
+    /sous[- ]titr(?:age|es?)\s+(?:par\s+)?(?:la\s+)?société\s+radio[- ]canada[.!]?/giu,
+    /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
+];
+export function withoutPhantoms(text) {
+    let t = text;
+    for (const re of PHANTOMS) t = t.replace(re, ' ');
+    return t.replace(/\s+/gu, ' ').trim();
+}
+
+/* SPEECH HAS A SPEED: nobody says more than ~25 characters a second. More
+   text than the audio could hold is the engine running on; it is cut at a
+   word. `seconds` undefined: no cap but TEXT_MAX. */
+export const CHARS_PER_SECOND = 25;
+export function capToDuration(text, seconds) {
+    if (!Number.isFinite(seconds)) return text;
+    const max = Math.ceil(30 + CHARS_PER_SECOND * seconds);
+    if (text.length <= max) return text;
+    const cut = text.slice(0, max);
+    const space = cut.lastIndexOf(' ');
+    return (space > max / 2 ? cut.slice(0, space) : cut).trim();
+}
+
+/* The length of a WAV, in seconds, from its header (bytes per second at 28). */
+export function wavSeconds(audio) {
+    const rate = audio.length >= 44 ? audio.readUInt32LE(28) : 0;
+    return rate > 0 ? Math.max(0, audio.length - 44) / rate : undefined;
+}
+
+export function cleanDictation(raw, seconds) {
+    const flat = String(raw ?? '').replace(/[\r\n\t]+/gu, ' ').replace(NOT_TYPED, '');
+    return capToDuration(withoutLoop(withoutPhantoms(withoutCharLoop(flat))), seconds).slice(0, TEXT_MAX).trim();
+}
+
+/* The engines (address and model) that refused "temperature": not asked with it again while this server runs. */
+const noTemperature = new Set();
 
 /* `audio` is a WAV file, as bytes. Resolves with the text to type. */
 export async function transcribe(config, audio, fetcher = fetch) {
@@ -74,14 +120,27 @@ export async function transcribe(config, audio, fetcher = fetch) {
     if (audio.subarray(0, 4).toString('latin1') !== 'RIFF' || audio.subarray(8, 12).toString('latin1') !== 'WAVE') {
         throw new Refusal(400, 'The recording is not a WAV file.');
     }
-    const form = new FormData();
-    form.append('file', new Blob([audio], { type: 'audio/wav' }), 'dictation.wav');
-    form.append('model', config.model);
-    if (config.language) form.append('language', config.language);
-    form.append('response_format', 'json');
+    /* Greedy decoding asked of every engine: sampling is what lets a loop run. An engine that refuses the field
+       (a 400 or 422: not every one takes it) is asked again without it, at once, and not asked with it again --
+       the same for every engine, nothing known of any in advance. */
+    const strict = !noTemperature.has(`${config.url} ${config.model}`);
+    const ask = (withTemperature) => {
+        const form = new FormData();
+        form.append('file', new Blob([audio], { type: 'audio/wav' }), 'dictation.wav');
+        form.append('model', config.model);
+        if (config.language) form.append('language', config.language);
+        form.append('response_format', 'json');
+        if (withTemperature) form.append('temperature', '0');
+        return fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    };
     let response;
     try {
-        response = await fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        response = await ask(strict);
+        if (strict && (response.status === 400 || response.status === 422)) {
+            const again = await ask(false);
+            if (again.ok) noTemperature.add(`${config.url} ${config.model}`);
+            response = again;
+        }
     } catch {
         /* The error of a failed request repeats the address it was sent to:
            it is not passed on. */
@@ -90,7 +149,7 @@ export async function transcribe(config, audio, fetcher = fetch) {
     if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
     const body = await response.json().catch(() => undefined);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
-    return cleanDictation(body.text);
+    return cleanDictation(body.text, wavSeconds(audio));
 }
 
 /* ---------- THE ENGINE CHOSEN IN SETTINGS ----------

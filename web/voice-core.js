@@ -11,7 +11,18 @@ export const BLOCK_MS = (BLOCK / RATE) * 1000;      /* 32 ms */
 export const PRE_ROLL_MS = 320;      /* kept from before the first word, or its attack is cut */
 export const SILENCE_MS = 500;       /* a pause this long ends the phrase */
 export const MINIMUM_MS = 250;       /* less SPEECH than this is a noise, not a phrase */
-export const MAXIMUM_MS = 30_000;    /* a phrase is cut rather than growing for ever */
+/* A phrase is cut rather than growing for ever: past SOFT_MAXIMUM_MS at its next short pause, at MAXIMUM_MS whatever.
+   Long pieces are where an engine runs on in loops; and the server takes 16 s of audio at most (AUDIO_MAX). */
+export const SOFT_MAXIMUM_MS = 12_000;
+export const MAXIMUM_MS = 15_000;
+export const SHORT_PAUSE_MS = 200;
+/* SPEECH IS HELD, A NOISE IS NOT: a syllable lasts this long at least (a click, a key, a breath do not), and
+   between its first and last sound, a phrase is speech this much of the time at least. What is sent of a
+   near-silence is what an engine fills with what it learned ("Sous-titrage ST' 501"). */
+export const HELD_MS = 160;
+export const SPEECH_SHARE = 0.3;
+/* Kept after the last sound: enough for its end, not a silence for the engine to fill. */
+export const TAIL_MS = 200;
 
 export function loudness(samples) {
     if (!samples || samples.length === 0) return 0;
@@ -63,16 +74,17 @@ export class Segmenter {
                 while (this.ring.length > Math.ceil(PRE_ROLL_MS / BLOCK_MS)) this.ring.shift();
                 return;
             }
-            this.current = { start: at, blocks: [...this.ring, samples], spoken: 1 };
+            this.current = { start: at, blocks: [...this.ring, samples], spoken: 1, first: this.ring.length, last: this.ring.length, run: 1, held: 1 };
             this.ring = []; this.silentSince = null;
             this.onStart();
             return;
         }
-        this.current.blocks.push(samples);
-        if (speech) { this.current.spoken++; this.silentSince = null; }
-        else if (this.silentSince === null) this.silentSince = at;
-        else if (at - this.silentSince >= SILENCE_MS) { this.close(); return; }
-        if (at - this.current.start >= MAXIMUM_MS) this.close();
+        const c = this.current;
+        c.blocks.push(samples);
+        if (speech) { c.spoken++; c.last = c.blocks.length - 1; c.run++; c.held = Math.max(c.held, c.run); this.silentSince = null; }
+        else { c.run = 0; if (this.silentSince === null) this.silentSince = at; else if (at - this.silentSince >= SILENCE_MS) { this.close(); return; } }
+        const long = at - c.start;
+        if (long >= MAXIMUM_MS || (long >= SOFT_MAXIMUM_MS && this.silentSince !== null && at - this.silentSince >= SHORT_PAUSE_MS)) this.close();
     }
     close() {
         const phrase = this.current;
@@ -81,7 +93,9 @@ export class Segmenter {
         /* Counted in blocks of SPEECH, never in length: a cough followed by
            half a second of silence is long, and is not a phrase. */
         if (phrase.spoken * BLOCK_MS < MINIMUM_MS) return;
-        this.onPhrase(phrase.blocks);
+        if (phrase.held * BLOCK_MS < HELD_MS) return;
+        if (phrase.spoken / (phrase.last - phrase.first + 1) < SPEECH_SHARE) return;
+        this.onPhrase(phrase.blocks.slice(0, phrase.last + 1 + Math.ceil(TAIL_MS / BLOCK_MS)));
     }
 }
 
