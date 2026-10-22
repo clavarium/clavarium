@@ -123,6 +123,46 @@ if (area === 'server' && verb === 'logs') {
     process.exit(0);
 }
 if (area === 'server' && verb === 'restart') { writeFileSync(join(DIR, 'restart-asked'), new Date().toISOString()); process.exit(0); }
+/* WI-FI: a server on "Home", a few networks in sight; FAKE_VM_DIR/wifi.json keeps what was
+   joined or forgotten. A switch ends a second after it was asked: joined when the password is
+   "right-password" (or the network is open), back on the network before otherwise. */
+if (area === 'wifi') {
+    const at = join(DIR, 'wifi.json');
+    const w = existsSync(at) ? JSON.parse(readFileSync(at, 'utf8')) : { using: 'Home', saved: ['Home', 'Office'], last: null };
+    const keep = () => writeFileSync(at, JSON.stringify(w));
+    const fail = (message, code) => { console.error(`REFUSED: ${message}`); process.exit(code); };
+    const seen = [['Home', 70, 'wpa'], ['Café "Guest"', 55, 'wpa'], ['Corp', 80, 'enterprise'], ['Open Lounge', 40, 'open']];
+    const now = Math.floor(Date.now() / 1000);
+    if (w.last?.state === 'joining' && Date.now() - w.last.ms > 1000) {
+        w.last.state = w.last.ok ? 'joined' : 'went-back'; w.last.at = now;
+        if (w.last.ok) { w.using = w.last.ssid; w.saved.push(w.last.ssid); } else w.last.why = 'password';
+        keep();
+    }
+    if (verb === 'status') {
+        const l = w.last;
+        console.log(['nmcli yes', 'device wlan0', ...(w.using ? [`using ${seen.find((n) => n[0] === w.using)?.[1] ?? 60} ${w.using}`] : []), ...w.saved.map((x) => `saved ${x}`),
+            ...(l ? [`last ${l.state} ${l.at}`, `lastssid ${l.ssid}`, `lastback ${l.back ?? ''}`, ...(l.why ? [`lastwhy ${l.why}`] : [])] : [])].join('\n'));
+        process.exit(0);
+    }
+    if (verb === 'scan') { console.log(seen.map(([ssid, signal, sec]) => `network ${signal} ${sec} ${ssid === w.using ? 'now' : 'other'} ${ssid}`).join('\n')); process.exit(0); }
+    if (verb === 'join') {
+        const [ssid, password] = readFileSync(0, 'utf8').split('\n');
+        const n = seen.find((x) => x[0] === ssid);
+        if (!n) fail(`${ssid} is not in sight of this server: look for the networks again`, 78);
+        if (n[2] === 'enterprise') fail(`${ssid} asks for a user and a certificate (802.1X), which are not given from here`, 78);
+        w.last = { state: 'joining', at: now, ms: Date.now(), ssid, back: w.using, ok: n[2] === 'open' || password === 'right-password' };
+        keep();
+        console.log(`joining ${ssid}\nfallback ${w.using ?? ''}`);
+        process.exit(0);
+    }
+    if (verb === 'forget') {
+        if (argv[0] === w.using) fail(`${argv[0]} is the network in use: join another one first`, 78);
+        if (!w.saved.includes(argv[0])) fail(`no saved network is named ${argv[0]}`, 78);
+        w.saved = w.saved.filter((x) => x !== argv[0]); keep();
+        console.log(`forgotten ${argv[0]}`);
+        process.exit(0);
+    }
+}
 /* UPDATES: the updater played on two files (the ones the server reads, as the
    real updater writes them): FAKE_VM_DIR/update/state.json and update.conf.
    What the registry has out: update/registry; a version that will not come up: update/broken. */

@@ -705,6 +705,35 @@
              (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
           </div>
         </details>
+        <!-- NETWORK: this server's Wi-Fi (server/wifi.mjs; done as root by the host program,
+             through NetworkManager). A switch goes back by itself when the new network does not work. -->
+        <details class="chapter" id="settings-wifi-top" data-chapter="s-network">
+          <summary><span class="chapter-title">Network</span><span class="chapter-about">The Wi-Fi this server is on; another one joined.</span></summary>
+          <div class="chapter-body">
+          <div id="wifi" tabindex="-1">
+            <p id="wifi-now" role="status"></p>
+            <p id="wifi-last" class="hint" role="status" hidden></p>
+            <div id="wifi-controls" hidden>
+              <div class="row"><button type="button" id="wifi-scan">Look for networks</button><span class="hint" id="wifi-said" role="status"></span></div>
+              <ul id="wifi-list" class="wifi-list" hidden></ul>
+              <form id="wifi-join" class="wifi-join" hidden>
+                <p id="wifi-join-what"></p>
+                <div id="wifi-password-box">
+                  <label for="wifi-password">Its password</label>
+                  <input id="wifi-password" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" minlength="8" maxlength="63">
+                </div>
+                <p class="hint" id="wifi-join-back"></p>
+                <div class="row"><button type="submit" class="primary" id="wifi-join-go">Join</button><button type="button" id="wifi-join-cancel">Cancel</button></div>
+                <p id="wifi-join-error" class="error" role="alert" hidden></p>
+              </form>
+              <details id="wifi-saved-box" hidden>
+                <summary>Networks this server keeps</summary>
+                <div id="wifi-saved"></div>
+              </details>
+            </div>
+          </div>
+          </div>
+        </details>
         <details class="chapter" id="settings-updates-top" data-chapter="s-updates">
           <summary><span class="chapter-title">Updates</span><span class="chapter-about">The version that runs, and how it updates.</span></summary>
           <div class="chapter-body">

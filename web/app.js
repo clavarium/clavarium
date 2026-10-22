@@ -3456,6 +3456,7 @@
         $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}.`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         void paintInstance();
+        if ($('settings-wifi-top').open) void paintWifi();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
 
@@ -3887,6 +3888,130 @@
         if (!p.disks.some((d) => !d.system)) rows.append(el('p', 'hint', 'No other disk: plug one in (or add one to this server), then open this again.'));
     }
     $('move-machines-box').addEventListener('toggle', () => { if ($('move-machines-box').open) void paintMoveMachines(); });
+    /* NETWORK: this server's Wi-Fi (server/wifi.mjs). The networks it sees, the one it is on, another
+       joined with its password, one it keeps forgotten. A join only STARTS a switch: the host goes back
+       to the network before by itself when the new one does not work within a minute -- this page may
+       lose the server meanwhile, so it says so before, and reads the outcome when it can again. */
+    const WIFI_OUTSIDE = {
+        'no-nmcli': 'Wi-Fi is managed outside Clavarium on this server (NetworkManager is not installed here).',
+        'not-running': 'Wi-Fi is managed outside Clavarium on this server (NetworkManager does not run here).',
+        'no-device': 'This server has no Wi-Fi device that NetworkManager sees: its network is managed outside Clavarium.',
+        unmanaged: 'Wi-Fi is managed outside Clavarium on this server (its Wi-Fi device is not NetworkManager\'s to drive).',
+        unreadable: 'This server\'s network cannot be read just now.',
+    };
+    const WIFI_WHY = { password: 'the password was not accepted', 'no-connection': 'it could not connect', 'no-internet': 'it gave no working network within a minute', stopped: 'the switch was stopped' };
+    const SECURITY_WORDS = { open: 'open', wpa: 'password', wpa3: 'password (WPA3)', wep: 'old protection (WEP): not joined here', enterprise: 'user and certificate (802.1X): not joined here', other: 'not joined here' };
+    let wifiNow = null; let wifiTimer;
+    /* Four bars, as many lit as the signal is strong; the figure for whoever reads it aloud. */
+    const signalBars = (signal) => {
+        const box = el('span', 'wifi-bars'); box.setAttribute('role', 'img'); box.setAttribute('aria-label', `Signal ${signal}%`); box.title = `Signal ${signal}%`;
+        for (let i = 1; i <= 4; i++) { const bar = el('span', signal >= i * 25 - 12 ? 'on' : ''); bar.style.height = `${i * 25}%`; box.append(bar); }
+        return box;
+    };
+    const lockSign = () => {
+        const ns = 'http://www.w3.org/2000/svg'; const svg = document.createElementNS(ns, 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('class', 'wifi-lock'); svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', 'Protected');
+        const body = document.createElementNS(ns, 'rect'); body.setAttribute('x', '5'); body.setAttribute('y', '11'); body.setAttribute('width', '14'); body.setAttribute('height', '10'); body.setAttribute('rx', '2');
+        const arch = document.createElementNS(ns, 'path'); arch.setAttribute('d', 'M8 11V7a4 4 0 0 1 8 0v4');
+        svg.append(body, arch); return svg;
+    };
+    async function paintWifi() {
+        clearTimeout(wifiTimer);
+        const s = await fetch(`${API}/wifi`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (!s) {
+            /* Lost during a switch, most likely: looked at again until it answers. */
+            $('wifi-now').textContent = 'This server does not answer just now. If it is changing networks, it comes back within a minute or two.';
+            if ($('settings-wifi-top').open && !$('settings').hidden) wifiTimer = setTimeout(() => { void paintWifi(); }, 4000);
+            return;
+        }
+        wifiNow = s;
+        $('wifi-controls').hidden = !s.available;
+        if (!s.available) { $('wifi-now').textContent = WIFI_OUTSIDE[s.why] ?? WIFI_OUTSIDE.unreadable; $('wifi-last').hidden = true; return; }
+        $('wifi-now').replaceChildren();
+        if (s.using) $('wifi-now').append(el('span', '', 'On '), el('b', '', s.using.ssid), el('span', '', ` (Wi-Fi, ${s.device}) `), signalBars(s.using.signal));
+        else $('wifi-now').textContent = `Not on a Wi-Fi network (${s.device}).`;
+        /* The last switch, as the host recorded it. */
+        const last = s.last; const words = !last ? '' : {
+            joining: `Joining "${last.ssid}"... If it does not work within a minute, the server goes back to ${last.back ? `"${last.back}"` : 'the network before'} by itself.`,
+            joined: `"${last.ssid}" worked: this server is on it.`,
+            'went-back': `"${last.ssid}" did not work (${WIFI_WHY[last.why] ?? last.why ?? 'no reason given'}): the server went back to ${last.back ? `"${last.back}"` : 'the network before'}.`,
+            'back-failed': `"${last.ssid}" did not work, and ${last.back ? `"${last.back}"` : 'the network before'} did not come back at once: NetworkManager goes on trying by itself.`,
+            interrupted: `The switch to "${last.ssid}" was interrupted (the server restarted?).`,
+        }[last.state] ?? '';
+        $('wifi-last').textContent = words; $('wifi-last').hidden = !words;
+        if (last?.state === 'joining' && $('settings-wifi-top').open && !$('settings').hidden) wifiTimer = setTimeout(() => { void paintWifi(); }, 3000);
+        /* What it keeps: forgotten here (never the one in use). */
+        const saved = $('wifi-saved'); saved.replaceChildren();
+        for (const ssid of s.saved) {
+            const row = el('div', 'folder'); row.append(el('b', '', ssid));
+            if (s.using?.ssid === ssid) row.append(el('small', 'hint', ' in use'));
+            else {
+                const forget = el('button', '', 'Forget...'); forget.type = 'button';
+                forget.addEventListener('click', () => {
+                    if (forget.dataset.sure !== 'yes') { forget.dataset.sure = 'yes'; forget.textContent = `Yes: forget "${ssid}" and its password`; return; }
+                    forget.disabled = true;
+                    void post(`${API}/wifi/forget`, { ssid }).then(() => { $('wifi-said').textContent = `"${ssid}" forgotten.`; void paintWifi(); }).catch((error) => { $('wifi-said').textContent = error.message; forget.disabled = false; });
+                });
+                row.append(forget);
+            }
+            saved.append(row);
+        }
+        $('wifi-saved-box').hidden = !s.saved.length;
+    }
+    $('settings-wifi-top').addEventListener('toggle', () => { if ($('settings-wifi-top').open) void paintWifi(); else clearTimeout(wifiTimer); });
+    $('wifi-scan').addEventListener('click', async () => {
+        $('wifi-scan').disabled = true; $('wifi-said').textContent = 'Looking (a few seconds)...';
+        try {
+            const r = await fetch(`${API}/wifi/scan`, { cache: 'no-store' });
+            const list = await r.json().catch(() => null);
+            if (!r.ok) throw new Error(list?.error ?? 'The networks could not be listed.');
+            const ul = $('wifi-list'); ul.replaceChildren();
+            for (const n of list) {
+                const li = el('li', 'wifi-network'); li.dataset.ssid = n.ssid;
+                const joinable = ['open', 'wpa', 'wpa3'].includes(n.security) && !n.inUse;
+                const pick = el('button', 'as-link', ''); pick.type = 'button'; pick.disabled = !joinable;
+                pick.append(signalBars(n.signal), ...(n.security === 'open' ? [] : [lockSign()]), el('span', 'wifi-name', n.ssid));
+                li.append(pick, el('small', 'hint', n.inUse ? 'in use' : SECURITY_WORDS[n.security] ?? n.security));
+                pick.addEventListener('click', () => { chooseWifi(n); });
+                ul.append(li);
+            }
+            ul.hidden = !list.length;
+            $('wifi-said').textContent = list.length ? '' : 'No network in sight.';
+        } catch (error) { $('wifi-said').textContent = error.message; }
+        $('wifi-scan').disabled = false;
+    });
+    /* One chosen: its password asked (never shown back), and what happens if it does not work said BEFORE. */
+    let wifiChosen = null;
+    function chooseWifi(n) {
+        wifiChosen = n;
+        const open = n.security === 'open';
+        $('wifi-join-what').textContent = open ? `Join "${n.ssid}", an open network?` : `Join "${n.ssid}":`;
+        $('wifi-password-box').hidden = open;
+        $('wifi-password').value = ''; $('wifi-password').required = !open;
+        const back = wifiNow?.using?.ssid;
+        $('wifi-join-back').textContent = back
+            ? `If it does not work within a minute, the server goes back to "${back}" by itself. This page may lose the server meanwhile: it comes back by itself.`
+            : 'If it does not work within a minute, the server leaves it by itself.';
+        $('wifi-join-error').hidden = true; $('wifi-join-go').disabled = false;
+        $('wifi-join').hidden = false;
+        if (!open) $('wifi-password').focus();
+    }
+    $('wifi-join-cancel').addEventListener('click', () => { $('wifi-join').hidden = true; $('wifi-password').value = ''; wifiChosen = null; });
+    $('wifi-join').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!wifiChosen) return;
+        const n = wifiChosen; const password = n.security === 'open' ? '' : $('wifi-password').value;
+        if (n.security !== 'open' && (password.length < 8 || password.length > 63)) { $('wifi-join-error').textContent = 'A Wi-Fi password has 8 to 63 characters.'; $('wifi-join-error').hidden = false; return; }
+        $('wifi-join-go').disabled = true;
+        void post(`${API}/wifi/join`, { ssid: n.ssid, password }).then(() => {
+            /* The password leaves the page with the request: not kept in the field. */
+            $('wifi-password').value = ''; $('wifi-join').hidden = true; wifiChosen = null;
+            $('wifi-list').hidden = true;
+            void paintWifi();
+        }).catch((error) => {
+            $('wifi-join-error').textContent = error.message; $('wifi-join-error').hidden = false; $('wifi-join-go').disabled = false;
+        });
+    });
     /* WHAT HAPPENED: newest first, a page at a time; chosen by kind, searched. */
     const EVENT_WORDS = { conversation: 'Conversation', machine: 'Machine', access: 'Access', asset: 'Asset', update: 'Update', server: 'Server', 'sign-in': 'Sign-in' };
     let eventsShown = []; let eventsAsk = 0;

@@ -1371,3 +1371,15 @@ button.inline.more-recent { text-decoration: none; }
 .parley-act[data-act="seen-done"] { color: var(--ok); border-color: transparent; background: transparent; cursor: default; opacity: .85; }
 .disk-room { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--ok) 50%, transparent); border-radius: 8px; }
 .disk-room p { margin: 0; }
+/* Network (Settings): the Wi-Fi networks this server sees, each with its signal in four bars. */
+.wifi-list { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.wifi-network { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; }
+.wifi-network > button { display: inline-flex; align-items: center; gap: 6px; min-width: 0; text-align: left; }
+.wifi-network > button:disabled { opacity: .6; text-decoration: none; cursor: default; }
+.wifi-name { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.wifi-bars { display: inline-flex; align-items: flex-end; gap: 1px; width: 16px; height: 12px; flex: none; vertical-align: middle; }
+.wifi-bars > span { flex: 1; background: color-mix(in srgb, currentColor 25%, transparent); border-radius: 1px; }
+.wifi-bars > span.on { background: currentColor; }
+.wifi-lock { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
+.wifi-join { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
+.wifi-join p { margin: 0; }

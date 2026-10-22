@@ -35,6 +35,11 @@
 #                it is read from /etc/clavarium/host.conf, which root owns.
 #   --mnt DIR    where the shared folders live ($MNT, see below); the same
 #                rule: --say-only only, else MNT= in host.conf.
+#   --test DIR   for the tests of the Wi-Fi verbs, which must run to be tried:
+#                run for real, with DIR as the data directory, Wi-Fi's record
+#                and NetworkManager's connection files, and waits of seconds instead of a minute. REFUSED AS
+#                ROOT: run by a plain account it can do nothing that account
+#                could not do already, and under sudo it is never honoured.
 #
 # WHY THE SHARED FOLDERS ARE NOT IN THE DATA DIRECTORY. The data directory
 # belongs to the server's account, so a compromised server could rename any
@@ -96,16 +101,31 @@ CODE="/opt/clavarium"
 UPDATER_NODE="$CODE/current/node/bin/node"
 UPDATER="$CODE/current/app/deploy/updater.mjs"
 UPDATE_STATE="/var/lib/clavarium/update"
+# WI-FI (verbs "wifi ..."): root's record of the last switch, read back by
+# "wifi status"; the unit a switch runs in; how long a new network has to
+# give a working one before the switch goes back, how long one activation may
+# take, and how often it is looked at meanwhile (seconds).
+WIFI_STATE="/var/lib/clavarium/wifi"
+WIFI_UNIT="clavarium-wifi-join"
+WIFI_WAIT="60"
+WIFI_UP_WAIT="45"
+WIFI_STEP="3"
+# Where NetworkManager keeps its connections as files (keyfiles): a new network is written
+# there by this program, root's and 0600 -- the one place its password is ever written.
+NM_KEYFILES="/etc/NetworkManager/system-connections"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi> <verb> [arguments]" >&2; exit 64; }
 
-SAY="no"; DATA=""; MNT=""
+SAY="no"; DATA=""; MNT=""; TEST=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --say-only) SAY="yes"; shift ;;
         --data) [ "$SAY" = "yes" ] || refuse "--data is only for --say-only"; DATA="${2:-}"; shift 2 ;;
         --mnt) [ "$SAY" = "yes" ] || refuse "--mnt is only for --say-only"; MNT="${2:-}"; shift 2 ;;
+        --test) [ "$(id -u)" != "0" ] || refuse "--test is never for root"; [ "$SAY" = "no" ] || refuse "--test runs for real: not with --say-only"
+                TEST="${2:-}"; case "$TEST" in /*) : ;; *) refuse "--test takes an absolute path" ;; esac
+                DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -284,6 +304,166 @@ unit_code() {
             fi ;;
         *) echo 79 ;;
     esac
+}
+
+# WI-FI: the networks THIS SERVER sees, through NetworkManager (nmcli). The
+# server is often reached from afar over that very Wi-Fi, so a switch that
+# does not work must never leave it cut off: a switch runs as root in a unit
+# of its own (it outlives the page, the request and the server's own network
+# going away), and goes back to the connection it left when the new one gives
+# no working network within $WIFI_WAIT seconds. The new network is saved with
+# autoconnect off until it has worked: a reboot in the middle comes back on
+# the old one. A password comes on standard input only (an argument shows in
+# ps to everyone) and goes to nmcli only; it is never printed, never recorded.
+#
+# nmcli under LC_ALL=C writes a '?' for every character outside ASCII ("Café" came
+# out "Caf?", and could then not be joined: found on a real NetworkManager). Its
+# words stay English and its format the same under C.UTF-8; the names stay whole.
+nmcli() { LC_ALL=C.UTF-8 command nmcli "$@"; }
+# One line of `nmcli -t` cut into FIELDS: ':' separates, and '\' makes the
+# next character plain (nmcli writes a ':' or a '\' inside a value as '\:'
+# and '\\': an SSID may hold either).
+terse_fields() {
+    local line="$1" field="" c i
+    FIELDS=()
+    for ((i = 0; i < ${#line}; i++)); do
+        c="${line:i:1}"
+        if [ "$c" = '\' ] && [ $((i + 1)) -lt ${#line} ]; then i=$((i + 1)); field+="${line:i:1}"
+        elif [ "$c" = ':' ]; then FIELDS+=("$field"); field=""
+        else field+="$c"; fi
+    done
+    FIELDS+=("$field")
+}
+# A network's name as this program takes it: 1 to 32 bytes (LC_ALL=C: ${#} counts
+# bytes, so a name in any script is measured as the radio does), no control
+# character (it is one line everywhere it goes).
+is_ssid() { [ "${#1}" -ge 1 ] && [ "${#1}" -le 32 ] && [[ "$1" != *[[:cntrl:]]* ]]; }
+is_uuid() { [[ "${1:-}" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; }
+# What nmcli says of a network's protection, in one word: open, wpa (a password,
+# WPA2 or older, or WPA3 alongside), wpa3 (WPA3 only), and what cannot be joined
+# with a password alone here: wep, enterprise (a user and a certificate), other.
+security_of() {
+    case "$1" in
+        ""|"--") echo open ;;
+        *802.1X*) echo enterprise ;;
+        *WEP*) echo wep ;;
+        *WPA1*|*WPA2*) echo wpa ;;
+        *WPA3*) echo wpa3 ;;
+        *WPA*) echo wpa ;;
+        *) echo other ;;
+    esac
+}
+# The Wi-Fi device NetworkManager has, and its state: "<device> <state>", or nothing.
+wifi_device() {
+    local out line
+    out="$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null || true)"
+    while IFS= read -r line; do
+        terse_fields "$line"
+        [ "${FIELDS[1]:-}" = "wifi" ] && [[ "${FIELDS[0]}" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || continue
+        printf '%s %s\n' "${FIELDS[0]}" "${FIELDS[2]:-unknown}"; return 0
+    done <<< "$out"
+    return 0
+}
+# The networks in sight on <device>, one per name (its strongest): "<signal> <security> <now|other> <ssid>",
+# the strongest first. <rescan>: yes (a fresh look, a few seconds) or no (what NetworkManager saw last).
+wifi_seen() {
+    local out line ssid signal sec now
+    declare -A best=() how=() inuse=()
+    out="$(nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list ifname "$1" --rescan "$2" 2>/dev/null)" \
+        || out="$(nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list ifname "$1" --rescan no 2>/dev/null)" \
+        || return 1
+    while IFS= read -r line; do
+        [ -n "$line" ] || continue
+        terse_fields "$line"
+        [ "${#FIELDS[@]}" -eq 4 ] || continue
+        now="${FIELDS[0]}"; ssid="${FIELDS[1]}"; signal="${FIELDS[2]}"; sec="$(security_of "${FIELDS[3]}")"
+        # A hidden network has no name to show (nmcli writes it empty, or "--").
+        [ "$ssid" != "--" ] && is_ssid "$ssid" && [[ "$signal" =~ ^[0-9]{1,3}$ ]] && [ "$signal" -le 100 ] || continue
+        [ "$now" = "*" ] && inuse["$ssid"]=1
+        if [ -z "${best["$ssid"]:-}" ] || [ "$signal" -gt "${best["$ssid"]}" ]; then best["$ssid"]="$signal"; how["$ssid"]="$sec"; fi
+    done <<< "$out"
+    for ssid in "${!best[@]}"; do
+        if [ -n "${inuse["$ssid"]:-}" ]; then now="now"; else now="other"; fi
+        printf '%s %s %s %s\n' "${best["$ssid"]}" "${how["$ssid"]}" "$now" "$ssid"
+    done | sort -k1,1nr -k4
+}
+# The Wi-Fi networks NetworkManager keeps: "<uuid> <ssid>", one per profile.
+wifi_saved() {
+    local out line u s
+    out="$(nmcli -t -f UUID,TYPE connection show 2>/dev/null || true)"
+    while IFS= read -r line; do
+        terse_fields "$line"
+        u="${FIELDS[0]:-}"
+        case "${FIELDS[1]:-}" in 802-11-wireless|wifi) : ;; *) continue ;; esac
+        is_uuid "$u" || continue
+        # One value, asked unescaped: it is the whole of what is printed. (Its input is not
+        # the loop's: nothing it reads may eat the lines still to come.)
+        s="$(nmcli -e no -g 802-11-wireless.ssid connection show uuid "$u" 2>/dev/null < /dev/null || true)"
+        is_ssid "$s" && printf '%s %s\n' "$u" "$s"
+    done <<< "$out"
+    return 0
+}
+# The uuid of the connection active on <device> (nothing when none), and every active one.
+wifi_active_on() {
+    local out line
+    out="$(nmcli -t -f UUID,DEVICE connection show --active 2>/dev/null || true)"
+    while IFS= read -r line; do
+        terse_fields "$line"
+        [ "${FIELDS[1]:-}" = "$1" ] && is_uuid "${FIELDS[0]}" && { echo "${FIELDS[0]}"; return 0; }
+    done <<< "$out"
+    return 0
+}
+wifi_active_all() { nmcli -t -f UUID connection show --active 2>/dev/null | grep -E '^[0-9a-f-]{36}$' || true; }
+# A working network through <device>: NetworkManager's own check says "full".
+# When it does not check here (no check configured: "unknown"), the gateway of
+# the Wi-Fi device answering will do.
+wifi_online() {
+    local c gw
+    c="$(nmcli networking connectivity check 2>/dev/null || true)"
+    case "$c" in full) return 0 ;; limited|portal|none) return 1 ;; esac
+    gw="$(nmcli -g IP4.GATEWAY device show "$1" 2>/dev/null | head -1 || true)"
+    [[ "$gw" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+    ping -c 1 -W 2 -I "$1" "$gw" >/dev/null 2>&1
+}
+# The last switch, as recorded: its first word (joining, joined, went-back...), or nothing.
+wifi_last_word() { sed -n 's/^last \([a-z-]*\) [0-9]*$/\1/p' "$WIFI_STATE/last" 2>/dev/null | head -1 || true; }
+# A switch is going on: recorded as such, and recently (a reboot in its middle
+# leaves "joining" behind; it is not believed for ever).
+wifi_busy() {
+    local at
+    [ "$(wifi_last_word)" = "joining" ] || return 1
+    at="$(sed -n 's/^last joining \([0-9]*\)$/\1/p' "$WIFI_STATE/last" | head -1)"
+    [ $(( $(date +%s) - ${at:-0} )) -lt $((WIFI_WAIT * 10)) ]
+}
+# A NEW NETWORK AS A NETWORKMANAGER KEYFILE, the format it keeps its own connections in:
+# <uuid> <name> <device> <ssid> <key-mgmt, or nothing for an open network>; the password
+# is $password. Its file is named from the uuid, never from the SSID (which may hold any
+# byte); the SSID is written as its list of bytes ("104;111;109;101;"), unambiguous for
+# any of them. Written whole beside it, root's, 0600, then renamed into place: NetworkManager
+# never reads half a file (and skips a name that starts with a dot). The password goes from
+# printf, part of bash, into that file: no program is started with it among its arguments.
+wifi_file() { printf '%s/clavarium-wifi-%s.nmconnection' "$NM_KEYFILES" "$1"; }
+wifi_keyfile() {
+    local file tmp bytes="" b
+    file="$(wifi_file "$1")"
+    for b in $(printf '%s' "$4" | od -An -v -tu1); do bytes+="$b;"; done
+    [ -d "$NM_KEYFILES" ] || install -d -m 0700 "$NM_KEYFILES"
+    tmp="$(mktemp -p "$NM_KEYFILES" .clavarium-wifi.XXXXXX)" || return 1
+    chmod 0600 -- "$tmp"
+    # In a keyfile value a '\' starts an escape: written doubled.
+    if ! { printf '[connection]\nid=%s\nuuid=%s\ntype=wifi\ninterface-name=%s\nautoconnect=false\n\n' "$2" "$1" "$3"
+           printf '[wifi]\nmode=infrastructure\nssid=%s\n\n' "$bytes"
+           [ -z "$5" ] || printf '[wifi-security]\nkey-mgmt=%s\npsk=%s\n\n' "$5" "${password//\\/\\\\}"
+           printf '[ipv4]\nmethod=auto\n\n[ipv6]\nmethod=auto\n'; } > "$tmp"; then rm -f -- "$tmp"; return 1; fi
+    [ -n "$TEST" ] || chown root:root -- "$tmp"
+    mv -f -- "$tmp" "$file"
+}
+# The outcome of a switch, recorded for "wifi status": <state> [<why>]. Uses $ssid and $back.
+wifi_record() {
+    install -d -m 0700 "$WIFI_STATE"
+    { printf 'last %s %s\n' "$1" "$(date +%s)"; printf 'lastssid %s\n' "$ssid"; printf 'lastback %s\n' "$back"
+      [ -z "${2:-}" ] || printf 'lastwhy %s\n' "$2"; } > "$WIFI_STATE/last.new"
+    mv -f -- "$WIFI_STATE/last.new" "$WIFI_STATE/last"
 }
 
 [ $# -ge 2 ] || usage
@@ -971,6 +1151,191 @@ case "$AREA $VERB" in
         printf '%s %s\n' "$VERB" "$1" > "$UPDATE_STATE/request.new"
         mv -f -- "$UPDATE_STATE/request.new" "$UPDATE_STATE/request"
         exec systemctl start --no-block clavarium-update.service ;;
+    "wifi status")
+        # WI-FI, for Settings (This server, Network): what this server is on, and what it keeps. Read-only.
+        #   nmcli <yes|no>
+        #   wifiwhy <no-nmcli|not-running|no-device|unmanaged|unavailable>   (nothing to do here: said, for the page)
+        #   device <name>
+        #   using <signal 0-100> <ssid>         (the SSID is the rest of the line: it may hold spaces)
+        #   saved <ssid>                        (one per network NetworkManager keeps)
+        #   last <joining|joined|went-back|back-failed|interrupted> <seconds since 1970>
+        #   lastssid <ssid>   lastback <ssid it went back to, or nothing>   lastwhy <password|no-connection|no-internet|stopped>
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "nmcli general; nmcli device status; nmcli device wifi list --rescan no; nmcli connection show (read-only)"; exit 0; fi
+        if [ -f "$WIFI_STATE/last" ]; then
+            busy="no"; wifi_busy && busy="yes"
+            while IFS= read -r line; do
+                # "joining" that has not been believed for a while: the switch never ended (a reboot in its middle).
+                if [ "$busy" = "no" ] && [[ "$line" =~ ^last\ joining\ ([0-9]{1,12})$ ]]; then line="last interrupted ${BASH_REMATCH[1]}"; fi
+                [[ "$line" =~ ^(last\ (joining|joined|went-back|back-failed|interrupted)\ [0-9]{1,12}|lastwhy\ [a-z-]{1,20}|last(ssid|back)\ .{0,32})$ ]] && printf '%s\n' "$line"
+            done < "$WIFI_STATE/last"
+        fi
+        type -P nmcli >/dev/null 2>&1 || { printf '%s\n' "nmcli no" "wifiwhy no-nmcli"; exit 0; }
+        echo "nmcli yes"
+        [ "$(nmcli -t -f RUNNING general 2>/dev/null || true)" = "running" ] || { echo "wifiwhy not-running"; exit 0; }
+        read -r dev state <<< "$(wifi_device)" || true
+        [ -n "${dev:-}" ] || { echo "wifiwhy no-device"; exit 0; }
+        echo "device $dev"
+        # Not NetworkManager's to drive (netplan with systemd-networkd, or told so), or switched off.
+        case "$state" in unmanaged) echo "wifiwhy unmanaged"; exit 0 ;; unavailable) echo "wifiwhy unavailable" ;; esac
+        while IFS= read -r line; do
+            # "<signal> <security> now <ssid>": the SSID whole, spaces at its ends included.
+            [[ "$line" =~ ^([0-9]{1,3})\ [a-z0-9]+\ now\ (.+)$ ]] && printf 'using %s %s\n' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+        done <<< "$(wifi_seen "$dev" no || true)"
+        while IFS= read -r line; do [ -n "$line" ] && printf 'saved %s\n' "${line#* }"; done <<< "$(wifi_saved)"
+        exit 0 ;;
+    "wifi scan")
+        # THE NETWORKS THIS SERVER SEES, looked for again now (a few seconds):
+        #   network <signal 0-100> <open|wpa|wpa3|wep|enterprise|other> <now|other> <ssid>
+        # one per name (its strongest), the strongest first; a hidden network is left out.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY device wifi list --rescan yes (read-only)"; exit 0; fi
+        type -P nmcli >/dev/null 2>&1 || refuse "NetworkManager (nmcli) is not on this server: its Wi-Fi is managed outside Clavarium"
+        read -r dev state <<< "$(wifi_device)" || true
+        [ -n "${dev:-}" ] || refuse "NetworkManager has no Wi-Fi device on this server"
+        [ "$state" != "unmanaged" ] || refuse "the Wi-Fi device $dev is not managed by NetworkManager"
+        seen="$(wifi_seen "$dev" yes)" || refuse "NetworkManager did not list the networks"
+        while IFS= read -r line; do [ -n "$line" ] && printf 'network %s\n' "$line"; done <<< "$seen"
+        exit 0 ;;
+    "wifi join")
+        # THIS SERVER TO ANOTHER WI-FI NETWORK, and back by itself if it does not work. On
+        # standard input, never as arguments (ps shows those to everyone): the SSID on the
+        # first line, the password on the second (empty for an open network). The network is
+        # written as a keyfile and loaded (autoconnect off: a reboot comes back on the old
+        # one), then the switch is
+        # started in a unit of its own ("wifi switch") and this returns at once:
+        #   joining <ssid>
+        #   fallback <the ssid it goes back to, or nothing: there was no Wi-Fi in use>
+        [ $# -eq 0 ] || usage
+        ssid=""; password=""
+        IFS= read -r ssid || true
+        IFS= read -r password || true
+        is_ssid "$ssid" || refuse "not a network name: 1 to 32 bytes, on one line"
+        # The password itself is never in a message: only what is wrong with it.
+        if [ -n "$password" ]; then
+            [ "${#password}" -ge 8 ] && [ "${#password}" -le 63 ] || refuse "a Wi-Fi password has 8 to 63 characters (this one has ${#password})"
+            [[ "$password" =~ ^[\ -~]+$ ]] || refuse "a Wi-Fi password is made of plain characters (letters, digits, signs, spaces): this one has another"
+            # A keyfile value loses a space at its start, and one at its end is easily lost by hand.
+            [[ "$password" != " "* && "$password" != *" " ]] || refuse "a password that starts or ends with a space cannot be given here"
+        fi
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "write $NM_KEYFILES/clavarium-wifi-<uuid>.nmconnection (root, 0600: ssid $ssid, autoconnect=false${password:+, key-mgmt <wpa-psk|sae>, its password})" \
+                "nmcli connection load $NM_KEYFILES/clavarium-wifi-<uuid>.nmconnection" \
+                "systemd-run --unit=$WIFI_UNIT --collect clavarium-host wifi switch"
+            exit 0
+        fi
+        type -P nmcli >/dev/null 2>&1 || refuse "NetworkManager (nmcli) is not on this server: its Wi-Fi is managed outside Clavarium"
+        ! wifi_busy || refuse "a switch is going on already: wait for its end (a minute or two)"
+        read -r dev state <<< "$(wifi_device)" || true
+        [ -n "${dev:-}" ] || refuse "NetworkManager has no Wi-Fi device on this server"
+        [ "$state" != "unmanaged" ] || refuse "the Wi-Fi device $dev is not managed by NetworkManager"
+        # Its protection, as the radio says it now: a password for what wants one, and nothing more.
+        sec=""
+        while IFS= read -r line; do
+            [[ "$line" =~ ^[0-9]{1,3}\ ([a-z0-9]+)\ (now|other)\ (.+)$ ]] && [ "${BASH_REMATCH[3]}" = "$ssid" ] && { sec="${BASH_REMATCH[1]}"; break; }
+        done <<< "$(wifi_seen "$dev" no || true)"
+        [ -n "$sec" ] || refuse "$ssid is not in sight of this server: look for the networks again"
+        case "$sec" in
+            open) [ -z "$password" ] || refuse "$ssid is an open network: it takes no password" ;;
+            wpa|wpa3) [ -n "$password" ] || refuse "$ssid is protected: its password is needed" ;;
+            wep) refuse "$ssid is protected the old way (WEP), which is not joined from here" ;;
+            enterprise) refuse "$ssid asks for a user and a certificate (802.1X), which are not given from here" ;;
+            *) refuse "$ssid is protected in a way not joined from here" ;;
+        esac
+        # What it goes back to: the connection on that device now, if any.
+        prev="$(wifi_active_on "$dev")"; back=""
+        [ -z "$prev" ] || back="$(nmcli -e no -g 802-11-wireless.ssid connection show uuid "$prev" 2>/dev/null || true)"
+        is_ssid "$back" || back=""
+        [ -z "$prev" ] || [ "$back" != "$ssid" ] || refuse "$ssid is the network in use already"
+        new=""; read -r new < /proc/sys/kernel/random/uuid || true
+        is_uuid "$new" || refuse "no new identifier could be made for the network"
+        keys=""; case "$sec" in wpa) keys="wpa-psk" ;; wpa3) keys="sae" ;; esac
+        wifi_keyfile "$new" "clavarium-wifi-$(date +%s)" "$dev" "$ssid" "$keys" || refuse "the new network could not be written for NetworkManager"
+        password=""
+        file="$(wifi_file "$new")"
+        if ! nmcli connection load "$file" >/dev/null 2>&1 || [ "$(nmcli -g connection.uuid connection show uuid "$new" 2>/dev/null | head -1 || true)" != "$new" ]; then
+            nmcli connection delete uuid "$new" >/dev/null 2>&1 || true; rm -f -- "$file"
+            refuse "NetworkManager did not take the new network"
+        fi
+        install -d -m 0700 "$WIFI_STATE"
+        printf 'new %s\nprev %s\ndevice %s\n' "$new" "${prev:-none}" "$dev" > "$WIFI_STATE/switch"
+        wifi_record joining
+        self=(/bin/bash "$(readlink -f -- "$0")"); [ -z "$TEST" ] || self+=(--test "$TEST")
+        if ! systemd-run --quiet --unit="$WIFI_UNIT" --collect --description="Clavarium - Wi-Fi to another network, back to the one before if it does not work" \
+            --property=TimeoutStopSec=180 "${self[@]}" wifi switch; then
+            nmcli connection delete uuid "$new" >/dev/null 2>&1 || true; rm -f -- "$file"
+            rm -f -- "$WIFI_STATE/switch"; wifi_record went-back stopped
+            refuse "the switch could not be started (another one still running?)"
+        fi
+        printf 'joining %s\nfallback %s\n' "$ssid" "$back"
+        exit 0 ;;
+    "wifi switch")
+        # THE SWITCH ITSELF, run by "wifi join" in its unit, as root: asks nothing, it does
+        # the switch recorded by the last join (and nothing else: no join, nothing to do).
+        # The new connection up; then up to $WIFI_WAIT seconds from its start for a working
+        # network (see wifi_online); if there is none, the new network is deleted and the
+        # one before brought up again. The outcome is recorded for "wifi status".
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "nmcli connection up <the new network>; ${WIFI_WAIT} s at most for a working network; else nmcli connection delete <the new one>; nmcli connection up <the one before>"; exit 0; fi
+        rec="$WIFI_STATE/switch"
+        [ -f "$rec" ] && [ "$(wifi_last_word)" = "joining" ] || refuse "no switch was asked"
+        new="$(sed -n 's/^new //p' "$rec" | head -1)"; prev="$(sed -n 's/^prev //p' "$rec" | head -1)"; dev="$(sed -n 's/^device //p' "$rec" | head -1)"
+        ssid="$(sed -n 's/^lastssid //p' "$WIFI_STATE/last" | head -1)"; back="$(sed -n 's/^lastback //p' "$WIFI_STATE/last" | head -1)"
+        is_uuid "$new" && { [ "$prev" = "none" ] || is_uuid "$prev"; } && [[ "$dev" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || refuse "the switch's record is not what it should be"
+        rm -f -- "$rec"
+        # Back to the connection before: the new one deleted (that ends it) and its file sure
+        # to be gone with its password, the old one up, tried three times (the radio may still
+        # be busy leaving the other network).
+        go_back() {
+            local i
+            nmcli connection delete uuid "$new" >/dev/null 2>&1 || true
+            rm -f -- "$(wifi_file "$new")"
+            if [ "$prev" = "none" ]; then wifi_record went-back "$1"; return 0; fi
+            for i in 1 2 3; do
+                if nmcli --wait "$WIFI_UP_WAIT" connection up uuid "$prev" >/dev/null 2>&1; then wifi_record went-back "$1"; return 0; fi
+                sleep "$WIFI_STEP"
+            done
+            wifi_record back-failed "$1"
+        }
+        # Stopped in its middle (a shutdown, someone): never left on a network that was not proven.
+        trap 'go_back stopped; exit 0' TERM INT HUP
+        start="$SECONDS"
+        if ! said="$(nmcli --wait "$WIFI_UP_WAIT" connection up uuid "$new" 2>&1 >/dev/null)"; then
+            case "$said" in *[Ss]ecrets*|*assword*|*psk*|*802-11-wireless-security*) go_back password ;; *) go_back no-connection ;; esac
+            exit 0
+        fi
+        # (A plain count of looks: $SECONDS is whole seconds, the tests' waits are shorter.)
+        looks=$(awk -v w="$WIFI_WAIT" -v s="$WIFI_STEP" 'BEGIN { print int(w / s) }')
+        for ((i = 0; i < looks && SECONDS - start < WIFI_WAIT; i++)); do
+            if wifi_online "$dev"; then
+                nmcli connection modify uuid "$new" connection.autoconnect yes >/dev/null 2>&1 || true
+                trap - TERM INT HUP
+                wifi_record joined
+                exit 0
+            fi
+            sleep "$WIFI_STEP"
+        done
+        go_back no-internet
+        exit 0 ;;
+    "wifi forget")
+        # <ssid>: every network NetworkManager keeps under that name, deleted. Never the one
+        # in use (the server would lose its network), never during a switch.
+        [ $# -eq 1 ] || usage
+        is_ssid "$1" || refuse "not a network name: 1 to 32 bytes, on one line"
+        if [ "$SAY" = "yes" ]; then echo "nmcli connection delete uuid <each saved network named $1>"; exit 0; fi
+        type -P nmcli >/dev/null 2>&1 || refuse "NetworkManager (nmcli) is not on this server: its Wi-Fi is managed outside Clavarium"
+        ! wifi_busy || refuse "a switch is going on: try again when it has ended"
+        active="$(wifi_active_all)"; gone=()
+        while IFS= read -r line; do
+            u="${line%% *}"
+            [ -n "$line" ] && [ "${line#* }" = "$1" ] || continue
+            ! grep -qx -- "$u" <<< "$active" || refuse "$1 is the network in use: join another one first"
+            gone+=("$u")
+        done <<< "$(wifi_saved)"
+        [ "${#gone[@]}" -gt 0 ] || refuse "no saved network is named $1"
+        for u in "${gone[@]}"; do nmcli connection delete uuid "$u" >/dev/null 2>&1 || refuse "NetworkManager did not forget $1"; done
+        printf 'forgotten %s\n' "$1"
+        exit 0 ;;
     "path held")
         # <dir>: the check `held` makes, run for real on that path, as the
         # caller (root not needed to refuse). --say-only only: it exists so

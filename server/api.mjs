@@ -72,6 +72,9 @@
  *   POST /api/machines/forget-old: the copy a move left behind, removed
  *   POST /api/machines/grow {mount}: room set aside and unused, given to that file system
  *   GET  /api/machines/disks: every disk, whole   POST /api/machines/mount {path}   POST /api/machines/prepare {path, typed}: erased
+ *   GET  /api/wifi: this server's Wi-Fi   GET /api/wifi/scan: the networks it sees (looked for again)
+ *   POST /api/wifi/join {ssid, password}: the switch started, back by itself if it does not work
+ *   POST /api/wifi/forget {ssid}: a kept network deleted (never the one in use)
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
@@ -130,7 +133,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -263,6 +266,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;
+            if (pathname === '/api/wifi' && wifi) return send(200, await wifi.status()), true;
+            if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
@@ -390,6 +395,9 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/machines/mount' && machinesMove) return send(200, await machinesMove.mount(String(body.path ?? ''))), true;
         if (pathname === '/api/machines/prepare' && machinesMove) return send(200, await machinesMove.prepare(String(body.path ?? ''), body.typed)), true;
         if (pathname === '/api/machines/forget-old' && machinesMove) return send(200, await machinesMove.forgetOld()), true;
+        /* The password goes on to the host program and nowhere else: not in an answer, not in What happened. */
+        if (pathname === '/api/wifi/join' && wifi) return send(202, await wifi.join(body.ssid, body.password ?? '')), true;
+        if (pathname === '/api/wifi/forget' && wifi) return send(200, await wifi.forget(body.ssid)), true;
         if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {

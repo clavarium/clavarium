@@ -228,3 +228,56 @@ test('a flow exported with the files of its folders, and imported: the folder ma
     assert.ok(job.steps.some((s) => /^Folder notes: made, with its files$/.test(s.text) && s.why === '2 files'), JSON.stringify(job.steps));
     assert.deepEqual(me.errors, []);
 });
+
+test('Settings, Network: the Wi-Fi this server is on; another one joined with its password, said before what happens if it does not work; the outcome read back; one kept forgotten', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-network');
+    await me.until('the network in use is said', async () => /^On Home \(Wi-Fi, wlan0\)/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
+    await me.page.locator('#wifi-scan').click();
+    const net = (ssid) => me.page.locator(`#wifi-list .wifi-network[data-ssid="${ssid.replace(/"/g, '\\"')}"]`);
+    await me.until('the networks are listed', async () => (await me.page.locator('#wifi-list .wifi-network').count()) === 4);
+    assert.equal(await net('Corp').locator('button').isDisabled(), true, '802.1X: not joined here');
+    assert.equal(await net('Home').locator('button').isDisabled(), true, 'the one in use');
+    assert.equal(await net('Café "Guest"').locator('.wifi-lock').count(), 1, 'a lock on a protected one');
+    assert.equal(await net('Open Lounge').locator('.wifi-lock').count(), 0);
+    /* A wrong password: asked, never shown back; what happens if it does not work said before; back on Home. */
+    await net('Café "Guest"').locator('button').click();
+    assert.equal(await me.page.locator('#wifi-password').getAttribute('type'), 'password');
+    assert.equal(await me.page.locator('#wifi-join-back').innerText(), 'If it does not work within a minute, the server goes back to "Home" by itself. This page may lose the server meanwhile: it comes back by itself.');
+    if (process.env.SHOTS) await me.page.locator('#settings-wifi-top').screenshot({ path: join(process.env.SHOTS, 'wifi.png') });
+    await me.page.fill('#wifi-password', 'not-the-password');
+    await me.page.locator('#wifi-join-go').click();
+    await me.until('it went back', async () => /did not work \(the password was not accepted\): the server went back to "Home"/.test(await me.page.locator('#wifi-last').innerText().catch(() => '')));
+    assert.equal(await me.page.inputValue('#wifi-password'), '', 'not kept in the page');
+    /* The right one: joined. */
+    await me.page.locator('#wifi-scan').click();
+    await me.until('listed again', async () => (await net('Café "Guest"').count()) === 1);
+    await net('Café "Guest"').locator('button').click();
+    await me.page.fill('#wifi-password', 'right-password');
+    await me.page.locator('#wifi-join-go').click();
+    await me.until('joined', async () => /^On Café "Guest"/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
+    assert.match(await me.page.locator('#wifi-last').innerText(), /"Café "Guest"" worked/);
+    /* Forgotten, asked twice; never the one in use. */
+    await me.page.locator('#wifi-saved-box > summary').click();
+    assert.match(await me.page.locator('#wifi-saved').innerText(), /Café "Guest"\s*in use/);
+    const office = me.page.locator('#wifi-saved .folder', { hasText: 'Office' }).getByRole('button');
+    await office.click(); await office.click();
+    await me.until('forgotten', async () => !/Office/.test(await me.page.locator('#wifi-saved').innerText()));
+    const said = (await me.api('/api/events?kind=server')).body.map((e) => e.text);
+    assert.ok(said.includes('Wi-Fi: joining "Café "Guest"" asked') && said.includes('Wi-Fi: "Office" forgotten'), said.join(' | '));
+    assert.ok(!said.join(' ').includes('password'), 'no password in What happened');
+    assert.deepEqual(me.errors, []);
+});
+
+test('Settings, Network: Wi-Fi managed outside Clavarium on this server: one sentence, no controls', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    writeFileSync(join(b.dir, 'wifi.json'), JSON.stringify({ using: null, saved: [], last: null }));
+    const me = await b.person();
+    await me.page.route('**/api/wifi', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ available: false, why: 'no-nmcli', device: null, using: null, saved: [], last: null }) }));
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-network');
+    await me.until('said', async () => /managed outside Clavarium on this server/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
+    assert.equal(await me.page.locator('#wifi-controls').isVisible(), false);
+});
