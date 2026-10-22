@@ -20,7 +20,7 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     /* What its tool is told about where it is (guide.mjs): the exact text behind "see", made from these
        settings; the owner's lines, as text; in its machine, and pointed to from its own instruction file. */
     await me.page.locator('#guide-see').click();
-    await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. Parley is installed: run parley guide\.$/m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
+    await me.until('the guide says its chat is on', async () => /^- Chat with the person: on\. Parley is installed: run parley guide\. When you were given Parley as your own tools/m.test(await me.page.locator('#guide-text').innerText().catch(() => '')));
     await me.page.fill('#guide-lines', 'Answer in <b>French</b>.');
     await me.page.locator('#guide-save').click();
     await me.until('the line is in what it is told, as text', async () => (await me.page.locator('#guide-text').innerText()).includes('- Answer in \u2039b\u203aFrench\u2039/b\u203a.'));
