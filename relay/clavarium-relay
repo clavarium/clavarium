@@ -24,7 +24,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-VERSION_OF_THIS="0.1.1-next.1"
+VERSION_OF_THIS="0.1.1"
 # Tests run it on a folder that stands for "/": nothing outside it is touched.
 ROOT="${CLAVARIUM_RELAY_ROOT:-}"
 REGISTRY="https://registry.npmjs.org"
