@@ -53,7 +53,7 @@ import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
 
-export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read' };
+export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read', tunnel: '/usr/local/sbin/clavarium-tunnel' };
 export const NAME = 'clavarium';
 /* Where each package checked here must have been built: its provenance says so. */
 export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley' };
@@ -173,10 +173,10 @@ const toHex = (integrity) => Buffer.from(String(integrity).replace(/^sha512-/, '
 
 export class Updater {
     #o; #run; #fetch;
-    constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
+    constructor({ code = PATHS.code, conf = PATHS.conf, stateDir = PATHS.stateDir, data = PATHS.data, hostTarget = PATHS.host, gitReadTarget = PATHS.gitRead, tunnelTarget = PATHS.tunnel, registry = REGISTRY, run = runCommand, fetcher = fetch, now = () => new Date(), log = (line) => console.log(line),
         verifySignatures, restart, health, backup, restoreData, installPrivileged, ensureNode, serviceState, answers, restarts, mainPid, pidCwd, diagnose, dropIn = DROP_IN,
         clock = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), minFreeMb = 1024, healthMs = 60_000, watchMs = 120_000, settleMs = 10_000 } = {}) {
-        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, clock, sleep, dropIn };
+        this.#o = { code, conf, stateDir, data, hostTarget, gitReadTarget, tunnelTarget, registry: registry.replace(/\/$/, ''), now, log, minFreeMb, healthMs, watchMs, settleMs, clock, sleep, dropIn };
         this.#run = run; this.#fetch = fetcher;
         this.verifySignatures = verifySignatures ?? ((dir) => this.#npm(['audit', 'signatures'], { cwd: dir, timeoutMs: 300_000 }));
         this.restart = restart ?? (() => this.#restart());
@@ -756,7 +756,9 @@ export class Updater {
     }
 
     async #installPrivileged(app) {
-        for (const [from, to] of [[join(app, 'deploy', 'clavarium-host'), this.#o.hostTarget], [join(app, 'deploy', 'git-read'), this.#o.gitReadTarget]]) {
+        for (const [from, to] of [[join(app, 'deploy', 'clavarium-host'), this.#o.hostTarget], [join(app, 'deploy', 'git-read'), this.#o.gitReadTarget], [join(app, 'deploy', 'clavarium-tunnel'), this.#o.tunnelTarget]]) {
+            /* A release older than a program has none to give: the one there stays. */
+            if (!existsSync(from)) continue;
             const r = await this.#run(['install', '-o', 'root', '-g', 'root', '-m', '0755', from, to], { timeoutMs: 30_000 });
             if (r.code !== 0) throw new Error(`${to}: ${lastLine(r)}`);
         }
@@ -808,6 +810,8 @@ async function main(argv) {
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
             try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
+            try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }
+            try { const { keepRelayCurrent, realSys } = await import('./online.mjs'); if (await keepRelayCurrent(realSys(), undefined, { done: join(PATHS.stateDir, 'relay-version') })) console.error('updater: the relay is at the version of this release'); } catch (error) { console.error(`updater: the relay could not be brought up to date: ${error.message}`); }
             const r = await u.runOnce(); console.log(typeof r === 'string' ? r : 'done'); return; }
         case 'set': if (rest.length !== 2) throw new Refused('set <mode|channel|window|port> <value>'); return print(u.set(rest[0], rest[1]));
         case 'prepare': { const r = await u.prepare({ version: value('--version'), fromDir: value('--from-dir') }); console.log(r.id); return; }

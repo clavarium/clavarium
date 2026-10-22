@@ -1,0 +1,49 @@
+#!/bin/bash
+# ---------------------------------------------------------------------------
+# THE OUTGOING TUNNEL TO THE RELAY, as systemd runs it (clavarium-tunnel.service,
+# written by install.sh and kept up to date by the updater). Root installs it at
+# /usr/local/sbin/clavarium-tunnel; it runs as the clavarium-tunnel account.
+#
+#   clavarium-tunnel RELAY PORT
+#
+# A CUT OF THE NETWORK is noticed in 20 to 30 seconds (a keepalive every 10 s,
+# two missed), and the tunnel is tried again 5 s later by systemd, as long as it
+# takes: a network that comes back finds it at once.
+#
+# A REFUSAL IS NOT A CUT: the relay refused the key, or answered with another
+# host key than the one kept. Trying again every 5 s changes nothing, so this
+# waits longer each time (30 s more each, 5 minutes at most) before it gives
+# back to systemd, and says so in the journal. The first time it holds again,
+# the count starts over.
+# ---------------------------------------------------------------------------
+set -u
+[ $# -eq 2 ] || { echo "usage: clavarium-tunnel RELAY PORT" >&2; exit 64; }
+relay="$1"; port="$2"
+[[ "$relay" =~ ^[A-Za-z0-9.-]{1,253}$ ]] || { echo "clavarium-tunnel: not a host name: $relay" >&2; exit 64; }
+[[ "$port" =~ ^[0-9]{1,5}$ ]] || { echo "clavarium-tunnel: not a port: $port" >&2; exit 64; }
+home=/var/lib/clavarium-tunnel
+# Kept across its restarts by systemd (RuntimeDirectory, RuntimeDirectoryPreserve).
+count="${RUNTIME_DIRECTORY:-/run/clavarium-tunnel}/refused"
+said="$(mktemp "${RUNTIME_DIRECTORY:-/tmp}/said.XXXXXX")" || said=/dev/null
+trap 'rm -f "$said"' EXIT
+
+started=$SECONDS
+ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o "IdentityFile=$home/key" -o "UserKnownHostsFile=$home/known_hosts" \
+    -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=10 -o ServerAliveCountMax=2 -o ConnectTimeout=15 \
+    -R '*:8443:127.0.0.1:443' -R '*:8080:127.0.0.1:80' -p "$port" "clavarium-tunnel@$relay" 2> >(tee "$said" >&2)
+code=$?
+wait 2>/dev/null
+
+if grep -qE 'Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|No matching host key|Too many authentication failures' "$said" 2>/dev/null; then
+    n=$(( $(cat "$count" 2>/dev/null || echo 0) + 1 ))
+    echo "$n" > "$count" 2>/dev/null || true
+    step="${CLAVARIUM_TUNNEL_STEP:-30}"; [[ "$step" =~ ^[0-9]{1,3}$ ]] || step=30
+    delay=$(( n * step > 10 * step ? 10 * step : n * step ))
+    echo "clavarium-tunnel: the relay refused this machine (its key, or the relay's host key): not a cut of the network. Next try in ${delay} s. sudo clavarium doctor says more." >&2
+    sleep "$delay"
+else
+    # A cut of the network, or a tunnel that held: tried again soon.
+    rm -f "$count" 2>/dev/null || true
+    [ $(( SECONDS - started )) -gt 60 ] && echo "clavarium-tunnel: the tunnel to $relay was lost (a cut of the network?): tried again in 5 s" >&2
+fi
+exit "$code"

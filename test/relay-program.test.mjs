@@ -62,6 +62,8 @@ test('setup: two accounts bounded by their key lines and by the SSH server, one 
         assert.equal(readFileSync(join(keys, 'clavarium-keeper'), 'utf8'), `restrict ${KEEPER}\n`);
         const sshd = readFileSync(join(p.root, 'etc', 'ssh', 'sshd_config.d', '10-clavarium-relay.conf'), 'utf8');
         for (const line of ['AllowTcpForwarding remote', 'PermitOpen none', 'ForceCommand /bin/false', 'Match User clavarium-keeper', 'AllowTcpForwarding no', 'ForceCommand /usr/local/sbin/clavarium-relay door', 'PasswordAuthentication no']) assert.ok(sshd.includes(line), line);
+        /* A tunnel that died without a word (a cut at home) gives its ports back within 20 to 30 s. */
+        assert.ok(sshd.includes('ClientAliveInterval 10') && sshd.includes('ClientAliveCountMax 2'));
         assert.match(readFileSync(join(p.root, 'etc', 'sudoers.d', 'clavarium-relay'), 'utf8'), /^clavarium-keeper ALL=\(root\) NOPASSWD: \/usr\/local\/sbin\/clavarium-relay$/m);
         assert.match(readFileSync(join(p.root, 'etc', 'clavarium-relay.nft'), 'utf8'), /tcp dport 443 redirect to :8443/);
         assert.match(readFileSync(join(p.root, 'etc', 'apt', 'apt.conf.d', '52clavarium-relay'), 'utf8'), /Unattended-Upgrade "1"/);

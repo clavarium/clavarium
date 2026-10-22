@@ -24,7 +24,7 @@
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
-VERSION_OF_THIS="0.1.0"
+VERSION_OF_THIS="0.1.1-next.1"
 # Tests run it on a folder that stands for "/": nothing outside it is touched.
 ROOT="${CLAVARIUM_RELAY_ROOT:-}"
 REGISTRY="https://registry.npmjs.org"
@@ -110,9 +110,10 @@ Match User $TUNNEL
     AllowAgentForwarding no
     PermitTunnel no
     ForceCommand /bin/false
-    # A tunnel that died without saying so gives its ports back within minutes.
-    ClientAliveInterval 30
-    ClientAliveCountMax 3
+    # A tunnel that died without saying so (a cut of the network at home) gives its ports back
+    # within 20 to 30 seconds: until then the tunnel that comes back cannot take them.
+    ClientAliveInterval 10
+    ClientAliveCountMax 2
 Match User $KEEPER
     AuthorizedKeysFile $KEYS/%u
     PasswordAuthentication no

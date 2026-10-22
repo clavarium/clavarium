@@ -692,28 +692,10 @@ if [ -n "$RELAY" ]; then
         printf '%s\n' "$scanned" > /var/lib/clavarium-tunnel/known_hosts
         chown clavarium-tunnel:clavarium-tunnel /var/lib/clavarium-tunnel/known_hosts
     fi
-    cat > /etc/systemd/system/clavarium-tunnel.service <<TUNNEL
-[Unit]
-Description=Clavarium - the outgoing tunnel to the relay
-After=network-online.target caddy.service
-Wants=network-online.target
-StartLimitIntervalSec=0
-
-[Service]
-User=clavarium-tunnel
-Group=clavarium-tunnel
-# Only TLS (443) and the certificate challenge (80) are carried.
-ExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile=/var/lib/clavarium-tunnel/key -o UserKnownHostsFile=/var/lib/clavarium-tunnel/known_hosts -o StrictHostKeyChecking=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -R *:8443:127.0.0.1:443 -R *:8080:127.0.0.1:80 -p $RELAY_PORT clavarium-tunnel@$RELAY
-Restart=always
-RestartSec=5
-NoNewPrivileges=yes
-ProtectSystem=strict
-ProtectHome=yes
-PrivateTmp=yes
-
-[Install]
-WantedBy=multi-user.target
-TUNNEL
+    # The unit is the updater's (deploy/tunnel.mjs, tunnelUnit): one text, kept up to date by each update.
+    install -o root -g root -m 0755 "$APP/deploy/clavarium-tunnel" /usr/local/sbin/clavarium-tunnel
+    "$NODE_DIR/bin/node" --input-type=module -e 'const { tunnelUnit } = await import(process.argv[1]); process.stdout.write(tunnelUnit(process.argv[2], process.argv[3]));' \
+        "$APP/deploy/tunnel.mjs" "$RELAY" "$RELAY_PORT" > /etc/systemd/system/clavarium-tunnel.service
     systemctl daemon-reload
     systemctl enable --quiet clavarium-tunnel.service
     systemctl restart clavarium-tunnel.service

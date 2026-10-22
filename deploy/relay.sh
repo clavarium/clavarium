@@ -39,7 +39,7 @@
 set -euo pipefail
 
 # The version of the maintenance program this Clavarium works with.
-RELAY_VERSION="0.1.0"
+RELAY_VERSION="0.1.1-next.1"
 ACCOUNT="clavarium-tunnel"
 TLS_PORT="8443"
 HTTP_PORT="8080"

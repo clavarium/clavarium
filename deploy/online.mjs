@@ -24,6 +24,7 @@
  * `sys`, so the tests can stand in for SSH, npm and DNS.
  */
 import { spawn } from 'node:child_process';
+import { relayOfUnit, TUNNEL_UNIT } from './tunnel.mjs';
 import { createReadStream, existsSync, mkdirSync, readFileSync, writeFileSync, rmSync, mkdtempSync, renameSync, openSync, readSync, writeSync, closeSync } from 'node:fs';
 import { promises as dns } from 'node:dns';
 import { connect } from 'node:net';
@@ -183,6 +184,25 @@ export async function keeper(sys, P, conf, words, { stream = false } = {}) {
 export function relayVersion(P = PATHS) {
     const text = readFileSync(join(P.code, 'current', 'app', 'deploy', 'relay.sh'), 'utf8');
     return /^RELAY_VERSION="([^"]+)"$/m.exec(text)?.[1];
+}
+
+/* THE RELAY KEPT AT THE VERSION THIS RELEASE NAMES, by the updater after an update (a relay change, such as
+   noticing a dead tunnel sooner, reaches it with no one typing "relay update-relay"). Only with the
+   maintenance key, and once per version (`done`: the file that keeps the last one brought). true when brought. */
+export async function keepRelayCurrent(sys, P = PATHS, { done, unit = TUNNEL_UNIT } = {}) {
+    /* An older install kept no relay.conf: the relay is the one its tunnel goes to. */
+    let conf = readRelayConf(P);
+    if (!conf) { try { const at = relayOfUnit(readFileSync(unit, 'utf8')); if (at) conf = { HOST: at.relay, PORT: at.port }; } catch { /* no tunnel */ } }
+    if (!conf || !existsSync(keyFiles(P).keeper)) return false;
+    const version = relayVersion(P);
+    if (!version) return false;
+    let last = '';
+    try { last = readFileSync(done, 'utf8').trim(); } catch { /* never brought */ }
+    if (last === version) return false;
+    const r = await keeper(sys, P, conf, ['update-relay', version]);
+    if (r.code !== 0) throw new Failed(`the relay did not take ${version} (exit ${r.code})`);
+    writeFileSync(`${done}.new`, `${version}\n`); renameSync(`${done}.new`, done);
+    return true;
 }
 
 /* Takes the setup key out of the relay account it was put in, and checks it no longer opens it. */

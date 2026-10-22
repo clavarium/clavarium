@@ -609,6 +609,16 @@
         };
     }
 
+    /* THE NETWORK CAME BACK (the browser says so, found 22-10: a short cut kept the pages away): what was open
+       is opened again at once, rather than when a connection that died without a word is noticed. */
+    addEventListener('online', () => {
+        void refresh();
+        if (!current || !socket || !wanted) return;
+        const dead = socket; socket = undefined;
+        try { dead.close(); } catch { /* gone */ }
+        connect();
+    });
+
     terminal.onData(send);
     terminal.onResize(sendSize);
     new ResizeObserver(() => fit.fit()).observe($('terminal'));
