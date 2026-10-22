@@ -52,6 +52,9 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
+import { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM } from './tunnel.mjs';
+/* The updater's run keeps the tunnel up to date: the same functions, from here too. */
+export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
 
 export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read', tunnel: '/usr/local/sbin/clavarium-tunnel' };
 export const NAME = 'clavarium';

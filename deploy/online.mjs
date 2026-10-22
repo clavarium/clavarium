@@ -204,7 +204,8 @@ export async function keepRelayCurrent(sys, P = PATHS, { done, unit = TUNNEL_UNI
     if (last === version) return { state: 'current', version };
     const r = await keeper(sys, P, conf, ['update-relay', version]);
     if (r.code !== 0) {
-        const said = `${r.stderr ?? ''}${r.stdout ?? ''}`;
+        /* sys.run says { code, out, err } (realSys). */
+        const said = `${r.err ?? ''}${r.out ?? ''}`;
         if (/Permission denied|Host key verification failed|REMOTE HOST IDENTIFICATION/i.test(said)) return { state: 'refused', version, why: 'the relay does not take this server\'s maintenance key' };
         return { state: 'failed', version, why: `the relay did not take ${version} (exit ${r.code})` };
     }

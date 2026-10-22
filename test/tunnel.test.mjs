@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tunnelUnit, relayOfUnit, ensureTunnel } from '../deploy/tunnel.mjs';
+import * as updater from '../deploy/updater.mjs';
 import { keepRelayCurrent } from '../deploy/online.mjs';
 
 const WRAPPER = fileURLToPath(new URL('../deploy/clavarium-tunnel', import.meta.url));
@@ -15,6 +16,11 @@ const folder = (t) => { const d = mkdtempSync(join(tmpdir(), 'clv-tunnel-')); t.
 /* An account at the relay, written so that no address appears whole in the source (the shapes check). */
 const at = (who) => [who, 'relay.example.com'].join('@');
 const OLD = `[Service]\nExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -R *:8443:127.0.0.1:443 -R *:8080:127.0.0.1:80 -p 2222 ${at('clavarium-tunnel')}\nRestart=always\n`;
+
+test('the updater has them (its run keeps the tunnel up to date: found missing on the test deployment)', () => {
+    assert.equal(updater.ensureTunnel, ensureTunnel);
+    assert.equal(updater.tunnelUnit, tunnelUnit);
+});
 
 test('its unit: the program of the release, the relay and its port read from what install.sh wrote then or now', () => {
     assert.deepEqual(relayOfUnit(OLD), { relay: 'relay.example.com', port: '2222' });
@@ -104,7 +110,7 @@ test('after an update, the relay is brought to the version this release names, o
     sys.run = async () => ({ code: 1, stdout: '', stderr: '' });
     assert.deepEqual(await keepRelayCurrent(sys, P, { done }), { state: 'failed', version: '0.1.2', why: 'the relay did not take 0.1.2 (exit 1)' });
     /* A relay set up without this key (found on the test deployment): said for what it is. */
-    sys.run = async () => ({ code: 255, stdout: '', stderr: `${at('clavarium-keeper')}: Permission denied (publickey).` });
+    sys.run = async () => ({ code: 255, out: '', err: `${at('clavarium-keeper')}: Permission denied (publickey).` });
     assert.equal((await keepRelayCurrent(sys, P, { done })).state, 'refused');
     assert.equal(readFileSync(done, 'utf8').trim(), '0.1.1', 'tried again at the next turn');
 });
