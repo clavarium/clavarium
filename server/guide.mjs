@@ -115,7 +115,7 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         out.push(`- ${repo}: its origin, read-only and kept up to date, is ${origin}.${auto} git -C ${repo} fetch ${origin} '+refs/heads/*:refs/remotes/origin/*'`);
     }
     out.push(!chat ? '- Chat with the person: off. Do not use parley.'
-        : '- Chat with the person: on. Parley is installed: run parley guide.');
+        : '- Chat with the person: on. Parley is installed: run parley guide. When you were given Parley as your own tools (MCP: tell, ask, doing, status...), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same.');
     /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
