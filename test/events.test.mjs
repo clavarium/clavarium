@@ -30,6 +30,16 @@ test('the owner\'s requests worth saying, in words; a secret by its name only; t
     assert.equal(all[0].who, 'ops@example.org');
 });
 
+test('a size chosen while it sleeps is said kept for its wake, and given up', (t) => {
+    const { e } = bench(t);
+    e.fromRequest('/api/conversations/site/machine', { memoryMb: 3072 }, '', { name: 'site', phase: 'ready', asleep: true, sizeAtWake: { memoryMb: 3072, cpus: 1, diskGb: 8 } });
+    e.fromRequest('/api/conversations/site/machine/cancel', {}, '', { name: 'site', phase: 'ready' });
+    assert.deepEqual(e.list().map((x) => [x.text, x.conversation]), [
+        ['Machine of site: the size kept for its wake given up', 'site'],
+        ['Machine of site to be resized as it wakes: 3072 MB of memory', 'site'],
+    ]);
+});
+
 test('chosen by kind, by conversation, by words; older ones a page at a time; a sign-in said once in a while', (t) => {
     const { e } = bench(t);
     for (let i = 0; i < 5; i += 1) e.add({ kind: 'machine', text: `look ${i}`, conversation: i % 2 ? 'a' : 'b' });

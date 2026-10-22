@@ -5,7 +5,9 @@
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
- *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?}: stopped, set, started again
+ *   POST /api/conversations/<name>/machine       {memoryMb?, diskGb?, cpus?}: stopped, set, started again (202);
+ *                                                asleep: checked and kept for its wake, as `sizeAtWake` (200)
+ *   POST /api/conversations/<name>/machine/cancel    the size kept for its wake, given up
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
@@ -548,8 +550,12 @@ export async function handleApi(request, response, conversations, headers, resou
                 await health.check(conversation, { asked: true }); return send(200, health.of(conversation)), true;
             }
             if (machine[2] === 'restart') return send(202, await conversations.restart(conversation)), true;
-            return send(202, await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus })), true;
+            const resized = await conversations.resize(conversation, { memoryMb: body.memoryMb, diskGb: body.diskGb, cpus: body.cpus });
+            /* Asleep, nothing was started: the choice is only kept, for its wake. */
+            return send(resized.phase === 'restarting' ? 202 : 200, resized), true;
         }
+        const later = /^\/api\/conversations\/([^/]+)\/machine\/cancel$/.exec(pathname);
+        if (later) return send(200, conversations.cancelResize(decodeURIComponent(later[1]))), true;
         const asking = /^\/api\/conversations\/([^/]+)\/ask-first$/.exec(pathname);
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);

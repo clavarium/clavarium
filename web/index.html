@@ -210,6 +210,8 @@
               <select id="machine-disk"></select>
               <p class="hint" id="machine-size-wait" role="status" hidden></p>
               <p class="hint" id="machine-size-hint">Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.</p>
+              <!-- CHOSEN WHILE IT SLEEPS: kept, and applied when it wakes (server/conversations.mjs, #wakeResized). -->
+              <p class="hint" id="machine-later" role="status" hidden><span id="machine-later-text"></span> · <button type="button" id="machine-later-cancel" class="inline">cancel</button></p>
               <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
             </form>
             <div id="work-box">

@@ -846,7 +846,7 @@
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
         if (noTerminal()) { chatAlone(); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
-        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show('Asleep. The tool is frozen as it was.', 'Wake it', connect); return; }
+        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`Asleep. The tool is frozen as it was.${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, 'Wake it', connect); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
     }
@@ -1815,6 +1815,8 @@
 
     /* ---------- the machine: its health, its size, a restart ---------- */
     const sizeWords = (mb) => (mb >= 1024 ? `${Number.isInteger(mb / 1024) ? mb / 1024 : (mb / 1024).toFixed(1)} GB` : `${mb} MB`);
+    /* The size kept for its wake, in the words the server uses for a size. */
+    function laterWords(w) { return `${w.memoryMb} MB, ${w.cpus} core${w.cpus > 1 ? 's' : ''}, ${w.diskGb} GB`; }
     /* `brief`: over a wait, only what to know -- figures stay in the Machine chapter. */
     function healthLines(list, record, { all = true, brief = false } = {}) {
         list.replaceChildren();
@@ -2035,6 +2037,13 @@
         for (const id of ['machine-memory', 'machine-cpus', 'machine-disk', 'machine-size-apply']) $(id).disabled = Boolean(waiting);
         $('machine-size').toggleAttribute('data-waiting', Boolean(waiting));
         $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
+        /* Asleep: chosen now, applied as it wakes -- it is not woken for it. */
+        $('machine-size-hint').textContent = here?.asleep === true
+            ? 'It is asleep: a new size is kept and applied when it wakes. Its machine is then stopped cleanly, set and started again, and the tool takes up its session. A disk can only grow.'
+            : 'Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.';
+        $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
+        $('machine-later').hidden = !here?.sizeAtWake;
+        $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
         /* When its tool starts: its last session, or a new one -- for a tool that can take one up. */
         $('resume-box').hidden = DEVICE || !here?.resumes;
         for (const b of $('resume-on').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.resume !== false)));
@@ -2056,6 +2065,11 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    $('machine-later-cancel').addEventListener('click', async () => {
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/machine/cancel`, {}); await refresh(); paintMachine(conversations.find((x) => x.name === current)); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
     $('machine-size').addEventListener('submit', (event) => {
         event.preventDefault();
         const name = current;
@@ -2063,9 +2077,18 @@
         if (!here) return;
         const memoryMb = Number($('machine-memory').value); const diskGb = Number($('machine-disk').value); const cpus = Number($('machine-cpus').value) || (here.cpus ?? 1);
         if (memoryMb === here.memoryMb && diskGb === (here.diskGb ?? 8) && cpus === (here.cpus ?? 1)) { $('panel-error').textContent = 'Nothing to change: choose another memory, cores or disk first.'; $('panel-error').hidden = false; return; }
+        const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
+        /* Asleep: kept for its wake, from Settings, where it is then said; nothing is stopped or woken now. */
+        if (here.asleep === true) {
+            $('panel-error').hidden = true;
+            void (async () => {
+                try { await post(`${API}/conversations/${encodeURIComponent(name)}/machine`, { memoryMb, diskGb, cpus }); await refresh(); paintMachine(conversations.find((x) => x.name === name)); }
+                catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+            })();
+            return;
+        }
         leavePanel();
         const resume = socket && state.dataset.state === 'live' ? () => { notice.hidden = true; focusTerminal(); } : enter;
-        const changes = [memoryMb !== here.memoryMb ? `${sizeWords(memoryMb)} of memory (now ${sizeWords(here.memoryMb)})` : '', cpus !== (here.cpus ?? 1) ? `${cpus} core${cpus > 1 ? 's' : ''} (now ${here.cpus ?? 1})` : '', diskGb !== (here.diskGb ?? 8) ? `a disk of ${diskGb} GB (now ${here.diskGb ?? 8} GB; it can never shrink again)` : ''].filter(Boolean).join(' and ');
         show(`Give "${name}" ${changes}? ITS MACHINE IS STOPPED CLEANLY, SET, AND STARTED AGAIN: what the tool is doing now is interrupted. Its work folder, its folders and its branches stay.`,
             'Change it', async () => {
                 disconnect(); say('restarting', 'connecting'); show('Changing its machine...'); $('notice-spin').hidden = false;

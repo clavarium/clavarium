@@ -62,6 +62,12 @@ export class Refusal extends Error {
    the tool starts -- a new disk holds no session to take up. */
 const buildProgress = (since) => ({ kind: 'build', steps: ['starting', 'preparing', 'installing', 'folders', 'tool'], at: 0, since, stepSince: since });
 
+/* What a machine has, in words: what its record says, else what was asked (`asked`). */
+const sizeSaid = (c, asked = {}) => {
+    const cpus = c?.cpus ?? asked.cpus;
+    return `${c?.memoryMb ?? asked.memoryMb} MB of memory, ${cpus} core${cpus > 1 ? 's' : ''}, ${c?.diskGb ?? asked.diskGb} GB of disk`;
+};
+
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Conversations {
@@ -92,6 +98,9 @@ export class Conversations {
        them (#calm). Stopping a machine while the VM manager mounts a folder
        in it was seen to hang the VM manager itself, for every machine. */
     #mounting = new Map();
+    /* A size kept for its wake being applied, by name: a second opening waits
+       for it, and a restart, a resize or a move is refused meanwhile. */
+    #resizing = new Map();
     /* Set by the server: told when its machine was restarted or built again
        by this server, in words for its chat, and whether the tool runs again
        (its chat says it, and the tool is told to read it again: talk.mjs). */
@@ -389,6 +398,8 @@ export class Conversations {
         /* Opening is the explicit gesture that ends a sleep. */
         if (c.asleep) this.#store.patch(name, { asleep: false });
         this.#watching.set(name, (this.#watching.get(name) ?? 0) + 1);
+        /* Another screen is applying the size kept for its wake: this one opens once it is over. */
+        await this.#resizing.get(name)?.catch(() => {});
         /* A start that fails here ends what the page was shown of it: the
            page then opens the terminal itself, and says what went wrong. */
         try { return await this.#opening(name, c, say); } catch (error) { this.#end(name); throw error; }
@@ -415,10 +426,20 @@ export class Conversations {
             if (state === 'Starting' || state === 'Restarting') { this.left(name); throw new Refusal(504, 'Its machine is still starting.', { retry: true }); }
             this.#reach(name, 'answering');
         }
+        /* A NEW SIZE WAS CHOSEN WHILE IT SLEPT: applied now, before anything
+           else; it runs after, with the new size or, failing that, the old. */
+        let resized = false;
+        if (this.#store.get(name)?.sizeAtWake) {
+            const applying = this.#wakeResized(name, c, tool, state, tell);
+            this.#resizing.set(name, applying);
+            try { state = await applying; } catch (error) { this.left(name); throw error; }
+            finally { this.#resizing.delete(name); }
+            resized = true;
+        }
         const stopped = state !== 'Running';
         /* Asleep, its memory was kept: the tool may still be there, as it was. */
         const asleep = state === 'Suspended';
-        let woke = this.#fresh.delete(name) || stopped;
+        let woke = this.#fresh.delete(name) || stopped || resized;
         if (stopped) {
             try { await this.room({ kind: 'start', name, memoryMb: c.memoryMb }); } catch (error) { this.left(name); throw error; }
             waking(asleep ? 'waking' : 'starting');
@@ -472,6 +493,63 @@ export class Conversations {
         for (const id of ['resume', 'fresh', 'first']) this.#reach(name, id);
         tell();
         return argv;
+    }
+
+    /* THE SIZE KEPT FOR ITS WAKE, APPLIED as it wakes. Taken out of its
+     * record first: it is tried once, and its outcome said either way.
+     *   1. this server's reserve, looked at again (what is free may have
+     *      changed since it was chosen); refused, it wakes as it was;
+     *   2. asleep, it is woken first: a machine asleep cannot be stopped
+     *      cleanly, and a stop by force would lose what its memory holds;
+     *   3. stopped cleanly (by force if that hangs), set, started (#cycle);
+     *   4. not running after that, what was set is put back where it can be
+     *      (a disk never shrinks) and it is started again: never left stopped.
+     * Said in Settings (`restarted`) and in its chat. The tool is started by
+     * the opening, which takes up its last session, as after any restart.
+     * Resolves with the state of its machine. */
+    async #wakeResized(name, c, tool, state, tell) {
+        const want = this.#store.get(name).sizeAtWake;
+        this.#store.patch(name, { sizeAtWake: undefined, restarted: undefined });
+        const had = { memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB };
+        try { await this.#roomAtWake(name, had, want, state, true); } catch (error) {
+            const why = error instanceof Refusal ? error.message : 'the room of this server could not be looked at.';
+            this.#store.patch(name, { restarted: `Not changed as it woke: ${why} It kept ${sizeSaid(had)}.` });
+            try { this.renewed(name, `Its machine was not changed as it woke: ${why} It kept ${sizeSaid(had)}.`, false); } catch { /* told, nothing more */ }
+            return state;
+        }
+        this.#begin(name, 'wake', [...(state === 'Suspended' ? ['waking'] : []), ...(state === 'Stopped' ? [] : ['stopping']), 'setting', 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)]);
+        tell('Changing its machine as it wakes...');
+        if (state === 'Suspended') await this.#watched(name, 'start', this.#vms.start(name)).catch(() => {});
+        this.#reach(name, 'stopping'); tell();
+        const set = [];
+        let failure = await this.#cycle(name, c, this.#setter(name, c, want, (what) => set.push(what)), true);
+        let now = await this.#vms.state(name).catch(() => undefined);
+        if (now !== 'Running') {
+            if (set.includes('memory')) await this.#vms.setMemory(name, had.memoryMb).catch(() => {});
+            if (set.includes('cpus')) await this.#vms.setCpus(name, had.cpus).catch(() => {});
+            const again = await this.#watched(name, 'start', this.#vms.start(name)).catch(() => ({ code: 1 }));
+            now = await this.#vms.state(name).catch(() => undefined);
+            if (again.code === 0 || now === 'Running') { this.#fresh.add(name); this.#mountAgain.add(name); }
+            failure ??= 'the machine did not start.';
+        }
+        await this.reconcile(name);
+        const said = sizeSaid(this.#store.get(name), had);
+        const running = now === 'Running';
+        this.#store.patch(name, { restarted: failure ? `Not changed as it woke: ${failure} It has ${said}.` : `Changed as it woke: it now has ${said}.` });
+        try { this.renewed(name, failure ? `Its machine was not changed as it woke: ${failure} It has ${said}.` : `Its machine was restarted as it woke, with ${said}: the tool started again.`, running); } catch { /* told, nothing more */ }
+        if (!running) throw new Refusal(502, `The machine did not wake: ${failure}`);
+        return now;
+    }
+
+    /* This server's reserve, for a size kept for its wake: running, it holds
+       its memory already; otherwise it takes all of it as it starts -- and
+       its old size first, when it is woken to be stopped (`woken`). */
+    async #roomAtWake(name, had, want, state, woken) {
+        const growth = Math.max(0, want.diskGb - had.diskGb) * 1024;
+        await this.room(state === 'Running'
+            ? { kind: 'grow', name, memoryMb: Math.max(0, want.memoryMb - had.memoryMb), diskMb: growth }
+            : { kind: 'start', name, memoryMb: woken && state === 'Suspended' ? Math.max(want.memoryMb, had.memoryMb) : want.memoryMb });
+        if (state !== 'Running' && growth > 0) await this.room({ kind: 'grow', name, memoryMb: 0, diskMb: growth });
     }
 
     /* WHAT STARTS THE TOOL. Its last session is taken up (`resume` in
@@ -681,24 +759,31 @@ export class Conversations {
        terminal come back as after any start (`ready`); its folders are
        looked at after (health.mjs). The answer comes at once; `restarted`
        says how it ended. A machine asleep is restarted too: that is what
-       was asked. */
+       was asked -- and the size kept for its wake is applied on the way. */
     async restart(name) {
         const c = this.#busyCheck(name);
+        const want = c.sizeAtWake;
+        const had = { memoryMb: c.memoryMb, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? DISK_GB };
         const release = this.#claim(name, 'restarting', 'Looking at the machine');
         let state;
         try {
             state = await this.#vms.state(name);
             if (state === undefined) throw new Refusal(410, 'The machine of this conversation no longer exists.');
             /* A machine that does not run is started: it takes its memory again. */
-            if (state !== 'Running') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
+            if (want) await this.#roomAtWake(name, had, want, state, false);
+            else if (state !== 'Running') await this.room({ kind: 'start', name, memoryMb: c.memoryMb });
         } catch (error) { release(); throw error; }
         this.#cancelStop(name);
         const since = new Date().toISOString();
-        this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: 'Stopping the machine', restarted: undefined });
+        this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: 'Stopping the machine', restarted: undefined, sizeAtWake: undefined });
         const tool = this.#tools.find((t) => t.id === c.tool);
-        this.#begin(name, 'restart', [...(state === 'Stopped' ? [] : ['stopping']), 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
-        this.restarted = this.#cycle(name, c, async () => undefined, true)
-            .then((failure) => this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.', Boolean(failure)));
+        this.#begin(name, 'restart', [...(state === 'Stopped' ? [] : ['stopping']), ...(want ? ['setting'] : []), 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
+        this.restarted = this.#cycle(name, c, want ? this.#setter(name, c, want) : async () => undefined, true).then(async (failure) => {
+            if (!want) return this.#settle(name, failure ? `Not restarted: ${failure}` : 'Restarted.', failure ? `Its machine was not restarted: ${failure}` : 'Its machine was restarted: the tool started again.', Boolean(failure));
+            await this.reconcile(name);
+            const said = sizeSaid(this.#store.get(name), had);
+            return this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `Restarted: it now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
+        });
         return this.#store.get(name);
     }
 
@@ -706,24 +791,13 @@ export class Conversations {
        manager takes it only from a stopped machine: a running one is
        stopped (cleanly first), set, and started again -- its work folder,
        its folders and its branches are not touched. A disk only grows.
-       What is recorded afterwards is what the VM manager says it has. */
-    async resize(name, { memoryMb, diskGb, cpus: cpusAsked } = {}) {
+       What is recorded afterwards is what the VM manager says it has.
+       Asleep, it is not woken for it: the choice is kept for its wake (#later). */
+    async resize(name, asked = {}) {
         const c = this.#busyCheck(name);
         const tool = this.#tools.find((t) => t.id === c.tool);
-        const memory = memoryMb === undefined || memoryMb === null || memoryMb === '' ? c.memoryMb : Number(memoryMb);
-        const disk = diskGb === undefined || diskGb === null || diskGb === '' ? c.diskGb ?? DISK_GB : Number(diskGb);
-        const cpusNow = c.cpus ?? 1;
-        const cpus = cpusAsked === undefined || cpusAsked === null || cpusAsked === '' ? cpusNow : Number(cpusAsked);
-        const hostCpus = availableParallelism();
-        if (cpus !== cpusNow && (!Number.isInteger(cpus) || cpus < 1 || cpus > hostCpus)) throw new Refusal(400, `Cores: 1 to ${hostCpus}, those of this server, which its machines share.`);
-        const least = tool?.memoryMb ?? 512;
-        /* Memory is checked only when it changes: a machine made when its tool
-           needed less keeps what it has, and its disk can still grow. */
-        if (memory !== c.memoryMb && (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB)) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
-        if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
-        if (disk < (c.diskGb ?? DISK_GB)) throw new Refusal(400, `A disk can only grow: it has ${c.diskGb ?? DISK_GB} GB.`);
-        if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB) && cpus === cpusNow) throw new Refusal(409, 'Nothing to change: it already has this.');
-        if (c.asleep === true) throw new Refusal(409, 'It is asleep: wake it first, then change its memory, cores or disk.');
+        const { memory, disk, cpus } = this.#sizeAsked(c, tool, asked);
+        if (c.asleep === true) return this.#later(name, c, { memoryMb: memory, cpus, diskGb: disk });
         const release = this.#claim(name, 'restarting', 'Looking at the machine');
         let state;
         try {
@@ -737,31 +811,84 @@ export class Conversations {
         this.#store.patch(name, { phase: 'restarting', restartingSince: since, step: state === 'Running' ? 'Stopping the machine' : 'Setting its memory and disk', restarted: undefined });
         /* Started again only when it ran: then the page is told each step to its tool. */
         if (state === 'Running') this.#begin(name, 'resize', ['stopping', 'setting', 'starting', 'answering', 'folders', 'tool', ...this.#resumeStep(c, tool)], since);
-        const set = async () => {
+        const set = this.#setter(name, c, { memoryMb: memory, cpus, diskGb: disk });
+        this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
+            await this.reconcile(name);
+            const said = sizeSaid(this.#store.get(name), { memoryMb: memory, cpus, diskGb: disk });
+            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
+        });
+        return this.#store.get(name);
+    }
+
+    /* WHAT A NEW SIZE ASKS, checked the same whether it is applied now or at
+       its wake. Refused, with why, before anything is touched. */
+    #sizeAsked(c, tool, { memoryMb, diskGb, cpus: cpusAsked } = {}) {
+        const memory = memoryMb === undefined || memoryMb === null || memoryMb === '' ? c.memoryMb : Number(memoryMb);
+        const disk = diskGb === undefined || diskGb === null || diskGb === '' ? c.diskGb ?? DISK_GB : Number(diskGb);
+        const cpusNow = c.cpus ?? 1;
+        const cpus = cpusAsked === undefined || cpusAsked === null || cpusAsked === '' ? cpusNow : Number(cpusAsked);
+        const hostCpus = availableParallelism();
+        if (cpus !== cpusNow && (!Number.isInteger(cpus) || cpus < 1 || cpus > hostCpus)) throw new Refusal(400, `Cores: 1 to ${hostCpus}, those of this server, which its machines share.`);
+        const least = tool?.memoryMb ?? 512;
+        /* Memory is checked only when it changes: a machine made when its tool
+           needed less keeps what it has, and its disk can still grow. */
+        if (memory !== c.memoryMb && (!Number.isInteger(memory) || memory < least || memory > MEMORY_MAX_MB)) throw new Refusal(400, `Memory is between ${least} MB (what ${tool?.label ?? 'its tool'} needs) and ${MEMORY_MAX_MB} MB.`);
+        if (!Number.isInteger(disk) || disk > DISK_MAX_GB) throw new Refusal(400, `A disk is at most ${DISK_MAX_GB} GB.`);
+        if (disk < (c.diskGb ?? DISK_GB)) throw new Refusal(400, `A disk can only grow: it has ${c.diskGb ?? DISK_GB} GB.`);
+        if (memory === c.memoryMb && disk === (c.diskGb ?? DISK_GB) && cpus === cpusNow) throw new Refusal(409, 'Nothing to change: it already has this.');
+        return { memory, disk, cpus };
+    }
+
+    /* What sets the sizes `want` on its stopped machine, beside what it has
+       (`c`): only what differs. Returns what went wrong, in words, or
+       undefined; `done` is told each one that was set. */
+    #setter(name, c, want, done = () => {}) {
+        return async () => {
             this.#reach(name, 'setting');
-            if (memory !== c.memoryMb) {
-                this.#store.patch(name, { step: `Setting its memory to ${memory} MB` });
-                const r = await this.#vms.setMemory(name, memory);
+            if (want.memoryMb !== c.memoryMb) {
+                this.#store.patch(name, { step: `Setting its memory to ${want.memoryMb} MB` });
+                const r = await this.#vms.setMemory(name, want.memoryMb);
                 if (r.code !== 0) return `its memory could not be set (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+                done('memory');
             }
-            if (cpus !== cpusNow) {
-                this.#store.patch(name, { step: `Setting its cores to ${cpus}` });
-                const r = await this.#vms.setCpus(name, cpus);
+            if (want.cpus !== (c.cpus ?? 1)) {
+                this.#store.patch(name, { step: `Setting its cores to ${want.cpus}` });
+                const r = await this.#vms.setCpus(name, want.cpus);
                 if (r.code !== 0) return `its cores could not be set (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+                done('cpus');
             }
-            if (disk !== (c.diskGb ?? DISK_GB)) {
-                this.#store.patch(name, { step: `Growing its disk to ${disk} GB` });
-                const r = await this.#vms.setDisk(name, disk);
+            if (want.diskGb !== (c.diskGb ?? DISK_GB)) {
+                this.#store.patch(name, { step: `Growing its disk to ${want.diskGb} GB` });
+                const r = await this.#vms.setDisk(name, want.diskGb);
                 if (r.code !== 0) return `its disk could not be grown (${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}).`;
+                done('disk');
             }
             return undefined;
         };
-        this.resized = this.#cycle(name, c, set, state === 'Running').then(async (failure) => {
-            await this.reconcile(name);
-            const now = this.#store.get(name);
-            const said = `${now?.memoryMb ?? memory} MB of memory, ${now?.cpus ?? cpus} core${(now?.cpus ?? cpus) > 1 ? 's' : ''}, ${now?.diskGb ?? disk} GB of disk`;
-            await this.#settle(name, failure ? `Not changed: ${failure} It has ${said}.` : `It now has ${said}.`, failure ? `Its machine was not changed: ${failure} It has ${said}.` : `Its machine was restarted with ${said}: the tool started again.`, Boolean(failure));
-        });
+    }
+
+    /* A NEW SIZE CHOSEN WHILE IT SLEEPS. A machine asleep cannot be set (the
+       VM manager sets only a stopped one), and stopping it would throw away
+       what its memory holds: the choice is checked as a resize would be --
+       its bounds, and this server's reserve for what it grows by -- then
+       kept in its record, which outlives a restart of this server, and
+       applied at its wake (#wakeResized). A second choice replaces the first. */
+    async #later(name, c, want) {
+        await this.room({ kind: 'grow', name, memoryMb: Math.max(0, want.memoryMb - c.memoryMb), diskMb: Math.max(0, want.diskGb - (c.diskGb ?? DISK_GB)) * 1024 });
+        /* Woken while the room was looked at: it is no longer for later. */
+        const now = this.#store.get(name);
+        if (!now) throw new Refusal(404, 'No such conversation.');
+        if (now.asleep !== true) throw new Refusal(409, 'It has just woken: choose its size again.');
+        this.#store.patch(name, { sizeAtWake: { ...want, at: new Date().toISOString() }, restarted: undefined });
+        return this.#store.get(name);
+    }
+
+    /* The size kept for its wake, given up: it wakes as it is. */
+    cancelResize(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (!c.sizeAtWake) throw new Refusal(409, 'No new size is waiting for its wake.');
+        this.#store.patch(name, { sizeAtWake: undefined });
         return this.#store.get(name);
     }
 
@@ -796,6 +923,7 @@ export class Conversations {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
         if (c.phase !== 'ready') throw new Refusal(409, c.phase === 'restarting' ? 'Its machine is being restarted already.' : c.phase === 'moving' ? 'It is moving its work folder.' : 'This conversation is not ready.');
+        if (this.#resizing.has(name)) throw new Refusal(409, 'Its machine is being given its new size as it wakes.', { retry: true });
         return c;
     }
 
@@ -1034,6 +1162,9 @@ export class Conversations {
         }
         return failed;
     }
+
+    /* Whether its machine is being given the size kept for its wake just now (it stops and starts meanwhile). */
+    resizing(name) { return this.#resizing.has(name); }
 
     /* The conversations whose machine should be running: built, not asleep. */
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }

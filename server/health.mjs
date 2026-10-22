@@ -163,8 +163,9 @@ export class Health {
         const c = this.#conversations.get(name);
         if (!c) return null;
         const at = new Date().toISOString();
-        /* A machine being built, moved or restarted is somebody else's business just now. */
-        if (c.phase !== 'ready') return this.#keep(name, { at, state: c.phase === 'restarting' ? 'Restarting' : 'Starting', busy: true });
+        /* A machine being built, moved or restarted -- or given its new size as
+           it wakes (conversations.mjs) -- is somebody else's business just now. */
+        if (c.phase !== 'ready' || this.#conversations.resizing?.(name)) return this.#keep(name, { at, state: c.phase === 'restarting' || c.phase === 'ready' ? 'Restarting' : 'Starting', busy: true });
         const state = await this.#vms.state(name).catch(() => 'Unknown');
         if (state !== 'Running') return this.#keep(name, { at, state });
         const paths = this.#resources ? this.#resources.expected(name, c.work === 'kept') : (c.work === 'kept' ? ['/work'] : []);
