@@ -344,6 +344,11 @@ test('a file the person attaches is put in the bridge folder, in a folder of its
     assert.equal(b.talk.shown('helper', 'work:.parley/to-agent.jsonl'), false);
     await assert.rejects(b.talk.say('helper', 'x', undefined, ['/work/.parley/to-agent.jsonl']), /attached here first/);
     await assert.rejects(b.talk.say('helper', 'x', undefined, Array(11).fill(file.path)), /10 files at most/);
+    /* With what the person wrote about that file alone: kept with it, read by the tool under it. */
+    await b.talk.say('helper', '', undefined, [{ path: file.path, note: 'the second line is wrong' }]);
+    assert.equal(b.talk.of('helper').messages.at(-1).files[0].note, 'the second line is wrong');
+    assert.match(b.parley('read').out, /notes\.txt \(9 bytes\)\n {4}Their note on this file: the second line is wrong/);
+    await assert.rejects(b.talk.say('helper', 'x', undefined, [{ path: '/work/.parley/to-agent.jsonl', note: 'x' }]), /attached here first/);
 });
 
 test('a machine put to sleep and woken does not say again what was wrong before: only a look at a running machine that finds it gone does', async (t) => {

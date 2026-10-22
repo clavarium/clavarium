@@ -2285,7 +2285,7 @@
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines).then((data) => withMachine(data, name)),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
-            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => f.path) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}) }),
+            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}) }),
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */

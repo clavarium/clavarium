@@ -349,13 +349,16 @@ export class Talk {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
         if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
-        /* Only files put here by `attach`: their paths are this server's, and each is there. */
-        const attached = given.map((path) => {
+        /* Only files put here by `attach`: their paths are this server's, and each is there. Each is
+           its path, or { path, note }: what the person wrote about that file alone (Parley bounds it). */
+        const attached = given.map((item) => {
+            const path = item && typeof item === 'object' && !Array.isArray(item) ? item.path : item;
             const m = typeof path === 'string' ? ATTACHED.exec(path) : null;
             const file = m ? join(this.#dir(name), FILES, m[1], m[2]) : undefined;
             const info = file ? lstatSync(file, { throwIfNoEntry: false }) : undefined;
             if (!info?.isFile()) throw new Refusal(400, 'A file of this message was not attached here first.');
-            return { path, name: m[2], size: info.size };
+            const note = item && typeof item === 'object' && typeof item.note === 'string' ? item.note : '';
+            return { path, name: m[2], size: info.size, ...(note ? { note } : {}) };
         });
         try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
