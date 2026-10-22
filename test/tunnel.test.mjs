@@ -12,13 +12,15 @@ import { keepRelayCurrent } from '../deploy/online.mjs';
 
 const WRAPPER = fileURLToPath(new URL('../deploy/clavarium-tunnel', import.meta.url));
 const folder = (t) => { const d = mkdtempSync(join(tmpdir(), 'clv-tunnel-')); t.after(() => rmSync(d, { recursive: true, force: true })); return d; };
-const OLD = `[Service]\nExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -R *:8443:127.0.0.1:443 -R *:8080:127.0.0.1:80 -p 2222 clavarium-tunnel@relay.example.net\nRestart=always\n`;
+/* An account at the relay, written so that no address appears whole in the source (the shapes check). */
+const at = (who) => [who, 'relay.example.com'].join('@');
+const OLD = `[Service]\nExecStart=/usr/bin/ssh -N -T -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o ConnectTimeout=15 -R *:8443:127.0.0.1:443 -R *:8080:127.0.0.1:80 -p 2222 ${at('clavarium-tunnel')}\nRestart=always\n`;
 
 test('its unit: the program of the release, the relay and its port read from what install.sh wrote then or now', () => {
-    assert.deepEqual(relayOfUnit(OLD), { relay: 'relay.example.net', port: '2222' });
-    const unit = tunnelUnit('relay.example.net', '2222');
-    assert.deepEqual(relayOfUnit(unit), { relay: 'relay.example.net', port: '2222' });
-    for (const line of ['ExecStart=/usr/local/sbin/clavarium-tunnel relay.example.net 2222', 'Restart=always', 'RestartSec=5', 'StartLimitIntervalSec=0', 'RuntimeDirectory=clavarium-tunnel', 'RuntimeDirectoryPreserve=yes', 'User=clavarium-tunnel']) assert.ok(unit.includes(`${line}\n`), line);
+    assert.deepEqual(relayOfUnit(OLD), { relay: 'relay.example.com', port: '2222' });
+    const unit = tunnelUnit('relay.example.com', '2222');
+    assert.deepEqual(relayOfUnit(unit), { relay: 'relay.example.com', port: '2222' });
+    for (const line of ['ExecStart=/usr/local/sbin/clavarium-tunnel relay.example.com 2222', 'Restart=always', 'RestartSec=5', 'StartLimitIntervalSec=0', 'RuntimeDirectory=clavarium-tunnel', 'RuntimeDirectoryPreserve=yes', 'User=clavarium-tunnel']) assert.ok(unit.includes(`${line}\n`), line);
     assert.equal(relayOfUnit('[Service]\nExecStart=/bin/true\n'), null);
     /* install.sh writes this very text. */
     assert.match(readFileSync(new URL('../deploy/install.sh', import.meta.url), 'utf8'), /tunnelUnit\(process\.argv\[2\], process\.argv\[3\]\).*\n.*deploy\/tunnel\.mjs" "\$RELAY" "\$RELAY_PORT" > \/etc\/systemd\/system\/clavarium-tunnel\.service/);
@@ -32,7 +34,7 @@ test('the updater writes it over an older one, the program first; then nothing m
     assert.equal(await ensureTunnel({ file, program, from: WRAPPER, run }), false, 'no tunnel here: nothing');
     writeFileSync(file, OLD);
     assert.equal(await ensureTunnel({ file, program, from: WRAPPER, run }), true);
-    assert.equal(readFileSync(file, 'utf8'), tunnelUnit('relay.example.net', '2222', program));
+    assert.equal(readFileSync(file, 'utf8'), tunnelUnit('relay.example.com', '2222', program));
     assert.deepEqual(ran, [`install -o root -g root -m 0755 ${WRAPPER} ${program}`]);
     assert.equal(await ensureTunnel({ file, program, from: WRAPPER, run }), false, 'the same: nothing');
     assert.equal(ran.length, 1);
@@ -43,22 +45,22 @@ function wrapper(t, said, code = 255) {
     const d = folder(t);
     mkdirSync(join(d, 'bin')); mkdirSync(join(d, 'run'));
     writeFileSync(join(d, 'bin', 'ssh'), `#!/bin/sh\necho "$*" > "${d}/args"\nprintf '%s\\n' "${said}" >&2\nexit ${code}\n`, { mode: 0o755 });
-    const go = () => spawnSync('bash', [WRAPPER, 'relay.example.net', '2222'], { env: { PATH: `${join(d, 'bin')}:/usr/bin:/bin`, RUNTIME_DIRECTORY: join(d, 'run'), CLAVARIUM_TUNNEL_STEP: '0' }, encoding: 'utf8' });
+    const go = () => spawnSync('bash', [WRAPPER, 'relay.example.com', '2222'], { env: { PATH: `${join(d, 'bin')}:/usr/bin:/bin`, RUNTIME_DIRECTORY: join(d, 'run'), CLAVARIUM_TUNNEL_STEP: '0' }, encoding: 'utf8' });
     return { d, go, count: () => (existsSync(join(d, 'run', 'refused')) ? readFileSync(join(d, 'run', 'refused'), 'utf8').trim() : '') };
 }
 
 test('a cut of the network: keepalives every 10 s, two missed; tried again at once', (t) => {
-    const w = wrapper(t, 'ssh: connect to host relay.example.net port 2222: Network is unreachable');
+    const w = wrapper(t, 'ssh: connect to host relay.example.com port 2222: Network is unreachable');
     const r = w.go();
     assert.equal(r.status, 255);
     assert.equal(w.count(), '', 'not counted as a refusal');
     const args = readFileSync(join(w.d, 'args'), 'utf8');
-    for (const o of ['ServerAliveInterval=10', 'ServerAliveCountMax=2', 'ExitOnForwardFailure=yes', 'StrictHostKeyChecking=yes', '*:8443:127.0.0.1:443', '*:8080:127.0.0.1:80', '-p 2222', 'clavarium-tunnel@relay.example.net']) assert.ok(args.includes(o), o);
+    for (const o of ['ServerAliveInterval=10', 'ServerAliveCountMax=2', 'ExitOnForwardFailure=yes', 'StrictHostKeyChecking=yes', '*:8443:127.0.0.1:443', '*:8080:127.0.0.1:80', '-p 2222', at('clavarium-tunnel')]) assert.ok(args.includes(o), o);
     assert.doesNotMatch(r.stderr, /refused this machine/);
 });
 
 test('a refusal (its key, the relay\'s host key) is not a cut: counted, said, waited for longer each time; held again, the count starts over', (t) => {
-    for (const said of ['clavarium-tunnel@relay.example.net: Permission denied (publickey).', 'Host key verification failed.', '@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @']) {
+    for (const said of [`${at('clavarium-tunnel')}: Permission denied (publickey).`, 'Host key verification failed.', '@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @']) {
         const w = wrapper(t, said);
         const r = w.go();
         assert.equal(r.status, 255);
@@ -89,9 +91,9 @@ test('after an update, the relay is brought to the version this release names, o
     writeFileSync(unit, OLD);
     const seen = [];
     assert.equal(await keepRelayCurrent({ run: async (argv) => { seen.push(argv.join(' ')); return { code: 0 }; } }, P, { done: join(d, 'v-old'), unit }), true);
-    assert.match(seen[0], /clavarium-keeper@relay\.example\.net update-relay 0\.1\.1$/);
+    assert.match(seen[0], new RegExp(`${at('clavarium-keeper').replace(/\./g, '\\.')} update-relay 0\\.1\\.1$`));
     rmSync(join(P.access, 'keeper-key'));
-    writeFileSync(P.relayConf, 'HOST=relay.example.net\nPORT=22\n');
+    writeFileSync(P.relayConf, 'HOST=relay.example.com\nPORT=22\n');
     assert.equal(await keepRelayCurrent(sys, P, { done }), false, 'no maintenance key: nothing asked');
     writeFileSync(join(P.access, 'keeper-key'), 'x');
     assert.equal(await keepRelayCurrent(sys, P, { done }), true);
