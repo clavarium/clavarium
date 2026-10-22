@@ -1,6 +1,6 @@
 {
   "name": "clavarium",
-  "version": "0.2.18-next.4",
+  "version": "0.2.18-next.5",
   "license": "MIT",
   "type": "module",
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
