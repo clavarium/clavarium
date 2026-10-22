@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadTools, readTools } from '../server/tools.mjs';
 
@@ -65,14 +65,24 @@ test('the launcher of Claude Code gives it the chat as its own tools (Parley, MC
     const asked = join(dir, 'asked.txt');
     /* A Claude Code that only notes what it is asked, and records the server as the real one does. */
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
-    const run = (env = {}) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH: `${bin}:${process.env.PATH}`, PARLEY_DIR: chat, ...env }, encoding: 'utf8' });
+    /* Only what this test puts on the way, and node (its launchers' scripts). */
+    const PATH = `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`;
+    const run = (env = {}) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: chat, ...env }, encoding: 'utf8' });
     assert.equal(run().status, 0);
     assert.equal(existsSync(asked), false, 'no chat (no server in its folder): nothing asked');
     writeFileSync(join(chat, 'server.mjs'), '');
     assert.equal(run().status, 0);
-    assert.equal(readFileSync(asked, 'utf8'), `mcp add --scope user parley -- node ${chat}/server.mjs --dir ${chat}\n`);
+    assert.equal(readFileSync(asked, 'utf8'), `mcp add --scope user parley -- node ${chat}/server.mjs --dir ${chat}\n`, 'no Docket in this machine: Parley alone');
     assert.equal(run().status, 0);
     assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).length, 1, 'declared already: Claude Code not asked again');
+    /* Docket installed: given as its tools too, once, its folder beside the chat's. */
+    writeFileSync(join(bin, 'docket-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]},"docket":{"command":"docket-mcp","args":["--dir","/work/.docket"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
+    assert.equal(run().status, 0);
+    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).at(-1), 'mcp add --scope user docket -- docket-mcp --dir /work/.docket');
+    assert.equal(run().status, 0);
+    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).length, 2, 'declared already: not asked again');
+    rmSync(join(bin, 'docket-mcp'));
     /* Claude Code refusing: said, and the tool starts all the same. */
     rmSync(join(dir, '.claude.json')); writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const refused = run();

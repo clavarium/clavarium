@@ -2550,7 +2550,11 @@
         ['sent-by-hand', 'Sent by hand', 'Sent from the review'],
         ['refused', 'Not sent', 'An automatic sending was refused: what to do'],
         ['origin', 'Origin updated', 'The remote brought commits'],
-        ['wakeup', 'Wake-up', 'A wake-up was typed'],
+        ['wakeup', 'Wake-up', 'A wake-up was typed, or posted to its docket'],
+        ['docket-done', 'Handled', 'What woke it, said done by the tool'],
+        ['docket-failed', 'Could not be handled', 'Said failed by the tool, with why'],
+        ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
+        ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
         ['tools-updated', 'New tools', 'After an update: a restart gives its tool all of them'],
@@ -2671,6 +2675,36 @@
         }
         if (document.activeElement?.id !== 'wakeups-limit') $('wakeups-limit').value = String(mine.perHour);
         $('wakeups-sent').textContent = `${mine.sentThisHour} this hour.`;
+        void paintDocket();
+    }
+    /* Its docket (server/dockets.mjs): the reminders its tool set, which its owner may take back; the newest events. */
+    const DOCKET_STATES = { waiting: 'waits', done: 'done', failed: 'could not be done' };
+    async function paintDocket() {
+        const of = current;
+        const d = DEVICE || !of ? null : await fetch(`${API}/conversations/${encodeURIComponent(of)}/docket`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (of !== current) return;
+        $('docket-box').hidden = !d?.on;
+        if (!d?.on) return;
+        const plans = $('docket-plans');
+        plans.replaceChildren();
+        for (const p of d.plans) {
+            const row = document.createElement('div'); row.className = 'wakeup'; row.dataset.kind = 'reminder';
+            const what = document.createElement('b'); what.textContent = p.text;
+            const when = document.createElement('p'); when.className = 'hint'; when.textContent = `${p.cron ? `By the clock (${p.cron}), next` : 'Once,'} ${new Date(p.next).toLocaleString()}`;
+            const off = document.createElement('button'); off.type = 'button'; off.textContent = 'Take it back';
+            off.addEventListener('click', async () => { try { await post(`${API}/conversations/${encodeURIComponent(of)}/docket/cancel`, { plan: p.id }); } catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; } void paintDocket(); });
+            const acts = document.createElement('div'); acts.className = 'row'; acts.append(off);
+            row.append(what, when, acts);
+            plans.append(row);
+        }
+        if (d.plans.length === 0) { const none = document.createElement('p'); none.className = 'hint'; none.textContent = 'No reminder set by the tool.'; plans.append(none); }
+        const events = $('docket-events');
+        events.replaceChildren();
+        for (const e of d.events.slice(0, 8)) {
+            const line = document.createElement('p'); line.className = 'hint docket-event'; line.dataset.state = e.state;
+            line.textContent = `${new Date(e.at).toLocaleString()}: ${e.text} -- ${DOCKET_STATES[e.state] ?? e.state}${e.note ? ` (${e.note})` : ''}${e.state === 'waiting' && e.told ? `, told ${e.told} time${e.told > 1 ? 's' : ''}` : ''}`;
+            events.append(line);
+        }
     }
     /* BY THE CLOCK IS ALWAYS A CRON LINE. The few usual choices write it, and
        it stays in sight: what is set is what is shown, and it can be changed. */

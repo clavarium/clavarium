@@ -127,6 +127,11 @@ export const EVENT_LEVELS = Object.freeze({
     restarted: 'news',
     /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
     'tools-updated': 'news',
+    /* Its docket (dockets.mjs): what it handled, what it could not, what it never did; a reminder it set itself. */
+    'docket-done': 'news',
+    'docket-failed': 'needs-you',
+    'docket-unhandled': 'needs-you',
+    'docket-reminder': 'trace',
 });
 const TONES = ['warn', 'bad'];
 /* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */
@@ -287,6 +292,15 @@ export class Talk {
             const stepAt = (now.steps ?? []).map((m) => m.at).sort().at(-1) ?? null;
             return { waiting: now.waiting, state: now.status?.state ?? null, needs, ...(stepAt ? { stepAt } : {}), ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
         } catch { return { waiting: 0, state: null }; }
+    }
+
+    /* Is its chat on? (cheap: the record alone) */
+    isOn(name) { return this.#store.get(name)?.on === true; }
+
+    /* Its tool's pulse (Parley): { busy, at }, or null. Where the chat is off: null. */
+    pulse(name) {
+        if (this.#store.get(name)?.on !== true) return null;
+        try { return this.#parley(name).read().pulse ?? null; } catch { return null; }
     }
 
     async set(name, on) {

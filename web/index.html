@@ -274,13 +274,19 @@
           <div class="chapter-body">
             <div id="wakeups-box">
             <div class="panel-top"><b>Wake it by itself</b></div>
-            <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken.</p>
+            <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken. Where its chat is on, the line goes to its docket instead: it waits there until the tool says it was done, and the tool is told again until then.</p>
             <div id="wakeups-rows"></div>
             <div id="wakeup-address-box" class="notice-box" hidden>
               <b>Its address, shown this once</b>
               <input id="wakeup-address" readonly spellcheck="false" aria-label="The address that wakes it">
               <p class="hint">Whoever has this address can wake the tool. Copy it now: it is not kept in a form that can be shown again.</p>
               <div class="row"><button type="button" id="wakeup-address-copy" class="primary">Copy</button><button type="button" id="wakeup-address-done">I have it</button></div>
+            </div>
+            <div id="docket-box" hidden>
+              <div class="panel-top"><b>Its docket</b></div>
+              <p class="hint">What woke it, and whether it was done; the reminders the tool set itself (it can, with "docket remind"). Take one back if you do not want it.</p>
+              <div id="docket-plans"></div>
+              <div id="docket-events"></div>
             </div>
             <details id="wakeups-new-box">
               <summary>Add a wake-up</summary>

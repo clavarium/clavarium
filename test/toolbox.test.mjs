@@ -6,8 +6,8 @@ import { mkdtempSync, rmSync, mkdirSync, readFileSync, writeFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { Toolbox, parleySource, integrityOf, TOOLS_PATH } from '../server/toolbox.mjs';
-import { packageFile, locked } from '../server/parley.mjs';
+import { Toolbox, parleySource, toolSources, integrityOf, TOOLS_PATH } from '../server/toolbox.mjs';
+import { packageFile, locked, MACHINE_TOOLS } from '../server/parley.mjs';
 import { Resources } from '../server/resources.mjs';
 import { Store } from '../server/store.mjs';
 
@@ -59,17 +59,22 @@ test('the folder is made by the host program, then filled: each archive, and an 
     const index = await b.box.prepare();
     assert.deepEqual(b.asked, ['tools make']);
     const files = join(b.dir, 'toolbox', 'files');
-    const [archive] = readdirSync(files).filter((f) => f.endsWith('.tgz'));
-    const sha256 = createHash('sha256').update(readFileSync(join(files, archive))).digest('hex');
-    assert.equal(sha256, createHash('sha256').update(readFileSync(parleySource()[0].archive)).digest('hex'));
-    assert.deepEqual(index, { tools: [{ name: 'parley', version: /-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.tgz$/.exec(archive)[1], file: archive, sha256, usage: 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }] });
+    /* Every tool of the machines, Parley first: its archive as npm recorded it, and one line of usage. */
+    const sum = (file) => createHash('sha256').update(readFileSync(file)).digest('hex');
+    const sources = toolSources();
+    assert.deepEqual(sources.map((x) => x.name), MACHINE_TOOLS.map((x) => x.name));
+    assert.deepEqual(index, { tools: sources.map((x) => { const file = x.archive.split('/').pop(); return { name: x.name, version: /-(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)\.tgz$/.exec(file)[1], file, sha256: sum(x.archive), usage: MACHINE_TOOLS.find((m) => m.name === x.name).usage }; }) });
+    for (const tool of index.tools) assert.equal(sum(join(files, tool.file)), tool.sha256);
+    assert.equal(index.tools[0].usage, 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.');
+    assert.match(index.tools[1].usage, /^Installed in every machine: docket --help\./);
     assert.deepEqual(JSON.parse(readFileSync(join(files, 'index.json'), 'utf8')), index, 'what a tool reads in /tools/index.json');
+    const archive = index.tools[0].file;
     assert.equal(b.box.find('parley').path, `${TOOLS_PATH}/${archive}`);
     /* Prepared again: what is no longer listed goes, what is there is kept. */
     writeFileSync(join(files, 'clavarium-parley-0.0.1.tgz'), 'an old one');
     mkdirSync(join(files, 'stray'));
     await b.box.prepare();
-    assert.deepEqual(readdirSync(files).sort(), [archive, 'index.json', 'launch'].sort());
+    assert.deepEqual(readdirSync(files).sort(), [...index.tools.map((x) => x.file), 'index.json', 'launch'].sort());
     /* The launchers, as they are in config/launch of this code. */
     assert.deepEqual(readdirSync(join(files, 'launch')).sort(), readdirSync(new URL('../config/launch', import.meta.url)).sort());
     /* The host program refuses: said, and nothing is offered. */
@@ -105,47 +110,47 @@ test('shown in each machine with its other folders, looked at by the health chec
     assert.equal(existsSync(join(b.dir, 'other')), false);
 });
 
-/* A machine, as far as installing Parley goes: what `parley --version` says,
-   whether npm is there, what sha256sum reads in /tools. */
-function machine(b, { version = '', npm = true, sum, npmFails = false } = {}) {
-    const m = { version, calls: [] };
+/* A machine, as far as installing its tools goes: what `parley --version` and
+   `docket --version` say, whether npm is there, what sha256sum reads in /tools. */
+function machine(b, { versions = {}, npm = true, sum, npmFails = false } = {}) {
+    const m = { versions: { ...versions }, calls: [] };
+    const of = (path) => b.box.list().find((x) => path.endsWith(`/${x.file}`));
     b.vms.exec = async (name, argv) => {
         m.calls.push(argv.join(' '));
-        if (argv[0] === 'parley') return m.version ? { code: 0, stdout: `${m.version}\n`, stderr: '' } : { code: 127, stdout: '', stderr: 'parley: not found' };
+        if (argv[0] === 'parley' || argv[0] === 'docket') return m.versions[argv[0]] ? { code: 0, stdout: `${m.versions[argv[0]]}\n`, stderr: '' } : { code: 127, stdout: '', stderr: `${argv[0]}: not found` };
         if (argv[0] === 'which') return { code: npm ? 0 : 1, stdout: npm ? '/usr/local/bin/npm\n' : '', stderr: '' };
-        if (argv[0] === 'sha256sum') return { code: 0, stdout: `${sum ?? b.box.find('parley').sha256}  ${argv.at(-1)}\n`, stderr: '' };
+        if (argv[0] === 'sha256sum') return { code: 0, stdout: `${sum ?? of(argv.at(-1)).sha256}  ${argv.at(-1)}\n`, stderr: '' };
         if (argv.includes('npm')) {
             if (npmFails) return { code: 1, stdout: '', stderr: 'npm ERR! code ENOTCACHED' };
-            m.version = b.box.find('parley').version; return { code: 0, stdout: '', stderr: '' };
+            const tool = of(argv.at(-1)); m.versions[tool.name] = tool.version; return { code: 0, stdout: '', stderr: '' };
         }
         return { code: 1, stdout: '', stderr: 'unexpected' };
     };
     return m;
 }
 
-test('Parley is installed by the server, in every machine: its sha256 read in the machine against the index, then npm offline, as root; once known there, nothing is asked', async (t) => {
+test('Parley and Docket are installed by the server, in every machine: each sha256 read in the machine against the index, then npm offline, as root; once known there, nothing is asked', async (t) => {
     const b = bench(t);
     assert.equal(await b.box.installIn('helper'), 'the tools folder is not in place');
     await b.box.prepare();
-    const parley = b.box.find('parley');
     const m = machine(b);
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley --version', 'which npm', `sha256sum -- ${parley.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${parley.path}`, 'parley --version']);
+    assert.deepEqual(m.calls, ['parley', 'docket'].flatMap((name) => { const tool = b.box.find(name); return [`${name} --version`, 'which npm', `sha256sum -- ${tool.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${tool.path}`, `${name} --version`]; }));
     /* Known there: an opening asks nothing of the machine. */
     m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
     assert.deepEqual(m.calls, []);
     /* Two openings at once: one install. */
-    b.box.forget('helper'); m.version = '0.0.1'; m.calls.length = 0;
+    b.box.forget('helper'); m.versions.parley = '0.0.1'; m.calls.length = 0;
     assert.deepEqual(await Promise.all([b.box.installIn('helper'), b.box.installIn('helper')]), ['', '']);
-    assert.equal(m.calls.filter((c) => c.includes('npm install')).length, 1, 'an older version is replaced, once');
+    assert.equal(m.calls.filter((c) => c.includes('npm install')).length, 1, 'an older version is replaced, once; the other is there already');
     /* Already the version of the index (a machine that kept its disk): looked at, not installed again. */
     b.box.forget('helper'); m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley --version']);
+    assert.deepEqual(m.calls, ['parley --version', 'docket --version']);
 });
 
-test('Parley is not installed from an archive that is not the one of the index, nor where there is no npm; npm failing is said', async (t) => {
+test('a tool is not installed from an archive that is not the one of the index, nor where there is no npm; npm failing is said', async (t) => {
     const b = bench(t);
     await b.box.prepare();
     const wrong = machine(b, { sum: '0'.repeat(64) });

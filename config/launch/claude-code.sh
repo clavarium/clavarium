@@ -26,6 +26,13 @@ if [ -f "$chat/server.mjs" ] && ! grep -q "\"$chat/server.mjs\"" "$HOME/.claude.
     claude mcp add --scope user parley -- node "$chat/server.mjs" --dir "$chat" >/dev/null 2>&1 \
         || echo "launch: Parley was not given to Claude Code as tools: the command parley still works" >&2
 fi
+# ITS DOCKET AS ITS OWN TOOLS (MCP), with its chat: what woke it, to say done or failed; the
+# reminders it sets itself. The same as the command "docket", installed in every machine.
+docket="/work/.docket"
+if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1 && ! grep -q "\"$docket\"" "$HOME/.claude.json" 2>/dev/null; then
+    claude mcp add --scope user docket -- docket-mcp --dir "$docket" >/dev/null 2>&1 \
+        || echo "launch: Docket was not given to Claude Code as tools: the command docket still works" >&2
+fi
 # ITS PULSE: Claude Code's own hooks say to the chat that it acts, and when its turn ends, so that
 # the person sees "Working..." while it works without a word (parley pulse; nothing posted).
 if [ -f "$chat/server.mjs" ]; then

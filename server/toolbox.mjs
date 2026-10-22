@@ -2,7 +2,7 @@
  *
  * An archive per tool, and an index that says what each one is.
  *
- * PARLEY IS INSTALLED BY THIS SERVER, never by the agent (decided after an
+ * PARLEY AND DOCKET (MACHINE_TOOLS, parley.mjs) ARE INSTALLED BY THIS SERVER, never by the agent (decided after an
  * agent rightly refused to install "code it had not checked"): in every
  * machine, at each start of its tool when it is missing or not the version
  * of the index, chat on or off. Its archive's sha256, as the machine reads
@@ -17,7 +17,7 @@
  *   /tools/CLAVARIUM.md                where a tool is, the same for every
  *                                      machine (see guide.mjs): `notes`
  *
- * Adding a tool is putting its archive in SOURCES with one line of usage.
+ * Adding a tool is a line of MACHINE_TOOLS and its dependency.
  *
  * THE FOLDER IS KEPT BY THIS SERVER and shown in each machine through a
  * read-only view made by the host program ("tools make": the same bindfs
@@ -29,7 +29,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, readdirSync, renameSync, rmSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { APP, ARCHIVES, PARLEY, archiveName, locked, parleyDir, parleyVersion } from './parley.mjs';
+import { APP, ARCHIVES, MACHINE_TOOLS, archiveName, locked, packageDir, packageVersion } from './parley.mjs';
 
 export const TOOLS_PATH = '/tools';
 export const NOTES = 'CLAVARIUM.md';
@@ -41,17 +41,21 @@ export const LAUNCHERS = fileURLToPath(new URL('../config/launch', import.meta.u
    parley.mjs), with the integrity npm recorded for the version installed:
    prepare() refuses an archive that is not that one. Missing, it is said
    once and nothing is offered: no machine gets a Parley nobody checked. */
-export function parleySource({ app = APP, dir } = {}) {
+export function toolSource(tool, { app = APP, dir } = {}) {
     let version;
-    try { version = parleyVersion(dir ?? parleyDir()); } catch (error) { console.error(`Parley: ${error.message}`); return []; }
-    const archive = join(app, ARCHIVES, archiveName(version));
-    if (!existsSync(archive)) { console.error(`Parley: ${archive} is missing (npm run toolbox): no machine is given Parley`); return []; }
-    const lock = locked(PARLEY, app);
-    if (lock?.version !== version) { console.error(`Parley: the lock file does not record version ${version}: no machine is given Parley`); return []; }
-    return [{ name: 'parley', archive, integrity: lock.integrity, usage: () => 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' }];
+    try { version = packageVersion(tool.pkg, dir ?? packageDir(tool.pkg)); } catch (error) { console.error(`${tool.name}: ${error.message}`); return []; }
+    const archive = join(app, ARCHIVES, archiveName(version, tool.pkg));
+    if (!existsSync(archive)) { console.error(`${tool.name}: ${archive} is missing (npm run toolbox): no machine is given it`); return []; }
+    const lock = locked(tool.pkg, app);
+    if (lock?.version !== version) { console.error(`${tool.name}: the lock file does not record version ${version}: no machine is given it`); return []; }
+    return [{ name: tool.name, archive, integrity: lock.integrity, usage: () => tool.usage }];
 }
+/* Every tool of MACHINE_TOOLS whose archive is here and checked. */
+export const toolSources = (options = {}) => MACHINE_TOOLS.flatMap((tool) => toolSource(tool, options));
+export const parleySource = (options = {}) => toolSource(MACHINE_TOOLS.find((t) => t.name === 'parley'), options);
 
 /* "sha512-<base64>", as npm writes an integrity. */
+const NO_NPM = 'there is no npm in this machine';
 export const integrityOf = (bytes) => `sha512-${createHash('sha512').update(bytes).digest('base64')}`;
 
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
@@ -69,7 +73,7 @@ export class Toolbox {
        may be in it: every machine reads it. */
     /* `launched`: a Store of what each tool was started with (its launchers' fingerprint): see stale(). */
     /* `launches(name)`: does its tool start through a launcher? (only those read one) */
-    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = parleySource(), notes = null, launchers = LAUNCHERS, launched = null, launches = () => false }) {
+    constructor({ host, vms, mntDir, uid = process.getuid(), gid = process.getgid(), sources = toolSources(), notes = null, launchers = LAUNCHERS, launched = null, launches = () => false }) {
         this.#launched = launched; this.#launches = launches;
         this.#host = host; this.#vms = vms; this.#mnt = mntDir; this.#uid = uid; this.#gid = gid; this.#sources = sources; this.#notes = notes; this.#launchers = launchers;
     }
@@ -162,20 +166,27 @@ export class Toolbox {
     /* Its machine was built again, or restarted: looked at again at its next opening. */
     forget(conversation) { this.#installed.delete(conversation); }
 
+    /* Each tool of MACHINE_TOOLS in the index, in turn: '' when all are there, else why the first was not. */
     async #install(conversation) {
-        const tool = this.find('parley');
-        if (!tool) return 'the tools folder is not in place';
+        if (!this.ready) return 'the tools folder is not in place';
+        const tools = MACHINE_TOOLS.map((t) => this.find(t.name)).filter(Boolean);
+        if (tools.length === 0) return 'the tools folder is not in place';
+        const sha256 = tools.map((t) => t.sha256).join(' ');
         const known = this.#installed.get(conversation);
-        if (known?.sha256 === tool.sha256) return known.why;
+        if (known?.sha256 === sha256) return known.why;
+        let why = '';
+        for (const tool of tools) { why = await this.#installOne(conversation, tool); if (why) break; }
+        /* Known once it is said: there, or why not (a machine without npm); a failure on the way is asked again. */
+        if (why === '' || why === NO_NPM) this.#installed.set(conversation, { sha256, why });
+        return why;
+    }
+
+    async #installOne(conversation, tool) {
         const exec = (argv, timeoutMs = 30_000) => this.#vms.exec(conversation, argv, { timeoutMs }).catch(() => ({ code: 1, stdout: '', stderr: '' }));
-        const there = async () => { const v = await exec(['parley', '--version']); return v.code === 0 && v.stdout.trim() === tool.version; };
-        if (await there()) { this.#installed.set(conversation, { sha256: tool.sha256, why: '' }); return ''; }
-        if ((await exec(['which', 'npm'])).code !== 0) {
-            /* A machine without node (a plain shell): said once, until it is built again or restarted. */
-            const why = 'there is no npm in this machine';
-            this.#installed.set(conversation, { sha256: tool.sha256, why });
-            return why;
-        }
+        const there = async () => { const v = await exec([tool.name, '--version']); return v.code === 0 && v.stdout.trim() === tool.version; };
+        if (await there()) return '';
+        /* A machine without node (a plain shell): said once, until it is built again or restarted. */
+        if ((await exec(['which', 'npm'])).code !== 0) return NO_NPM;
         /* The archive as the machine reads it, against the index; /tools mounted again once if it is not there. */
         const sum = async () => /^([0-9a-f]{64})\s/.exec((await exec(['sha256sum', '--', tool.path], 60_000)).stdout ?? '')?.[1];
         let seen = await sum();
@@ -184,8 +195,7 @@ export class Toolbox {
         if (seen !== tool.sha256) return `${tool.path} in the machine is not the archive of the index (sha256 differs): not installed`;
         const r = await exec(['sudo', '-n', 'npm', 'install', '-g', '--offline', '--no-audit', '--no-fund', tool.path], 180_000);
         if (r.code !== 0) return `npm: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}`;
-        if (!(await there())) return 'installed, but "parley --version" does not say the version of the index';
-        this.#installed.set(conversation, { sha256: tool.sha256, why: '' });
+        if (!(await there())) return `installed, but "${tool.name} --version" does not say the version of the index`;
         return '';
     }
 

@@ -20,6 +20,14 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 export const APP = fileURLToPath(new URL('..', import.meta.url));
 export const PARLEY = 'clavarium-parley';
+export const DOCKET = 'clavarium-docket';
+/* THE TOOLS EVERY MACHINE IS GIVEN, each an npm dependency at an exact version, as Parley is:
+   installed by this server in every machine (toolbox.mjs), from its archive here. `usage`
+   is what /tools/index.json says of it. Adding one is adding a line here and its dependency. */
+export const MACHINE_TOOLS = Object.freeze([
+    { name: 'parley', pkg: PARLEY, usage: 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' },
+    { name: 'docket', pkg: DOCKET, usage: 'Installed in every machine: docket --help. What woke you, waiting until you say done or failed; and reminders you set yourself.' },
+]);
 
 /* Where an installed package is, by the lookup Node itself makes from here
    (its own node_modules, then each parent's), without asking its "exports":
@@ -39,9 +47,10 @@ export const packageFile = (name, path) => join(packageDir(name), path);
 
 export function parleyDir() { return packageDir(PARLEY); }
 export function parleyVersion(dir = parleyDir()) { return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version; }
+export function packageVersion(name, dir = packageDir(name)) { return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')).version; }
 /* Where its archive for the machines sits, next to the code. */
 export const ARCHIVES = 'toolbox';
-export const archiveName = (version) => `${PARLEY}-${version}.tgz`;
+export const archiveName = (version, pkg = PARLEY) => `${pkg}-${version}.tgz`;
 
 /* WHAT NPM RECORDED of a dependency: { version, resolved, integrity } from
    the lock file of this tree (a working tree, a local install), the

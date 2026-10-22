@@ -299,6 +299,9 @@ export async function handleApi(request, response, conversations, headers, resou
             if (guided && guide) return send(200, guide.about(decodeURIComponent(guided[1]))), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
             if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
+            /* Its docket: the reminders its tool set, the newest events (dockets.mjs). */
+            const docketRead = /^\/api\/conversations\/([^/]+)\/docket$/.exec(pathname);
+            if (docketRead && wakeups) return send(200, wakeups.docketOf(decodeURIComponent(docketRead[1]))), true;
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
             if (answered && answerer) return send(200, answerer.log(decodeURIComponent(answered[1]))), true;
             /* A repository: where its commits go, and what would go now. */
@@ -435,6 +438,11 @@ export async function handleApi(request, response, conversations, headers, resou
             if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via)), true;
+        }
+        const docketed = /^\/api\/conversations\/([^/]+)\/docket(\/cancel)?$/.exec(pathname);
+        if (docketed && wakeups) {
+            const conversation = decodeURIComponent(docketed[1]);
+            if (docketed[2]) return send(200, wakeups.cancelReminder(conversation, body.plan)), true;
         }
         const woken = /^\/api\/conversations\/([^/]+)\/wakeups(?:\/([0-9a-f-]{36})(\/remove)?)?$/.exec(pathname);
         if (woken && wakeups) {

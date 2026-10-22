@@ -26,12 +26,12 @@
  * A RELEASE IS MADE (prepare) in a folder of its own, beside the one that runs:
  *   1. npm installs clavarium@<version> with no script run, from the registry;
  *   2. checked: the integrity npm recorded is the registry's; Clavarium and
- *      Parley each carry a provenance statement whose subject is that very
+ *      Parley and Docket each carry a provenance statement whose subject is that very
  *      archive and whose source is their repository on GitHub (REPOS); and
  *      `npm audit signatures` checks the registry's signatures and those
  *      statements' own signatures, for every package installed;
  *   3. only then the build scripts run (npm rebuild: node-pty is compiled),
- *      Parley's archive for the machines is fetched and checked
+ *      the archives of the machines' tools are fetched and checked
  *      (parley-archive.mjs), and the server's own smoke test runs
  *      (server/smoke.mjs). Anything wrong: the folder goes, nothing changed.
  *
@@ -53,7 +53,7 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, rmSync, readdirSync
 import { dirname, join, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { fetchParleyArchive, REGISTRY } from './parley-archive.mjs';
+import { fetchToolArchives, REGISTRY } from './parley-archive.mjs';
 import { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM } from './tunnel.mjs';
 /* The updater's run keeps the tunnel up to date: the same functions, from here too. */
 export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
@@ -61,7 +61,7 @@ export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
 export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read', tunnel: '/usr/local/sbin/clavarium-tunnel' };
 export const NAME = 'clavarium';
 /* Where each package checked here must have been built: its provenance says so. */
-export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley' };
+export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley', 'clavarium-docket': 'https://github.com/clavarium/clavarium-docket' };
 export const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
 export const LOCAL = /^local-\d{8}-\d{6}$/;
 export const MODES = ['auto', 'asap', 'ask', 'off'];
@@ -411,7 +411,7 @@ export class Updater {
             /* The build scripts run now, checked first: node-pty is compiled for this release's Node.js. */
             const built = await this.#npm(['rebuild', '--no-audit', '--no-fund'], { cwd: version ? tmp : app, nodeDir });
             if (built.code !== 0) throw new Error(`the build failed (npm rebuild): ${lastLine(built)}`);
-            await fetchParleyArchive({ app, registry: this.#o.registry, fetcher: this.#fetch });
+            await fetchToolArchives({ app, registry: this.#o.registry, fetcher: this.#fetch });
             if (version) symlinkSync(join('node_modules', NAME), join(tmp, 'app'));
             this.#step(action, id, 'Testing');
             const smoke = await this.#run([join(nodeDir, 'bin', 'node'), join(app, 'server', 'smoke.mjs')], { cwd: app, env: this.#npmEnv(nodeDir), timeoutMs: 120_000 });

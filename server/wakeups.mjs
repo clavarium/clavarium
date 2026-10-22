@@ -14,6 +14,9 @@
  * What is then done is small: a MESSAGE THE OWNER WROTE is typed into the
  * tool's terminal, followed by Enter. Nothing is run, nothing is decided
  * here; the tool does what it would do had its owner typed that line.
+ * Where its chat is on, the message is posted to its DOCKET instead, as an
+ * event it acknowledges, and it is told so in one line (dockets.mjs): told
+ * again until it says done or failed.
  *
  * What holds it:
  *   - the message is the owner's. The only thing that is not, the names of
@@ -131,17 +134,36 @@ const FIRED_SHOWN = 120;
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export class Wakeups {
-    #store; #vms; #conversations; #resources; #warm; #now; #fired; #held = new Map(); #busy = false;
+    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #held = new Map(); #busy = false;
 
     /* `warm(name)`: opens the terminal of a machine that runs, if it is not open.
        `fired(name, { text, item })`: a wake-up was typed (its chat says so: Talk.event). */
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {} }) {
-        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired;
+    /* `docket`: { on(name), post(name, {kind, text, data}) } (dockets.mjs), or none: typed always. */
+    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null }) {
+        this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired; this.#docket = docket;
+    }
+    /* Where its chat is on, posted to its docket (told at its next tick); else typed. Resolves with what to say of it, and whether it went. */
+    async #deliver(name, item, text) {
+        if (this.#docket?.on(name)) {
+            try { this.#docket.post(name, { kind: item.kind, text, data: { wakeup: item.id } }); return { ok: true, what: `Posted to its docket: ${text}` }; } catch { /* its folder: typed instead */ }
+        }
+        const typed = await this.#type(name, text).catch(() => false);
+        return { ok: typed, what: typed ? `Typed: ${text}` : 'Could not be typed: is its tool running?' };
     }
     /* What its chat says of a wake-up that was typed: the line, cut short. Never stops a wake-up. */
-    #said(name, item, line) {
+    #said(name, item, line, posted = false) {
         const shown = line.length > FIRED_SHOWN ? `${line.slice(0, FIRED_SHOWN - 3)}...` : line;
-        try { this.#fired(name, { text: `Wake-up "${shown}" typed.`, item: { id: item.id, kind: item.kind } }); } catch { /* as said */ }
+        try { this.#fired(name, { text: `Wake-up "${shown}" ${posted ? 'posted to its docket' : 'typed'}.`, item: { id: item.id, kind: item.kind } }); } catch { /* as said */ }
+    }
+
+    /* Its docket, for its owner: the tool's reminders and the newest events (dockets.mjs). */
+    docketOf(name) { this.#known(name); return this.#docket?.of(name) ?? { on: false, plans: [], events: [] }; }
+    /* The owner takes back a reminder the tool set itself. */
+    cancelReminder(name, plan) {
+        this.#known(name);
+        if (!this.#docket?.on(name)) throw new Refusal(409, 'Its chat is off: it has no docket.');
+        if (typeof plan !== 'string' || !this.#docket.cancel(name, plan)) throw new Refusal(404, 'No such reminder.');
+        return this.docketOf(name);
     }
 
     #record(name) { return this.#store.get(name) ?? { name, perHour: DEFAULT_PER_HOUR, sent: [], items: [] }; }
@@ -285,11 +307,11 @@ export class Wakeups {
             const at = this.#now().toISOString();
             const r = this.#record(record.name);
             const capped = r.perHour > 0 && this.#recent(r).length >= r.perHour;
-            const typed = capped ? false : await this.#type(record.name, line).catch(() => false);
-            const what = capped ? `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` : typed ? `Typed: ${line}` : 'Could not be typed: is its tool running?';
+            const went = capped ? { ok: false, what: `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` } : await this.#deliver(record.name, item, line);
+            const typed = went.ok; const what = went.what;
             const again = this.#record(record.name);
             this.#store.put({ ...again, sent: typed ? [...this.#recent(again), at] : this.#recent(again), items: again.items.map((i) => (i.id === item.id ? { ...i, last: { at, what: what.slice(0, 300), ok: typed } } : i)) });
-            if (typed) this.#said(record.name, item, line);
+            if (typed) this.#said(record.name, item, line, what.startsWith('Posted'));
             return capped ? 'capped' : typed ? 'typed' : 'failed';
         }
         return undefined;
@@ -309,11 +331,11 @@ export class Wakeups {
                     const r = this.#record(record.name);
                     const at = this.#now().toISOString();
                     const capped = r.perHour > 0 && this.#recent(r).length >= r.perHour;
-                    const typed = capped ? false : await this.#type(record.name, text).catch(() => false);
-                    const what = capped ? `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` : typed ? `Typed: ${text}` : 'Could not be typed: is its tool running?';
+                    const went = capped ? { ok: false, what: `Not sent: ${r.perHour} wake-up(s) this hour already, the cap you set.` } : await this.#deliver(record.name, item, text);
+                    const typed = went.ok; const what = went.what;
                     const again = this.#record(record.name);
                     this.#store.put({ ...again, sent: typed ? [...this.#recent(again), at] : this.#recent(again), items: again.items.map((i) => (i.id === item.id ? { ...i, last: { at, what: what.slice(0, 300), ok: typed }, ...(i.kind === 'arrival' ? {} : { fired: at }) } : i)) });
-                    if (typed) this.#said(record.name, item, text);
+                    if (typed) this.#said(record.name, item, text, what.startsWith('Posted'));
                 }
             }
         } finally { this.#busy = false; }

@@ -37,6 +37,8 @@ import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
 import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
+import { Dockets } from './dockets.mjs';
+import { PULSE_MS } from 'clavarium-parley/ui';
 import { Wakeups, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
 import { Talk } from './talk.mjs';
@@ -357,9 +359,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A tool is told to get to work when something arrives, or by the clock: see wakeups.mjs. */
     let bridge;
     /* A wake-up typed is said in its chat (talk, made below: called only once a wake-up fires). */
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name),
+    /* Where its chat is on, what wakes a tool is an event it acknowledges: see dockets.mjs. */
+    const dockets = new Dockets({ store: new Store(`${dataDir}/dockets.json`), resources: folders,
+        say: (name, line) => wakeups.say(name, line),
+        event: (name, line) => talk.event(name, line),
+        alert: (message) => { void alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }); },
+        /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
+        idle: (name) => { const p = talk.pulse(name); return !(p?.busy === true && Date.now() - Date.parse(p.at) < PULSE_MS); },
+        awake: () => all.awake(), chatOn: (name) => talk.isOn(name) });
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets,
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
+    const docketTimer = dockets.start(wakeEveryMs);
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
@@ -456,7 +467,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

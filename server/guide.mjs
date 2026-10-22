@@ -118,6 +118,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         : '- Chat with the person: on. Parley is installed: run parley guide. When you were given Parley as your own tools (MCP: tell, ask, doing, status...), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same.');
     /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
+    /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
+    if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);

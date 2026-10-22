@@ -463,7 +463,7 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
     assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
     const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
-    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news' });
+    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'news', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace' });
     assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
     assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
     /* Bounds: topic, brief, text; a tone only of the two. */
