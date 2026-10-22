@@ -71,3 +71,15 @@ test('room set aside and not used: read from the host, said on its disk, given o
     await assert.rejects(m.grow('/etc'), /no room set aside/);
     assert.equal(asked.filter((a) => a.startsWith('disks grow')).length, 1, 'asked of the host only where there is room');
 });
+
+test('a room that could not be read is said on its disk, as it was read', async () => {
+    const host = async (argv) => {
+        if (argv.join(' ') === 'disks list') return { code: 0, stdout: LSBLK, stderr: '' };
+        if (argv.join(' ') === 'disks room') return { code: 0, stdout: 'lvwhy / 1756345_00x\n', stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+    };
+    const { disks } = await new MachinesMove({ host, usedMb: () => 4000 }).disks();
+    const sda = disks.find((d) => d.name === 'sda');
+    assert.deepEqual(sda.unused, []);
+    assert.deepEqual(sda.unreadable, [{ mount: '/', read: '1756345_00x' }]);
+});

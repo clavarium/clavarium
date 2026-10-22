@@ -3841,6 +3841,8 @@
                 });
                 box.append(go); card.append(box);
             }
+            /* Its volume's room could not be read: said as it was read, so that it can be put right. */
+            for (const w of d.unreadable ?? []) card.append(el('p', 'hint', w.read === 'no-lvm-tools' ? 'Whether part of this disk is set aside and unused cannot be told: the LVM tools are not installed on this server.' : `Part of this disk may be set aside and unused, but its size could not be read (it said "${w.read}"). Please send this line to whoever looks after Clavarium.`));
             /* PREPARE: erase it, one file system on it, mounted. Its name typed again. */
             if (!d.prepare) {
                 const box = el('div', 'disk-prepare');

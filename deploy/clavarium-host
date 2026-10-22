@@ -51,6 +51,9 @@
 # "git read" has its own fixed codes, listed at that verb.
 # ---------------------------------------------------------------------------
 set -euo pipefail
+# Every command read here speaks the neutral language: numbers with a point, the same words on any
+# server (a server in French wrote "1756345,00", and the room set aside on its disk was not seen).
+export LC_ALL=C
 
 MULTIPASS="multipass"
 IMAGE="24.04"
@@ -705,15 +708,17 @@ case "$AREA $VERB" in
         #   lvroom <mount point> <volume> <group> <free MB> <file system>
         [ $# -eq 0 ] || usage
         if [ "$SAY" = "yes" ]; then echo "findmnt; lvs; vgs (read-only)"; exit 0; fi
-        command -v lvs >/dev/null 2>&1 || exit 0
+        #   lvwhy <mount point> <what was read>   (its room could not be read: said, for the page)
+        command -v lvs >/dev/null 2>&1 || { echo "lvwhy / no-lvm-tools"; exit 0; }
         for at in / $(findmnt -rn -o TARGET | grep -E '^/(mnt|media)/[A-Za-z0-9/._-]+$|^/home$' || true); do
             # (Most mounts are no logical volume: under pipefail, a refusal of lvs must not stop this program.)
             src="$(findmnt -nvo SOURCE -- "$at" 2>/dev/null || true)"; [ -n "$src" ] || continue
             fs="$(findmnt -nvo FSTYPE -- "$at" 2>/dev/null || true)"
-            vg="$( { lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
+            vg="$( { LC_ALL=C lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
             [ -n "$vg" ] || continue
-            free="$( { vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | cut -d. -f1)"
-            [[ "$free" =~ ^[0-9]+$ ]] || continue
+            # In the C locale: a server in French writes "1756345,00", which is no whole number.
+            free="$( { LC_ALL=C vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | tr ',' '.' | cut -d. -f1)"
+            [[ "$free" =~ ^[0-9]+$ ]] || { printf 'lvwhy %s %s\n' "$at" "$(printf '%s' "${free:-empty}" | tr -c 'A-Za-z0-9.,_-' '_' | cut -c1-40)"; continue; }
             printf 'lvroom %s %s %s %s %s\n' "$at" "$src" "$vg" "$free" "$fs"
         done
         exit 0 ;;
@@ -727,11 +732,11 @@ case "$AREA $VERB" in
         mountpoint -q -- "$1" || refuse "nothing is mounted at $1"
         src="$(findmnt -nvo SOURCE -- "$1")"; fs="$(findmnt -nvo FSTYPE -- "$1")"
         case "$fs" in ext4|xfs) : ;; *) refuse "$1 holds $fs: only ext4 and xfs are grown here" ;; esac
-        vg="$( { lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
+        vg="$( { LC_ALL=C lvs --noheadings -o vg_name -- "$src" 2>/dev/null || true; } | tr -d ' ')"
         [ -n "$vg" ] || refuse "$1 is not on a logical volume: nothing set aside to give it"
-        free="$( { vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | cut -d. -f1)"
+        free="$( { LC_ALL=C vgs --noheadings --units m --nosuffix -o vg_free -- "$vg" 2>/dev/null || true; } | tr -d ' ' | tr ',' '.' | cut -d. -f1)"
         [ "${free:-0}" -ge 1024 ] || refuse "less than 1 GB set aside in $vg: nothing worth giving"
-        lvextend -q -r -l +100%FREE -- "$src" >/dev/null 2>&1 || refuse "the volume of $1 could not be grown"
+        LC_ALL=C lvextend -q -r -l +100%FREE -- "$src" >/dev/null 2>&1 || refuse "the volume of $1 could not be grown"
         printf 'grown %s %s\n' "$1" "$(df -Pm -- "$1" | awk 'NR==2 {print $2}')"
         exit 0 ;;
     "disks mount")

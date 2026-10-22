@@ -114,9 +114,12 @@ export class MachinesMove {
         const disks = readDisks(r.stdout);
         /* Room set aside and not used (a logical volume made small at installation): said on its disk, offered. */
         const rooms = room.code === 0 ? readRooms(room.stdout) : [];
+        /* What could not be read, said on its disk: nobody has to type a command on the server to know. */
+        const why = room.code === 0 ? String(room.stdout).split('\n').map((l) => /^lvwhy (\/[A-Za-z0-9/._-]*) ([A-Za-z0-9.,_-]{1,40})$/.exec(l.trim())).filter(Boolean).map((m) => ({ mount: m[1], read: m[2] })) : [{ mount: '/', read: `exit ${room.code}` }];
         for (const d of disks) {
             const mounts = d.parts.map((p) => p.mount).filter(Boolean);
             d.unused = rooms.filter((x) => mounts.includes(x.mount) || (d.system && x.mount === '/'));
+            d.unreadable = why.filter((x) => mounts.includes(x.mount) || (d.system && x.mount === '/'));
         }
         const now = places?.now?.place ?? null;
         for (const d of disks) for (const p of d.parts) {
