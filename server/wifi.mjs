@@ -9,7 +9,7 @@
  * before by itself -- whether or not this server, the page or the request are
  * still there to see it. The outcome is read back from `status()`.
  *
- *   status()  { available, why, device, using: {ssid, signal} | null, saved: [ssid],
+ *   status()  { available, why, device, using: {ssid, signal} | null, saved: [ssid], links: [{kind: cable|wifi, device, address | null}],
  *             last: {state, at, ssid, back, why} | null }
  *             why (not available): no-nmcli, not-running, no-device, unmanaged, unreadable
  *             last.state: joining, joined, went-back, back-failed, interrupted
@@ -56,7 +56,7 @@ const WATCH_FOR_MS = 6 * 60_000;
 
 /* "wifi status", line by line: only the lines of the expected shapes. */
 export function readStatus(text) {
-    const out = { available: false, why: null, device: null, using: null, saved: [], last: null, handover: false, hand: null };
+    const out = { available: false, why: null, device: null, using: null, saved: [], last: null, handover: false, hand: null, links: [] };
     let nmcli = false;
     for (const line of String(text ?? '').split('\n').slice(0, 300)) {
         const word = line.split(' ', 1)[0]; const rest = line.slice(word.length + 1);
@@ -67,6 +67,7 @@ export function readStatus(text) {
         else if (word === 'saved' && rest) out.saved.push(rest);
         else if (word === 'last') { const m = /^([a-z-]+) (\d{1,12})$/.exec(rest); if (m && STATES.includes(m[1])) out.last = { ...(out.last ?? {}), state: m[1], at: new Date(Number(m[2]) * 1000).toISOString() }; }
         else if (word === 'handover') out.handover = rest === 'possible';
+        else if (word === 'link') { const m = /^(cable|wifi) ([A-Za-z0-9._-]{1,15}) (none|\d{1,3}(?:\.\d{1,3}){3})$/.exec(rest); if (m) out.links.push({ kind: m[1], device: m[2], address: m[3] === 'none' ? null : m[3] }); }
         else if (word === 'hand') { const m = /^([a-z-]+) (\d{1,12})$/.exec(rest); if (m && HAND_STATES.includes(m[1])) out.hand = { ...(out.hand ?? {}), state: m[1], at: new Date(Number(m[2]) * 1000).toISOString() }; }
         else if (word === 'handwhy' && /^[a-z-]{1,20}$/.test(rest)) out.hand = { ...(out.hand ?? {}), why: rest };
         else if (['lastssid', 'lastback', 'lastwhy'].includes(word) && line.startsWith(`${word} `)) out.last = { ...(out.last ?? {}), [word.slice(4)]: rest || null };

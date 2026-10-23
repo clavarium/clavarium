@@ -124,6 +124,8 @@ NETPLAN_DIR="/etc/netplan"
 HAND_FILE="90-clavarium-network.yaml"
 HAND_UNIT="clavarium-network-handover"
 HAND_WAIT="90"
+# Where the kernel lists the network devices (a physical one has a "device" link there).
+SYS_NET="/sys/class/net"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
 usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi> <verb> [arguments]" >&2; exit 64; }
@@ -137,7 +139,7 @@ while [ $# -gt 0 ]; do
         --test) [ "$(id -u)" != "0" ] || refuse "--test is never for root"; [ "$SAY" = "no" ] || refuse "--test runs for real: not with --say-only"
                 TEST="${2:-}"; case "$TEST" in /*) : ;; *) refuse "--test takes an absolute path" ;; esac
                 DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"
-                HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; shift 2 ;;
+                HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; SYS_NET="$TEST/sys-net"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -1209,6 +1211,7 @@ case "$AREA $VERB" in
         #   device <name>
         #   using <signal 0-100> <ssid>         (the SSID is the rest of the line: it may hold spaces)
         #   saved <ssid>                        (one per network NetworkManager keeps)
+        #   link <cable|wifi> <device> <IPv4 address, or none>   (one per physical device)
         #   last <joining|joined|went-back|back-failed|interrupted> <seconds since 1970>
         #   lastssid <ssid>   lastback <ssid it went back to, or nothing>   lastwhy <password|no-connection|no-internet|stopped>
         [ $# -eq 0 ] || usage
@@ -1229,6 +1232,15 @@ case "$AREA $VERB" in
             done < "$HAND_STATE/last"
         fi
         hand_busy || ! hand_possible || echo "handover possible"
+        # Its connections: each physical device, a cable or a Wi-Fi, and its address (or none).
+        for d in "$SYS_NET"/*; do
+            n="${d##*/}"
+            [ -e "$d/device" ] && [[ "$n" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || continue
+            kind="cable"; [ ! -d "$d/wireless" ] || kind="wifi"
+            a="$(ip -4 -o addr show dev "$n" scope global 2>/dev/null | sed -n 's/^.* inet \([0-9.]*\)\/[0-9]* .*$/\1/p' | head -1 || true)"
+            [[ "$a" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || a="none"
+            printf 'link %s %s %s\n' "$kind" "$n" "$a"
+        done
         type -P nmcli >/dev/null 2>&1 || { printf '%s\n' "nmcli no" "wifiwhy no-nmcli"; exit 0; }
         echo "nmcli yes"
         [ "$(nmcli -t -f RUNNING general 2>/dev/null || true)" = "running" ] || { echo "wifiwhy not-running"; exit 0; }

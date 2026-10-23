@@ -712,10 +712,11 @@
         <!-- NETWORK: this server's Wi-Fi (server/wifi.mjs; done as root by the host program,
              through NetworkManager). A switch goes back by itself when the new network does not work. -->
         <details class="chapter" id="settings-wifi-top" data-chapter="s-network">
-          <summary><span class="chapter-title">Network</span><span class="chapter-about">The Wi-Fi this server is on; another one joined.</span></summary>
+          <summary><span class="chapter-title">Network</span><span class="chapter-about">Its cable and its Wi-Fi.</span></summary>
           <div class="chapter-body">
           <div id="wifi" tabindex="-1">
             <p id="wifi-now" role="status"></p>
+            <ul id="net-links" class="net-links" hidden></ul>
             <p id="wifi-last" class="hint" role="status" hidden></p>
             <!-- ITS NETWORK SET UP OUTSIDE CLAVARIUM (netplan and systemd-networkd, as the Ubuntu installer leaves it): handed over to NetworkManager, back as it was if it does not work. -->
             <div id="wifi-hand" hidden>

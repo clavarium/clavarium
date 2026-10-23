@@ -235,6 +235,8 @@ test('Settings, Network: the Wi-Fi this server is on; another one joined with it
     await me.page.locator('#nav-settings').click();
     await me.chapter('s-network');
     await me.until('the network in use is said', async () => /^On Home \(Wi-Fi, wlan0\)/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
+    /* Its connections, cable and Wi-Fi, each with its address. */
+    assert.deepEqual(await me.page.locator('#net-links li').allInnerTexts(), [`Cable (eth0): ${['192', '168', '1', '20'].join('.')}`, `Wi-Fi (wlan0): ${['192', '168', '1', '21'].join('.')}`]);
     await me.page.locator('#wifi-scan').click();
     const net = (ssid) => me.page.locator(`#wifi-list .wifi-network[data-ssid="${ssid.replace(/"/g, '\\"')}"]`);
     await me.until('the networks are listed', async () => (await me.page.locator('#wifi-list .wifi-network').count()) === 4);

@@ -29,7 +29,7 @@ test('status and scan read only the lines of the expected shapes; names whole, s
     const w = new Wifi({ host });
     assert.deepEqual(await w.status(), {
         available: true, why: null, device: 'wlan0', using: { signal: 70, ssid: 'Home sweet: "home"' }, saved: ['Home sweet: "home"', ' Spaced '],
-        last: { state: 'went-back', at: new Date(1792000000 * 1000).toISOString(), ssid: 'Café', back: 'Home sweet: "home"', why: 'no-internet' }, handover: false, hand: null,
+        last: { state: 'went-back', at: new Date(1792000000 * 1000).toISOString(), ssid: 'Café', back: 'Home sweet: "home"', why: 'no-internet' }, handover: false, hand: null, links: [],
     });
     assert.deepEqual(await w.scan(), [
         { ssid: 'Corp', signal: 80, security: 'enterprise', inUse: false },
@@ -39,7 +39,7 @@ test('status and scan read only the lines of the expected shapes; names whole, s
 });
 
 test('not available: said why (no nmcli, a device NetworkManager does not drive, the host not answering)', async () => {
-    assert.deepEqual(readStatus('nmcli no\nwifiwhy no-nmcli\n'), { available: false, why: 'no-nmcli', device: null, using: null, saved: [], last: null, handover: false, hand: null });
+    assert.deepEqual(readStatus('nmcli no\nwifiwhy no-nmcli\n'), { available: false, why: 'no-nmcli', device: null, using: null, saved: [], last: null, handover: false, hand: null, links: [] });
     assert.equal(readStatus('nmcli yes\ndevice wlp2s0\nwifiwhy unmanaged\n').available, false);
     assert.equal(readStatus('nmcli yes\nwifiwhy no-device\n').why, 'no-device');
     const w = new Wifi({ host: async () => ({ code: 78, stdout: '', stderr: 'REFUSED: unknown verb: wifi status' }) });
@@ -123,6 +123,7 @@ test('a network set up outside Clavarium: offered to be handed over; the handove
     assert.equal(s.handover, true);
     assert.deepEqual(s.hand, { state: 'went-back', at: new Date(1792000000 * 1000).toISOString(), why: 'no-network' });
     assert.equal(readStatus('nmcli no\nwifiwhy no-nmcli\n').handover, false);
+    assert.deepEqual(readStatus('link cable eth0 127.0.0.1\nlink wifi wlan0 none\nlink tap tap0 127.0.0.1\nlink cable eth1 999\n').links, [{ kind: 'cable', device: 'eth0', address: '127.0.0.1' }, { kind: 'wifi', device: 'wlan0', address: null }]);
     let state = 'hand switching 1792000000\nnmcli no\nwifiwhy no-nmcli\n';
     const { host, asked } = bench({ answers: { 'wifi status': () => ({ code: 0, stdout: state, stderr: '' }), 'wifi handover': () => ({ code: 0, stdout: 'handing\n', stderr: '' }) } });
     const said = [];

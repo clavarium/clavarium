@@ -4186,11 +4186,11 @@
        to the network before by itself when the new one does not work within a minute -- this page may
        lose the server meanwhile, so it says so before, and reads the outcome when it can again. */
     const WIFI_OUTSIDE = {
-        'no-nmcli': 'Wi-Fi is managed outside Clavarium on this server (NetworkManager is not installed here).',
-        'not-running': 'Wi-Fi is managed outside Clavarium on this server (NetworkManager does not run here).',
-        'no-device': 'This server has no Wi-Fi device that NetworkManager sees: its network is managed outside Clavarium.',
-        unmanaged: 'Wi-Fi is managed outside Clavarium on this server (its Wi-Fi device is not NetworkManager\'s to drive).',
-        unreadable: 'This server\'s network cannot be read just now.',
+        'no-nmcli': 'Wi-Fi is managed outside Clavarium on this server.',
+        'not-running': 'Wi-Fi is managed outside Clavarium on this server.',
+        'no-device': 'This server has no Wi-Fi.',
+        unmanaged: 'Wi-Fi is managed outside Clavarium on this server.',
+        unreadable: 'The network cannot be read just now.',
     };
     const WIFI_WHY = { password: 'the password was not accepted', 'no-connection': 'it could not connect', 'no-internet': 'it gave no working network within a minute', stopped: 'the switch was stopped' };
     const SECURITY_WORDS = { open: 'open', wpa: 'password', wpa3: 'password (WPA3)', wep: 'old protection (WEP): not joined here', enterprise: 'user and certificate (802.1X): not joined here', other: 'not joined here' };
@@ -4248,8 +4248,19 @@
         }
         wifiNow = s;
         paintHand(s);
+        /* Its connections, cable and Wi-Fi, each with its address. */
+        const links = $('net-links'); links.replaceChildren();
+        for (const l of s.links ?? []) {
+            const li = el('li', l.address ? '' : 'hint');
+            li.append(el('b', '', l.kind === 'wifi' ? 'Wi-Fi' : 'Cable'), ` (${l.device}): `, l.address ? el('code', '', l.address) : 'not connected');
+            links.append(li);
+        }
+        links.hidden = !(s.links ?? []).length;
         $('wifi-controls').hidden = !s.available;
-        if (!s.available) { $('wifi-now').textContent = s.handover ? 'Clavarium does not manage this server\'s network yet.' : WIFI_OUTSIDE[s.why] ?? WIFI_OUTSIDE.unreadable; $('wifi-last').hidden = true; return; }
+        /* While it is handed over, its progress alone is said. */
+        const handing = ['installing', 'switching'].includes(s.hand?.state);
+        if (!s.available) { $('wifi-now').textContent = handing ? '' : s.handover ? 'Clavarium does not manage this server\'s network yet.' : WIFI_OUTSIDE[s.why] ?? WIFI_OUTSIDE.unreadable; $('wifi-now').hidden = handing; $('wifi-last').hidden = true; return; }
+        $('wifi-now').hidden = false;
         $('wifi-now').replaceChildren();
         if (s.using) $('wifi-now').append(el('span', '', 'On '), el('b', '', s.using.ssid), el('span', '', ` (Wi-Fi, ${s.device}) `), signalBars(s.using.signal));
         else $('wifi-now').textContent = `Not on a Wi-Fi network (${s.device}).`;

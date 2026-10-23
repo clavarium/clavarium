@@ -140,6 +140,10 @@ if (area === 'wifi') {
         w.hand = { state: 'switching', at: now, ms: Date.now() }; keep();
         console.log('handing'); process.exit(0);
     }
+    /* Its connections: a cable and the Wi-Fi, each with its address (written apart: not an address of anywhere). */
+    const address = (last) => ['192', '168', '1', String(last)].join('.');
+    const links = [`link cable eth0 ${address(20)}`, `link wifi wlan0 ${w.using ? address(21) : 'none'}`];
+    if (verb === 'status') console.log(links.join('\n'));
     if (verb === 'status' && (w.outside || w.hand)) {
         const h = w.hand ? [`hand ${w.hand.state} ${w.hand.at}`] : [];
         if (w.outside) { console.log([...h, ...(w.hand?.state === 'switching' ? [] : ['handover possible']), 'nmcli no', 'wifiwhy no-nmcli'].join('\n')); process.exit(0); }

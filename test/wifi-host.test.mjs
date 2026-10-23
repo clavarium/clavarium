@@ -397,3 +397,17 @@ test('handover, say-only: what it does, step by step', () => {
     assert.match(r.stdout, /write \/etc\/netplan\/90-clavarium-network\.yaml \(root, 0600: renderer NetworkManager\); netplan apply/);
     assert.match(r.stdout, /systemctl disable systemd-networkd-wait-online/);
 });
+
+test('status: each physical device, a cable or a Wi-Fi, with its address or none; what is not physical left out', { skip: ROOT }, () => {
+    const b = bench({ nmcli: false });
+    const net = join(b.dir, 'sys-net');
+    for (const [name, wireless, physical] of [['eth0', false, true], ['wlan0', true, true], ['mpqemubr0', false, false]]) {
+        mkdirSync(join(net, name), { recursive: true });
+        if (physical) writeFileSync(join(net, name, 'device'), '');
+        if (wireless) mkdirSync(join(net, name, 'wireless'));
+    }
+    writeFileSync(join(b.dir, 'bin', 'ip'), '#!/bin/bash\ncase "$*" in *"dev eth0"*) echo "2: eth0    inet 127.0.0.1/8 scope global eth0" ;; esac\n');
+    chmodSync(join(b.dir, 'bin', 'ip'), 0o755);
+    assert.equal(b.host(['wifi', 'status']).out, 'link cable eth0 127.0.0.1\nlink wifi wlan0 none\nnmcli no\nwifiwhy no-nmcli\n');
+    b.done();
+});
