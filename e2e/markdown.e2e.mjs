@@ -233,7 +233,7 @@ test('pictures shown together are one gallery with their titles, large one after
     assert.match(await zoom.locator('.parley-zoom-name').innerText(), /^Home, before \(1\/2\)$/);
     assert.equal(await zoom.locator('.parley-zoom-thumb').count(), 2, 'a picture shown and cited is one picture');
     /* Each button says what it does; Close apart, with its word. */
-    assert.deepEqual(await zoom.locator('.parley-zoom-tools button:visible').evaluateAll((all) => all.map((x) => x.getAttribute('aria-label'))), ['Zoom out', 'Zoom in', 'Actual size', 'Fit to the screen', 'Previous', 'Next']);
+    assert.deepEqual(await zoom.locator('.parley-zoom-tools button:visible').evaluateAll((all) => all.map((x) => x.getAttribute('aria-label'))), ['Zoom out', 'Zoom in', 'Actual size', 'Fit to the screen', 'Previous', 'Next', 'Draw on it and send it']);
     assert.equal((await zoom.locator('.parley-zoom-close').innerText()).trim(), 'Close');
     await zoom.locator('.parley-zoom-thumb').nth(1).click();
     await me.until('the other one', async () => /^Home, after/.test(await zoom.locator('.parley-zoom-name').innerText()));
@@ -268,6 +268,27 @@ test('pictures shown together are one gallery with their titles, large one after
     const went = readFileSync(join(work, '.parley', 'to-agent.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)).at(-1);
     assert.deepEqual([went.reaction, went.to], ['go', 'g3-0000-4000-8000-000000000000'.slice(0, 36)]);
     assert.deepEqual(me.errors, []);
+    /* Drawn on and sent again: the same drawing as a picture attached, its note saying where it came from,
+       the message answering the one it was in. */
+    await thread.locator('.parley-gallery img').first().click();
+    await me.until('large again', async () => zoom.isVisible());
+    await zoom.locator('.parley-zoom-draw').click();
+    const drawing = thread.locator('.parley-zoom.parley-draw');
+    await me.until('the drawing is open', async () => drawing.isVisible());
+    const area = await drawing.locator('canvas').boundingBox();
+    await me.page.mouse.move(area.x + area.width * 0.3, area.y + area.height * 0.4); await me.page.mouse.down();
+    await me.page.mouse.move(area.x + area.width * 0.6, area.y + area.height * 0.5, { steps: 5 }); await me.page.mouse.up();
+    await drawing.locator('.parley-draw-note').fill('This one, smaller');
+    await drawing.locator('.parley-zoom-done').click();
+    await me.until('waiting in the box, drawn on', async () => (await thread.locator('.parley-pending-picture[data-marked="true"]').count()) === 1);
+    assert.equal(await thread.locator('.parley-replying').isVisible(), true, 'answering the message the picture was in');
+    await thread.locator('.parley-box').fill('Look');
+    await thread.locator('.parley-send').click();
+    await me.until('sent with its picture', async () => (await me.api('/api/conversations/pages/talk')).body.messages.some((m) => m.from === 'person' && m.text === 'Look' && m.files?.length === 1));
+    const drawnSent = (await me.api('/api/conversations/pages/talk')).body.messages.find((m) => m.from === 'person' && m.text === 'Look');
+    assert.match(drawnSent.files[0].note, /^This one, smaller \(drawn on Home, before, a picture of this chat\)$/);
+    assert.match(drawnSent.files[0].path, /home-before-annotated\.png$/);
+    assert.ok(drawnSent.re || drawnSent.answers, 'it answers the message the picture was in');
 });
 
 test('on a touch screen, a pinch on a picture in the viewer zooms the picture alone, never the page; a page zoomed all the same leaves the viewer its size', { skip: SKIP }, async (t) => {

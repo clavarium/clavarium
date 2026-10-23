@@ -111,7 +111,16 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
 }
 @media (min-width: 701px) { #back { display: none; } }
 /* The list folded away with one click, on a wide screen: the terminal takes the room. */
-@media (min-width: 701px) { #app[data-list="folded"] #list, #app[data-list="folded"] #nav { display: none; } #app[data-list="folded"] #room { grid-column: 1 / -1; } }
+/* The list folded away (wide screens): it slides out, the room widening with it -- and back. */
+@media (min-width: 701px) {
+  #app[data-list="folded"] { grid-template-columns: 0px minmax(0, 1fr); }
+  #app :is(#list, #nav) { min-width: 0; overflow-x: hidden; }
+  #app[data-list="folded"] :is(#list, #nav) { visibility: hidden; transition: visibility 0s .22s; }
+}
+/* Only folding slides: a width set by hand (dragged, by the keys) follows at once. */
+@media (min-width: 701px) and (prefers-reduced-motion: no-preference) {
+  #app[data-folding] { transition: grid-template-columns .22s ease; }
+}
 @media (max-width: 700px) { #fold { display: none; } }
 #fold { font-size: 1rem; line-height: 1; padding: 4px 9px; }
 .chips { display: flex; gap: 5px; min-width: 0; overflow: hidden; }
@@ -1519,3 +1528,5 @@ details.more[open] > summary { margin-bottom: 4px; }
 :is(#updates, #wifi) > .callout { margin: 8px 16px; padding: 8px 12px; border-top: 0; }
 :is(#updates, #wifi) > .set-rows { padding: 0; }
 :is(#updates, #wifi) > .hint { padding-top: 8px; padding-bottom: 8px; }
+.ts-progress { margin: 10px 0 0; font-size: .875rem; }
+.ts-filters { margin-top: 10px; }

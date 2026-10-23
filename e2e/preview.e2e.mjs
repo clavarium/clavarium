@@ -206,7 +206,8 @@ test('the list of conversations folds away with one click and comes back; the te
     const cols = () => me.page.evaluate(() => window.clavariumTerminal.cols);
     const before = await cols();
     await me.page.locator('#fold').click();
-    assert.equal(await me.page.locator('#list').isVisible(), false);
+    /* It slides away (a fifth of a second), then is out of the way. */
+    await me.until('the list is folded away', async () => !(await me.page.locator('#list').isVisible()));
     await me.until('the terminal is wider', async () => (await cols()) > before);
     await me.type('echo still-typing');
     await me.sees('\nstill-typing');
@@ -214,7 +215,7 @@ test('the list of conversations folds away with one click and comes back; the te
     await me.until('back and live', async () => (await me.state()) === 'live');
     assert.equal(await me.page.locator('#list').isVisible(), false, 'kept across a reload');
     await me.page.locator('#fold').click();
-    assert.equal(await me.page.locator('#list').isVisible(), true);
+    await me.until('the list is back, at its width again', async () => await me.page.locator('#list').isVisible() && (await me.page.locator('#list').boundingBox()).width > 200);
 });
 
 /* A whole 3x2 PNG, made here (the one above is cut short: shown, but not decoded strictly). */

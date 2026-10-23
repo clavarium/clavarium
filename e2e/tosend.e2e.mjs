@@ -49,18 +49,19 @@ test('To send: two repositories reviewed together and sent with one button; one 
     await me.until('To send is offered', async () => await entry.isVisible());
     await entry.click();
     const row = (name) => page.locator(`#cassets-detail .ts-row[data-repo="${name}"]`);
-    /* Both ticked, each with its branch, its target and its size; their checks run by themselves. */
-    await me.until('both are read and their checks done', async () => {
-        for (const name of ['site', 'styles']) {
-            if (!(await row(name).locator('input[type=checkbox]').isChecked().catch(() => false))) return false;
-            if (/Checks running|Looking/.test(await row(name).innerText())) return false;
-        }
-        return true;
-    }, 30_000);
-    assert.match(await row('site').innerText(), /site[\s\S]*main[\s\S]*1 commit[\s\S]*\+1/);
+    /* Read branch by branch, said as it goes; then both, to update on the remote, ticked -- nothing checked yet. */
+    const progress = page.locator('#cassets-detail .ts-progress');
+    await me.until('all read', async () => /all read$/.test(await progress.innerText().catch(() => '')), 30_000);
+    assert.equal(await progress.innerText(), '2 to update · 0 new · all read');
+    assert.equal(await page.locator('#cassets-detail .ts-filters button[aria-pressed="true"]').innerText(), 'To update 2');
+    for (const name of ['site', 'styles']) assert.equal(await row(name).locator('input[type=checkbox]').isChecked(), true, name);
+    assert.match(await row('site').innerText(), /site[\s\S]*main[\s\S]*1 commit[\s\S]*\+1[\s\S]*to check/);
     assert.equal(await row('site').locator('select').inputValue(), 'main');
     const go = page.locator('#cassets-detail [data-act="send-all"]');
-    assert.equal(await go.innerText(), 'Send the 2 to main');
+    /* The checks, of what is ticked, on a click; then Send. */
+    assert.equal(await go.innerText(), 'Check the 2');
+    await go.click();
+    await me.until('checked', async () => (await go.innerText()) === 'Send the 2 to main', 30_000);
     await shot(page, 'tablet-to-send');
 
     /* One review of both: the files of each under its name, the changes of each. */
@@ -80,7 +81,9 @@ test('To send: two repositories reviewed together and sent with one button; one 
     const send = page.locator('#cassets-detail [data-act="send"]');
     await me.until('its Send', async () => await send.isVisible(), 20_000);
     await send.click();
-    await me.until('To send again, its checks done', async () => (await row('styles').count()) === 1 && !/Checks running|Looking/.test(await page.locator('#cassets-detail').innerText()), 30_000);
+    await me.until('To send again, all read', async () => /all read$/.test(await progress.innerText().catch(() => '')), 30_000);
+    await go.click();
+    await me.until('checked again', async () => (await go.innerText()) === 'Send the 2 to main', 30_000);
     assert.equal(await page.locator('#cassets-rows .as-row[aria-current="true"]').getAttribute('data-asset'), 'send:all');
 
     /* Unticked: left out, and said by the button. */
@@ -106,7 +109,9 @@ test('To send: two repositories reviewed together and sent with one button; one 
     const phone = await b.person({ phone: true, at: '/?c=coder' });
     await phone.page.locator('#view-assets').click();
     await phone.page.locator('#cassets-rows .as-row[data-asset="send:all"]').click();
-    await phone.until('the rows on a phone', async () => (await phone.page.locator('#cassets-detail .ts-row').count()) === 2 && !/Looking/.test(await phone.page.locator('#cassets-detail').innerText()), 30_000);
+    await phone.until('the rows on a phone', async () => /all read$/.test(await phone.page.locator('#cassets-detail .ts-progress').innerText().catch(() => '')), 30_000);
+    await phone.page.locator('#cassets-detail .ts-filters button[data-filter="all"]').click();
+    assert.equal(await phone.page.locator('#cassets-detail .ts-row').count(), 2);
     assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'never sideways');
     await shot(phone.page, 'phone-to-send');
 });
@@ -126,17 +131,18 @@ test('To send: two branches of one repository, both moved lately, both ticked an
     await page.locator('#view-assets').click();
     await page.locator('#cassets-rows .as-row[data-asset="send:all"]').click();
     const row = (branch) => page.locator(`#cassets-detail .ts-row[data-repo="site"][data-branch="${branch}"]`);
-    await me.until('both branches listed, ticked, checked', async () => {
-        for (const br of ['main', 'feature']) {
-            if (!(await row(br).locator('input[type=checkbox]').isChecked().catch(() => false))) return false;
-            if (/Checks running|Looking/.test(await row(br).innerText())) return false;
-        }
-        return true;
-    }, 40_000);
-    assert.match(await row('feature').innerText(), /feature[\s\S]*→[\s\S]*feature \(new branch\)/);
+    await me.until('all read', async () => /all read$/.test(await page.locator('#cassets-detail .ts-progress').innerText().catch(() => '')), 40_000);
+    /* By default, what the remote has to update: main; the new branch, one touch away. */
+    assert.equal(await row('main').count(), 1);
+    assert.equal(await row('feature').count(), 0, 'a new branch is not shown by default');
+    await page.locator('#cassets-detail .ts-filters button[data-filter="all"]').click();
+    assert.match(await row('feature').innerText(), /feature[\s\S]*→[\s\S]*feature \(new branch\)[\s\S]*new branch/);
+    await row('feature').locator('input[type=checkbox]').check();
     await shot(page, 'tablet-to-send-branches');
     const go = page.locator('#cassets-detail [data-act="send-all"]');
-    assert.equal(await go.innerText(), 'Send the 2');
+    assert.equal(await go.innerText(), 'Check the 2');
+    await go.click();
+    await me.until('checked', async () => (await go.innerText()) === 'Send the 2', 30_000);
     await go.click(); await go.click();
     await me.until('both sent', async () => /all 2 went/.test(await page.locator('#cassets-detail .ts-said').innerText().catch(() => '')), 30_000);
     assert.equal(git(site.remote, 'rev-parse', 'refs/heads/main'), site.head);

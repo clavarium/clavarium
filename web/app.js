@@ -330,11 +330,12 @@
         $('fold').setAttribute('aria-pressed', String(folded));
         $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
     };
-    let listFolded = false;
+    let listFolded = false; let foldingTimer;
     try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
     $('fold').addEventListener('click', () => {
         listFolded = !listFolded;
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
+        app.dataset.folding = 'true'; clearTimeout(foldingTimer); foldingTimer = setTimeout(() => { delete app.dataset.folding; fit.fit(); }, 300);
         applyFold(listFolded);
         fit.fit(); focusTerminal();
     });
@@ -2941,30 +2942,41 @@
         return box;
     }
     /* TO SEND: every repository of a conversation on one screen. What its
-       agent committed, ticked when there is something to send; the checks run
-       by themselves; one review of them all; one button sends them one after
-       the other, each by the same route as its own review (the same commit,
+       agent committed, read branch by branch and said as it goes; filtered
+       (by default, the branches the remote has and that can be brought up to
+       date) and ticked; the checks of what is ticked on a click; one review
+       of them all; one button sends them one after the other, each by the same route as its own review (the same commit,
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
     const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
     /* How many other branches of a repository are looked at; those moved within this long are ticked at first. */
     const BRANCHES_MORE = 7;
     const MOVED_LATELY_MS = 24 * 3600_000;
+    /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
+    const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
+    const TS_FILTERS = [['update', 'To update'], ['new', 'New branches'], ['all', 'All']];
+    /* Three steps: every branch read (said as it goes, nothing checked yet); filtered and ticked; the checks of what is
+       ticked, on a click; then Send. */
     async function sendDetail(holder, names) {
-        const list = el('div', 'ts-rows'); list.append(el('p', 'hint busy', 'Looking at every repository...'));
+        const progress = el('p', 'status-line ts-progress'); progress.setAttribute('role', 'status');
+        const filters = el('div', 'levels ts-filters'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Show');
+        const list = el('div', 'ts-rows');
         const bar = el('div', 'as-acts ts-bar');
         const together = el('button', '', 'Review together'); together.type = 'button'; together.dataset.act = 'send-review';
-        const go = el('button', 'primary', 'Send'); go.type = 'button'; go.dataset.act = 'send-all';
+        const go = el('button', 'primary', 'Check'); go.type = 'button'; go.dataset.act = 'send-all';
         const why = el('span', 'hint ts-why');
         bar.append(together, go, why);
         const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
         const review = el('div', 'ts-review'); review.hidden = true;
-        holder.append(el('p', 'hint', 'What its agent committed, every branch. Ticked: what it moved lately.'), list, bar, said, review);
-        const rows = names.map((name) => ({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null }));
-        let sending = false;
+        holder.append(progress, filters, list, bar, said, review);
+        const rows = [];
+        let filter = 'update';
+        let sending = false; let checking = false;
         let sure = '';
-        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead');
-        /* One row looked at again: its branch and target as chosen; its checks run when it has something to send. */
+        let planned = names.length; let read = 0; let reading = true;
+        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter;
+        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
+        const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function look(r) {
             const query = new URLSearchParams();
             if (r.branch) query.set('branch', r.branch);
@@ -2972,13 +2984,9 @@
             const [out, keep] = await Promise.all([fetch(`${API}/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`).then(async (x) => { const j = await x.json().catch(() => ({})); return x.ok ? j : { state: 'error', message: j.error || 'It could not be read.' }; }).catch(() => ({ state: 'error', message: 'It could not be read.' })), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
             r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             if (out.state !== 'ahead') r.picked = false;
-            paint();
-            /* Checked when it is to go: ticked (another branch ticked later is checked then). */
-            if (out.state === 'ahead' && r.picked) void checkRow(r, out.head, out.target);
         }
-        /* Several branches of one repository: named with it. */
-        const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
-        async function checkRow(r, head, target) {
+        async function checkRow(r) {
+            const { head, target } = r.out;
             r.check = { status: 'running' }; paint();
             let result;
             try { result = await post(`${API}/git/${r.name}/check`, { head, target }); }
@@ -2987,58 +2995,76 @@
             r.check = result; paint();
         }
         const stopped = (r) => Boolean(r.keep?.settings?.requireForSend) && r.check?.status !== 'passed';
+        function paintProgress() {
+            const count = (k) => rows.filter((r) => kindOfRow(r.out) === k).length;
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the branches: ${read} of ${planned}...`; }
+            else { progress.dataset.tone = count('update') + count('new') ? 'ok' : ''; progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new · all read` : 'Nothing to send · all read'; }
+            filters.replaceChildren(...TS_FILTERS.map(([key, word]) => {
+                const n = key === 'all' ? rows.length : count(key);
+                const b = el('button', '', `${word} ${n}`); b.type = 'button'; b.dataset.filter = key; b.setAttribute('aria-pressed', String(filter === key));
+                b.addEventListener('click', () => { filter = key; sure = ''; paint(); if (!review.hidden) paintReview(); });
+                return b;
+            }));
+        }
         function paintButtons() {
             const p = picked();
+            const unchecked = p.filter((r) => !r.check);
+            const running = p.filter((r) => r.check?.status === 'running');
+            const held = p.filter((r) => r.check && r.check.status !== 'running' && stopped(r));
+            const failed = p.filter((r) => r.check?.status === 'failed' || r.check?.status === 'unavailable');
+            const word = p.length > 1 ? `the ${p.length}` : 'it';
             const targets = [...new Set(p.map((r) => r.target))];
             const where = targets.length === 1 ? ` to ${targets[0]}` : '';
             together.disabled = p.length === 0;
             together.textContent = p.length > 1 ? `Review the ${p.length} together` : 'Review';
-            const running = p.filter((r) => r.check?.status === 'running');
-            const held = p.filter((r) => r.check?.status !== 'running' && stopped(r));
-            const failed = p.filter((r) => r.check?.status === 'failed');
-            const word = p.length > 1 ? `the ${p.length}` : 'it';
-            go.disabled = sending || p.length === 0 || running.length > 0 || held.length > 0;
-            why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Waits for the checks.' : held.length ? `Its owner asked for passing checks: ${held.map(label).join(', ')}.` : failed.length ? `Checks failed in ${failed.map(label).join(', ')}.` : '';
+            go.disabled = sending || checking || p.length === 0 || running.length > 0 || (!unchecked.length && held.length > 0);
+            why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Checking...' : unchecked.length ? '' : held.length ? `Passing checks are required: ${held.map(label).join(', ')}.` : failed.length ? `Checks did not pass: ${failed.map(label).join(', ')}.` : '';
             if (sending) { go.textContent = 'Sending...'; return; }
+            /* First the checks of what is ticked; then Send. */
+            if (unchecked.length || running.length) { go.dataset.step = 'check'; go.textContent = `Check ${word}`; return; }
+            go.dataset.step = 'send';
             const all = p.some((r) => r.out?.guards?.confirm);
             go.textContent = sure === 'yes' ? (all ? `Not all of it could be shown here: send ${word}${where} anyway` : `Yes, send ${word}${where}: this cannot be undone`) : sure === 'all' ? `Yes, send ${word}${where}: this cannot be undone` : `Send ${word}${where}${failed.length ? ' anyway' : ''}`;
         }
         function paint() {
+            paintProgress();
             list.replaceChildren();
             for (const r of rows) {
+                if (!shownRow(r)) continue;
                 const row = el('div', 'ts-row'); row.dataset.repo = r.name; if (r.branch) row.dataset.branch = r.branch;
                 const out = r.out;
                 const ahead = out?.state === 'ahead';
                 row.classList.toggle('off', !ahead);
-                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending; tick.setAttribute('aria-label', `Send ${r.name}`);
-                tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; if (r.picked && !r.check && r.out?.state === 'ahead') void checkRow(r, r.out.head, r.out.target); paintButtons(); if (!review.hidden) paintReview(); });
+                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
+                tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
                 const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
                 const way = el('div', 'ts-way');
                 if (out?.branch) {
                     way.append(el('code', 'ts-branch', out.branch));
                     if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
-                        const to = el('select'); to.setAttribute('aria-label', `Where ${r.name} goes`); to.disabled = sending;
+                        const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
                         const names2 = [...(out.branches ?? [])]; if (!names2.includes(out.target)) names2.unshift(out.target);
                         for (const b of names2) { const o = el('option', '', b === out.target && !out.targetExists ? `${b} (new branch)` : b); o.value = b; to.append(o); }
                         to.value = out.target;
-                        to.addEventListener('change', () => { r.target = to.value; sure = ''; void look(r); });
+                        to.addEventListener('change', async () => { r.target = to.value; sure = ''; await look(r); paint(); });
                         way.append(to);
                     }
                 }
                 const size = el('div', 'ts-size');
-                if (!out) size.append(el('span', 'hint busy', 'Looking...'));
+                if (!out) size.append(el('span', 'hint busy', 'Reading...'));
                 else if (ahead) {
                     const files = diffFiles(out.diff);
-                    size.append(el('span', '', out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`), el('br'),
-                        el('span', 'plus', `+${files.reduce((n, f) => n + f.added, 0)}`), ' ', el('span', 'minus', `−${files.reduce((n, f) => n + f.removed, 0)}`));
+                    /* A branch the remote does not have: "new", not a count against a branch that is not there. */
+                    const what = out.targetExists === false ? 'new branch' : out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`;
+                    size.append(el('span', '', what), el('br'), el('span', 'plus', `+${files.reduce((n, f) => n + f.added, 0)}`), ' ', el('span', 'minus', `−${files.reduce((n, f) => n + f.removed, 0)}`));
                 } else size.append(el('span', 'hint', out.state === 'up-to-date' ? 'nothing' : '-'));
                 const state = el('div', 'ts-state');
-                if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '\u2717 Not sent'));
+                if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
                 else if (!out) state.append('');
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
-                else if (!r.check && !r.picked) state.append(el('span', 'hint', 'checked once ticked'));
-                else if (!r.check || r.check.status === 'running') state.append(el('span', 'warn', 'Checks running...'));
+                else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
+                else if (r.check.status === 'running') state.append(el('span', 'warn', 'Checking...'));
                 else {
                     const [word, tone] = CHECK_WORDS[r.check.status] ?? [String(r.check.status), ''];
                     state.append(el('b', tone || 'quiet', r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word));
@@ -3047,7 +3073,8 @@
                 if (r.sent && !r.sent.ok) row.append(el('p', 'ts-note bad', r.sent.text));
                 list.append(row);
             }
-            if (rows.length === 0) list.append(el('p', 'hint', 'No repository is given to it.'));
+            if (!reading && rows.length === 0) list.append(el('p', 'hint', 'No repository is given to it.'));
+            else if (!reading && !rows.some(shownRow)) list.append(el('p', 'hint', filter === 'update' ? 'No branch of the remote to update.' : 'None.'));
             paintButtons();
         }
         /* ONE REVIEW of them all: the files of each under its name, then each one's changes, commits and checks. */
@@ -3062,7 +3089,7 @@
             const removed = all.reduce((n, x) => n + x.files.reduce((m, f) => m + f.removed, 0), 0);
             const commits = p.reduce((n, r) => n + (r.out.count ?? r.out.commits.length), 0);
             const head = el('div', 'ts-review-head');
-            head.append(el('h3', '', `${p.length} repositor${p.length === 1 ? 'y' : 'ies'}`), el('p', 'as-line', `${commits} commit${commits === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'} · `));
+            head.append(el('h3', '', `${p.length} branch${p.length === 1 ? '' : 'es'}`), el('p', 'as-line', `${commits} commit${commits === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'} · `));
             head.lastChild.append(el('span', 'plus', `+${added}`), ' ', el('span', 'minus', `−${removed}`));
             const tabs = el('div', 'rv-tabs ts-tabs'); tabs.setAttribute('role', 'tablist');
             const passed = p.filter((r) => r.check?.status === 'passed').length;
@@ -3106,8 +3133,8 @@
                 }
             } else {
                 for (const r of p) {
-                    const [word] = CHECK_WORDS[r.check?.status] ?? [r.check?.status === 'running' ? 'Running...' : 'Not run'];
-                    body.append(el('h4', '', `${r.name}: ${word}`));
+                    const [word] = CHECK_WORDS[r.check?.status] ?? [r.check?.status === 'running' ? 'Running...' : 'Not run yet'];
+                    body.append(el('h4', '', `${label(r)}: ${word}`));
                     if (r.check?.output) body.append(el('pre', 'ts-output', r.check.output));
                 }
             }
@@ -3122,6 +3149,14 @@
         go.addEventListener('click', async () => {
             const p = picked();
             if (p.length === 0 || go.disabled) return;
+            /* The checks first, of what is ticked only, one after the other: each takes the machine of its agent. */
+            if (go.dataset.step === 'check') {
+                checking = true; paint();
+                for (const r of p.filter((x) => !x.check)) await checkRow(r);
+                checking = false; paint();
+                if (!review.hidden) paintReview();
+                return;
+            }
             /* Two clicks: what leaves cannot be called back. Three when a review could not show it all. */
             const all = p.some((r) => r.out?.guards?.confirm);
             if (!sure) { sure = 'yes'; paintButtons(); return; }
@@ -3142,23 +3177,32 @@
             said.className = `ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.hidden = false;
             if (reviewStep) nav.drop(reviewStep);
             /* What is left to send, read again; what became of each stays said. */
-            const kept = new Map(rows.map((r) => [r.name, r.sent]));
+            const kept = new Map(rows.map((r) => [r, r.sent]));
             await Promise.all(rows.map((r) => look(r)));
-            for (const r of rows) r.sent = kept.get(r.name);
+            for (const r of rows) r.sent = kept.get(r);
             paint();
         });
         paint();
-        /* Each repository's branch that moved last, then every other branch of its agent that has something to send. */
-        await Promise.all(rows.map(async (r) => { await look(r); }));
-        const others = rows.flatMap((r) => (r.out?.agentBranches ?? []).filter((b) => b.name !== r.branch).slice(0, BRANCHES_MORE).map((b) => ({ name: r.name, out: null, keep: r.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt })));
-        for (const r of rows) r.movedAt = (r.out?.agentBranches ?? []).find((b) => b.name === r.branch)?.movedAt ?? null;
-        await Promise.all(others.map(async (o) => { await look(o); }));
-        for (const o of others) if (o.out?.state === 'ahead') rows.splice(rows.findLastIndex((x) => x.name === o.name) + 1, 0, o);
-        /* Ticked at first: what its agent moved lately -- each repository's newest, and any other moved within a day. */
+        /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */
         const lately = (r) => r.movedAt && Date.now() - Date.parse(r.movedAt) < MOVED_LATELY_MS;
-        for (const r of rows) r.picked = r.out?.state === 'ahead' && (rows.find((x) => x.name === r.name) === r || lately(r));
+        await Promise.all(names.map(async (name) => {
+            const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
+            rows.push(first);
+            await look(first); read++;
+            first.movedAt = (first.out?.agentBranches ?? []).find((b) => b.name === first.branch)?.movedAt ?? null;
+            first.picked = kindOfRow(first.out) === 'update';
+            const others = (first.out?.agentBranches ?? []).filter((b) => b.name !== first.branch).slice(0, BRANCHES_MORE);
+            planned += others.length;
+            paint();
+            await Promise.all(others.map(async (b) => {
+                const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
+                await look(r); read++;
+                if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update' && lately(r); rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
+                paint();
+            }));
+        }));
+        reading = false;
         paint();
-        for (const r of rows) if (r.picked) void checkRow(r, r.out.head, r.out.target);
     }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;
