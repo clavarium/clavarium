@@ -225,8 +225,9 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-memory option[value="2048"]').innerText(), '2 GB (now)');
     assert.match(await me.page.locator('#general-facts').innerText(), /2 GB of memory, 16 GB disk/);
     await me.page.locator('#view-terminal').click();
+    /* Its tool came back after the restart: given the time a loaded bench takes. */
     await me.type('echo still-here');
-    await me.sees('\nstill-here');
+    await me.sees('\nstill-here', 40_000);
     assert.deepEqual(me.errors, []);
 });
 

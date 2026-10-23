@@ -110,3 +110,35 @@ test('To send: two repositories reviewed together and sent with one button; one 
     assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true, 'never sideways');
     await shot(phone.page, 'phone-to-send');
 });
+
+test('To send: two branches of one repository, both moved lately, both ticked and sent at once, each to its own branch', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('coder');
+    const site = await repository(b, me, 'site', 'contact.html');
+    /* A second branch of its agent, with a commit of its own. */
+    git(site.work, 'checkout', '--quiet', '-b', 'feature');
+    writeFileSync(join(site.work, 'feature.html'), 'feature\n'); git(site.work, 'add', '.'); git(site.work, 'commit', '--quiet', '-m', 'A feature');
+    const feature = git(site.work, 'rev-parse', 'HEAD');
+    git(site.work, 'checkout', '--quiet', 'main');
+    const page = me.page;
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.locator('#view-assets').click();
+    await page.locator('#cassets-rows .as-row[data-asset="send:all"]').click();
+    const row = (branch) => page.locator(`#cassets-detail .ts-row[data-repo="site"][data-branch="${branch}"]`);
+    await me.until('both branches listed, ticked, checked', async () => {
+        for (const br of ['main', 'feature']) {
+            if (!(await row(br).locator('input[type=checkbox]').isChecked().catch(() => false))) return false;
+            if (/Checks running|Looking/.test(await row(br).innerText())) return false;
+        }
+        return true;
+    }, 40_000);
+    assert.match(await row('feature').innerText(), /feature[\s\S]*→[\s\S]*feature \(new branch\)/);
+    await shot(page, 'tablet-to-send-branches');
+    const go = page.locator('#cassets-detail [data-act="send-all"]');
+    assert.equal(await go.innerText(), 'Send the 2');
+    await go.click(); await go.click();
+    await me.until('both sent', async () => /all 2 went/.test(await page.locator('#cassets-detail .ts-said').innerText().catch(() => '')), 30_000);
+    assert.equal(git(site.remote, 'rev-parse', 'refs/heads/main'), site.head);
+    assert.equal(git(site.remote, 'rev-parse', 'refs/heads/feature'), feature);
+});

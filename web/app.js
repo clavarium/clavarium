@@ -2944,6 +2944,9 @@
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
     const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
+    /* How many other branches of a repository are looked at; those moved within this long are ticked at first. */
+    const BRANCHES_MORE = 7;
+    const MOVED_LATELY_MS = 24 * 3600_000;
     async function sendDetail(holder, names) {
         const list = el('div', 'ts-rows'); list.append(el('p', 'hint busy', 'Looking at every repository...'));
         const bar = el('div', 'as-acts ts-bar');
@@ -2953,7 +2956,7 @@
         bar.append(together, go, why);
         const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
         const review = el('div', 'ts-review'); review.hidden = true;
-        holder.append(el('p', 'hint', 'What its agent committed, in every repository of this conversation. The checks run by themselves.'), list, bar, said, review);
+        holder.append(el('p', 'hint', 'What its agent committed, every branch. Ticked: what it moved lately.'), list, bar, said, review);
         const rows = names.map((name) => ({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null }));
         let sending = false;
         let sure = '';
@@ -2967,8 +2970,11 @@
             r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             if (out.state !== 'ahead') r.picked = false;
             paint();
-            if (out.state === 'ahead') void checkRow(r, out.head, out.target);
+            /* Checked when it is to go: ticked (another branch ticked later is checked then). */
+            if (out.state === 'ahead' && r.picked) void checkRow(r, out.head, out.target);
         }
+        /* Several branches of one repository: named with it. */
+        const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function checkRow(r, head, target) {
             r.check = { status: 'running' }; paint();
             let result;
@@ -2989,7 +2995,7 @@
             const failed = p.filter((r) => r.check?.status === 'failed');
             const word = p.length > 1 ? `the ${p.length}` : 'it';
             go.disabled = sending || p.length === 0 || running.length > 0 || held.length > 0;
-            why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Waits for the checks.' : held.length ? `Its owner asked for passing checks: ${held.map((r) => r.name).join(', ')}.` : failed.length ? `Checks failed in ${failed.map((r) => r.name).join(', ')}.` : '';
+            why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Waits for the checks.' : held.length ? `Its owner asked for passing checks: ${held.map(label).join(', ')}.` : failed.length ? `Checks failed in ${failed.map(label).join(', ')}.` : '';
             if (sending) { go.textContent = 'Sending...'; return; }
             const all = p.some((r) => r.out?.guards?.confirm);
             go.textContent = sure === 'yes' ? (all ? `Not all of it could be shown here: send ${word}${where} anyway` : `Yes, send ${word}${where}: this cannot be undone`) : sure === 'all' ? `Yes, send ${word}${where}: this cannot be undone` : `Send ${word}${where}${failed.length ? ' anyway' : ''}`;
@@ -2997,23 +3003,16 @@
         function paint() {
             list.replaceChildren();
             for (const r of rows) {
-                const row = el('div', 'ts-row'); row.dataset.repo = r.name;
+                const row = el('div', 'ts-row'); row.dataset.repo = r.name; if (r.branch) row.dataset.branch = r.branch;
                 const out = r.out;
                 const ahead = out?.state === 'ahead';
                 row.classList.toggle('off', !ahead);
                 const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending; tick.setAttribute('aria-label', `Send ${r.name}`);
-                tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paintButtons(); if (!review.hidden) paintReview(); });
+                tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; if (r.picked && !r.check && r.out?.state === 'ahead') void checkRow(r, r.out.head, r.out.target); paintButtons(); if (!review.hidden) paintReview(); });
                 const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
                 const way = el('div', 'ts-way');
                 if (out?.branch) {
-                    const branches = out.agentBranches ?? [];
-                    if (branches.length > 1) {
-                        const pick = el('select'); pick.setAttribute('aria-label', `The branch of ${r.name}`); pick.disabled = sending;
-                        for (const b of branches) { const o = el('option', '', b.name); o.value = b.name; pick.append(o); }
-                        pick.value = out.branch;
-                        pick.addEventListener('change', () => { r.branch = pick.value; r.target = ''; sure = ''; void look(r); });
-                        way.append(pick);
-                    } else way.append(el('code', 'ts-branch', out.branch));
+                    way.append(el('code', 'ts-branch', out.branch));
                     if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${r.name} goes`); to.disabled = sending;
@@ -3035,6 +3034,7 @@
                 if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '\u2717 Not sent'));
                 else if (!out) state.append('');
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
+                else if (!r.check && !r.picked) state.append(el('span', 'hint', 'checked once ticked'));
                 else if (!r.check || r.check.status === 'running') state.append(el('span', 'warn', 'Checks running...'));
                 else {
                     const [word, tone] = CHECK_WORDS[r.check.status] ?? [String(r.check.status), ''];
@@ -3073,7 +3073,7 @@
             if (tab === 'changes') {
                 const tree = el('div', 'rv-tree ts-tree'); const diffs = el('div', 'rv-diff ts-diffs');
                 for (const { r, files } of all) {
-                    tree.append(el('small', 'ts-tree-repo', r.name));
+                    tree.append(el('small', 'ts-tree-repo', label(r)));
                     const box = el('div', 'ts-diff'); box.dataset.repo = r.name;
                     box.append(el('h4', '', `${r.name}: ${r.out.branch} → ${r.out.target}`));
                     const inner = el('div'); box.append(inner);
@@ -3145,10 +3145,17 @@
             paint();
         });
         paint();
+        /* Each repository's branch that moved last, then every other branch of its agent that has something to send. */
         await Promise.all(rows.map(async (r) => { await look(r); }));
-        /* Ticked at first: each one with something to send. */
-        for (const r of rows) r.picked = r.out?.state === 'ahead';
+        const others = rows.flatMap((r) => (r.out?.agentBranches ?? []).filter((b) => b.name !== r.branch).slice(0, BRANCHES_MORE).map((b) => ({ name: r.name, out: null, keep: r.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt })));
+        for (const r of rows) r.movedAt = (r.out?.agentBranches ?? []).find((b) => b.name === r.branch)?.movedAt ?? null;
+        await Promise.all(others.map(async (o) => { await look(o); }));
+        for (const o of others) if (o.out?.state === 'ahead') rows.splice(rows.findLastIndex((x) => x.name === o.name) + 1, 0, o);
+        /* Ticked at first: what its agent moved lately -- each repository's newest, and any other moved within a day. */
+        const lately = (r) => r.movedAt && Date.now() - Date.parse(r.movedAt) < MOVED_LATELY_MS;
+        for (const r of rows) r.picked = r.out?.state === 'ahead' && (rows.find((x) => x.name === r.name) === r || lately(r));
         paint();
+        for (const r of rows) if (r.picked) void checkRow(r, r.out.head, r.out.target);
     }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;

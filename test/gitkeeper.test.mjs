@@ -394,6 +394,15 @@ test('Send from the page: checks are advice by default, required when the owner 
     assert.equal((await b.keeper.send('site', { head, target: 'main' })).branch, 'main');
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), head);
     await assert.rejects(b.keeper.check('site', { head: 'f'.repeat(40) }), /changed since you looked/);
+    /* Two targets checked one after the other ("To send", two branches at once): each keeps its own result. */
+    const next = b.commit('c.txt', 'c\n', 'three');
+    await b.review.outgoing('site', { target: 'main' });
+    await b.keeper.check('site', { head: next, target: 'main' });
+    await b.review.outgoing('site', { target: 'staging' });
+    verdict = 'failed';
+    await b.keeper.check('site', { head: next, target: 'staging' });
+    assert.equal((await b.keeper.send('site', { head: next, target: 'main' })).branch, 'main', 'the checks of staging do not undo those of main');
+    await assert.rejects(b.keeper.send('site', { head: next, target: 'staging' }), /Passing checks are required/);
 });
 
 test('a push whose outcome is unknown, with the remote silent, holds automatic sending for that branch until a refresh settles it', async (t) => {

@@ -262,7 +262,8 @@ export class GitKeeper {
             settings: this.settings(r.name),
             auto,
             origin: hasRemote ? { path: `/resources/${folder}`, kept: this.#resources.hasOrigin(r.name), ...(record.mirror ?? {}) } : null,
-            checks: this.#results.get(r.name) ?? null,
+            /* The newest checks of the repository, whatever their target. */
+            checks: [...(this.#results.get(r.name)?.values() ?? [])].sort((x, y) => String(y.at ?? '').localeCompare(String(x.at ?? '')))[0] ?? null,
             last: this.lastChecks(r.name),
             read: record.lastRead ?? null,
             blocked: Object.keys(record.blocked ?? {}),
@@ -485,7 +486,10 @@ export class GitKeeper {
     async #check(name, seen, machine) {
         const s = this.settings(name);
         const result = await this.#checks.run(name, { head: seen.head, branch: seen.branch, target: seen.target, remoteTip: seen.remoteTip, remote: this.#review.remoteOf(name), command: s.checkCommand, hook: s.runHook, seconds: s.checkSeconds, ...(machine ? { machine } : {}) });
-        this.#results.set(name, result);
+        /* One result per target: two branches of the repository, checked one after the other, each keep theirs. */
+        const byTarget = this.#results.get(name) ?? new Map();
+        byTarget.set(String(result.target ?? seen.target ?? ''), result);
+        this.#results.set(name, byTarget);
         this.#keepLast(name, result);
         return result;
     }
@@ -524,8 +528,9 @@ export class GitKeeper {
     async send(name, body) {
         const r = this.#repository(name);
         if (this.settings(r.name).requireForSend) {
-            const last = this.#results.get(r.name);
             const target = body?.target || undefined;
+            const kept = [...(this.#results.get(r.name)?.values() ?? [])];
+            const last = target !== undefined ? this.#results.get(r.name)?.get(target) : kept.find((x) => x.head === body?.head);
             if (!last || last.status !== 'passed' || last.head !== body?.head || (target !== undefined && last.target !== target)) {
                 throw new Refusal(409, 'Passing checks are required before sending: run the checks for this commit first.');
             }
