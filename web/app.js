@@ -2387,7 +2387,10 @@
         /* ONE "Seen" for its machine: marked on the strip or here, every line it covers says so, and offers it no more. */
         const seenAt = conversations.find((x) => x.name === current)?.health?.seenAt ?? '';
         const seenWords = seenAt ? `\u2713 Seen ${new Date(seenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
-        const actionsOf = (m) => (m.actions ?? []).filter(may).map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
+        /* Restart, offered by a line, is offered no more once its machine was restarted after it. */
+        const restartedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'restarted').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt))
+            .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */

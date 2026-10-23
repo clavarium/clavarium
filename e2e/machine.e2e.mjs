@@ -214,6 +214,11 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal((await me.api('/api/conversations/roomy/talk', { text: 'Where are we?' })).status, 201);
     await me.sees('Your chat with the person is kept: run "parley read --all" before going on.');
     assert.ok((await me.api('/api/conversations/roomy/talk')).body.messages.some((m) => m.from === 'system' && m.text === 'Its machine was restarted with 2048 MB of memory, 1 core, 16 GB of disk: the tool started again.'));
+    /* The line that offered Restart before it offers it no more: its machine was restarted since. */
+    await me.page.locator('#view-chat').click();
+    await me.until('Restart no longer offered by the older line', async () => !(await line.first().locator('button').allInnerTexts().catch(() => ['Restart...'])).includes('Restart...'), 20_000);
+    assert.ok((await line.first().locator('button').allInnerTexts()).includes('More memory...'));
+    await me.page.locator('#view-terminal').click();
     assert.equal(c.memoryMb, 2048); assert.equal(c.diskGb, 16);
     assert.deepEqual(JSON.parse(readFileSync(join(vmHome(b, 'roomy'), 'size.json'), 'utf8')), { memory: 2048, disk: 16 });
     /* A disk never shrinks; a tool's least memory is kept. */
