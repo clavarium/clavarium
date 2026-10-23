@@ -229,7 +229,7 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     /* EVERY CHAPTER HAS SOMETHING TO ACT ON, but About, where the facts are, one line each. */
     await me.chapter('s-about');
     await me.until('the facts', async () => /^Clavarium \S+/.test(await me.page.locator('#settings-about').innerText()));
-    assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Who may sign in/);
+    assert.match(await me.page.locator('#settings-people').innerText(), /Development mode|Administrators: /);
     assert.match(await me.page.locator('#settings-address').innerText(), /^Address: /);
     assert.equal(await me.page.locator('#settings-ch-people').count(), 0, 'People & address: merged into About');
     const idle = await me.page.locator('#settings details.chapter').evaluateAll((all) => all.filter((d) => !['s-about', 's-shortcuts'].includes(d.dataset.chapter) && !d.querySelector('.chapter-body button, .chapter-body select, .chapter-body input, .chapter-body textarea')).map((d) => d.dataset.chapter));
@@ -237,7 +237,7 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     /* No shortcut: one line, how to add one. */
     if ((await me.api('/api/shortcuts')).body.length === 0) { await me.chapter('s-shortcuts'); assert.match(await me.page.locator('#settings-shortcuts-hint').innerText(), /No shortcut yet/); }
     await me.chapter('s-dictation');
-    await me.until('the environment\'s engine is said', async () => /set on the server \(CLAVARIUM_TRANSCRIPTION_URL\)/.test(await me.page.locator('#settings-dictation').innerText()));
+    await me.until('the environment\'s engine is said', async () => /set on the server/.test(await me.page.locator('#settings-dictation').innerText()));
     /* Each provider fills in its address and its model. */
     await me.page.selectOption('#dictation-provider', 'mistral');
     assert.equal(await me.page.inputValue('#dictation-url'), 'https://api.mistral.ai/v1/audio/transcriptions');

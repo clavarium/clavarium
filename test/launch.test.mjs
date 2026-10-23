@@ -3,7 +3,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -65,8 +65,9 @@ test('the launcher of Claude Code gives it the chat as its own tools (Parley, MC
     const asked = join(dir, 'asked.txt');
     /* A Claude Code that only notes what it is asked, and records the server as the real one does. */
     writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
-    /* Only what this test puts on the way, and node (its launchers' scripts). */
-    const PATH = `${bin}:${dirname(process.execPath)}:/usr/bin:/bin`;
+    /* Only what this test puts on the way, and node (its launchers' scripts) -- node alone, never what sits beside it (a Docket of this computer's). */
+    const nodeDir = join(dir, 'node'); mkdirSync(nodeDir); symlinkSync(process.execPath, join(nodeDir, 'node'));
+    const PATH = `${bin}:${nodeDir}:/usr/bin:/bin`;
     const run = (env = {}) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: chat, ...env }, encoding: 'utf8' });
     assert.equal(run().status, 0);
     assert.equal(existsSync(asked), false, 'no chat (no server in its folder): nothing asked');

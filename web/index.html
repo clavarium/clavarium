@@ -128,22 +128,19 @@
         <div class="panel-top"><b id="panel-title">This conversation</b></div>
         <p id="panel-error" class="error" role="alert" hidden></p>
         <details class="chapter" id="chapter-general" data-chapter="general">
-          <summary><span class="chapter-title">General</span><span class="chapter-about">What it is, and how you talk with it.</span></summary>
+          <summary><span class="chapter-title">General</span><span class="chapter-about">Name, group, chat.</span></summary>
           <div class="chapter-body">
             <dl id="general-facts" class="facts"></dl>
             <div id="title-box" hidden>
-            <form id="title-form" class="row" autocomplete="off"><label for="title-name">Name</label><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></form>
+            <form id="title-form" class="set-row" autocomplete="off"><div class="set-what"><label for="title-name">Name</label></div><div class="set-control"><input id="title-name" maxlength="60" spellcheck="false"><button type="submit">Save</button></div></form>
             </div>
             <div id="group-box" hidden>
-            <form id="group-form" class="row" autocomplete="off"><label for="group-name">Group</label><input id="group-name" maxlength="40" list="group-names" placeholder="None" spellcheck="false"><button type="submit">Save</button></form>
-            <p class="hint">A folder of the list, shared by every device: choose one, type a new one, or empty it for none.</p>
-            <form id="group-rename-form" class="row" autocomplete="off" hidden><label for="group-rename">Rename its group</label><input id="group-rename" maxlength="40" spellcheck="false"><button type="submit">Rename for all</button></form>
-            <div class="row" id="order-row"><span>Its place</span><button type="button" id="move-up">Move up</button><button type="button" id="move-down">Move down</button><button type="button" id="group-up" hidden>Group up</button><button type="button" id="group-down" hidden>Group down</button></div>
-            <p class="hint" id="order-hint">The same order on every device. In the list: drag it (on a phone or tablet, hold it, then drag), or Alt and an arrow key.</p>
+            <form id="group-form" class="set-row" autocomplete="off"><div class="set-what"><label for="group-name">Group</label><small>A folder of the list. Empty: none</small></div><div class="set-control"><input id="group-name" maxlength="40" list="group-names" placeholder="None" spellcheck="false"><button type="submit">Save</button></div></form>
+            <form id="group-rename-form" class="set-row" autocomplete="off" hidden><div class="set-what"><label for="group-rename">Rename its group</label></div><div class="set-control"><input id="group-rename" maxlength="40" spellcheck="false"><button type="submit">Rename for all</button></div></form>
+            <div class="set-row" id="order-row"><div class="set-what"><span>Its place</span><small id="order-hint">Also: drag it in the list, or Alt and an arrow</small></div><div class="set-control"><button type="button" id="move-up">Move up</button><button type="button" id="move-down">Move down</button><button type="button" id="group-up" hidden>Group up</button><button type="button" id="group-down" hidden>Group down</button></div></div>
             </div>
             <div id="hide-box" hidden>
-            <div class="row"><span>In the list</span><div class="levels" id="hide-on" role="group" aria-label="Hidden from the list"><button type="button" data-on="false">Shown</button><button type="button" data-on="true">Hidden</button></div></div>
-            <p class="hint">Hidden, it runs as before, keeps what it was given and stays in Access; "hidden" at the bottom of the list shows it.</p>
+            <div class="set-row"><div class="set-what"><span>In the list</span><small>Hidden, it still runs</small></div><div class="set-control"><div class="levels" id="hide-on" role="group" aria-label="Hidden from the list"><button type="button" data-on="false">Shown</button><button type="button" data-on="true">Hidden</button></div></div></div>
             </div>
             <!-- WHAT ITS TOOL IS TOLD ABOUT WHERE IT IS: the exact text, made by the
                  server from these settings; the owner's own lines; told again on a click. -->
@@ -152,32 +149,27 @@
             <div id="guide-shown" hidden>
               <label for="guide-lines">Your own lines for it</label>
               <textarea id="guide-lines" rows="3" maxlength="1200" spellcheck="true" placeholder="Write to me in French.&#10;Never change the photos in family-archive."></textarea>
-              <p class="hint" id="guide-limits">What you want it to keep in mind: your language, what not to touch, how to work. Plain text, 12 short lines at most; never a password or a key.</p>
+              <p class="hint" id="guide-limits">Your language, what not to touch, how to work. 12 short lines; never a password.</p>
               <div class="row"><button type="button" id="guide-save">Save my lines</button><button type="button" id="guide-tell">Tell it again</button></div>
-              <p class="hint" id="guide-tell-hint">Saved, it is in its machine for its next start. Tell it again: it is already working, and should read it now (one line is typed in its terminal).</p>
+              <p class="hint" id="guide-tell-hint">Saved: read at its next start. Tell it again: read now.</p>
               <p class="hint" id="guide-said" role="status"></p>
               <p class="hint" id="guide-where"></p>
               <pre id="guide-text" tabindex="0" aria-label="What its tool is told"></pre>
             </div>
             </div>
             <div id="talk-box">
-            <div class="panel-top"><b>Talk through the app</b></div>
-            <p class="hint" id="talk-about">A chat screen instead of its terminal: a small command, parley, installed in its machine by Clavarium, lets the tool tell you something, ask you something, show you a file, say what it is doing and read your answers. Turned on, WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER; what it prints in its terminal is not. It works as far as the tool agrees to use it.</p>
-            <div class="row"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div>
+            <div class="set-row"><div class="set-what"><b>Chat</b><small id="talk-about">A chat screen instead of its terminal. What the tool posts there is read by this server</small></div><div class="set-control"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div></div>
             <p class="hint" id="talk-declare" hidden></p>
-            <form id="chat-name-form" class="row" autocomplete="off"><label for="chat-name">Its name in the chat</label><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></form>
-            <p class="hint" id="chat-name-hint">Shown above its messages. Empty: a neutral word, "Assistant" in your language. Its tool is named, small, in the detailed view.</p>
+            <form id="chat-name-form" class="set-row" autocomplete="off"><div class="set-what"><label for="chat-name">Its name in the chat</label><small id="chat-name-hint">Empty: "Assistant"</small></div><div class="set-control"><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></div></form>
             </div>
             <!-- DICTATION INTO ITS TERMINAL: marked once per message, so that the tool knows it may hold recognition mistakes. -->
             <div id="voice-mark-box" hidden>
-            <div class="panel-top"><b>Mark what I dictate</b></div>
-            <div class="row"><div class="levels" id="voice-mark" role="group" aria-label="Mark what I dictate"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div></div>
-            <p class="hint">On: what you dictate into its terminal starts with a microphone sign, once per message, so that the tool knows a word may have been misheard. Never in a shell.</p>
+            <div class="set-row"><div class="set-what"><b>Mark what I dictate</b><small>A microphone sign before it: a word may be misheard</small></div><div class="set-control"><div class="levels" id="voice-mark" role="group" aria-label="Mark what I dictate"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div></div></div>
             </div>
           </div>
         </details>
         <details class="chapter" id="chapter-machine" data-chapter="machine">
-          <summary><span class="chapter-title">Machine</span><span class="chapter-about">Its health, its memory and disk; restart, sleep.</span></summary>
+          <summary><span class="chapter-title">Machine</span><span class="chapter-about">Health, size, restart.</span></summary>
           <div class="chapter-body">
             <div class="panel-top"><b>Health</b><button type="button" id="health-check">Look now</button></div>
             <ul id="machine-health" class="health-lines" aria-live="polite"></ul>
@@ -192,15 +184,11 @@
               <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
             </div>
             <div id="resume-box" hidden>
-            <div class="panel-top"><b>When its tool starts</b></div>
-            <div class="row"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div>
-            <p class="hint" id="resume-hint">Each time its machine starts (a wake after a stop, a restart), the tool takes up the session it had, as it was. Start fresh: it starts a new one, with nothing of before in mind.</p>
+            <div class="set-row"><div class="set-what"><b>When its tool starts</b><small id="resume-hint">After a wake or a restart</small></div><div class="set-control"><div class="levels" id="resume-on" role="group" aria-label="When its tool starts"><button type="button" data-on="true">Resume its last session</button><button type="button" data-on="false">Start fresh</button></div></div></div>
             </div>
             <!-- FULL RIGHTS IN ITS OWN MACHINE: the default, said plainly where it is changed. -->
             <div id="rights-box" hidden>
-            <div class="panel-top"><b>Ask before acting</b></div>
-            <div class="row"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div>
-            <p class="hint" id="rights-hint">Off (the default): <b>the tool acts without asking you</b>, with every right inside its own machine: it installs, changes and deletes there as it sees fit. Outside its machine it reaches only what you attached to it, as you attached it. On: it asks you before it acts, as it does by itself. Taken into account the next time the tool starts: restart the machine to apply it now.</p>
+            <div class="set-row"><div class="set-what"><b>Ask before acting</b><small id="rights-hint">Off: <b>the tool acts without asking you</b>, inside its own machine. At its next start</small></div><div class="set-control"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
             </div>
             <div class="panel-top"><b>Memory, cores and disk</b></div>
             <form id="machine-size" autocomplete="off">
@@ -211,7 +199,7 @@
               <label for="machine-disk">Disk</label>
               <select id="machine-disk"></select>
               <p class="hint" id="machine-size-wait" role="status" hidden></p>
-              <p class="hint" id="machine-size-hint">Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.</p>
+              <p class="hint" id="machine-size-hint">Restarts the machine; its work stays. A disk only grows.</p>
               <!-- CHOSEN WHILE IT SLEEPS: kept, and applied when it wakes (server/conversations.mjs, #wakeResized). -->
               <p class="hint" id="machine-later" role="status" hidden><span id="machine-later-text"></span> · <button type="button" id="machine-later-cancel" class="inline">cancel</button></p>
               <div class="row"><button type="submit" id="machine-size-apply">Apply...</button></div>
@@ -228,19 +216,19 @@
             <label class="check"><input type="checkbox" id="react-on"> <span id="react-on-label">Also tell its agent</span></label>
             <input id="react-message" maxlength="500" spellcheck="false" aria-label="What its agent is told ({problem}: what was found)">
             <input id="react-command" maxlength="500" spellcheck="false" placeholder="a command, run in its machine: rm -rf ~/.cache/*" aria-label="The command run in its machine" hidden>
-            <p class="hint" id="react-hint">You are told either way. Once each time it happens; what was said or run shows in its chat.</p>
+            <p class="hint" id="react-hint">You are told either way.</p>
             <div class="row"><button type="submit">Save</button><span class="hint" id="react-said" role="status"></span></div>
             </form>
           </div>
         </details>
         <details class="chapter" id="chapter-access" data-chapter="access">
-          <summary><span class="chapter-title">Access</span><span class="chapter-about">Folders, repositories, mailboxes, secrets, network.</span></summary>
+          <summary><span class="chapter-title">Access</span><span class="chapter-about">Folders, repositories, secrets, network.</span></summary>
           <div class="chapter-body">
-            <p class="hint">What this conversation has: it appears in its machine under <code>/resources/</code>. Read-only is enforced outside the machine: the tool cannot lift it.</p>
+            <p class="hint">In its machine under <code>/resources/</code>. Read-only cannot be lifted by the tool.</p>
             <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
             <div id="panel-rows"></div>
             <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
-            <div class="row to-access"><button type="button" id="access-assets-here">Attach an asset</button><span class="hint">Every asset, in Access, with what this conversation may do with each.</span></div>
+            <div class="row to-access"><button type="button" id="access-assets-here">Attach an asset</button><span class="hint">Every asset, in Access.</span></div>
             <div class="panel-top"><b>Secrets handed to its tool</b></div>
             <div id="access-secrets"></div>
             <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
@@ -252,13 +240,13 @@
             <button type="button" id="attach-manage">Manage all assets</button>
             </div>
             <div class="panel-top"><b>Network</b></div>
-            <p class="hint">Offline, the machine of this conversation reaches nothing outside. Its terminal and its folders keep working. The cut is made outside the machine: the tool cannot undo it.</p>
+            <p class="hint">Offline: its machine reaches nothing outside. The tool cannot undo it.</p>
             <div class="levels" id="network" role="group" aria-label="Network of this conversation">
             <button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button>
             </div>
             <div id="signin-setup" hidden>
             <div class="panel-top"><b>Sign-in mailbox</b></div>
-            <p class="hint">A mailbox used only for this tool's account. When its provider sends a sign-in link there, the link appears next to the terminal. The mailbox is read, never changed; its password stays on the host and never enters the machine. Use an app password where the mail provider offers one.</p>
+            <p class="hint">A mailbox for this tool's account: its sign-in links appear next to the terminal. Read only; its password never enters the machine.</p>
             <p id="signin-state" class="hint"></p>
             <form id="signin-form" autocomplete="off">
               <div class="row"><input id="signin-host" placeholder="imap.example.com" aria-label="Mail server" spellcheck="false" autocapitalize="none">
@@ -270,21 +258,21 @@
           </div>
         </details>
         <details class="chapter" id="chapter-wakeups" data-chapter="wakeups">
-          <summary><span class="chapter-title">Wake-ups</span><span class="chapter-about">A line typed to the tool when something arrives, or by the clock.</span></summary>
+          <summary><span class="chapter-title">Wake-ups</span><span class="chapter-about">When something arrives, or by the clock.</span></summary>
           <div class="chapter-body">
             <div id="wakeups-box">
             <div class="panel-top"><b>Wake it by itself</b></div>
-            <p class="hint">When something arrives in what it has (a file, a mail, a commit), or by the clock, a line you wrote is typed to the tool. A conversation that is asleep is not woken. Where its chat is on, the line goes to its docket instead: it waits there until the tool says it was done, and the tool is told again until then.</p>
+            <p class="hint">A line you wrote, given to the tool when something arrives or by the clock. Never wakes a sleeping machine.</p>
             <div id="wakeups-rows"></div>
             <div id="wakeup-address-box" class="notice-box" hidden>
               <b>Its address, shown this once</b>
               <input id="wakeup-address" readonly spellcheck="false" aria-label="The address that wakes it">
-              <p class="hint">Whoever has this address can wake the tool. Copy it now: it is not kept in a form that can be shown again.</p>
+              <p class="hint">Whoever has this address can wake the tool. Shown this once.</p>
               <div class="row"><button type="button" id="wakeup-address-copy" class="primary">Copy</button><button type="button" id="wakeup-address-done">I have it</button></div>
             </div>
             <div id="docket-box" hidden>
               <div class="panel-top"><b>Its docket</b></div>
-              <p class="hint">What woke it, and whether it was done; the reminders the tool set itself (it can, with "docket remind"). Take one back if you do not want it.</p>
+              <p class="hint">What woke it, and whether it was done; the reminders it set itself.</p>
               <div id="docket-plans"></div>
               <div id="docket-events"></div>
             </div>
@@ -318,7 +306,7 @@
                   <label for="wakeup-line">The cron line this sets: minute hour day month weekday</label>
                   <input id="wakeup-line" spellcheck="false" autocapitalize="off" value="0 * * * *">
                 </div>
-                <div data-for="call" hidden><p class="hint">It gets an address of its own. Whatever calls that address with POST wakes the tool. What the caller sends replaces {text} in your line, as one plain line.</p></div>
+                <div data-for="call" hidden><p class="hint">An address of its own: a POST to it wakes the tool; what it sends replaces {text}.</p></div>
                 <label for="wakeup-message">What is typed to the tool</label>
                 <textarea id="wakeup-message" rows="3" maxlength="1000" placeholder="New requests arrived in /resources/handoff: {files}. Read them and do what they ask."></textarea>
                 <p class="hint">{files} is replaced by the names of what arrived.</p>
@@ -331,7 +319,7 @@
           </div>
         </details>
         <details class="chapter" id="chapter-answerer" data-chapter="answerer">
-          <summary><span class="chapter-title">Answerer</span><span class="chapter-about">Models that answer its simple questions while you are away.</span></summary>
+          <summary><span class="chapter-title">Answerer</span><span class="chapter-about">Simple questions answered while you are away.</span></summary>
           <div class="chapter-body">
             <div id="answerer-box">
             <div class="panel-top"><b>Answers in your place</b></div>
@@ -357,19 +345,19 @@
           </div>
         </details>
         <details class="chapter" id="chapter-sharing" data-chapter="sharing">
-          <summary><span class="chapter-title">Sharing</span><span class="chapter-about">Its terminal, its chat, or both, on another device.</span></summary>
+          <summary><span class="chapter-title">Sharing</span><span class="chapter-about">On another device.</span></summary>
           <div class="chapter-body">
-            <p class="hint">Give a phone or a tablet its terminal, its chat, or both. Change it here at any time, or take it back.</p>
+            <p class="hint">Its terminal, its chat, or both, on a phone or a tablet.</p>
             <div id="share-here"></div>
             <p id="share-here-none" class="hint" hidden>No device has it.</p>
             <div class="row"><button type="button" id="share" hidden>Pair a new device...</button></div>
-            <div class="row to-access"><button type="button" id="access-devices-here">Share with a device</button><span class="hint">Every device, in Access, with what each has of this conversation.</span></div>
+            <div class="row to-access"><button type="button" id="access-devices-here">Share with a device</button><span class="hint">Every device, in Access.</span></div>
           </div>
         </details>
         <details class="chapter" id="chapter-advanced" data-chapter="advanced">
           <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Archive it.</span></summary>
           <div class="chapter-body">
-            <p class="hint">Archiving deletes its machine, with everything on its disk. Attached folders are kept; its work folder is put aside on the server.</p>
+            <p class="hint">Deletes its machine and its disk. Attached folders are kept; its work folder is put aside.</p>
             <div class="row" id="conversation-actions"><button type="button" id="archive" hidden>Archive...</button></div>
           </div>
         </details>
@@ -574,57 +562,42 @@
       </div>
       <div id="settings" class="sheet" hidden>
         <div class="panel-top"><b>Settings</b><button type="button" id="settings-close" class="as-link place-back">&lsaquo; Conversations</button></div>
+        <!-- THE CATEGORIES: a list beside them on a wide screen, headings one under the other on a phone. -->
+        <nav id="settings-nav" class="settings-nav" aria-label="Categories of Settings">
+          <button type="button" data-group="device">This device</button>
+          <button type="button" data-group="chat">Chat</button>
+          <button type="button" data-group="server">Server &amp; access</button>
+          <button type="button" data-group="storage">Storage &amp; machines</button>
+          <button type="button" data-group="diagnostics">Diagnostics</button>
+        </nav>
+        <div id="settings-groups" class="settings-groups">
+        <section class="settings-group" id="settings-group-device" data-group="device">
         <h3 class="chapter-group">This device</h3>
         <details class="chapter" id="settings-ch-screen" data-chapter="s-screen">
-          <summary><span class="chapter-title">Screen</span><span class="chapter-about">Light or dark, text size, the app.</span></summary>
+          <summary><span class="chapter-title">Screen</span><span class="chapter-about">Theme, text size, the app.</span></summary>
           <div class="chapter-body">
-        <div class="row"><span>Screen</span><button type="button" id="theme" aria-label="Light or dark screen">Light</button><button type="button" id="install" class="primary" hidden>Install the app</button></div>
-        <form id="install-name-form" class="row" autocomplete="off" hidden><label for="install-name">Name on this device</label><input id="install-name" maxlength="30" spellcheck="false"><button type="submit" class="primary">Install</button><button type="button" id="install-name-cancel">Cancel</button></form>
-        <div class="row"><span>Text size</span><span class="text-size" id="settings-text" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span></div>
-        <p class="hint">All text, the terminal's too, on this device only. Also: two fingers pinched, Ctrl and the wheel, Ctrl + and Ctrl -.</p>
+        <div class="set-row"><div class="set-what"><span>Theme</span><small>This device only</small></div><div class="set-control"><button type="button" id="theme" aria-label="Light or dark screen">Light</button></div></div>
+        <div class="set-row"><div class="set-what"><span>Text size</span><small>Also: a pinch, or Ctrl + and Ctrl -</small></div><div class="set-control"><span class="text-size" id="settings-text" role="group" aria-label="Text size"><button type="button" data-text="smaller" aria-label="Smaller text">A&minus;</button><button type="button" data-text="normal" aria-label="Normal text size" class="text-now">100%</button><button type="button" data-text="larger" aria-label="Larger text">A+</button></span></div></div>
+        <div class="set-row" id="install-row" hidden><div class="set-what"><span>App</span><small>Installed on this device's home screen</small></div><div class="set-control"><button type="button" id="install" class="primary" hidden>Install the app</button></div></div>
+        <form id="install-name-form" class="set-row" autocomplete="off" hidden><div class="set-what"><label for="install-name">Name on this device</label></div><div class="set-control"><input id="install-name" maxlength="30" spellcheck="false"><button type="submit" class="primary">Install</button><button type="button" id="install-name-cancel">Cancel</button></div></form>
           </div>
         </details>
         <details class="chapter" id="settings-ch-alerts" data-chapter="s-alerts">
-          <summary><span class="chapter-title">Alerts</span><span class="chapter-about">Be told here when a tool waits for you.</span></summary>
+          <summary><span class="chapter-title">Alerts</span><span class="chapter-about">When a tool needs you.</span></summary>
           <div class="chapter-body">
-        <p class="hint" id="alerts-state">When a tool stops and waits for you, this device can be told.</p>
-        <div class="row"><button type="button" id="alerts-on" class="primary">Alert me on this device</button><button type="button" id="alerts-off" hidden>Stop alerting this device</button><button type="button" id="alerts-test" hidden>Send a test</button></div>
+        <div class="set-row"><div class="set-what"><span>On this device</span><small id="alerts-state">Off</small></div><div class="set-control"><button type="button" id="alerts-on" class="primary">Turn on</button><button type="button" id="alerts-off" hidden>Turn off</button><button type="button" id="alerts-test" hidden>Send a test</button></div></div>
           </div>
         </details>
-        <h3 class="chapter-group">This server</h3>
-        <details class="chapter" id="settings-ch-general" data-chapter="s-general">
-          <summary><span class="chapter-title">General</span><span class="chapter-about">The name of this Clavarium.</span></summary>
-          <div class="chapter-body">
-        <form id="instance-form" class="row" autocomplete="off"><label for="instance-name">Name of this Clavarium</label><input id="instance-name" maxlength="30" spellcheck="false"><button type="submit">Save</button></form>
-        <p class="hint" id="instance-hint">In the title of its tab, above its list, in its alerts, and under its icon once installed. Empty: the name drawn from its address.</p>
-        <p class="error" id="instance-error" role="alert" hidden></p>
-          </div>
-        </details>
-        <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
-        <details class="chapter" id="settings-ch-operators" data-chapter="s-operators" hidden>
-          <summary><span class="chapter-title">Administrators</span><span class="chapter-about">Who may sign in, and their passwords.</span></summary>
-          <div class="chapter-body">
-        <div id="operators-rows"></div>
-        <form id="operators-new" class="row" autocomplete="off"><label for="operators-email">Add an administrator</label><input id="operators-email" type="email" placeholder="someone@example.com" spellcheck="false" autocapitalize="off" required><button type="submit">Add</button></form>
-        <div id="operators-password" class="as-form" hidden><p><b id="operators-password-for"></b>: its password, shown <b>this once</b>. Give it to them yourself.</p><div class="row"><input id="operators-password-value" readonly spellcheck="false"><button type="button" id="operators-password-copy">Copy</button><button type="button" id="operators-password-done">Done</button></div></div>
-        <p class="hint">Five failed sign-ins within 15 minutes lock that address for 15 minutes; you are told. The last administrator is never locked out nor removed.</p>
-        <p class="error" id="operators-error" role="alert" hidden></p>
-          </div>
-        </details>
-        <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
-          <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">The ready-made answers under the terminal.</span></summary>
-          <div class="chapter-body">
-        <p class="hint" id="settings-shortcuts-hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
-        <div id="settings-shortcuts"></div>
-          </div>
-        </details>
+        </section>
+        <section class="settings-group" id="settings-group-chat" data-group="chat">
+        <h3 class="chapter-group">Chat</h3>
         <details class="chapter" id="settings-ch-words" data-chapter="s-words">
-          <summary><span class="chapter-title">Chat screen</span><span class="chapter-about">Its language, and your own words.</span></summary>
+          <summary><span class="chapter-title">Chat screen</span><span class="chapter-about">Language and wording.</span></summary>
           <div class="chapter-body">
-        <div class="row"><label for="words-lang">Language</label><select id="words-lang"><option value="device">The language of each device</option></select></div>
+        <div class="set-row"><div class="set-what"><label for="words-lang">Language</label><small>Of the chat screen, every device</small></div><div class="set-control"><select id="words-lang"><option value="device">The language of each device</option></select></div></div>
         <details id="words-box">
           <summary>Your own words</summary>
-          <p class="hint">Replace any word of the chat screen with your own, for every device: <code>{"send": "Go"}</code>. Only the words you give change. They are shown as plain text.</p>
+          <p class="hint">Any word of the chat, replaced for every device: <code>{"send": "Go"}</code>.</p>
           <textarea id="words-own" rows="6" spellcheck="false" aria-label="Your own words, as JSON"></textarea>
           <div class="row"><button type="button" id="words-save" class="primary">Save</button><button type="button" id="words-show">Show all the words</button><span class="hint" id="words-saved" role="status"></span></div>
           <pre id="words-all" class="hint" hidden></pre>
@@ -635,84 +608,57 @@
           </div>
         </details>
         <details class="chapter" id="settings-ch-thread" data-chapter="s-thread">
-          <summary><span class="chapter-title">Chat thread</span><span class="chapter-about">What the chat says of machines and repositories.</span></summary>
+          <summary><span class="chapter-title">Chat events</span><span class="chapter-about">Machines and repositories, in the chat.</span></summary>
           <div class="chapter-body">
-        <p class="hint">Besides the messages, the chat says what happened to its machine and its repositories. <b>Needs you</b>: in both views. <b>News</b>: in the simple view as one short line, several in a row grouped. <b>Trace</b>: in the detailed view only. Never counted as unread.</p>
+        <p class="hint"><b>Needs you</b>: both views. <b>News</b>: one short line. <b>Trace</b>: detailed view only.</p>
         <div id="thread-levels" class="thread-levels"></div>
         <p class="hint" id="thread-saved" role="status"></p>
         <p id="thread-error" class="error" role="alert" hidden></p>
           </div>
         </details>
-        <details class="chapter" id="settings-ch-dictation" data-chapter="s-dictation">
-          <summary><span class="chapter-title">Dictation</span><span class="chapter-about">Speech to text, on this server.</span></summary>
+        <details class="chapter" id="settings-ch-shortcuts" data-chapter="s-shortcuts">
+          <summary><span class="chapter-title">Shortcuts</span><span class="chapter-about">Ready answers under the terminal.</span></summary>
           <div class="chapter-body">
-        <p id="settings-dictation" class="hint"></p>
-        <form id="dictation-form" autocomplete="off">
-          <div class="row"><label for="dictation-provider">Provider</label><select id="dictation-provider"></select></div>
-          <div class="row"><label for="dictation-url">Address</label><input id="dictation-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div>
-          <div class="row"><label for="dictation-model">Model</label><input id="dictation-model" spellcheck="false" maxlength="100"></div>
-          <div class="row"><label for="dictation-secret">Key</label><select id="dictation-secret"><option value="">No key</option></select></div>
-          <div class="row"><label for="dictation-language">Language</label><select id="dictation-language"><option value="">Automatic</option><option value="en">English (en)</option><option value="fr">French (fr)</option><option value="de">German (de)</option><option value="es">Spanish (es)</option><option value="it">Italian (it)</option><option value="nl">Dutch (nl)</option><option value="pt">Portuguese (pt)</option><option value="other">Another code...</option></select><input id="dictation-language-code" maxlength="8" spellcheck="false" placeholder="code, such as pl" aria-label="Language code" hidden></div>
-          <p class="hint" id="dictation-key-hint">The key is one of your secrets (Assets, Secrets), chosen by its name: it is never shown, and only this server uses it, when it transcribes.</p>
-          <p class="hint" id="dictation-other-hint" hidden>"Other (compatible)": any engine with the same interface (<code>/v1/audio/transcriptions</code>). Only with it may the address be on this server's own network (localhost, a private address, plain http), for an engine of your own: the others must be public HTTPS addresses.</p>
-          <div class="row"><button type="submit" class="primary" id="dictation-save">Save</button><button type="button" id="dictation-try">Try it</button><button type="button" id="dictation-off">Turn off</button><span class="hint" id="dictation-saved" role="status"></span></div>
+        <p class="hint" id="settings-shortcuts-hint">The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.</p>
+        <div id="settings-shortcuts"></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-dictation" data-chapter="s-dictation">
+          <summary><span class="chapter-title">Dictation</span><span class="chapter-about">Speech to text.</span></summary>
+          <div class="chapter-body">
+        <p id="settings-dictation" class="status-line"></p>
+        <form id="dictation-form" class="set-rows" autocomplete="off">
+          <div class="set-row"><div class="set-what"><label for="dictation-provider">Provider</label></div><div class="set-control"><select id="dictation-provider"></select></div></div>
+          <div class="set-row"><div class="set-what"><label for="dictation-url">Address</label><small>Its transcription endpoint</small></div><div class="set-control"><input id="dictation-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div></div>
+          <div class="set-row"><div class="set-what"><label for="dictation-model">Model</label></div><div class="set-control"><input id="dictation-model" spellcheck="false" maxlength="100"></div></div>
+          <div class="set-row"><div class="set-what"><label for="dictation-secret">Key</label><small id="dictation-key-hint">One of your secrets. Never shown</small></div><div class="set-control"><select id="dictation-secret"><option value="">No key</option></select></div></div>
+          <div class="set-row"><div class="set-what"><label for="dictation-language">Language</label></div><div class="set-control"><select id="dictation-language"><option value="">Automatic</option><option value="en">English (en)</option><option value="fr">French (fr)</option><option value="de">German (de)</option><option value="es">Spanish (es)</option><option value="it">Italian (it)</option><option value="nl">Dutch (nl)</option><option value="pt">Portuguese (pt)</option><option value="other">Another code...</option></select><input id="dictation-language-code" maxlength="8" spellcheck="false" placeholder="code, such as pl" aria-label="Language code" hidden></div></div>
+          <p class="hint" id="dictation-other-hint" hidden>Any engine with the same interface (<code>/v1/audio/transcriptions</code>); it alone may be on this server's own network.</p>
+          <div class="action-row"><span class="hint" id="dictation-saved" role="status"></span><button type="button" id="dictation-off">Turn off</button><button type="button" id="dictation-try">Try it</button><button type="submit" class="primary" id="dictation-save">Save</button></div>
           <p class="hint" id="dictation-heard" role="status" hidden></p>
           <p class="error" id="dictation-error" role="alert" hidden></p>
         </form>
           </div>
         </details>
-        <!-- THIS SERVER: its disk and memory, what takes them, and the reserve
-             no machine may eat into (server/capacity.mjs). Nothing here wakes a machine. -->
-        <details class="chapter" id="settings-server-top" data-chapter="s-resources">
-          <summary><span class="chapter-title">Resources</span><span class="chapter-about">Disk and memory, what takes them, the reserve.</span></summary>
+        </section>
+        <section class="settings-group" id="settings-group-server" data-group="server">
+        <h3 class="chapter-group">Server &amp; access</h3>
+        <details class="chapter" id="settings-ch-general" data-chapter="s-general">
+          <summary><span class="chapter-title">General</span><span class="chapter-about">Server name.</span></summary>
           <div class="chapter-body">
-        <div id="settings-server" tabindex="-1">
-          <p id="server-unknown" class="hint" hidden>This server's disk and memory cannot be read just now. Nothing is refused for lack of room while they cannot.</p>
-          <div class="curves" id="server-curves" data-of="server" hidden>
-            <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
-            <div class="curves-row"></div>
+        <form id="instance-form" class="set-row" autocomplete="off"><div class="set-what"><label for="instance-name">Name</label><small id="instance-hint">In tabs, alerts and the app icon. Empty: from the address</small></div><div class="set-control"><input id="instance-name" maxlength="30" spellcheck="false"><button type="submit">Save</button></div></form>
+        <p class="error" id="instance-error" role="alert" hidden></p>
           </div>
-          <div id="server-disks"></div>
-          <!-- ALL THE MACHINES TO ANOTHER DISK (server/machinesmove.mjs). -->
-          <details id="move-machines-box">
-            <summary>The disks, and moving all the machines to another one...</summary>
-            <p class="hint">Every machine is stopped, its disk copied to the disk you choose, and started again as its conversation is opened. <b>This server stops meanwhile</b>: this page comes back by itself. It takes from a few minutes to much longer, with the size of the machines. The copy on the disk of now is kept until you remove it.</p>
-            <div id="move-machines-rows"></div>
-            <p class="hint" id="move-machines-said" role="status"></p>
-          </details>
-          <div class="server-block" id="server-memory" hidden>
-            <div class="server-head"><b>Memory</b><span id="server-memory-state" class="server-state"></span><span id="server-memory-figures" class="server-figures"></span></div>
-            <div class="server-meter" id="server-memory-meter" role="meter" aria-label="Memory taken" aria-valuemin="0" aria-valuemax="100"><span class="fill"></span><span class="zone"></span><span class="mark"></span></div>
-            <p id="server-memory-note" class="server-note"></p>
-            <dl id="server-memory-parts" class="server-parts"></dl>
-          </div>
-          <div class="server-block">
-            <div class="server-head"><b>Reserve</b><span class="server-figures">always left free, the larger of the two</span></div>
-            <div class="reserve-row">
-              <span class="reserve-what">Disk</span>
-              <label><input type="number" id="reserve-disk" min="0" max="1024" step="0.5" inputmode="decimal" aria-label="Disk reserve, in GB"> GB</label>
-              <span aria-hidden="true">or</span>
-              <label><input type="number" id="reserve-disk-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Disk reserve, in percent of the disk"> %</label>
-            </div>
-            <div class="reserve-row">
-              <span class="reserve-what">Memory</span>
-              <label><input type="number" id="reserve-memory" min="0" max="256" step="0.25" inputmode="decimal" aria-label="Memory reserve, in GB"> GB</label>
-              <span aria-hidden="true">or</span>
-              <label><input type="number" id="reserve-memory-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Memory reserve, in percent of the memory"> %</label>
-            </div>
-            <div class="reserve-row">
-              <button type="button" id="reserve-save" class="primary">Save</button>
-              <span class="hint" id="reserve-saved" role="status"></span>
-            </div>
-            <p class="server-note" id="reserve-now"></p>
-            <p class="hint">Judged on what is really free. A machine is not created, started or given more if that would leave less. Below it, you are alerted and the running machine that takes the most is put to sleep. Waking is never refused for lack of disk, so you can get in to clean up.</p>
-            <p class="server-note promised" id="promised-disk" hidden></p>
-            <p class="server-note promised" id="promised-memory" hidden></p>
-            <p id="reserve-error" class="error" role="alert" hidden></p>
-          </div>
-        </div>
-        <!-- UPDATES: what runs, what is out, how this server updates itself
-             (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
+        </details>
+        <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
+        <details class="chapter" id="settings-ch-operators" data-chapter="s-operators" hidden>
+          <summary><span class="chapter-title">Administrators</span><span class="chapter-about">Who may sign in.</span></summary>
+          <div class="chapter-body">
+        <div id="operators-rows"></div>
+        <form id="operators-new" class="set-row" autocomplete="off"><div class="set-what"><label for="operators-email">Add an administrator</label><small>Email address</small></div><div class="set-control"><input id="operators-email" type="email" placeholder="someone@example.com" spellcheck="false" autocapitalize="off" required><button type="submit">Add</button></div></form>
+        <div id="operators-password" class="as-form" hidden><p><b id="operators-password-for"></b>: its password, shown <b>this once</b>. Give it to them yourself.</p><div class="row"><input id="operators-password-value" readonly spellcheck="false"><button type="button" id="operators-password-copy">Copy</button><button type="button" id="operators-password-done">Done</button></div></div>
+        <p class="hint">5 failed sign-ins lock an address for 15 min. The last administrator is never locked or removed.</p>
+        <p class="error" id="operators-error" role="alert" hidden></p>
           </div>
         </details>
         <!-- NETWORK: this server's Wi-Fi (server/wifi.mjs; done as root by the host program,
@@ -752,35 +698,117 @@
           </div>
         </details>
         <details class="chapter" id="settings-updates-top" data-chapter="s-updates">
-          <summary><span class="chapter-title">Updates</span><span class="chapter-about">The version that runs, and how it updates.</span></summary>
+          <summary><span class="chapter-title">Updates</span><span class="chapter-about">Version and updates.</span></summary>
           <div class="chapter-body">
         <div id="updates" tabindex="-1">
-          <div class="updates-head"><b id="updates-version"></b><span id="updates-state" role="status"></span><button type="button" id="updates-check">Check now</button></div>
-          <p id="updates-news" class="updates-news" hidden></p>
-          <p id="updates-relay" class="hint" hidden></p>
-          <!-- What the front serves to a browser (server/certificate.mjs). -->
-          <p id="updates-certificate" class="hint" role="status" hidden></p>
-          <div class="row" id="updates-offer" hidden><button type="button" id="updates-apply" class="primary"></button><button type="button" id="updates-retry-yes" class="primary" hidden>Try again</button><button type="button" id="updates-retry-no" hidden>Cancel</button><span class="hint" id="updates-retry-note" hidden></span></div>
-          <div id="updates-settings" class="updates-grid">
-            <label for="updates-mode">Mode</label>
-            <select id="updates-mode"><option value="auto">Automatic, in a window</option><option value="asap">As soon as out</option><option value="ask">Ask me</option><option value="off">Off</option></select>
-            <label for="updates-from" id="updates-window-label">Window</label>
-            <span id="updates-window" class="updates-window"><input type="time" id="updates-from" aria-label="From"><span aria-hidden="true">to</span><input type="time" id="updates-to" aria-label="To"></span>
-            <label for="updates-channel">Channel</label>
-            <select id="updates-channel"><option value="latest">Stable</option><option value="next">Next (test versions)</option></select>
+          <div class="set-row updates-head"><div class="status-line" id="updates-line"><b id="updates-version"></b><span id="updates-state" class="hint" role="status"></span></div><div class="set-control"><button type="button" id="updates-check">Check now</button></div></div>
+          <p id="updates-news" class="updates-news callout" hidden></p>
+          <div id="updates-relay" class="hint" hidden></div>
+          <div class="action-row" id="updates-offer" hidden><span class="hint" id="updates-retry-note" hidden></span><button type="button" id="updates-retry-no" hidden>Cancel</button><button type="button" id="updates-retry-yes" class="primary" hidden>Try again</button><button type="button" id="updates-apply" class="primary"></button></div>
+          <div id="updates-settings" class="set-rows">
+            <div class="set-row"><div class="set-what"><label for="updates-mode">Mode</label><small>When updates are installed</small></div><div class="set-control"><select id="updates-mode"><option value="auto">Automatic, in a window</option><option value="asap">As soon as out</option><option value="ask">Ask me</option><option value="off">Off</option></select></div></div>
+            <div class="set-row" id="updates-window-row"><div class="set-what"><label for="updates-from" id="updates-window-label">Window</label><small>Hours when it may restart</small></div><div class="set-control"><span id="updates-window" class="updates-window"><input type="time" id="updates-from" aria-label="From"><span aria-hidden="true">to</span><input type="time" id="updates-to" aria-label="To"></span></div></div>
+            <div class="set-row"><div class="set-what"><label for="updates-channel">Channel</label><small>Stable, or test versions</small></div><div class="set-control"><select id="updates-channel"><option value="latest">Stable</option><option value="next">Next (test versions)</option></select></div></div>
+            <!-- What the front serves to a browser (server/certificate.mjs). -->
+            <div class="set-row" id="updates-certificate-row" hidden><div class="set-what"><span>Certificate</span><small id="updates-certificate" role="status"></small></div></div>
           </div>
           <!-- WHEN: the updater's next look, and when a version that is out is installed (server/updates.mjs, schedule). -->
           <p class="hint" id="updates-when" hidden></p>
           <p class="hint" id="updates-saved" role="status"></p>
-          <div id="updates-back"></div>
+          <div id="updates-back" class="action-row"></div>
           <details id="updates-history-box" hidden><summary>History</summary><ul id="updates-history" class="updates-history"></ul></details>
           <p id="updates-error" class="error" role="alert" hidden></p>
         </div>
           </div>
         </details>
+        </section>
+        <section class="settings-group" id="settings-group-storage" data-group="storage">
+        <h3 class="chapter-group">Storage &amp; machines</h3>
+        <!-- THIS SERVER: its disk and memory, what takes them, and the reserve
+             no machine may eat into (server/capacity.mjs). Nothing here wakes a machine. -->
+        <details class="chapter" id="settings-server-top" data-chapter="s-resources">
+          <summary><span class="chapter-title">Resources</span><span class="chapter-about">Disk, memory and the reserve.</span></summary>
+          <div class="chapter-body">
+        <div id="settings-server" tabindex="-1">
+          <p id="server-unknown" class="hint" hidden>Disk and memory cannot be read just now.</p>
+          <div class="curves" id="server-curves" data-of="server" hidden>
+            <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>
+            <div class="curves-row"></div>
+          </div>
+          <div id="server-disks"></div>
+          <!-- ALL THE MACHINES TO ANOTHER DISK (server/machinesmove.mjs). -->
+          <details id="move-machines-box">
+            <summary>Disks, and moving the machines to another one</summary>
+            <p class="hint">All machines are copied to the chosen disk. <b>This server stops meanwhile</b>; the old copy is kept.</p>
+            <div id="move-machines-rows"></div>
+            <p class="hint" id="move-machines-said" role="status"></p>
+          </details>
+          <div class="server-block" id="server-memory" hidden>
+            <div class="server-head"><b>Memory</b><span id="server-memory-state" class="server-state"></span><span id="server-memory-figures" class="server-figures"></span></div>
+            <div class="server-meter" id="server-memory-meter" role="meter" aria-label="Memory taken" aria-valuemin="0" aria-valuemax="100"><span class="fill"></span><span class="zone"></span><span class="mark"></span></div>
+            <p id="server-memory-note" class="server-note"></p>
+            <dl id="server-memory-parts" class="server-parts"></dl>
+          </div>
+          <div class="server-block">
+            <div class="server-head"><b>Reserve</b><span class="server-figures">always left free, the larger of the two</span></div>
+            <div class="reserve-row">
+              <span class="reserve-what">Disk</span>
+              <label><input type="number" id="reserve-disk" min="0" max="1024" step="0.5" inputmode="decimal" aria-label="Disk reserve, in GB"> GB</label>
+              <span aria-hidden="true">or</span>
+              <label><input type="number" id="reserve-disk-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Disk reserve, in percent of the disk"> %</label>
+            </div>
+            <div class="reserve-row">
+              <span class="reserve-what">Memory</span>
+              <label><input type="number" id="reserve-memory" min="0" max="256" step="0.25" inputmode="decimal" aria-label="Memory reserve, in GB"> GB</label>
+              <span aria-hidden="true">or</span>
+              <label><input type="number" id="reserve-memory-percent" min="0" max="100" step="1" inputmode="numeric" aria-label="Memory reserve, in percent of the memory"> %</label>
+            </div>
+            <div class="reserve-row">
+              <button type="button" id="reserve-save" class="primary">Save</button>
+              <span class="hint" id="reserve-saved" role="status"></span>
+            </div>
+            <p class="server-note" id="reserve-now"></p>
+            <details class="more"><summary>How the reserve works</summary><span>No machine is created, started or enlarged into it. Below it you are alerted and the largest running machine is put to sleep. Waking is always allowed, to clean up.</span></details>
+            <p class="server-note promised" id="promised-disk" hidden></p>
+            <p class="server-note promised" id="promised-memory" hidden></p>
+            <p id="reserve-error" class="error" role="alert" hidden></p>
+          </div>
+        </div>
+        <!-- UPDATES: what runs, what is out, how this server updates itself
+             (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
+          <summary><span class="chapter-title">Backup</span><span class="chapter-about">Export, import, full backup.</span></summary>
+          <div class="chapter-body">
+        <div class="set-row"><div class="set-what"><span>Export or import a setup</span><small id="export-note">Conversations, assets, devices, links. Secrets: names only</small></div><div class="set-control"><label class="check" title="The files of the folders too, in a .tar.gz: to move a flow to another Clavarium with what it holds"><input type="checkbox" id="flows-with-files"> With the folders' files</label></div></div>
+        <div class="action-row"><span id="flows-said" class="hint" role="status"></span><span class="row access-files"><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><input type="file" id="flows-file" accept=".json,application/json,.gz,.tgz,application/gzip" hidden></span></div>
+        <div class="set-row"><div class="set-what"><span>Full backup</span><small>On the server: <code>sudo deploy/backup.sh --to /a/folder</code> (the archive, and the vault's key apart)</small></div></div>
+          </div>
+        </details>
+        <details class="chapter" id="settings-ch-advanced" data-chapter="s-advanced">
+          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Ready-made machine, git server keys.</span></summary>
+          <div class="chapter-body" id="settings-advanced">
+          <div id="shelf">
+            <div class="set-row"><div class="set-what"><b>Ready-made machine</b><small>New conversations start from it. Rebuilt monthly</small></div><div class="set-control"><button type="button" id="shelf-rebuild">Rebuild it now</button></div></div>
+            <p id="shelf-state" class="hint" role="status"></p>
+            <p id="shelf-error" class="error" role="alert" hidden></p>
+          </div>
+          <div>
+            <div class="set-what"><b>Git server keys</b><small>Recorded at first contact; a changed key is refused</small></div>
+            <details class="more"><summary>When to forget one</summary><span>Only when the hosting service says on its own site that it changed its key: the next contact then trusts the key it shows.</span></details>
+            <p id="git-hosts-empty" class="hint">None yet.</p>
+            <div id="git-hosts"></div>
+            <p id="git-hosts-error" class="error" role="alert" hidden></p>
+          </div>
+          </div>
+        </details>
+        </section>
+        <section class="settings-group" id="settings-group-diagnostics" data-group="diagnostics">
+        <h3 class="chapter-group">Diagnostics</h3>
         <!-- WHAT HAPPENED: the owner's actions and what the server did by itself, dated (server/events.mjs). -->
         <details class="chapter" id="settings-events-top" data-chapter="s-events">
-          <summary><span class="chapter-title">What happened</span><span class="chapter-about">Conversations, machines, access, updates, sign-ins: dated.</span></summary>
+          <summary><span class="chapter-title">Activity</span><span class="chapter-about">What happened, dated.</span></summary>
           <div class="chapter-body">
           <div class="row events-pick">
             <label>Show <select id="events-kind" class="pill">
@@ -797,7 +825,7 @@
         <!-- WHAT THE SERVER'S PROGRAMS SAID, to read, copy whole or keep (server/serverlogs.mjs);
              and this server started again. -->
         <details class="chapter" id="settings-logs-top" data-chapter="s-logs">
-          <summary><span class="chapter-title">Logs and restart</span><span class="chapter-about">What the server's programs said; start it again.</span></summary>
+          <summary><span class="chapter-title">Logs and restart</span><span class="chapter-about">Server logs; restart.</span></summary>
           <div class="chapter-body">
           <div class="row logs-pick">
             <label>Source <select id="logs-source" class="pill">
@@ -821,39 +849,12 @@
           <p class="hint" id="logs-said" role="status"></p>
           <div class="row" id="logs-acts" hidden><button type="button" id="logs-copy">Copy all</button><button type="button" id="logs-save">Download</button></div>
           <pre id="logs-text" class="logs-text" tabindex="0" hidden></pre>
-          <p class="hint">What looks like a password, a token or a key is masked. The newest lines are at the bottom.</p>
-          <div class="row"><button type="button" class="danger" id="server-restart">Restart this server...</button><span class="hint" id="server-restart-said" role="status"></span></div>
-          <p class="hint">Its machines go on running; the page comes back by itself in a few seconds.</p>
-          </div>
-        </details>
-        <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
-          <summary><span class="chapter-title">Storage &amp; backup</span><span class="chapter-about">Disk sizes, and how to back up.</span></summary>
-          <div class="chapter-body">
-        <div class="row"><span id="export-note" class="hint">Secrets are never exported, only their names.</span> <label class="check" title="The files of the folders too, in a .tar.gz: to move a flow to another Clavarium with what it holds"><input type="checkbox" id="flows-with-files"> and the files of its folders</label>           <span class="row access-files"><button type="button" id="flows-export" title="Everything here, to a file: conversations, assets, devices, links; never a secret's value">Export</button><button type="button" id="flows-import" title="A setup from a file: shown whole before anything is made">Import...</button><input type="file" id="flows-file" accept=".json,application/json,.gz,.tgz,application/gzip" hidden></span> <span id="flows-said" class="hint" role="status"></span></div>
-        <p class="hint">Each conversation works in a disk of a fixed size (10 GB unless the installation says otherwise). A backup is made on the machine itself, as two files -- the archive, and the key of the vault apart: <code>sudo deploy/backup.sh --to /a/folder</code>.</p>
-          </div>
-        </details>
-        <details class="chapter" id="settings-ch-advanced" data-chapter="s-advanced">
-          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Ready-made machine, git server keys.</span></summary>
-          <div class="chapter-body" id="settings-advanced">
-          <div id="shelf">
-            <b>Ready-made machine</b>
-            <p class="hint">New conversations start from a copy of a machine prepared in advance, with the tools already installed: a minute or two instead of several. It is rebuilt each month in the background; running conversations are not touched.</p>
-            <p id="shelf-state" role="status"></p>
-            <div class="row"><button type="button" id="shelf-rebuild">Rebuild it now</button></div>
-            <p id="shelf-error" class="error" role="alert" hidden></p>
-          </div>
-          <div>
-            <b>Git servers whose key is recorded</b>
-            <p class="hint">The first time a git server is reached over ssh, the key it shows is recorded; a different key later is refused, because the server may not be who it says. If a hosting service really changed its key (it says so on its own site), forget it here: the next contact will trust whatever key the server shows.</p>
-            <p id="git-hosts-empty" class="hint">No key recorded yet.</p>
-            <div id="git-hosts"></div>
-            <p id="git-hosts-error" class="error" role="alert" hidden></p>
-          </div>
+          <p class="hint">Secrets are masked. Newest at the bottom.</p>
+          <div class="set-row"><div class="set-what"><span>Restart this server</span><small id="server-restart-said" role="status">Machines keep running; the page comes back</small></div><div class="set-control"><button type="button" class="danger" id="server-restart">Restart this server...</button></div></div>
           </div>
         </details>
         <details class="chapter" id="settings-ch-about" data-chapter="s-about">
-          <summary><span class="chapter-title">About</span><span class="chapter-about">The version, who may sign in, the address.</span></summary>
+          <summary><span class="chapter-title">About</span><span class="chapter-about">Version, administrators, address.</span></summary>
           <div class="chapter-body">
         <!-- Facts only, one line each: a chapter with nothing to act on is not a chapter. -->
         <p id="settings-about" class="hint"></p>
@@ -861,6 +862,8 @@
         <p id="settings-address" class="hint"></p>
           </div>
         </details>
+        </section>
+        </div>
       </div>
       <div id="copy" class="sheet" hidden>
         <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close" aria-label="Close" title="Close">&times;</button></div>

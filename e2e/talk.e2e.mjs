@@ -13,10 +13,10 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.api('/api/alerts', { subscription: { endpoint: 'https://fcm.googleapis.com/fcm/send/a-device', keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) } }, label: 'Phone' });
     /* Off, and said plainly what turning it on means. */
     await me.page.locator('#folders').click();
-    await me.until('it says what it is', async () => /WHAT THE TOOL POSTS THERE IS READ BY THIS SERVER/.test(await me.page.locator('#talk-about').innerText()));
+    await me.until('it says what it is', async () => /What the tool posts there is read by this server/.test(await me.page.locator('#talk-about').innerText()));
     assert.equal(await me.page.locator('#talk-invite').isVisible(), false);
     await me.page.locator('#talk-on button[data-on=true]').click();
-    await me.until('it says what the tool will be asked', async () => /parley is installed in its machine, to use it and to write to you in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
+    await me.until('it says what the tool will be asked', async () => /it is told to talk to you here, in French/.test(await me.page.locator('#talk-declare').innerText().catch(() => '')));
     /* What its tool is told about where it is (guide.mjs): the exact text behind "see", made from these
        settings; the owner's lines, as text; in its machine, and pointed to from its own instruction file. */
     await me.page.locator('#guide-see').click();

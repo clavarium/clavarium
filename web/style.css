@@ -420,8 +420,9 @@ details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 
 details.chapter > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 12px; padding: 12px 14px; border: 0; background: none; border-radius: 10px; min-height: 48px; }
 details.chapter > summary::-webkit-details-marker { display: none; }
 details.chapter > summary::before { content: none; }
-details.chapter > summary::after { content: "Expand"; margin-left: auto; font-size: .75rem; font-weight: 600; color: var(--ink2); border: 1px solid var(--line); border-radius: 7px; padding: 3px 9px; }
-details.chapter[open] > summary::after { content: "Collapse"; }
+/* Folded or open: a chevron, turned when open (no word to wrap under the summary on a phone). */
+details.chapter > summary::after { content: ""; margin-left: auto; align-self: center; flex: 0 0 auto; width: 8px; height: 8px; border-right: 2px solid var(--ink2); border-bottom: 2px solid var(--ink2); transform: rotate(45deg); transition: transform .15s; margin-right: 4px; }
+details.chapter[open] > summary::after { transform: rotate(-135deg); }
 details.chapter[open] > summary { border-bottom: 1px solid var(--line); border-radius: 10px 10px 0 0; }
 .chapter-title { font-size: 1.0625rem; font-weight: 700; color: var(--ink); }
 .chapter-about { font-size: .8125rem; font-weight: 400; color: var(--ink2); flex: 1 1 14rem; }
@@ -1429,3 +1430,84 @@ button.inline.more-recent { text-decoration: none; }
 /* Network: its connections, one a line. */
 .net-links { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .net-links code { font-size: .875rem; }
+
+/* ---------- SETTINGS, AND A CONVERSATION'S SETTINGS: one look ----------
+   Every field the same; a setting is a row (its name and one short line on
+   the left, its control on the right; one under the other on a phone); a
+   state is a line with a dot; what asks for an action is a callout. */
+:is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]), select, textarea) {
+  font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-height: 40px; max-width: 100%;
+}
+:is(#settings, #panel) select { appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+:is(#settings, #panel) :is(input, select, textarea):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+@media (pointer: coarse) { :is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]), select) { min-height: 44px; } }
+#settings select.pill { font: .875rem var(--sans); font-weight: 400; }
+:is(#settings, #panel) .chapter-body { gap: 0; padding: 0; background: var(--bar); }
+:is(#settings, #panel) .chapter-body > * { margin: 0; padding: 12px 16px; }
+:is(#settings, #panel) .chapter-body > * + * { border-top: 1px solid var(--line); }
+:is(#settings, #panel) .chapter-body > [hidden] + *, :is(#settings, #panel) .chapter-body > .hint + .hint { border-top: 0; }
+:is(#settings, #panel) .chapter-body > .hint, :is(#settings, #panel) .chapter-body > .error { padding-top: 8px; padding-bottom: 8px; }
+.set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; }
+.set-row > .set-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.set-row > .set-what > :is(b, label, span:first-child) { font-size: .875rem; font-weight: 600; color: var(--ink); }
+.set-row > .set-what > small { font-size: .75rem; color: var(--ink2); }
+.set-row > .set-control { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.set-row > .set-control > :is(input, select) { width: 16rem; }
+@media (max-width: 560px) { .set-row { grid-template-columns: minmax(0, 1fr); } .set-row > .set-control { justify-content: flex-start; } .set-row > .set-control > :is(input, select) { width: 100%; } }
+.action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.action-row > [role=status] { margin-right: auto; }
+.status-line { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.status-line > * { min-width: 0; }
+.status-line::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink2); flex: 0 0 auto; }
+.status-line[data-tone=ok]::before { background: var(--ok); } .status-line[data-tone=warn]::before { background: var(--warn); } .status-line[data-tone=bad]::before { background: var(--danger); }
+.callout { border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 8%, var(--bar)); border-radius: 4px; font-size: .8125rem; }
+.callout.bad { border-left-color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, var(--bar)); }
+:is(#settings, #panel) .chapter-body > .callout { margin: 8px 16px; padding: 8px 12px; border-top: 0; }
+.sub-head { font-size: .6875rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+/* What is long is said only when asked: a small "i" opens it. */
+details.more { color: var(--ink2); font-size: .75rem; }
+details.more > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; color: var(--ink2); }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "i"; display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--ink2); border-radius: 50%; font: italic 700 .6875rem Georgia, serif; }
+details.more[open] > summary { margin-bottom: 4px; }
+/* The categories: beside them on a wide screen, headings one under the other otherwise. */
+.settings-nav { display: none; }
+.settings-groups { display: flex; flex-direction: column; gap: 12px; }
+.settings-group { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 8px; }
+#settings .chapter-group { margin: 10px 4px 0; font-size: .6875rem; letter-spacing: .06em; }
+@media (min-width: 1000px) {
+  #settings { display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto 1fr; align-content: start; column-gap: 20px; }
+  #settings > .panel-top { grid-column: 1 / -1; }
+  .settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; }
+  .settings-nav button { text-align: left; background: none; border: 0; color: var(--ink2); padding: 9px 10px; border-radius: 8px; font-size: .875rem; }
+  .settings-nav button[aria-current="true"] { background: var(--button, #222c38); color: var(--ink); box-shadow: inset 3px 0 0 var(--brass); }
+  .settings-groups { max-width: 760px; }
+}
+/* A form of several settings: each its row, one line between them. */
+:is(#settings, #panel) .chapter-body > .set-rows { display: flex; flex-direction: column; padding: 0; }
+.set-rows > * { margin: 0; padding: 12px 16px; }
+.set-rows > * + * { border-top: 1px solid var(--line); }
+.set-rows > [hidden] + * { border-top: 0; }
+/* One thing of a list (a shortcut, an administrator, a key): its name and a line; its actions on the right. */
+.list-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; }
+.list-item + .list-item { border-top: 1px solid var(--line); }
+.list-item > .set-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.list-item > .set-what > b { font-size: .875rem; overflow-wrap: anywhere; }
+.list-item > .set-what > small { font-size: .75rem; color: var(--ink2); }
+.list-item > :is(button, .set-control) { justify-self: end; }
+:is(#settings, #panel) .chapter-body > :is(#settings-shortcuts, #operators-rows, #git-hosts) { padding: 0; }
+.mono-cut { font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#settings #export-note { max-width: none; text-align: left; margin: 0; order: 0; flex: none; }
+/* Several settings in one block: one line between them too. */
+:is(#settings, #panel) .chapter-body > * > :is(.set-row, form.set-row) ~ :is(.set-row, form.set-row):not([hidden]) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+/* Nothing in it yet (a list, a line said later): no empty band. */
+:is(#settings, #panel) .chapter-body > :empty { display: none; }
+/* A sub-heading inside a chapter: small capitals, no line of its own. */
+:is(#settings, #panel) .chapter-body .panel-top { border: 0; }
+:is(#settings, #panel) .chapter-body .panel-top > b { font-size: .6875rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+/* The machine's size: each a row, its name on the left, its choice on the right. */
+#panel #machine-size { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 16rem); gap: 10px 16px; align-items: center; max-width: none; }
+#panel #machine-size > label { font-size: .875rem; font-weight: 600; color: var(--ink); }
+#panel #machine-size > :is(p, .row) { grid-column: 1 / -1; }
+#panel #machine-size > .row { justify-content: flex-end; }
+@media (max-width: 560px) { #panel #machine-size { grid-template-columns: minmax(0, 1fr); } }

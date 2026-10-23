@@ -14,10 +14,10 @@ test('This server: its disk and memory in Settings; a small gauge only when it i
     const gauge = me.page.locator('#server-gauge');
     assert.equal(await gauge.isVisible(), false, 'plenty of room: no gauge');
     await me.page.locator('#nav-settings').click();
-    /* Settings: every chapter folded at first, in two groups. */
+    /* Settings: every chapter folded at first, in five groups. */
     await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
     assert.deepEqual(await me.page.evaluate(() => [...document.querySelectorAll('#settings details.chapter')].filter((d) => d.open).length), 0);
-    assert.deepEqual(await me.page.locator('#settings .chapter-group').allInnerTexts().then((x) => x.map((t) => t.toLowerCase())), ['this device', 'this server']);
+    assert.deepEqual(await me.page.locator('#settings .chapter-group').allInnerTexts().then((x) => x.map((t) => t.toLowerCase())), ['this device', 'chat', 'server & access', 'storage & machines', 'diagnostics']);
     await me.chapter('s-resources');
     const disk = me.page.locator('#server-disks .server-block').first();
     await me.until('the disk is said', async () => (await disk.locator('.server-figures').innerText().catch(() => '')) === '60 GB free of 100 GB');
@@ -155,7 +155,8 @@ test('the curves: memory, CPU and disk over time, of this server (with its reser
     assert.equal(await curves.locator('.curve[data-measure="memory"] .curve-reserve').count(), 1, 'the reserve, dotted');
     const plot = curves.locator('.curve[data-measure="memory"] svg');
     await me.until('the value under the pointer', async () => {
-        await plot.hover({ position: { x: 5, y: 30 } }); await plot.hover({ position: { x: 250, y: 30 } });
+        const box = await plot.boundingBox();
+        await plot.hover({ position: { x: 5, y: 30 } }); await plot.hover({ position: { x: Math.max(6, box.width - 8), y: 30 } });
         return /: \d+ %$/.test(await curves.locator('.curve[data-measure="memory"] .curve-tip').innerText().catch(() => ''));
     });
     if (process.env.SHOTS) await curves.screenshot({ path: join(process.env.SHOTS, 'curves-server.png') });

@@ -74,7 +74,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     assert.equal(await me.page.locator('#resume-on button[data-on=true]').getAttribute('aria-pressed'), 'true');
     /* Ask before acting: off by default, and the page says plainly what that means; turned on, from its next start. */
     assert.equal(await me.page.locator('#ask-first button[data-on=false]').getAttribute('aria-pressed'), 'true');
-    assert.match(await me.page.locator('#rights-hint').innerText(), /the tool acts without asking you, with every right inside its own machine/);
+    assert.match(await me.page.locator('#rights-hint').innerText(), /the tool acts without asking you, inside its own machine/);
     await me.page.locator('#ask-first button[data-on=true]').click();
     await me.until('it asks before acting', async () => (await me.page.locator('#ask-first button[data-on=true]').getAttribute('aria-pressed')) === 'true');
     assert.equal((await me.api('/api/conversations')).body.find((x) => x.name === 'silent').askFirst, true);

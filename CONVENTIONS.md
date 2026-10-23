@@ -59,3 +59,29 @@ configuration, not code.
 
 A slice ends with one run against a real machine and a real tool, and a
 screenshot. What was not tried is written as not tried.
+
+## 8. One look for every setting
+
+Every screen where something is set (Settings, a conversation's settings,
+and the sheets to come) is made of the same few pieces, styled once in
+`web/style.css` (the block "SETTINGS, AND A CONVERSATION'S SETTINGS: one look"):
+
+- **chapter**: a `details.chapter` card; its title and a summary of 2 to 5
+  words; a chevron, never a word, says it is open.
+- **set-row**: one setting. On the left its name (1 to 3 words) and at most
+  one short line (`small`, 5 to 10 words) saying what it is; on the right its
+  control. One under the other on a phone. Several in a form: `.set-rows`.
+- **status-line**: a state, with a dot (`data-tone`: ok, warn, bad):
+  "On · whisper-large · chosen here".
+- **callout**: what asks for an action (a key missing, a rebuild refused).
+- **list-item**: one thing of a list (a shortcut, an administrator, a key):
+  its name and a line on the left, its actions on the right.
+- **action-row**: the buttons of a form, at its end, the main one last; a
+  status message on its left.
+- **more**: a `details.more` with a small "i": what is long and rarely needed.
+- Fields and selects are styled by the place they are in, never one by one.
+
+The words follow the same rule: a setting is described, never narrated --
+not what it will do, nor what was done. State as "Name: value". Keep only
+the safety facts (never shown, cannot be undone), in a few words. If the
+title or its summary says it, the body does not say it again.

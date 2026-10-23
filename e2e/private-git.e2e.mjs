@@ -109,7 +109,7 @@ test('a git server\'s recorded key is forgotten from Settings, deep down, after 
     await me.until('the hosts are listed', async () => (await row.count()) === 1);
     assert.match(await row.innerText(), /ssh-ed25519 SHA256:[A-Za-z0-9+/]+/);
     await row.locator('button').click();
-    assert.match(await row.locator('button').innerText(), /the next contact will trust whatever key this server shows/);
+    assert.equal(await row.locator('button').innerText(), 'Yes, forget it');
     assert.match(readFileSync(knownHosts, 'utf8'), /^example\.com /m, 'not yet: one click only asks');
     await row.locator('button').click();
     await me.until('it is forgotten', async () => (await row.count()) === 0);

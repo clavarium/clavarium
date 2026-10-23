@@ -2039,8 +2039,8 @@
         $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
         /* Asleep: chosen now, applied as it wakes -- it is not woken for it. */
         $('machine-size-hint').textContent = here?.asleep === true
-            ? 'It is asleep: a new size is kept and applied when it wakes. Its machine is then stopped cleanly, set and started again, and the tool takes up its session. A disk can only grow.'
-            : 'Changing them stops the machine cleanly, sets them and starts it again: its work folder, folders and branches stay. A disk can only grow.';
+            ? 'Asleep: kept and applied when it wakes. A disk only grows.'
+            : 'Restarts the machine; its work stays. A disk only grows.';
         $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
         $('machine-later').hidden = !here?.sizeAtWake;
         $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
@@ -2445,9 +2445,9 @@
         $('talk-invite').hidden = !talk.on;
         $('talk-declare').hidden = !talk.on;
         if (talk.on) $('talk-declare').textContent = talk.tools
-            ? `Then "Ask the tool to use it": it is told, in its terminal, that parley is installed in its machine, to use it and to write to you in ${languageName(deviceLang())}. From then on, this conversation opens on its chat; its terminal is one click away.`
-            : 'The tools folder (/tools) is not in place on this server yet: the tool cannot be asked to install parley.';
-        if (!talk.on && talk.possible === false) $('talk-about').textContent = 'This conversation works on the disk of its machine: talking through the app needs its work folder kept here.';
+            ? `Then "Ask the tool to use it": it is told to talk to you here, in ${languageName(deviceLang())}.`
+            : 'The tools folder (/tools) is not in place yet: the tool cannot be asked.';
+        if (!talk.on && talk.possible === false) $('talk-about').textContent = 'Needs its work folder kept here (it works on its machine\'s disk)';
     }
     for (const b of $('talk-on').children) {
         b.addEventListener('click', async () => {
@@ -2616,24 +2616,24 @@
         const state = $('alerts-state');
         if (!pushable()) {
             $('alerts-on').hidden = true;
-            state.textContent = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'On an iPhone or an iPad, alerts come once the page is installed as an app (Share, then "Add to Home Screen").' : 'This browser cannot be alerted.';
+            state.textContent = /iPad|iPhone|iPod/.test(navigator.userAgent) ? 'Install the app first (Share, then "Add to Home Screen")' : 'Not possible in this browser';
             return;
         }
         const registration = await navigator.serviceWorker.ready;
         const mine = await registration.pushManager.getSubscription();
         const about = await fetch(`${API}/alerts`).then((r) => r.json()).catch(() => ({ devices: [] }));
         $('alerts-on').hidden = Boolean(mine); $('alerts-off').hidden = $('alerts-test').hidden = !mine;
-        state.textContent = said ?? (mine ? `This device is told when a tool stops and waits for you. ${about.devices.length} device(s) in all.` : `When a tool stops and waits for you, this device can be told.${about.devices.length > 0 ? ` ${about.devices.length} other device(s) already are.` : ''}`);
+        state.textContent = said ?? (mine ? `On · ${about.devices.length} device${about.devices.length === 1 ? '' : 's'} in all` : `Off${about.devices.length > 0 ? ` · ${about.devices.length} other device${about.devices.length === 1 ? '' : 's'} on` : ''}`);
     }
     $('alerts-on').addEventListener('click', async () => {
         try {
-            if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Alerts are refused for this site in the settings of this browser.'); return; }
+            if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Refused in this browser\'s settings'); return; }
             const { key } = await fetch(`${API}/alerts`).then((r) => r.json());
             const registration = await navigator.serviceWorker.ready;
             const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: pushKey(key) });
             await post(`${API}/alerts`, { subscription: subscription.toJSON(), label: /Android/.test(navigator.userAgent) ? 'Android' : /iPad|iPhone/.test(navigator.userAgent) ? 'iPhone or iPad' : 'Computer' });
             await paintAlerts();
-        } catch (error) { await paintAlerts(`This device could not be set up for alerts: ${error.message}`); }
+        } catch (error) { await paintAlerts(`Could not be set up: ${error.message}`); }
     });
     $('alerts-off').addEventListener('click', async () => {
         const registration = await navigator.serviceWorker.ready;
@@ -3746,13 +3746,15 @@
             await paintOperators();
         };
         for (const o of got.operators) {
-            const row = el('div', 'folder'); row.dataset.email = o.email;
-            const name = el('b', '', o.email);
-            const state = el('small', 'hint', o.locked ? ` locked until ${new Date(o.locked).toLocaleTimeString([], { timeStyle: 'short' })}` : o.enabled ? (o.email === got.me ? ' you' : '') : ' disabled');
-            name.append(state);
+            const row = el('div', 'list-item folder'); row.dataset.email = o.email;
+            const name = el('div', 'set-what'); name.append(el('b', '', o.email));
+            const word = o.locked ? `Locked until ${new Date(o.locked).toLocaleTimeString([], { timeStyle: 'short' })}` : o.enabled ? (o.email === got.me ? 'You' : '') : 'Disabled';
+            if (word) name.append(el('small', '', word));
             const buttons = [['password', 'New password']];
             if (o.email !== got.me) buttons.push(o.enabled ? ['disable', 'Disable'] : ['enable', 'Enable'], ['remove', 'Remove']);
-            row.append(name, ...buttons.map(([verb, label]) => { const b = el('button', verb === 'remove' ? 'danger' : '', label); b.type = 'button'; b.dataset.act = verb; b.addEventListener('click', () => void act([o.email, verb])); return b; }));
+            const acts = el('div', 'set-control');
+            acts.append(...buttons.map(([verb, label]) => { const b = el('button', verb === 'remove' ? 'danger' : '', label); b.type = 'button'; b.dataset.act = verb; b.addEventListener('click', () => void act([o.email, verb])); return b; }));
+            row.append(name, acts);
             rows.append(row);
         }
     }
@@ -3768,6 +3770,17 @@
         catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
         await paintOperators();
     });
+    /* THE CATEGORIES OF SETTINGS, beside them on a wide screen: one click brings its group into sight; the one in sight is marked. */
+    const settingsNav = [...document.querySelectorAll('#settings-nav button[data-group]')];
+    const markGroup = (key) => { for (const b of settingsNav) b.setAttribute('aria-current', String(b.dataset.group === key)); };
+    for (const b of settingsNav) b.addEventListener('click', () => { document.getElementById(`settings-group-${b.dataset.group}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); markGroup(b.dataset.group); });
+    $('settings').addEventListener('scroll', () => {
+        const top = $('settings').getBoundingClientRect().top + 60;
+        const groups = [...document.querySelectorAll('#settings .settings-group')];
+        const seen = groups.filter((g) => g.getBoundingClientRect().top <= top).pop() ?? groups[0];
+        if (seen) markGroup(seen.dataset.group);
+    }, { passive: true });
+    markGroup('device');
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
         void paintAlerts().catch(() => {});
@@ -3776,9 +3789,10 @@
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();
         for (const shortcut of saved) {
-            const row = document.createElement('div'); row.className = 'folder';
-            const label = document.createElement('b'); label.textContent = shortcut.label;
-            const what = document.createElement('small'); what.className = 'hint'; what.textContent = ` ${shortcut.enter ? 'sent with Enter' : 'typed, left to be completed'}`; label.append(what);
+            const row = document.createElement('div'); row.className = 'list-item';
+            const label = document.createElement('div'); label.className = 'set-what';
+            const name = document.createElement('b'); name.textContent = shortcut.label;
+            const what = document.createElement('small'); what.textContent = shortcut.enter ? 'Sends Enter' : 'Typed, not sent'; label.append(name, what);
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
             remove.addEventListener('click', async () => { await post(`${API}/shortcuts/${shortcut.id}/remove`).catch(() => {}); await openSettings(); void paintShortcuts(); });
             row.append(label, remove); list.append(row);
@@ -3786,11 +3800,11 @@
         void paintDictation();
         void paintOperators();
         /* With no shortcut, one line: how to add one (this is the only place to remove them). */
-        $('settings-shortcuts-hint').textContent = saved.length ? 'The ready-made answers under the terminal. They are added there ("+ Shortcut"); they are removed here.' : 'No shortcut yet: add one under the terminal, with "+ Shortcut".';
+        $('settings-shortcuts-hint').textContent = saved.length ? 'Added under the terminal, with "+ Shortcut".' : 'No shortcut yet · add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length
-            ? `Who may sign in: ${platform.operators.join(', ')} (Settings, Administrators).`
-            : 'Development mode: anyone on this machine is the operator.';
-        $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}.`;
+            ? `Administrators: ${platform.operators.join(', ')}`
+            : 'Development mode: anyone on this machine is the operator';
+        $('settings-address').textContent = `Address: ${platform.address ?? 'not declared'}`;
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         void paintInstance();
         if ($('settings-wifi-top').open) void paintWifi();
@@ -3816,12 +3830,10 @@
     };
     async function paintDictation() {
         const [about, secrets] = await Promise.all([getJson('/dictation', null), getJson('/secrets', [])]);
-        if (!about) { $('settings-dictation').textContent = 'Dictation cannot be set from here.'; $('dictation-form').hidden = true; return; }
-        $('settings-dictation').textContent = about.source === 'settings'
-            ? `On: speech is turned into text by "${about.model}", chosen here.${about.env ? ' The engine set on the server (CLAVARIUM_TRANSCRIPTION_URL) is the fallback when this is turned off.' : ''}`
-            : about.source === 'env'
-                ? `On: speech is turned into text by "${about.env.model}", set on the server (CLAVARIUM_TRANSCRIPTION_URL). An engine chosen here takes its place.`
-                : 'Off: no speech-to-text engine, so Dictate is not offered. Choose one below.';
+        if (!about) { $('settings-dictation').textContent = 'Not set from here'; $('dictation-form').hidden = true; return; }
+        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here`
+            : about.source === 'env' ? `On · "${about.env.model}" · set on the server` : 'Off · choose a provider';
+        $('settings-dictation').dataset.tone = about.source ? 'ok' : '';
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
         dictationProviders = about.providers;
         const provider = $('dictation-provider');
@@ -3906,14 +3918,15 @@
     async function paintCertificate() {
         const c = await fetch(`${API}/certificate`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         const line = $('updates-certificate');
-        if (!c || c.local) { line.hidden = true; return; }
+        if (!c || c.local) { $('updates-certificate-row').hidden = true; return; }
         const day = (iso) => new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
         const bad = c.none || !c.trusted || c.daysLeft < 10;
-        line.className = bad ? 'error' : 'hint';
-        line.textContent = c.none ? `Certificate of ${c.domain}: none is served (${c.why}).`
-            : !c.trusted ? `Certificate of ${c.domain}: browsers do not trust it (${c.why})${c.local ? ', it is the machine\'s own until Let\'s Encrypt gives one: sudo clavarium doctor --certificate' : ''}.`
-            : `Certificate of ${c.domain}: by ${c.issuer}, valid until ${day(c.validTo)} (${c.daysLeft} days); renewed by itself.${c.daysLeft < 10 ? ' It should have been renewed already: sudo clavarium doctor --certificate.' : ''}`;
-        line.hidden = false;
+        line.className = bad ? 'error' : '';
+        line.textContent = c.none ? `None served (${c.why})`
+            : !c.trusted ? `Not trusted by browsers (${c.why})${c.local ? ' · sudo clavarium doctor --certificate' : ''}`
+            : `${c.issuer} · until ${day(c.validTo)} · renews by itself${c.daysLeft < 10 ? ' · late: sudo clavarium doctor --certificate' : ''}`;
+        line.title = c.domain;
+        $('updates-certificate-row').hidden = false;
     }
     /* WHEN IT HAPPENS, in words: the next look of the updater, and when a version that is out gets installed. */
     function paintUpdatesWhen(u) {
@@ -3921,14 +3934,14 @@
         box.hidden = !u.installed || !w; if (box.hidden) return;
         const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         const inWords = (ms) => { const m = Math.max(1, Math.round((ms - Date.now()) / 60_000)); return m < 60 ? `in ${m} min` : m < 36 * 60 ? `in ${Math.round(m / 60)} h` : `in ${Math.round(m / 1440)} days`; };
-        const look = w.nextLookAt ? `the next look ${inWords(w.nextLookAt)} (around ${clock(w.nextLookAt)})` : 'the next look in a few minutes';
-        const out = u.available ? `${u.available} is out. ` : '';
+        const look = w.nextLookAt ? `next check ${inWords(w.nextLookAt)} (${clock(w.nextLookAt)})` : 'next check in a few minutes';
+        const out = u.available ? `${u.available} is out · ` : '';
         const lines = {
-            auto: w.inWindow ? `${out}Inside the update window now: ${u.available ? 'it is installed at' : 'a version that is out is installed at'} ${look}. The window closes at ${clock(w.windowClosesAt)}.`
-                : `${out}${u.available ? 'It is installed' : 'Updates are installed'} in the window only: it opens ${inWords(w.windowOpensAt)} (at ${clock(w.windowOpensAt)}, until ${clock(w.windowClosesAt)}). Looked at every 15 minutes inside it.`,
-            asap: `${out}Looked at every 15 minutes, ${look}: ${u.available ? 'it is installed then' : 'a version that is out is installed then'}.`,
-            ask: `${out}The registry is asked about every 6 hours${w.askNextAt ? `, next ${inWords(w.askNextAt)}` : ''}; nothing is installed until you choose Update.`,
-            off: 'Never by itself: use Check now, then Update.',
+            auto: w.inWindow ? `${out}In the window now · ${look} · closes at ${clock(w.windowClosesAt)}`
+                : `${out}Installed in the window only · it opens ${inWords(w.windowOpensAt)} (${clock(w.windowOpensAt)} to ${clock(w.windowClosesAt)})`,
+            asap: `${out}Installed as soon as out · ${look}`,
+            ask: `${out}Checked every 6 h${w.askNextAt ? ` · next ${inWords(w.askNextAt)}` : ''} · installed when you choose`,
+            off: 'Off · Check now, then Update',
         };
         box.textContent = lines[w.mode] ?? '';
     }
@@ -3941,15 +3954,23 @@
         $('updates-version').textContent = `Clavarium ${u.version ?? ''}`;
         /* Its relay, kept at the version of each release by the updater -- or why not, and what to do once. */
         const relay = u.relay;
+        /* [what is said, what to do once (behind a small "i"), whether it asks for something]. */
         const RELAY_SAID = {
-            brought: (r) => `The relay was brought to ${r.version} with this update.`,
-            current: (r) => `The relay is up to date (${r.version}).`,
-            refused: () => 'The relay does not take this server\'s maintenance key, so it is not kept up to date by itself. Once: on this server, sudo clavarium key gives its two keys; on the relay, run relay.sh again with --key and --keeper-key.',
-            'no-key': () => 'This server has no maintenance key for its relay: the relay is not kept up to date by itself (sudo clavarium online --relay HOST sets one up).',
-            failed: (r) => `The relay could not be brought up to date: ${r.why ?? 'unknown'}. Tried again at the next turn of the updater.`,
+            brought: (r) => [`Relay updated to ${r.version}`],
+            current: (r) => [`Relay up to date (${r.version})`],
+            refused: () => ['Relay not kept up to date: it refuses this server\'s key', 'Once: sudo clavarium key on this server, then relay.sh again on the relay, with --key and --keeper-key.', true],
+            'no-key': () => ['Relay not kept up to date: no maintenance key', 'sudo clavarium online --relay HOST sets one up.', true],
+            failed: (r) => [`Relay update failed: ${r.why ?? 'unknown'} · tried again later`, '', true],
         };
-        $('updates-relay').hidden = !relay || !RELAY_SAID[relay.state];
-        if (relay && RELAY_SAID[relay.state]) { $('updates-relay').textContent = RELAY_SAID[relay.state](relay); $('updates-relay').dataset.state = relay.state; }
+        const relayBox = $('updates-relay');
+        relayBox.hidden = !relay || !RELAY_SAID[relay.state];
+        if (relay && RELAY_SAID[relay.state]) {
+            const [said, todo, asks] = RELAY_SAID[relay.state](relay);
+            relayBox.replaceChildren(el('span', '', said));
+            if (todo) { const more = el('details', 'more'); more.append(el('summary', '', 'How'), el('span', '', todo)); relayBox.append(' ', more); }
+            relayBox.className = asks ? 'callout' : 'hint';
+            relayBox.dataset.state = relay.state;
+        }
         paintUpdatesWhen(u);
         void paintCertificate();
         for (const id of ['updates-check', 'updates-settings', 'updates-back']) $(id).hidden = !u.installed;
@@ -3960,6 +3981,7 @@
         }
         const running = u.running;
         updatesBusy = Boolean(running);
+        $('updates-line').dataset.tone = running ? 'warn' : u.checkError ? 'bad' : u.available ? 'warn' : 'ok';
         $('updates-state').textContent = running ? `${running.action === 'back' ? 'Going back to' : 'Updating to'} ${running.version}: ${running.step.toLowerCase()}...`
             : u.checkError ? 'Could not check just now.'
             : u.available ? `${u.available} is out.`
@@ -3988,7 +4010,7 @@
             [$('updates-from').value, $('updates-to').value] = u.window.split('-');
         }
         const auto = u.mode === 'auto';
-        $('updates-window').hidden = !auto; $('updates-window-label').hidden = !auto;
+        $('updates-window').hidden = !auto; $('updates-window-label').hidden = !auto; $('updates-window-row').hidden = !auto;
         const back = $('updates-back'); back.replaceChildren();
         for (const r of running ? [] : u.back) {
             const b = document.createElement('button'); b.type = 'button'; b.textContent = `Go back to ${r.version}`;
@@ -4399,7 +4421,7 @@
         const q = new URLSearchParams({ kind: $('events-kind').value, q: $('events-q').value.trim(), limit: '100', ...(before ? { before } : {}) });
         const got = await fetch(`${API}/events?${q}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         if (ask !== eventsAsk) return;
-        if (!got) { $('events-said').textContent = 'What happened cannot be read just now.'; return; }
+        if (!got) { $('events-said').textContent = 'Activity cannot be read just now.'; return; }
         eventsShown = more ? [...eventsShown, ...got] : got;
         const list = $('events-list'); if (!more) list.replaceChildren();
         for (const e of got) {
@@ -4632,12 +4654,12 @@
         if (!r) return;
         const lines = [];
         if (r.current) {
-            lines.push(`Made ${day(r.current.builtAt)}${r.current.sizeMb ? `, ${(r.current.sizeMb / 1024).toFixed(1)} GB on disk` : ''}. Holds: ${r.current.tools.join(', ') || 'no tool'}.`);
-            lines.push(r.current.fresh ? `Next rebuild around ${day(r.current.refreshAt)}.` : `Older than ${r.maxAgeDays} days: new conversations are built the long way until it is rebuilt.`);
-        } else lines.push('None yet: new conversations are built the long way (several minutes).');
-        if (r.building) lines.push(`Being rebuilt since ${new Date(r.building.since).toLocaleTimeString()} (${r.building.step}). New conversations use ${r.current ? 'the current one' : 'the long way'} meanwhile.`);
-        if (r.error && !r.building) lines.push(`Last rebuild failed: ${r.error}`);
-        $('shelf-state').textContent = lines.join(' ');
+            lines.push(`Made ${day(r.current.builtAt)}${r.current.sizeMb ? ` · ${(r.current.sizeMb / 1024).toFixed(1)} GB` : ''} · holds ${r.current.tools.join(', ') || 'no tool'}`);
+            lines.push(r.current.fresh ? `next rebuild around ${day(r.current.refreshAt)}` : `older than ${r.maxAgeDays} days: new conversations take longer`);
+        } else lines.push('None yet: new conversations take several minutes');
+        if (r.building) lines.push(`rebuilding since ${new Date(r.building.since).toLocaleTimeString()} (${r.building.step})`);
+        if (r.error && !r.building) lines.push(`last rebuild failed: ${r.error}`);
+        $('shelf-state').textContent = lines.join(' · ');
         $('shelf-error').hidden = !r.refused || Boolean(r.building);
         $('shelf-error').textContent = r.refused?.text ?? '';
         $('shelf-rebuild').disabled = Boolean(r.building);
@@ -4658,17 +4680,19 @@
         const rows = $('git-hosts'); rows.replaceChildren();
         $('git-hosts-empty').hidden = hosts.length > 0;
         for (const h of hosts) {
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.host = h.host;
-            const label = document.createElement('b'); label.textContent = h.host;
-            const key = document.createElement('code'); key.textContent = `${h.type} ${h.fingerprint}`;
+            const row = document.createElement('div'); row.className = 'list-item folder'; row.dataset.host = h.host;
+            const label = document.createElement('div'); label.className = 'set-what';
+            const name = document.createElement('b'); name.textContent = h.host;
+            const key = document.createElement('small'); key.className = 'mono-cut'; key.textContent = `${h.type} ${h.fingerprint}`; key.title = key.textContent;
+            label.append(name, key);
             const forget = document.createElement('button'); forget.type = 'button'; forget.textContent = 'Forget';
             forget.addEventListener('click', async () => {
-                if (forget.dataset.sure !== 'yes') { forget.dataset.sure = 'yes'; forget.textContent = 'Yes, forget it: the next contact will trust whatever key this server shows'; return; }
+                if (forget.dataset.sure !== 'yes') { forget.dataset.sure = 'yes'; forget.textContent = 'Yes, forget it'; return; }
                 forget.disabled = true; $('git-hosts-error').hidden = true;
                 try { await post(`${API}/git-hosts/forget`, { host: h.host }); } catch (error) { $('git-hosts-error').textContent = error.message; $('git-hosts-error').hidden = false; }
                 await paintHosts();
             });
-            row.append(label, key, forget); rows.append(row);
+            row.append(label, forget); rows.append(row);
         }
     }
     $('settings-close').addEventListener('click', () => leavePlace());
@@ -6825,7 +6849,7 @@
     const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     let installEvent = null;
     let installOffered = false;
-    const offerInstall = () => { installOffered = true; $('install').hidden = false; };
+    const offerInstall = () => { installOffered = true; $('install').hidden = false; $('install-row').hidden = false; };
     /* Chrome reads the manifest again when its address changes, and may then
        offer the install anew: that offer, if it comes soon, is the one used. */
     let freshOffer = null;
@@ -6833,7 +6857,7 @@
         event.preventDefault(); installEvent = event; offerInstall();
         if (freshOffer) { const take = freshOffer; freshOffer = null; take(event); }
     });
-    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-name-form').hidden = true; });
+    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-row').hidden = true; $('install-name-form').hidden = true; });
     if (apple && !asApp) offerInstall();
     /* FIRST A NAME FOR THIS DEVICE, then the browser's own question. */
     $('install').addEventListener('click', async () => {
@@ -6868,7 +6892,7 @@
         installEvent = null;
         asked.prompt();
         const choice = await asked.userChoice.catch(() => ({ outcome: 'dismissed' }));
-        if (choice.outcome === 'accepted') { installOffered = false; $('install').hidden = true; }
+        if (choice.outcome === 'accepted') { installOffered = false; $('install').hidden = true; $('install-row').hidden = true; }
         else installEvent = asked;
     });
 

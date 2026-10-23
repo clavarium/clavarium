@@ -29,7 +29,7 @@ test('a conversation built from the ready-made machine goes through its three st
     /* Room enough: rebuilt in the background, then shown with its date and size. */
     process.env.FAKE_SHELF_ROOM = 'free 40000';
     await me.page.locator('#shelf-rebuild').click();
-    await me.until('it is made', async () => /Made .*4\.1 GB on disk\. Holds: Shell\./.test(await me.page.locator('#shelf-state').innerText()), 30_000);
+    await me.until('it is made', async () => /Made .* · 4\.1 GB · holds Shell/.test(await me.page.locator('#shelf-state').innerText()), 30_000);
     assert.ok(await me.page.locator('#shelf-error').isHidden());
     const shelf = (await me.api('/api/shelf')).body;
     assert.ok(shelf.current.fresh);
