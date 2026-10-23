@@ -368,7 +368,7 @@ export async function run(o, log = console.log) {
             if ((await pictures.count()) === 0) throw new Skip('no picture shown in this chat to pinch: ask its agent to show one (parley show) and run again');
             await pictures.last().scrollIntoViewIfNeeded();
             await pictures.last().tap();
-            const zoom = p.locator('#simple-thread .parley-zoom');
+            const zoom = p.locator('#simple-thread .parley-zoom:not(.parley-draw)');
             await until('the viewer', () => zoom.isVisible());
             await until('the picture, loaded', () => zoom.locator('.parley-zoom-stage img').evaluate((i) => i.complete && i.naturalWidth > 0), 30_000);
             await wait(300);
