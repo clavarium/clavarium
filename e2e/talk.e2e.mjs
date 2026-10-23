@@ -43,9 +43,10 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     assert.doesNotMatch(invited, /npm|install -g|\.tgz/, 'the tool is never asked to install anything');
     assert.match(invited, /under \/work, never in \/tmp/, 'where to check out its branches');
     /* Installed by the server, before: in the machine's /usr/local (here, under the stand-in machine's root, whose PATH the shell is given). */
-    assert.match(readFileSync(join(process.env.FAKE_VM_DIR, 'vms', 'clv-helper', 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
+    assert.match(readFileSync(join(process.env.FAKE_VM_DIR, 'vms', 'clv-helper', 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     await me.type('clear; export PATH="$FAKE_VM_ROOT"/usr/local/bin:$PATH; grep -c sha256 "$FAKE_VM_ROOT"/tools/index.json');
-    await me.printed('1', 30_000);
+    /* One checksum per tool of the index: Parley and Docket. */
+    await me.printed('2', 30_000);
     /* It says where it is, and asks, with choices; it does not wait. */
     await me.type('clear; parley status working "on the cover" && parley ask "Blue or red cover?" blue red >/dev/null && echo posted');
     await me.printed('posted');

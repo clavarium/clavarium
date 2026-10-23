@@ -421,9 +421,10 @@ if (area === 'vm') {
             appendFileSync(join(home(vm), 'npm-installs'), `${archive}\n`);
             process.exit(0);
         }
-        if (program === 'parley') {
-            const bin = inVm(vm, '/usr/local/bin/parley');
-            if (!existsSync(bin)) { console.error('parley: command not found'); process.exit(127); }
+        /* The machine's tools (Parley, Docket): the ones installed in it. */
+        if (program === 'parley' || program === 'docket') {
+            const bin = inVm(vm, `/usr/local/bin/${program}`);
+            if (!existsSync(bin)) { console.error(`${program}: command not found`); process.exit(127); }
             const r = spawnSync(bin, rest, { encoding: 'utf8', cwd: root(vm) });
             process.stdout.write(r.stdout ?? ''); process.stderr.write(r.stderr ?? '');
             process.exit(r.status ?? 1);
