@@ -2769,7 +2769,7 @@
     const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round']];
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-    const kindIcon = (kind) => { const name = ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
     /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
     function paintAsList(holder, items, { chosen, choose, add, empty }) {
@@ -2811,7 +2811,7 @@
     const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
 
     /* A repository, on the right: its branch, what would go, the diagram. */
-    async function gitDetail(holder, name, { place = false } = {}) {
+    async function gitDetail(holder, name, { place = false, others = false } = {}) {
         const facts = el('div', 'as-facts'); facts.append(el('p', 'hint busy', 'Looking at its branches...'));
         const acts = el('div', 'as-acts');
         const review = el('button', '', 'Open the review'); review.type = 'button'; review.dataset.act = 'review';
@@ -2838,7 +2838,7 @@
             facts.append(line, cards);
             const last = lastFor(keep?.last, out);
             if (last) facts.append(lastChecksCard(name, { ...last, outdated: moved(last, out) }, back));
-            if (out.state === 'ahead' && out.target) { send.hidden = false; send.textContent = `Send to ${out.target}...`; send.addEventListener('click', () => { void openGit(name, { back, target: out.target, branch: out.branch ?? '' }); }); }
+            if (out.state === 'ahead' && out.target) { send.hidden = false; send.textContent = `Send to ${out.target}...`; send.addEventListener('click', () => { if (others) pickRoomAsset('send:all'); else void openGit(name, { back, target: out.target, branch: out.branch ?? '' }); }); }
         }
         diagram.replaceChildren(graph ? window.clavariumGraph.draw(graph, { pick: (c) => { void openGit(name, { commit: c.id, back }); } }) : el('p', 'hint', 'The branches could not be read.'));
     }
@@ -2878,6 +2878,219 @@
         box.append(head, line, acts);
         return box;
     }
+    /* TO SEND: every repository of a conversation on one screen. What its
+       agent committed, ticked when there is something to send; the checks run
+       by themselves; one review of them all; one button sends them one after
+       the other, each by the same route as its own review (the same commit,
+       the same target, the same guards). One refused does not hold the
+       others back: each says what became of it. */
+    const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
+    async function sendDetail(holder, names) {
+        const list = el('div', 'ts-rows'); list.append(el('p', 'hint busy', 'Looking at every repository...'));
+        const bar = el('div', 'as-acts ts-bar');
+        const together = el('button', '', 'Review together'); together.type = 'button'; together.dataset.act = 'send-review';
+        const go = el('button', 'primary', 'Send'); go.type = 'button'; go.dataset.act = 'send-all';
+        const why = el('span', 'hint ts-why');
+        bar.append(together, go, why);
+        const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
+        const review = el('div', 'ts-review'); review.hidden = true;
+        holder.append(el('p', 'hint', 'What its agent committed, in every repository of this conversation. The checks run by themselves.'), list, bar, said, review);
+        const rows = names.map((name) => ({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null }));
+        let sending = false;
+        let sure = '';
+        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead');
+        /* One row looked at again: its branch and target as chosen; its checks run when it has something to send. */
+        async function look(r) {
+            const query = new URLSearchParams();
+            if (r.branch) query.set('branch', r.branch);
+            if (r.target) query.set('target', r.target);
+            const [out, keep] = await Promise.all([fetch(`${API}/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`).then(async (x) => { const j = await x.json().catch(() => ({})); return x.ok ? j : { state: 'error', message: j.error || 'It could not be read.' }; }).catch(() => ({ state: 'error', message: 'It could not be read.' })), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
+            r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
+            if (out.state !== 'ahead') r.picked = false;
+            paint();
+            if (out.state === 'ahead') void checkRow(r, out.head, out.target);
+        }
+        async function checkRow(r, head, target) {
+            r.check = { status: 'running' }; paint();
+            let result;
+            try { result = await post(`${API}/git/${r.name}/check`, { head, target }); }
+            catch (error) { result = { status: 'unavailable', output: error.message }; }
+            if (r.out?.head !== head || r.out?.target !== target) return;
+            r.check = result; paint();
+        }
+        const stopped = (r) => Boolean(r.keep?.settings?.requireForSend) && r.check?.status !== 'passed';
+        function paintButtons() {
+            const p = picked();
+            const targets = [...new Set(p.map((r) => r.target))];
+            const where = targets.length === 1 ? ` to ${targets[0]}` : '';
+            together.disabled = p.length === 0;
+            together.textContent = p.length > 1 ? `Review the ${p.length} together` : 'Review';
+            const running = p.filter((r) => r.check?.status === 'running');
+            const held = p.filter((r) => r.check?.status !== 'running' && stopped(r));
+            const failed = p.filter((r) => r.check?.status === 'failed');
+            const word = p.length > 1 ? `the ${p.length}` : 'it';
+            go.disabled = sending || p.length === 0 || running.length > 0 || held.length > 0;
+            why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Waits for the checks.' : held.length ? `Its owner asked for passing checks: ${held.map((r) => r.name).join(', ')}.` : failed.length ? `Checks failed in ${failed.map((r) => r.name).join(', ')}.` : '';
+            if (sending) { go.textContent = 'Sending...'; return; }
+            const all = p.some((r) => r.out?.guards?.confirm);
+            go.textContent = sure === 'yes' ? (all ? `Not all of it could be shown here: send ${word}${where} anyway` : `Yes, send ${word}${where}: this cannot be undone`) : sure === 'all' ? `Yes, send ${word}${where}: this cannot be undone` : `Send ${word}${where}${failed.length ? ' anyway' : ''}`;
+        }
+        function paint() {
+            list.replaceChildren();
+            for (const r of rows) {
+                const row = el('div', 'ts-row'); row.dataset.repo = r.name;
+                const out = r.out;
+                const ahead = out?.state === 'ahead';
+                row.classList.toggle('off', !ahead);
+                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending; tick.setAttribute('aria-label', `Send ${r.name}`);
+                tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paintButtons(); if (!review.hidden) paintReview(); });
+                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
+                const way = el('div', 'ts-way');
+                if (out?.branch) {
+                    const branches = out.agentBranches ?? [];
+                    if (branches.length > 1) {
+                        const pick = el('select'); pick.setAttribute('aria-label', `The branch of ${r.name}`); pick.disabled = sending;
+                        for (const b of branches) { const o = el('option', '', b.name); o.value = b.name; pick.append(o); }
+                        pick.value = out.branch;
+                        pick.addEventListener('change', () => { r.branch = pick.value; r.target = ''; sure = ''; void look(r); });
+                        way.append(pick);
+                    } else way.append(el('code', 'ts-branch', out.branch));
+                    if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
+                        way.append(el('span', 'ts-arrow', '→'));
+                        const to = el('select'); to.setAttribute('aria-label', `Where ${r.name} goes`); to.disabled = sending;
+                        const names2 = [...(out.branches ?? [])]; if (!names2.includes(out.target)) names2.unshift(out.target);
+                        for (const b of names2) { const o = el('option', '', b === out.target && !out.targetExists ? `${b} (new branch)` : b); o.value = b; to.append(o); }
+                        to.value = out.target;
+                        to.addEventListener('change', () => { r.target = to.value; sure = ''; void look(r); });
+                        way.append(to);
+                    }
+                }
+                const size = el('div', 'ts-size');
+                if (!out) size.append(el('span', 'hint busy', 'Looking...'));
+                else if (ahead) {
+                    const files = diffFiles(out.diff);
+                    size.append(el('span', '', out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`), el('br'),
+                        el('span', 'plus', `+${files.reduce((n, f) => n + f.added, 0)}`), ' ', el('span', 'minus', `−${files.reduce((n, f) => n + f.removed, 0)}`));
+                } else size.append(el('span', 'hint', out.state === 'up-to-date' ? 'nothing' : '-'));
+                const state = el('div', 'ts-state');
+                if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '\u2717 Not sent'));
+                else if (!out) state.append('');
+                else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
+                else if (!r.check || r.check.status === 'running') state.append(el('span', 'warn', 'Checks running...'));
+                else {
+                    const [word, tone] = CHECK_WORDS[r.check.status] ?? [String(r.check.status), ''];
+                    state.append(el('b', tone || 'quiet', r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word));
+                }
+                row.append(tick, who, way, size, state);
+                if (r.sent && !r.sent.ok) row.append(el('p', 'ts-note bad', r.sent.text));
+                list.append(row);
+            }
+            if (rows.length === 0) list.append(el('p', 'hint', 'No repository is given to it.'));
+            paintButtons();
+        }
+        /* ONE REVIEW of them all: the files of each under its name, then each one's changes, commits and checks. */
+        let tab = 'changes';
+        function paintReview() {
+            review.replaceChildren();
+            const p = picked();
+            if (p.length === 0) { review.hidden = true; return; }
+            const all = p.map((r) => ({ r, files: diffFiles(r.out.diff) }));
+            const nFiles = all.reduce((n, x) => n + x.files.length, 0);
+            const added = all.reduce((n, x) => n + x.files.reduce((m, f) => m + f.added, 0), 0);
+            const removed = all.reduce((n, x) => n + x.files.reduce((m, f) => m + f.removed, 0), 0);
+            const commits = p.reduce((n, r) => n + (r.out.count ?? r.out.commits.length), 0);
+            const head = el('div', 'ts-review-head');
+            head.append(el('h3', '', `${p.length} repositor${p.length === 1 ? 'y' : 'ies'}`), el('p', 'as-line', `${commits} commit${commits === 1 ? '' : 's'} · ${nFiles} file${nFiles === 1 ? '' : 's'} · `));
+            head.lastChild.append(el('span', 'plus', `+${added}`), ' ', el('span', 'minus', `−${removed}`));
+            const tabs = el('div', 'rv-tabs ts-tabs'); tabs.setAttribute('role', 'tablist');
+            const passed = p.filter((r) => r.check?.status === 'passed').length;
+            for (const [key, word] of [['changes', `Changes ${nFiles}`], ['commits', `Commits ${commits}`], ['checks', `Checks ${passed}/${p.length}`]]) {
+                const b = el('button', '', word); b.type = 'button'; b.dataset.tab = key; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(key === tab));
+                b.addEventListener('click', () => { tab = key; paintReview(); });
+                tabs.append(b);
+            }
+            const body = el('div', 'ts-review-body');
+            review.append(head, tabs, body);
+            if (tab === 'changes') {
+                const tree = el('div', 'rv-tree ts-tree'); const diffs = el('div', 'rv-diff ts-diffs');
+                for (const { r, files } of all) {
+                    tree.append(el('small', 'ts-tree-repo', r.name));
+                    const box = el('div', 'ts-diff'); box.dataset.repo = r.name;
+                    box.append(el('h4', '', `${r.name}: ${r.out.branch} → ${r.out.target}`));
+                    const inner = el('div'); box.append(inner);
+                    files.forEach((f, i) => {
+                        const b = el('button'); b.type = 'button'; b.dataset.how = f.how;
+                        b.append(el('span', 'rv-path', f.path), el('small', 'plus', `+${f.added}`), el('small', 'minus', `−${f.removed}`));
+                        b.addEventListener('click', () => { inner.querySelectorAll('.d2h-file-wrapper')[i]?.scrollIntoView({ block: 'start' }); });
+                        tree.append(b);
+                    });
+                    const Ui = window.Diff2HtmlUI;
+                    if (!r.out.diff) inner.append(el('p', 'hint', 'No change to show.'));
+                    else if (!Ui) inner.append(el('pre', '', r.out.diff));
+                    else {
+                        const ui = new Ui(inner, r.out.diff, { outputFormat: 'line-by-line', drawFileList: false, matching: 'lines', diffStyle: 'word', fileContentToggle: false, stickyFileHeaders: false, highlight: true, colorScheme: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark' });
+                        ui.draw();
+                        try { ui.highlightCode(); } catch { /* the plain diff stays */ }
+                    }
+                    if (r.out.cut) inner.append(el('p', 'hint', '... (the rest is not shown here: too long)'));
+                    diffs.append(box);
+                }
+                body.append(tree, diffs);
+            } else if (tab === 'commits') {
+                for (const r of p) {
+                    body.append(el('h4', '', `${r.name}: ${r.out.branch} → ${r.out.target}`));
+                    for (const c of r.out.commits) { const line = el('div', 'commit'); line.append(el('code', '', c.id.slice(0, 8)), el('b', '', c.subject), el('small', '', `${c.author}, ${new Date(c.date).toLocaleString()}`)); body.append(line); }
+                    if ((r.out.count ?? 0) > r.out.commits.length) body.append(el('p', 'hint', `Only the last ${r.out.commits.length} of ${r.out.count} are listed.`));
+                }
+            } else {
+                for (const r of p) {
+                    const [word] = CHECK_WORDS[r.check?.status] ?? [r.check?.status === 'running' ? 'Running...' : 'Not run'];
+                    body.append(el('h4', '', `${r.name}: ${word}`));
+                    if (r.check?.output) body.append(el('pre', 'ts-output', r.check.output));
+                }
+            }
+        }
+        let reviewStep = null;
+        together.addEventListener('click', () => {
+            if (!review.hidden) { review.scrollIntoView({ block: 'start' }); return; }
+            review.hidden = false; tab = 'changes'; paintReview();
+            reviewStep = nav.over('send-review', () => { review.hidden = true; reviewStep = null; });
+            review.scrollIntoView({ block: 'start' });
+        });
+        go.addEventListener('click', async () => {
+            const p = picked();
+            if (p.length === 0 || go.disabled) return;
+            /* Two clicks: what leaves cannot be called back. Three when a review could not show it all. */
+            const all = p.some((r) => r.out?.guards?.confirm);
+            if (!sure) { sure = 'yes'; paintButtons(); return; }
+            if (all && sure === 'yes') { sure = 'all'; paintButtons(); return; }
+            sending = true; sure = ''; said.hidden = true;
+            for (const r of rows) r.sent = null;
+            paint();
+            for (const r of p) {
+                try {
+                    const sent = await post(`${API}/git/${r.name}/push`, { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) });
+                    r.sent = { ok: true, text: sent.already ? `✓ Already in ${sent.branch}` : sent.commits > 0 ? `✓ Sent to ${sent.branch}` : `✓ Made ${sent.branch}` };
+                } catch (error) { r.sent = { ok: false, text: /^Not sent/.test(error.message) ? error.message : `Not sent: ${error.message}` }; }
+                paint();
+            }
+            sending = false; paint();
+            const ok = p.filter((r) => r.sent?.ok).length;
+            said.textContent = ok === p.length ? `Sent: ${ok === 1 ? 'it went' : `all ${ok} went`}.` : `${ok} of ${p.length} sent; the others say why.`;
+            said.className = `ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.hidden = false;
+            if (reviewStep) nav.drop(reviewStep);
+            /* What is left to send, read again; what became of each stays said. */
+            const kept = new Map(rows.map((r) => [r.name, r.sent]));
+            await Promise.all(rows.map((r) => look(r)));
+            for (const r of rows) r.sent = kept.get(r.name);
+            paint();
+        });
+        paint();
+        await Promise.all(rows.map(async (r) => { await look(r); }));
+        /* Ticked at first: each one with something to send. */
+        for (const r of rows) r.picked = r.out?.state === 'ahead';
+        paint();
+    }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;
     function embedFiles(holder, name) {
@@ -2914,11 +3127,22 @@
                 sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
         for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, sub: 'name only · used by its agent' });
-        const chosen = items.find((i) => i.key === roomPick) ?? null;
+        /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
+        const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
+        const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
+        const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
         paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
         const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
+        if (outbox) {
+            const row = el('button', 'as-row ts-entry'); row.type = 'button'; row.dataset.asset = outbox.key;
+            if (chosen === outbox) row.setAttribute('aria-current', 'true');
+            const words = el('span', 'as-words'); words.append(el('b', '', outbox.name), el('small', 'as-sub', outbox.sub));
+            row.append(kindIcon('send'), words);
+            row.addEventListener('click', () => pickRoomAsset(outbox.key));
+            $('cassets-rows').prepend(row);
+        }
         $('cassets-rows').prepend(top);
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
@@ -2932,7 +3156,8 @@
         if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
             if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
             embedFiles(detail, chosen.name);
-        } else if (chosen.kind === 'git') await gitDetail(detail, chosen.name);
+        } else if (chosen.kind === 'send') await sendDetail(detail, gits);
+        else if (chosen.kind === 'git') await gitDetail(detail, chosen.name, { others: gits.length > 1 });
         else {
             detail.append(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'), chapter('Used by'));
             const list = el('div', 'as-chips');

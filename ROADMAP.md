@@ -15,8 +15,15 @@ listed here.
   run in the same blind, throw-away sandbox that reads the agent's commits,
   from the fetched commits only, so their result no longer depends on the
   agent's machine.
+- **"To send", one outbox for what only the owner may do.** It starts with
+  git: every repository of a conversation on one screen, the checks run by
+  themselves, one review, one button. Next, whatever else leaves for the
+  outside on the owner's say alone (a file put on S3, a mail, a deployment)
+  takes the same path: the agent proposes, the owner reviews and sends it,
+  each kind with its own review and its own guards.
 - **"Ask to send".** The agent can ask for a branch to be sent; the server
-  applies the same rules as an automatic send, or asks the owner on the phone.
+  applies the same rules as an automatic send, or puts it in "To send" and
+  tells the owner on the phone.
 - **GitLab webhook.** GitLab calls the server on each push, so the reference
   repository is refreshed at once instead of every few minutes.
 

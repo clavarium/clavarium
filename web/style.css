@@ -1383,3 +1383,39 @@ button.inline.more-recent { text-decoration: none; }
 .wifi-lock { width: 12px; height: 12px; flex: none; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; }
 .wifi-join { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin: 8px 0; }
 .wifi-join p { margin: 0; }
+
+/* TO SEND: every repository of a conversation, one row each, then one review of those ticked. */
+.ts-entry .as-ic { color: var(--brass); }
+.ts-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.ts-row { display: grid; grid-template-columns: 24px minmax(0, 1.1fr) minmax(0, 1.7fr) minmax(0, .8fr) minmax(0, 1.1fr); gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.ts-row.off { opacity: .6; }
+.ts-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--brass); }
+.ts-who { display: flex; flex-direction: column; min-width: 0; }
+.ts-who b { overflow-wrap: anywhere; }
+.ts-way { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.ts-way select { max-width: 100%; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+.ts-bar button:disabled { opacity: .5; cursor: default; }
+.ts-state .quiet { color: var(--ink2); font-weight: 400; }
+.ts-branch { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--brass); overflow-wrap: anywhere; }
+.ts-size .plus, .ts-review-head .plus { color: var(--ok); } .ts-size .minus, .ts-review-head .minus { color: var(--danger); }
+.ts-state .ok { color: var(--ok); } .ts-state .bad { color: var(--danger); } .ts-state .warn { color: var(--warn); }
+.ts-bar { align-items: center; margin-top: 14px; }
+.ts-why { font-size: .875rem; }
+.ts-said { margin: 10px 0 0; font-weight: 700; }
+.ts-said.ok { color: var(--ok); } .ts-said.bad { color: var(--danger); }
+.ts-review { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.ts-review-head h3 { margin: 0; }
+.ts-tree-repo { padding: 8px 8px 2px; color: var(--ink2); font-weight: 700; letter-spacing: .06em; text-transform: uppercase; font-size: .75rem; overflow-wrap: anywhere; }
+.ts-diff h4, .ts-review h4 { margin: 12px 0 8px; }
+.ts-diff:first-child h4 { margin-top: 0; }
+.ts-tree { position: static; max-height: none; margin-bottom: 12px; }
+.ts-diffs { min-width: 0; }
+.ts-diffs .d2h-code-linenumber { position: static; }
+.ts-note { grid-column: 2 / -1; margin: 0; font-size: .875rem; }
+.ts-note.bad { color: var(--danger); }
+.ts-output { white-space: pre-wrap; max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: .8125rem; }
+@media (max-width: 700px) {
+  .ts-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
+  .ts-way { grid-column: 2 / -1; }
+  .ts-size { grid-column: 2; } .ts-state { grid-column: 3; text-align: right; }
+}

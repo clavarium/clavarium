@@ -60,7 +60,10 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* Its Assets: by kind, the repository first; nothing opened until one is chosen. */
     await page.locator('#view-assets').click();
     const rows = page.locator('#cassets-rows .as-row');
-    await me.until('its assets are listed', async () => (await rows.count()) === 3);
+    await me.until('its assets are listed', async () => (await rows.count()) === 4);
+    /* To send first, once it has a repository: every one of them at once. */
+    assert.match(await rows.first().innerText(), /To send\s*every repository, reviewed and sent at once/);
+    assert.equal(await rows.first().getAttribute('data-asset'), 'send:all');
     assert.match(await page.locator('#cassets-rows .as-row[data-asset="folder:work"]').innerText(), /where its tool works/);
     assert.deepEqual(await page.locator('#cassets-rows .as-kind h3').allTextContents(), ['Git repositories', 'Folders']);
     assert.match(await page.locator('#cassets-rows .as-row[data-asset="git:site"]').innerText(), /site\s*write/);
@@ -158,7 +161,7 @@ test('a conversation\'s bar, its Assets, the branch diagram and the review page'
     /* A PHONE: the list, then one asset with "All assets"; the review unified, file by file. */
     const phone = await b.person({ phone: true, at: '/?c=coder' });
     await phone.page.locator('#view-assets').click();
-    await phone.until('the list first', async () => (await phone.page.locator('#cassets-rows .as-row').count()) === 4 && !(await phone.page.locator('#cassets-detail').isVisible()));
+    await phone.until('the list first', async () => (await phone.page.locator('#cassets-rows .as-row').count()) === 5 && !(await phone.page.locator('#cassets-detail').isVisible()));
     await shot(phone.page, 'phone-conversation-assets-list');
     await phone.page.locator('#cassets-rows .as-row[data-asset="git:site"]').tap();
     await phone.until('then the repository', async () => (await phone.page.locator('#cassets-detail .gg-row').count()) >= 3, 20_000);

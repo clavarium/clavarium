@@ -176,6 +176,14 @@ send"): the server fetches the commits into a copy of its own, shows them, and
 pushes exactly what was shown with a key it keeps sealed (`server/gitpush.mjs`).
 The tool never holds that key.
 
+"To send", first in a conversation's Assets, shows every repository of that
+conversation on one screen: each one its agent committed to is ticked, with
+its branch and where it goes, and its checks run by themselves. One review
+shows the changes of all those ticked; one button sends them one after the
+other, each exactly as its own review would (the same commit, the same
+target, the same guards). One refused, for example because its remote moved,
+does not hold the others back, and each says what became of it.
+
 A repository may also be cloned from a private remote (`server/gitaccess.mjs`),
 over SSH (`user@host:path`, `ssh://...`) or HTTPS. The safest way in comes
 first: an SSH key made by the server, whose private half is sealed in the vault
