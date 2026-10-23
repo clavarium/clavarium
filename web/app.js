@@ -2677,7 +2677,7 @@
             select.dataset.of = `${current}:${wanted}`;
         }
         if (document.activeElement?.id !== 'wakeups-limit') $('wakeups-limit').value = String(mine.perHour);
-        $('wakeups-sent').textContent = `${mine.sentThisHour} this hour.`;
+        $('wakeups-sent').textContent = `0: no cap · ${mine.sentThisHour} this hour`;
         void paintDocket();
     }
     /* Its docket (server/dockets.mjs): the reminders its tool set, which its owner may take back; the newest events. */

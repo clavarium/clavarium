@@ -313,8 +313,7 @@
                 <button type="submit" class="primary">Add</button>
               </form>
             </details>
-            <label for="wakeups-limit">Wake-ups an hour at most (0: no cap)</label>
-            <div class="row"><input id="wakeups-limit" type="number" min="0" step="1" inputmode="numeric"><button type="button" id="wakeups-limit-save">Set</button><span class="hint" id="wakeups-sent"></span></div>
+            <div class="set-row"><div class="set-what"><label for="wakeups-limit">At most, an hour</label><small id="wakeups-sent">0: no cap</small></div><div class="set-control"><input id="wakeups-limit" type="number" min="0" step="1" inputmode="numeric" style="width:6rem"><button type="button" id="wakeups-limit-save">Set</button></div></div>
             </div>
           </div>
         </details>
@@ -664,7 +663,7 @@
         <!-- NETWORK: this server's Wi-Fi (server/wifi.mjs; done as root by the host program,
              through NetworkManager). A switch goes back by itself when the new network does not work. -->
         <details class="chapter" id="settings-wifi-top" data-chapter="s-network">
-          <summary><span class="chapter-title">Network</span><span class="chapter-about">Its cable and its Wi-Fi.</span></summary>
+          <summary><span class="chapter-title">Network</span><span class="chapter-about">Cable and Wi-Fi.</span></summary>
           <div class="chapter-body">
           <div id="wifi" tabindex="-1">
             <p id="wifi-now" role="status"></p>

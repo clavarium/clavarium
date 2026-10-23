@@ -1511,3 +1511,11 @@ details.more[open] > summary { margin-bottom: 4px; }
 #panel #machine-size > :is(p, .row) { grid-column: 1 / -1; }
 #panel #machine-size > .row { justify-content: flex-end; }
 @media (max-width: 560px) { #panel #machine-size { grid-template-columns: minmax(0, 1fr); } }
+/* A chapter whose body is one block (Updates, Network): its pieces are the rows, not the block. */
+:is(#settings, #panel) .chapter-body > :is(#updates, #wifi) { padding: 0; }
+:is(#updates, #wifi) > * { margin: 0; padding: 12px 16px; }
+:is(#updates, #wifi) > * + * { border-top: 1px solid var(--line); }
+:is(#updates, #wifi) > :is([hidden], :empty) { display: none; }
+:is(#updates, #wifi) > .callout { margin: 8px 16px; padding: 8px 12px; border-top: 0; }
+:is(#updates, #wifi) > .set-rows { padding: 0; }
+:is(#updates, #wifi) > .hint { padding-top: 8px; padding-bottom: 8px; }
