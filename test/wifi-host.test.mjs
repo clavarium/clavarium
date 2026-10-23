@@ -299,3 +299,101 @@ test('say-only: what would run, without the password; --test is not for say-only
     assert.equal(spawnSync('/bin/bash', [PROGRAM, '--say-only', '--test', '/tmp/x', 'wifi', 'status'], { encoding: 'utf8' }).status, 78);
     assert.equal(spawnSync('/bin/bash', [PROGRAM, '--test', 'relative', 'wifi', 'status'], { encoding: 'utf8' }).status, 78);
 });
+
+/* THE HANDOVER: a server whose network netplan renders with systemd-networkd, and no
+   NetworkManager. Stand-ins for apt-get (which installs the nmcli stand-in), netplan (its
+   files in the bench's netplan folder; "apply" with the file added makes NetworkManager drive
+   the devices, unless told it never comes back), ip (one default route, through wlan0) and
+   systemctl (recorded). */
+const WIFI_YAML = 'network:\n  version: 2\n  wifis:\n    wlan0:\n      dhcp4: true\n      access-points:\n        "Home":\n          password: "home-secret"\n';
+function handBench({ comesBack = true, aptFails = false, renderer = '' } = {}) {
+    const b = bench({ nmcli: false });
+    const bin = join(b.dir, 'bin');
+    for (const t of ['cp', 'find', 'ln', 'tail']) { const at = ['/usr/bin', '/bin'].map((d) => join(d, t)).find(existsSync); if (at) symlinkSync(at, join(bin, t)); }
+    const plan = join(b.dir, 'netplan'); mkdirSync(plan);
+    writeFileSync(join(plan, '50-cloud-init.yaml'), 'network:\n  version: 2\n  ethernets:\n    eth0:\n      dhcp4: true\n');
+    writeFileSync(join(plan, '60-installer-wifi.yaml'), renderer ? `${WIFI_YAML}  renderer: ${renderer}\n` : WIFI_YAML, { mode: 0o600 });
+    const script = (name, body) => { writeFileSync(join(bin, name), `#!/bin/bash\nprintf '%s\\n' "$*" >> "$FAKE_NM/${name}.log"\n${body}\n`); chmodSync(join(bin, name), 0o755); };
+    script('apt-get', aptFails ? 'exit 100' : `ln -s ${FAKE_NMCLI} "$FAKE_NM/bin/nmcli"`);
+    script('netplan', `case "$1" in
+  get) if [ -e "$FAKE_NM/netplan/90-clavarium-network.yaml" ]; then echo NetworkManager; else r="$(sed -n 's/^  renderer: //p' "$FAKE_NM"/netplan/*.yaml | tail -1)"; echo "\${r:-null}"; fi ;;
+  generate) : ;;
+  apply) if [ -e "$FAKE_NM/netplan/90-clavarium-network.yaml" ] && ${comesBack ? 'true' : 'false'}; then node -e 'const f=process.env.FAKE_NM+"/state.json";const s=JSON.parse(require("fs").readFileSync(f,"utf8"));s.drives=true;require("fs").writeFileSync(f,JSON.stringify(s))'; fi ;;
+esac`);
+    script('ip', 'echo "default via 127.0.0.1 dev wlan0 proto dhcp src 127.0.0.1 metric 600"');
+    script('systemctl', '[ "$1" != "is-enabled" ] || echo enabled');
+    const log = (name) => (existsSync(join(b.dir, `${name}.log`)) ? readFileSync(join(b.dir, `${name}.log`), 'utf8') : '');
+    const handed = async () => {
+        for (let i = 0; i < 150; i++) {
+            const out = b.host(['wifi', 'status']).out;
+            if (/^hand (?!installing|switching)/m.test(out)) return out;
+            await new Promise((ok) => setTimeout(ok, 100));
+        }
+        throw new Error('the handover never ended');
+    };
+    return { ...b, plan, log, handed };
+}
+
+test('handover: offered where netplan renders with systemd-networkd; NetworkManager installed, made the renderer by one file of its own; its wait for systemd-networkd left; the copy that held the password not kept', { skip: ROOT }, async () => {
+    const b = handBench();
+    assert.equal(b.host(['wifi', 'status']).out, 'handover possible\nnmcli no\nwifiwhy no-nmcli\n');
+    const r = b.host(['wifi', 'handover']);
+    assert.equal(r.code, 0, r.err);
+    assert.equal(r.out, 'handing\n');
+    assert.match(readFileSync(join(b.dir, 'systemd-run.log'), 'utf8'), /--unit=clavarium-network-handover .*wifi hand$/m);
+    const out = await b.handed();
+    assert.match(out, /^hand handed \d+$/m);
+    assert.doesNotMatch(out, /handover possible/, 'not offered twice');
+    assert.match(out, /^nmcli yes$/m);
+    assert.match(b.log('apt-get'), /^install -y -q network-manager$/m);
+    const added = join(b.plan, '90-clavarium-network.yaml');
+    assert.equal(readFileSync(added, 'utf8'), '# Written by Clavarium (Settings, Network): NetworkManager drives the network.\nnetwork:\n  version: 2\n  renderer: NetworkManager\n');
+    assert.equal(statSync(added).mode & 0o777, 0o600);
+    assert.equal(readFileSync(join(b.plan, '60-installer-wifi.yaml'), 'utf8'), WIFI_YAML, 'the installer\'s file untouched: its Wi-Fi comes with it');
+    assert.match(b.log('systemctl'), /^disable systemd-networkd-wait-online\.service$/m);
+    assert.equal(existsSync(join(b.dir, 'network', 'netplan-before')), false, 'the copy with the password, gone');
+    assert.equal(b.host(['wifi', 'handover']).code, 78, 'nothing left to hand over');
+    b.done();
+});
+
+test('handover: the network not back within the wait -> netplan\'s files put back as they were, applied, said; offered again', { skip: ROOT }, async () => {
+    const b = handBench({ comesBack: false });
+    assert.equal(b.host(['wifi', 'handover']).code, 0);
+    const out = await b.handed();
+    assert.match(out, /^hand went-back \d+$/m);
+    assert.match(out, /^handwhy no-network$/m);
+    assert.match(out, /^handover possible$/m);
+    assert.deepEqual(readdirSync(b.plan).sort(), ['50-cloud-init.yaml', '60-installer-wifi.yaml']);
+    assert.equal(readFileSync(join(b.plan, '60-installer-wifi.yaml'), 'utf8'), WIFI_YAML);
+    assert.equal(b.log('netplan').match(/^apply$/gm).length, 2, 'applied, then applied back');
+    assert.doesNotMatch(b.log('systemctl'), /disable/);
+    b.done();
+});
+
+test('handover: NetworkManager not installed -> nothing changed, said; refused where netplan does not render with systemd-networkd', { skip: ROOT }, async () => {
+    const b = handBench({ aptFails: true });
+    assert.equal(b.host(['wifi', 'handover']).code, 0);
+    const out = await b.handed();
+    assert.match(out, /^hand failed \d+$/m);
+    assert.match(out, /^handwhy install$/m);
+    assert.equal(b.log('netplan').includes('apply'), false, 'nothing applied');
+    assert.deepEqual(readdirSync(b.plan).sort(), ['50-cloud-init.yaml', '60-installer-wifi.yaml']);
+    b.done();
+    const nm = handBench({ renderer: 'NetworkManager' });
+    assert.doesNotMatch(nm.host(['wifi', 'status']).out, /handover possible/);
+    assert.match(nm.host(['wifi', 'handover']).err, /^REFUSED: this server's network is not one netplan renders with systemd-networkd/m);
+    nm.done();
+    const none = handBench();
+    rmSync(none.plan, { recursive: true });
+    assert.doesNotMatch(none.host(['wifi', 'status']).out, /handover possible/);
+    none.done();
+});
+
+test('handover, say-only: what it does, step by step', () => {
+    const r = spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', 'wifi', 'handover'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /systemd-run --unit=clavarium-network-handover --collect clavarium-host wifi hand/);
+    assert.match(r.stdout, /apt-get install network-manager/);
+    assert.match(r.stdout, /write \/etc\/netplan\/90-clavarium-network\.yaml \(root, 0600: renderer NetworkManager\); netplan apply/);
+    assert.match(r.stdout, /systemctl disable systemd-networkd-wait-online/);
+});

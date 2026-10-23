@@ -4208,6 +4208,35 @@
         const arch = document.createElementNS(ns, 'path'); arch.setAttribute('d', 'M8 11V7a4 4 0 0 1 8 0v4');
         svg.append(body, arch); return svg;
     };
+    /* THE NETWORK HANDED OVER TO NETWORKMANAGER (the host program, "wifi handover"): offered where
+       netplan drives it with systemd-networkd; its progress and outcome, as the host recorded them. */
+    const HAND_WHY = { install: 'could not install', invalid: 'refused', 'no-network': 'no network', stopped: 'stopped', copy: 'could not copy', write: 'could not write' };
+    const HAND_DAY_MS = 24 * 3600_000;
+    function paintHand(s) {
+        const h = s.hand; const busy = ['installing', 'switching'].includes(h?.state);
+        const words = !h ? '' : {
+            installing: 'Setting it up (a minute or two)...',
+            switching: 'Switching (a few seconds)...',
+            handed: 'Done: Clavarium manages the network.',
+            'went-back': `It did not work (${HAND_WHY[h.why] ?? h.why ?? 'no reason given'}): all is back as before.`,
+            failed: `It did not work (${HAND_WHY[h.why] ?? h.why ?? 'no reason given'}): nothing changed.`,
+            interrupted: 'Interrupted (the server restarted?).',
+        }[h.state] ?? '';
+        const old = h?.state === 'handed' && Date.now() - Date.parse(h.at) > HAND_DAY_MS;
+        $('wifi-hand-said').textContent = words; $('wifi-hand-said').hidden = !words || old;
+        $('wifi-hand-said').className = h && ['went-back', 'failed', 'interrupted'].includes(h.state) ? 'error' : 'hint';
+        $('wifi-hand').hidden = !s.handover || busy;
+        if (busy && $('settings-wifi-top').open && !$('settings').hidden) wifiTimer = setTimeout(() => { void paintWifi(); }, 3000);
+    }
+    const handReset = () => { const go = $('wifi-hand-go'); go.dataset.sure = ''; go.textContent = 'Manage the network'; go.disabled = false; $('wifi-hand-cancel').hidden = true; };
+    $('wifi-hand-go').addEventListener('click', () => {
+        const go = $('wifi-hand-go');
+        /* Two clicks: the network may be cut for a few seconds. */
+        if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = 'Confirm (undone by itself if it fails)'; $('wifi-hand-cancel').hidden = false; return; }
+        go.disabled = true;
+        void post(`${API}/wifi/handover`, {}).then(() => { handReset(); void paintWifi(); }).catch((error) => { handReset(); $('wifi-hand-said').textContent = error.message; $('wifi-hand-said').className = 'error'; $('wifi-hand-said').hidden = false; });
+    });
+    $('wifi-hand-cancel').addEventListener('click', handReset);
     async function paintWifi() {
         clearTimeout(wifiTimer);
         const s = await fetch(`${API}/wifi`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -4218,8 +4247,9 @@
             return;
         }
         wifiNow = s;
+        paintHand(s);
         $('wifi-controls').hidden = !s.available;
-        if (!s.available) { $('wifi-now').textContent = WIFI_OUTSIDE[s.why] ?? WIFI_OUTSIDE.unreadable; $('wifi-last').hidden = true; return; }
+        if (!s.available) { $('wifi-now').textContent = s.handover ? 'Clavarium does not manage this server\'s network yet.' : WIFI_OUTSIDE[s.why] ?? WIFI_OUTSIDE.unreadable; $('wifi-last').hidden = true; return; }
         $('wifi-now').replaceChildren();
         if (s.using) $('wifi-now').append(el('span', '', 'On '), el('b', '', s.using.ssid), el('span', '', ` (Wi-Fi, ${s.device}) `), signalBars(s.using.signal));
         else $('wifi-now').textContent = `Not on a Wi-Fi network (${s.device}).`;

@@ -77,6 +77,7 @@
  *   GET  /api/wifi: this server's Wi-Fi   GET /api/wifi/scan: the networks it sees (looked for again)
  *   POST /api/wifi/join {ssid, password}: the switch started, back by itself if it does not work
  *   POST /api/wifi/forget {ssid}: a kept network deleted (never the one in use)
+ *   POST /api/wifi/handover: the network handed over to NetworkManager (back as it was if it does not work)
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
@@ -400,6 +401,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* The password goes on to the host program and nowhere else: not in an answer, not in What happened. */
         if (pathname === '/api/wifi/join' && wifi) return send(202, await wifi.join(body.ssid, body.password ?? '')), true;
         if (pathname === '/api/wifi/forget' && wifi) return send(200, await wifi.forget(body.ssid)), true;
+        if (pathname === '/api/wifi/handover' && wifi) return send(202, await wifi.handover()), true;
         if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {

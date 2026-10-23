@@ -133,6 +133,18 @@ if (area === 'wifi') {
     const fail = (message, code) => { console.error(`REFUSED: ${message}`); process.exit(code); };
     const seen = [['Home', 70, 'wpa'], ['Café "Guest"', 55, 'wpa'], ['Corp', 80, 'enterprise'], ['Open Lounge', 40, 'open']];
     const now = Math.floor(Date.now() / 1000);
+    /* Its network set up outside (netplan, systemd-networkd): handed over a second after it was asked. */
+    if (w.hand?.state === 'switching' && Date.now() - w.hand.ms > 1000) { w.hand = { state: 'handed', at: now }; w.outside = false; keep(); }
+    if (verb === 'handover') {
+        if (!w.outside) fail("this server's network is not one netplan renders with systemd-networkd: nothing to hand over", 78);
+        w.hand = { state: 'switching', at: now, ms: Date.now() }; keep();
+        console.log('handing'); process.exit(0);
+    }
+    if (verb === 'status' && (w.outside || w.hand)) {
+        const h = w.hand ? [`hand ${w.hand.state} ${w.hand.at}`] : [];
+        if (w.outside) { console.log([...h, ...(w.hand?.state === 'switching' ? [] : ['handover possible']), 'nmcli no', 'wifiwhy no-nmcli'].join('\n')); process.exit(0); }
+        console.log(h.join('\n'));
+    }
     if (w.last?.state === 'joining' && Date.now() - w.last.ms > 1000) {
         w.last.state = w.last.ok ? 'joined' : 'went-back'; w.last.at = now;
         if (w.last.ok) { w.using = w.last.ssid; w.saved.push(w.last.ssid); } else w.last.why = 'password';

@@ -59,6 +59,8 @@ if (is('device', 'wifi', 'list')) {
     for (const ap of state.aps) said(row({ 'IN-USE': ap.ssid === live && ap.ssid !== '' ? '*' : ' ', SSID: ap.ssid, SIGNAL: ap.signal, SECURITY: ap.security }, fields));
     process.exit(0);
 }
+/* A device's state, for a handover (-g GENERAL.STATE): connected once netplan made NetworkManager drive it. */
+if (is('device', 'show') && get?.includes('GENERAL.STATE')) { said(state.drives ? '100 (connected)' : '20 (unavailable)'); process.exit(0); }
 if (is('device', 'show')) { said(state.gateway?.[ssidOf(state.active)] ?? ''); process.exit(0); }
 if (is('networking', 'connectivity', 'check')) { const s = ssidOf(state.active); said(s === undefined ? 'none' : state.online?.[s] ?? 'full'); process.exit(0); }
 if (is('connection', 'show') && command.length === 2) {

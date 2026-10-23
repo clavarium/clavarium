@@ -717,6 +717,12 @@
           <div id="wifi" tabindex="-1">
             <p id="wifi-now" role="status"></p>
             <p id="wifi-last" class="hint" role="status" hidden></p>
+            <!-- ITS NETWORK SET UP OUTSIDE CLAVARIUM (netplan and systemd-networkd, as the Ubuntu installer leaves it): handed over to NetworkManager, back as it was if it does not work. -->
+            <div id="wifi-hand" hidden>
+              <p id="wifi-hand-about">Let Clavarium manage it: Wi-Fi chosen here, a cable taken by itself. Your Wi-Fi stays as it is.</p>
+              <div class="row"><button type="button" class="primary" id="wifi-hand-go">Manage the network</button><button type="button" id="wifi-hand-cancel" hidden>Cancel</button></div>
+            </div>
+            <p id="wifi-hand-said" role="status" hidden></p>
             <div id="wifi-controls" hidden>
               <div class="row"><button type="button" id="wifi-scan">Look for networks</button><span class="hint" id="wifi-said" role="status"></span></div>
               <ul id="wifi-list" class="wifi-list" hidden></ul>

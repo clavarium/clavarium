@@ -113,6 +113,17 @@ WIFI_STEP="3"
 # Where NetworkManager keeps its connections as files (keyfiles): a new network is written
 # there by this program, root's and 0600 -- the one place its password is ever written.
 NM_KEYFILES="/etc/NetworkManager/system-connections"
+# THE NETWORK HANDED OVER TO NETWORKMANAGER (verbs "wifi handover", "wifi hand"): a server set up
+# by the Ubuntu installer has its network in netplan, rendered by systemd-networkd, and no
+# NetworkManager: its Wi-Fi cannot be chosen from Clavarium, and a cable plugged in later is not
+# taken. NetworkManager is installed, one file of netplan's makes it the renderer, and if the
+# networks in use before are not working again within $HAND_WAIT seconds, netplan's files are put
+# back as they were. Its record; netplan's folder; the file added; the unit it runs in.
+HAND_STATE="/var/lib/clavarium/network"
+NETPLAN_DIR="/etc/netplan"
+HAND_FILE="90-clavarium-network.yaml"
+HAND_UNIT="clavarium-network-handover"
+HAND_WAIT="90"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
 usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi> <verb> [arguments]" >&2; exit 64; }
@@ -125,7 +136,8 @@ while [ $# -gt 0 ]; do
         --mnt) [ "$SAY" = "yes" ] || refuse "--mnt is only for --say-only"; MNT="${2:-}"; shift 2 ;;
         --test) [ "$(id -u)" != "0" ] || refuse "--test is never for root"; [ "$SAY" = "no" ] || refuse "--test runs for real: not with --say-only"
                 TEST="${2:-}"; case "$TEST" in /*) : ;; *) refuse "--test takes an absolute path" ;; esac
-                DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"; shift 2 ;;
+                DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"
+                HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -458,6 +470,45 @@ wifi_keyfile() {
     [ -n "$TEST" ] || chown root:root -- "$tmp"
     mv -f -- "$tmp" "$file"
 }
+# THE HANDOVER. Possible where netplan renders the network with systemd-networkd (its default)
+# and this program has not handed it over already; apt-get to install NetworkManager.
+hand_possible() {
+    local r
+    type -P netplan >/dev/null 2>&1 && type -P apt-get >/dev/null 2>&1 || return 1
+    [ ! -e "$NETPLAN_DIR/$HAND_FILE" ] || return 1
+    compgen -G "$NETPLAN_DIR/*.yaml" >/dev/null || return 1
+    r="$(netplan get renderer 2>/dev/null | head -1 || true)"
+    case "$r" in ""|null|networkd) return 0 ;; *) return 1 ;; esac
+}
+# Its record: "hand <state> <seconds since 1970>" and "handwhy <why>".
+hand_record() {
+    install -d -m 0700 "$HAND_STATE"
+    { printf 'hand %s %s\n' "$1" "$(date +%s)"; [ -z "${2:-}" ] || printf 'handwhy %s\n' "$2"; } > "$HAND_STATE/last.new"
+    mv -f -- "$HAND_STATE/last.new" "$HAND_STATE/last"
+}
+hand_word() { sed -n 's/^hand \([a-z-]*\) [0-9]*$/\1/p' "$HAND_STATE/last" 2>/dev/null | head -1 || true; }
+# Going on: recorded as such, and not for longer than an install and a wait could take.
+hand_busy() {
+    local at
+    case "$(hand_word)" in installing|switching) : ;; *) return 1 ;; esac
+    at="$(sed -n 's/^hand [a-z]* \([0-9]*\)$/\1/p' "$HAND_STATE/last" | head -1)"
+    [ $(( $(date +%s) - ${at:-0} )) -lt 1800 ]
+}
+# The networks in use: "<device> <gateway>", one per default route.
+hand_routes() { ip -4 route show default 2>/dev/null | sed -n 's/^default via \([0-9.]*\) dev \([A-Za-z0-9._-]*\).*$/\2 \1/p' | sort -u || true; }
+# Each of them working again, through NetworkManager: connected, with its way out (a default
+# route through it). Not its gateway answering a ping: many a box does not answer one.
+hand_back_up() {
+    local dev gw st
+    while read -r dev gw; do
+        [ -n "$dev" ] || continue
+        st="$(nmcli -g GENERAL.STATE device show "$dev" 2>/dev/null | head -1 || true)"
+        case "$st" in 100*) : ;; *) return 1 ;; esac
+        [ -n "$(ip -4 route show default dev "$dev" 2>/dev/null || true)" ] || return 1
+    done < "$HAND_STATE/routes"
+    [ "$(nmcli -t -f RUNNING general 2>/dev/null || true)" = "running" ]
+}
+
 # The outcome of a switch, recorded for "wifi status": <state> [<why>]. Uses $ssid and $back.
 wifi_record() {
     install -d -m 0700 "$WIFI_STATE"
@@ -1170,6 +1221,14 @@ case "$AREA $VERB" in
                 [[ "$line" =~ ^(last\ (joining|joined|went-back|back-failed|interrupted)\ [0-9]{1,12}|lastwhy\ [a-z-]{1,20}|last(ssid|back)\ .{0,32})$ ]] && printf '%s\n' "$line"
             done < "$WIFI_STATE/last"
         fi
+        # The handover: how the last one went; whether it can be asked.
+        if [ -f "$HAND_STATE/last" ]; then
+            while IFS= read -r line; do
+                if ! hand_busy && [[ "$line" =~ ^hand\ (installing|switching)\ ([0-9]{1,12})$ ]]; then line="hand interrupted ${BASH_REMATCH[2]}"; fi
+                [[ "$line" =~ ^(hand\ (installing|switching|handed|went-back|failed|interrupted)\ [0-9]{1,12}|handwhy\ [a-z-]{1,20})$ ]] && printf '%s\n' "$line"
+            done < "$HAND_STATE/last"
+        fi
+        hand_busy || ! hand_possible || echo "handover possible"
         type -P nmcli >/dev/null 2>&1 || { printf '%s\n' "nmcli no" "wifiwhy no-nmcli"; exit 0; }
         echo "nmcli yes"
         [ "$(nmcli -t -f RUNNING general 2>/dev/null || true)" = "running" ] || { echo "wifiwhy not-running"; exit 0; }
@@ -1316,6 +1375,85 @@ case "$AREA $VERB" in
             sleep "$WIFI_STEP"
         done
         go_back no-internet
+        exit 0 ;;
+    "wifi handover")
+        # THE NETWORK TO NETWORKMANAGER, asked from Settings: started in a unit of its own ("wifi
+        # hand"), and this returns at once: "handing". Refused where it is not possible.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "systemd-run --unit=$HAND_UNIT --collect clavarium-host wifi hand:" \
+                "  apt-get install network-manager (when it is not installed)" \
+                "  copy $NETPLAN_DIR aside; write $NETPLAN_DIR/$HAND_FILE (root, 0600: renderer NetworkManager); netplan apply" \
+                "  ${HAND_WAIT} s at most for the networks in use before to work again: then systemctl disable systemd-networkd-wait-online;" \
+                "  else netplan's files put back, netplan apply"
+            exit 0
+        fi
+        ! hand_busy || refuse "the network is being handed over already: wait for its end (a few minutes)"
+        ! wifi_busy || refuse "a Wi-Fi switch is going on: wait for its end"
+        hand_possible || refuse "this server's network is not one netplan renders with systemd-networkd: nothing to hand over"
+        hand_record installing
+        self=(/bin/bash "$(readlink -f -- "$0")"); [ -z "$TEST" ] || self+=(--test "$TEST")
+        if ! systemd-run --quiet --unit="$HAND_UNIT" --collect --description="Clavarium - the network handed over to NetworkManager, back as it was if it does not work" \
+            --property=TimeoutStopSec=180 "${self[@]}" wifi hand; then
+            hand_record failed stopped
+            refuse "the handover could not be started (another one still running?)"
+        fi
+        echo "handing"
+        exit 0 ;;
+    "wifi hand")
+        # THE HANDOVER ITSELF, run by "wifi handover" in its unit, as root. NetworkManager
+        # installed if it is not (nothing else changed yet: a failure there leaves all as it was);
+        # netplan's folder copied aside, root's; one file of netplan's makes NetworkManager the
+        # renderer (the Wi-Fi it knew comes with it, and a cable is taken when plugged in); then
+        # up to $HAND_WAIT seconds for the networks in use before to work again. If they do not,
+        # netplan's files are put back as they were and applied. The outcome is recorded for "wifi status".
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "see: wifi handover"; exit 0; fi
+        [ "$(hand_word)" = "installing" ] || refuse "no handover was asked"
+        install -d -m 0700 "$HAND_STATE"
+        hand_routes > "$HAND_STATE/routes"
+        if ! type -P nmcli >/dev/null 2>&1; then
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y -q network-manager > "$HAND_STATE/install.log" 2>&1; then hand_record failed install; exit 0; fi
+        fi
+        hand_record switching
+        aside="$HAND_STATE/netplan-before"
+        rm -rf -- "$aside"; install -d -m 0700 "$aside"
+        cp -a -- "$NETPLAN_DIR/." "$aside/" || { hand_record failed copy; exit 0; }
+        # Back as it was: netplan's files exactly as copied (theirs only), applied.
+        put_back() {
+            rm -f -- "$NETPLAN_DIR/$HAND_FILE"
+            find "$NETPLAN_DIR" -mindepth 1 -maxdepth 1 -name '*.yaml' -exec rm -f -- {} + 2>/dev/null || true
+            cp -a -- "$aside/." "$NETPLAN_DIR/"
+            netplan apply >/dev/null 2>&1 || true
+            hand_record went-back "$1"
+        }
+        trap 'put_back stopped; exit 0' TERM INT HUP
+        tmp="$(mktemp -p "$NETPLAN_DIR" .clavarium-network.XXXXXX)" || { hand_record failed write; exit 0; }
+        chmod 0600 -- "$tmp"
+        printf '# Written by Clavarium (Settings, Network): NetworkManager drives the network.\nnetwork:\n  version: 2\n  renderer: NetworkManager\n' > "$tmp"
+        [ -n "$TEST" ] || chown root:root -- "$tmp"
+        mv -f -- "$tmp" "$NETPLAN_DIR/$HAND_FILE"
+        if ! netplan generate >/dev/null 2>&1; then rm -f -- "$NETPLAN_DIR/$HAND_FILE"; trap - TERM INT HUP; hand_record failed invalid; exit 0; fi
+        netplan apply >/dev/null 2>&1 || true
+        start="$SECONDS"
+        looks=$(awk -v w="$HAND_WAIT" -v s="$WIFI_STEP" 'BEGIN { print int(w / s) }')
+        for ((i = 0; i < looks && SECONDS - start < HAND_WAIT; i++)); do
+            if hand_back_up; then
+                trap - TERM INT HUP
+                # Its copy held the Wi-Fi password: not kept once it is no longer needed.
+                rm -rf -- "$aside"
+                # systemd-networkd drives nothing now: its wait for a network would hold each start
+                # two minutes, then fail. NetworkManager's own wait takes its place.
+                if [ "$(systemctl is-enabled systemd-networkd-wait-online.service 2>/dev/null || true)" = "enabled" ]; then
+                    systemctl disable systemd-networkd-wait-online.service >/dev/null 2>&1 && echo "networkd-wait-online disabled" > "$HAND_STATE/undone"
+                fi
+                hand_record handed
+                exit 0
+            fi
+            sleep "$WIFI_STEP"
+        done
+        trap - TERM INT HUP
+        put_back no-network
         exit 0 ;;
     "wifi forget")
         # <ssid>: every network NetworkManager keeps under that name, deleted. Never the one

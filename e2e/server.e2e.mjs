@@ -281,3 +281,28 @@ test('Settings, Network: Wi-Fi managed outside Clavarium on this server: one sen
     await me.until('said', async () => /managed outside Clavarium on this server/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')));
     assert.equal(await me.page.locator('#wifi-controls').isVisible(), false);
 });
+
+test('Settings, Network: a network set up when Ubuntu was installed, handed over to NetworkManager from here, asked twice; its Wi-Fi then chosen here', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    writeFileSync(join(b.dir, 'wifi.json'), JSON.stringify({ using: 'Home', saved: ['Home'], last: null, outside: true }));
+    const me = await b.person();
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-network');
+    await me.until('said, and offered', async () => await me.page.locator('#wifi-hand').isVisible());
+    assert.equal(await me.page.locator('#wifi-now').innerText(), 'Clavarium does not manage this server\'s network yet.');
+    assert.equal(await me.page.locator('#wifi-hand-about').innerText(), 'Let Clavarium manage it: Wi-Fi chosen here, a cable taken by itself. Your Wi-Fi stays as it is.');
+    assert.equal(await me.page.locator('#wifi-controls').isVisible(), false);
+    const go = me.page.locator('#wifi-hand-go');
+    await go.click();
+    assert.equal(await go.innerText(), 'Confirm (undone by itself if it fails)');
+    assert.equal(existsSync(join(b.dir, 'wifi.json')) && JSON.parse(readFileSync(join(b.dir, 'wifi.json'), 'utf8')).hand, undefined, 'one click asks nothing of the host');
+    if (process.env.SHOTS) await me.page.locator('#settings-wifi-top').screenshot({ path: join(process.env.SHOTS, 'network-handover.png') });
+    await go.click();
+    await me.until('handed over, its Wi-Fi shown', async () => /^Done: Clavarium manages the network\.$/.test(await me.page.locator('#wifi-hand-said').innerText().catch(() => '')) && /^On Home \(Wi-Fi, wlan0\)/.test(await me.page.locator('#wifi-now').innerText().catch(() => '')), 20_000);
+    assert.equal(await me.page.locator('#wifi-hand').isVisible(), false, 'not offered twice');
+    assert.equal(await me.page.locator('#wifi-controls').isVisible(), true);
+    if (process.env.SHOTS) await me.page.locator('#settings-wifi-top').screenshot({ path: join(process.env.SHOTS, 'network-handed.png') });
+    const said = (await me.api('/api/events?kind=server')).body.map((e) => e.text);
+    assert.ok(said.includes('Network: management by Clavarium asked'), said.join(' | '));
+    assert.deepEqual(me.errors, []);
+});

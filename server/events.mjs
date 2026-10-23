@@ -57,6 +57,7 @@ const SAID = [
     [/^\/api\/machines\/forget-old$/, 'server', () => 'The old copy of the machines removed'],
     /* Its name only: the password of a network is never said. */
     [/^\/api\/wifi\/join$/, 'server', (m, b) => `Wi-Fi: joining "${clip(b.ssid, 40)}" asked`],
+    [/^\/api\/wifi\/handover$/, 'server', () => 'Network: management by Clavarium asked'],
     [/^\/api\/wifi\/forget$/, 'server', (m, b) => `Wi-Fi: "${clip(b.ssid, 40)}" forgotten`],
     [/^\/api\/instance$/, 'server', (m, b) => (String(b.name ?? '').trim() ? `This Clavarium named "${clip(b.name, 40)}"` : 'This Clavarium given back the name drawn from its address')],
     [/^\/api\/operators$/, 'sign-in', (m, b) => `Administrator ${clip(b.email, 80)} added`],
