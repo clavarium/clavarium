@@ -70,10 +70,12 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   Settings; the message is encrypted for that device alone.
 
 - **11 - the simple screen**: each conversation can be shown without its
-  terminal, for whoever does not read one: a box to say what is wanted,
-  what is ready to read, and what the tool says now as plain text, read by
-  the page from its own screen. What is written is typed into the same
-  terminal; the server reads nothing more.
+  terminal, for whoever does not read one: its chat (12). While its chat is
+  off, its Chat tab says so, with the one button that turns it on and asks
+  its tool to use it. A device given its terminal but not its chat keeps
+  the plain screen: a box to say what is wanted, what is ready to read, and
+  what the tool says now as plain text, read by the page from its own
+  screen; what is written is typed into the same terminal.
 
 - **12 - talk through the app**: a branching on Clavarium Parley, a project
   of its own (an npm dependency at an exact version, `clavarium-parley`). Every machine has a

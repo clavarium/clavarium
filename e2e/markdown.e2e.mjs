@@ -85,9 +85,20 @@ test('the chat renders what the tool writes: Markdown built element by element, 
     await me.page.locator('#preview-close').click();
     /* A picture, large: zoomed in, moved, the next one, closed with Escape. */
     await pictures.first().click();
-    const zoom = thread.locator('.parley-zoom');
+    const zoom = thread.locator('.parley-zoom:not(.parley-draw)');
     await me.until('large', async () => zoom.isVisible());
     await me.until('its name and place', async () => /before \(\d\/\d\)/.test(await zoom.locator('.parley-zoom-name').innerText()));
+    /* Nothing of the page under it is grabbed: not the edge that widens the list. */
+    assert.equal(await me.page.locator('#list-resize').isVisible(), false, 'the edge of the list, put away under a picture');
+    /* Pulled sideways: the next one, then back to the first. */
+    const swipe = async (by) => { const r = await zoom.locator('.parley-zoom-stage').boundingBox(); const x = r.x + r.width / 2; const y = r.y + r.height / 2; await me.page.mouse.move(x, y); await me.page.mouse.down(); await me.page.mouse.move(x + by, y, { steps: 6 }); await me.page.mouse.up(); };
+    await swipe(-160);
+    await me.until('the next one, by a swipe', async () => /after/.test(await zoom.locator('.parley-zoom-name').innerText()));
+    await swipe(30);
+    await me.page.waitForTimeout(400);
+    assert.match(await zoom.locator('.parley-zoom-name').innerText(), /after/, 'not far enough: it stays');
+    await swipe(160);
+    await me.until('the first again', async () => /before/.test(await zoom.locator('.parley-zoom-name').innerText()));
     await zoom.locator('.parley-zoom-plus').click(); await zoom.locator('.parley-zoom-plus').click();
     await me.until('zoomed', async () => (await zoom.getAttribute('data-zoomed')) === 'true');
     await me.page.keyboard.press('ArrowRight');
@@ -143,7 +154,7 @@ test('the chat renders what the tool writes: Markdown built element by element, 
         box.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
     });
     await me.until('a picture above the box', async () => (await thread.locator('.parley-pending-picture img').count()) === 1);
-    assert.match(await thread.locator('.parley-pending-picture').getAttribute('title'), /^screenshot-\d{4}-\d\d-\d\d-\d{6}\.png/);
+    assert.match(await thread.locator('.parley-pending-picture img').getAttribute('alt'), /^screenshot-\d{4}-\d\d-\d\d-\d{6}\.png/);
     assert.deepEqual(me.errors, []);
 
     /* A device given the chat alone sees the pictures of its chat, and no other file of the folder. */
@@ -217,7 +228,7 @@ test('pictures shown together are one gallery with their titles, large one after
     await me.until('one gallery, titled', async () => (await thread.locator('.parley-gallery .parley-caption').allInnerTexts()).join('|') === 'Home, before|Home, after');
     /* Large, from its thumbnail: the strip of the others, the title; a tap on the ground closes it. */
     await thread.locator('.parley-gallery img').first().click();
-    const zoom = thread.locator('.parley-zoom');
+    const zoom = thread.locator('.parley-zoom:not(.parley-draw)');
     await me.until('large', async () => zoom.isVisible());
     assert.match(await zoom.locator('.parley-zoom-name').innerText(), /^Home, before \(1\/2\)$/);
     assert.equal(await zoom.locator('.parley-zoom-thumb').count(), 2, 'a picture shown and cited is one picture');
@@ -271,7 +282,7 @@ test('on a touch screen, a pinch on a picture in the viewer zooms the picture al
     const thread = me.page.locator('#simple-thread');
     await me.until('the picture', async () => (await thread.locator('.parley-said[data-kind=show] img').count()) > 0);
     await thread.locator('.parley-said[data-kind=show] img').first().click();
-    const zoom = thread.locator('.parley-zoom');
+    const zoom = thread.locator('.parley-zoom:not(.parley-draw)');
     await me.until('large', async () => zoom.isVisible());
     await me.until('fitted', async () => (await zoom.locator('.parley-zoom-stage img').evaluate((i) => i.complete && i.naturalWidth > 0)));
     await wait(300);

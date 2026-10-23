@@ -385,6 +385,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 /* The chat takes the whole screen: its box stays at the bottom, the messages scroll above it. */
 /* On a light screen, brass text is too pale to read: the words in that colour are darker; the buttons keep it. */
 :root[data-theme="light"] #simple-thread { --parley-ask: #8a5d00; }
+#chat-turn { margin: auto; max-width: 40ch; text-align: center; padding: 32px 8px; }
+#chat-turn p { margin: 0 0 12px; font-size: 1rem; }
+#chat-turn p + p { color: var(--ink2); }
+#chat-turn .hint { margin-top: 10px; font-size: .875rem; }
 #chat-off { margin: auto; max-width: 36ch; text-align: center; padding: 24px 8px; }
 #chat-off p { margin: 0 0 10px; font-size: 1rem; }
 #chat-off p + p { color: var(--ink2); }
@@ -1363,6 +1367,8 @@ select.pill { appearance: auto; }
 @media (pointer: coarse) { #list-resize { width: 18px; margin-right: -9px; } }
 @media (max-width: 700px) { #list-resize { display: none; } }
 #app[data-list="folded"] #list-resize { display: none; }
+/* A picture open over the page (the chat's viewer, its drawing): nothing of the page under it is grabbed. */
+#app:has(.parley-zoom:not([hidden])) #list-resize { display: none; }
 /* "Seen" stands apart from what acts on the machine: in the colour of what is fine. */
 .parley-act[data-act="seen"], #health-dismiss { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 60%, transparent); }
 .parley-act[data-act="seen"]:hover, #health-dismiss:hover { background: color-mix(in srgb, var(--ok) 14%, transparent); }

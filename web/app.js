@@ -2262,15 +2262,23 @@
         const wanted = talk.on && talkOf === current;
         box.hidden = !wanted;
         /* Where the tool talks through the app, the chat is the whole screen: one box to write in. */
-        $('simple-plain').hidden = wanted;
+        /* Its chat off, on this server's own page: said, with the button that turns it on (a device's page keeps the plain screen). */
+        const offer = !DEVICE && !wanted && !noTerminal();
+        $('simple-plain').hidden = wanted || offer;
+        $('chat-turn').hidden = !offer;
+        if (offer) {
+            const possible = !(talkOf === current && talk.possible === false);
+            $('chat-turn-on').hidden = !possible;
+            $('chat-turn-why').textContent = possible ? 'Turned on, its tool talks with you here, as in a messaging app. Its terminal stays one click away.' : 'This conversation works on the disk of its machine: its chat needs its work folder kept here.';
+        }
         $('simple').toggleAttribute('data-chat', wanted);
         /* The ready-made answers type into the terminal: not under a chat. */
-        $('room').toggleAttribute('data-chat', wanted && simple);
+        $('room').toggleAttribute('data-chat', (wanted || offer) && simple);
         /* Its chat alone was given, and the owner has not turned it on: said, not left blank. */
         $('chat-off').hidden = !(noTerminal() && !wanted);
         if (noTerminal()) { $('room').setAttribute('data-chat', ''); keysForChat(); say(wanted ? 'chat' : 'chat off', wanted ? 'live' : 'waiting'); }
         /* The bar's dictation types into the terminal: not while the chat is in front, which has its own. */
-        if (wanted && simple && stopListening) stopVoice();
+        if ((wanted || offer) && simple && stopListening) stopVoice();
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
@@ -2491,6 +2499,23 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    /* From the Chat tab: on, then its tool is asked to use it -- the same two steps as in its settings. */
+    $('chat-turn-on').addEventListener('click', async () => {
+        const name = current; const button = $('chat-turn-on');
+        if (button.dataset.open) { delete button.dataset.open; button.textContent = 'Turn the chat on'; $('chat-turn-said').textContent = ''; await readTalk(); await paintThread(); return; }
+        button.disabled = true; $('chat-turn-said').textContent = '';
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/talk`, { on: true }); }
+        catch (error) { $('chat-turn-said').textContent = error.message; button.disabled = false; return; }
+        let asked = '';
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/talk/invite`, { lang: deviceLang() }); }
+        catch (error) { asked = error.message; }
+        button.disabled = false;
+        if (name !== current) return;
+        void paintGuide(conversations.find((x) => x.name === name));
+        /* Its tool could not be asked: the chat is on all the same; said here, the chat one click away. */
+        if (asked) { $('chat-turn-said').textContent = `The chat is on, but its tool could not be asked to use it: ${asked}`; button.textContent = 'Open the chat'; button.dataset.open = 'yes'; return; }
+        await readTalk(); await paintThread();
+    });
     $('talk-invite').addEventListener('click', async () => {
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/talk/invite`, { lang: deviceLang() }); $('talk-invite').textContent = 'Asked'; setTimeout(() => { $('talk-invite').textContent = 'Ask the tool to use it'; }, 2500); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
