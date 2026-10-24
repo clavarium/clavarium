@@ -171,7 +171,7 @@ async function walk(t, { phone }) {
     /* FROM THE CHAT, DIRECT: the line that says the commit was sent opens its review, and the commit it names too. */
     const line = page.locator('#simple-thread .parley-system', { hasText: 'Sent by hand: site → main' });
     await until('the line of the sending', async () => (await line.count()) > 0);
-    assert.match(await line.first().innerText(), new RegExp(`\\(up to ${head.slice(0, 7)}\\)`));
+    assert.match(await line.first().innerText(), /site → main, 1 commit/);
     await bothWays(() => line.first().locator('button.parley-act', { hasText: 'See the commit' }).click(),
         async () => (await shown('#cassets #gitview')) && (await page.locator('#gitview-from').innerText()).includes(head.slice(0, 7)) && (await pressed('#view-assets')),
         async () => (await inChat()) && !(await shown('#gitview')), 'the review of the commits sent');
@@ -181,9 +181,7 @@ async function walk(t, { phone }) {
     await shot(page, `${tag}-review-from-chat`);
     await page.locator('#gitview-close').click();
     await until('"< Chat": the chat', inChat);
-    await bothWays(() => line.first().locator('button.parley-ref', { hasText: head.slice(0, 7) }).click(),
-        async () => (await shown('#gitview')) && (await page.locator('#gitview-from').innerText()) === head.slice(0, 7),
-        async () => (await inChat()) && !(await shown('#gitview')), 'the review of the commit it names');
+    /* The commit is no longer named in the line (a few words now): "See the commit" above leads to it. */
 
     /* WHAT THE CHAT OPENS OVER ITSELF (its menu): Back closes it, and the chat stays. */
     await bothWays(() => page.locator('.parley-prefs-open').click(), () => shown('.parley-prefs-menu'),
