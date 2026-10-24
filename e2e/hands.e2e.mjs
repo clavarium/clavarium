@@ -266,6 +266,19 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     assert.deepEqual([about.body.provider, about.body.model, about.body.secret, about.body.language], ['other', 'local-whisper', 'STT_KEY', 'fr']);
     assert.equal(JSON.stringify(about.body).includes('a-key-never-shown'), false);
     assert.equal(await me.page.content().then((html) => html.includes('a-key-never-shown')), false);
+    /* Its key past its expiry day: not sent; said in red, with a dot on the chapter. */
+    assert.equal((await me.api('/api/secrets/STT_KEY/replace', { expires: '2020-01-01' })).status, 200);
+    await me.page.reload();
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-dictation');
+    await me.until('said expired', async () => (await me.page.locator('#settings-dictation').innerText()) === 'Key expired: replace it in Assets > Secrets');
+    assert.equal(await me.page.locator('#settings-dictation').getAttribute('data-tone'), 'bad');
+    await me.until('a dot on the chapter', async () => (await me.page.locator('#settings-ch-dictation[data-attention]').count()) === 1);
+    const asked = b.engineKeys.length;
+    await me.page.locator('#dictation-try').click();
+    await me.until('refused in one line', async () => (await me.page.locator('#dictation-error').innerText()) === 'Dictation key expired: replace it in Assets > Secrets.');
+    assert.equal(b.engineKeys.length, asked, 'the engine was not asked');
+    assert.equal((await me.api('/api/secrets/STT_KEY/replace', { expires: '' })).status, 200);
     /* Turned off: the environment's engine again. */
     await me.page.locator('#dictation-off').click();
     await me.until('off', async () => (await me.api('/api/dictation')).body.source === 'env');

@@ -85,10 +85,10 @@ test('a WAV file is 44 bytes of header and two bytes per sample, at the stated r
 /* ---------- the engine chosen in Settings ---------- */
 const PUBLIC = async () => [{ address: '2001:db8::1' }];
 const lan = ['10', '1', '2', '3'].join('.');
-function dictation({ env = {}, secrets = { STT_KEY: 'the-key-value' }, lookup = PUBLIC } = {}) {
+function dictation({ env = {}, secrets = { STT_KEY: 'the-key-value' }, lookup = PUBLIC, expired = () => false } = {}) {
     const sent = [];
     const fetcher = async (url, init) => { sent.push({ url, auth: init.headers.authorization, model: init.body.get('model'), language: init.body.get('language'), redirect: init.redirect }); return new Response(JSON.stringify({ text: 'heard' })); };
-    return { d: new Dictation({ env, secret: (n) => secrets[n], lookup, fetcher }), sent };
+    return { d: new Dictation({ env, secret: (n) => secrets[n], expired, lookup, fetcher }), sent };
 }
 
 test('Settings win over the environment, which stays the fallback; off gives the environment back, at once', async () => {
@@ -251,4 +251,21 @@ test('clicks and keys in a quiet room are not a phrase; a short word is', () => 
     const typing = []; for (let i = 0; i < 12; i++) typing.push([0.3, 2], [0.005, 6]);
     assert.equal(talk([[0.005, 2 * second], ...typing, [0.005, second]]), 0, 'keys: loud, short, many: no phrase');
     assert.equal(talk([[0.005, 2 * second], [0.2, 9], [0.005, second]]), 1, '"oui": about 300 ms');
+});
+
+test('a key past its expiry day is never sent: dictation refuses in one line, and the page is told', async () => {
+    const gone = new Set();
+    const { d, sent } = dictation({ expired: (n) => gone.has(n) });
+    d.set({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY' });
+    assert.equal(await d.transcribe(wav), 'heard');
+    assert.equal(d.about().secretExpired, false);
+    gone.add('STT_KEY');
+    const before = sent.length;
+    await assert.rejects(d.transcribe(wav), (e) => e.status === 409 && e.message === 'Dictation key expired: replace it in Assets > Secrets.');
+    await assert.rejects(d.try({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY' }, wav), /Dictation key expired/);
+    assert.equal(sent.length, before, 'nothing went to the engine');
+    assert.equal(d.about().secretExpired, true);
+    assert.equal(d.model, PROVIDERS.groq.model, 'still offered: the line is seen when it is used');
+    gone.delete('STT_KEY');
+    assert.equal(await d.transcribe(wav), 'heard', 'a new expiry: used again');
 });

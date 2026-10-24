@@ -207,11 +207,14 @@ export function dictationProblem(c) {
     return undefined;
 }
 
+export const KEY_EXPIRED = 'Dictation key expired: replace it in Assets > Secrets.';
+
 export class Dictation {
-    #file; #env; #secret; #lookup; #fetcher;
-    /* `secret(name)`: the value of a secret, or undefined. `lookup(host)`: the addresses a name resolves to. */
-    constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch } = {}) {
-        this.#file = file; this.#env = env; this.#secret = secret; this.#lookup = lookup; this.#fetcher = fetcher;
+    #file; #env; #secret; #expired; #lookup; #fetcher;
+    /* `secret(name)`: the value of a secret, or undefined. `expired(name)`: past its expiry
+       day (secrets.mjs): then not used. `lookup(host)`: the addresses a name resolves to. */
+    constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, expired = () => false, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch } = {}) {
+        this.#file = file; this.#env = env; this.#secret = secret; this.#expired = expired; this.#lookup = lookup; this.#fetcher = fetcher;
     }
     /* A secret renamed: the key of dictation follows it. */
     secretRenamed(from, to) {
@@ -236,6 +239,7 @@ export class Dictation {
             on: this.#saved() !== undefined,
             provider: saved.provider ?? null, url: saved.url ?? '', model: saved.model ?? '', secret: saved.secret ?? '', language: saved.language ?? '',
             secretMissing: Boolean(saved.secret) && this.#secret(saved.secret) === undefined,
+            secretExpired: Boolean(saved.secret) && this.#expired(saved.secret),
             env: env ? { model: env.model } : null,
             source: this.#saved() ? 'settings' : env ? 'env' : null,
             providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, ...p })),
@@ -259,14 +263,19 @@ export class Dictation {
         try { addresses = isIP(host.replace(/^\[|\]$/g, '')) ? [{ address: host }] : await this.#lookup(host); } catch { throw new Refusal(502, 'The speech-to-text engine cannot be reached.'); }
         if (addresses.some((a) => isPrivateHost(a.address))) throw new Refusal(400, 'This address leads into this server\'s own network: only "Other (compatible)" may.');
     }
+    /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
+    #fresh(c) { if (c?.secret && this.#expired(c.secret)) throw new Refusal(409, KEY_EXPIRED); }
     async transcribe(audio) {
+        this.#fresh(this.#saved());
         const config = this.current();
         if (config) await this.#guard(config);
         return transcribe(config, audio, this.#fetcher);
     }
     /* "Try it": what is in the form, not saved, on one short recording. */
     async try(body, audio) {
-        const config = this.#configOf(this.#checked(body));
+        const checked = this.#checked(body);
+        this.#fresh(checked);
+        const config = this.#configOf(checked);
         await this.#guard(config);
         return transcribe(config, audio, this.#fetcher);
     }

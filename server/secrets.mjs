@@ -93,6 +93,8 @@ export class Secrets {
         return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
             expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s) }));
     }
+    /* Past its expiry day: kept, not used (nor by dictation, voice.mjs). */
+    isExpired(name) { const s = this.#store.get(name); return Boolean(s) && this.#expired(s); }
     /* Handed to it, expired or not (its Assets show both). */
     of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
     /* Delivered to it at its next start. */

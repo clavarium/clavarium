@@ -4203,6 +4203,8 @@
         $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here`
             : about.source === 'env' ? `On · "${about.env.model}" · set on the server` : 'Off · choose a provider';
         $('settings-dictation').dataset.tone = about.source ? 'ok' : '';
+        /* Its key past its expiry day: not used (voice.mjs); said in red, a dot on the chapter. */
+        if (about.source === 'settings' && about.secretExpired) { $('settings-dictation').textContent = 'Key expired: replace it in Assets > Secrets'; $('settings-dictation').dataset.tone = 'bad'; }
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
         dictationProviders = about.providers;
         const provider = $('dictation-provider');

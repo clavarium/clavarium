@@ -167,6 +167,7 @@ test('expired: kept, still handed, but no longer delivered nor named in what the
     assert.deepEqual(b.secrets.of('alpha').sort(), ['OTHER', 'TOKEN'], 'still handed: its Assets show it');
     assert.deepEqual(b.secrets.given('alpha'), ['OTHER']);
     assert.equal(b.secrets.list().find((s) => s.name === 'TOKEN').expired, true);
+    assert.deepEqual([b.secrets.isExpired('TOKEN'), b.secrets.isExpired('OTHER'), b.secrets.isExpired('NONE')], [true, false, false]);
     assert.equal(b.secrets.reveal('TOKEN'), 'sk-expiring-value', 'kept: never deleted by itself');
     /* A server started again does not say it twice. */
     const again = b.make(); const said2 = [];

@@ -290,7 +290,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     await bounded(hostSteps, startWaitMs, 'the host program');
     const shortcuts = new Shortcuts(new Store(`${dataDir}/shortcuts.json`));
     /* The engine of dictation: chosen in Settings, else the environment's (voice.mjs). */
-    const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name) });
+    const voice = new Dictation({ file: new JsonFile(`${dataDir}/dictation.json`, {}), env, secret: (name) => secrets.reveal(name), expired: (name) => secrets.isExpired(name) });
     /* Read here already: a device paired before a conversation was shared in
        two parts keeps the chat it reached then (see devices.mjs). */
     const talkStore = new Store(`${dataDir}/talk.json`);
