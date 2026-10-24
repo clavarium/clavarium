@@ -18,6 +18,8 @@ const line = (id, s, rest) => `${JSON.stringify({ id: `${id}-0000-4000-8000-0000
 
 const RICH = `## Disk full: why
 
+Compound growth: $$C_n = C_0 (1 + t)^n$$ and a price of 5 $ stays text.
+
 | What | Size | State |
 |---|--:|---|
 | Snaps | 1.5 GB | [warn] |
@@ -74,6 +76,12 @@ test('the chat renders what the tool writes: Markdown built element by element, 
     assert.equal(await first.locator('.parley-code pre').innerText(), 'const free = 1.4; // GB');
     /* Its drawing: by Mermaid, shown as a picture. */
     await me.until('the drawing is a picture', async () => /^blob:/.test(await first.locator('.parley-diagram img').getAttribute('src').catch(() => '') ?? ''), 30_000);
+    /* The drawing has a size of its own (a picture that once came out at 0 x 0). */
+    assert.ok((await first.locator('.parley-diagram img').evaluate((i) => i.getBoundingClientRect().width)) > 20, 'the drawing is seen');
+    /* A formula: drawn by Parley with its own KaTeX, served here; a price stays text. */
+    const formula = first;
+    await me.until('the formula is drawn', async () => (await formula.locator('.parley-math-drawn').count()) === 1, 30_000);
+    assert.match(await formula.innerText(), /5 \$ stays text/);
     /* Its pictures, side by side, from the shared folder, by the route of the thumbnails. */
     const pictures = first.locator('.parley-pictures img');
     assert.equal(await pictures.count(), 2);

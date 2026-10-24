@@ -371,7 +371,7 @@ export class Talk {
         return { ...this.of(name), invited: text };
     }
 
-    async say(name, text, answers, files, via) {
+    async say(name, text, answers, files, via, extra) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
         if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
@@ -386,7 +386,7 @@ export class Talk {
             const note = item && typeof item === 'object' && typeof item.note === 'string' ? item.note : '';
             return { path, name: m[2], size: info.size, ...(note ? { note } : {}) };
         });
-        try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }

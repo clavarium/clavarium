@@ -437,7 +437,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
             if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
-            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via)), true;
+            /* What the chat may add to an answer: the choices ticked, the answers of a group, the zone of a picture it is about (Parley checks each). */
+            return send(201, await talk.say(conversation, body.text, body.answers, body.files, body.via, { picked: body.picked, replies: body.replies, about: body.about })), true;
         }
         const docketed = /^\/api\/conversations\/([^/]+)\/docket(\/cancel)?$/.exec(pathname);
         if (docketed && wakeups) {

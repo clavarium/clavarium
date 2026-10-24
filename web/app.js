@@ -2406,7 +2406,15 @@
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines).then((data) => withMachine(data, name)),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
-            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}) }),
+            send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
+                /* The choices ticked, the answers of a group, the zone of a picture the answer is about. */
+                ...(extra?.picked ? { picked: extra.picked } : {}), ...(extra?.replies ? { replies: extra.replies } : {}), ...(extra?.about ? { about: extra.about } : {}) }),
+            /* Formulas: Parley's own KaTeX, served here. Zones and people may point to a file of a shared folder (file:/work/...). */
+            math: { url: new URL('vendor/katex/katex.mjs', new URL(DEVICE ? '/c/' : '/', location.href)).href },
+            refs: {
+                label: (ref) => (/^file:\/(work|resources)\//.test(ref) ? 'Open' : null),
+                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void preview(tab, m[2], m[2].split('/').pop(), 0); },
+            },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
@@ -3082,7 +3090,7 @@
         bar.append(why, together, go);
         const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
         const review = el('div', 'ts-review'); review.hidden = true;
-        holder.append(progress, meter, filters, list, bar, said, review);
+        holder.append(progress, meter, said, filters, list, bar, review);
         const rows = [];
         let filter = 'update';
         let sending = false; let checking = false;
@@ -3154,7 +3162,9 @@
             together.textContent = p.length > 1 ? `Review the ${p.length} together` : 'Review';
             go.disabled = sending || checking || p.length === 0 || running.length > 0 || (!unchecked.length && held.length > 0);
             why.textContent = p.length === 0 ? 'Nothing ticked.' : running.length ? 'Checking...' : unchecked.length ? '' : held.length ? `Passing checks are required: ${held.map(label).join(', ')}.` : failed.length ? `Checks did not pass: ${failed.map(label).join(', ')}.` : '';
-            if (sending) { go.textContent = 'Sending...'; return; }
+            /* Once something went and nothing is left ticked, no button that would seem to say nothing went. */
+            go.hidden = !sending && p.length === 0 && rows.some((r) => r.sent?.ok);
+            if (sending) { go.textContent = 'Sending…'; return; }
             /* First the checks of what is ticked; then Send. */
             if (unchecked.length || running.length) { go.dataset.step = 'check'; go.textContent = `Check ${word}`; return; }
             go.dataset.step = 'send';
@@ -3195,7 +3205,8 @@
                     size.append(el('span', '', what), el('br'), el('span', 'plus', `+${files.reduce((n, f) => n + f.added, 0)}`), ' ', el('span', 'minus', `−${files.reduce((n, f) => n + f.removed, 0)}`));
                 } else size.append(el('span', 'hint', out.state === 'up-to-date' ? 'nothing' : '-'));
                 const state = el('div', 'ts-state');
-                if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
+                if (r.sending) { const s2 = el('span', 'ts-running'); s2.append(el('span', 'warn', 'Sending…')); state.append(s2); }
+                else if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
                 else if (!out) state.append('');
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
                 else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
@@ -3347,11 +3358,12 @@
             for (const r of rows) r.sent = null;
             paint();
             for (const r of p) {
+                r.sending = true; paint();
                 try {
                     const sent = await post(`${API}/git/${r.name}/push`, { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) });
                     r.sent = { ok: true, text: sent.already ? `✓ Already in ${sent.branch}` : sent.commits > 0 ? `✓ Sent to ${sent.branch}` : `✓ Made ${sent.branch}` };
                 } catch (error) { r.sent = { ok: false, text: /^Not sent/.test(error.message) ? error.message : `Not sent: ${error.message}` }; }
-                paint();
+                r.sending = false; paint();
             }
             sending = false; paint();
             const ok = p.filter((r) => r.sent?.ok).length;
@@ -3361,8 +3373,10 @@
             /* What is left to send, read again; what became of each stays said. */
             const kept = new Map(rows.map((r) => [r, r.sent]));
             await Promise.all(rows.map((r) => look(r)));
-            for (const r of rows) r.sent = kept.get(r);
+            /* What went is unticked: nothing is offered again for what is done. */
+            for (const r of rows) { r.sent = kept.get(r); if (r.sent?.ok) r.picked = false; }
             paint();
+            said.scrollIntoView({ block: 'nearest' });
         });
         paint();
         /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */

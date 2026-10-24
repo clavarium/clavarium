@@ -12,7 +12,7 @@
  *   node server/main.mjs --command "your-tool" --cwd /path/to/work
  *       no VM: one tool on this machine, at /?c=<name>. For development.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -107,6 +107,14 @@ export const FILES = {
     '/vendor/prism.js': [['web/prism-manual.js', ...['core', 'clike', 'markup', 'css', 'javascript', 'typescript', 'json', 'python', 'bash', 'markup-templating', 'php', 'sql', 'yaml', 'diff', 'markdown', 'ini', 'apacheconf']
         .map((l) => packageFile('prismjs', `components/prism-${l}.min.js`))], 'text/javascript; charset=utf-8'],
 };
+/* Formulas in the chat are drawn by Parley with its own copy of KaTeX, loaded on the first formula
+   (the page tells it where: /vendor/katex/katex.mjs): served as Parley ships it, fonts included. */
+try {
+    const katex = packageFile(PARLEY, 'ui/vendor/katex');
+    FILES['/vendor/katex/katex.mjs'] = [`${katex}/katex.mjs`, 'text/javascript; charset=utf-8'];
+    FILES['/vendor/katex/katex.min.css'] = [`${katex}/katex.min.css`, 'text/css; charset=utf-8'];
+    for (const font of readdirSync(`${katex}/fonts`)) if (/^[\w.-]+\.woff2$/.test(font)) FILES[`/vendor/katex/fonts/${font}`] = [`${katex}/fonts/${font}`, 'font/woff2'];
+} catch { /* a Parley without it: formulas shown as their text */ }
 /* The device door serves the same files under /c/: that prefix is the only
    one the edge lets through without sign-on. Its page differs; nothing else. */
 const DEVICE_FILES = Object.fromEntries(Object.entries(FILES).filter(([path]) => path !== '/').map(([path, file]) => [`/c${path}`, file]));
