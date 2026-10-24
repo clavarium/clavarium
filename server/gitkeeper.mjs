@@ -270,6 +270,7 @@ export class GitKeeper {
             /* The newest checks of the repository, whatever their target. */
             checks: [...(this.#results.get(r.name)?.values() ?? [])].sort((x, y) => String(y.at ?? '').localeCompare(String(x.at ?? '')))[0] ?? null,
             last: this.lastChecks(r.name),
+            running: this.runningChecks(r.name),
             read: record.lastRead ?? null,
             blocked: Object.keys(record.blocked ?? {}),
             log: record.log ?? [],
@@ -497,7 +498,7 @@ export class GitKeeper {
         const key = `${name}\n${seen.head}\n${seen.target ?? ''}`;
         let entry = this.#inFlight.get(key);
         if (!entry || (entry.done && !join)) {
-            const made = { done: false };
+            const made = { done: false, since: this.#now().toISOString(), head: seen.head, target: seen.target ?? '' };
             made.run = this.#check(name, seen).finally(() => { made.done = true; setTimeout(() => { if (this.#inFlight.get(key) === made) this.#inFlight.delete(key); }, CHECK_KEEP_MS).unref?.(); });
             this.#inFlight.set(key, made);
             entry = made;
@@ -526,10 +527,14 @@ export class GitKeeper {
     #keepLast(name, result) {
         if (!this.#last) return;
         const target = typeof result.target === 'string' ? result.target : '';
-        const kept = { status: result.status, head: result.head ?? null, branch: result.branch ?? null, target: target || null, at: result.at, machine: result.machine ?? null, output: String(result.output ?? '').slice(-LAST_OUTPUT_MAX) };
+        const kept = { status: result.status, head: result.head ?? null, branch: result.branch ?? null, target: target || null, at: result.at, machine: result.machine ?? null, ...(Number.isFinite(result.ms) ? { ms: result.ms } : {}), output: String(result.output ?? '').slice(-LAST_OUTPUT_MAX) };
         const before = Object.entries(this.#last.get(name)?.targets ?? {}).filter(([t]) => t !== target);
         const targets = Object.fromEntries([...before, [target, kept]].sort((a, b) => String(b[1].at).localeCompare(String(a[1].at))).slice(0, LAST_TARGETS));
         try { this.#last.put({ name, targets }); } catch { /* kept in memory still: a full disk does not stop the checks */ }
+    }
+    /* The checks running now for this repository: [{ head, target, since }] (a page that comes back follows them). */
+    runningChecks(name) {
+        return [...this.#inFlight.entries()].filter(([key, e]) => key.startsWith(`${name}\n`) && !e.done).map(([, e]) => ({ head: e.head, target: e.target, since: e.since }));
     }
     /* [{ status, head, branch, target, at, machine, output, outdated }], the newest first. */
     lastChecks(name) {

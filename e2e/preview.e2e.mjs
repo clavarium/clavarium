@@ -178,13 +178,13 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     const b = await bench(t);
     const me = await b.person();
     await me.create('daylight');
-    const look = () => me.page.evaluate(() => ({ theme: document.documentElement.dataset.theme, page: getComputedStyle(document.body).backgroundColor, terminal: window.clavariumTerminal.options.theme.background, button: document.getElementById('theme').textContent }));
-    assert.deepEqual(await look(), { theme: 'dark', page: 'rgb(15, 20, 26)', terminal: '#0f141a', button: 'Light' });
+    const look = () => me.page.evaluate(() => ({ theme: document.documentElement.dataset.theme, page: getComputedStyle(document.body).backgroundColor, terminal: window.clavariumTerminal.options.theme.background, button: document.querySelector('#theme [aria-pressed="true"]')?.textContent }));
+    assert.deepEqual(await look(), { theme: 'dark', page: 'rgb(15, 20, 26)', terminal: '#0f141a', button: 'Dark' });
     await me.page.locator('#nav-settings').click();
     await me.chapter('s-screen');
-    await me.page.locator('#theme').click();
+    await me.page.locator('#theme [data-theme="light"]').click();
     await me.page.locator('#settings-close').click();
-    assert.deepEqual(await look(), { theme: 'light', page: 'rgb(251, 251, 250)', terminal: '#fbfbfa', button: 'Dark' });
+    assert.deepEqual(await look(), { theme: 'light', page: 'rgb(251, 251, 250)', terminal: '#fbfbfa', button: 'Light' });
     /* Still typing in the same terminal. */
     await me.page.locator('#terminal').click();
     await me.type('echo still-here');
@@ -194,9 +194,17 @@ test('the screen can be light or dark: the terminal follows, and the choice is k
     assert.equal((await look()).theme, 'light', 'kept across a reload');
     await me.page.locator('#nav-settings').click();
     await me.chapter('s-screen');
-    await me.page.locator('#theme').click();
+    await me.page.locator('#theme [data-theme="dark"]').click();
     await me.page.locator('#settings-close').click();
     assert.equal((await look()).theme, 'dark');
+    /* System: as the device says, and as it changes. */
+    await me.page.emulateMedia({ colorScheme: 'light' });
+    await me.page.locator('#nav-settings').click();
+    await me.chapter('s-screen');
+    await me.page.locator('#theme [data-theme="system"]').click();
+    assert.deepEqual(await look().then((x) => [x.theme, x.button]), ['light', 'System']);
+    await me.page.emulateMedia({ colorScheme: 'dark' });
+    await me.until('it follows the device', async () => (await look()).theme === 'dark');
 });
 
 test('the list of conversations folds away with one click and comes back; the terminal takes the room', { skip: SKIP }, async (t) => {

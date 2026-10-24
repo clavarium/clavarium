@@ -188,6 +188,8 @@ test('What happened: what was done from the page, dated and in words; chosen by 
     await me.until('said, newest first', async () => (await lines()).length >= 4);
     assert.deepEqual((await lines()).slice(0, 4), ['notes given to alpha (write)', 'Folder notes added', 'Secret DEPLOY_KEY set', 'Conversation "alpha" made (shell)']);
     assert.doesNotMatch(await me.page.locator('#events-list').innerText(), /never-shown/);
+    /* Which conversation, in its own column; a click opens it. */
+    assert.deepEqual((await me.page.locator('#events-list .event-conv').allInnerTexts()).slice(0, 4), ['alpha', '', '', 'alpha']);
     await me.page.locator('#events-kind').selectOption('asset');
     await me.until('only folders, repositories, secrets', async () => (await lines()).join('|') === 'Folder notes added|Secret DEPLOY_KEY set');
     await me.page.locator('#events-kind').selectOption('');

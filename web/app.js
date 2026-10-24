@@ -330,14 +330,25 @@
         $('fold').setAttribute('aria-pressed', String(folded));
         $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
     };
-    let listFolded = false; let foldingTimer;
+    let listFolded = false;
     try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
-    $('fold').addEventListener('click', () => {
+    /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
+       redrew the terminal) at every frame: it stuttered. The list and the menu slide instead -- a transform,
+       which costs nothing -- and the columns change once: after it slid out, or before it slides in. */
+    const sliders = () => ['list', 'nav'].map((id) => $(id)).filter(Boolean);
+    const slide = (out) => Promise.all(sliders().map((e) => e.animate(
+        [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-100%)', opacity: 0 }],
+        { duration: 200, easing: 'ease', direction: out ? 'normal' : 'reverse' }).finished.catch(() => {})));
+    const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
+    $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
-        app.dataset.folding = 'true'; clearTimeout(foldingTimer); foldingTimer = setTimeout(() => { delete app.dataset.folding; fit.fit(); }, 300);
-        applyFold(listFolded);
+        const folded = listFolded;
+        if (!still() && folded) await slide(true);
+        if (listFolded !== folded) return;
+        applyFold(folded);
         fit.fit(); focusTerminal();
+        if (!still() && !folded) await slide(false);
     });
 
     /* ---------- light or dark ---------- */
@@ -357,16 +368,20 @@
         for (const view of document.querySelectorAll('.md-view')) view.dataset.theme = light ? 'light' : 'dark';
         terminal.options.theme = light ? LIGHT : DARK;
         document.querySelector('meta[name=theme-color]')?.setAttribute('content', light ? LIGHT.background : DARK.background);
-        $('theme').textContent = light ? 'Dark' : 'Light';
+        /* What is chosen, said by the choice pressed: never a button that names the other one. */
+        for (const b of $('theme').children) b.setAttribute('aria-pressed', String(b.dataset.theme === themeChoice));
     };
-    let lightScreen = false;
-    try { lightScreen = localStorage.getItem('clavarium-theme') === 'light'; } catch { /* a private window: the choice lasts as long as the page */ }
-    applyTheme(lightScreen);
-    $('theme').addEventListener('click', () => {
-        lightScreen = !lightScreen;
-        try { localStorage.setItem('clavarium-theme', lightScreen ? 'light' : 'dark'); } catch { /* as above */ }
-        applyTheme(lightScreen);
-        focusTerminal();
+    /* light, dark, or system (as the device says, and as it changes). */
+    const systemLight = window.matchMedia?.('(prefers-color-scheme: light)');
+    let themeChoice = 'dark';
+    try { const kept = localStorage.getItem('clavarium-theme'); if (['light', 'dark', 'system'].includes(kept)) themeChoice = kept; } catch { /* a private window: the choice lasts as long as the page */ }
+    const themeNow = () => (themeChoice === 'system' ? Boolean(systemLight?.matches) : themeChoice === 'light');
+    applyTheme(themeNow());
+    systemLight?.addEventListener?.('change', () => { if (themeChoice === 'system') applyTheme(themeNow()); });
+    for (const b of $('theme').children) b.addEventListener('click', () => {
+        themeChoice = b.dataset.theme;
+        try { localStorage.setItem('clavarium-theme', themeChoice); } catch { /* as above */ }
+        applyTheme(themeNow());
     });
     const fit = new FitAddon.FitAddon();
     terminal.loadAddon(fit);
@@ -2613,7 +2628,7 @@
         wordsSettings = await fetch(`${API}/talk/settings`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         if (!wordsSettings) return;
         const select = $('words-lang');
-        select.replaceChildren(...[['device', `The language of each device (here: ${languageName(deviceLang())})`], ...wordsSettings.languages.map((l) => [l, languageName(l)])].map(([value, label]) => { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }));
+        select.replaceChildren(...[['device', `Each device's (${languageName(deviceLang())})`], ...wordsSettings.languages.map((l) => [l, languageName(l)])].map(([value, label]) => { const o = document.createElement('option'); o.value = value; o.textContent = label; return o; }));
         select.value = wordsSettings.lang;
         if (document.activeElement !== $('words-own')) $('words-own').value = Object.keys(wordsSettings.own).length ? JSON.stringify(wordsSettings.own, null, 2) : '';
     }
@@ -3031,9 +3046,8 @@
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
     const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
-    /* How many other branches of a repository are looked at; those moved within this long are ticked at first. */
+    /* How many other branches of a repository are looked at. */
     const BRANCHES_MORE = 7;
-    const MOVED_LATELY_MS = 24 * 3600_000;
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
     const TS_FILTERS = [['update', 'To update'], ['new', 'New branches'], ['all', 'All']];
@@ -3066,21 +3080,33 @@
             if (r.target) query.set('target', r.target);
             const [out, keep] = await Promise.all([fetch(`${API}/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`).then(async (x) => { const j = await x.json().catch(() => ({})); return x.ok ? j : { state: 'error', message: j.error || 'It could not be read.' }; }).catch(() => ({ state: 'error', message: 'It could not be read.' })), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
             r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
+            /* What the server knows of this very commit and target: a check still running is followed again; the last
+               one that ran is shown with its age (left and come back, even the next day: nothing run again for nothing). */
+            if (out.state === 'ahead' && out.head) {
+                const going = (keep?.running ?? []).find((x) => x.head === out.head && x.target === out.target);
+                const ran = (keep?.last ?? []).find((x) => x.head === out.head && x.target === out.target && x.status !== 'unavailable');
+                if (going) setTimeout(() => { void checkRow(r, { since: Date.parse(going.since) || Date.now(), resume: true }); }, 0);
+                else if (ran) r.check = { ...ran, earlier: true };
+            }
             if (out.state !== 'ahead') r.picked = false;
         }
         /* The server keeps the run: a request hears "running" after a while, and asks again until it ends. */
-        async function checkRow(r) {
+        async function checkRow(r, { since = Date.now(), resume = false } = {}) {
             const { head, target } = r.out;
-            r.check = { status: 'running' }; r.open = false; paint();
+            r.check = { status: 'running', since }; r.open = false; paint();
+            /* While it runs, its line moves every second: how long so far, and about how long the last one took. */
+            const ticking = setInterval(() => { if (r.check?.status === 'running') paint(); }, 1000);
             let result;
             for (let first = true; ; first = false) {
-                try { result = await post(`${API}/git/${r.name}/check`, { head, target, ...(first ? {} : { join: true }) }); }
+                try { result = await post(`${API}/git/${r.name}/check`, { head, target, ...(first && !resume ? {} : { join: true }) }); }
                 catch (error) { result = { status: 'unavailable', output: `The page could not reach the server: ${error.message}` }; }
                 if (result?.status !== 'running' || r.out?.head !== head || r.out?.target !== target) break;
             }
+            clearInterval(ticking);
             if (r.out?.head !== head || r.out?.target !== target) return;
             r.check = result; paint();
         }
+        const checkedAgo = (at) => { const m = Math.max(0, Math.round((Date.now() - Date.parse(at)) / 60000)); return m < 1 ? 'just now' : m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
         /* What its agent is told when checks did not pass: where, and the end of what they said. */
         const forAgent = (r) => `The checks of ${r.name} (${r.out.branch} → ${r.out.target}) did not pass before sending. Please fix it, commit, and tell me.\n\n\`\`\`\n${String(r.check?.output ?? '').slice(-3000)}\n\`\`\``;
         const stopped = (r) => Boolean(r.keep?.settings?.requireForSend) && r.check?.status !== 'passed';
@@ -3132,7 +3158,7 @@
                 const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
                 const way = el('div', 'ts-way');
                 if (out?.branch) {
-                    way.append(el('code', 'ts-branch', out.branch));
+                    const code = el('code', 'ts-branch', out.branch); code.title = out.branch; way.append(code);
                     if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
@@ -3156,10 +3182,23 @@
                 else if (!out) state.append('');
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
                 else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
-                else if (r.check.status === 'running') state.append(el('span', 'warn', 'Checking...'));
+                else if (r.check.status === 'running') {
+                    const took = (r.keep?.last ?? []).find((x) => x.target === r.out.target && Number.isFinite(x.ms))?.ms ?? (r.keep?.last ?? []).find((x) => Number.isFinite(x.ms))?.ms;
+                    const so = Date.now() - (r.check.since ?? Date.now());
+                    const clock = (ms) => { const s = Math.round(ms / 1000); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+                    const box = el('span', 'ts-running');
+                    box.append(el('span', 'warn', `Checking ${clock(so)}`), el('small', 'hint', took ? `last time ${clock(took)}` : 'may take minutes'));
+                    const bar = el('span', 'ts-meter ts-meter-row'); const fill = el('i'); bar.append(fill);
+                    /* Measured against the last run: never full until it ends; without one, a slow sweep. */
+                    fill.style.width = took ? `${Math.min(95, Math.round((so / took) * 100))}%` : '';
+                    if (!took) bar.classList.add('ts-sweep');
+                    box.append(bar);
+                    state.append(box);
+                }
                 else {
                     const [word, tone] = CHECK_WORDS[r.check.status] ?? [String(r.check.status), ''];
-                    const text = r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word;
+                    const age = r.check.earlier && r.check.at ? ` · ${checkedAgo(r.check.at)}` : '';
+                    const text = `${r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word}${age}`;
                     /* What did not pass says why, one tap away: the reason, what they printed, and what to do. */
                     if (r.check.status === 'failed' || r.check.status === 'unavailable') {
                         const open = el('button', `ts-why-open ${tone}`, `${text} ${r.open ? '▴' : '▾'}`); open.type = 'button'; open.setAttribute('aria-expanded', String(Boolean(r.open)));
@@ -3222,7 +3261,14 @@
             if (tab === 'changes') {
                 const tree = el('div', 'rv-tree ts-tree'); const diffs = el('div', 'rv-diff ts-diffs');
                 for (const { r, files } of all) {
-                    tree.append(el('small', 'ts-tree-repo', label(r)));
+                    /* Each repository its own group: a header that says which, where to, how much; its files under it, folding with it. */
+                    const group = el('section', 'ts-tree-group');
+                    const head = el('button', 'ts-tree-repo'); head.type = 'button'; head.setAttribute('aria-expanded', 'true');
+                    head.append(el('b', '', label(r)), el('code', '', `${r.out.branch} → ${r.out.target}`),
+                        el('small', 'hint', `${files.length} file${files.length === 1 ? '' : 's'}`), el('small', 'plus', `+${files.reduce((n, f) => n + f.added, 0)}`), el('small', 'minus', `−${files.reduce((n, f) => n + f.removed, 0)}`));
+                    const list2 = el('div', 'ts-tree-files');
+                    head.addEventListener('click', () => { const open = list2.hidden; list2.hidden = !open; head.setAttribute('aria-expanded', String(open)); });
+                    group.append(head, list2); tree.append(group);
                     const box = el('div', 'ts-diff'); box.dataset.repo = r.name;
                     box.append(el('h4', '', `${r.name}: ${r.out.branch} → ${r.out.target}`));
                     const inner = el('div'); box.append(inner);
@@ -3230,7 +3276,7 @@
                         const b = el('button'); b.type = 'button'; b.dataset.how = f.how;
                         b.append(el('span', 'rv-path', f.path), el('small', 'plus', `+${f.added}`), el('small', 'minus', `−${f.removed}`));
                         b.addEventListener('click', () => { inner.querySelectorAll('.d2h-file-wrapper')[i]?.scrollIntoView({ block: 'start' }); });
-                        tree.append(b);
+                        list2.append(b);
                     });
                     const Ui = window.Diff2HtmlUI;
                     if (!r.out.diff) inner.append(el('p', 'hint', 'No change to show.'));
@@ -3303,7 +3349,6 @@
         });
         paint();
         /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */
-        const lately = (r) => r.movedAt && Date.now() - Date.parse(r.movedAt) < MOVED_LATELY_MS;
         await Promise.all(names.map(async (name) => {
             const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
             rows.push(first);
@@ -3315,7 +3360,8 @@
             await Promise.all(others.map(async (b) => {
                 const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
                 await look(r);
-                if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update' && lately(r); rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
+                /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
+                if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
                 paint();
             }));
             reposDone++; paint();
@@ -4602,7 +4648,17 @@
         for (const e of got) {
             const li = el('li', 'event'); li.dataset.kind = e.kind;
             const when = el('time', 'event-when', new Date(e.at).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })); when.dateTime = e.at;
-            li.append(when, el('span', 'event-kind', EVENT_WORDS[e.kind] ?? e.kind), el('span', 'event-text', e.text));
+            /* Which conversation, in a column of its own (and out of the text, where older lines put it first): one click opens it. */
+            const conv = el('span', 'event-conv');
+            let text = e.text;
+            if (e.conversation) {
+                if (text.startsWith(`${e.conversation}: `)) text = text.slice(e.conversation.length + 2);
+                const open = el('button', 'as-link', e.conversation); open.type = 'button'; open.title = `Open ${e.conversation}`;
+                open.disabled = !conversations.some((c) => c.name === e.conversation);
+                open.addEventListener('click', () => { leavePlace(); select(e.conversation); });
+                conv.append(open);
+            }
+            li.append(when, el('span', 'event-kind', EVENT_WORDS[e.kind] ?? e.kind), conv, el('span', 'event-text', text));
             if (e.who && !e.text.includes(e.who)) li.append(el('span', 'event-who', e.who));
             list.append(li);
         }
@@ -4615,7 +4671,7 @@
     $('events-q').addEventListener('input', () => { clearTimeout(eventsTyping); eventsTyping = setTimeout(() => { void paintEvents(); }, 250); });
     $('events-more').addEventListener('click', () => { void paintEvents({ more: true }); });
     $('events-copy').addEventListener('click', async () => {
-        const text = eventsShown.map((e) => `${e.at}\t${e.kind}\t${e.text}${e.who ? `\t${e.who}` : ''}`).join('\n');
+        const text = eventsShown.map((e) => `${e.at}\t${e.kind}\t${e.conversation ?? ''}\t${e.text}${e.who ? `\t${e.who}` : ''}`).join('\n');
         try { await navigator.clipboard.writeText(text); $('events-said').textContent = `Copied: ${eventsShown.length} lines.`; } catch { $('events-said').textContent = 'The clipboard is not available here.'; }
     });
     /* WHAT THE SERVER'S PROGRAMS SAID: one source over a span, to read, copy whole or keep as a file. */

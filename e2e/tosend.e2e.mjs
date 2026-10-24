@@ -79,7 +79,7 @@ test('To send: two repositories reviewed together and sent with one button; one 
     /* One review of both: the files of each under its name, the changes of each. */
     await page.locator('#cassets-detail [data-act="send-review"]').click();
     await me.until('the review of both', async () => (await page.locator('#cassets-detail .ts-diff').count()) === 2);
-    assert.deepEqual((await page.locator('#cassets-detail .ts-tree-repo').allInnerTexts()).map((x) => x.toLowerCase()), ['site', 'styles']);
+    assert.deepEqual((await page.locator('#cassets-detail .ts-tree-repo b').allInnerTexts()).map((x) => x.toLowerCase()), ['site', 'styles']);
     assert.match(await page.locator('#cassets-detail .ts-diff[data-repo="styles"]').innerText(), /forms\.css of styles/);
     await shot(page, 'tablet-to-send-review');
     /* Escape closes the review, as Back does; the rows stay. */
@@ -94,8 +94,9 @@ test('To send: two repositories reviewed together and sent with one button; one 
     await me.until('its Send', async () => await send.isVisible(), 20_000);
     await send.click();
     await me.until('To send again, all read', async () => /all read$/.test(await progress.innerText().catch(() => '')), 30_000);
-    await go.click();
-    await me.until('checked again', async () => (await go.innerText()) === 'Send the 2 to main', 30_000);
+    /* Left and come back: the checks of these very commits are kept, said with their age -- nothing run again. */
+    await me.until('the checks kept', async () => (await go.innerText()) === 'Send the 2 to main', 30_000);
+    assert.match(await row('styles').locator('.ts-state').innerText(), /Checks passed · just now/);
     assert.equal(await page.locator('#cassets-rows .as-row[aria-current="true"]').getAttribute('data-asset'), 'send:all');
 
     /* Unticked: left out, and said by the button. */

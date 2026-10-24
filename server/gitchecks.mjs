@@ -142,11 +142,13 @@ export class GitChecks {
         if (!hook && !command) return { ...base, status: 'none', output: 'No check is set: no pre-push hook asked for, no check command.' };
         const machine = wanted === undefined ? await this.machineFor(repository) : (await this.runs(wanted, repository) ? wanted : undefined);
         if (!machine) return { ...base, status: 'unavailable', output: 'No machine that has this repository attached is running: the checks could not run. Open a conversation it is attached to, then look again.' };
+        const began = Date.now();
         const line = `refs/heads/${branch} ${head} refs/heads/${target} ${remoteTip ?? ZERO}`;
         const r = await this.#vms.exec(machine, ['timeout', '-k', '10', String(seconds), 'sh', '-c', SCRIPT, 'clavarium-check', `/resources/${repository}`, head, line, String(remote ?? ''), command, hook ? 'yes' : 'no'],
             { timeoutMs: (seconds + 60) * 1000 }).catch((error) => ({ code: -1, stdout: '', stderr: String(error?.message ?? error) }));
         const output = printable(`${r.stdout ?? ''}${r.stderr ?? ''}`).trim();
-        const said = (status, why) => ({ ...base, machine, status, output: why ? `${why}${output ? `\n${output}` : ''}` : output });
+        /* `ms`: how long they ran, so that the next run can say about how long it takes. */
+        const said = (status, why) => ({ ...base, machine, status, ms: Date.now() - began, output: why ? `${why}${output ? `\n${output}` : ''}` : output });
         if (r.code === 0) return said('passed');
         if (r.code === NOTHING) return said('none', 'Nothing was checked: this repository has no pre-push hook, and no check command is set.');
         if (r.code === TIMED_OUT || r.code === 137) return said('failed', `Stopped after ${seconds} seconds, the time limit.`);
