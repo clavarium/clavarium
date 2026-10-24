@@ -23,6 +23,10 @@
 /* The command run inside the machine. Its arguments are the paths that
    should be mounted; they are passed as arguments, never parsed by the
    shell. It prints one fact per line; the server reads only these lines. */
+import { SHARING_STEP } from './vm.mjs';
+
+/* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
+export const SHARING_MS = 180_000;
 export const PROBE = [
     'awk \'/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{print "memory", t+0, a+0}\' /proc/meminfo',
     'awk \'$1=="oom_kill"{n=$2} END{print "oom", n+0}\' /proc/vmstat',
@@ -188,8 +192,16 @@ export class Health {
             /* Looked at again just before acting: never on a machine that went to sleep meanwhile. */
             const still = loose();
             if (still.length > 0 && this.#conversations.get(name)?.phase === 'ready' && (await this.#vms.state(name).catch(() => undefined)) === 'Running') {
+                /* A machine whose shared-folder helper went missing (the VM manager says to install
+                   multipass-sshfs in it): installed once, as at its start, then the folder tried again. */
+                let helped = false;
                 for (const path of still) {
-                    const why = await this.#resources.repair(name, path).catch((error) => error.message);
+                    let why = await this.#resources.repair(name, path).catch((error) => error.message);
+                    if (why && /multipass-sshfs/.test(why) && !helped) {
+                        helped = true;
+                        const put = await this.#vms.exec(name, [...SHARING_STEP], { timeoutMs: SHARING_MS }).catch(() => ({ code: -1 }));
+                        if (put.code === 0) why = await this.#resources.repair(name, path).catch((error) => error.message);
+                    }
                     if (why) failed.push({ path, why });
                 }
                 facts = (await this.#probe(name, paths)) ?? facts;

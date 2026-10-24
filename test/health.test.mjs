@@ -87,7 +87,7 @@ function machine(t, { state = 'Running', mounted = ['/work', '/resources/reports
     const records = new Map([['demo', { name: 'demo', phase, work: 'kept' }]]);
     const conversations = { get: (n) => records.get(n), awake: () => [...records.keys()] };
     const health = new Health({ vms, conversations, resources, settleMs: 5 });
-    return { health, calls, box, resources, grants, dir, store };
+    return { health, calls, box, resources, grants, dir, store, vms };
 }
 const attach = (m, name, access) => {
     m.store.put({ name, type: 'folder' });
@@ -271,4 +271,17 @@ test('the probe tells the kernel\'s two kinds apart: the whole machine short, or
     assert.equal(out.stdout.trim(), 'oomkinds 1 2');
     assert.deepEqual(readProbe('oom 3\noomkinds 1 2\n', []).oomKinds, { machine: 1, limit: 2 });
     assert.equal(readProbe('oom 3\n', []).oomKinds, undefined, 'not read: not said');
+});
+
+test('a folder the VM manager cannot mount for want of its helper in the machine: the helper is installed once, then it is tried again', async (t) => {
+    const m = machine(t, { mounted: ['/work'] });
+    attach(m, 'reports', 'write');
+    attach(m, 'papers', 'write');
+    let helper = false; const execs = [];
+    const exec = m.vms.exec.bind(m.vms);
+    m.vms.exec = async (name, argv, o) => { if (argv.includes('multipass-sshfs')) { execs.push(argv.join(' ')); helper = true; return { code: 0, stdout: '', stderr: '' }; } return exec(name, argv, o); };
+    m.resources.repair = async () => (helper ? '' : "Please install the 'multipass-sshfs' snap manually inside the instance.");
+    const seen = await m.health.check('demo');
+    assert.deepEqual(execs, ['sudo -n snap install multipass-sshfs'], 'once, for both folders');
+    assert.equal((seen.failed ?? []).some((f) => /multipass-sshfs/.test(f.why)), false);
 });
