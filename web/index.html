@@ -473,7 +473,7 @@
         </form>
           </div>
           <div id="git-box" class="as-form" data-kind="git"><h3>New repository</h3>
-          <p class="hint">A folder that starts as a repository: empty, or cloned from a remote -- public, or private over SSH or HTTPS. It is attached and shared like a folder, to read or to write. What opens a private remote is kept on this server, sealed, and used here only (to clone, to look, to send): the tool's machine never receives it.</p>
+          <div class="hint">Empty, or cloned from a remote. <details class="more"><summary>Private remotes</summary><span>Public, or private over SSH or HTTPS. It is attached and shared like a folder, to read or to write. What opens a private remote is kept on this server, sealed, and used here only (to clone, to look, to send): the tool's machine never receives it.</span></details></div>
           <form id="git-new" autocomplete="off">
             <label for="git-name">Name</label>
             <input id="git-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="website" spellcheck="false" autocapitalize="off" required>
@@ -518,7 +518,7 @@
         <p id="git-keys-empty" class="hint">No key yet: "New key" in Add a repository makes one.</p>
           </div>
           <div id="mailbox-box" class="as-form" data-kind="mailbox"><h3>New mailbox</h3>
-          <p class="hint">Its recent messages become files in a folder, kept up to date, that a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</p>
+          <div class="hint">Recent messages as files, read only. <details class="more"><summary>Before attaching it</summary><span>Kept up to date in a folder a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</span></details></div>
           <form id="mailbox-new" autocomplete="off">
             <label for="mailbox-name">Folder name</label>
             <input id="mailbox-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="inbox" spellcheck="false" autocapitalize="off" required>
@@ -545,16 +545,12 @@
           </div>
         <details id="gitview-remote-box">
           <summary>Where the commits are sent</summary>
-          <form id="gitview-remote" autocomplete="off">
-            <label for="gitview-url">Address (https or ssh)</label>
-            <input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required>
-            <label for="gitview-sshkey">SSH key made here (for an ssh address)</label>
-            <select id="gitview-sshkey"></select>
-            <label for="gitview-user">For an https address: user name of the token (optional)</label>
-            <input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token">
-            <label for="gitview-key">Key or token that may push (kept sealed here; leave empty to keep the one there is)</label>
-            <div class="row"><input id="gitview-key" type="password" autocomplete="new-password"><button type="submit" class="primary">Save</button></div>
-            <p id="gitview-key-state" class="hint"></p>
+          <form id="gitview-remote" class="set-rows" autocomplete="off">
+            <div class="set-row"><div class="set-what"><label for="gitview-url">Address</label><small>https or ssh</small></div><div class="set-control"><input id="gitview-url" inputmode="url" spellcheck="false" autocapitalize="off" placeholder="https://example.com/project.git" required></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-sshkey">SSH key</label><small>Made here, for an ssh address</small></div><div class="set-control"><select id="gitview-sshkey"></select></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-user">Token user</label><small>For https, optional</small></div><div class="set-control"><input id="gitview-user" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="x-access-token"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-key">Push key or token</label><small>Kept sealed · empty keeps the current one</small></div><div class="set-control"><input id="gitview-key" type="password" autocomplete="new-password"></div></div>
+            <div class="action-row"><span id="gitview-key-state" class="hint" role="status"></span><button type="submit" class="primary">Save</button></div>
           </form>
         </details>
         </div>
@@ -902,9 +898,9 @@
           <div class="bar" role="progressbar" aria-labelledby="files-progress-text" aria-valuemin="0" aria-valuemax="100" id="files-progress-bar"><span></span></div>
           <small id="files-progress-bytes" class="hint"></small>
         </div>
-        <div id="files-ask" class="files-card" role="alertdialog" aria-labelledby="files-ask-text" hidden>
+        <div id="files-ask" class="files-card callout confirm" role="alertdialog" aria-labelledby="files-ask-text" hidden>
           <b id="files-ask-text"></b>
-          <div class="row"><button type="button" id="files-ask-keep" class="primary">Keep both</button><button type="button" id="files-ask-replace">Replace</button><button type="button" id="files-ask-skip">Skip</button></div>
+          <div class="action-row"><button type="button" id="files-ask-skip">Skip</button><button type="button" id="files-ask-replace">Replace</button><button type="button" id="files-ask-keep" class="primary">Keep both</button></div>
           <label class="check" id="files-ask-all-line"><input type="checkbox" id="files-ask-all"> <span id="files-ask-all-text">Do the same for the others</span></label>
         </div>
         <form id="files-name" class="files-card" autocomplete="off" hidden>
@@ -960,20 +956,17 @@
         </div>
         <details id="gitview-keep-box">
           <summary>Checks, origin, automatic sending</summary>
-          <form id="gitview-keep" autocomplete="off">
-            <label class="check"><input type="checkbox" id="gitview-runhook"> Run the project's pre-push hook, if it has one</label>
-            <label for="gitview-checkcommand">Check command, run in the repository in the agent's machine (optional)</label>
-            <input id="gitview-checkcommand" spellcheck="false" autocapitalize="off" maxlength="500" placeholder="npm test">
-            <label for="gitview-checkseconds">Time limit of the checks, in seconds</label>
-            <input id="gitview-checkseconds" type="number" min="10" max="3600" step="1" inputmode="numeric">
-            <label class="check"><input type="checkbox" id="gitview-require"> Send only after the checks passed</label>
-            <label for="gitview-refreshminutes">Refresh the origin every (minutes; 0: only with "Refresh now")</label>
-            <input id="gitview-refreshminutes" type="number" min="0" max="1440" step="1" inputmode="numeric">
-            <p class="hint">Refreshing and automatic sending happen only while a running machine has this repository attached; "Refresh now" works any time.</p>
-            <p class="hint" id="gitview-auto-where">Automatic sending is set for each conversation, under its access to this repository (Write), in the conversation's Access panel.</p>
-            <label class="check"><input type="checkbox" id="gitview-alert"> Tell my phone about automatic sendings</label>
-            <label class="check"><input type="checkbox" id="gitview-tellmoves"> Tell the agent when a branch it follows moved (its origin/* is fetched for it either way)</label>
-            <div class="row"><button type="submit" class="primary">Save</button><span class="hint" id="gitview-keep-said" role="status"></span></div>
+          <form id="gitview-keep" class="set-rows" autocomplete="off">
+            <div class="set-row"><div class="set-what"><label for="gitview-runhook">Pre-push hook</label><small>The project's own, if it has one</small></div><div class="set-control"><input type="checkbox" id="gitview-runhook"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-checkcommand">Check command</label><small>Run in the agent's machine, optional</small></div><div class="set-control"><input id="gitview-checkcommand" spellcheck="false" autocapitalize="off" maxlength="500" placeholder="npm test"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-checkseconds">Time limit</label><small>Of the checks, in seconds</small></div><div class="set-control"><input id="gitview-checkseconds" type="number" min="10" max="3600" step="1" inputmode="numeric"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-require">Checks required</label><small>Send only after they passed</small></div><div class="set-control"><input type="checkbox" id="gitview-require"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-refreshminutes">Origin refresh</label><small>Every N minutes · 0: by hand only</small></div><div class="set-control"><input id="gitview-refreshminutes" type="number" min="0" max="1440" step="1" inputmode="numeric"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-alert">Phone alerts</label><small>On automatic sendings</small></div><div class="set-control"><input type="checkbox" id="gitview-alert"></div></div>
+            <div class="set-row"><div class="set-what"><label for="gitview-tellmoves">Branch moves</label><small>Told to the agent · origin/* is fetched anyway</small></div><div class="set-control"><input type="checkbox" id="gitview-tellmoves"></div></div>
+            <p class="hint">Refresh and automatic sending: only while a running machine has it attached. "Refresh now": any time.</p>
+            <p class="hint" id="gitview-auto-where">Automatic sending: set for each conversation, in its Access (Write).</p>
+            <div class="action-row"><span class="hint" id="gitview-keep-said" role="status"></span><button type="submit" class="primary">Save</button></div>
           </form>
           <b>What was sent by itself, and what went wrong</b>
           <p id="gitview-log-empty" class="hint">Nothing yet.</p>

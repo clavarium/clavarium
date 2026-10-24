@@ -63,8 +63,9 @@ screenshot. What was not tried is written as not tried.
 ## 8. One look for every setting
 
 Every screen where something is set (Settings, a conversation's settings,
-and the sheets to come) is made of the same few pieces, styled once in
-`web/style.css` (the block "SETTINGS, AND A CONVERSATION'S SETTINGS: one look"):
+an asset, Access and a device, To send and the review) is made of the same
+few pieces, styled once in `web/style.css` (the block "SETTINGS, AND A
+CONVERSATION'S SETTINGS: one look", and the one after it for the other sheets):
 
 - **chapter**: a `details.chapter` card; its title and a summary of 2 to 5
   words; a chevron, never a word, says it is open.
@@ -79,6 +80,9 @@ and the sheets to come) is made of the same few pieces, styled once in
 - **action-row**: the buttons of a form, at its end, the main one last; a
   status message on its left.
 - **more**: a `details.more` with a small "i": what is long and rarely needed.
+- **confirm**: a `callout confirm` before what cannot be taken back: its line,
+  then its buttons, the main one last.
+- Rows in a card: one line between two rows in sight, whatever is hidden.
 - Fields and selects are styled by the place they are in, never one by one.
 
 The words follow the same rule: a setting is described, never narrated --

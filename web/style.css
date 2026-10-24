@@ -258,8 +258,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #gitview .commit { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--line); }
 #gitview .commit code { color: var(--ink2); }
 #gitview .commit small { color: var(--ink2); }
-#gitview-remote, #gitview-keep { display: grid; gap: 6px; margin-top: 8px; }
-#gitview-keep input:not([type=checkbox]), #gitview-keep textarea, #gitview-target, #gitview-newbranch { min-width: 0; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
+#gitview-target, #gitview-newbranch { min-width: 0; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #gitview-target { max-width: 100%; }
 #gitview-origin code { overflow-wrap: anywhere; font: .75rem/1.45 ui-monospace, Menlo, Consolas, monospace; }
 #gitview-checks-state.passed { color: var(--ok); }
@@ -437,7 +436,6 @@ textarea.public-key { flex: 1 1 260px; min-width: 0; font: .75rem ui-monospace, 
 .git-key { flex-direction: column; align-items: stretch; }
 .git-key .row { flex-wrap: wrap; }
 #git-new input[type="radio"] { min-height: 0; padding: 0; margin: 0; }
-#git-new select, #gitview-sshkey { min-height: 40px; min-width: 10rem; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 
 #settings-advanced > div { display: grid; gap: 6px; }
 #git-hosts .folder code { overflow-wrap: anywhere; font: .75rem/1.45 ui-monospace, Menlo, Consolas, monospace; }
@@ -682,7 +680,7 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .lk-add { width: 100%; margin-top: 12px; border: 1.5px dashed var(--line); background: none; border-radius: 12px; padding: 12px; }
 /* Flows. */
 .lk-files { gap: 8px; }
-.lk-tpick select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; max-width: 100%; }
+.lk-tpick select { max-width: 100%; }
 .lk-tscroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); }
 .lk-tboard { position: relative; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(118px, 150px); gap: 0 34px; padding: 16px 18px 20px; width: max-content; min-width: 100%; justify-content: center; }
 .lk-tcol { display: flex; flex-direction: column; justify-content: center; gap: 12px; position: relative; z-index: 2; }
@@ -1431,7 +1429,7 @@ button.inline.more-recent { text-decoration: none; }
 .ts-who { display: flex; flex-direction: column; min-width: 0; }
 .ts-who b { overflow-wrap: anywhere; }
 .ts-way { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
-.ts-way select { max-width: 100%; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+.ts-way select { max-width: 100%; }
 .ts-bar button:disabled { opacity: .5; cursor: default; }
 .ts-state .quiet { color: var(--ink2); font-weight: 400; }
 .ts-branch { font-family: ui-monospace, Menlo, Consolas, monospace; color: var(--brass); overflow-wrap: anywhere; }
@@ -1465,18 +1463,23 @@ button.inline.more-recent { text-decoration: none; }
 /* ---------- SETTINGS, AND A CONVERSATION'S SETTINGS: one look ----------
    Every field the same; a setting is a row (its name and one short line on
    the left, its control on the right; one under the other on a phone); a
-   state is a line with a dot; what asks for an action is a callout. */
-:is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]), select, textarea) {
+   state is a line with a dot; what asks for an action is a callout. The
+   other sheets where something is set (an asset, Access and a device, To
+   send and the review) take the same fields, at a lower weight: what is
+   their own (a branch pill, the editor) stays theirs. */
+:is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]), select, textarea),
+:where(#assets, #cassets, #access, #gitview) :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=range]), select, textarea:not(.editor)) {
   font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-height: 40px; max-width: 100%;
 }
-:is(#settings, #panel) select { appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
-:is(#settings, #panel) :is(input, select, textarea):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
-@media (pointer: coarse) { :is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]), select) { min-height: 44px; } }
+:is(#settings, #panel) select, :where(#assets, #cassets, #access, #gitview) select:not(.pill) { appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+:is(#settings, #panel) :is(input, select, textarea):focus-visible, :where(#assets, #cassets, #access, #gitview) :is(input, select, textarea):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+@media (pointer: coarse) { :is(#settings, #panel) :is(input:not([type=checkbox]):not([type=radio]), select), :where(#assets, #cassets, #access, #gitview) :is(input:not([type=checkbox]):not([type=radio]), select:not(.pill)) { min-height: 44px; } }
 #settings select.pill { font: .875rem var(--sans); font-weight: 400; }
 :is(#settings, #panel) .chapter-body { gap: 0; padding: 0; background: var(--bar); }
 :is(#settings, #panel) .chapter-body > * { margin: 0; padding: 12px 16px; }
-:is(#settings, #panel) .chapter-body > * + * { border-top: 1px solid var(--line); }
-:is(#settings, #panel) .chapter-body > [hidden] + *, :is(#settings, #panel) .chapter-body > .hint + .hint { border-top: 0; }
+/* One line between two pieces in sight: a piece hidden (or empty) neither draws one nor takes one away. */
+:is(#settings, #panel) .chapter-body > :where(:not([hidden], :empty)) ~ :where(:not([hidden], :empty)) { border-top: 1px solid var(--line); }
+:is(#settings, #panel) .chapter-body > .hint + .hint { border-top: 0; }
 :is(#settings, #panel) .chapter-body > .hint, :is(#settings, #panel) .chapter-body > .error { padding-top: 8px; padding-bottom: 8px; }
 .set-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 16px; align-items: center; }
 .set-row > .set-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -1501,6 +1504,9 @@ details.more > summary { list-style: none; cursor: pointer; display: inline-flex
 details.more > summary::-webkit-details-marker { display: none; }
 details.more > summary::before { content: "i"; display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1px solid var(--ink2); border-radius: 50%; font: italic 700 .6875rem Georgia, serif; }
 details.more[open] > summary { margin-bottom: 4px; }
+/* The same "i" in a sheet whose other folds are buttons. */
+:is(#assets, #gitview, #panel) details.more > summary { padding: 0; border: 0; background: none; font-weight: 400; min-height: 0; display: inline-flex; align-self: auto; }
+:is(#assets, #gitview, #panel) details.more > summary::before { content: "i"; }
 /* The categories: beside them on a wide screen, headings one under the other otherwise. */
 .settings-nav { display: none; }
 .settings-groups { display: flex; flex-direction: column; gap: 12px; }
@@ -1517,8 +1523,7 @@ details.more[open] > summary { margin-bottom: 4px; }
 /* A form of several settings: each its row, one line between them. */
 :is(#settings, #panel) .chapter-body > .set-rows { display: flex; flex-direction: column; padding: 0; }
 .set-rows > * { margin: 0; padding: 12px 16px; }
-.set-rows > * + * { border-top: 1px solid var(--line); }
-.set-rows > [hidden] + * { border-top: 0; }
+.set-rows > :where(:not([hidden])) ~ :where(:not([hidden])) { border-top: 1px solid var(--line); }
 /* One thing of a list (a shortcut, an administrator, a key): its name and a line; its actions on the right. */
 .list-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; padding: 10px 16px; }
 .list-item + .list-item { border-top: 1px solid var(--line); }
@@ -1530,7 +1535,7 @@ details.more[open] > summary { margin-bottom: 4px; }
 .mono-cut { font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings #export-note { max-width: none; text-align: left; margin: 0; order: 0; flex: none; }
 /* Several settings in one block: one line between them too. */
-:is(#settings, #panel) .chapter-body > * > :is(.set-row, form.set-row) ~ :is(.set-row, form.set-row):not([hidden]) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+:is(#settings, #panel) .chapter-body > * > :is(.set-row, form.set-row):not([hidden]) ~ :is(.set-row, form.set-row):not([hidden]) { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 /* Nothing in it yet (a list, a line said later): no empty band. */
 :is(#settings, #panel) .chapter-body > :empty { display: none; }
 /* A sub-heading inside a chapter: small capitals, no line of its own. */
@@ -1565,3 +1570,71 @@ details.more[open] > summary { margin-bottom: 4px; }
 .ts-why-box { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 10px; }
 .ts-why-box p { margin: 0; }
 .ts-filters { margin-top: 10px; }
+
+/* ---------- THE OTHER SHEETS, IN THE SAME LOOK ----------
+   An asset, a device, To send, the review's settings: a card of rows (the
+   set-rows of a chapter, standing alone), its heads in small capitals, its
+   buttons at the end; a question before what cannot be taken back is a callout. */
+.set-card, .as-users, .as-settings, .as-detail .set-rows, #gitview-keep, .ts-rows, .device.card .card-body { border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
+.as-detail .set-rows, #gitview-keep { display: flex; flex-direction: column; gap: 0; margin: 0; }
+.as-detail .set-rows > .action-row, #gitview-keep > .action-row { padding: 10px 16px; }
+.as-detail .set-rows > .hint, #gitview-keep > .hint { padding-top: 8px; padding-bottom: 8px; font-size: .8125rem; }
+#gitview-keep > .hint + .hint { border-top: 0; padding-top: 0; }
+.set-row > .set-control > input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--brass); }
+/* A chapter of a sheet: a head in small capitals, its action on the right. */
+.as-chapter { margin-top: 10px; min-height: 30px; }
+.as-chapter h3 { font-size: .6875rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+/* Who has it: one row each, a line between them. */
+.as-users { gap: 0; }
+.as-users > *, .device.card .given > * { border-top: 1px solid var(--line); }
+.as-users > .given-row, .device.card .given > .given-row, .thing > .given-row { padding: 10px 16px; border-top: 1px solid var(--line); }
+.as-users > :first-child, .device.card .given > :first-child { border-top: 0; }
+.as-users > .hint, .device.card .given > .hint { margin: 0; padding: 10px 16px; }
+.as-picker { border-style: dashed; background: transparent; }
+/* Its settings: the name on the left, the value on the right, as a set-row. */
+.as-settings { padding: 0 16px; }
+.as-settings dt, .as-settings dd { padding: 12px 0; }
+.as-settings dt { color: var(--ink); font-size: .875rem; font-weight: 600; }
+.as-settings dd { color: var(--ink2); font-weight: 400; font-size: .875rem; }
+.as-card, .as-lastchecks, .as-graph { background: var(--bar); border-radius: 10px; }
+.secret-rename > .set-control > input { width: 14rem; }
+.as-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.as-foot > br { display: none; }
+#gitview-remote-box { margin: 0; }
+#gitview-remote { display: flex; flex-direction: column; gap: 0; padding: 0; margin: 0; }
+#gitview-key-state { font-size: .75rem; }
+/* A device: its head, then what it has as rows, then its buttons. */
+.device.card { background: transparent; border: 0; }
+.device.card .device-head { padding: 10px 2px 8px; min-height: 0; }
+.device.card .card-body { padding: 0; gap: 0; }
+.device.card .given { display: block; }
+.device.card .given > .parts-off { margin: 0; padding: 8px 16px; }
+.device.card .device-acts { padding: 10px 16px; border-top: 1px solid var(--line); justify-content: flex-start; }
+.thing { border: 1px solid var(--line); border-radius: 10px; background: var(--bar); padding: 0; margin-top: 8px; }
+.thing > summary { padding: 0 16px; }
+/* To send: one card, a row for each branch; the result, a state line. */
+.ts-rows { gap: 0; margin-top: 12px; }
+.ts-rows:empty { display: none; }
+.ts-row { border: 0; border-radius: 0; background: transparent; padding: 12px 16px; }
+.ts-row + .ts-row { border-top: 1px solid var(--line); }
+.ts-rows > p { margin: 0; padding: 12px 16px; }
+.ts-bar { margin-top: 12px; }
+.ts-bar > .ts-why { margin-right: auto; }
+.ts-bar > .ts-why:empty { display: none; }
+.ts-said { font-weight: 600; }
+.ts-review-head h3 { font-size: .6875rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+.ts-review-head .as-line { margin-top: 4px; color: var(--ink); }
+/* The review's settings, folded under its checks. */
+#gitview-keep-box > summary { font-weight: 600; }
+#gitview-keep-box > b { display: block; margin: 14px 0 4px; font-size: .6875rem; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+/* A question before what cannot be taken back: a callout, its line, then its buttons, the main one last. */
+.callout.confirm { display: flex; flex-direction: row; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; font-size: .875rem; }
+.callout.confirm > label { flex: 1 1 100%; }
+.callout.confirm > :is(span, b, p):first-child { flex: 1 1 12rem; margin: 0; font-weight: 600; color: var(--ink); }
+.callout.confirm > .action-row { flex: 1 1 100%; }
+span.callout.confirm { display: inline-flex; justify-content: flex-end; padding: 4px; margin-left: auto; }
+.files-card.callout { border: 0; border-left: 3px solid var(--warn); border-radius: 4px; }
+#files-ask.callout { border-color: var(--warn); }
+.entry .acts.confirm { margin: 0 0 10px 44px; padding: 8px 12px; border-left: 3px solid var(--danger); border-radius: 4px; background: color-mix(in srgb, var(--danger) 8%, var(--bar)); justify-content: flex-end; }
+.entry .acts.confirm .sure { font-size: .875rem; }
+@media (max-width: 700px) { .entry .acts.confirm { margin-left: 0; } }

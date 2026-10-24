@@ -2963,11 +2963,11 @@
         const meter = el('div', 'ts-meter'); const meterFill = el('i'); meter.append(meterFill); meter.setAttribute('aria-hidden', 'true');
         const filters = el('div', 'levels ts-filters'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Show');
         const list = el('div', 'ts-rows');
-        const bar = el('div', 'as-acts ts-bar');
+        const bar = el('div', 'action-row ts-bar');
         const together = el('button', '', 'Review together'); together.type = 'button'; together.dataset.act = 'send-review';
         const go = el('button', 'primary', 'Check'); go.type = 'button'; go.dataset.act = 'send-all';
-        const why = el('span', 'hint ts-why');
-        bar.append(together, go, why);
+        const why = el('span', 'hint ts-why'); why.setAttribute('role', 'status');
+        bar.append(why, together, go);
         const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
         const review = el('div', 'ts-review'); review.hidden = true;
         holder.append(progress, meter, filters, list, bar, said, review);
@@ -3212,7 +3212,7 @@
             sending = false; paint();
             const ok = p.filter((r) => r.sent?.ok).length;
             said.textContent = ok === p.length ? `Sent: ${ok === 1 ? 'it went' : `all ${ok} went`}.` : `${ok} of ${p.length} sent; the others say why.`;
-            said.className = `ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.hidden = false;
+            said.className = `status-line ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.dataset.tone = ok === p.length ? 'ok' : 'bad'; said.hidden = false;
             if (reviewStep) nav.drop(reviewStep);
             /* What is left to send, read again; what became of each stays said. */
             const kept = new Map(rows.map((r) => [r, r.sent]));
@@ -3404,12 +3404,13 @@
         /* State, in a line. */
         if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
         if (chosen.kind === 'secret') {
-            detail.append(el('p', 'hint', 'Its value is never shown again. A change takes effect the next time the tool starts.'));
             /* Renamed: its value and the conversations it is handed to go with it. */
-            const form = el('form', 'row secret-rename'); form.autocomplete = 'off';
+            const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
             const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
             const go = el('button', '', 'Rename'); go.type = 'submit';
-            form.append(name, go);
+            const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Value never shown · applies at next start'));
+            const control = el('div', 'set-control'); control.append(name, go);
+            form.append(what, control);
             form.addEventListener('submit', async (event) => {
                 event.preventDefault();
                 $('assets-error').hidden = true;
@@ -3417,7 +3418,8 @@
                 catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
                 await paintAssets();
             });
-            detail.append(form);
+            const box = el('div', 'set-rows as-block'); box.append(form);
+            detail.append(box);
         }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
         const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
@@ -3465,13 +3467,18 @@
         const inUse = chosen.kind !== 'secret' && using.length > 0;
         if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
         remove.addEventListener('click', () => {
-            const sure = el('button', 'danger', chosen.kind === 'secret' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name} (its files are kept aside on the server)`); sure.type = 'button';
+            const sure = el('button', 'danger', chosen.kind === 'secret' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
+            const keep = el('button', '', 'Keep'); keep.type = 'button';
+            keep.addEventListener('click', () => { void paintAssets(); });
+            const ask = el('div', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog');
+            ask.append(el('span', '', chosen.kind === 'secret' ? 'Its value is lost for good.' : 'Its files are kept aside on the server.'), keep, sure);
             sure.addEventListener('click', async () => {
                 try { await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`); assetOpen = ''; }
                 catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
                 await paintAssets();
             });
-            remove.replaceWith(sure);
+            remove.replaceWith(ask); why.remove();
+            sure.focus();
         });
         /* Given to a device: from here too (the map shows who has it). */
         const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
@@ -3505,8 +3512,8 @@
         const pick = $('gitview-sshkey'); pick.replaceChildren();
         for (const [value, text] of [['', '(none)'], ...gitKeys.map((k) => [k.name, k.name])]) { const o = document.createElement('option'); o.value = value; o.textContent = text; pick.append(o); }
         pick.value = settings.sshKey ?? '';
-        $('gitview-key-state').textContent = settings.hasKey ? 'A key is kept for this repository.'
-            : settings.sshKey ? `Over ssh, the SSH key ${settings.sshKey} is used.` : 'No key is kept for sending: what the repository was cloned with is used, for the same server only; a remote that asks for more will refuse.';
+        $('gitview-key-state').textContent = settings.hasKey ? 'Push key: kept here'
+            : settings.sshKey ? `Push key: SSH key ${settings.sshKey}` : 'Push key: none · the clone\'s access, same server only';
     }
     $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
     $('assets-close').addEventListener('click', () => leavePlace());
@@ -4859,7 +4866,7 @@
         $('gitview-alert').checked = s.alert; $('gitview-tellmoves').checked = s.tellMoves !== false;
         /* Which conversations send by themselves: set in each one's Access panel. */
         const senders = Object.entries(keep.auto ?? {});
-        $('gitview-auto-where').textContent = `Automatic sending is set for each conversation, under its access to this repository (Write), in the conversation's Access panel. ${senders.length ? `Now: ${senders.map(([c, list]) => `${c} (${list.join(', ')})`).join('; ')}.` : 'Now: none.'}`;
+        $('gitview-auto-where').textContent = `Automatic sending: set for each conversation, in its Access (Write). ${senders.length ? `Now: ${senders.map(([c, list]) => `${c} (${list.join(', ')})`).join('; ')}.` : 'Now: none.'}`;
         $('gitview-origin').hidden = !keep.origin;
         if (keep.origin) {
             $('gitview-origin-where').textContent = `Its origin, kept up to date by this server, is at ${keep.origin.path} in the agent's machine, read-only, next to the repository. The tool brings it in itself, with no key, by running there:`;
@@ -5668,6 +5675,7 @@
         }
         function confirmDelete() {
             acts.replaceChildren();
+            acts.classList.add('confirm');
             const p = document.createElement('p'); p.className = 'sure';
             p.textContent = entry.folder ? `Delete the folder "${entry.name}" and everything in it? This cannot be undone.` : `Delete "${entry.name}"? This cannot be undone.`;
             const yes = button(entry.folder ? 'Delete the folder' : 'Delete', async () => {
@@ -6357,7 +6365,7 @@
         drop.addEventListener('click', () => { editing.saved = editing.area.value; then(); });
         const stay = document.createElement('button'); stay.type = 'button'; stay.textContent = 'Keep editing';
         stay.addEventListener('click', () => { box.hidden = true; editing.area.focus(); });
-        const row = document.createElement('div'); row.className = 'row'; row.append(save, drop, stay);
+        const row = document.createElement('div'); row.className = 'action-row'; row.append(stay, drop, save);
         box.append(p, row); box.hidden = false;
         save.focus();
     }
@@ -6383,7 +6391,7 @@
         area.className = 'editor'; area.value = read.text; area.spellcheck = false;
         area.setAttribute('autocapitalize', 'off'); area.setAttribute('autocomplete', 'off'); area.setAttribute('wrap', 'off');
         area.setAttribute('aria-label', `Text of ${name}`);
-        const ask = document.createElement('div'); ask.className = 'edit-ask files-card'; ask.hidden = true; ask.setAttribute('role', 'alertdialog');
+        const ask = document.createElement('div'); ask.className = 'edit-ask files-card callout confirm'; ask.hidden = true; ask.setAttribute('role', 'alertdialog');
         const bar = document.createElement('div'); bar.className = 'row edit-bar';
         const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save'; save.id = 'edit-save';
         const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel'; cancel.id = 'edit-cancel';
@@ -6469,7 +6477,7 @@
         over.addEventListener('click', () => { void saveEdit('any'); });
         const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'primary'; copy.textContent = 'Save mine as a copy';
         copy.addEventListener('click', () => { void saveEdit('copy'); });
-        const row = document.createElement('div'); row.className = 'row'; row.append(copy, over, reload);
+        const row = document.createElement('div'); row.className = 'action-row'; row.append(reload, over, copy);
         box.append(p, look, row); box.hidden = false;
         copy.focus();
         e.tell('not saved: changed meanwhile');
@@ -6848,7 +6856,8 @@
         const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
         keep.addEventListener('click', () => { void repaintDevices(); });
         sure.addEventListener('click', async () => { await run().catch(() => {}); await repaintDevices(); void refresh(); });
-        button.replaceWith(sure, keep);
+        const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
+        button.replaceWith(ask); sure.focus();
     }
     function grantRow(device, g) {
         const [type, name] = g.asset.split(':');
@@ -6917,7 +6926,7 @@
         if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
         const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
         more.addEventListener('click', () => { void openCompose([], device.id); });
-        const acts = document.createElement('div'); acts.className = 'row device-acts'; acts.append(more, rename, revoke);
+        const acts = document.createElement('div'); acts.className = 'action-row device-acts'; acts.append(more, rename, revoke);
         const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
         card.append(head, body);
         return card;
@@ -6990,7 +6999,8 @@
                 const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
                 keep.addEventListener('click', () => { void paintShareHere(); });
                 sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset }).catch(() => {}); await paintShareHere(); void refresh(); });
-                take.replaceWith(sure, keep);
+                const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
+                take.replaceWith(ask); sure.focus();
             });
             row.append(label, right, take); box.append(row);
         }
