@@ -61,6 +61,7 @@ import { Updates } from './updates.mjs';
 import { Certificate } from './certificate.mjs';
 import { Operators } from './operators.mjs';
 import { HealthReact } from './healthreact.mjs';
+import { HealthDocket } from './healthdocket.mjs';
 import { MachinesMove } from './machinesmove.mjs';
 import { Wifi } from './wifi.mjs';
 import { Binders } from './binders.mjs';
@@ -438,10 +439,14 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
     const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
         isAgent: (name) => all.list().find((c) => c.name === name)?.ai === true, event: (name, line) => talk.event(name, line) });
+    /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs). */
+    const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets });
+    health.forgotten = (name) => healthDocket.forget(name);
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();
     health.judged = (name, record) => {
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
+        try { healthDocket.judged(name, record); } catch { /* its docket: nothing more */ }
         const now = (record?.problems ?? []).filter((x) => x.level === 'bad' || (x.level === 'warn' && ['memory', 'disk'].includes(x.kind)));
         const before = problemsSaid.get(name) ?? new Set();
         for (const x of now) if (!before.has(x.key)) events.add({ kind: 'machine', text: `${name}: ${x.text}`, conversation: name });

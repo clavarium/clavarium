@@ -128,6 +128,8 @@ export class Health {
     #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen;
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
+    /* Set by the server: told a conversation is forgotten (what else is kept of its machine goes too). */
+    forgotten = () => {};
 
     /* `settleMs`: how long a missing folder is given before it is mounted
        again (a machine that has just started may still be mounting it).
@@ -148,7 +150,7 @@ export class Health {
         this.#seen?.put({ name, keys, at: new Date().toISOString() });
         return this.of(name);
     }
-    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); }
+    forget(name) { this.#records.delete(name); this.#quiet.delete(name); this.#seen?.remove?.(name); try { this.forgotten(name); } catch { /* told */ } }
 
     /* The look under way (it may be mounting a folder again), or null. */
     busy(name) { return this.#running.get(name) ?? null; }

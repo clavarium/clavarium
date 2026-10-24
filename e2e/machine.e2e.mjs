@@ -171,6 +171,15 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     const said = await me.page.locator('#machine-health').innerText();
     assert.match(said, /Its memory is almost full: 20 MB free of 768 MB/);
     assert.match(said, /Its disk is almost full: 50 MB left/);
+    /* Its chat is on: its agent is given one event for its disk and one for the machine out of memory (healthdocket.mjs). */
+    const posted = async () => (await me.api('/api/conversations/roomy/docket')).body.events.filter((e) => e.kind === 'machine-health').map((e) => e.text);
+    await me.until('its agent has them in its docket', async () => (await posted()).length >= 2);
+    const events = await posted();
+    assert.ok(events.some((x) => /^Disk of your machine at 99% \(\/\): free space/.test(x)), events.join('\n'));
+    assert.ok(events.some((x) => /^Your machine ran out of memory \(2 times since it started\)/.test(x)), events.join('\n'));
+    await me.page.locator('#health-check').click();
+    await me.page.waitForTimeout(1500);
+    assert.equal((await posted()).filter((x) => /^(Disk|Your machine)/.test(x)).length, 2, 'looked at again: not posted again');
     rmSync(join(vmHome(b, 'roomy'), 'health.json'));
     /* What it has now, and only larger disks. */
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '768');
