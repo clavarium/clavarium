@@ -144,6 +144,12 @@ test('a git repository is added from the page, attached like a folder, and is a 
     await me.page.locator('#git-new button[type=submit]').click();
     await me.until('the repository is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="git:site"]').count()) === 1);
     await me.until('and opened', async () => (await me.page.locator('#assets-detail h2').innerText().catch(() => '')).includes('site'));
+    /* Opened, it is read (what would be sent, its branches): empty, the
+       tools that write in it are told so, a line typed in their terminal
+       (gitkeeper.mjs #toAgent). Those reads are let finish before it is
+       attached: under load they ended after, and that line was typed into
+       the command below, which never ran. */
+    await me.until('it is read, and said empty', async () => /Nothing has been committed on a branch in this repository yet/.test(await me.page.locator('#assets-detail').innerText().catch(() => '')), 30_000);
     await me.page.locator('#assets-close').click();
     await me.access('site', 'Write');
     assert.match(await me.page.locator('#view-assets').getAttribute('title'), /site - write/);

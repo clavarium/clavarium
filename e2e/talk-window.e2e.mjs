@@ -23,13 +23,17 @@ test('a chat of 600 messages: the last 200 shown, "Earlier messages" brings 200 
     writeFileSync(join(bridge, 'to-agent.jsonl'), person.map((x) => `${JSON.stringify(x)}\n`).join(''));
     writeFileSync(join(bridge, 'read.json'), JSON.stringify({ lines: person.length, reads: [] }));
     assert.equal((await me.api('/api/conversations/notes/talk', { on: true })).status, 200);
-    /* What the page asks of the chat, and how much comes back. */
+    /* What the page asks of the chat, and how much comes back. Noted when
+       asked, its size when it has come (`read`): noted only once its body
+       was read, a request was counted after the page had already drawn what
+       it brought -- under load, after the step that looked for it. */
     const asked = [];
-    me.page.on('response', async (r) => {
-        const url = new URL(r.url());
-        if (!/\/api\/conversations\/notes\/talk(\/search)?$/.test(url.pathname) || r.request().method() !== 'GET') return;
-        const body = await r.body().catch(() => Buffer.alloc(0));
-        asked.push({ query: Object.fromEntries(url.searchParams), search: url.pathname.endsWith('/search'), bytes: body.length });
+    me.page.on('request', (q) => {
+        const url = new URL(q.url());
+        if (!/\/api\/conversations\/notes\/talk(\/search)?$/.test(url.pathname) || q.method() !== 'GET') return;
+        const x = { query: Object.fromEntries(url.searchParams), search: url.pathname.endsWith('/search'), bytes: null };
+        x.read = q.response().then((r) => r?.body()).then((body) => { x.bytes = body?.length ?? 0; }, () => { x.bytes = 0; });
+        asked.push(x);
     });
     await me.page.goto(`${b.origin}/?c=notes`);
     const thread = me.page.locator('#simple-thread');
@@ -38,6 +42,7 @@ test('a chat of 600 messages: the last 200 shown, "Earlier messages" brings 200 
     assert.equal(await thread.locator('.parley-said[data-from=agent] .parley-md').first().innerText(), `Tool message 400: ${'the tests pass and the page is drawn again '.repeat(4).trim()}`);
     const first = asked.find((x) => x.query.last === '200' && !x.query.since);
     assert.ok(first, 'its window asked for');
+    await first.read;
     /* The page before, the reader kept where they were. */
     const scroller = thread.locator('.parley-thread');
     await scroller.evaluate((e) => { e.scrollTop = 0; });
@@ -59,11 +64,16 @@ test('a chat of 600 messages: the last 200 shown, "Earlier messages" brings 200 
     const before = asked.length;
     appendFileSync(join(bridge, 'from-agent.jsonl'), `${JSON.stringify({ id: 'fresh-0000-4000-8000-000000000000', at: new Date().toISOString(), kind: 'say', text: 'One more: done.' })}\n`);
     await me.until('its new message', async () => (await thread.locator('.parley-said[data-id="fresh-0000-4000-8000-000000000000"]').count()) === 1, 30_000);
-    const looks = asked.slice(before).filter((x) => !x.search);
+    /* Besides, every few seconds, the page asks whether the chat is on
+       (state=1): nothing of the thread, small too. Under load one falls
+       in this step. */
+    const after = asked.slice(before).filter((x) => !x.search);
+    const looks = after.filter((x) => x.query.state !== '1');
     assert.ok(looks.length >= 1);
-    assert.ok(looks.every((x) => x.query.since), 'only what changed is asked for');
-    assert.ok(looks.every((x) => x.bytes < 6000), `small: ${looks.map((x) => x.bytes).join(', ')} bytes, against ${first.bytes} for the window`);
-    assert.ok(first.bytes > 20 * Math.max(...looks.map((x) => x.bytes)));
+    assert.ok(looks.every((x) => x.query.since), `only what changed is asked for: ${JSON.stringify(looks.map((x) => x.query))}`);
+    await Promise.all(after.map((x) => x.read));
+    assert.ok(after.every((x) => x.bytes < 6000), `small: ${after.map((x) => x.bytes).join(', ')} bytes, against ${first.bytes} for the window`);
+    assert.ok(first.bytes > 20 * Math.max(...after.map((x) => x.bytes)));
     /* The files on disk are whole; the page threw nothing. */
     assert.equal(readFileSync(join(bridge, 'from-agent.jsonl'), 'utf8').split('\n').filter(Boolean).length, 301);
     assert.deepEqual(me.errors, []);
