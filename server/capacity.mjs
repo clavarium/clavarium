@@ -36,6 +36,7 @@
  * nothing is refused: the reserve is a guard, not a gate that jams.
  */
 import { Refusal, DISK_GB } from './conversations.mjs';
+import { MIN_FREE_MB } from './shelf.mjs';
 
 export const RESERVE_DISK_MB = 5 * 1024;
 export const RESERVE_MEMORY_MB = 1024;
@@ -244,8 +245,16 @@ export class Capacity {
             throw new Refusal(409, `${verb}: this server cannot spare ${asks}. It has ${gb(f.memory.freeMb)} of memory free and keeps ${gb(r.memoryMb)} in reserve. ${what}, or lower the reserve in Settings, This server.`);
         }
         const takes = kind === 'create' ? (this.#shelf?.about?.().current?.sizeMb ?? NEW_MACHINE_MB) : diskMb;
-        if (f.disk && kind !== 'start' && takes > 0 && f.disk.freeMb - takes < r.diskMb) {
-            const asks = kind === 'create' ? `the ${gb(takes)} of disk a new machine takes` : `${gb(takes)} more disk for ${who}`;
+        /* A disk grown: the host program refuses it under its own floor
+           (grow_room in deploy/clavarium-host: what it grows by, plus
+           SHELF_MIN_FREE_MB), whatever reserve is set here. The same rule
+           here, so that it is refused before anything is stopped. */
+        if (f.disk && kind === 'grow' && takes > 0) {
+            const needMb = takes + Math.max(r.diskMb, MIN_FREE_MB);
+            if (f.disk.freeMb < needMb) throw new Refusal(409, `${verb}: ${gb(f.disk.freeMb)} of disk free, ${gb(needMb)} needed.`);
+        }
+        if (f.disk && kind === 'create' && takes > 0 && f.disk.freeMb - takes < r.diskMb) {
+            const asks = `the ${gb(takes)} of disk a new machine takes`;
             throw new Refusal(409, `${verb}: this server cannot spare ${asks}. It has ${gb(f.disk.freeMb)} of disk free and keeps ${gb(r.diskMb)} in reserve. Archive conversations you no longer need, or lower the reserve in Settings, This server.`);
         }
     }

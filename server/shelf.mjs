@@ -35,6 +35,8 @@ export const REFRESH_MS = 30 * DAY;
 /* A little more than a month: a monthly rebuild that failed for a few days
    does not send every new conversation the long way at once. */
 export const MAX_AGE_MS = 40 * DAY;
+/* SHELF_MIN_FREE_MB of deploy/clavarium-host, which refuses under it too:
+   a rebuild, and a disk grown (on top of what it grows by: capacity.mjs). */
 export const MIN_FREE_MB = 6 * 1024;
 /* After a failed or refused rebuild, the next automatic try waits this long. */
 export const RETRY_MS = DAY;

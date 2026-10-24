@@ -2,10 +2,13 @@
    verbs, shown, and a reserve that refuses, in words, what would eat into it. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
+import { MIN_FREE_MB } from '../server/shelf.mjs';
 import { Capacity, readRoom, readUsage, RESERVE_DISK_MB, RESERVE_MEMORY_MB, RESERVE_DISK_PERCENT, RESERVE_MEMORY_PERCENT, ROOM_MS, NEW_MACHINE_MB } from '../server/capacity.mjs';
 
 function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [] } = {}) {
@@ -82,7 +85,7 @@ test('the reserve: refuses what would eat into it, in words that say why and wha
     await assert.rejects(b.capacity.check({ kind: 'create', memoryMb: 1024 }), (e) => e.message === `Not created: this server cannot spare the ${(NEW_MACHINE_MB / 1024).toFixed(1)} GB of disk a new machine takes. It has 7.8 GB of disk free and keeps 5.0 GB in reserve. Archive conversations you no longer need, or lower the reserve in Settings, This server.`);
     await b.capacity.check({ kind: 'start', name: 'alpha', memoryMb: 1024 });
     await b.capacity.check({ kind: 'grow', name: 'alpha', diskMb: 1024 });
-    await assert.rejects(b.capacity.check({ kind: 'grow', name: 'alpha', diskMb: 4096 }), /^Error: Not changed: this server cannot spare 4\.0 GB more disk for alpha\./);
+    await assert.rejects(b.capacity.check({ kind: 'grow', name: 'alpha', diskMb: 4096 }), (e) => e.status === 409 && e.message === 'Not changed: 7.8 GB of disk free, 10.0 GB needed.');
     await assert.rejects(b.capacity.check({ kind: 'grow', name: 'alpha', memoryMb: 3072 }), /Not changed: this server cannot spare 3\.0 GB more memory for alpha\..*or give it less, or lower/);
     /* Lowered by the owner: allowed. */
     assert.deepEqual(b.capacity.setReserve({ diskMb: 0, memoryMb: 0 }), { diskMb: 0, diskPercent: 5, memoryMb: 0, memoryPercent: 5 });
@@ -102,6 +105,24 @@ test('the reserve: refuses what would eat into it, in words that say why and wha
     /* A ready-made machine says what a copy takes. */
     const s = bench(t, { room: 'place machines 1 100000 9000\nmemory 16384 8000', conversations: [], shelfMb: 6500 });
     await assert.rejects(s.capacity.check({ kind: 'create', memoryMb: 1024 }), /the 6\.3 GB of disk a new machine takes/);
+});
+
+/* The server kept 5 GB under a grown disk where the host program keeps 6:
+   it accepted a resize the host then refused, once the machine was stopped. */
+test('a disk grown: the floor of the host program, whatever reserve is set, at the same boundary as the host', async (t) => {
+    const host = fileURLToPath(new URL('../deploy/clavarium-host', import.meta.url));
+    assert.match(readFileSync(host, 'utf8'), new RegExp(`^SHELF_MIN_FREE_MB="${MIN_FREE_MB}"$`, 'm'), 'one floor, the same on both sides');
+    const hostSays = (has, wants, free) => spawnSync('/bin/bash', [host, '--say-only', '--data', '/var/lib/clavarium', 'disk', 'room', String(has), String(wants), String(free)]).status === 0;
+    for (const free of [12 * 1024 + MIN_FREE_MB - 1, 12 * 1024 + MIN_FREE_MB, 5 * 1024 + 12 * 1024 + 100]) {
+        const b = bench(t, { room: `place machines 1 100000 ${free}\nmemory 16384 8000`, conversations: [] });
+        b.capacity.setReserve({ diskMb: 0, diskPercent: 0 });
+        const server = await b.capacity.check({ kind: 'grow', name: 'alpha', diskMb: 12 * 1024 }).then(() => true, () => false);
+        assert.equal(server, hostSays(8, 20, free), `${free} MB free`);
+    }
+    /* A larger reserve set here still holds. */
+    const b = bench(t, { room: 'place machines 1 100000 20000\nmemory 16384 8000', conversations: [] });
+    b.capacity.setReserve({ diskMb: 10 * 1024 });
+    await assert.rejects(b.capacity.check({ kind: 'grow', name: 'alpha', diskMb: 12 * 1024 }), (e) => e.message === 'Not changed: 19.5 GB of disk free, 22.0 GB needed.');
 });
 
 test('figures that cannot be read refuse nothing', async (t) => {

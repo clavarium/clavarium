@@ -87,6 +87,8 @@ SHELF_CACHE="$SHELF_STORE/cache"
 # (No drop-in is the usual case: under pipefail a missing file must not stop this program.)
 MOVED_TO="$( { sed -n 's/^Environment=MULTIPASS_STORAGE=\(\/[A-Za-z0-9/._-]*\)$/\1/p' /etc/systemd/system/snap.multipass.multipassd.service.d/override.conf 2>/dev/null || true; } | head -1)"
 if [ -n "$MOVED_TO" ] && [ -d "$MOVED_TO/data" ]; then SHELF_STORE="$MOVED_TO"; SHELF_INSTANCES="$MOVED_TO/data/vault/instances"; SHELF_CACHE="$MOVED_TO/cache"; fi
+# Also the floor under a grown disk (grow_room): the server keeps the same
+# (MIN_FREE_MB in server/shelf.mjs, used by server/capacity.mjs).
 SHELF_MIN_FREE_MB="6144"
 CONF="/etc/clavarium/host.conf"
 # THE GIT READER (verb "git read"): an empty root-owned directory used as the

@@ -229,6 +229,17 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '2048');
     assert.equal(await me.page.locator('#machine-memory option[value="2048"]').innerText(), '2 GB (now)');
     assert.match(await me.page.locator('#general-facts').innerText(), /2 GB of memory, 16 GB disk/);
+    /* Above this server's reserve but under the host's floor (what it grows by, plus 6 GB): refused before it is stopped. */
+    process.env.FAKE_SERVER_ROOM = ['place machines 2049 102400 10000', 'place data 2049 102400 61440', 'place folders 2049 102400 61440', 'memory 16384 12288'].join('\n');
+    t.after(() => { delete process.env.FAKE_SERVER_ROOM; });
+    await me.page.selectOption('#machine-disk', '20');
+    await me.page.locator('#machine-size-apply').click();
+    await me.page.locator('#notice-action', { hasText: 'Change it' }).click();
+    await me.until('refused', async () => (await me.page.locator('#notice-text').innerText()) === 'Not changed: 9.8 GB of disk free, 10.0 GB needed.', 20_000);
+    delete process.env.FAKE_SERVER_ROOM;
+    await me.page.locator('#notice-action', { hasText: 'Back' }).click();
+    assert.equal((await me.api('/api/conversations')).body[0].diskGb, 16);
+    await me.until('live again, never stopped', async () => (await me.state()) === 'live', 30_000);
     await me.page.locator('#view-terminal').click();
     /* Its tool came back after the restart: given the time a loaded bench takes. */
     await me.type('echo still-here');
