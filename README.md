@@ -103,8 +103,12 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   ways: what the tool shows, and what the person attaches to a message (put
   under /work/.parley/files/, the tool given its path). What is wrong with its
   machine, and its restarts, are grey lines in the thread, with what can be
-  done; after a restart the tool is told once to read the whole thread again
-  (`parley read --all`). The server keeps its own copy of the thread, out of
+  done; after a restart the tool is told once to read the end of the thread
+  (`parley read --last 100`, or as the owner chose in Settings), and reads
+  further back as it needs. The page shows the end of the thread too (the
+  last 200 messages, or as each device chose), "Earlier messages" on demand;
+  the search looks in the whole thread, and each look brings only what
+  changed. Nothing is ever cut or summarised. The server keeps its own copy of the thread, out of
   the machine: a line the tool rewrites or deletes in /work/.parley, the
   owner's too, is shown as it was, and the thread says "History changed
   here". Off by default, per conversation; what the tool

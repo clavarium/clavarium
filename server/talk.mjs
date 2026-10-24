@@ -39,7 +39,9 @@
  *                            there), each with what can be done about it.
  *   AFTER A RESTART          the tool starts again with no memory of the
  *                            chat: once it had time to start, REREAD is typed
- *                            in its terminal, once (it reads the whole thread).
+ *                            in its terminal, once (it reads the end of the
+ *                            thread, as far as the owner chose, and further
+ *                            back as it needs).
  *   THE THREAD, KEPT HERE    Parley's own copy (its `keep`): every line read
  *                            or written is kept in this server's data, one
  *                            folder per conversation, out of the machine's
@@ -57,9 +59,9 @@
  * the tool agrees to use it.
  */
 import { posix, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, lstatSync, rmSync } from 'node:fs';
-import { install, Parley, WAKE, REREAD, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
+import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
 import { Refusal, SESSION } from './conversations.mjs';
@@ -68,6 +70,17 @@ import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
 const IN_MACHINE = `/work/${FOLDER}`;
+/* A part of the thread as the page asks for it (?last=200, ?days=3, ?before=ID, ?from=ID, ?since=CURSOR): Parley's options, or null. */
+export function partOf(query) {
+    if (!query || typeof query !== 'object') return null;
+    const get = (k) => (typeof query.get === 'function' ? query.get(k) : query[k]);
+    /* ?state=1: whether it is on, and no message (the page asks it often). */
+    if (String(get('state') ?? '') === '1') return { state: true };
+    const out = {};
+    for (const k of ['last', 'days']) { const v = get(k); if (v !== null && v !== undefined && /^[1-9]\d{0,4}$/.test(String(v))) out[k] = Number(v); }
+    for (const k of ['before', 'from', 'since']) { const v = get(k); if (typeof v === 'string' && PART.test(v)) out[k] = v; }
+    return Object.keys(out).length ? out : null;
+}
 const PANE = `=${SESSION}:`;
 /* Nothing is typed in a terminal somebody typed in this recently. */
 export const TYPING_QUIET_MS = 4000;
@@ -156,6 +169,15 @@ const WORD_MAX = 500;
 /* The words of the page and of the alerts. */
 const WORDS = Object.freeze([...KEYS, 'alert-asks', 'alert-waits']);
 
+/* WHAT IS READ OF THE THREAD AT FIRST: the newest messages, or those of the last days. The
+   screen chooses for itself (each device, app.js); the tool's choice is the owner's, here:
+   what REREAD asks it to read after a restart, and what its guide says. Either way the rest
+   is there, read on demand: the thread is never cut, summarised nor compacted. */
+export const WINDOWS = Object.freeze(['messages:100', 'messages:200', 'messages:500', 'days:1', 'days:3', 'days:7']);
+export const AI_WINDOW = 'messages:100';
+export const windowOf = (choice) => { const [kind, n] = String(choice).split(':'); return kind === 'days' ? { days: Number(n) } : { last: Number(n) }; };
+/* What the page may ask for: a part of the thread (Parley's read(options)), its own cursor for "since". */
+const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
@@ -266,18 +288,56 @@ export class Talk {
     #listen(name) { if (!this.#listening.has(name)) { try { this.#listening.set(name, this.#parley(name).listen({ every: this.#every })); } catch { /* its folder is not there yet */ } } }
     #deaf(name) { this.#listening.get(name)?.(); this.#listening.delete(name); }
 
-    of(name) {
+    /* `part`: a part of the thread (the page's window, the page before it, what changed since its
+       cursor: Parley's read(options)); none, the newest SHOWN_MAX, as before. The cursor given back
+       is Parley's and this server's own lines', together. */
+    of(name, part) {
         const c = this.#known(name);
         const possible = c.work === 'kept';
         const record = this.#store.get(name);
         const tools = Boolean(this.#toolbox?.find('parley'));
         if (record?.on !== true || !possible) return { on: false, possible, tools, messages: [], waiting: 0, status: null, steps: [], files: [], unread: 0 };
-        const read = this.#parley(name).read();
+        const wake = { waits: record.pending === true || record.reread === true, typed: record.typedAt ?? null, why: record.reread === true ? 'restarting' : record.why ?? null };
         /* The machine's lines go among the messages, where they happened. */
         const lines = (record.system ?? []).map((l) => ({ from: 'system', kind: 'system', choices: [], ...l }));
-        const messages = [...read.messages, ...lines].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-SHOWN_MAX);
-        return { on: true, possible, tools, ...read, messages, wake: { waits: record.pending === true || record.reread === true, typed: record.typedAt ?? null, why: record.reread === true ? 'restarting' : record.why ?? null } };
+        const asked = partOf(part);
+        if (asked?.state) return { on: true, possible, tools, wake };
+        if (!asked) {
+            const read = this.#parley(name).read();
+            const messages = [...read.messages, ...lines].sort((a, b) => String(a.at).localeCompare(String(b.at))).slice(-SHOWN_MAX);
+            return { on: true, possible, tools, ...read, messages, wake };
+        }
+        /* Its own lines change apart from the thread (and their buttons with what was marked seen): their stamp is part of the cursor. */
+        const stamp = createHash('sha256').update(JSON.stringify([record.system ?? [], this.#health?.of?.(name)?.seenAt ?? null])).digest('hex').slice(0, 10);
+        const [thread, ours] = asked.since ? String(asked.since).split('~') : [];
+        const read = this.#parley(name).read({ ...asked, ...(asked.since ? { since: thread } : {}) });
+        const cursor = `${read.cursor}~${stamp}`;
+        if (read.since === true) return { on: true, possible, tools, ...read, messages: [...read.messages, ...(ours === stamp ? [] : lines)].sort((a, b) => String(a.at).localeCompare(String(b.at))), cursor, wake };
+        /* A part: the lines of its time. */
+        const w = read.window ?? {};
+        const mine = lines.filter((l) => (!(w.more > 0) || String(l.at) >= String(w.from ?? '')) && (w.until === null || w.until === undefined || String(l.at) < String(w.until)));
+        return { on: true, possible, tools, ...read, messages: [...read.messages, ...mine].sort((a, b) => String(a.at).localeCompare(String(b.at))), cursor, wake };
     }
+
+    /* The whole thread searched, however little of it a screen shows (Parley's search). */
+    search(name, text) {
+        if (!this.of(name).on) throw new Refusal(409, 'Its chat is off.');
+        return this.#parley(name).search(String(text ?? '').slice(0, 200));
+    }
+
+    /* What the tool reads of its chat after a restart (REREAD), the owner's choice of WINDOWS. */
+    window() {
+        const ai = this.#words?.get('window')?.ai;
+        return { ai: WINDOWS.includes(ai) ? ai : AI_WINDOW, default: AI_WINDOW, choices: [...WINDOWS] };
+    }
+    setWindow({ ai } = {}) {
+        if (!WINDOWS.includes(ai)) throw new Refusal(400, `The window is one of: ${WINDOWS.join(', ')}.`);
+        this.#words.put({ name: 'window', ai });
+        return this.window();
+    }
+    /* The line typed after a restart, and the command it names (for its guide). */
+    rereadLine() { return reread(windowOf(this.window().ai)); }
+    rereadCommand() { const w = windowOf(this.window().ai); return w.days ? `parley read --days ${w.days}` : `parley read --last ${w.last}`; }
 
     /* For the list of conversations: does it wait for its owner? Cheap: two small files read. */
     brief(name) {
@@ -285,7 +345,8 @@ export class Talk {
         if (r?.on !== true) return null;
         /* On, but unreadable just now: still said to be on (the share sheet offers its chat by that). */
         try {
-            const now = this.#parley(name).read();
+            /* Its open questions, however old, come with the newest messages (Parley's window). */
+            const now = this.#parley(name).read({ last: SHOWN_MAX });
             /* Its last message, either way: the list says when it last spoke, and what (app.js, Recent). */
             /* What the person or the tool said -- never a line of this server (a restart, a machine put to sleep):
                those are no one using it, and would lift it in Recent. */
@@ -426,7 +487,7 @@ export class Talk {
        picture placed in the text), or attached by the person. */
     shown(name, reference) {
         if (!this.of(name).on || typeof reference !== 'string' || !reference) return false;
-        return this.#parley(name).read().messages.some((m) => m.open === reference || (m.files ?? []).some((f) => f.open === reference) || (m.refs ?? []).some((r) => r.open === reference));
+        return this.#parley(name).read({ all: true }).messages.some((m) => m.open === reference || (m.files ?? []).some((f) => f.open === reference) || (m.refs ?? []).some((r) => r.open === reference));
     }
 
     /* ---- lines of the machine, and of what happened to its repositories ---- */
@@ -522,7 +583,7 @@ export class Talk {
                 if (wait > 0) return later(wait + 100);
             }
         }
-        if (!(await this.#type(name, REREAD).catch(() => false))) return later(RETRY_MS);
+        if (!(await this.#type(name, this.rereadLine()).catch(() => false))) return later(RETRY_MS);
         /* Reading the whole thread, it reads what waits too: that line is not typed after it. */
         const waits = this.#parley(name).unread() > 0;
         this.#store.put({ ...this.#store.get(name), reread: false, ...(waits ? { pending: false, woke: true, why: null, again: false } : {}), typedAt: new Date(this.#now()).toISOString() });

@@ -20,7 +20,8 @@
  *   GET  .../files/thumb|text   POST .../files/save|make|rename|move|remove|taken   (see files.mjs)
  *   POST /c/api/<pairing>/leave   the device removes this pairing itself
  *   GET  /c/api/<pairing>/talk/words?lang=
- *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}
+ *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}; ?last= ?days= ?before= ?from= ?since=: a part of it
+ *   GET  /c/api/<pairing>/conversations/<any>/talk/search?q=   its whole chat searched
  *   POST /c/api/<pairing>/conversations/<any>/talk/remind
  *   POST /c/api/<pairing>/conversations/<any>/talk/react        {to, reaction}: a reaction to a message of the tool (null: taken back)
  *   POST /c/api/<pairing>/conversations/<any>/talk/file?name=   a file attached to a message
@@ -174,7 +175,8 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (talk && (route === '/talk/words' || talking)) need(part.chat !== null, 'the chat');
         if (talk && request.method === 'GET' && route === '/talk/words') return send(200, talk.words(url.searchParams.get('lang') ?? 'en'));
         if (talk && talking) {
-            if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name));
+            if (request.method === 'GET' && !talking[1]) return send(200, talk.of(name, url.searchParams));
+            if (request.method === 'GET' && talking[1] === '/search') return send(200, talk.search(name, url.searchParams.get('q') ?? ''));
             /* Reminding the tool and writing to it: a chat given to write in. Nothing else (turning it on, inviting the tool) is a device's. */
             if (request.method === 'POST' && (talking[1] === undefined || talking[1] === '/remind' || talking[1] === '/file' || talking[1] === '/react')) need(part.chat === 'write', 'the chat to write in');
             if (request.method === 'POST' && talking[1] === '/react') { const body = await readJson(request); return send(200, await talk.react(name, body.to, body.reaction ?? null)); }

@@ -329,7 +329,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        its machine at a start and when a setting changes. `talk` and
        `wakeups` are made below; only asked once the server runs. */
     const guide = new Guide({ store: new Store(`${dataDir}/guide.json`), vms, conversations: all, resources: folders, secrets, toolbox, tools,
-        chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line) });
+        chat: (name) => Boolean(talk?.brief(name)), say: (name, line) => wakeups.say(name, line), reread: () => talk?.rereadCommand() ?? null });
     /* Why Parley is not in a machine, said once in the log, not at each opening. */
     const parleySaid = new Map();
     all.prepare = async (name, woke) => {

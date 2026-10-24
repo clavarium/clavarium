@@ -2374,11 +2374,21 @@
         return chatWords;
     }
     /* The same on this server's own page and on a device's (which speaks for its own conversation). */
-    const talkPath = (name, tail = '') => `${API}/conversations/${encodeURIComponent(name)}/talk${tail}${DEVICE ? `?${new URLSearchParams({ c: name })}` : ''}`;
+    const talkPath = (name, tail = '', params = {}) => {
+        const q = new URLSearchParams({ ...(DEVICE ? { c: name } : {}), ...Object.fromEntries(Object.entries(params).filter(([, v]) => v !== undefined && v !== null).map(([k, v]) => [k, String(v)])) });
+        return `${API}/conversations/${encodeURIComponent(name)}/talk${tail}${String(q) ? `?${q}` : ''}`;
+    };
+    /* WHAT THE CHAT SHOWS AT FIRST, chosen on each device (Settings, Chat screen): the newest
+       messages, or those of the last days; the rest on demand ("Earlier messages"). */
+    const CHAT_WINDOWS = [['messages:100', 'Last 100 messages'], ['messages:200', 'Last 200 messages'], ['messages:500', 'Last 500 messages'], ['days:1', 'Last day'], ['days:3', 'Last 3 days'], ['days:7', 'Last 7 days']];
+    let chatWindow = 'messages:200';
+    try { const kept = localStorage.getItem('clavarium-chat-window'); if (CHAT_WINDOWS.some(([v]) => v === kept)) chatWindow = kept; } catch { /* a private window */ }
+    const windowFor = (choice) => { const [kind, n] = choice.split(':'); return kind === 'days' ? { days: Number(n) } : { messages: Number(n) }; };
     async function readTalk() {
         /* A device not given the chat does not ask for it: the server would refuse. */
         if (!current || (DEVICE && deviceParts.chat === null)) { talk = { on: false, messages: [] }; talkOf = current; return talk; }
-        talk = await fetch(talkPath(current)).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
+        /* Whether it is on, nothing of the thread: asked every few seconds. */
+        talk = await fetch(talkPath(current, '', { state: 1 })).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
         talkOf = current;
         return talk;
     }
@@ -2413,10 +2423,22 @@
         const name = current;
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
+        /* The lines of its machine seen so far: what changed comes alone, and their buttons are worked out on all of them. */
+        const lines = new Map();
+        const withLines = (data, asked) => {
+            if (!Array.isArray(data?.messages)) return data;
+            if (data.since !== true && !asked?.before) lines.clear();
+            for (const m of data.messages) if (m.from === 'system') lines.set(m.id, m);
+            return data.since === true ? { ...data, messages: [...data.messages.filter((m) => m.from !== 'system'), ...lines.values()] } : data;
+        };
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
-            load: () => fetch(talkPath(name)).then((r) => r.json()).then(machineLines).then((data) => withMachine(data, name)),
+            /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
+            window: windowFor(chatWindow),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)),
+            /* The whole thread searched, however little of it is shown. */
+            search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
             send: (text, answers, files, extra) => post(talkPath(name), { text, answers, ...(files ? { files: files.map((f) => (f.note ? { path: f.path, note: f.note } : f.path)) } : {}), ...(extra?.via === 'voice' ? { via: 'voice' } : {}),
                 /* The choices ticked, the answers of a group, the zone of a picture the answer is about. */
@@ -2682,6 +2704,24 @@
             await paintWords();
         } catch (error) { $('words-error').textContent = error.message; $('words-error').hidden = false; }
     }
+    /* Settings: what the chat shows at first, on this device; what its tool reads again after a restart, on this server. */
+    async function paintChatWindow() {
+        const option = ([value, text], chosen) => { const o = document.createElement('option'); o.value = value; o.textContent = text; o.selected = value === chosen; return o; };
+        $('chat-window').replaceChildren(...CHAT_WINDOWS.map((c) => option(c, chatWindow)));
+        if (DEVICE) return;
+        const now = await fetch(`${API}/talk/window`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        if (now) $('chat-window-ai').replaceChildren(...CHAT_WINDOWS.filter(([v]) => now.choices.includes(v)).map((c) => option(c, now.ai)));
+    }
+    $('chat-window').addEventListener('change', () => {
+        chatWindow = $('chat-window').value;
+        try { localStorage.setItem('clavarium-chat-window', chatWindow); } catch { /* a private window */ }
+        /* Drawn again with it. */
+        thread?.destroy(); thread = null; threadOf = ''; void paintThread();
+    });
+    $('chat-window-ai').addEventListener('change', async () => {
+        try { await post(`${API}/talk/window`, { ai: $('chat-window-ai').value }); } catch (error) { $('words-error').textContent = error.message; $('words-error').hidden = false; }
+        await paintChatWindow();
+    });
     /* Settings: what the chat's thread shows of each kind of event (server/talk.mjs EVENT_LEVELS). */
     const THREAD_KINDS = [
         ['sent', 'Sent automatically', 'A branch went to the remote by itself'],
@@ -4155,6 +4195,7 @@
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
         void paintThreadLevels().catch(() => {});
+        void paintChatWindow().catch(() => {});
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();
         for (const shortcut of saved) {

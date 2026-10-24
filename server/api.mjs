@@ -20,6 +20,11 @@
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
+ *   GET  /api/conversations/<name>/talk?last=|days=|before=|from=|since=   a part of its chat: the newest messages, those of the
+ *                                                last days, the page before a message, up to a message found, what changed since a cursor
+ *   GET  /api/conversations/<name>/talk/search?q=   its whole chat searched: {matches: [{id, at, from, kind, text}], count}
+ *   GET  /api/talk/window                        what a tool reads of its chat after a restart: {ai, default, choices}
+ *   POST /api/talk/window                        {ai: 'messages:100'|'messages:200'|'messages:500'|'days:1'|'days:3'|'days:7'}
  *   GET  /api/talk/thread                        what a chat shows of each kind of event: {levels, defaults, choices}
  *   POST /api/talk/thread                        {levels: {kind: 'needs-you'|'news'|'trace'}}: the owner's choice, whole or partial
  *   GET  /api/conversations/<name>/guide         what its tool is told about where it is: the exact texts, the owner's lines
@@ -299,10 +304,13 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/talk/words' && talk) return send(200, talk.words(query.get('lang') ?? 'en')), true;
             if (pathname === '/api/talk/settings' && talk) return send(200, talk.settings()), true;
             if (pathname === '/api/talk/thread' && talk) return send(200, talk.thread()), true;
+            if (pathname === '/api/talk/window' && talk) return send(200, talk.window()), true;
+            const searched = /^\/api\/conversations\/([^/]+)\/talk\/search$/.exec(pathname);
+            if (searched && talk) return send(200, talk.search(decodeURIComponent(searched[1]), query.get('q') ?? '')), true;
             const guided = /^\/api\/conversations\/([^/]+)\/guide$/.exec(pathname);
             if (guided && guide) return send(200, guide.about(decodeURIComponent(guided[1]))), true;
             const talked = /^\/api\/conversations\/([^/]+)\/talk$/.exec(pathname);
-            if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]))), true;
+            if (talked && talk) return send(200, talk.of(decodeURIComponent(talked[1]), query)), true;
             /* Its docket: the reminders its tool set, the newest events (dockets.mjs). */
             const docketRead = /^\/api\/conversations\/([^/]+)\/docket$/.exec(pathname);
             if (docketRead && wakeups) return send(200, wakeups.docketOf(decodeURIComponent(docketRead[1]))), true;
@@ -431,6 +439,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/alerts/test' && alerts) return send(200, { reached: await alerts.tell({ title: instance?.name() ?? 'Clavarium', body: 'This is what an alert looks like.', url: '/' }) }), true;
         if (pathname === '/api/talk/settings' && talk) return send(200, talk.setWords({ lang: body.lang, own: body.own })), true;
         if (pathname === '/api/talk/thread' && talk) return send(200, talk.setThread({ levels: body.levels })), true;
+        if (pathname === '/api/talk/window' && talk) return send(200, talk.setWindow({ ai: body.ai })), true;
         const guiding = /^\/api\/conversations\/([^/]+)\/guide(\/tell)?$/.exec(pathname);
         if (guiding && guide) {
             const conversation = decodeURIComponent(guiding[1]);

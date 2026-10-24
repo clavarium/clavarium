@@ -97,8 +97,9 @@ export function commonText() {
 const list = (items) => items.join(', ');
 
 /* THE PART OF ONE CONVERSATION, from its facts:
-   { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines } */
-export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [] }) {
+   { name, tool, workKept, resources: [{ name, access, type, origin }], chat, online, secrets: [names], lines, reread }
+   `reread`: the command that reads the end of its chat after a restart (the owner's choice, talk.mjs). */
+export function ownText({ name, tool, workKept, resources = [], chat, online, secrets = [], lines = [], reread }) {
     const out = [`# This conversation: ${plain(name, 40)}`, ''];
     if (tool) out.push(`- Tool running here: ${plain(tool, 40)}.`);
     out.push(workKept ? '- /work is kept by the server: the person sees it in Files, and it outlives the machine.' : '- /work is on this machine\'s own disk: it goes with the machine.');
@@ -118,6 +119,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         : '- Chat with the person: on. Parley is installed: run parley guide. When you were given Parley as your own tools (MCP: tell, ask, doing, status...), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same.');
     /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
+    /* The thread is kept whole: after a restart, its end is read, and further back on demand. */
+    if (chat && reread) out.push(`- After a restart: ${plain(reread, 60)}, the end of the chat; it says how to read further back.`);
     /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
     if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
     /* Its lists (binders.mjs): kept on the server, asked for through .binder; a person approves. */
@@ -184,10 +187,12 @@ const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean
 const sha = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
 
 export class Guide {
-    #store; #vms; #conversations; #resources; #secrets; #toolbox; #tools; #chat; #say; #written = new Map(); #pointed = new Set();
+    #store; #vms; #conversations; #resources; #secrets; #toolbox; #tools; #chat; #say; #reread; #written = new Map(); #pointed = new Set();
 
     /* `chat(name)`: is its chat on. `say(name, line)`: types a line in its terminal (wakeups.mjs). */
-    constructor({ store, vms, conversations, resources, secrets = null, toolbox = null, tools = [], chat = () => false, say = async () => false }) {
+    /* `reread()`: the command its tool runs after a restart to read the end of its chat. */
+    constructor({ store, vms, conversations, resources, secrets = null, toolbox = null, tools = [], chat = () => false, say = async () => false, reread = () => null }) {
+        this.#reread = reread;
         this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#secrets = secrets;
         this.#toolbox = toolbox; this.#tools = tools; this.#chat = chat; this.#say = say;
     }
@@ -209,7 +214,7 @@ export class Guide {
             const type = this.#resources.get(r.name)?.type ?? 'folder';
             return { name: r.name, access: r.access, type, origin: type === 'git' && this.#resources.hasOrigin?.(r.name) ? originFolder(r.name) : undefined };
         });
-        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name) });
+        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name), reread: this.#reread() });
     }
 
     /* What the page shows: the exact texts, where each is, and the line in the tool's own file. */

@@ -576,9 +576,12 @@
         <section class="settings-group" id="settings-group-chat" data-group="chat">
         <h3 class="chapter-group">Chat</h3>
         <details class="chapter" id="settings-ch-words" data-chapter="s-words">
-          <summary><span class="chapter-title">Chat screen</span><span class="chapter-about">Language and wording.</span></summary>
+          <summary><span class="chapter-title">Chat screen</span><span class="chapter-about">Language, wording, history.</span></summary>
           <div class="chapter-body">
         <div class="set-row"><div class="set-what"><label for="words-lang">Language</label><small>Of the chat screen, every device</small></div><div class="set-control"><select id="words-lang"><option value="device">The language of each device</option></select></div></div>
+        <!-- THE END OF THE THREAD, the rest on demand: never cut (server/talk.mjs WINDOWS). -->
+        <div class="set-row"><div class="set-what"><label for="chat-window">Shown at first</label><small>On this device; the rest on demand</small></div><div class="set-control"><select id="chat-window"></select></div></div>
+        <div class="set-row"><div class="set-what"><label for="chat-window-ai">Read after a restart</label><small>By its tool; older on demand</small></div><div class="set-control"><select id="chat-window-ai"></select></div></div>
         <details id="words-box">
           <summary>Your own words</summary>
           <p class="hint">Any word of the chat, replaced for every device: <code>{"send": "Go"}</code>.</p>
