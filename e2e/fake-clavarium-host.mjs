@@ -421,8 +421,8 @@ if (area === 'vm') {
             appendFileSync(join(home(vm), 'npm-installs'), `${archive}\n`);
             process.exit(0);
         }
-        /* The machine's tools (Parley, Docket): the ones installed in it. */
-        if (program === 'parley' || program === 'docket') {
+        /* The machine's tools (Parley, Docket, Binder): the ones installed in it. */
+        if (program === 'parley' || program === 'docket' || program === 'binder') {
             const bin = inVm(vm, `/usr/local/bin/${program}`);
             if (!existsSync(bin)) { console.error(`${program}: command not found`); process.exit(127); }
             const r = spawnSync(bin, rest, { encoding: 'utf8', cwd: root(vm) });
