@@ -44,9 +44,9 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "clavarium-binder": "0.1.0-next.1",
-    "clavarium-docket": "0.1.1-next.1",
-    "clavarium-parley": "0.15.0-next.3",
+    "clavarium-binder": "0.1.1-next.3",
+    "clavarium-docket": "0.1.1",
+    "clavarium-parley": "0.15.0",
     "mermaid": "11.17.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",
