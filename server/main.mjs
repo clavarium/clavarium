@@ -300,6 +300,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const secrets = new Secrets({ store: new Store(`${dataDir}/secrets.json`), vault, vms, grants });
     /* A secret renamed: what names it follows (the key of dictation). `voice` is made below. */
     secrets.renamed = (from, to) => voice.secretRenamed(from, to);
+    /* Expired: kept, no longer delivered; said once in What happened. */
+    secrets.expired = (name, users) => { events.add({ kind: 'asset', text: `Secret ${name} expired: no longer given${users.length ? ` to ${users.join(', ')}` : ''}` }); };
+    secrets.check();
+    const expiryTimer = setInterval(() => secrets.check(), 10 * 60_000); expiryTimer.unref();
     const signin = new SignInMailboxes({ store: new Store(`${dataDir}/signin.json`), vault, rules: (name) => all.signinRules(name) });
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
@@ -324,6 +328,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const parleySaid = new Map();
     all.prepare = async (name, woke) => {
         await hostReady;
+        secrets.check();
         const wanted = secrets.signature(name);
         const rules = network.apply();
         if (woke || delivered.get(name) !== wanted) {
@@ -475,7 +480,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

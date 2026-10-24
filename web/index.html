@@ -519,6 +519,7 @@
           <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
             <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
             <button type="submit" class="primary">Save</button></div>
+          <div class="row secret-expiry"><label for="secret-expires">Expires</label><input id="secret-expires" type="date"><small class="hint">Optional</small></div>
           <!-- A key or a certificate is several lines: pasted into the line above, they come here by themselves. -->
           <textarea id="secret-lines" class="secret-lines" rows="7" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-----BEGIN ...-----&#10;...&#10;-----END ...-----" aria-label="Value, several lines (never shown again)" hidden></textarea>
           <button type="button" id="secret-lines-switch" class="as-link">Several lines (a key, a certificate)</button>

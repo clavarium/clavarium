@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { bench, SKIP } from './bench.mjs';
+
+/* A day as the date field and the server take it, `n` days from today. */
+const day = (n) => { const d = new Date(); d.setDate(d.getDate() + n); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+/* CLAVARIUM_SHOTS: a folder; the sheets of a secret are photographed there. */
+const SHOTS = process.env.CLAVARIUM_SHOTS;
 
 test('a secret handed to the tool is a variable of the tool after it restarts, and gone once switched off', { skip: SKIP }, async (t) => {
     const b = await bench(t);
@@ -132,4 +139,96 @@ test('reloading the page sends nothing into the machine: its terminal is already
     delete process.env.FAKE_VM_LOG;
     assert.deepEqual(sent, [], `nothing is asked of the VM manager: ${sent.join(' ; ')}`);
     assert.ok(took < 4000, `the page and its terminal were back in ${took} ms`);
+});
+
+test('an expiry: said a few days ahead, with a dot on Assets; past it the secret is kept, shown Expired, and no longer given; its value replaced without being seen', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('expiring');
+    /* Made with an expiry three days ahead. */
+    await me.addAsset('secret');
+    await me.page.fill('#secret-name', 'SOON_KEY');
+    await me.page.fill('#secret-value', 'sk-soon-first');
+    await me.page.fill('#secret-expires', day(3));
+    await me.page.locator('#secret-new button[type=submit]').click();
+    const soonRow = me.page.locator('#assets-rows .as-row[data-asset="secret:SOON_KEY"] .as-sub');
+    await me.until('its row says it is near', async () => (await soonRow.innerText().catch(() => '')) === 'Expires in 3 days');
+    assert.equal(await soonRow.getAttribute('data-tone'), 'warn');
+    await me.until('its sheet says it, with the day', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')) === `Expires in 3 days · ${day(3)}`);
+    assert.equal(await me.page.locator('#assets-detail .secret-expiry-state').getAttribute('data-tone'), 'warn');
+    await me.until('a dot on Assets', async () => (await me.page.locator('#nav-assets[data-attention]').count()) === 1);
+    /* One past its day, made through the API: expired at once. */
+    await me.api('/api/secrets', { name: 'PAST_KEY', value: 'sk-past-value', expires: day(-1) });
+    await me.api('/api/conversations/expiring/secrets', { secret: 'SOON_KEY', attached: true });
+    await me.api('/api/conversations/expiring/secrets', { secret: 'PAST_KEY', attached: true });
+    const listed = (await me.api('/api/secrets')).body;
+    assert.deepEqual(listed.map((x) => [x.name, x.expired, x.days]).sort(), [['PAST_KEY', true, -1], ['SOON_KEY', false, 3]]);
+    await me.page.locator('#assets-close').click();
+    await me.openAsset('secret', 'PAST_KEY');
+    await me.until('shown Expired, in red', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')).startsWith('Expired'));
+    assert.equal(await me.page.locator('#assets-detail .secret-expiry-state').getAttribute('data-tone'), 'bad');
+    assert.equal(await me.page.locator('#assets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub').innerText(), 'Expired');
+    /* Said once in What happened, with who had it. */
+    await me.until('said in What happened', async () => (await me.api('/api/events?q=PAST_KEY')).body.some((e) => e.text.startsWith('Secret PAST_KEY expired')));
+
+    /* Replace the value of SOON_KEY, and take its expiry away. */
+    await me.openAsset('secret', 'SOON_KEY');
+    await me.page.locator('#secret-replace-open').click();
+    await me.page.fill('#secret-replace-value', 'sk-soon-second');
+    await me.page.fill('#secret-replace-expires', '');
+    await me.page.locator('#secret-replace button[type=submit]').click();
+    await me.until('said once replaced', async () => (await me.page.locator('#assets-detail .secret-replace-said').innerText().catch(() => '')) === 'Machines get it at their next start');
+    await me.until('no expiry any more', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText()) === 'No expiry');
+    assert.equal((await me.page.content()).includes('sk-soon'), false, 'no value in the page, old or new');
+    assert.equal(JSON.stringify((await me.api('/api/secrets')).body).match(/sk-soon|sk-past|sealed/), null, 'nor in what the server gives back');
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'SOON_KEY').conversations, ['expiring'], 'still given to it');
+
+    /* Its own Assets show the expired one too. */
+    await me.page.locator('#assets-close').click();
+    await me.page.locator('#view-assets').click();
+    const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub');
+    await me.until('its own Assets say it expired', async () => (await pastHere.innerText().catch(() => '')) === 'Expired');
+    assert.equal(await pastHere.getAttribute('data-tone'), 'bad');
+    await me.until('a dot on its Assets', async () => (await me.page.locator('#view-assets[data-attention]').count()) === 1);
+    await me.page.locator('#view-terminal').click();
+
+    /* At its next start: the new value, and nothing of the expired one. */
+    await me.type('exit');
+    await me.until('the tool has exited', async () => (await me.state()) === 'ended');
+    await me.page.locator('#notice-action').click();
+    await me.until('live again', async () => (await me.state()) === 'live');
+    await me.type('echo "soon=[$SOON_KEY] past=[$PAST_KEY]"');
+    await me.sees('soon=[sk-soon-second] past=[]');
+    assert.equal(me.errors.length, 0, me.errors.join('\n'));
+});
+
+test('the sheets of a secret, photographed: near its expiry, expired, and Replace the value', { skip: SHOTS ? SKIP : 'set CLAVARIUM_SHOTS to a folder' }, async (t) => {
+    const b = await bench(t);
+    const first = await b.person();
+    await first.create('builder');
+    await first.api('/api/secrets', { name: 'NPM_TOKEN', value: 'shot-value-one', expires: day(3) });
+    await first.api('/api/secrets', { name: 'OLD_TOKEN', value: 'shot-value-two', expires: day(-2) });
+    await first.api('/api/secrets', { name: 'MODEL_KEY', value: 'shot-value-three' });
+    for (const n of ['NPM_TOKEN', 'OLD_TOKEN']) await first.api('/api/conversations/builder/secrets', { secret: n, attached: true });
+    mkdirSync(SHOTS, { recursive: true });
+    const looks = [['tablet-light', { viewport: { width: 1180, height: 820 }, colorScheme: 'light' }], ['tablet-dark', { viewport: { width: 1180, height: 820 }, colorScheme: 'dark' }], ['phone', { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light' }]];
+    for (const [look, options] of looks) {
+        const context = await b.browser.newContext(options);
+        await context.addInitScript((theme) => { try { localStorage.setItem('clavarium-theme', theme); } catch { /* an opaque page */ } }, options.colorScheme);
+        const me = await b.person({ context });
+        /* On a phone the list is hidden behind an opened sheet: back to it first. */
+        const open = async (name) => { const back = me.page.locator('#assets-detail .as-back'); if (await back.isVisible().catch(() => false)) await back.click(); await me.openAsset('secret', name); };
+        await me.openAsset('secret', 'NPM_TOKEN');
+        await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-near.png`) });
+        await open('OLD_TOKEN');
+        await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-expired.png`) });
+        await open('NPM_TOKEN');
+        await me.page.locator('#secret-replace-open').click();
+        await me.page.fill('#secret-replace-value', 'typed-not-shown');
+        await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-replace.png`) });
+        await me.page.locator('#assets-close').click();
+        await me.addAsset('secret');
+        await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-new.png`) });
+        assert.equal(me.errors.length, 0, me.errors.join('\n'));
+    }
 });

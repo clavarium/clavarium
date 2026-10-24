@@ -1613,12 +1613,24 @@
     /* THE BAR (G): Chat | Terminal | Assets N, then its settings. What was
        given to it is counted on "Assets", and shown there. */
     let assetsShown = false; let roomPick = '';
+    /* A secret near or past its expiry (secrets.mjs, WARN_DAYS): a dot on Assets, and on the
+       Assets of a conversation that has it. Read with the list, at most once a minute. */
+    let secretsKnown = []; let secretsReadAt = 0;
+    const secretDue = (s) => s.expired === true || (typeof s.days === 'number' && s.days <= 7);
+    function markSecrets(list) {
+        secretsKnown = Array.isArray(list) ? list : []; secretsReadAt = Date.now();
+        $('nav-assets').toggleAttribute('data-attention', secretsKnown.some(secretDue));
+        $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
+    }
+    async function readSecretsNow() { if (!DEVICE) markSecrets(await (await fetch(`${API}/secrets`)).json().catch(() => [])); }
     function paintChips() {
         if (DEVICE) return;
         const c = conversations.find((x) => x.name === current);
         $('views').hidden = !c;
         const n = (c?.resources?.length ?? 0) + (c?.secrets?.length ?? 0) + (c?.work === 'kept' ? 1 : 0);
         $('assets-count').textContent = n ? String(n) : '';
+        $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
+        if (Date.now() - secretsReadAt > 60_000) { secretsReadAt = Date.now(); void readSecretsNow().catch(() => {}); }
         /* Its title names each of them, with what it may do. */
         $('view-assets').title = c ? [...(c.offline === true ? ['offline'] : []), ...(c.resources ?? []).map((r) => `${r.name} - ${r.access}`), ...(c.secrets ?? [])].join(', ') || 'Nothing given yet' : '';
         paintViews();
@@ -2973,6 +2985,7 @@
                 const name = el('b', '', item.name);
                 if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
                 const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
+                if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
                 const words = el('span', 'as-words'); words.append(name, sub);
                 row.append(kindIcon(kind), words);
                 row.addEventListener('click', () => choose(item.key));
@@ -2994,6 +3007,21 @@
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
     const boxSub = (box) => (!box ? 'mailbox' : box.failure ? box.failure : `${box.messages} message${box.messages === 1 ? '' : 's'}`);
     const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
+    /* A secret's expiry, as said: `due` when it asks for the person (near, or past). */
+    const secretState = (s) => {
+        if (s.expired) return { text: 'Expired', tone: 'bad', due: true };
+        if (s.days === null || s.days === undefined) return { text: 'No expiry', tone: '', due: false };
+        if (secretDue(s)) return { text: s.days === 1 ? 'Expires tomorrow' : `Expires in ${s.days} days`, tone: 'warn', due: true };
+        return { text: `Expires ${s.expires}`, tone: 'ok', due: false };
+    };
+    const secretItem = (s, sub) => { const st = secretState(s); return st.due ? { sub: st.text, dot: st.tone, tone: st.tone === 'bad' ? 'bad' : '' } : { sub }; };
+    /* Its line on a sheet: the state and the day. */
+    const secretLine = (s, expiredWords) => {
+        const st = secretState(s);
+        const line = el('p', 'status-line secret-expiry-state', st.tone === 'bad' ? `Expired · ${expiredWords}` : st.due ? `${st.text} · ${s.expires}` : st.text);
+        if (st.tone) line.dataset.tone = st.tone;
+        return line;
+    };
 
     /* A repository, on the right: its branch, what would go, the diagram. */
     async function gitDetail(holder, name, { place = false, others = false } = {}) {
@@ -3435,7 +3463,8 @@
             items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only',
                 sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
-        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, sub: 'name only · used by its agent' });
+        markSecrets(secrets);
+        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...secretItem(s2, 'name only · used by its agent') });
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
@@ -3468,6 +3497,7 @@
         } else if (chosen.kind === 'send') await sendDetail(detail, gits);
         else if (chosen.kind === 'git') await gitDetail(detail, chosen.name, { others: gits.length > 1 });
         else {
+            if (chosen.secret.expires) detail.append(secretLine(chosen.secret, 'not given to its tool'));
             detail.append(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'), chapter('Used by'));
             const list = el('div', 'as-chips');
             for (const who of chosen.secret.conversations) list.append(el('span', 'as-chip', shownName(conversations.find((x) => x.name === who)) || who));
@@ -3503,12 +3533,63 @@
         if ($('cassets').contains($('gitview'))) shutGit();
     }
 
+    /* REPLACE THE VALUE, without seeing it: a new one typed (never shown, the old one
+       never sent here) and/or its expiry; its name and who has it stay. */
+    let secretReplacing = ''; let secretSaid = null;
+    function secretReplace(chosen) {
+        const said = el(secretReplacing === chosen.name ? 'span' : 'p', 'hint secret-replace-said', secretSaid?.name === chosen.name ? secretSaid.text : ''); said.setAttribute('role', 'status');
+        if (secretReplacing !== chosen.name) {
+            const open = el('button', '', 'Replace the value...'); open.type = 'button'; open.id = 'secret-replace-open';
+            open.addEventListener('click', () => { secretReplacing = chosen.name; secretSaid = null; void paintAssets(); });
+            const what = el('div', 'set-what'); what.append(el('span', '', 'Value'), el('small', '', 'Never shown'));
+            const control = el('div', 'set-control'); control.append(open);
+            const row = el('div', 'set-row'); row.append(what, control);
+            return { rows: said.textContent ? [row, said] : [row], card: [] };
+        }
+        const form = el('form', 'set-rows as-block secret-replace'); form.id = 'secret-replace'; form.autocomplete = 'off';
+        const value = el('input'); value.id = 'secret-replace-value'; value.type = 'password'; value.autocomplete = 'new-password'; value.setAttribute('aria-label', 'New value');
+        const lines = el('textarea', 'secret-lines'); lines.id = 'secret-replace-lines'; lines.rows = 5; lines.spellcheck = false; lines.hidden = true; lines.setAttribute('aria-label', 'New value, several lines');
+        /* A key pasted: its lines kept, in a box of several lines, masked too. */
+        value.addEventListener('paste', (event) => {
+            const text = event.clipboardData?.getData('text') ?? '';
+            if (!/[\r\n]/.test(text.replace(/[\r\n]+$/, ''))) return;
+            event.preventDefault();
+            lines.value = text.replace(/\r\n?/g, '\n'); lines.hidden = false; value.hidden = true; value.value = ''; lines.focus();
+        });
+        const day = el('input'); day.id = 'secret-replace-expires'; day.type = 'date'; day.value = chosen.secret.expires ?? ''; day.setAttribute('aria-label', 'Expires');
+        const field = (label, small, ...control) => {
+            const what = el('div', 'set-what'); what.append(el('span', '', label), el('small', '', small));
+            const c = el('div', 'set-control'); c.append(...control);
+            const row = el('div', 'set-row'); row.append(what, c); return row;
+        };
+        const cancel = el('button', '', 'Cancel'); cancel.type = 'button';
+        cancel.addEventListener('click', () => { secretReplacing = ''; void paintAssets(); });
+        const go = el('button', 'primary', 'Replace'); go.type = 'submit';
+        const actions = el('div', 'action-row'); actions.append(said, cancel, go);
+        form.append(field('New value', 'Never shown · empty keeps it', value, lines), field('Expires', 'Optional', day), actions);
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            $('assets-error').hidden = true;
+            const typed = lines.hidden ? value.value : lines.value.replace(/\r\n?/g, '\n');
+            const body = { expires: day.value };
+            if (typed) body.value = typed;
+            /* Not kept in the page a moment longer. */
+            value.value = ''; lines.value = '';
+            try { await post(`${API}/secrets/${chosen.name}/replace`, body); secretReplacing = ''; secretSaid = { name: chosen.name, text: 'Machines get it at their next start' }; }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            await paintAssets();
+        });
+        setTimeout(() => value.focus(), 0);
+        return { rows: [], card: [form] };
+    }
+
     /* ---- the server's ---- */
     let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false;
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
         const [all, boxes, secrets, keys] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), readDevices()]);
         paintKeys(keys);
+        markSecrets(secrets);
         const items = [];
         for (const r of all) {
             const kind = kindOf(r); const users = Object.keys(r.attachments ?? {}).length;
@@ -3516,7 +3597,7 @@
             items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
                 sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
-        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', sub: 'name only' });
+        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
@@ -3566,7 +3647,7 @@
             const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
             const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
             const go = el('button', '', 'Rename'); go.type = 'submit';
-            const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Value never shown · applies at next start'));
+            const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Applies at next start'));
             const control = el('div', 'set-control'); control.append(name, go);
             form.append(what, control);
             form.addEventListener('submit', async (event) => {
@@ -3576,8 +3657,10 @@
                 catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
                 await paintAssets();
             });
-            const box = el('div', 'set-rows as-block'); box.append(form);
-            detail.append(box);
+            detail.append(secretLine(chosen.secret, 'not given to machines'));
+            const replace = secretReplace(chosen);
+            const box = el('div', 'set-rows as-block'); box.append(form, ...replace.rows);
+            detail.append(box, ...replace.card);
         }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
         const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
@@ -3805,7 +3888,8 @@
         const lines = !$('secret-lines').hidden;
         /* A key's last line ends with a line break: kept as it was pasted. */
         const value = lines ? $('secret-lines').value.replace(/\r\n?/g, '\n') : $('secret-value').value;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; secretLines(false, ''); }
+        const expires = $('secret-expires').value;
+        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value, ...(expires ? { expires } : {}) }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, ''); }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await paintAssets();
     });

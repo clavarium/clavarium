@@ -42,6 +42,8 @@ const SAID = [
     [/^\/api\/resources\/([^/]+)\/remove$/, 'asset', (m) => `${clip(decodeURIComponent(m[1]), 40)} removed (its content put aside)`],
     [/^\/api\/secrets$/, 'asset', (m, b) => `Secret ${clip(b.name, 40)} set`],
     [/^\/api\/secrets\/([^/]+)\/remove$/, 'asset', (m) => `Secret ${clip(m[1], 40)} removed`],
+    /* Never the value: only that it was replaced, and the expiry. */
+    [/^\/api\/secrets\/([^/]+)\/replace$/, 'asset', (m, b) => `Secret ${clip(m[1], 40)}: ${[...(b.value ? ['value replaced'] : []), ...(b.expires === undefined ? [] : [b.expires ? `expires ${clip(b.expires, 10)}` : 'no expiry'])].join(', ') || 'unchanged'}`],
     [/^\/api\/secrets\/([^/]+)\/rename$/, 'asset', (m, b) => `Secret ${clip(m[1], 40)} renamed ${clip(b.name, 40)}`],
     [/^\/api\/git\/([^/]+)\/push$/, 'asset', (m, b) => `${clip(decodeURIComponent(m[1]), 40)}: a commit sent${b.target ? ` to ${clip(b.target, 40)}` : ''}`],
     [/^\/api\/mailboxes$/, 'asset', (m, b) => `Mailbox ${clip(b.name, 40)} added`],

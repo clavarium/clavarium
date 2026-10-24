@@ -1592,6 +1592,12 @@ details.more[open] > summary { margin-bottom: 4px; }
 .as-settings dd { color: var(--ink2); font-weight: 400; font-size: .875rem; }
 .as-card, .as-lastchecks, .as-graph { background: var(--bar); border-radius: 10px; }
 .secret-rename > .set-control > input { width: 14rem; }
+/* A secret: its expiry said under its title; Replace the value, in its rows. */
+.secret-replace .set-control > input, .secret-replace .set-control > textarea { width: 14rem; max-width: 100%; }
+.secret-replace .set-control > .secret-lines { margin-top: 0; }
+#secret-new .secret-expiry { align-items: center; gap: 8px; margin-top: .5rem; }
+#secret-new .secret-expiry > label { margin: 0; }
+#secret-new .secret-expiry > input { flex: 0 1 12rem; width: 12rem; }
 .as-foot { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
 .as-foot > br { display: none; }
 #gitview-remote-box { margin: 0; }
@@ -1692,4 +1698,4 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 .ts-tree-files { padding: 4px 4px 4px 12px; }
 
 /* Something asks for the person in this chapter (a callout, a warning): a dot on its title, and on its category. */
-details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
+details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after, #nav-assets[data-attention] > span::after, #view-assets[data-attention] > span::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }

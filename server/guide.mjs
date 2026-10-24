@@ -207,7 +207,7 @@ export class Guide {
             const type = this.#resources.get(r.name)?.type ?? 'folder';
             return { name: r.name, access: r.access, type, origin: type === 'git' && this.#resources.hasOrigin?.(r.name) ? originFolder(r.name) : undefined };
         });
-        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: this.#secrets?.of(name) ?? [], lines: this.lines(name) });
+        return ownText({ name, tool: this.#tool(c)?.label ?? c.tool, workKept: c.work === 'kept', resources, chat: Boolean(this.#chat(name)), online: c.offline !== true, secrets: (this.#secrets?.given ?? this.#secrets?.of)?.call(this.#secrets, name) ?? [], lines: this.lines(name) });
     }
 
     /* What the page shows: the exact texts, where each is, and the line in the tool's own file. */

@@ -30,6 +30,14 @@ test('the owner\'s requests worth saying, in words; a secret by its name only; t
     assert.equal(all[0].who, 'ops@example.org');
 });
 
+test('a secret replaced is said by its name and its expiry, never its value', (t) => {
+    const { e, file } = bench(t);
+    e.fromRequest('/api/secrets/GITHUB_TOKEN/replace', { value: 'ghp_shouldneverbeseen', expires: '2027-01-31' });
+    e.fromRequest('/api/secrets/GITHUB_TOKEN/replace', { expires: '' });
+    assert.deepEqual(e.list().map((x) => x.text), ['Secret GITHUB_TOKEN: no expiry', 'Secret GITHUB_TOKEN: value replaced, expires 2027-01-31']);
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /ghp_/);
+});
+
 test('a size chosen while it sleeps is said kept for its wake, and given up', (t) => {
     const { e } = bench(t);
     e.fromRequest('/api/conversations/site/machine', { memoryMb: 3072 }, '', { name: 'site', phase: 'ready', asleep: true, sizeAtWake: { memoryMb: 3072, cpus: 1, diskGb: 8 } });

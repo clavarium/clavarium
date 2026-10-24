@@ -5,17 +5,21 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Vault } from '../server/vault.mjs';
-import { Secrets, isSecretName, RUNNER_SCRIPT, RUNNER, SECRETS_DIR } from '../server/secrets.mjs';
+import { Secrets, isSecretName, expiryOf, daysTo, RUNNER_SCRIPT, RUNNER, SECRETS_DIR } from '../server/secrets.mjs';
+import { Grants } from '../server/grants.mjs';
+import { Readable } from 'node:stream';
+import { handleApi } from '../server/api.mjs';
 import { Store } from '../server/store.mjs';
 import { Vms } from '../server/vm.mjs';
 
-function bench(t) {
+function bench(t, { now } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-sec-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const calls = [];
     const vms = new Vms(async (argv, options) => { calls.push({ argv: argv.slice(1).join(' '), input: options?.input }); return { code: 0, stdout: '', stderr: '' }; }, ['vmm']);
-    const secrets = new Secrets({ store: new Store(join(dir, 'secrets.json')), vault: new Vault(join(dir, 'vault.key')), vms });
-    return { dir, calls, secrets };
+    const clock = { at: now ?? new Date(2026, 9, 24, 12, 0) };
+    const make = () => new Secrets({ store: new Store(join(dir, 'secrets.json')), vault: new Vault(join(dir, 'vault.key')), vms, grants: clock.grants ??= new Grants(), now: () => clock.at });
+    return { dir, calls, secrets: make(), clock, make };
 }
 
 test('at rest a value is sealed: the data file shows the name and not the value; the key file is private', (t) => {
@@ -25,7 +29,7 @@ test('at rest a value is sealed: the data file shows the name and not the value;
     assert.ok(onDisk.includes('MODEL_KEY'));
     assert.ok(!onDisk.includes('sk-very-secret-value'));
     assert.equal(statSync(join(b.dir, 'vault.key')).mode & 0o777, 0o600);
-    assert.deepEqual(b.secrets.list().map((s) => Object.keys(s).sort()), [['conversations', 'createdAt', 'name']], 'a listing never carries a value');
+    assert.deepEqual(b.secrets.list().map((s) => Object.keys(s).sort()), [['conversations', 'createdAt', 'days', 'expired', 'expires', 'name']], 'a listing never carries a value');
 });
 
 test('a sealed value opens only with its key, and not if a single byte was changed', (t) => {
@@ -123,4 +127,102 @@ test('renamed: its value (still sealed) and the conversations it is handed to go
     assert.throws(() => secrets.rename('NEW_KEY', 'TAKEN'), /already named TAKEN/);
     assert.throws(() => secrets.rename('NEW_KEY', 'bad name'), /named like a variable/);
     assert.throws(() => secrets.rename('NOPE', 'OTHER'), /No such secret/);
+});
+
+test('an expiry is a day, YYYY-MM-DD, optional; kept, changed, removed; past days are allowed and mean expired at once', (t) => {
+    const b = bench(t);
+    for (const bad of ['2026-13-01', '2026-02-30', '26-11-01', '2026-11-1', 'tomorrow', '2026-11-01T00:00', 20261101]) assert.throws(() => b.secrets.set({ name: 'K', value: 'v', expires: bad }), /YYYY-MM-DD/, String(bad));
+    assert.equal(expiryOf(''), null); assert.equal(expiryOf(undefined), null); assert.equal(expiryOf('2026-02-28'), '2026-02-28');
+    b.secrets.set({ name: 'K', value: 'v', expires: '2026-10-27' });
+    assert.deepEqual(b.secrets.list().map(({ expires, days, expired }) => ({ expires, days, expired })), [{ expires: '2026-10-27', days: 3, expired: false }]);
+    b.secrets.set({ name: 'K', value: 'w' });
+    assert.equal(b.secrets.list()[0].expires, '2026-10-27', 'a new value without an expiry keeps the one it had');
+    b.secrets.set({ name: 'K', value: 'w', expires: '' });
+    assert.deepEqual([b.secrets.list()[0].expires, b.secrets.list()[0].days, b.secrets.list()[0].expired], [null, null, false]);
+    b.secrets.set({ name: 'OLD', value: 'v', expires: '2020-01-01' });
+    assert.equal(b.secrets.list().find((s) => s.name === 'OLD').expired, true);
+    assert.equal(daysTo('2026-10-24', new Date(2026, 9, 24, 23, 59)), 0, 'its own day: expired');
+    assert.equal(daysTo('2026-10-25', new Date(2026, 9, 24, 0, 1)), 1);
+    assert.equal(JSON.parse(readFileSync(join(b.dir, 'secrets.json'), 'utf8')).find((s) => s.name === 'K').expires, undefined, 'removed from the file too');
+});
+
+test('expired: kept, still handed, but no longer delivered nor named in what the tool is told; said once', async (t) => {
+    const b = bench(t);
+    const said = [];
+    b.secrets.expired = (name, users) => said.push(`${name}:${users.join(',')}`);
+    b.secrets.set({ name: 'TOKEN', value: 'sk-expiring-value', expires: '2026-10-26' });
+    b.secrets.set({ name: 'OTHER', value: 'still-good' });
+    b.secrets.attach('alpha', 'TOKEN', true); b.secrets.attach('alpha', 'OTHER', true);
+    const before = b.secrets.signature('alpha');
+    await b.secrets.deliver('alpha');
+    assert.ok(b.calls.some((c) => c.argv.endsWith(`${SECRETS_DIR}/TOKEN`)), 'delivered before its day');
+    b.clock.at = new Date(2026, 9, 26, 8, 0);
+    b.secrets.check(); b.secrets.check();
+    assert.deepEqual(said, ['TOKEN:alpha'], 'said once, with who had it');
+    assert.notEqual(b.secrets.signature('alpha'), before, 'a delivery would differ: it is done again at the next opening');
+    b.calls.length = 0;
+    await b.secrets.deliver('alpha');
+    assert.ok(!b.calls.some((c) => c.argv.includes('TOKEN') || c.input === 'sk-expiring-value'), 'not delivered once expired');
+    assert.ok(b.calls.some((c) => c.argv.endsWith(`${SECRETS_DIR}/OTHER`)), 'the others still are');
+    assert.deepEqual(b.secrets.of('alpha').sort(), ['OTHER', 'TOKEN'], 'still handed: its Assets show it');
+    assert.deepEqual(b.secrets.given('alpha'), ['OTHER']);
+    assert.equal(b.secrets.list().find((s) => s.name === 'TOKEN').expired, true);
+    assert.equal(b.secrets.reveal('TOKEN'), 'sk-expiring-value', 'kept: never deleted by itself');
+    /* A server started again does not say it twice. */
+    const again = b.make(); const said2 = [];
+    again.expired = (name) => said2.push(name); again.check();
+    assert.deepEqual(said2, []);
+    /* A new day, then past again: said again. */
+    again.replace('TOKEN', { expires: '2026-11-30' });
+    assert.equal(again.list().find((s) => s.name === 'TOKEN').expired, false);
+    assert.deepEqual(again.given('alpha').sort(), ['OTHER', 'TOKEN']);
+});
+
+test('replaced without being seen: the name and the conversations stay; a new value or a new expiry, or both; nothing returned carries a value', async (t) => {
+    const b = bench(t);
+    b.secrets.set({ name: 'K', value: 'first-value', expires: '2026-10-25' });
+    b.secrets.attach('alpha', 'K', true); b.secrets.attach('beta', 'K', true);
+    const sealed = JSON.parse(readFileSync(join(b.dir, 'secrets.json'), 'utf8'))[0].sealed;
+    const answer = b.secrets.replace('K', { value: 'second-value', expires: '2027-01-31' });
+    assert.deepEqual(answer, { name: 'K', expires: '2027-01-31' });
+    assert.equal(b.secrets.reveal('K'), 'second-value');
+    assert.deepEqual(b.secrets.list().map((s) => [s.name, s.conversations.sort(), s.expires]), [['K', ['alpha', 'beta'], '2027-01-31']]);
+    b.secrets.replace('K', { expires: '' });
+    assert.equal(b.secrets.reveal('K'), 'second-value', 'an expiry alone keeps the value');
+    assert.equal(b.secrets.list()[0].expires, null);
+    b.secrets.replace('K', { value: 'third-value' });
+    assert.equal(b.secrets.list()[0].expires, null, 'a value alone keeps the expiry');
+    const onDisk = readFileSync(join(b.dir, 'secrets.json'), 'utf8');
+    assert.ok(!/first-value|second-value|third-value/.test(onDisk), 'sealed at rest');
+    assert.notEqual(JSON.parse(onDisk)[0].sealed, sealed);
+    assert.throws(() => b.secrets.replace('K', {}), /Nothing to change/);
+    assert.throws(() => b.secrets.replace('K', { value: 'x'.repeat(9000) }), /between 1 byte/);
+    assert.throws(() => b.secrets.replace('K', { expires: '31/01/2027' }), /YYYY-MM-DD/);
+    assert.throws(() => b.secrets.replace('NOPE', { value: 'x' }), /No such secret/);
+    assert.ok(!JSON.stringify([b.secrets.list(), b.secrets.of('alpha'), b.secrets.given('alpha')]).includes('third-value'), 'what the page reads carries no value');
+    await b.secrets.deliver('alpha');
+    assert.equal(b.calls.at(-1).input, 'third-value', 'the next start gets the new one');
+});
+
+test('through the API: made with an expiry, replaced in place; no answer ever carries a value', async (t) => {
+    const b = bench(t);
+    const call = async (method, path, body) => {
+        const request = Object.assign(Readable.from(method === 'POST' ? [Buffer.from(JSON.stringify(body ?? {}))] : []), { method, url: path, headers: { 'content-type': 'application/json' } });
+        let status; let text = '';
+        const response = { writeHead: (s) => { status = s; return { end: (x) => { text = x; } }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready' }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return { status, text };
+    };
+    const answers = [];
+    const made = await call('POST', '/api/secrets', { name: 'API_KEY', value: 'sk-api-one', expires: '2026-10-27' }); answers.push(made.text);
+    assert.equal(made.status, 201);
+    assert.equal((await call('POST', '/api/secrets', { name: 'BAD', value: 'x', expires: '2026-1-1' })).status, 400);
+    const replaced = await call('POST', '/api/secrets/API_KEY/replace', { value: 'sk-api-two', expires: '' }); answers.push(replaced.text);
+    assert.equal(replaced.status, 200);
+    assert.equal((await call('POST', '/api/secrets/NONE/replace', { value: 'x' })).status, 404);
+    const listed = await call('GET', '/api/secrets'); answers.push(listed.text);
+    assert.deepEqual(JSON.parse(listed.text).map((s) => [s.name, s.expires]), [['API_KEY', null]]);
+    assert.equal(b.secrets.reveal('API_KEY'), 'sk-api-two');
+    for (const text of answers) assert.ok(!/sk-api|sealed/.test(text), text);
 });

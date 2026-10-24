@@ -12,6 +12,10 @@
  * never in a log, never back to a browser: once saved, a value cannot be
  * read again from the page, only replaced.
  *
+ * EXPIRY (optional, a day, like a token's): from that day on the secret is
+ * kept -- never deleted by itself -- but no longer delivered; WARN_DAYS
+ * before, the page says it is near. Days are those of this server's clock.
+ *
  * WHAT IT IS NOT: protected from the tool. The agent is root in its VM and
  * can read and send anywhere whatever is delivered there. A secret the host
  * should use on the agent's behalf (a push key, a mailbox password) does not
@@ -25,6 +29,9 @@ import { VM_USER } from './vm.mjs';
 export const SECRETS_DIR = '/run/secrets';
 export const RUNNER = '/usr/local/bin/clv-run';
 export const VALUE_MAX = 8 * 1024;
+export const WARN_DAYS = 7;
+const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DAY_MS = 86_400_000;
 const NAME = /^[A-Z][A-Z0-9_]{0,39}$/;
 /* Names the tool's own start depends on must not be replaced by a secret. */
 const RESERVED = new Set(['PATH', 'HOME', 'USER', 'SHELL', 'TERM', 'LANG', 'PWD', 'IFS', 'LD_PRELOAD', 'LD_LIBRARY_PATH']);
@@ -45,15 +52,29 @@ done
 exec "$@"
 `;
 
+/* A day as YYYY-MM-DD, or '' / null for none; anything else is refused. */
+export function expiryOf(value) {
+    if (value === undefined || value === null || value === '') return null;
+    const m = DAY.exec(String(value));
+    const d = m && new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    if (!d || d.toISOString().slice(0, 10) !== value || Number(m[1]) < 2000) throw new Refusal(400, 'An expiry is a day, as YYYY-MM-DD.');
+    return value;
+}
+/* Whole days from today (this server's local day) to that day: 0 or less, expired. */
+export function daysTo(day, now = new Date()) {
+    const m = DAY.exec(day);
+    return Math.round((Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) - Date.UTC(now.getFullYear(), now.getMonth(), now.getDate())) / DAY_MS);
+}
+
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Secrets {
-    #store; #vault; #vms; #grants;
+    #store; #vault; #vms; #grants; #now;
 
     /* `grants`: the one table of rights. "Handed to a conversation" is a
        line of it: the conversation may USE the secret. */
-    constructor({ store, vault, vms, grants = new Grants() }) {
-        this.#store = store; this.#vault = vault; this.#vms = vms; this.#grants = grants;
+    constructor({ store, vault, vms, grants = new Grants(), now = () => new Date() }) {
+        this.#store = store; this.#vault = vault; this.#vms = vms; this.#grants = grants; this.#now = now;
         for (const s of store.all()) {
             if (s.attachments === undefined) continue;
             for (const conversation of Object.keys(s.attachments)) this.#grants.give(conversationSubject(conversation), `secret:${s.name}`, 'x');
@@ -61,24 +82,73 @@ export class Secrets {
         }
     }
     #handed(conversation, name) { return this.#grants.can(conversationSubject(conversation), `secret:${name}`, 'x'); }
+    #expired(s) { return Boolean(s.expires) && daysTo(s.expires, this.#now()) <= 0; }
+    #users(name) { return this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)); }
+    /* What is delivered to this conversation: handed, and not expired. */
+    #given(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name) && !this.#expired(s)); }
 
-    /* Names and where they are attached. Never a value. */
-    list() { return this.#store.all().map(({ name, createdAt }) => ({ name, conversations: this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)), createdAt })); }
+    /* Names, where they are attached, the expiry. Never a value. `days`: whole
+       days left (null without an expiry); `expired`: no longer delivered. */
+    list() {
+        return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
+            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s) }));
+    }
+    /* Handed to it, expired or not (its Assets show both). */
     of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
+    /* Delivered to it at its next start. */
+    given(conversation) { return this.#given(conversation).map((s) => s.name); }
 
     /* The value, for this server's own use only (the key of the dictation
        engine, put in a request's header): never returned by any route. */
     reveal(name) { const s = this.#store.get(name); return s ? this.#vault.open(s.sealed) : undefined; }
 
-    /* Creates, or replaces the value of, a secret. */
-    set({ name, value }) {
+    /* Creates, or replaces the value of, a secret. `expires`: a day, '' for
+       none, left out to keep the one it had. */
+    set({ name, value, expires }) {
         if (!isSecretName(name)) throw new Refusal(400, 'A secret is named like a variable: capitals, digits and underscores, starting with a letter.');
-        if (typeof value !== 'string' || value === '' || Buffer.byteLength(value) > VALUE_MAX) throw new Refusal(400, `A value is between 1 byte and ${VALUE_MAX / 1024} KB.`);
-        if (value.includes('\0')) throw new Refusal(400, 'A value cannot contain a null byte.');
+        const sealed = this.#seal(value);
+        const day = expires === undefined ? undefined : expiryOf(expires);
         const before = this.#store.get(name);
-        this.#store.put({ name, sealed: this.#vault.seal(value), createdAt: before?.createdAt ?? new Date().toISOString() });
+        this.#write({ ...before, name, sealed, createdAt: before?.createdAt ?? new Date().toISOString() }, day);
         return { name };
     }
+
+    /* REPLACED in place, without being seen: a new value (empty keeps the
+       one it has) and/or a new expiry ('' removes it). Its name and the
+       conversations it is handed to stay; they get it at their next start. */
+    replace(name, { value, expires } = {}) {
+        const before = this.#store.get(name);
+        if (!before) throw new Refusal(404, 'No such secret.');
+        const keep = value === undefined || value === null || value === '';
+        const day = expires === undefined ? undefined : expiryOf(expires);
+        if (keep && day === undefined) throw new Refusal(400, 'Nothing to change: a new value or an expiry.');
+        this.#write({ ...before, sealed: keep ? before.sealed : this.#seal(value) }, day);
+        return { name, expires: this.#store.get(name).expires ?? null };
+    }
+
+    #seal(value) {
+        if (typeof value !== 'string' || value === '' || Buffer.byteLength(value) > VALUE_MAX) throw new Refusal(400, `A value is between 1 byte and ${VALUE_MAX / 1024} KB.`);
+        if (value.includes('\0')) throw new Refusal(400, 'A value cannot contain a null byte.');
+        return this.#vault.seal(value);
+    }
+    /* `day`: undefined keeps the expiry, null removes it. */
+    #write(record, day) {
+        const next = { ...record };
+        if (day !== undefined) { if (day) next.expires = day; else delete next.expires; }
+        this.#store.put(next);
+        this.check();
+    }
+
+    /* Said once, when it expires (`expired(name, conversations)`): remembered
+       with the day said, so a new expiry is said again when it comes. */
+    check() {
+        for (const s of this.#store.all()) {
+            if (!this.#expired(s) || s.expiredSaid === s.expires) continue;
+            this.#store.patch(s.name, { expiredSaid: s.expires });
+            try { this.expired(s.name, this.#users(s.name)); } catch { /* said nowhere: never a reason to fail */ }
+        }
+    }
+    expired = () => {};
 
     /* RENAMED: its value (still sealed, never opened) and the conversations it is handed to go with
        it; `renamed(from, to)` tells what else names it (dictation's key). Delivered under its new
@@ -118,12 +188,13 @@ export class Secrets {
     /* What a delivery to this conversation would contain, as one string that
        changes whenever a delivery would differ: names and sealed values. */
     signature(conversation) {
-        return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
+        return this.#given(conversation).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
     }
 
-    /* Puts in the VM exactly the secrets attached NOW, and the runner. Called
-       each time the conversation is opened: a detached secret disappears from
-       the VM, a new one appears, and a restarted VM gets them back. */
+    /* Puts in the VM exactly the secrets attached NOW and not expired, and the
+       runner. Called each time the conversation is opened: a detached or
+       expired secret disappears from the VM, a new one appears, and a
+       restarted VM gets them back. */
     async deliver(conversation) {
         const run = async (argv, input) => {
             const r = await this.#vms.exec(conversation, argv, { input });
@@ -132,8 +203,7 @@ export class Secrets {
         await run(['sudo', '-n', 'install', '-m', '0755', '/dev/stdin', RUNNER], RUNNER_SCRIPT);
         await run(['sudo', '-n', 'install', '-d', '-m', '0755', SECRETS_DIR]);
         await run(['sudo', '-n', 'find', SECRETS_DIR, '-mindepth', '1', '-delete']);
-        for (const secret of this.#store.all()) {
-            if (!this.#handed(conversation, secret.name)) continue;
+        for (const secret of this.#given(conversation)) {
             await run(['sudo', '-n', 'install', '-m', '0600', '-o', VM_USER, '-g', VM_USER, '/dev/stdin', `${SECRETS_DIR}/${secret.name}`], this.#vault.open(secret.sealed));
         }
     }

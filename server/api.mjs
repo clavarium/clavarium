@@ -66,7 +66,8 @@
  *   GET  /api/conversations/<name>/signin   {available, configured, host, user, items}
  *   POST /api/conversations/<name>/signin   {host, port?, user, password}; empty host removes
  *   GET  /api/secrets                       names only: a value never comes back
- *   POST /api/secrets                       {name, value}  create or replace
+ *   POST /api/secrets                       {name, value, expires?}  create or replace; expires YYYY-MM-DD
+ *   POST /api/secrets/<NAME>/replace        {value?, expires?}: in place, its name and grants kept; '' removes the expiry
  *   POST /api/secrets/<NAME>/remove
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
@@ -415,6 +416,9 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
         if (renaming && secrets) return send(200, secrets.rename(renaming[1], String(body.name ?? '').trim())), true;
+        /* A new value (never sent back) and/or a new expiry, in place. */
+        const replacing = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/replace$/.exec(pathname);
+        if (replacing && secrets) return send(200, secrets.replace(replacing[1], { value: body.value, expires: body.expires })), true;
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
