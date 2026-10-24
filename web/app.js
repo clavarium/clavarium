@@ -3696,7 +3696,7 @@
         listsSig = binderSig(lists.data);
         for (const l of shownLists) {
             const users = givenTo(l).length;
-            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: `${l.count} record${l.count === 1 ? '' : 's'}` });
+            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
         }
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
@@ -3791,7 +3791,7 @@
             const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
             const holder = el('div', 'binder-holder as-binder');
             open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
-            detail.append(chapter('Records', open), holder);
+            detail.append(chapter('Cards', open), holder);
             const id = chosen.list.id;
             if (listOpen === chosen.key) void mountBinder(holder, (l) => l.id === id, { onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } });
         }
@@ -3818,7 +3818,7 @@
         const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
         const why = el('small', 'hint');
         const inUse = chosen.kind !== 'secret' && using.length > 0;
-        const lost = { secret: 'Its value is lost for good.', list: 'Its records are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
+        const lost = { secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
         if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
         remove.addEventListener('click', () => {
             const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
