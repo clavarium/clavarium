@@ -1,9 +1,10 @@
 /* THE MAP (once "Who gets what"), AND FLOWS: the first tab of Access, with
  * its Map / Flows switch (app.js opens, closes and filters Access).
  *
- *   Map             devices, conversations and assets in columns that each
- *                   scroll on their own; a link is a right, coloured by what
- *                   it gives. At rest no line, a count on each box; a box
+ *   Map             devices, conversations and assets in columns, laid out
+ *                   whole and fitted to the screen, with a zoom of its own
+ *                   (pinch, ctrl + wheel, the buttons; moved by a drag once
+ *                   zoomed in); a link is a right, coloured by what it gives. At rest no line, a count on each box; a box
  *                   touched shows its links, greys the rest, and says them in
  *                   words. A link is made by dragging from a dot (or a box
  *                   touched, then another), changed by the knob on it, taken
@@ -27,8 +28,6 @@
     /* An icon of that set, or, until it is there, nothing in its place. */
     const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
     const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
-    /* A pill that points up or down: its arrow drawn, then its words. */
-    const arrowed = (pill, dir, text) => { pill.replaceChildren(...[ic(dir === 'up' ? 'arrow-up' : 'arrow-down', 'lk-arrow')].filter(Boolean), text); return pill; };
     const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', secret: 'secret' };
     const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', secret: 'asset' };
     const TITLES = { device: 'Devices', conversation: 'Conversations', asset: 'Assets' };
@@ -189,7 +188,7 @@
             legend();
             const bd = board();
             bd.className = `lk-board ${VIEWS[view].cols.length === 3 ? 'three' : 'two'}`;
-            bd.querySelectorAll('.lk-col, .lk-knob, .lk-pop, .lk-edge').forEach((e) => e.remove()); pop = null; popLink = null;
+            bd.querySelectorAll('.lk-col, .lk-knob').forEach((e) => e.remove()); closePop();
             const lists = layout();
             VIEWS[view].cols.forEach((cols, ci) => {
                 const col = h('div', { class: 'lk-col' });
@@ -200,10 +199,9 @@
                     for (const n of list) col.append(nodeEl(n));
                     if (!list.length) col.append(empty(k));
                 });
-                col.addEventListener('scroll', () => { place(); draw(); }, { passive: true });
                 bd.append(col);
             });
-            draw(); hint(); paintPhone();
+            fit(); draw(); hint(); paintPhone();
         }
         /* How each kind is made: a device paired, a conversation created, an asset added. The same,
            from the small round "+" by each column's title (always there, however many it holds)
@@ -220,9 +218,12 @@
         }
         function nodeEl(n) {
             const cnt = graph.links.filter((l) => (l.from === n.id || l.to === n.id) && shown(l)).length;
-            const e = h('div', { class: `lk-node lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}`, 'data-id': n.id, 'data-kind': n.kind, tabindex: 0, role: 'button', 'aria-label': `${n.name}, ${n.sub}, ${cnt} link${cnt === 1 ? '' : 's'}` },
+            /* One line: the icon says the kind; its words in the title. A conversation says by a dot its chat on, or that it is not ready. */
+            const state = n.kind !== 'conversation' ? null : n.phase && n.phase !== 'ready' ? 'off' : n.chat ? 'chat' : null;
+            const e = h('div', { class: `lk-node lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}`, 'data-id': n.id, 'data-kind': n.kind, tabindex: 0, role: 'button', title: `${n.name} · ${n.sub}`, 'aria-label': `${n.name}, ${n.sub}, ${cnt} link${cnt === 1 ? '' : 's'}` },
                 kindIcon(n.kind),
-                h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name }), h('span', { class: 'lk-sb', text: n.sub })),
+                h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name })),
+                state && h('span', { class: 'lk-st', 'data-state': state, 'aria-hidden': 'true' }),
                 h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
             if (VIEWS[view].sources.includes(n.kind) && !n.pending) {
                 const dot = h('span', { class: 'lk-handle', title: 'Drag to what it gets', 'aria-hidden': 'true' });
@@ -236,14 +237,15 @@
             return e;
         }
         const el = (id) => board().querySelector(`.lk-node[data-id="${CSS.escape(id)}"]`);
-        /* Where a link meets a box; a box scrolled out of its column is met at the column's edge. */
+        /* A box's place on the board, in the board's own terms (before its zoom). */
+        function local(e) {
+            const r = e.getBoundingClientRect(); const b = board().getBoundingClientRect(); const k = zoom.k;
+            return { left: (r.left - b.left) / k, right: (r.right - b.left) / k, top: (r.top - b.top) / k, bottom: (r.bottom - b.top) / k };
+        }
+        /* Where a link meets a box. */
         function anchor(id, side) {
-            const n = el(id); const col = n.closest('.lk-col');
-            const r = n.getBoundingClientRect(); const c = col.getBoundingClientRect(); const b = board().getBoundingClientRect();
-            const top = c.top + 34; const bottom = c.bottom - 2;
-            let y = r.top + r.height / 2; let away = 0;
-            if (y < top) { y = top; away = -1; } else if (y > bottom) { y = bottom; away = 1; }
-            return { x: (side === 'out' ? r.right : r.left) - b.left, y: y - b.top, away, col };
+            const r = local(el(id));
+            return { x: side === 'out' ? r.right : r.left, y: (r.top + r.bottom) / 2 };
         }
         /* Everything a box reaches or is reached by, in this view. */
         function related(id) {
@@ -282,16 +284,14 @@
             return { d: `M${a.x},${a.y} L${t},${a.y} C${t + g * 0.35},${a.y} ${z.x - g * 0.3},${z.y} ${z.x},${z.y}` };
         }
         /* The free gaps of the middle column, top to bottom, in the board's terms. */
-        function gaps(col, b) {
-            const c = col.getBoundingClientRect(); const out = [];
-            let at = c.top + 34 - b.top;
-            for (const n of [...col.querySelectorAll('.lk-node')].map((x) => x.getBoundingClientRect()).sort((x, y) => x.top - y.top)) {
-                if (n.bottom - b.top < at) continue;
-                if (n.top - b.top > at + 2) out.push([at, Math.min(n.top - b.top, c.bottom - b.top)]);
-                at = Math.max(at, n.bottom - b.top);
-                if (at > c.bottom - b.top) break;
+        function gaps(col) {
+            const c = local(col); const out = [];
+            let at = c.top + 34;
+            for (const n of [...col.querySelectorAll('.lk-node')].map(local).sort((x, y) => x.top - y.top)) {
+                if (n.top > at + 2) out.push([at, n.top]);
+                at = Math.max(at, n.bottom);
             }
-            if (at < c.bottom - b.top - 2) out.push([at, c.bottom - b.top]);
+            if (at < c.bottom - 2) out.push([at, c.bottom]);
             return out;
         }
         function draw() {
@@ -302,14 +302,13 @@
             const many = allLines && !drag && ls.length > MANY;
             bd.classList.toggle('simple', !allLines && !drag);
             bd.classList.toggle('many', many);
-            const b = bd.getBoundingClientRect();
-            const colEls = [...bd.querySelectorAll('.lk-col')]; const cols = colEls.map((c) => c.getBoundingClientRect());
-            const middle = cols.length === 3 ? { left: cols[1].left - b.left, right: cols[1].right - b.left, free: gaps(colEls[1], b) } : null;
-            svg.setAttribute('viewBox', `0 0 ${b.width} ${b.height}`);
+            const colEls = [...bd.querySelectorAll('.lk-col')]; const cols = colEls.map(local);
+            const middle = cols.length === 3 ? { left: cols[1].left, right: cols[1].right, free: gaps(colEls[1]) } : null;
+            svg.setAttribute('viewBox', `0 0 ${bd.offsetWidth} ${bd.offsetHeight}`);
             /* No arrowheads: the colour of a line says the right. */
             svg.replaceChildren();
-            bd.querySelectorAll('.lk-knob, .lk-edge, .lk-hook').forEach((c) => c.remove());
-            const edges = new Map(); const knobs = []; const wanted = []; const hooks = new Map();
+            bd.querySelectorAll('.lk-knob').forEach((c) => c.remove());
+            const knobs = []; const wanted = [];
             /* The pale ones first: the links in colour are drawn over them. */
             const layers = [s('g', { class: 'lk-pale' }), s('g')];
             svg.append(...layers);
@@ -318,26 +317,13 @@
                 const off = rel && !(rel.has(l.from) && rel.has(l.to));
                 const on = rel && !off;
                 const pale = many && !on;
-                const away = a.away || z.away;
-                for (const [p, end] of [[a, l.from], [z, l.to]]) if (p.away && !off) { const e = edges.get(p.col) ?? { up: [], down: [] }; (p.away < 0 ? e.up : e.down).push(end); edges.set(p.col, e); }
-                /* Gathered, a link to a box out of sight is a short hook at the end in sight, bent the way the
-                   other end is; the pill at the column's edge says how many. */
-                if (pale && away) {
-                    /* Its other end hidden on the left: counted by the pill of that column only. */
-                    if (a.away || off) continue;
-                    const out = Boolean(z.away); const dir = a.away || z.away; const at = out ? a : z;
-                    const key = `${out ? l.from : l.to}|${dir}`;
-                    const g = hooks.get(key) ?? { box: out ? l.from : l.to, out, dir, x: at.x, y: at.y, room: z.x - a.x, k, ids: [] };
-                    g.ids.push(out ? l.to : l.from); hooks.set(key, g);
-                    continue;
-                }
                 const dash = node(l.from).kind === 'device' && COLUMN[node(l.to).kind] === 'asset';
-                const over = dash && middle && !away ? middle : null;
+                const over = dash && middle ? middle : null;
                 const r = route(a, z, over, many);
-                const p = s('path', { d: r.d, class: [dash ? 'dash' : '', away ? 'away' : '', off ? 'dim' : '', on ? 'on' : '', pale ? 'pale' : '', l.pending ? 'later' : ''].join(' '), 'data-from': l.from, 'data-to': l.to, 'data-kind': k });
+                const p = s('path', { d: r.d, class: [dash ? 'dash' : '', off ? 'dim' : '', on ? 'on' : '', pale ? 'pale' : '', l.pending ? 'later' : ''].join(' '), 'data-from': l.from, 'data-to': l.to, 'data-kind': k });
                 p.style.stroke = css(k);
                 layers[pale ? 0 : 1].append(p);
-                if (away || pale || off) continue;
+                if (pale || off) continue;
                 const hit = s('path', { d: r.d, class: 'hit' }); hit.addEventListener('click', () => openPop(l)); layers[1].append(hit);
                 const spots = (r.knob ? [0.5, 0.3, 0.7, 0.2, 0.82].map(r.knob) : [0.68, 0.55, 0.8, 0.45, 0.88, 0.38].map((f) => p.getPointAtLength(p.getTotalLength() * f)));
                 wanted.push({ l, k, off, on, spots, late: Boolean(r.knob) });
@@ -352,45 +338,6 @@
                 const kb = h('button', { type: 'button', class: `lk-knob${off ? ' dim' : ''}${on ? ' on' : ''}`, style: `background:${css(k)};left:${at.x}px;top:${at.y}px`, title: `${node(l.from).name} → ${node(l.to).name}: ${said(l)}`, 'aria-label': `${node(l.from).name} to ${node(l.to).name}: ${said(l)}. Change.`, 'data-from': l.from, 'data-to': l.to });
                 kb.addEventListener('click', () => openPop(l));
                 bd.append(kb);
-            }
-            /* A box whose links go to boxes out of sight: a short hook bent the way they are, and a small
-               pill naming them; touched, it brings the first into sight. */
-            const taken = [];
-            for (const g of hooks.values()) {
-                const len = Math.min(40, g.room * 0.3); const names = [...new Set(g.ids)].map((id) => node(id).name);
-                const d = g.out ? `M${g.x},${g.y} L${g.x + len * 0.5},${g.y} Q${g.x + len},${g.y} ${g.x + len},${g.y + g.dir * 12}` : `M${g.x - len},${g.y + g.dir * 12} Q${g.x - len},${g.y} ${g.x - len * 0.5},${g.y} L${g.x},${g.y}`;
-                const hook = s('path', { d, class: 'pale hook' }); hook.style.stroke = css(g.k); layers[0].append(hook);
-                const pill = h('button', { type: 'button', class: `lk-hook ${g.out ? 'out' : 'in'}`, title: `${g.dir < 0 ? 'Above' : 'Below'}: ${names.join(', ')}`,
-                    style: `${g.out ? `left:${g.x + 4}px` : `left:${g.x - 4}px`};top:${g.y + g.dir * 22}px;max-width:${Math.max(48, Math.min(170, g.room - 24))}px` });
-                arrowed(pill, g.dir < 0 ? 'up' : 'down', `${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ''}`);
-                pill.addEventListener('click', () => { el([...g.ids].find((id) => el(id)))?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
-                bd.append(pill);
-                /* A name cut short says nothing: where it does not fit, the count, the names in its title. */
-                if (pill.scrollWidth > pill.clientWidth + 1) {
-                    /* No room in the gap: inside its box, at the end of its second line, where there is. */
-                    const r = el(g.box)?.getBoundingClientRect();
-                    if (r) { pill.classList.add('inbox'); pill.style.left = `${r.right - b.left - 20}px`; pill.style.top = `${r.bottom - b.top - 13}px`; pill.style.maxWidth = `${Math.max(48, r.width - 100)}px`; }
-                    if (pill.scrollWidth > pill.clientWidth + 1) arrowed(pill, g.dir < 0 ? 'up' : 'down', String(names.length));
-                }
-                /* Never over another pill or a knob: moved further the same way, or left out (the hook stays). */
-                const clear = () => { const r = pill.getBoundingClientRect(); return [...taken, ...knobs.map((q) => ({ left: q.x + b.left - 11, right: q.x + b.left + 11, top: q.y + b.top - 11, bottom: q.y + b.top + 11 }))].every((o) => r.right < o.left || r.left > o.right || r.bottom < o.top || r.top > o.bottom); };
-                let tries = 0;
-                while (!clear() && tries < 2) { tries += 1; pill.style.top = `${g.y + g.dir * (22 + tries * 20)}px`; }
-                if (clear()) taken.push(pill.getBoundingClientRect()); else pill.remove();
-            }
-            /* Links to boxes scrolled away: a pill says how many, and brings the first into sight.
-               Above: in the column's title band; below: in the strip under the column. Never over a name. */
-            for (const [col, e] of edges) {
-                const c = col.getBoundingClientRect();
-                for (const [dir, ids] of [['up', e.up], ['down', e.down]]) {
-                    if (!ids.length) continue;
-                    const n = new Set(ids).size;
-                    const pill = h('button', { type: 'button', class: `lk-edge ${dir}`, title: `${n} linked box${n === 1 ? '' : 'es'} ${dir === 'up' ? 'above' : 'below'}: bring into sight`,
-                        style: dir === 'up' ? `left:${c.right - b.left - 14}px;top:${c.top - b.top + 8}px` : `left:${c.left - b.left + c.width / 2}px;top:${c.bottom - b.top + 4}px` });
-                    arrowed(pill, dir, `${n} more linked`);
-                    pill.addEventListener('click', () => { el(ids[0])?.scrollIntoView({ block: 'center', behavior: 'smooth' }); });
-                    bd.append(pill);
-                }
             }
             if (drag?.at) svg.append(s('path', { d: curve(anchor(drag.from.id, 'out'), drag.at), class: 'temp' }));
             const src = picked || drag?.from;
@@ -410,29 +357,127 @@
             const again = pinned === n.id;
             pinned = again ? null : n.id;
             picked = !again && VIEWS[view].sources.includes(n.kind) && !n.pending ? n : null;
-            closePop(); hint(); reveal(); draw();
+            closePop(); hint(); draw(); reveal();
         }
-        /* A box touched: what it is linked to, scrolled out of sight in another column, is brought into it. */
+        /* A box touched: it and what it is linked to are brought into the map's window (its card above takes room). */
         function reveal() {
             if (!pinned || phone() || !el(pinned)) return;
-            const rel = related(pinned); const mine = el(pinned).closest('.lk-col');
-            for (const col of board().querySelectorAll('.lk-col')) {
-                if (col === mine) continue;
-                const ns = [...col.querySelectorAll('.lk-node')].filter((e) => rel.has(e.dataset.id));
-                if (!ns.length) continue;
-                const c = col.getBoundingClientRect(); const rs = ns.map((e) => e.getBoundingClientRect());
-                if (rs.every((r) => r.top >= c.top + 30 && r.bottom <= c.bottom)) continue;
-                const top = Math.min(...rs.map((r) => r.top)); const bottom = Math.max(...rs.map((r) => r.bottom));
-                col.scrollTop += bottom - top < c.height - 50 ? (top + bottom) / 2 - (c.top + c.bottom) / 2 : top - c.top - 40;
-            }
+            const rel = related(pinned); const sc = scroller(); const H = sc.clientHeight - BAR_H; const W = sc.clientWidth;
+            const rs = [...board().querySelectorAll('.lk-node')].filter((e) => rel.has(e.dataset.id)).map(local);
+            const me = local(el(pinned));
+            const top = Math.min(...rs.map((r) => r.top)) * zoom.k; const bottom = Math.max(...rs.map((r) => r.bottom)) * zoom.k;
+            const left = Math.min(...rs.map((r) => r.left)) * zoom.k; const right = Math.max(...rs.map((r) => r.right)) * zoom.k;
+            const inY = (y) => top + y >= 0 && bottom + y <= H; const inX = (x) => left + x >= 0 && right + x <= W;
+            if (!inY(zoom.y)) zoom.y = bottom - top <= H ? 8 - top + (H - 16 - (bottom - top)) / 2 : 24 - me.top * zoom.k;
+            if (!inX(zoom.x)) zoom.x = right - left <= W ? (W - (right - left)) / 2 - left : 24 - me.left * zoom.k;
+            apply();
         }
-        /* The board takes the height left on the screen: as many boxes in sight as can be. */
+        /* ---------- the map's own zoom: a transform of the board alone, never the page's text size ---------- */
+        /* `fit`: the whole board in sight, as at first; zoomed or moved by hand, it stays as it was put. */
+        const zoom = { k: 1, x: 0, y: 0, fit: true, min: 1 };
+        const MAX_ZOOM = 2.5;
+        const scroller = () => $('links-scroller');
+        /* Natural width: columns of their own width; wider when the screen has the room. */
+        const COL_W = 236; const COL_GAP = 96;
+        /* Room kept under the board for the zoom's buttons, fitted. */
+        const BAR_H = 46;
+        /* Moved or zoomed, kept inside its window: smaller than it, at its top, centred across. */
+        function apply() {
+            const sc = scroller(); const bd = board(); const W = sc.clientWidth; const H = sc.clientHeight;
+            zoom.k = Math.min(MAX_ZOOM, Math.max(zoom.min, zoom.k));
+            const w = bd.offsetWidth * zoom.k; const hh = bd.offsetHeight * zoom.k;
+            zoom.x = w <= W ? (W - w) / 2 : Math.min(0, Math.max(W - w, zoom.x));
+            zoom.y = hh <= H ? 0 : Math.min(0, Math.max(H - hh, zoom.y));
+            bd.style.transform = `translate(${zoom.x}px, ${zoom.y}px) scale(${zoom.k})`;
+            /* The dots to drag from and the knobs keep their size on the screen, zoomed out. */
+            bd.style.setProperty('--lk-inv', String(Math.min(2, Math.max(1, 1 / zoom.k))));
+            sc.classList.toggle('zoomed', w > W + 1 || hh > H + 1);
+            const bar = sc.querySelector('.lk-zoom');
+            if (bar) {
+                bar.querySelector('[data-zoom="out"]').disabled = zoom.k <= zoom.min + 0.001;
+                bar.querySelector('[data-zoom="in"]').disabled = zoom.k >= MAX_ZOOM - 0.001;
+                bar.querySelector('[data-zoom="fit"]').disabled = zoom.fit;
+            }
+            place();
+        }
+        /* Zoomed by `f` around a point of the window (its middle by default). */
+        function zoomBy(f, cx, cy) {
+            const sc = scroller(); const x = cx ?? sc.clientWidth / 2; const y = cy ?? sc.clientHeight / 2;
+            const k = Math.min(MAX_ZOOM, Math.max(zoom.min, zoom.k * f));
+            if (k === zoom.k) return;
+            zoom.x = x - ((x - zoom.x) * k) / zoom.k; zoom.y = y - ((y - zoom.y) * k) / zoom.k; zoom.k = k; zoom.fit = false;
+            apply();
+        }
+        /* The board takes the height left on the screen, and the whole of it is fitted there. */
         function fit() {
-            const bd = board(); const a = $('access');
+            const sc = scroller(); const bd = board(); const a = $('access');
             if (phone() || !shownNow()) return;
-            const top = bd.getBoundingClientRect().top - a.getBoundingClientRect().top + a.scrollTop;
-            const want = `${Math.round(Math.max(320, a.clientHeight - top - 20))}px`;
-            if (bd.style.height !== want) { bd.style.height = want; requestAnimationFrame(() => draw()); }
+            const n = VIEWS[view].cols.length;
+            const natural = n * COL_W + (n - 1) * COL_GAP + 36;
+            const top = sc.getBoundingClientRect().top - a.getBoundingClientRect().top + a.scrollTop;
+            const room = Math.round(Math.max(320, a.clientHeight - top - 20));
+            /* The card of a box touched takes room above: the scale stays the one without it, the map moves under it. */
+            const card = $('links-card'); const cardH = card.hidden ? 0 : card.offsetHeight + 10;
+            const W = sc.clientWidth;
+            bd.style.width = `${natural}px`;
+            const bh = bd.offsetHeight;
+            const kh = Math.min(1, (room + cardH - BAR_H) / bh);
+            const width = Math.max(natural, W / kh);
+            bd.style.width = `${Math.floor(width)}px`;
+            const k = Math.min(kh, W / width);
+            zoom.min = Math.min(k, 1);
+            sc.style.height = `${Math.max(160, Math.min(room, Math.ceil(bh * k) + BAR_H))}px`;
+            if (zoom.fit) { zoom.k = k; zoom.x = 0; zoom.y = 0; }
+            apply();
+        }
+        function zoomBar() {
+            const b = (z, text, label, onclick) => h('button', { type: 'button', 'data-zoom': z, id: `links-zoom-${z}`, 'aria-label': label, title: label, text, onclick });
+            return h('div', { class: 'lk-zoom', role: 'group', 'aria-label': 'Zoom of the map' },
+                b('out', '−', 'Zoom out', () => zoomBy(1 / 1.25)), b('in', '+', 'Zoom in', () => zoomBy(1.25)),
+                b('fit', 'Fit', 'See everything', () => { zoom.fit = true; fit(); }));
+        }
+        /* A finger or the mouse moves the map (zoomed in), two fingers zoom it; a box or a link touched without moving is a tap. */
+        function gestures() {
+            const sc = scroller(); const pts = new Map(); let pan = null; let pinch = null; let moved = false;
+            const at = (e) => { const r = sc.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+            sc.prepend(zoomBar());
+            sc.addEventListener('pointerdown', (e) => {
+                if (e.button > 0 || e.target.closest('.lk-handle, .lk-pop, .lk-zoom')) return;
+                pts.set(e.pointerId, at(e));
+                if (pts.size === 1) { moved = false; pan = { ...at(e), x0: zoom.x, y0: zoom.y }; pinch = null; }
+                if (pts.size === 2) {
+                    const [p, q] = [...pts.values()];
+                    pinch = { d: Math.hypot(p.x - q.x, p.y - q.y) || 1, k: zoom.k, mx: (p.x + q.x) / 2, my: (p.y + q.y) / 2, x0: zoom.x, y0: zoom.y }; pan = null; moved = true;
+                }
+            });
+            sc.addEventListener('pointermove', (e) => {
+                if (!pts.has(e.pointerId) || drag) return;
+                const p = at(e); pts.set(e.pointerId, p);
+                if (pinch && pts.size >= 2) {
+                    const [a, b] = [...pts.values()];
+                    const k = Math.min(MAX_ZOOM, Math.max(zoom.min, (pinch.k * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.d));
+                    const mx = (a.x + b.x) / 2; const my = (a.y + b.y) / 2;
+                    zoom.x = mx - ((pinch.mx - pinch.x0) * k) / pinch.k; zoom.y = my - ((pinch.my - pinch.y0) * k) / pinch.k; zoom.k = k; zoom.fit = false;
+                    apply(); return;
+                }
+                if (!pan) return;
+                if (!moved && Math.hypot(p.x - pan.x, p.y - pan.y) < 6) return;
+                if (!moved) { moved = true; sc.setPointerCapture?.(e.pointerId); sc.classList.add('panning'); }
+                zoom.x = pan.x0 + p.x - pan.x; zoom.y = pan.y0 + p.y - pan.y; apply();
+            });
+            const up = (e) => { pts.delete(e.pointerId); if (!pts.size) { pan = null; pinch = null; sc.classList.remove('panning'); } };
+            sc.addEventListener('pointerup', up); sc.addEventListener('pointercancel', up);
+            /* Moved, not tapped: the click that follows is not a tap on a box. */
+            sc.addEventListener('click', (e) => { if (moved) { moved = false; e.stopPropagation(); e.preventDefault(); } }, true);
+            /* Ctrl (or cmd) + wheel, and a pinch on a trackpad: the map's zoom. The wheel alone moves it, zoomed in. */
+            sc.addEventListener('wheel', (e) => {
+                if (phone() || e.target.closest('.lk-pop')) return;
+                if (e.ctrlKey || e.metaKey) { e.preventDefault(); const p = at(e); zoomBy(Math.exp(-Math.max(-50, Math.min(50, e.deltaY)) * 0.01), p.x, p.y); return; }
+                if (!sc.classList.contains('zoomed')) return;
+                e.preventDefault(); zoom.x -= e.shiftKey ? e.deltaY : e.deltaX; zoom.y -= e.shiftKey ? 0 : e.deltaY; zoom.fit = false; apply();
+            }, { passive: false });
+            /* Never scrolled (a box reached with Tab would scroll it): the zoom alone moves the board. */
+            sc.addEventListener('scroll', () => { sc.scrollTop = 0; sc.scrollLeft = 0; });
         }
         function hint() {
             card();
@@ -492,17 +537,20 @@
             try { await request('/setup/drop', { id }); pinned = null; await changed(); } catch (e) { err(e.message); }
         }
 
-        /* Dragging near a column's top or bottom scrolls it, so a target out of sight can be reached. */
+        /* Dragging near an edge of the map's window, zoomed in, moves the map, so a target out of sight can be reached. */
         function startDrag(ev, n) {
             ev.preventDefault(); ev.stopPropagation(); closePop(); picked = null;
             drag = { from: n, at: null, x: 0, y: 0 };
+            const follow = () => { const b = board().getBoundingClientRect(); drag.at = { x: (drag.x - b.left) / zoom.k, y: (drag.y - b.top) / zoom.k }; };
             const tick = () => {
                 if (!drag) return;
-                const over = document.elementFromPoint(drag.x, drag.y)?.closest('.lk-col');
-                if (over) { const c = over.getBoundingClientRect(); if (drag.y < c.top + 50) over.scrollTop -= 8; else if (drag.y > c.bottom - 40) over.scrollTop += 8; }
+                const c = scroller().getBoundingClientRect(); const step = 10;
+                const dx = drag.x < c.left + 40 ? step : drag.x > c.right - 40 ? -step : 0;
+                const dy = drag.y < c.top + 40 ? step : drag.y > c.bottom - 40 ? -step : 0;
+                if (drag.at && (dx || dy)) { const x = zoom.x; const y = zoom.y; zoom.x += dx; zoom.y += dy; apply(); if (x !== zoom.x || y !== zoom.y) { follow(); draw(); } }
                 requestAnimationFrame(tick);
             };
-            const move = (e) => { const b = board().getBoundingClientRect(); drag.x = e.clientX; drag.y = e.clientY; drag.at = { x: e.clientX - b.left, y: e.clientY - b.top }; draw(); };
+            const move = (e) => { drag.x = e.clientX; drag.y = e.clientY; follow(); draw(); };
             const up = (e) => {
                 removeEventListener('pointermove', move); removeEventListener('pointerup', up);
                 const t = document.elementFromPoint(e.clientX, e.clientY)?.closest('.lk-node');
@@ -584,16 +632,18 @@
             if (l.pending) rm.hidden = true;
             row.append(rm, h('button', { type: 'button', class: 'primary', text: 'Done', onclick: () => { closePop(); draw(); } }));
             pop.append(row);
-            board().append(pop); place();
+            /* Over the map's window, not in the board: its size is the page's, whatever the zoom. */
+            scroller().append(pop); place();
             /* Whole in sight: the board may reach below the screen. */
             pop.scrollIntoView({ block: 'nearest' });
             pop.querySelector('input')?.focus({ preventScroll: true });
         }
         function place() {
             if (!pop || !popLink || !el(popLink.from) || !el(popLink.to)) return;
-            const a = anchor(popLink.from, 'out'); const z = anchor(popLink.to, 'in'); const b = board().getBoundingClientRect();
-            const x = Math.min(Math.max(8, (a.x + z.x) / 2 - pop.offsetWidth / 2), b.width - pop.offsetWidth - 8);
-            const y = Math.min(Math.max(8, (a.y + z.y) / 2 + 16), Math.max(8, b.height - pop.offsetHeight - 8));
+            const a = anchor(popLink.from, 'out'); const z = anchor(popLink.to, 'in'); const sc = scroller();
+            const mx = ((a.x + z.x) / 2) * zoom.k + zoom.x; const my = ((a.y + z.y) / 2) * zoom.k + zoom.y;
+            const x = Math.min(Math.max(8, mx - pop.offsetWidth / 2), sc.clientWidth - pop.offsetWidth - 8);
+            const y = Math.min(Math.max(8, my + 16), Math.max(8, sc.clientHeight - pop.offsetHeight - 8));
             pop.style.left = `${x}px`; pop.style.top = `${y}px`;
         }
 
@@ -991,7 +1041,7 @@
             err(''); picked = null; ph.screen = 'list';
             showPane('links');
             await load();
-            pinned = pin && byId.has(pin) ? pin : null;
+            pinned = pin && byId.has(pin) ? pin : null; zoom.fit = true;
             if (pinned && phone()) { ph.kind = COLUMN[node(pinned).kind]; ph.sheet = pinned; }
             paint();
             if (document.fonts?.ready) document.fonts.ready.then(() => draw());
@@ -1003,7 +1053,7 @@
             traceOf = of ?? '*';
             paintFlows();
         }
-        for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.addEventListener('click', () => { view = b.dataset.view; picked = null; pinned = null; try { localStorage.setItem('clavarium-links-view', view); } catch { /* not kept */ } paint(); });
+        for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.addEventListener('click', () => { view = b.dataset.view; picked = null; pinned = null; zoom.fit = true; try { localStorage.setItem('clavarium-links-view', view); } catch { /* not kept */ } paint(); });
         $('links-all').addEventListener('change', () => { allLines = $('links-all').checked; try { localStorage.setItem('clavarium-links-all', allLines ? '1' : '0'); } catch { /* not kept */ } draw(); });
         $('flows-of').addEventListener('change', (e) => { traceOf = e.target.value; paintFlows(); });
         $('flows-export').addEventListener('click', () => { void exportFile(); });
@@ -1038,7 +1088,7 @@
         /* A click away from it closes the knob's card (a button it just replaced is not "away"). */
         document.addEventListener('click', (e) => { if (pop && e.target.isConnected && !e.target.closest('.lk-pop, .lk-knob, .lk-node, svg')) { closePop(); draw(); } });
         addEventListener('resize', () => { if (shownNow()) { legend(); paintPhone(); fit(); draw(); place(); } });
-        $('links-scroller').addEventListener('scroll', () => draw(), { passive: true });
+        gestures();
         return { open, openFlows, close, changed };
     };
 })();

@@ -767,8 +767,9 @@
         stepText(way);
     }, true);
     let wheelAt = 0;
-    /* A picture large in the chat's viewer zooms itself, with a pinch or the wheel: the text is not grown under it. */
-    const inViewer = (event) => event.target instanceof Element && Boolean(event.target.closest('.parley-zoom'));
+    /* A picture large in the chat's viewer zooms itself, with a pinch or the wheel: the text is not grown under it.
+       So does the map of Access (links.js). */
+    const inViewer = (event) => event.target instanceof Element && Boolean(event.target.closest('.parley-zoom, .lk-scroller'));
     addEventListener('wheel', (event) => {
         if (!event.ctrlKey || inViewer(event)) return;
         event.preventDefault(); event.stopPropagation();

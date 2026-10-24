@@ -24,8 +24,13 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await page.locator('#links-tabs [data-view=convs]').click();
     const node = (id) => page.locator(`#links-board .lk-node[data-id="${id}"]`);
     await me.until('the map is drawn', async () => (await page.locator('#links-board .lk-node').count()) === 6);
-    /* No column scrolls sideways: the dots to draw from stay inside their column. */
-    assert.deepEqual(await page.locator('#links-board .lk-col').evaluateAll((cols) => cols.filter((c) => c.scrollWidth > c.clientWidth).length), 0);
+    /* No column scrolls, either way: the board is laid out whole, and fitted to its window. */
+    assert.deepEqual(await page.locator('#links-board .lk-col').evaluateAll((cols) => cols.filter((c) => getComputedStyle(c).overflowY !== 'visible' || getComputedStyle(c).overflowX !== 'visible').length), 0);
+    const inside = () => page.evaluate(() => { const w = document.getElementById('links-scroller').getBoundingClientRect(); return [...document.querySelectorAll('#links-board .lk-node')].every((n) => { const r = n.getBoundingClientRect(); return r.top >= w.top - 1 && r.bottom <= w.bottom + 1 && r.left >= w.left - 1 && r.right <= w.right + 1; }); });
+    assert.equal(await inside(), true, 'every box in sight at first');
+    /* One line a box: its name; what it is, in its title. */
+    assert.equal(await page.locator('#links-board .lk-node .lk-sb').count(), 0);
+    assert.match(await node('git:site-a').getAttribute('title'), /site-a · repository/);
     /* At rest every link is drawn, a line for each right given; this device may hide them, a count staying on each box. */
     const kinds = () => page.locator('#links-svg path[data-kind]').evaluateAll((l) => l.filter((x) => getComputedStyle(x).display !== 'none').map((x) => x.dataset.kind).sort().join());
     await me.until('every link is drawn at rest', async () => (await kinds()) === 'read,use,write,write');
@@ -35,6 +40,21 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.equal(await node('conversation:client-a').locator('.lk-cnt').innerText(), '3');
     assert.equal(await page.locator('#links-svg path[data-kind]:visible').count(), 0);
     await page.locator('#links-all').check();
+    /* The map's own zoom: the buttons, ctrl + wheel; the page's text size never moves with it. */
+    const scale = () => page.evaluate(() => Number(/scale\(([\d.]+)\)/.exec(document.getElementById('links-board').style.transform)?.[1]));
+    const textSize = await page.evaluate(() => window.clavariumText().scale);
+    const fitted = await scale();
+    await page.locator('#links-zoom-in').click();
+    assert.ok(await scale() > fitted * 1.2, 'zoomed in by its button');
+    const w = await page.locator('#links-scroller').boundingBox();
+    await page.mouse.move(w.x + w.width / 2, w.y + w.height / 2);
+    await page.keyboard.down('Control'); await page.mouse.wheel(0, 200); await page.keyboard.up('Control');
+    await me.until('zoomed out by ctrl + wheel', async () => (await scale()) < fitted * 1.2);
+    assert.equal(await page.evaluate(() => window.clavariumText().scale), textSize, 'the text size is left alone');
+    await page.locator('#links-zoom-in').click(); await page.locator('#links-zoom-in').click();
+    await page.locator('#links-zoom-fit').click();
+    assert.equal(await scale(), fitted);
+    assert.equal(await inside(), true, 'everything in sight again');
     /* One agent alone: what it sees, in words; what it does not see, greyed. */
     await node('conversation:client-a').click();
     await me.until('it says what client-a sees', async () => /its agent: read and write of site-a[\s\S]*its agent: read of brand[\s\S]*its agent: use of DEPLOY_A/.test(await page.locator('#links-card').innerText()));
@@ -56,6 +76,17 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Detach brand from client-b?');
     await page.locator('.lk-pop button', { hasText: /^Remove$/ }).click();
     await me.until('brand is detached from client-b', async () => (await brandOf()) === undefined);
+    /* Zoomed in, a link is still drawn from the dot of a box to another. */
+    await page.locator('#links-zoom-in').click();
+    const dot = await node('conversation:client-b').locator('.lk-handle').boundingBox();
+    const to = await node('folder:brand').boundingBox();
+    await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2); await page.mouse.down();
+    await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 8 }); await page.mouse.up();
+    await me.until('brand is read by client-b, dragged', async () => (await brandOf()) === 'read');
+    await page.locator('.lk-pop .lk-rm').click();
+    await page.locator('.lk-pop button', { hasText: /^Remove$/ }).click();
+    await me.until('brand is detached again', async () => (await brandOf()) === undefined);
+    await page.locator('#links-zoom-fit').click();
     /* Traced: what reaches it, what it reaches. */
     await node('conversation:client-a').click();
     await page.locator('#links-trace-it').click();
@@ -89,6 +120,8 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await me.until('its own in full', async () => (await page.locator('#links-svg path.on[data-from="conversation:c2"]').count()) === 5);
     const knobs = await page.locator('#links-board .lk-knob').evaluateAll((l) => l.map((x) => x.dataset.from));
     assert.ok(knobs.length > 0 && knobs.every((x) => x === 'conversation:c2'), `knobs only on its own: ${knobs}`);
+    /* No count of links out of sight, no pill at a column's end: every link is drawn end to end. */
+    assert.equal(await page.locator('#links-board .lk-hook, #links-board .lk-edge').count(), 0);
     await page.unroute('**/api/flows');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(me.errors, []);
