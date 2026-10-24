@@ -169,7 +169,7 @@ async function walk(t, { phone }) {
     await until('the chat, two steps down', inChat);
 
     /* FROM THE CHAT, DIRECT: the line that says the commit was sent opens its review, and the commit it names too. */
-    const line = page.locator('#simple-thread .parley-system', { hasText: 'Sent by hand to main of site' });
+    const line = page.locator('#simple-thread .parley-system', { hasText: 'Sent by hand: site → main' });
     await until('the line of the sending', async () => (await line.count()) > 0);
     assert.match(await line.first().innerText(), new RegExp(`\\(up to ${head.slice(0, 7)}\\)`));
     await bothWays(() => line.first().locator('button.parley-act', { hasText: 'See the commit' }).click(),

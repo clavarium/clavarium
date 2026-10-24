@@ -718,7 +718,7 @@ test('what happens to a repository is said in the chat of the conversations it i
     /* The sending: alpha's alone, whose settings sent it; its own refresh brings nothing "new". */
     const tip = git(b.work, 'rev-parse', 'HEAD');
     /* The commit it names is its first seven characters (the page makes them a link); a new branch has no "See the commits". */
-    assert.deepEqual(b.lines, [['alpha', { kind: 'sent', text: `Sent to try/one of site: 2 commits (up to ${tip.slice(0, 7)}) (a new branch), checks passed.`, topic: 'Sent', brief: 'try/one', actions: ['review:site'] }]]);
+    assert.deepEqual(b.lines, [['alpha', { kind: 'sent', text: 'Sent: site → try/one, 2 commits, a new branch.', topic: 'Sent', brief: 'try/one', actions: ['review:site'] }]]);
     /* Refused: checks that failed, with what to do; once for that commit. */
     b.lines.length = 0; verdict = 'failed';
     b.commit('c.txt', 'c\n', 'three');
@@ -744,7 +744,7 @@ test('what happens to a repository is said in the chat of the conversations it i
     const head = b.commit('e.txt', 'e\n', 'five');
     await b.review.outgoing('site');
     await b.keeper.send('site', { head, target: 'main' });
-    const byHand = `Sent by hand to main of site: 1 commit (up to ${head.slice(0, 7)}).`;
+    const byHand = 'Sent by hand: site → main, 1 commit.';
     assert.deepEqual(b.lines.map(([c, e]) => [c, e.kind, e.text, e.brief]), [['alpha', 'sent-by-hand', byHand, 'main'], ['beta', 'sent-by-hand', byHand, 'main']]);
     /* "See the commit(s)": from the tip the remote had to the one sent. */
     assert.deepEqual(b.lines[0][1].actions, [`commits:site.${head.slice(0, 12)}.${before.slice(0, 12)}.1`, 'review:site']);

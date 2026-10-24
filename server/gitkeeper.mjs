@@ -568,7 +568,7 @@ export class GitKeeper {
         }
         try {
             const sent = await this.#review.push(r.name, body);
-            if (!sent.already) this.#say(r.name, this.#attached(r.name), { kind: 'sent-by-hand', text: `Sent by hand to ${sent.branch} of ${r.name}: ${commitsOf(sent.commits)}${upTo(sent.head)}${sent.made ? ' (a new branch)' : ''}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(r.name, sent.head, sent.base, sent.commits) });
+            if (!sent.already) this.#say(r.name, this.#attached(r.name), { kind: 'sent-by-hand', text: `Sent by hand: ${r.name} → ${sent.branch}, ${commitsOf(sent.commits)}${sent.made ? ', a new branch' : ''}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(r.name, sent.head, sent.base, sent.commits) });
             return sent;
         } catch (error) {
             if (error instanceof GitFailure) this.#sendFailed(r.name, error, { branch: body?.target, head: body?.head });
@@ -682,7 +682,7 @@ export class GitKeeper {
             if (sent.already) { this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Already on the remote: ${b}.` }, { sent: true, by: conversation }); return true; }
             this.#log(name, { branch: b, head: tip.id, conversation, ok: true, what: `Sent automatically for ${conversation}: ${sent.commits} commit(s) to ${sent.branch}${sent.made ? ' (a new branch)' : ''}, ${checked}.${sent.note ? ` ${sent.note}` : ''}` }, { sent: true, by: conversation });
             if (alert) this.#tell(`${name}: sent to ${sent.branch}`, `${sent.commits} commit(s), automatically for ${conversation}, ${checked}.`);
-            this.#say(name, [conversation], { kind: 'sent', text: `Sent to ${sent.branch} of ${name}: ${commitsOf(sent.commits)}${upTo(sent.head)}${sent.made ? ' (a new branch)' : ''}, ${checked}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(name, sent.head, sent.base, sent.commits) });
+            this.#say(name, [conversation], { kind: 'sent', text: `Sent: ${name} → ${sent.branch}, ${commitsOf(sent.commits)}${sent.made ? ', a new branch' : ''}${s.checks ? '' : ', no checks'}.`, topic: 'Sent', brief: sent.branch, actions: seeCommits(name, sent.head, sent.base, sent.commits) });
             return true;
         } catch (error) {
             const kind = error instanceof GitFailure ? error.kind : 'error';
