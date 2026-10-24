@@ -354,6 +354,7 @@
         document.documentElement.dataset.theme = light ? 'light' : 'dark';
         /* The chat's colours of meaning (notes, warnings, code) follow the page's theme, not the device's. */
         $('simple-thread').dataset.theme = light ? 'light' : 'dark';
+        for (const view of document.querySelectorAll('.md-view')) view.dataset.theme = light ? 'light' : 'dark';
         terminal.options.theme = light ? LIGHT : DARK;
         document.querySelector('meta[name=theme-color]')?.setAttribute('content', light ? LIGHT.background : DARK.background);
         $('theme').textContent = light ? 'Dark' : 'Light';
@@ -5977,13 +5978,17 @@
     const PREVIEW_MAX = 25 * 1024 * 1024;
     const TEXT_MAX = 1024 * 1024;
     const PICTURES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-    const TEXTS = ['txt', 'md', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
+    const TEXTS = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
     const PDF_PAGES = 30;
+    /* Beyond this, a Markdown file is shown as its text: formatting it would hold the page. */
+    const MD_MAX = 512 * 1024;
     let shownUrl = null;
     /* The file is shown in a WINDOW over the screen, wherever it was asked
        from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
+        for (const url of mdUrls) URL.revokeObjectURL(url);
+        mdUrls.clear();
         editing = null;
         delete $('viewer').dataset.editing;
         $('preview-body').replaceChildren();
@@ -6047,6 +6052,142 @@
         const range = document.createRange(); range.selectNodeContents(node);
         const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
         return true;
+    }
+    /* A MARKDOWN FILE, SHOWN FORMATTED, as the chat shows what the tool
+       writes. Parley reads the text into plain data (its markdown()); the
+       page is built from that data element by element, its text as text:
+       never the file as markup. Parley does not export its painter yet: once
+       it does (renderMarkdown, with these same slots), it is used instead of
+       the one here. Slots: picture(src) the address of a picture this
+       preview may show, or null (then its caption is shown); open(href) a
+       function opening a file of the same folder, or null; diagram and
+       highlight as for the chat. Blob addresses made go into `urls`. */
+    const mdUrls = new Set();
+    let mdWords = null;
+    async function markdownPage(text, slots) {
+        const P = await import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href);
+        if (!mdWords) mdWords = await readWords().catch(() => ({}));
+        const all = { words: mdWords, urls: mdUrls, ...slots };
+        if (typeof P.renderMarkdown === 'function') return P.renderMarkdown(text, all);
+        return paintMarkdown(P.markdown(text), P.safeLink, all);
+    }
+    function paintMarkdown(data, safeLink, { words, picture, open, diagram, highlight, urls }) {
+        const el = (tag, className, text) => { const e = document.createElement(tag); if (className) e.className = className; if (text !== undefined) e.textContent = text; return e; };
+        const said = (key, fallback) => (typeof words?.[key] === 'string' ? words[key] : fallback);
+        const KINDS = { note: 'Note', tip: 'Tip', important: 'Important', warning: 'Warning', caution: 'Caution' };
+        const BADGES = { ok: 'ok', todo: 'todo', blocked: 'blocked', warn: 'warn' };
+        function inlines(nodes, into) {
+            for (const n of nodes) {
+                if (n.t === 'text') into.append(n.v);
+                else if (n.t === 'br') into.append(el('br'));
+                else if (n.t === 'code') into.append(el('code', '', n.v));
+                else if (n.t === 'em' || n.t === 'strong' || n.t === 'del' || n.t === 'mark') into.append(inlines(n.c, el(n.t === 'del' ? 's' : n.t)));
+                else if (n.t === 'badge') { const b = el('span', 'parley-badge', said(`badge-${n.kind}`, BADGES[n.kind] ?? n.kind)); b.dataset.kind = n.kind; into.append(b); }
+                else if (n.t === 'link') {
+                    const href = safeLink(n.href);
+                    const go = href ? null : open?.(n.href);
+                    if (href) { const a = el('a', 'parley-link'); a.href = href; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow'; a.title = href; into.append(inlines(n.c, a)); }
+                    else if (go) { const b = el('button', 'parley-pathlink'); b.type = 'button'; b.title = n.href; b.addEventListener('click', go); into.append(inlines(n.c, b)); }
+                    else into.append(inlines(n.c, el('span')));
+                } else if (n.t === 'img') {
+                    const url = picture?.(n.src);
+                    if (url) { const img = el('img'); img.src = url; img.alt = n.alt || n.src.split('/').pop(); img.loading = 'lazy'; img.decoding = 'async'; into.append(img); }
+                    else { const off = el('span', 'parley-noimg', n.alt || n.src.split('/').pop()); off.title = said('not-shown', 'Not shown here'); into.append(off); }
+                }
+            }
+            return into;
+        }
+        function tokens(list, depth) {
+            const out = [];
+            for (const t of list) {
+                if (typeof t === 'string') { out.push(t); continue; }
+                if (!t || typeof t !== 'object' || depth > 12) continue;
+                const span = el('span', 'parley-tok');
+                for (const n of [t.type, ...(Array.isArray(t.alias) ? t.alias : [t.alias])]) if (typeof n === 'string' && /^[a-z][a-z-]{0,30}$/.test(n)) span.classList.add(`parley-tok-${n}`);
+                span.append(...(Array.isArray(t.content) ? tokens(t.content, depth + 1) : [String(t.content ?? '')]));
+                out.push(span);
+            }
+            return out;
+        }
+        function code(b) {
+            const holder = el('div', 'parley-code');
+            const bar = el('div', 'parley-code-bar');
+            const c = el('code', '', b.text);
+            const pre = el('pre'); pre.append(c);
+            const copy = el('button', 'parley-copy', said('copy', 'Copy')); copy.type = 'button';
+            copy.addEventListener('click', () => {
+                const done = () => { copy.textContent = said('copied', 'Copied'); setTimeout(() => { copy.textContent = said('copy', 'Copy'); }, 1500); };
+                try { void navigator.clipboard.writeText(b.text).then(done, () => selectAll(c)); } catch { selectAll(c); }
+            });
+            bar.append(el('span', 'parley-code-lang', b.lang), copy);
+            holder.append(bar, pre);
+            if (highlight && b.lang && b.text.length <= 40_000) Promise.resolve().then(() => highlight(b.text, b.lang)).then((tree) => { if (Array.isArray(tree)) c.replaceChildren(...tokens(tree, 0)); }, () => {});
+            return holder;
+        }
+        function drawing(b) {
+            if (!diagram || b.text.length > 20_000) return code(b);
+            const fig = el('figure', 'parley-diagram');
+            fig.append(el('span', 'parley-diagram-wait', said('diagram', 'Diagram')));
+            Promise.resolve().then(() => diagram(b.text)).then((svg) => {
+                if (typeof svg !== 'string' || !/^\s*(<\?xml[^>]*>\s*)?<svg[\s>]/i.test(svg)) throw new Error('not a drawing');
+                /* A picture runs nothing and loads nothing: the drawing is shown as one. */
+                const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+                urls?.add(url);
+                const img = el('img'); img.src = url; img.alt = said('diagram', 'Diagram');
+                fig.replaceChildren(img);
+            }).catch(() => fig.replaceWith(code(b)));
+            return fig;
+        }
+        function block(b) {
+            if (b.t === 'p') return inlines(b.c, el('p'));
+            if (b.t === 'h') return inlines(b.c, el(`h${Math.min(6, b.level + 1)}`, `parley-h parley-h${b.level}`));
+            if (b.t === 'hr') return el('hr');
+            if (b.t === 'code') return b.lang === 'mermaid' ? drawing(b) : code(b);
+            if (b.t === 'quote') return blocks(b.c, el('blockquote'));
+            if (b.t === 'alert') {
+                const box = el('div', 'parley-callout'); box.dataset.kind = b.kind; box.setAttribute('role', 'note');
+                box.append(el('p', 'parley-callout-head', said(b.kind, KINDS[b.kind] ?? b.kind)));
+                return blocks(b.c, box);
+            }
+            if (b.t === 'list') {
+                const list = el(b.ordered ? 'ol' : 'ul');
+                if (Number.isInteger(b.start)) list.start = b.start;
+                for (const item of b.items) {
+                    const li = el('li');
+                    if (item.task !== null) { li.className = 'parley-task'; const box = el('span', 'parley-check', item.task ? '☑' : '☐'); box.dataset.done = String(item.task); li.append(box); }
+                    if (item.c.length === 1 && item.c[0].t === 'p') inlines(item.c[0].c, li); else blocks(item.c, li);
+                    list.append(li);
+                }
+                return list;
+            }
+            if (b.t === 'table') {
+                const wrap = el('div', 'parley-table'); wrap.tabIndex = 0;
+                const table = el('table'); const head = el('thead'); const tr = el('tr'); const body = el('tbody');
+                b.head.forEach((cell, k) => { const th = el('th'); if (b.align[k]) th.style.textAlign = b.align[k]; tr.append(inlines(cell, th)); });
+                head.append(tr);
+                for (const row of b.rows) { const r = el('tr'); row.forEach((cell, k) => { const td = el('td'); if (b.align[k]) td.style.textAlign = b.align[k]; r.append(inlines(cell, td)); }); body.append(r); }
+                table.append(head, body); wrap.append(table);
+                return wrap;
+            }
+            return el('span');
+        }
+        function blocks(list, into) { for (const b of list) into.append(block(b)); return into; }
+        return blocks(data, el('div', 'parley-md'));
+    }
+    /* A path written in a Markdown file, as a place in the same folder kept
+       here: relative to the file, or absolute under /work or the folder's own
+       /resources/<name>. Never above the top of the folder; anything else: null. */
+    function besideFile(tab, inner, href) {
+        let raw = String(href ?? '').trim().replace(/[?#].*$/, '');
+        if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith('//')) return null;
+        try { raw = decodeURIComponent(raw); } catch { return null; }
+        let parts;
+        const top = tab === 'work' ? '/work/' : `/resources/${tab}/`;
+        if (raw.startsWith('/')) { if (!raw.startsWith(top)) return null; parts = raw.slice(top.length).split('/'); }
+        else parts = [...inner.split('/').slice(0, -1), ...raw.split('/')];
+        const out = [];
+        for (const p of parts) { if (p === '' || p === '.') continue; if (p === '..') { if (!out.length) return null; out.pop(); } else out.push(p); }
+        return out.length ? out.join('/') : null;
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
@@ -6122,9 +6263,9 @@
             } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-            const source = () => { const pre = document.createElement('pre'); pre.textContent = text; return pre; };
+            const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
             /* Copy: all its text, the source of a page too. Refused, the text is shown and selected. */
-            offerCopy({ text }, { select: () => { if (!body.querySelector('pre')) body.querySelector('button')?.click(); return selectAll(body.querySelector('pre')); } });
+            offerCopy({ text }, { select: () => { if (!body.querySelector('pre.source')) body.querySelector('button')?.click(); return selectAll(body.querySelector('pre.source')); } });
             /* A page written by the tool is SHOWN AS A PAGE -- in a frame that is
                nobody: no session, no network, nothing of this site (the server
                answers it with those rules; see files.mjs). Its source is one
@@ -6146,6 +6287,38 @@
                 });
                 body.append(toggle, frame);
                 note('A page written by the tool, shown in a closed frame: it reaches nothing outside itself. Never type a password into it.');
+            } else if ((kind === 'md' || kind === 'markdown') && text.length <= MD_MAX) {
+                /* Markdown: formatted, its text one tap away (the choice kept on this device). */
+                let page;
+                try {
+                    page = await markdownPage(text, {
+                        /* Pictures as the thumbnails of Files allow them (the server checks the folder and the bytes); a file of the machine's disk shows none. */
+                        picture: (src) => { const p = from ? null : besideFile(tab, inner, src); return p && /\.(png|jpe?g|gif|webp)$/i.test(p) ? `${API}/files/thumb?${new URLSearchParams({ c: current, r: tab, p })}` : null; },
+                        open: (href) => { const p = from ? null : besideFile(tab, inner, href); return p ? () => { void preview(tab, p, p.split('/').pop(), 0); } : null; },
+                        diagram: drawDiagram, highlight: colourCode,
+                    });
+                } catch { page = null; }
+                if ($('viewer').hidden || $('preview-name').textContent !== name) return;
+                if (!page) { body.append(source()); note(''); return; }
+                const formatted = document.createElement('div'); formatted.className = 'parley md-view'; formatted.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+                formatted.append(page);
+                const raw = source();
+                const switcher = document.createElement('div'); switcher.className = 'md-switch'; switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', 'Show');
+                const choice = (label, what) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.dataset.show = what; b.addEventListener('click', () => show(what, true)); return b; };
+                const asFormatted = choice('Formatted', 'formatted'); const asText = choice('Text', 'text');
+                switcher.append(asFormatted, asText);
+                const show = (what, keep) => {
+                    asFormatted.setAttribute('aria-pressed', String(what === 'formatted')); asText.setAttribute('aria-pressed', String(what === 'text'));
+                    formatted.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
+                    body.replaceChildren(switcher, what === 'text' ? raw : formatted);
+                    if (keep) { try { localStorage.setItem('clavarium-md-show', what); } catch { /* a private window: not kept */ } }
+                };
+                let first = 'formatted';
+                try { if (localStorage.getItem('clavarium-md-show') === 'text') first = 'text'; } catch { /* as above */ }
+                show(first, false);
+                /* Refused copy: the text is shown and selected. */
+                offerCopy({ text }, { select: () => { show('text', false); return selectAll(raw); } });
+                note('');
             } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
     }

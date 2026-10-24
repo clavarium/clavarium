@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { bench, SKIP } from './bench.mjs';
@@ -310,4 +310,86 @@ test('Copy in the window: all the text of a text file, the source of a page, a p
     await viewer.page.locator('#preview-copy').tap();
     await viewer.until('copied on the device', async () => (await viewer.page.evaluate(() => navigator.clipboard.readText())) === 'shared words\n');
     assert.deepEqual(viewer.errors, []);
+});
+
+test('a Markdown file is shown formatted, built element by element; its text is one tap away', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('reader');
+    const work = join(b.dir, 'kept-work', 'reader', 'work');
+    mkdirSync(join(work, 'docs', 'shots'), { recursive: true });
+    writeFileSync(join(work, 'docs', 'shots', 'chart.png'), PNG);
+    writeFileSync(join(work, 'outside.png'), PNG);
+    writeFileSync(join(work, 'docs', 'other.md'), '# The other page\n');
+    writeFileSync(join(work, 'docs', 'report.md'), [
+        '# Disk report', '', 'Written by the tool, with **bold**, *emphasis*, `code` and a [link](https://example.com/docs).', '',
+        '> [!IMPORTANT]', '> The disk is almost full.', '', '## What takes room', '',
+        '| Folder | Size | Share |', '|:--|--:|:-:|', '| /var/log | 12 GB | 40% |', '| /home | 9 GB | 30% |', '',
+        '- [x] logs rotated', '- [ ] old images removed', '', '1. first', '2. second', '',
+        '> A plain quote.', '', '```js', 'const free = disk.size - disk.used;', '```', '',
+        '![the chart](shots/chart.png) ![above its folder](../../outside.png) ![far](https://example.com/x.png)', '',
+        'See [the other page](other.md). <script id="planted">top.document.title = "ran"</script> <b id="bold">not markup</b>', '',
+    ].join('\n'));
+    await me.files('work');
+    await me.page.locator('#files-rows .file', { hasText: 'docs' }).click();
+    await me.until('the folder is shown', async () => (await me.page.locator('#files-rows').innerText()).includes('report.md'));
+    await me.page.locator('#files-rows .file', { hasText: 'report.md' }).click();
+    const view = me.page.locator('#preview-body .md-view');
+    await me.until('it is formatted', async () => (await view.locator('h2').first().innerText().catch(() => '')) === 'Disk report');
+    assert.equal(await view.locator('h3').innerText(), 'What takes room');
+    /* A table, in a box that scrolls; its alignment kept. */
+    assert.equal(await view.locator('.parley-table table tbody tr').count(), 2);
+    assert.deepEqual(await view.locator('.parley-table th').allInnerTexts(), ['Folder', 'Size', 'Share']);
+    assert.equal(await view.locator('.parley-table td').nth(1).evaluate((td) => td.style.textAlign), 'right');
+    assert.equal(await view.locator('.parley-callout[data-kind="important"]').count(), 1);
+    assert.match(await view.locator('.parley-callout').innerText(), /almost full/);
+    assert.equal(await view.locator('strong').innerText(), 'bold');
+    assert.equal(await view.locator('em').innerText(), 'emphasis');
+    assert.equal(await view.locator('.parley-task').count(), 2);
+    assert.equal(await view.locator('ol li').count(), 2);
+    assert.equal(await view.locator('blockquote').innerText(), 'A plain quote.');
+    assert.match(await view.locator('.parley-code pre').innerText(), /const free = disk\.size - disk\.used;/);
+    /* A link to the web: a new tab, sending nothing of this page. */
+    const link = view.locator('a.parley-link');
+    assert.equal(await link.getAttribute('href'), 'https://example.com/docs');
+    assert.equal(await link.getAttribute('target'), '_blank');
+    assert.match(await link.getAttribute('rel'), /noopener/);
+    /* Pictures: only from its own folder, by the route of the thumbnails; any other is its caption. */
+    const images = view.locator('img');
+    assert.equal(await images.count(), 1);
+    assert.match(await images.getAttribute('src'), /^\/api\/files\/thumb\?c=reader&r=work&p=docs%2Fshots%2Fchart\.png$/);
+    await me.until('the picture is loaded', async () => images.evaluate((i) => i.complete && i.naturalWidth === 2));
+    assert.deepEqual(await view.locator('.parley-noimg').allInnerTexts(), ['above its folder', 'far']);
+    /* What looks like markup is text. */
+    assert.equal(await me.page.locator('#planted, #bold').count(), 0);
+    assert.match(await view.innerText(), /<b id="bold">not markup<\/b>/);
+    assert.notEqual(await me.page.title(), 'ran');
+    /* Its text, one tap away, exactly as it is; and back. */
+    const choice = (label) => me.page.locator('#preview-body .md-switch button', { hasText: label });
+    assert.equal(await choice('Formatted').getAttribute('aria-pressed'), 'true');
+    await choice('Text').click();
+    await me.until('its text is shown', async () => (await me.page.locator('#preview-body pre.source').innerText().catch(() => '')).startsWith('# Disk report\n'));
+    assert.equal(await view.count(), 0);
+    assert.equal(await choice('Text').getAttribute('aria-pressed'), 'true');
+    await choice('Formatted').click();
+    await me.until('formatted again', async () => (await view.locator('h2').count()) === 1);
+    /* A file of the same folder it links to opens in the window. */
+    await view.locator('button.parley-pathlink', { hasText: 'the other page' }).click();
+    await me.until('the other page is shown', async () => (await me.page.locator('#preview-name').innerText()) === 'other.md' && (await view.locator('h2').innerText().catch(() => '')) === 'The other page');
+    await me.page.locator('#preview-close').click();
+    assert.deepEqual(me.errors, []);
+    /* Pictures of it, dark, on a tablet and on a phone, when asked for. */
+    const shots = process.env.CLAVARIUM_MD_SHOTS;
+    if (!shots) return;
+    mkdirSync(shots, { recursive: true });
+    const p = me;
+    await p.page.emulateMedia({ colorScheme: 'dark' });
+    for (const [device, width, height] of [['tablet', 1180, 820], ['phone', 390, 844]]) {
+        await p.page.setViewportSize({ width, height });
+        await p.page.locator('#files-rows .file', { hasText: 'report.md' }).click();
+        await p.until('formatted', async () => (await p.page.locator('#preview-body .md-view h3').count()) === 1);
+        await p.until('its picture is loaded', async () => p.page.locator('#preview-body .md-view img').evaluate((i) => i.complete && i.naturalWidth === 2));
+        await p.page.screenshot({ path: join(shots, `markdown-preview-${device}.png`) });
+        await p.page.locator('#preview-close').click();
+    }
 });
