@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds } from '../server/voice.mjs';
+import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds, languageOf, deviceLanguage } from '../server/voice.mjs';
 import { Detector, Segmenter, toWav, loudness, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
 
 const wav = Buffer.from(toWav([new Float32Array(BLOCK).fill(0.1)]));
@@ -268,4 +268,39 @@ test('a key past its expiry day is never sent: dictation refuses in one line, an
     assert.equal(d.model, PROVIDERS.groq.model, 'still offered: the line is seen when it is used');
     gone.delete('STT_KEY');
     assert.equal(await d.transcribe(wav), 'heard', 'a new expiry: used again');
+});
+
+test('the language: the one chosen, else the device\'s; guessed by the engine only when "auto" is chosen', () => {
+    assert.equal(languageOf('', 'fr-FR'), 'fr', 'nothing chosen: the device\'s, cut to its language');
+    assert.equal(languageOf(undefined, 'fr_CA'), 'fr');
+    assert.equal(languageOf('de', 'fr-FR'), 'de', 'chosen: wins over the device');
+    assert.equal(languageOf('pt-BR', 'fr'), 'pt-BR');
+    assert.equal(languageOf('auto', 'fr-FR'), undefined, '"auto": left to the engine');
+    assert.equal(languageOf('', undefined), undefined, 'nothing known: left to the engine');
+    assert.equal(languageOf('', 'not a tag!'), undefined);
+    assert.equal(deviceLanguage('EN-us'), 'en');
+    assert.equal(deviceLanguage('*'), undefined);
+    assert.equal(dictationProblem({ provider: 'openai', url: PROVIDERS.openai.url, model: 'whisper-1', language: 'auto' }), undefined);
+});
+
+test('a French device gets French asked of the engine, never a guess per phrase', async () => {
+    const { d, sent } = dictation({ env: { CLAVARIUM_TRANSCRIPTION_URL: 'https://env.example.com/v1/audio/transcriptions' } });
+    await d.transcribe(wav, 'fr-FR');
+    assert.equal(sent.at(-1).language, 'fr', 'the environment\'s engine, no language set: the device\'s');
+    await d.transcribe(wav);
+    assert.equal(sent.at(-1).language, null, 'no device language: none sent');
+    d.set({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY', language: '' });
+    await d.transcribe(wav, 'fr-FR');
+    assert.equal(sent.at(-1).language, 'fr', 'Settings, "Each device\'s": the device\'s');
+    d.set({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY', language: 'en' });
+    await d.transcribe(wav, 'fr-FR');
+    assert.equal(sent.at(-1).language, 'en', 'a language chosen: that one');
+    d.set({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY', language: 'auto' });
+    await d.transcribe(wav, 'fr-FR');
+    assert.equal(sent.at(-1).language, null, '"Automatic": the engine guesses');
+    await d.try({ provider: 'groq', url: PROVIDERS.groq.url, model: PROVIDERS.groq.model, secret: 'STT_KEY', language: '' }, wav, 'fr-BE');
+    assert.equal(sent.at(-1).language, 'fr', '"Try it" too');
+    const auto = dictation({ env: { CLAVARIUM_TRANSCRIPTION_URL: 'https://env.example.com/v1/audio/transcriptions', CLAVARIUM_TRANSCRIPTION_LANGUAGE: 'auto' } });
+    await auto.d.transcribe(wav, 'fr-FR');
+    assert.equal(auto.sent.at(-1).language, null, 'the environment may ask for "auto" too');
 });

@@ -97,11 +97,11 @@
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
  *   GET  /api/voice                         is dictation available?
- *   POST /api/voice                         the body IS a WAV recording -> {text}
+ *   POST /api/voice?lang=                   the body IS a WAV recording -> {text}; lang: the device's language
  *   GET  /api/dictation                     the engine chosen in Settings (never a key: a secret's name)
  *   POST /api/dictation                     {provider, url, model, secret, language}: chosen, at once
  *   POST /api/dictation/off                 the environment's engine, if any, again
- *   POST /api/dictation/try?provider=&url=&model=&secret=&language=   a WAV -> {text}, nothing saved
+ *   POST /api/dictation/try?provider=&url=&model=&secret=&language=&lang=   a WAV -> {text}, nothing saved
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
  *   GET  /api/flows                         who gets what: devices, conversations, assets, the rights between them, the flows
  *   POST /api/flows/name                    {around, name}: a flow named by the owner ('' gives it back its own)
@@ -187,8 +187,9 @@ export async function handleApi(request, response, conversations, headers, resou
             for await (const chunk of request) { size += chunk.length; if (size > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.'); parts.push(chunk); }
             const audio = Buffer.concat(parts);
             /* "Try it": the choice in the form, in the address's parameters (no key in it: a secret's name). */
-            if (pathname === '/api/dictation/try') return send(200, { text: await voice.try(Object.fromEntries(query), audio) }), true;
-            return send(200, { text: voice ? await voice.transcribe(audio) : await transcribe(undefined, audio) }), true;
+            /* `lang`: the language of the device that dictates (voice.mjs, languageOf). */
+            if (pathname === '/api/dictation/try') return send(200, { text: await voice.try(Object.fromEntries(query), audio, query.get('lang') ?? undefined) }), true;
+            return send(200, { text: voice ? await voice.transcribe(audio, query.get('lang') ?? undefined) : await transcribe(undefined, audio) }), true;
         }
         if (request.method === 'GET' && pathname === '/api/files') return send(200, await list(attached(), query.get('p') ?? '')), true;
         if (request.method === 'GET' && pathname === '/api/files/machine') {

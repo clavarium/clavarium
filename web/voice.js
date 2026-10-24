@@ -7,6 +7,13 @@ import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, toWav } from './v
    known once it has signed in (the page writes it on the document). */
 const api = () => (document.documentElement.dataset.door === 'device' ? `/c/api/${document.documentElement.dataset.pairing ?? ''}` : '/api');
 
+/* The language this device speaks, sent with each phrase: the server asks the
+   engine for it unless another is chosen in Settings (server/voice.mjs). */
+const withLanguage = (to) => {
+    const lang = navigator.languages?.[0] || navigator.language || '';
+    return lang ? `${to}${to.includes('?') ? '&' : '?'}lang=${encodeURIComponent(lang)}` : to;
+};
+
 /* Opens the microphone; resolves with a function that closes it.
    `on.phrase(text)`, `on.state(word)`: calibrating, listening, hearing,
    transcribing; `on.error(message)`. `to`: where phrases go, if not the
@@ -25,7 +32,7 @@ async function listen(on, { to } = {}) {
         onPhrase: async (blocks) => {
             pending++; tell();
             try {
-                const r = await fetch(to ?? `${api()}/voice`, { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: toWav(blocks) });
+                const r = await fetch(withLanguage(to ?? `${api()}/voice`), { method: 'POST', headers: { 'content-type': 'audio/wav' }, body: toWav(blocks) });
                 const j = await r.json().catch(() => ({}));
                 if (!r.ok) throw new Error(j.error || 'The phrase could not be transcribed.');
                 if (!closed && j.text) on.phrase(j.text);

@@ -174,6 +174,25 @@ export const PROVIDERS = {
     other: { label: 'Other (compatible)', url: '', model: '' },
 };
 const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
+export const AUTOMATIC = 'auto';
+
+/* WHICH LANGUAGE IS ASKED FOR. Left to the engine, the language is guessed
+   again on every phrase -- a few seconds of audio, often hesitant -- and a
+   French phrase came back as Icelandic. So a language is always given: the
+   one chosen (Settings, else CLAVARIUM_TRANSCRIPTION_LANGUAGE), else the
+   language of the device that dictates (its browser's first, sent with each
+   phrase). Guessed only when "auto" is chosen, or nothing is known.
+   The device's tag is cut to its language ("fr-CA" -> "fr"): what the engines take. */
+export function deviceLanguage(tag) {
+    const primary = String(tag ?? '').trim().toLowerCase().split(/[-_]/)[0];
+    return /^[a-z]{2,3}$/.test(primary) ? primary : undefined;
+}
+export function languageOf(chosen, device) {
+    const c = String(chosen ?? '').trim();
+    if (c === AUTOMATIC) return undefined;
+    if (c !== '' && LANGUAGE.test(c)) return c;
+    return deviceLanguage(device);
+}
 const MODEL = /^[A-Za-z0-9._:/-]{1,100}$/;
 
 /* An address of this server's own network, written as such. */
@@ -203,7 +222,7 @@ export function dictationProblem(c) {
     if (url.protocol !== 'https:' && !(url.protocol === 'http:' && own)) return 'The address must start with https:// (plain http only for an engine on this server\'s own network).';
     if (!MODEL.test(String(c.model ?? ''))) return 'Give the name of a model.';
     if (c.secret !== undefined && c.secret !== '' && !isSecretName(c.secret)) return 'The key is the name of a secret.';
-    if (c.language !== undefined && c.language !== '' && !LANGUAGE.test(String(c.language))) return 'The language is a code such as en or fr, or automatic.';
+    if (c.language !== undefined && c.language !== '' && c.language !== AUTOMATIC && !LANGUAGE.test(String(c.language))) return 'The language is a code such as en or fr, or automatic.';
     return undefined;
 }
 
@@ -265,18 +284,19 @@ export class Dictation {
     }
     /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
     #fresh(c) { if (c?.secret && this.#expired(c.secret)) throw new Refusal(409, KEY_EXPIRED); }
-    async transcribe(audio) {
+    /* `device`: the language of the device that dictates (a tag such as fr-FR), if it said. */
+    async transcribe(audio, device) {
         this.#fresh(this.#saved());
         const config = this.current();
         if (config) await this.#guard(config);
-        return transcribe(config, audio, this.#fetcher);
+        return transcribe(config && { ...config, language: languageOf(config.language, device) }, audio, this.#fetcher);
     }
     /* "Try it": what is in the form, not saved, on one short recording. */
-    async try(body, audio) {
+    async try(body, audio, device) {
         const checked = this.#checked(body);
         this.#fresh(checked);
         const config = this.#configOf(checked);
         await this.#guard(config);
-        return transcribe(config, audio, this.#fetcher);
+        return transcribe({ ...config, language: languageOf(config.language, device) }, audio, this.#fetcher);
     }
 }

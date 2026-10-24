@@ -58,6 +58,9 @@ test('dictation: what is said is typed at the cursor, phrase by phrase; with "au
     await me.sees('\u{1F3A4} said out loud');
     assert.match(await me.page.locator('#voice-line').innerText(), /Typed: said out loud|Listening|Hearing|Writing/);
     assert.equal((await me.screen()).includes('command not found'), false, 'typed, not sent');
+    /* The engine is told the language of this browser, never left to guess it phrase by phrase. */
+    const lang = (await me.page.evaluate(() => navigator.languages?.[0] || navigator.language)).split('-')[0].toLowerCase();
+    assert.ok(b.engineLanguages.length > 0 && b.engineLanguages.every((l) => l === lang), `asked for ${lang}: ${b.engineLanguages.join(',')}`);
     /* With "auto", the phrase is sent once the person has stopped. */
     await me.page.locator('#auto').click();
     await me.sees('command not found', 25_000);
