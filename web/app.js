@@ -2959,6 +2959,7 @@
        ticked, on a click; then Send. */
     async function sendDetail(holder, names) {
         const progress = el('p', 'status-line ts-progress'); progress.setAttribute('role', 'status');
+        const meter = el('div', 'ts-meter'); const meterFill = el('i'); meter.append(meterFill); meter.setAttribute('aria-hidden', 'true');
         const filters = el('div', 'levels ts-filters'); filters.setAttribute('role', 'group'); filters.setAttribute('aria-label', 'Show');
         const list = el('div', 'ts-rows');
         const bar = el('div', 'as-acts ts-bar');
@@ -2968,12 +2969,12 @@
         bar.append(together, go, why);
         const said = el('p', 'ts-said'); said.hidden = true; said.setAttribute('role', 'status');
         const review = el('div', 'ts-review'); review.hidden = true;
-        holder.append(progress, filters, list, bar, said, review);
+        holder.append(progress, meter, filters, list, bar, said, review);
         const rows = [];
         let filter = 'update';
         let sending = false; let checking = false;
         let sure = '';
-        let planned = names.length; let read = 0; let reading = true;
+        let reposDone = 0; let reading = true;
         const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter;
         const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
         const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
@@ -2985,19 +2986,28 @@
             r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             if (out.state !== 'ahead') r.picked = false;
         }
+        /* The server keeps the run: a request hears "running" after a while, and asks again until it ends. */
         async function checkRow(r) {
             const { head, target } = r.out;
-            r.check = { status: 'running' }; paint();
+            r.check = { status: 'running' }; r.open = false; paint();
             let result;
-            try { result = await post(`${API}/git/${r.name}/check`, { head, target }); }
-            catch (error) { result = { status: 'unavailable', output: error.message }; }
+            for (let first = true; ; first = false) {
+                try { result = await post(`${API}/git/${r.name}/check`, { head, target, ...(first ? {} : { join: true }) }); }
+                catch (error) { result = { status: 'unavailable', output: `The page could not reach the server: ${error.message}` }; }
+                if (result?.status !== 'running' || r.out?.head !== head || r.out?.target !== target) break;
+            }
             if (r.out?.head !== head || r.out?.target !== target) return;
             r.check = result; paint();
         }
+        /* What its agent is told when checks did not pass: where, and the end of what they said. */
+        const forAgent = (r) => `The checks of ${r.name} (${r.out.branch} → ${r.out.target}) did not pass before sending. Please fix it, commit, and tell me.\n\n\`\`\`\n${String(r.check?.output ?? '').slice(-3000)}\n\`\`\``;
         const stopped = (r) => Boolean(r.keep?.settings?.requireForSend) && r.check?.status !== 'passed';
         function paintProgress() {
             const count = (k) => rows.filter((r) => kindOfRow(r.out) === k).length;
-            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the branches: ${read} of ${planned}...`; }
+            /* By repositories: how many there are is known from the start, how many branches each has is not. */
+            meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
+            progress.toggleAttribute('data-busy', reading);
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the repositories: ${reposDone} of ${names.length}${rows.length ? ` · ${rows.length} branch${rows.length === 1 ? '' : 'es'} found` : ''}`; }
             else { progress.dataset.tone = count('update') + count('new') ? 'ok' : ''; progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new · all read` : 'Nothing to send · all read'; }
             filters.replaceChildren(...TS_FILTERS.map(([key, word]) => {
                 const n = key === 'all' ? rows.length : count(key);
@@ -3067,9 +3077,36 @@
                 else if (r.check.status === 'running') state.append(el('span', 'warn', 'Checking...'));
                 else {
                     const [word, tone] = CHECK_WORDS[r.check.status] ?? [String(r.check.status), ''];
-                    state.append(el('b', tone || 'quiet', r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word));
+                    const text = r.check.status === 'passed' ? '✓ Checks passed' : r.check.status === 'failed' ? '✗ Checks failed' : word;
+                    /* What did not pass says why, one tap away: the reason, what they printed, and what to do. */
+                    if (r.check.status === 'failed' || r.check.status === 'unavailable') {
+                        const open = el('button', `ts-why-open ${tone}`, `${text} ${r.open ? '▴' : '▾'}`); open.type = 'button'; open.setAttribute('aria-expanded', String(Boolean(r.open)));
+                        open.addEventListener('click', () => { r.open = !r.open; paint(); });
+                        state.append(open);
+                    } else state.append(el('b', tone || 'quiet', text));
                 }
                 row.append(tick, who, way, size, state);
+                if (!r.seen) { r.seen = true; if (reading) row.classList.add('ts-new'); }
+                if (r.open && r.check && !r.sent) {
+                    const lines = String(r.check.output ?? '').split('\n').map((x) => x.trim()).filter(Boolean);
+                    const box = el('div', 'ts-why-box');
+                    box.append(el('p', '', lines[0] ?? 'Nothing was said.'));
+                    if (lines.length > 1) box.append(el('pre', 'ts-output', String(r.check.output).slice(-4000)));
+                    const acts = el('div', 'action-row');
+                    const again = el('button', '', 'Check again'); again.type = 'button'; again.dataset.act = 'check-again';
+                    again.disabled = checking || sending;
+                    again.addEventListener('click', async () => { checking = true; await checkRow(r); checking = false; paint(); });
+                    const tell = el('button', '', talk.on && talkOf === current ? 'Ask its agent to fix it' : 'Copy for its agent'); tell.type = 'button'; tell.dataset.act = 'tell-agent';
+                    tell.addEventListener('click', async () => {
+                        try {
+                            if (talk.on && talkOf === current) { await post(talkPath(current), { text: forAgent(r) }); tell.textContent = '✓ Sent to its chat'; }
+                            else { await navigator.clipboard.writeText(forAgent(r)); tell.textContent = '✓ Copied'; }
+                            tell.disabled = true;
+                        } catch (error) { tell.textContent = `Not done: ${error.message}`; }
+                    });
+                    acts.append(again, tell); box.append(acts);
+                    row.append(box);
+                }
                 if (r.sent && !r.sent.ok) row.append(el('p', 'ts-note bad', r.sent.text));
                 list.append(row);
             }
@@ -3188,18 +3225,18 @@
         await Promise.all(names.map(async (name) => {
             const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
             rows.push(first);
-            await look(first); read++;
+            await look(first);
             first.movedAt = (first.out?.agentBranches ?? []).find((b) => b.name === first.branch)?.movedAt ?? null;
             first.picked = kindOfRow(first.out) === 'update';
             const others = (first.out?.agentBranches ?? []).filter((b) => b.name !== first.branch).slice(0, BRANCHES_MORE);
-            planned += others.length;
             paint();
             await Promise.all(others.map(async (b) => {
                 const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
-                await look(r); read++;
+                await look(r);
                 if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update' && lately(r); rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
                 paint();
             }));
+            reposDone++; paint();
         }));
         reading = false;
         paint();

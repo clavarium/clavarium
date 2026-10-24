@@ -49,7 +49,7 @@ test('To send: two repositories reviewed together and sent with one button; one 
     await me.until('To send is offered', async () => await entry.isVisible());
     await entry.click();
     const row = (name) => page.locator(`#cassets-detail .ts-row[data-repo="${name}"]`);
-    /* Read branch by branch, said as it goes; then both, to update on the remote, ticked -- nothing checked yet. */
+    /* Read repository by repository, said as it goes; then both, to update on the remote, ticked -- nothing checked yet. */
     const progress = page.locator('#cassets-detail .ts-progress');
     await me.until('all read', async () => /all read$/.test(await progress.innerText().catch(() => '')), 30_000);
     assert.equal(await progress.innerText(), '2 to update · 0 new · all read');
@@ -60,8 +60,20 @@ test('To send: two repositories reviewed together and sent with one button; one 
     const go = page.locator('#cassets-detail [data-act="send-all"]');
     /* The checks, of what is ticked, on a click; then Send. */
     assert.equal(await go.innerText(), 'Check the 2');
+    /* The hook of styles fails: said, and why one tap away, with what to do; checked again once fixed. */
+    const hook = join(styles.work, '.git', 'hooks', 'pre-push');
+    writeFileSync(hook, '#!/bin/sh\necho "tests are red"\nexit 1\n', { mode: 0o755 });
     await go.click();
+    await me.until('styles failed', async () => /Checks failed/.test(await row('styles').locator('.ts-state').innerText().catch(() => '')), 30_000);
+    assert.match(await row('site').locator('.ts-state').innerText(), /Nothing to check/);
+    await row('styles').locator('.ts-why-open').click();
+    const why = row('styles').locator('.ts-why-box');
+    assert.match(await why.innerText(), /tests are red/);
+    assert.match(await why.locator('[data-act="tell-agent"]').innerText(), /its agent/);
+    writeFileSync(hook, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await why.locator('[data-act="check-again"]').click();
     await me.until('checked', async () => (await go.innerText()) === 'Send the 2 to main', 30_000);
+    assert.match(await row('styles').locator('.ts-state').innerText(), /Checks passed/);
     await shot(page, 'tablet-to-send');
 
     /* One review of both: the files of each under its name, the changes of each. */

@@ -207,8 +207,13 @@ const upTo = (id) => (short(id) ? ` (up to ${short(id)})` : '');
 /* "See the N commits": from the tip before to the tip now, as the review shows them; none for a new branch. */
 const seeCommits = (name, head, base, n) => (short(head) && short(base) && Number.isInteger(n) && n > 0 ? [`commits:${name}.${head.slice(0, 12)}.${base.slice(0, 12)}.${Math.min(n, 9999)}`] : []);
 
+/* How long one request waits for a check before it hears it still runs (a proxy cuts longer ones), and how
+   long a finished run is kept for the request that asks again just after. */
+export const CHECK_WAIT_MS = 20_000;
+export const CHECK_KEEP_MS = 60_000;
+
 export class GitKeeper {
-    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map();
+    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map(); #inFlight = new Map();
 
     /* `review`: GitReview (reads, the reference, Send). `checks`: GitChecks.
        `alerts`: what tells the owner's phone. `tellAgent(repository, line,
@@ -480,7 +485,28 @@ export class GitKeeper {
         const target = body?.target || undefined;
         const seen = typeof body?.head === 'string' ? this.#review.reviewOf(r.name, body.head, target) : undefined;
         if (!seen) throw new Refusal(409, 'The repository changed since you looked: look again at what would be sent.');
-        return this.#check(r.name, seen);
+        return this.#joined(r.name, seen, body?.wait, body?.join === true);
+    }
+    /* A CHECK OUTLIVES THE REQUEST THAT ASKED FOR IT. It may take minutes (dependencies installed, then the
+       tests), longer than a proxy on the way lets one request wait: the page was cut off and said "could not
+       run" while the checks ran on. So the run is kept here by repository, commit and target; a request
+       waits for it at most CHECK_WAIT_MS, then hears { status: 'running' } and asks again, joining the same run. */
+    /* A run still going is always joined; one just ended only by `join` (the page asking again after
+       "running"): any other ask is a new run, as before. */
+    async #joined(name, seen, wait, join = false) {
+        const key = `${name}\n${seen.head}\n${seen.target ?? ''}`;
+        let entry = this.#inFlight.get(key);
+        if (!entry || (entry.done && !join)) {
+            const made = { done: false };
+            made.run = this.#check(name, seen).finally(() => { made.done = true; setTimeout(() => { if (this.#inFlight.get(key) === made) this.#inFlight.delete(key); }, CHECK_KEEP_MS).unref?.(); });
+            this.#inFlight.set(key, made);
+            entry = made;
+        }
+        const run = entry.run;
+        const ms = Number.isFinite(wait) ? Math.max(0, Math.min(wait, CHECK_WAIT_MS)) : CHECK_WAIT_MS;
+        let timer;
+        const pending = new Promise((ok) => { timer = setTimeout(() => ok({ status: 'running', head: seen.head, branch: seen.branch, target: seen.target }), ms); });
+        try { return await Promise.race([run, pending]); } finally { clearTimeout(timer); }
     }
     /* `machine`: the conversation whose machine runs them (automatic sending). */
     async #check(name, seen, machine) {
@@ -520,7 +546,7 @@ export class GitKeeper {
         const branch = typeof body?.branch === 'string' && body.branch ? body.branch : undefined;
         const out = await this.#review.outgoing(r.name, { target, branch });
         if (!out?.head || !out.target) throw new Refusal(409, out?.message || 'There is no commit to check on this branch.');
-        return this.#check(r.name, { head: out.head, branch: out.branch, target: out.target, remoteTip: out.remoteTip ?? null });
+        return this.#joined(r.name, { head: out.head, branch: out.branch, target: out.target, remoteTip: out.remoteTip ?? null }, body?.wait);
     }
 
     /* Send, from the page: as GitReview.push, and refused when the owner
