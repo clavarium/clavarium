@@ -152,7 +152,13 @@ test('the review shows the agent\'s branches, what the changes alone hide, asks 
     const guards = await me.page.locator('#gitview-guards').innerText();
     assert.match(guards, /Changed and changed back, so not in the changes below: secret\.bin/);
     assert.match(guards, /Largest new files: secret\.bin \(5 KB\)/);
+    /* The rest of a message is under its line, opened by a click: each commit's own. */
+    await me.page.locator('#gitview-tabs [data-tab="commits"]').click();
+    assert.doesNotMatch(await me.page.locator('#gitview-commits').innerText(), /Nothing to see here\./);
+    const more = me.page.locator('#gitview-commits details.commit > summary');
+    for (let i = 0; i < await more.count(); i++) await more.nth(i).click();
     assert.match(await me.page.locator('#gitview-commits').innerText(), /Nothing to see here\./, 'the whole message is shown');
+    await me.page.locator('#gitview-tabs [data-tab="changes"]').click();
     await me.page.locator('#gitview-branch').selectOption('main');
     await me.until('main is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
 

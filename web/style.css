@@ -1224,6 +1224,9 @@ select.pill { appearance: auto; }
 :root:not([data-theme="light"]) .rv-diff .d2h-del del, :root:not([data-theme="light"]) .rv-diff .d2h-del .d2h-change { background: #8a2d33; }
 :root:not([data-theme="light"]) .rv-diff .d2h-info { background: var(--bar); color: var(--ink2); border-color: var(--line); }
 :root:not([data-theme="light"]) .rv-diff .d2h-emptyplaceholder, :root:not([data-theme="light"]) .rv-diff .d2h-code-side-emptyplaceholder { background: var(--bar); border-color: var(--line); }
+/* Line numbers in the flow of their row: diff2html places them absolutely, and they slide off their lines when the page scrolls. */
+.rv-diff .d2h-code-linenumber, .rv-diff .d2h-code-side-linenumber, .ts-diffs .d2h-code-linenumber, .ts-diffs .d2h-code-side-linenumber { position: static; }
+.rv-diff .d2h-code-line, .rv-diff .d2h-code-side-line, .ts-diffs .d2h-code-line, .ts-diffs .d2h-code-side-line { padding: 0 .6em; width: auto; }
 /* Syntax colours (highlight.js classes), both themes. */
 .rv-diff .hljs-keyword, .rv-diff .hljs-selector-tag, .rv-diff .hljs-built_in { color: #d73a49; }
 .rv-diff .hljs-string, .rv-diff .hljs-attr, .rv-diff .hljs-regexp { color: #22863a; }
@@ -1242,7 +1245,6 @@ select.pill { appearance: auto; }
   .rv-acts #gitview-push { flex: 1 1 100%; order: -1; }
   .rv-body { grid-template-columns: minmax(0, 1fr); }
   .rv-tree { position: static; max-height: none; }
-  .rv-diff .d2h-code-linenumber { position: static; }
 }
 @media (max-width: 700px) {
   html:not([data-door="device"]) #room > header { min-height: 44px; padding-block: 3px; }
@@ -1434,7 +1436,6 @@ button.inline.more-recent { text-decoration: none; }
 .ts-diff:first-child h4 { margin-top: 0; }
 .ts-tree { position: static; max-height: none; margin-bottom: 12px; }
 .ts-diffs { min-width: 0; }
-.ts-diffs .d2h-code-linenumber { position: static; }
 .ts-note { grid-column: 2 / -1; margin: 0; font-size: .875rem; }
 .ts-note.bad { color: var(--danger); }
 .ts-output { white-space: pre-wrap; max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 8px; font-size: .8125rem; }
@@ -1714,3 +1715,11 @@ body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink);
 @media (pointer: coarse) { .binder-holder .binder-tick { min-height: 0; width: 1.75rem; height: 1.75rem; } }
 /* On the tab, what waits for the owner's tick: the colour of what asks. */
 .views #lists-count { background: var(--brass); color: var(--on-brass, #1b1405); font-weight: 700; }
+/* A commit with more to its message: a click on its line opens the rest. */
+details.commit { display: block; }
+details.commit > summary { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; cursor: pointer; list-style: none; }
+details.commit > summary::-webkit-details-marker { display: none; }
+details.commit > summary::before { content: '▸'; color: var(--ink2); width: 1em; flex: none; }
+details.commit[open] > summary::before { content: '▾'; }
+div.commit::before { content: ''; width: 1em; flex: none; }
+details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink2); font-size: .85em; }

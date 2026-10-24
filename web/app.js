@@ -3034,6 +3034,15 @@
     const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
+    /* A commit: its line, and the rest of its message under it, opened by a click. */
+    function commitRow(c) {
+        const rest = (c.message ?? '').split('\n').slice(1).join('\n').trim();
+        const head = [el('code', '', c.id.slice(0, 8)), el('b', '', c.subject), el('small', '', `${c.author}, ${new Date(c.date).toLocaleString()}`)];
+        if (!rest) { const line = el('div', 'commit'); line.append(...head); return line; }
+        const line = el('details', 'commit'); const summary = el('summary'); summary.append(...head);
+        line.append(summary, el('pre', '', rest));
+        return line;
+    }
     const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
@@ -3424,7 +3433,7 @@
             } else if (tab === 'commits') {
                 for (const r of p) {
                     body.append(el('h4', '', `${r.name}: ${r.out.branch} → ${r.out.target}`));
-                    for (const c of r.out.commits) { const line = el('div', 'commit'); line.append(el('code', '', c.id.slice(0, 8)), el('b', '', c.subject), el('small', '', `${c.author}, ${new Date(c.date).toLocaleString()}`)); body.append(line); }
+                    for (const c of r.out.commits) body.append(commitRow(c));
                     if ((r.out.count ?? 0) > r.out.commits.length) body.append(el('p', 'hint', `Only the last ${r.out.commits.length} of ${r.out.count} are listed.`));
                 }
             } else {
@@ -5330,7 +5339,7 @@
         item(`${counted}; ${g.newBytes === null || g.newBytes === undefined ? 'the size of the new data is unknown' : `${sizeText(g.newBytes)} of new data`}.`);
         /* What the review could not show: each said, and Send asks to confirm. */
         for (const line of g.incomplete ?? []) item(line);
-        if (g.largest?.length) item(`Largest new files: ${g.largest.slice(0, 5).map((b) => `${b.path || '(no path)'} (${sizeText(b.size)})`).join(', ')}.`);
+        if (g.largest?.length) item(`Largest new files: ${g.largest.filter((b, i, all) => !b.path || all.findIndex((x) => x.path === b.path) === i).slice(0, 5).map((b) => `${b.path || '(no path)'} (${sizeText(b.size)})`).join(', ')}.`);
         if (g.unchanged?.length) item(`Changed and changed back, so not in the changes below: ${g.unchanged.join(', ')}${g.unchangedAll > g.unchanged.length ? `, and ${g.unchangedAll - g.unchanged.length} more` : ''}.`);
         if (g.merges) item(`${g.merges} merge commit${g.merges === 1 ? '' : 's'}: what they bring from their other parents is in the count, not listed.`);
         if (out.cut) item('The changes are too long to be shown whole here.');
@@ -5473,16 +5482,7 @@
             ...(out.guards?.newBytes !== null && out.guards?.newBytes !== undefined ? [bit(`${sizeText(out.guards.newBytes)} of new data`, 'hint')] : []));
         $('gitview-n-files').textContent = String(files.length);
         $('gitview-n-commits').textContent = String(out.commits.length);
-        for (const c of out.commits) {
-            const line = document.createElement('div'); line.className = 'commit';
-            const id = document.createElement('code'); id.textContent = c.id.slice(0, 8);
-            const what = document.createElement('b'); what.textContent = c.subject;
-            const who = document.createElement('small'); who.textContent = `${c.author}, ${new Date(c.date).toLocaleString()}`;
-            line.append(id, what, who);
-            /* The whole message: what a subject line leaves out is part of what is sent. */
-            if (c.message && c.message !== c.subject) { const body = document.createElement('pre'); body.textContent = c.message.split('\n').slice(1).join('\n').trim(); if (body.textContent) line.append(body); }
-            $('gitview-commits').append(line);
-        }
+        for (const c of out.commits) $('gitview-commits').append(commitRow(c));
         $('gitview-stat').textContent = out.stat;
         gitFile = 0;
         drawDiff(out.diff);
