@@ -14,6 +14,9 @@
  * back. What was posted is kept in a store, so a restart of the server does
  * not post it again.
  *
+ * Not where its owner chose its own reaction (healthreact.mjs): its agent is told
+ * one way, not two.
+ *
  * Only a machine that runs and answered is judged: one that does not answer
  * cannot read its docket, and what it has is not known (nothing changes).
  *
@@ -49,14 +52,16 @@ export function oomText(times) {
 
 export class HealthDocket {
     #store; #dockets; #now;
-    /* `dockets`: { on(name), post(name, {kind, text, data}) } (dockets.mjs). */
-    constructor({ store, dockets, now = () => Date.now() }) { this.#store = store; this.#dockets = dockets; this.#now = now; }
+    #reacting;
+    /* `dockets`: { on(name), post(name, {kind, text, data}) } (dockets.mjs). `reacting(name)`: its owner
+       turned on its own reaction to a machine short of room (healthreact.mjs). */
+    constructor({ store, dockets, reacting = () => false, now = () => Date.now() }) { this.#store = store; this.#dockets = dockets; this.#reacting = reacting; this.#now = now; }
 
     forget(name) { this.#store.remove?.(name); }
 
     judged(name, record) {
         if (!record || record.state !== 'Running' || record.answering !== true) return [];
-        if (!this.#dockets.on(name)) return [];
+        if (!this.#dockets.on(name) || this.#reacting(name)) return [];
         const before = this.#store.get(name) ?? {};
         const r = { name, disks: { ...(before.disks ?? {}) }, memory: { ...(before.memory ?? {}) }, ...(before.oom ? { oom: { ...before.oom } } : {}) };
         const posted = [];

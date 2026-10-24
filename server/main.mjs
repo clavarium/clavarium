@@ -439,8 +439,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
     const reacting = new HealthReact({ store: new Store(`${dataDir}/health-react.json`), say: (name, line) => wakeups.say(name, line), exec: (name, argv, options) => vms.exec(name, argv, options),
         isAgent: (name) => all.list().find((c) => c.name === name)?.ai === true, event: (name, line) => talk.event(name, line) });
-    /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs). */
-    const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets });
+    /* Where its chat is on, its agent is given an event when its disk or memory crosses a level (healthdocket.mjs);
+       not where its owner turned on its own reaction (above): one way of telling it, not two. */
+    const healthDocket = new HealthDocket({ store: new Store(`${dataDir}/health-docket.json`), dockets, reacting: (name) => reacting.settings(name).on });
     health.forgotten = (name) => healthDocket.forget(name);
     /* A machine's problems worth keeping in What happened: said once, until they went away. */
     const problemsSaid = new Map();

@@ -12,10 +12,10 @@ import { Store } from '../server/store.mjs';
 function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-health-docket-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const world = { on: true, now: Date.parse('2026-10-24T10:00:00.000Z'), fail: false };
+    const world = { on: true, reacting: false, now: Date.parse('2026-10-24T10:00:00.000Z'), fail: false };
     const posted = [];
     const dockets = { on: () => world.on, post: (name, e) => { if (world.fail) throw new Error('not writable'); posted.push({ name, ...e }); return { id: String(posted.length), ...e }; } };
-    const make = () => new HealthDocket({ store: new Store(join(dir, 'health-docket.json')), dockets, now: () => world.now });
+    const make = () => new HealthDocket({ store: new Store(join(dir, 'health-docket.json')), dockets, reacting: () => world.reacting, now: () => world.now });
     return { dir, world, posted, make, h: make() };
 }
 /* A machine that runs and answered, its disk `usedPercent` full (of 10000 MB), its memory `memPercent` used. */
@@ -113,6 +113,19 @@ test('nothing where the chat (its docket) is off, nor for a machine that does no
     /* Not known while it does not answer: what was posted stays posted. */
     b.h.judged('site', look({ disk: 99 }));
     b.h.judged('site', { state: 'Running', answering: false });
+    b.h.judged('site', look({ disk: 99 }));
+    assert.equal(b.posted.length, 1);
+});
+
+test('not where its owner turned on its own reaction (healthreact.mjs): one way of telling its agent, not two', (t) => {
+    const b = bench(t);
+    b.world.reacting = true;
+    b.h.judged('site', look({ disk: 99, mem: 98, oom: 2 }));
+    b.h.judged('site', look({ disk: 99, mem: 98, oom: 2 }));
+    assert.equal(b.posted.length, 0);
+    assert.equal(new Store(join(b.dir, 'health-docket.json')).get('site'), undefined, 'nothing kept either');
+    /* Turned off again: what is short now is posted. */
+    b.world.reacting = false;
     b.h.judged('site', look({ disk: 99 }));
     assert.equal(b.posted.length, 1);
 });
