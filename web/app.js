@@ -2420,6 +2420,8 @@
             ...(noTerminal() ? {} : { terminal: () => seeTerminal() }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
             /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
+            /* What is being written is kept per conversation: another one looked at, it is there again. */
+            draft: name,
             markdown: true, agentName: conversations.find((x) => x.name === name)?.chatName ?? '', agentTool: conversations.find((x) => x.name === name)?.toolLabel ?? '',
             /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
             picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
