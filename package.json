@@ -44,7 +44,7 @@
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "clavarium-binder": "file:../clavarium-binder/clavarium-binder-0.1.0-next.1.tgz",
+    "clavarium-binder": "0.1.0-next.1",
     "clavarium-docket": "0.1.0",
     "clavarium-parley": "0.15.0-next.2",
     "mermaid": "11.17.2",
