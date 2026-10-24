@@ -105,6 +105,9 @@ test('the part of one conversation: read-only and read-write right, the chat on 
     const other = b.guide.own('helper');
     assert.match(other, /^- Folders given: none\.$/m);
     assert.match(other, /^- Chat with the person: off\. Do not use parley\.$/m);
+    /* Its batches: in its binder of batches, shown beside the chat; only with a chat to show them. */
+    assert.match(own, /^- When you work in batches: keep them in a binder of batches, shown beside the chat\. None yet: make it once \(binder new batches; MCP: new-list, template batches\)\. Then one card each \(binder add Batches "title"\), kept up to date; start only those the person ticked\.$/m);
+    assert.doesNotMatch(other, /binder of batches/);
     assert.match(other, /^- Internet: off\.$/m);
     assert.match(other, /^- \/work is on this machine's own disk/m);
     assert.ok(!other.includes('book') && !other.includes('MODEL_KEY'), 'nothing of another conversation');

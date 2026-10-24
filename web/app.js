@@ -2502,6 +2502,60 @@
         });
         const replies = await loadReplies();
         if (thread && threadOf === name) thread.replies = replies;
+        if (!DEVICE) { tasksChanges = -1; void paintTasks(name); watchTasks(); }
+    }
+    /* ITS BATCHES, BESIDE ITS CHAT: Parley's panel, fed from the binder of batches given to
+       this conversation (Binder's "batches" template). Its tool keeps them there (binder); the
+       owner ticks those it may start (Binder's approval), and a click opens the card in its Binders
+       tab. No such binder: no panel, no button. Folded or not: kept per conversation. */
+    const TASKS_TEMPLATE = 'batches';
+    const TASKS_TONE = { doing: 'active', yours: 'attention' };
+    let tasksTimer = null; let tasksChanges = -1;
+    const tasksFolded = (name) => { try { const v = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}')[name]; return typeof v === 'boolean' ? v : null; } catch { return null; } };
+    const keepTasksFolded = (name, on) => { try { const all = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}'); all[name] = on; localStorage.setItem('clavarium-tasks-folded', JSON.stringify(all)); } catch { /* a private window */ } };
+    /* Its binder of batches: the first of that template it was given, not archived. */
+    async function batchesOf(name) {
+        const lists = await binderCall('lists', {});
+        if (!lists.ok || !Array.isArray(lists.data)) return undefined;
+        return lists.data.find((l) => !l.archived && l.template === TASKS_TEMPLATE && l.grants?.[`conversation:${name}`]) ?? null;
+    }
+    async function paintTasks(name) {
+        if (DEVICE || !thread || threadOf !== name) return;
+        const list = await batchesOf(name);
+        if (list === undefined || !thread || threadOf !== name) return;
+        if (!list) { thread.side = null; return; }
+        const shown = await binderCall('show', { list: list.id });
+        if (!shown.ok || !thread || threadOf !== name) return;
+        const states = new Map(shown.data.list.states.map((st) => [st.id, st]));
+        const nameOf = (id) => binderPeople.find((p) => p.id === id)?.name ?? id.replace(/^[a-z]+:/, '');
+        const items = shown.data.records.map((r) => ({
+            id: r.id, title: r.title, state: states.get(r.state)?.name ?? '', done: Boolean(states.get(r.state)?.done), checked: r.approved === true,
+            /* Its own conversation owning it goes without saying. */
+            owner: r.owners.filter((o) => o !== `conversation:${name}`).map(nameOf).join(', '), tone: TASKS_TONE[r.state] ?? '' }));
+        thread.side = { onFold: (on) => keepTasksFolded(name, on), title: list.title, items, folded: tasksFolded(name) ?? false,
+            /* What waits for the owner's tick: counted on the bar's button, as on the Binders tab. */
+            count: items.filter((x) => !x.done && !x.checked).length,
+            tick: async (id, yes) => { const r = await binderCall('approve', { id, yes }); if (!r.ok) throw new Error(r.text); void paintTasks(name); },
+            open: (id) => void openTaskCard(name, id) };
+    }
+    /* A card opened in its Binders tab, once that tab drew its binder. */
+    async function openTaskCard(name, id) {
+        if (current !== name) return;
+        goTab('lists');
+        for (let i = 0; i < 50 && !(listsView && listsOf === name); i++) await new Promise((r) => setTimeout(r, 100));
+        if (listsView && listsOf === name) await listsView.open?.(id);
+    }
+    /* Read again when the binders changed (a number that moves with each change), and only then. */
+    function watchTasks() {
+        if (tasksTimer) return;
+        tasksTimer = setInterval(async () => {
+            if (!thread) { clearInterval(tasksTimer); tasksTimer = null; return; }
+            if (document.hidden) return;
+            const now = await getJson('/binder/people', null);
+            if (!now || now.changes === tasksChanges) return;
+            tasksChanges = now.changes; binderPeople = now.people;
+            void paintTasks(threadOf);
+        }, 4000);
     }
     /* DRAWINGS AND CODE IN THE CHAT, by libraries served here at fixed
        versions (package.json), loaded only when one is shown. A drawing is
