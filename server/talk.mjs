@@ -40,6 +40,13 @@
  *   AFTER A RESTART          the tool starts again with no memory of the
  *                            chat: once it had time to start, REREAD is typed
  *                            in its terminal, once (it reads the whole thread).
+ *   THE THREAD, KEPT HERE    Parley's own copy (its `keep`): every line read
+ *                            or written is kept in this server's data, one
+ *                            folder per conversation, out of the machine's
+ *                            reach. That copy is what the page shows; a line
+ *                            the tool rewrote or deleted in /work/.parley --
+ *                            the person's too -- is said in the thread
+ *                            ("History changed here"), never taken.
  *   FILES OF THE PERSON      attached to a message, put under
  *                            /work/.parley/files/<id>/<name>, and the message
  *                            gives the tool their paths.
@@ -51,7 +58,7 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, lstatSync } from 'node:fs';
+import { mkdirSync, lstatSync, rmSync } from 'node:fs';
 import { install, Parley, WAKE, REREAD, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
@@ -152,15 +159,18 @@ const WORDS = Object.freeze([...KEYS, 'alert-asks', 'alert-waits']);
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map();
+    #terminal; #health; #ranAt = new Map(); #kept;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
     /* `terminal`: the terminals the bridge keeps open (bridge.mjs): `open(name)`,
        `type(name, line, enterAfterMs)`, `droppedAt(name)`. `health`: what was
        last seen of each machine (health.mjs), `of(name)`. Both optional. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null }) {
-        this.#terminal = terminal; this.#health = health;
+    /* `keptDir`: where each conversation's thread is kept (its own folder),
+       in this server's data -- never in the work folder, which its machine
+       writes. Without it, the bridge folder is all there is. */
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null }) {
+        this.#terminal = terminal; this.#health = health; this.#kept = keptDir;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
@@ -173,6 +183,7 @@ export class Talk {
         return c;
     }
     #dir(name) { return `${this.#resources.workFolder(name)}/${FOLDER}`; }
+    #keep(name) { return this.#kept && isConversationName(name) ? join(this.#kept, name) : undefined; }
 
     /* ---- the words a person reads ---- */
     settings() {
@@ -241,6 +252,7 @@ export class Talk {
 
     #parley(name, reacted = () => {}) {
         return new Parley(this.#dir(name), {
+            keep: this.#keep(name),
             reach: (path) => this.#reach(name, path),
             on: (event) => {
                 if (event.type === 'person-reacted') { reacted(event); return; }
@@ -572,6 +584,6 @@ export class Talk {
         }
     }
 
-    forget(name) { this.#deaf(name); this.#store.remove(name); this.#typedAt.delete(name); this.#ranAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }
+    forget(name) { this.#deaf(name); if (this.#keep(name)) rmSync(this.#keep(name), { recursive: true, force: true }); this.#store.remove(name); this.#typedAt.delete(name); this.#ranAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }
     stop() { clearInterval(this.#timer); for (const name of [...this.#listening.keys()]) this.#deaf(name); }
 }

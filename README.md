@@ -104,7 +104,10 @@ Built slice by slice; the plan is in `blueprint/architecture.html`, tab
   under /work/.parley/files/, the tool given its path). What is wrong with its
   machine, and its restarts, are grey lines in the thread, with what can be
   done; after a restart the tool is told once to read the whole thread again
-  (`parley read --all`). Off by default, per conversation; what the tool
+  (`parley read --all`). The server keeps its own copy of the thread, out of
+  the machine: a line the tool rewrites or deletes in /work/.parley, the
+  owner's too, is shown as it was, and the thread says "History changed
+  here". Off by default, per conversation; what the tool
   prints in its terminal is never read.
 
 - **13 - the machine**: each conversation's machine is looked at after a

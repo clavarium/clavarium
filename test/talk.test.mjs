@@ -49,7 +49,7 @@ function bench(t, { work = 'kept', tools = true } = {}) {
     const make = () => new Talk({ store: new Store(join(dir, 'talk.json')), words: new Store(join(dir, 'talk-words.json')), vms, toolbox, terminal, health,
         conversations: { list: () => [{ name: 'helper', work }], awake: () => (world.awake ? ['helper'] : []) },
         resources: { workFolder: (name) => join(dir, 'work', name), of: () => world.attached.map((name) => ({ name, access: 'read' })) },
-        warm: async (name) => { warmed.push(name); }, alert: (payload) => alerted.push(payload), listenEveryMs: 30, now: () => world.clock });
+        warm: async (name) => { warmed.push(name); }, alert: (payload) => alerted.push(payload), listenEveryMs: 30, now: () => world.clock, keptDir: join(dir, 'data', 'talk-kept') });
     const talk = make();
     t.after(() => talk.stop());
     const bridge = join(dir, 'work', 'helper', '.parley');
@@ -554,4 +554,26 @@ test('what this server says in a chat (a restart, a machine put to sleep) is no 
     const after = b.talk.brief('helper');
     assert.equal(after.lastText, 'Half written.');
     assert.equal(after.lastAt, before.lastAt);
+});
+
+test('the thread is kept in this server\'s data, out of its machine: a line the tool rewrote or deleted, the person\'s too, is shown as it was, said where it happened; forgotten with the conversation', async (t) => {
+    const b = bench(t);
+    await b.talk.set('helper', true);
+    b.parley('tell', 'I will paint it blue.');
+    await b.talk.say('helper', 'Fine, blue.');
+    const kept = join(b.dir, 'data', 'talk-kept', 'helper');
+    assert.ok(existsSync(join(kept, 'from-agent.jsonl')) && existsSync(join(kept, 'to-agent.jsonl')), 'in the data of this server');
+    assert.equal(existsSync(join(b.bridge, 'kept')), false);
+    /* The tool rewrites its line and takes the person's away. */
+    const out = join(b.bridge, 'from-agent.jsonl');
+    writeFileSync(out, readFileSync(out, 'utf8').replace('blue', 'red'));
+    writeFileSync(join(b.bridge, 'to-agent.jsonl'), '');
+    const now = b.talk.of('helper');
+    assert.deepEqual(now.messages.map((m) => m.text), ['I will paint it blue.', 'Fine, blue.']);
+    assert.deepEqual(now.altered.map((a) => [a.side, a.kind]), [['agent', 'changed'], ['person', 'gone']]);
+    /* What it posts next is taken as usual. */
+    b.parley('tell', 'Done.');
+    assert.deepEqual(b.talk.of('helper').messages.map((m) => m.text).at(-1), 'Done.');
+    b.talk.forget('helper');
+    assert.equal(existsSync(kept), false, 'gone with the conversation');
 });
