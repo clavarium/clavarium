@@ -1884,19 +1884,33 @@
         for (const b of $('network').children) b.setAttribute('aria-pressed', String((b.dataset.online === 'true') !== offline));
         await paintSignIn();
     }
-    /* ---------- chapters (a conversation's settings, and Settings): folded or not, kept on this device ---------- */
-    /* All folded at first, as a project's settings: what the person opens is kept. */
+    /* ---------- chapters (a conversation's settings, and Settings): folded or not ---------- */
+    /* All folded when the app is opened: what the person opens stays open while this tab lives (a reload
+       included), never from one day to the next -- a page that opens half-unfolded says nothing. What asks
+       for them is said on the folded chapter instead (markAttention). */
     const OPEN_AT_FIRST = {};
     let chapters = {};
-    try { chapters = JSON.parse(localStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
+    try { chapters = JSON.parse(sessionStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
+    try { localStorage.removeItem('clavarium-chapters'); } catch { /* as above */ }
     for (const chapter of document.querySelectorAll('details.chapter')) {
         const key = chapter.dataset.chapter;
         chapter.open = chapters[key] ?? OPEN_AT_FIRST[key] ?? false;
         chapter.addEventListener('toggle', () => {
             chapters[key] = chapter.open;
-            try { localStorage.setItem('clavarium-chapters', JSON.stringify(chapters)); } catch { /* as above */ }
+            try { sessionStorage.setItem('clavarium-chapters', JSON.stringify(chapters)); } catch { /* as above */ }
         });
     }
+    /* A chapter that holds something asking for the person -- a callout, or a state said as a warning or a
+       fault -- wears a dot on its title, folded or not: one look at Settings says where to go. */
+    const asksForYou = (el2) => [...el2.querySelectorAll('.callout, .status-line[data-tone="warn"], .status-line[data-tone="bad"]')]
+        .some((x) => !x.closest('[hidden]') && x.textContent.trim());
+    let marking;
+    const markAttention = () => { clearTimeout(marking); marking = setTimeout(() => {
+        for (const chapter of document.querySelectorAll('details.chapter')) chapter.toggleAttribute('data-attention', asksForYou(chapter));
+        /* And on its category, in the side list of Settings. */
+        for (const b of document.querySelectorAll('#settings-nav button[data-group]')) b.toggleAttribute('data-attention', Boolean(document.querySelector(`#settings-group-${b.dataset.group} details.chapter[data-attention]`)));
+    }, 150); };
+    new MutationObserver(markAttention).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tone', 'class'] });
     /* Reached by a link (or a button that leads to it): opened, and said for a moment. */
     let reachedTimer;
     const openChapter = (key, { show = true } = {}) => {

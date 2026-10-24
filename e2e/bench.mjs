@@ -119,12 +119,12 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
 
     /* A person at a screen. `phone: true` is a small touch screen. */
     /* `locale`: the language the browser says it reads (a French device: 'fr-FR'). */
-    /* `chapters`: what this device opened before, among the folding chapters (all are folded at first):
+    /* `chapters`: what this tab opened before, among the folding chapters (all are folded at first):
        by default the ones most tests work in, kept open as a person who uses them would. `{}`: a new device. */
     async function person({ phone = false, at = '/', context: given, locale, chapters = { general: true, machine: true, access: true } } = {}) {
         const context = given ?? await browser.newContext({ ...(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true }), ...(locale ? { locale } : {}) });
         contexts.push(context);
-        await context.addInitScript((open) => { try { if (localStorage.getItem('clavarium-chapters') === null) localStorage.setItem('clavarium-chapters', open); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
+        await context.addInitScript((open) => { try { if (sessionStorage.getItem('clavarium-chapters') === null) sessionStorage.setItem('clavarium-chapters', open); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (e) => errors.push(String(e)));

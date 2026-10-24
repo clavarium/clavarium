@@ -1695,3 +1695,6 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 .ts-tree-group .ts-tree-repo code { color: var(--brass); font-size: .8125rem; }
 .ts-tree-group .ts-tree-repo .plus { color: var(--ok); } .ts-tree-group .ts-tree-repo .minus { color: var(--danger); }
 .ts-tree-files { padding: 4px 4px 4px 12px; }
+
+/* Something asks for the person in this chapter (a callout, a warning): a dot on its title, and on its category. */
+details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
