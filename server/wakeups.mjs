@@ -97,6 +97,22 @@ export function cron(line) {
         && (anyDay && anyWeekday ? true : anyDay ? weekday.has(date.getDay()) : anyWeekday ? day.has(date.getDate()) : day.has(date.getDate()) || weekday.has(date.getDay()));
 }
 const PANE = `=${SESSION}:`;
+const HOLD_STEP_MS = 1000;
+const HOLD_MAX_MS = 5 * 60_000;
+
+/* WHO IS TYPING IN A TERMINAL, from what screens send (bridge.mjs onTyped).
+   Busy: a key in the last seconds, or a line begun and not yet sent
+   (Enter, Ctrl-C, Ctrl-U end it) -- held so for a few minutes at most. */
+export class TypingWatch {
+    #at = new Map(); #now;
+    constructor({ now = () => Date.now(), quietMs = 2000, openMs = HOLD_MAX_MS } = {}) { this.#now = now; this.quietMs = quietMs; this.openMs = openMs; }
+    typed(name, data) { this.#at.set(name, { at: this.#now(), open: !/[\r\n\x03\x15]$/.test(String(data ?? '')) }); }
+    busy(name) {
+        const t = this.#at.get(name); if (!t) return false;
+        const since = this.#now() - t.at;
+        return since < this.quietMs || (t.open && since < this.openMs);
+    }
+}
 /* How new commits are named among what arrived. */
 export const COMMITS = 'new commits';
 
@@ -134,19 +150,22 @@ const FIRED_SHOWN = 120;
 const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 export class Wakeups {
-    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #held = new Map(); #busy = false;
+    #store; #vms; #conversations; #resources; #warm; #now; #fired; #docket; #typing; #pause; #held = new Map(); #busy = false;
 
     /* `warm(name)`: opens the terminal of a machine that runs, if it is not open.
        `fired(name, { text, item })`: a wake-up was typed (its chat says so: Talk.event). */
     /* `docket`: { on(name), post(name, {kind, text, data}) } (dockets.mjs), or none: typed always. */
-    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null }) {
+    /* `typing(name)`: someone is typing in its terminal from a screen (see TypingWatch): a line is held until it is free. */
+    constructor({ store, vms, conversations, resources, warm = async () => {}, now = () => new Date(), fired = () => {}, docket = null, typing = () => false, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) }) {
         this.#store = store; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#warm = warm; this.#now = now; this.#fired = fired; this.#docket = docket;
+        this.#typing = typing; this.#pause = pause;
     }
     /* Where its chat is on, posted to its docket (told at its next tick); else typed. Resolves with what to say of it, and whether it went. */
     async #deliver(name, item, text) {
         if (this.#docket?.on(name)) {
             try { this.#docket.post(name, { kind: item.kind, text, data: { wakeup: item.id } }); return { ok: true, what: `Posted to its docket: ${text}` }; } catch { /* its folder: typed instead */ }
         }
+        await this.#free(name);
         const typed = await this.#type(name, text).catch(() => false);
         return { ok: typed, what: typed ? `Typed: ${text}` : 'Could not be typed: is its tool running?' };
     }
@@ -269,6 +288,11 @@ export class Wakeups {
         return withFiles(item.message, arrived);
     }
 
+    /* Typed into a command being typed, both were broken (seen 24-10): wait for the line to be free, a while at most. */
+    async #free(name) {
+        for (const start = this.#now().getTime(); this.#typing(name) && this.#now().getTime() - start < HOLD_MAX_MS;) await this.#pause(HOLD_STEP_MS);
+    }
+
     async #type(name, text) {
         await this.#warm(name);
         const tmux = ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE];
@@ -286,7 +310,7 @@ export class Wakeups {
     async say(name, text) {
         if (!this.#conversations.awake().includes(name)) return false;
         const before = this.#queue.get(name) ?? Promise.resolve();
-        const mine = before.then(() => this.#type(name, cleanMessage(text)).catch(() => false));
+        const mine = before.then(() => this.#free(name)).then(() => this.#type(name, cleanMessage(text)).catch(() => false));
         this.#queue.set(name, mine);
         void mine.finally(() => { if (this.#queue.get(name) === mine) this.#queue.delete(name); });
         return mine;
@@ -323,7 +347,8 @@ export class Wakeups {
         try {
             const awake = new Set(this.#conversations.awake());
             for (const record of this.#store.all()) {
-                if (!awake.has(record.name)) continue;
+                /* Someone typing there: its wake-ups wait for the next tick, the others go on. */
+                if (!awake.has(record.name) || (this.#typing(record.name) && !this.#docket?.on(record.name))) continue;
                 for (const item of record.items.filter((i) => i.on)) {
                     let text;
                     try { text = this.#due(record.name, item); } catch { text = undefined; }

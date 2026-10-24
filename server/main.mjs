@@ -39,7 +39,7 @@ import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
 import { Dockets } from './dockets.mjs';
 import { PULSE_MS } from 'clavarium-parley/ui';
-import { Wakeups, CALL_PATH } from './wakeups.mjs';
+import { Wakeups, TypingWatch, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
 import { Talk } from './talk.mjs';
 import { Toolbox } from './toolbox.mjs';
@@ -387,7 +387,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Not in a turn: its pulse ended, or is old (Parley's own measure). */
         idle: (name) => { const p = talk.pulse(name); return !(p?.busy === true && Date.now() - Date.parse(p.at) < PULSE_MS); },
         awake: () => all.awake(), chatOn: (name) => talk.isOn(name) });
-    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets,
+    const typingWatch = new TypingWatch();
+    const wakeups = new Wakeups({ store: new Store(`${dataDir}/wakeups.json`), vms, conversations: all, resources: folders, warm: (name) => bridge?.warm(name), docket: dockets, typing: (name) => typingWatch.busy(name),
         fired: (name, { text }) => talk.event(name, { kind: 'wakeup', text, topic: 'Wake-up' }) });
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
@@ -499,7 +500,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
-        onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); },
+        onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },
         spawn: async (name, cols, rows, say) => {
             const [program, ...argv] = await all.open(name, say);
             const started = pty.spawn(program, argv, { name: 'xterm-256color', env: withoutTmux(env), cols, rows });

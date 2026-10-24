@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, appendFileS
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../server/store.mjs';
-import { Wakeups, look, withFiles, cleanMessage, plainName, cron } from '../server/wakeups.mjs';
+import { Wakeups, TypingWatch, look, withFiles, cleanMessage, plainName, cron } from '../server/wakeups.mjs';
 
 function bench(t) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
@@ -249,4 +249,42 @@ test('two lines said at once are typed one after the other, each with its Enter:
     const both = await Promise.all([b.wakeups.say('worker', 'first line'), b.wakeups.say('worker', 'second line')]);
     assert.deepEqual(both, [true, true]);
     assert.deepEqual(b.typed, ['first line', 'Enter', 'second line', 'Enter']);
+});
+
+test('who is typing: a key in the last seconds, or a line begun and not sent; Enter, Ctrl-C, Ctrl-U free it', () => {
+    let now = 0;
+    const watch = new TypingWatch({ now: () => now });
+    assert.equal(watch.busy('worker'), false);
+    watch.typed('worker', 'git sta');
+    now = 10_000; assert.equal(watch.busy('worker'), true, 'a line begun');
+    now = 6 * 60_000; assert.equal(watch.busy('worker'), false, 'not for ever');
+    watch.typed('worker', 'tus\r'); assert.equal(watch.busy('worker'), true, 'a key just now');
+    now += 3000; assert.equal(watch.busy('worker'), false, 'sent, then quiet');
+    watch.typed('worker', 'oops'); watch.typed('worker', '\u0015'); now += 3000;
+    assert.equal(watch.busy('worker'), false, 'the line cleared');
+    assert.equal(watch.busy('other'), false);
+});
+
+test('a line from the server waits while someone types in the terminal, then is typed whole', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const typed = []; let busy = true; let paused = 0;
+    const vms = { exec: async (name, argv) => { const rest = argv.slice(argv.indexOf('send-keys') + 3); typed.push(rest[0] === '-l' ? rest.slice(2).join(' ') : rest.join(' ')); return { code: 0 }; } };
+    const wakeups = new Wakeups({ store: new Store(join(dir, 'w.json')), vms, conversations: { list: () => [{ name: 'worker' }], awake: () => ['worker'] }, resources: { of: () => [] },
+        typing: () => busy, pause: async () => { paused += 1; if (paused === 3) busy = false; } });
+    assert.equal(await wakeups.say('worker', 'Clavarium, repository site: moved.'), true);
+    assert.equal(paused, 3, 'held while the line was taken');
+    assert.deepEqual(typed, ['Clavarium, repository site: moved.', 'Enter']);
+});
+
+test('held a few minutes at most: a line left half typed does not keep the server silent', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-wake-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const typed = []; let now = 0;
+    const vms = { exec: async (name, argv) => { typed.push(argv.at(-1)); return { code: 0 }; } };
+    const wakeups = new Wakeups({ store: new Store(join(dir, 'w.json')), vms, conversations: { list: () => [{ name: 'worker' }], awake: () => ['worker'] }, resources: { of: () => [] },
+        now: () => new Date(now), typing: () => true, pause: async (ms) => { now += ms; } });
+    assert.equal(await wakeups.say('worker', 'hello'), true);
+    assert.ok(now >= 5 * 60_000 && now < 6 * 60_000);
+    assert.deepEqual(typed, ['hello', 'Enter']);
 });
