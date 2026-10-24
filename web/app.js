@@ -333,22 +333,30 @@
     let listFolded = false;
     try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
     /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
-       redrew the terminal) at every frame: it stuttered. The list and the menu slide instead -- a transform,
-       which costs nothing -- and the columns change once: after it slid out, or before it slides in. */
+       redrew the terminal) at every frame: it stuttered. The columns change once, the room taking the whole
+       width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost
+       nothing -- so nothing is left blank, and nothing jumps at the end. */
     const sliders = () => ['list', 'nav'].map((id) => $(id)).filter(Boolean);
-    const slide = (out) => Promise.all(sliders().map((e) => e.animate(
-        [{ transform: 'none', opacity: 1 }, { transform: 'translateX(-100%)', opacity: 0 }],
-        { duration: 200, easing: 'ease', direction: out ? 'normal' : 'reverse' }).finished.catch(() => {})));
+    const slide = (out, width) => {
+        const how = { duration: 200, easing: 'ease', direction: out ? 'normal' : 'reverse' };
+        const moving = sliders().map((e) => e.animate([{ transform: 'none' }, { transform: 'translateX(-100%)' }], how));
+        moving.push($('room').animate([{ transform: `translateX(${width}px)` }, { transform: 'none' }], how));
+        return Promise.all(moving.map((a) => a.finished.catch(() => {})));
+    };
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
     $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
-        if (!still() && folded) await slide(true);
+        if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
+        const width = $('list').getBoundingClientRect().width || $('list').offsetWidth;
+        app.classList.add('sliding');
+        if (folded) { applyFold(true); fit.fit(); }
+        await slide(folded, width);
+        app.classList.remove('sliding');
         if (listFolded !== folded) return;
-        applyFold(folded);
-        fit.fit(); focusTerminal();
-        if (!still() && !folded) await slide(false);
+        if (!folded) { applyFold(false); fit.fit(); }
+        focusTerminal();
     });
 
     /* ---------- light or dark ---------- */
