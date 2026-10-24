@@ -293,7 +293,7 @@ test('with a mouse and a real keyboard nothing changes: no button, no hint', { s
     assert.equal(await me.page.evaluate(() => window.clavariumTerminal.textarea.getAttribute('inputmode')), null);
     /* A field opened for typing takes the cursor, as before. */
     await me.page.locator('#new').click();
-    await me.until('the name of a new conversation takes the cursor', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'create-name');
+    await me.until('the name of a new conversation takes the cursor', async () => (await me.page.evaluate(() => document.activeElement?.id)) === 'newconv-name');
 });
 
 /* Where on the page a piece of text of the terminal starts and ends. */

@@ -47,9 +47,6 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes pulse { 50% { opacity: .25; } }
 @media (prefers-reduced-motion: reduce) { .item > .state-dot, .unfolding { animation: none !important; } }
-#create { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--bar); border: 1px solid var(--line); border-radius: 8px; }
-#create label, #create .legend { font-size: .75rem; color: var(--ink2); }
-#create input { font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choices button[aria-checked="true"] { border-color: var(--brass); background: rgba(210, 169, 78, .16); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -857,12 +854,8 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 #app:is([data-place="access"], [data-place="assets"], [data-place="settings"]) #room > :is(#keys, #shortcuts) { visibility: hidden; }
 #app[data-current=""]:is([data-place="access"], [data-place="assets"], [data-place="settings"]) #room > header { display: none; }
 
-/* The form that makes a conversation keeps its height, and the conversations
-   under it keep theirs: on a phone the whole column scrolls (seen: rows
-   squashed under the open form). */
-#create { flex: 0 0 auto; }
+/* The rows of the list keep their height: on a phone the whole column scrolls. */
 .item { flex-shrink: 0; }
-#list:has(> #create:not([hidden])) #items { flex: 0 0 auto; overflow: visible; }
 
 /* ---------- Files: list or icons, changes by hand, uploads, the editor ---------- */
 #files { --t: var(--ink2); }
@@ -1065,8 +1058,6 @@ button.inline:hover { color: var(--brass); }
 #hidden-toggle[hidden] { display: none; }
 #hidden-toggle .needs-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--brass); vertical-align: middle; }
 .item[data-hidden="true"] { opacity: .7; }
-#create .advanced { margin: .25rem 0; }
-#create .advanced summary { cursor: pointer; color: var(--ink2); font-size: .8rem; }
 
 /* ---------- THE BAR (G): « · state dot + name · [Chat | Terminal | Assets N] · settings ---------- */
 html:not([data-door="device"]) #room > header { flex-wrap: nowrap; }
@@ -1638,3 +1629,51 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 .entry .acts.confirm { margin: 0 0 10px 44px; padding: 8px 12px; border-left: 3px solid var(--danger); border-radius: 4px; background: color-mix(in srgb, var(--danger) 8%, var(--bar)); justify-content: flex-end; }
 .entry .acts.confirm .sure { font-size: .875rem; }
 @media (max-width: 700px) { .entry .acts.confirm { margin-left: 0; } }
+
+/* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
+   The pieces of "one look" (set-row, sub-head, more, chapter, action-row);
+   a choice of a few is a card each; Create stays in sight at the bottom. */
+#newconv { gap: 12px; padding: 14px 20px 0; }
+#newconv > .panel-top b { font-size: 1.125rem; }
+#newconv > .nc-body { display: flex; flex-direction: column; gap: 12px; max-width: 720px; width: 100%; }
+#newconv :is(input:not([type=checkbox]):not([type=radio]), select) { font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-height: 40px; max-width: 100%; box-sizing: border-box; }
+#newconv select { appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
+#newconv :is(input, select):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+@media (pointer: coarse) { #newconv :is(input:not([type=checkbox]):not([type=radio]), select) { min-height: 44px; } }
+#newconv .set-control > :is(input, select)[aria-invalid=true]:not([type=checkbox]):not([type=radio]) { border-color: var(--danger); }
+#newconv .set-row > .set-control > :is(input, select) { width: 18rem; }
+#newconv .set-what > .err { font-size: .75rem; color: var(--danger); }
+/* A card of rows, as an open chapter without its fold. */
+.nc-card, #newconv details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
+.nc-card > *, #newconv details.chapter > .chapter-body > * { margin: 0; padding: 12px 16px; }
+.nc-card > * + *, #newconv details.chapter > .chapter-body > * + * { border-top: 1px solid var(--line); }
+.nc-card > .sub-head { display: block; padding-bottom: 0; }
+.nc-card > .sub-head + * { border-top: 0; }
+#newconv details.chapter > .chapter-body { gap: 0; padding: 0; background: var(--bar); border-radius: 0 0 10px 10px; }
+/* A choice of a few, each a card: its name and one short line. */
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.pick.two { grid-template-columns: 1fr 1fr; }
+.pick > button { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-height: 56px; padding: 10px 24px 10px 12px; text-align: left; font-weight: 400; background: var(--panel); }
+.pick > button b { font-size: .875rem; color: var(--ink); }
+.pick > button small { font-size: .75rem; color: var(--ink2); }
+.pick > button[aria-checked=true] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); background: color-mix(in srgb, var(--brass) 10%, var(--panel)); }
+.pick > button[aria-checked=true]::after { content: ""; position: absolute; right: 10px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: var(--brass); }
+/* The buttons stay in sight at the end of the page. */
+#newconv > .action-row { position: sticky; bottom: 0; z-index: 1; flex-wrap: nowrap; max-width: 720px; width: 100%; box-sizing: border-box; margin-top: auto; padding: 12px 0 calc(14px + env(safe-area-inset-bottom, 0px)); background: var(--panel); border-top: 1px solid var(--line); }
+#newconv > .action-row > .hint { font-size: .8125rem; min-width: 0; }
+#newconv > .action-row > .hint.error { color: var(--danger); }
+#newconv > .action-row > button { flex: none; min-height: 40px; padding: 8px 16px; }
+#new[aria-pressed=true] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 3px var(--brass); }
+/* Over a conversation on a wide screen, as Settings: its keys keep their room but cannot be touched; with none, no bar. */
+#app[data-place="new"] #room > :is(#keys, #shortcuts) { visibility: hidden; }
+#app[data-current=""][data-place="new"] #room > header { display: none; }
+@media (max-width: 700px) {
+  /* A phone: the whole screen, the menu bar and the conversation's bar put away. */
+  #app[data-place="new"] #nav { display: none; }
+  #app[data-place="new"] #room > :is(header, #health-strip, #signin-strip, #voice-line, #shortcuts, #keys) { display: none !important; }
+  #newconv { padding: 12px 16px 0; }
+  #newconv .set-row > .set-control > :is(input, select) { width: 100%; }
+  .pick { grid-template-columns: 1fr 1fr; }
+  .pick.two { grid-template-columns: 1fr; }
+  #newconv > .action-row > .hint { font-size: .75rem; }
+}

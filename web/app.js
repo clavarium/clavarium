@@ -1339,50 +1339,131 @@
         if (home) pollTimer = setTimeout(refresh, conversations.some(holds) ? 1500 : conversations.some((c) => c.phase === 'building' || c.phase === 'moving' || c.phase === 'restarting') ? 2500 : 10000);
     }
 
-    /* ---------- creating ---------- */
+    /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
+       "+ New" opens it beside the list (the whole screen on a phone), with an
+       address of its own (?open=new); Back, Escape, Cancel and its "<" link
+       close it. From the map's "+" it is a step over the map, and goes back
+       to it. Its tools are the server's (GET /api/tools). */
     let chosenTool = '';
-    async function openCreate() {
-        const tools = await (await fetch(`${API}/tools`)).json();
-        const box = $('create-tools');
-        box.replaceChildren();
-        chosenTool = tools[0]?.id ?? '';
-        for (const t of tools) {
-            const b = document.createElement('button');
-            b.type = 'button'; b.textContent = t.label; b.setAttribute('role', 'radio');
-            b.setAttribute('aria-checked', t.id === chosenTool ? 'true' : 'false');
+    let newTools = [];
+    const ID_SHAPE = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
+    const NEW_FIELDS = ['name', 'group', 'id', 'memory'];
+    function newError(field, text) {
+        const at = field && NEW_FIELDS.includes(field) ? field : '';
+        for (const f of NEW_FIELDS) {
+            const said = $(`newconv-${f}-error`); const box = $(`newconv-${f}`);
+            const mine = f === at && Boolean(text);
+            said.textContent = mine ? text : ''; said.hidden = !mine;
+            if (mine) box.setAttribute('aria-invalid', 'true'); else box.removeAttribute('aria-invalid');
+        }
+        const status = $('newconv-status');
+        const general = !at && Boolean(text);
+        status.textContent = general ? text : 'Ready in a few minutes';
+        status.classList.toggle('error', general);
+        if (at === 'id' || at === 'memory') $('newconv-more').open = true;
+        if (at) $(`newconv-${at}`).focus();
+    }
+    /* Which field a refusal of the server is about (names.mjs, conversations.mjs, capacity.mjs). */
+    function fieldOf(message) {
+        if (/folder name/i.test(message)) return 'group';
+        if (/already has this name|^A name is 1 to 32/.test(message)) return 'id';
+        if (/memory/i.test(message)) return 'memory';
+        if (/^(Give a name|A name )/.test(message)) return 'name';
+        return '';
+    }
+    /* Memory: from what the chosen tool needs up to what a machine may have (MEMORY_CHOICES). */
+    function paintNewMemory() {
+        const tool = newTools.find((t) => t.id === chosenTool);
+        const least = tool?.memoryMb ?? 512;
+        const select = $('newconv-memory');
+        const was = Number(select.value) || least;
+        const mems = [...new Set([least, ...MEMORY_CHOICES.filter((m) => m > least)])];
+        select.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = sizeWords(m); return o; }));
+        select.value = String(mems.includes(was) ? was : least);
+        $('newconv-memory-least').textContent = tool ? `${tool.label} needs ${sizeWords(least)} at least` : '';
+    }
+    function paintNewTools() {
+        const box = $('newconv-tools');
+        if (!newTools.some((t) => t.id === chosenTool)) chosenTool = newTools[0]?.id ?? '';
+        box.replaceChildren(...newTools.map((t) => {
+            const b = el('button'); b.type = 'button'; b.setAttribute('role', 'radio'); b.dataset.tool = t.id;
+            b.setAttribute('aria-checked', String(t.id === chosenTool));
+            b.append(el('b', '', t.label), el('small', '', t.ai ? 'AI agent' : 'A terminal, no AI'));
             b.addEventListener('click', () => {
                 chosenTool = t.id;
-                for (const other of box.children) other.setAttribute('aria-checked', other === b ? 'true' : 'false');
+                for (const other of box.children) other.setAttribute('aria-checked', String(other === b));
+                paintNewMemory();
             });
-            box.append(b);
+            return b;
+        }));
+        paintNewMemory();
+    }
+    for (const b of $('newconv-work').querySelectorAll('[data-work]')) {
+        b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
+    }
+    const newOnDisk = () => $('newconv-work').querySelector('[data-work="disk"]').getAttribute('aria-checked') === 'true';
+    async function openNew({ push = true } = {}) {
+        if (DEVICE) return;
+        newError('', '');
+        if (place !== 'new') {
+            /* From the map: a step over it, and back to it. Otherwise a place of its own. */
+            if (place === 'access' && push) {
+                showPlace('new');
+                nav.push('create', ({ quiet }) => {
+                    if (quiet || place !== 'new') return;
+                    showPlace('access'); paintTabs(); remember();
+                    void (mapMode === 'flows' ? links?.openFlows() : links?.open({ pin: accessFor ? `conversation:${accessFor}` : null }));
+                }, { address: placeAddress() });
+                $('newconv-close').textContent = '‹ Access';
+            } else {
+                enterPlace('new', push);
+                $('newconv-close').textContent = '‹ Conversations';
+            }
         }
-        $('create-error').hidden = true;
-        $('create').hidden = false;
-        focusField($('create-name'));
+        $('newconv').scrollTop = 0;
+        focusField($('newconv-name'));
+        try { const r = await fetch(`${API}/tools`); if (r.ok) newTools = await r.json(); } catch { /* kept as it was */ }
+        paintNewTools();
+    }
+    /* Closed as any page is: the step on top (the place, or the step over the map). */
+    function closeNew() {
+        if (place !== 'new') return;
+        if (!nav.close('create')) leavePlace();
     }
     $('hidden-toggle').addEventListener('click', () => { showHidden = !showHidden; paint(); });
-    $('new').addEventListener('click', () => { void openCreate(); });
-    $('create-cancel').addEventListener('click', () => { if (!nav.close('create')) $('create').hidden = true; });
-    /* From the map's "+" of Conversations: the same form as the list's "+ New", a step over the map (on a phone, the list is shown for it). */
-    function createFromMap() {
-        void openCreate();
-        if (narrow()) view('list');
-        if (nav.last(['create']) < 0) nav.push('create', ({ quiet }) => { $('create').hidden = true; if (!quiet && place !== 'conversations') view('room'); });
-    }
+    $('new').addEventListener('click', () => { void openNew(); });
+    $('newconv-cancel').addEventListener('click', closeNew);
+    $('newconv-close').addEventListener('click', closeNew);
+    /* From the map's "+" of Conversations: the same page. */
+    function createFromMap() { void openNew(); }
     /* The identifier drawn from the name, as the server draws it (names.mjs), shown before it is made; the server decides. */
-    const identifierOf = (title) => String(title).normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 32).replace(/-+$/, '') || 'conversation';
-    $('create-name').addEventListener('input', () => { $('create-id').placeholder = identifierOf($('create-name').value.trim()); });
-    $('create').addEventListener('submit', async (event) => {
+    const identifierOf = (title) => String(title).normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^[^a-z]+/, '').replace(/-+$/, '').slice(0, 32).replace(/-+$/, '') || 'conversation';
+    $('newconv-name').addEventListener('input', () => { $('newconv-id').placeholder = identifierOf($('newconv-name').value.trim()); });
+    for (const f of NEW_FIELDS) $(`newconv-${f}`).addEventListener(f === 'memory' ? 'change' : 'input', () => { if (!$(`newconv-${f}-error`).hidden) newError('', ''); });
+    let creating = false;
+    $('newconv').addEventListener('submit', async (event) => {
         event.preventDefault();
-        const title = $('create-name').value.trim();
-        const id = $('create-id').value.trim();
+        if (creating) return;
+        const title = $('newconv-name').value.trim();
+        const id = $('newconv-id').value.trim();
+        const group = $('newconv-group').value.trim();
+        if (!title) { newError('name', 'Give a name.'); return; }
+        if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
+        const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
+        const memoryMb = Number($('newconv-memory').value);
+        newError('', '');
+        creating = true; $('newconv-create').disabled = true;
         try {
-            const group = $('create-group').value.trim();
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: $('create-disk').checked });
-            $('create').hidden = true; $('create-name').value = ''; $('create-id').value = ''; $('create-group').value = ''; $('create-disk').checked = false;
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}) });
+            $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
             await refresh();
+            /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);
-        } catch (error) { $('create-error').textContent = error.message; $('create-error').hidden = false; }
+        } catch (error) {
+            const field = fieldOf(error.message);
+            newError(field, field === 'id' && /already has this name/.test(error.message) ? 'Already used by another conversation' : error.message);
+        } finally { creating = false; $('newconv-create').disabled = false; }
     });
 
     /* ---------- shortcuts ---------- */
@@ -3690,10 +3771,14 @@
         place = which;
         app.dataset.place = which;
         app.dataset.current = current ? 'yes' : '';
-        for (const b of $('nav').querySelectorAll('button[data-place]')) { if (b.dataset.place === which) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+        /* A new conversation is made among the conversations: "+ New" stays marked while its page is open. */
+        const marked = which === 'new' ? 'conversations' : which;
+        for (const b of $('nav').querySelectorAll('button[data-place]')) { if (b.dataset.place === marked) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+        $('new').setAttribute('aria-pressed', String(which === 'new'));
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
+        $('newconv').hidden = which !== 'new';
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
         if (which !== 'conversations') { for (const id of ['files', 'copy']) $(id).hidden = true; view('room'); }
@@ -3792,6 +3877,7 @@
         const wanted = q.get('c') ?? '';
         if (home && wanted !== current && conversations.some((c) => c.name === wanted)) select(wanted);
         const open = q.get('open') ?? '';
+        if (open === 'new') { await openNew({ push: false }); return; }
         if (open === 'settings') {
             await openSettings({ push: false });
             /* A link to one chapter of Settings (?open=settings&at=resources): that one opened, and shown. */

@@ -222,6 +222,17 @@ async function walk(t, { phone }) {
         await page.locator(`#${item}-close`).click();
         await until(`"< Conversations" closes ${item}`, async () => !(await shown(id)));
     }
+    /* A NEW CONVERSATION: a page of its own, as Settings; "+ New" stays marked; Back, Escape, Cancel and "<" close it. */
+    if (phone) await until('the list', async () => shown('#new'));
+    await bothWays(() => page.locator('#new').click(), async () => (await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === 'new' && (await page.locator('#new').getAttribute('aria-pressed')) === 'true',
+        async () => !(await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === null && (await page.locator('#new').getAttribute('aria-pressed')) === 'false', 'a new conversation');
+    for (const way of ['#newconv-cancel', '#newconv-close']) {
+        await page.locator('#new').click();
+        await until('the page of a new conversation', () => shown('#newconv'));
+        assert.equal(await page.locator('#newconv-close').innerText(), '‹ Conversations');
+        await page.locator(way).click();
+        await until(`${way} closes it`, async () => !(await shown('#newconv')) && new URL(page.url()).searchParams.get('open') === null);
+    }
     /* Access: all the devices, a step over the map. */
     await page.locator('#nav-access').click();
     await until('the map', async () => (await page.locator('#links-board .lk-node, #links-phone .lk-item').count()) > 0 || await shown('#map-all-devices'));
@@ -232,10 +243,10 @@ async function walk(t, { phone }) {
     await page.locator('#share-manage-close').click();
     await until('"< Access": the map', () => shown('#access-map'));
     /* EACH COLUMN OF THE MAP HAS ITS "+", with things in it already: a new device, a new conversation, a new asset; Back, the map. */
-    const onMap = async () => (await shown('#access-map')) && !(await shown('#sharing')) && !(await shown('#create')) && !(await shown('#assets'));
+    const onMap = async () => (await shown('#access-map')) && !(await shown('#sharing')) && !(await shown('#newconv')) && !(await shown('#assets'));
     for (const [kind, title, word, opened] of [
         ['device', 'Devices', 'New device', () => shown('#share-compose')],
-        ['conversation', 'Conversations', 'New conversation', () => shown('#create')],
+        ['conversation', 'Conversations', 'New conversation', () => shown('#newconv')],
         ['asset', 'Assets', 'New asset', async () => (await shown('#assets')) && (await page.locator('#assets-detail .as-kinds button').count()) === 4],
     ]) {
         if (phone) await page.locator('#links-phone .lk-kinds button', { hasText: title }).click();

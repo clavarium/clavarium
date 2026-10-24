@@ -154,10 +154,10 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         /* Creates a conversation from the page, as a person does, and waits for its terminal. */
         async function create(name, tool = 'Shell', { onDisk = false } = {}) {
             await page.locator('#new').click();
-            await page.fill('#create-name', name);
-            if (onDisk) await page.locator('#create-disk').check();
-            await page.locator('#create-tools button', { hasText: tool }).click();
-            await page.locator('#create button[type=submit]').click();
+            await page.fill('#newconv-name', name);
+            if (onDisk) await page.locator('#newconv-work [data-work="disk"]').click();
+            await page.locator('#newconv-tools button', { hasText: tool }).click();
+            await page.locator('#newconv-create').click();
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
             await sees(tool === 'Shell' ? 'ready>' : 'other>');
             await fullSize(name);

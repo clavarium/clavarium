@@ -16,25 +16,6 @@
     <div class="top"><b id="list-title" title="Conversations">Clavarium</b><span class="top-acts"><button type="button" id="search-open" class="icon-btn" aria-label="Search conversations" title="Search (/ or Ctrl+K)" aria-expanded="false" aria-controls="search"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button><button type="button" id="new" class="primary">+ New</button></span></div>
     <!-- SEARCH, discreet: opened by the magnifier, "/" or Ctrl+K; filters as it is typed. -->
     <div id="search" role="search" hidden><input id="search-field" type="search" placeholder="Search" aria-label="Search conversations: name, folder, identifier, tool" autocomplete="off" spellcheck="false" maxlength="60" aria-controls="items"></div>
-    <form id="create" hidden autocomplete="off">
-      <label for="create-name">Name</label>
-      <input id="create-name" name="name" required maxlength="60" placeholder="Website redesign" spellcheck="false">
-      <details class="advanced"><summary>Advanced options</summary>
-        <label for="create-id">Identifier</label>
-        <input id="create-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" title="Lower-case letters, digits and hyphens; starts with a letter, does not end with a hyphen" placeholder="website-redesign" spellcheck="false" autocapitalize="none">
-        <p class="hint">Used for its machine, its folders, its address and what is given to it. Drawn from the name when empty; it cannot be changed later. The name can.</p>
-      </details>
-      <label for="create-group">Group <span class="hint">(optional)</span></label>
-      <input id="create-group" maxlength="40" list="group-names" placeholder="None" spellcheck="false" autocomplete="off">
-      <datalist id="group-names"></datalist>
-      <span class="legend">What runs in it</span>
-      <div id="create-tools" class="choices" role="radiogroup" aria-label="What runs in it"></div>
-      <label class="check"><input type="checkbox" id="create-disk"> Work on the machine's own disk</label>
-      <p class="hint">Unticked, what the tool makes is kept here: you see it in Files, and it outlives the machine. Tick it for a code project that installs packages: a folder kept here refuses the links they make, and is slower. Those files are then not shown here and go with the machine. It can be changed later.</p>
-      <p id="create-error" class="error" role="alert" hidden></p>
-      <div class="row"><button type="submit" class="primary">Create</button><button type="button" id="create-cancel">Cancel</button>
-        <span class="hint">a new machine takes a few minutes</span></div>
-    </form>
     <!-- Needs you and Recent: copies of rows of the list below, by when they were last used (app.js, paint). -->
     <div id="recent"></div>
     <div id="items"></div>
@@ -860,6 +841,36 @@
         </section>
         </div>
       </div>
+      <!-- A NEW CONVERSATION: a page of its own, as Settings, opened by "+ New" (app.js, openNew). -->
+      <form id="newconv" class="sheet" hidden novalidate autocomplete="off" aria-labelledby="newconv-title">
+        <div class="panel-top"><b id="newconv-title">New conversation</b><button type="button" id="newconv-close" class="as-link place-back">&lsaquo; Conversations</button></div>
+        <div class="nc-body">
+          <div class="nc-card">
+            <div class="set-row"><div class="set-what"><label for="newconv-name">Name</label><small>Shown in the list. Can be changed</small><span id="newconv-name-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-name" name="name" required maxlength="60" placeholder="Website redesign" spellcheck="false"></div></div>
+            <div class="set-row"><div class="set-what"><label for="newconv-group">Folder</label><small>Optional. Groups it in the list</small><span id="newconv-group-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-group" maxlength="40" list="group-names" placeholder="None" spellcheck="false" autocomplete="off"><datalist id="group-names"></datalist></div></div>
+          </div>
+          <div class="nc-card">
+            <span class="sub-head">Tool</span>
+            <div id="newconv-tools" class="pick" role="radiogroup" aria-label="Tool"></div>
+          </div>
+          <div class="nc-card">
+            <span class="sub-head">Its files</span>
+            <div id="newconv-work" class="pick two" role="radiogroup" aria-label="Its files">
+              <button type="button" role="radio" data-work="kept" aria-checked="true"><b>Kept here</b><small>Seen in Files. Outlives the machine</small></button>
+              <button type="button" role="radio" data-work="disk" aria-checked="false"><b>On the machine's disk</b><small>Faster for code. Gone with the machine</small></button>
+            </div>
+            <details class="more"><summary>Which one?</summary>A code project that installs packages: its disk. Can be changed later.</details>
+          </div>
+          <details class="chapter" id="newconv-more">
+            <summary><span class="chapter-title">More</span><span class="chapter-about">Identifier, memory.</span></summary>
+            <div class="chapter-body">
+              <div class="set-row"><div class="set-what"><label for="newconv-id">Identifier</label><small>Its machine and address. Never changes</small><span id="newconv-id-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" placeholder="website-redesign" spellcheck="false" autocapitalize="none"></div></div>
+              <div class="set-row"><div class="set-what"><label for="newconv-memory">Memory</label><small id="newconv-memory-least"></small><span id="newconv-memory-error" class="err" role="alert" hidden></span></div><div class="set-control"><select id="newconv-memory"></select></div></div>
+            </div>
+          </details>
+        </div>
+        <div class="action-row"><span id="newconv-status" class="hint" role="status">Ready in a few minutes</span><button type="button" id="newconv-cancel">Cancel</button><button type="submit" id="newconv-create" class="primary">Create</button></div>
+      </form>
       <div id="copy" class="sheet" hidden>
         <div class="panel-top"><b>Copy from the screen</b><button type="button" id="copy-close" aria-label="Close" title="Close">&times;</button></div>
         <p class="hint">The terminal draws its text itself, so it cannot be selected by touch. Here is the same text as ordinary text: select what you need, or copy it all.</p>

@@ -201,7 +201,8 @@ export class Conversations {
 
     /* `resumes`: the tool can take up its last session when it starts (`resume` in config/tools.json). */
     /* `rights`: it can be started with every right in its machine (`rights` in config/tools.json). */
-    tools() { return this.#tools.map(({ id, label, memoryMb, resume, rights }) => ({ id, label, memoryMb, resumes: Boolean(resume), rights: Boolean(rights) })); }
+    /* `ai`: an agent that reads instructions (`instructions`), not a bare terminal. */
+    tools() { return this.#tools.map(({ id, label, memoryMb, resume, rights, instructions }) => ({ id, label, memoryMb, resumes: Boolean(resume), rights: Boolean(rights), ai: Boolean(instructions) })); }
 
     /* The sign-in rules of a conversation's tool, or undefined. */
     signinRules(name) { return this.#tools.find((t) => t.id === this.#store.get(name)?.tool)?.signin; }

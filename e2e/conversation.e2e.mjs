@@ -6,9 +6,9 @@ test('a conversation is created from the page, built, and its terminal answers',
     const b = await bench(t, { launchSeconds: '6' });
     const me = await b.person();
     await me.page.locator('#new').click();
-    await me.page.fill('#create-name', 'first-talk');
-    await me.page.locator('#create-tools button', { hasText: 'Shell' }).click();
-    await me.page.locator('#create button[type=submit]').click();
+    await me.page.fill('#newconv-name', 'first-talk');
+    await me.page.locator('#newconv-tools button', { hasText: 'Shell' }).click();
+    await me.page.locator('#newconv-create').click();
     /* While the machine is being built, the page says so, and offers nothing that cannot work yet. */
     await me.until('the page says it is building', async () => (await me.state()) === 'building');
     assert.match(await me.page.locator('#notice-text').innerText(), /a new machine takes a few minutes/i);

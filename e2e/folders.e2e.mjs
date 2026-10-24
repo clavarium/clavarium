@@ -35,9 +35,9 @@ test('folders: made at creation and in General, folded on this device only, rena
     /* Made in a folder from the form, with the folders there are offered. */
     await me.page.locator('#new').click();
     assert.deepEqual(await me.page.locator('#group-names option').evaluateAll((all) => all.map((o) => o.value)), ['Perso', 'Clients']);
-    await me.page.fill('#create-name', 'Quote');
-    await me.page.fill('#create-group', 'Clients');
-    await me.page.locator('#create button[type=submit]').click();
+    await me.page.fill('#newconv-name', 'Quote');
+    await me.page.fill('#newconv-group', 'Clients');
+    await me.page.locator('#newconv-create').click();
     await me.until('in its folder, first', async () => (await me.page.locator('.group[data-group="Clients"] .item').first().getAttribute('data-name')) === 'quote');
     /* Folded: kept on this device after a reload, not on another. */
     await me.page.locator('.group[data-group="Perso"] .group-head').click();
