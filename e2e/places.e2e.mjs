@@ -18,7 +18,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.api('/api/resources', { name: 'seeds' });
     await pairDevice(me, b.origin, [{ asset: 'folder:seeds', rights: 'r' }], 'Kitchen tablet');
     /* On a wide screen the list above is the menu: the bar holds the places of the whole. */
-    assert.deepEqual(await page.locator('#nav button:visible').allInnerTexts(), ['Lists', 'Assets', 'Access', 'Settings']);
+    assert.deepEqual(await page.locator('#nav button:visible').allInnerTexts(), ['Assets', 'Access', 'Settings']);
     const navBox = await page.locator('#nav').boundingBox(); const listBox = await page.locator('#list').boundingBox();
     assert.ok(navBox.x < 5 && navBox.y >= listBox.y + listBox.height - 1, 'under the list, bottom left');
     for (const id of ['#links-open', '#assets-open', '#sharing-open', '#settings-open', '#access-tabs', '#tab-devices']) assert.equal(await page.locator(id).count(), 0, `${id} is gone`);
@@ -92,13 +92,13 @@ test('on a phone: the list first, a bar along the bottom with its items, Access 
     assert.ok(Math.abs(bar.y + bar.height - height) <= 1, `at the very bottom (${bar.y + bar.height} of ${height})`);
     assert.ok(bar.width >= page.viewportSize().width - 1, 'across the screen');
     const items = page.locator('#nav button');
-    assert.equal(await items.count(), 5);
-    for (let i = 0; i < 5; i += 1) {
+    assert.equal(await items.count(), 4);
+    for (let i = 0; i < 4; i += 1) {
         const item = items.nth(i);
         assert.equal(await item.locator('svg').count(), 1, 'an icon');
         assert.ok((await item.boundingBox()).height >= 44, 'a fingertip high');
     }
-    assert.deepEqual(await items.allInnerTexts(), ['Conversations', 'Lists', 'Assets', 'Access', 'Settings']);
+    assert.deepEqual(await items.allInnerTexts(), ['Conversations', 'Assets', 'Access', 'Settings']);
     /* Inside a conversation the bar gives its room to the terminal; back on the list, it is there again. */
     await page.locator('#items .item', { hasText: 'garden' }).click();
     await me.until('the conversation', async () => (await me.state()) === 'live');

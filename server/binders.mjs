@@ -7,7 +7,8 @@
  * machine: what a tool could write, it could rewrite. A tool asks through
  * its work folder's .binder (beside .parley and .docket), and is answered
  * there; who asks is said by the folder -- conversation:<name> -- never by
- * the ask. The owner changes it from the page (Lists).
+ * the ask. The owner changes it from the page: Assets > Lists, and a
+ * conversation's Lists tab (only the lists it was given).
  *
  * A TOOL SEES ONLY THE LISTS IT WAS GIVEN (read, or change), and never
  * approves: a gate (Batches: "Approved") is the owner's tick.
@@ -84,6 +85,19 @@ export class Binders {
         const persons = (this.#team?.list?.() ?? []).map((o) => ({ id: `person:${String(o.email ?? o.id ?? '').toLowerCase()}`, kind: 'person', name: String(o.email ?? o.id ?? '') })).filter((p) => p.name);
         if (!persons.length) persons.push({ id: `person:${identity || 'owner'}`, kind: 'person', name: identity || 'Owner' });
         return [...persons, ...this.#conversations().map((name) => ({ id: `${AGENT}${name}`, kind: 'agent', name }))];
+    }
+    /* What each conversation was given: { name: { lists, waiting } }, waiting being the
+       records of those lists that wait for a person's tick (a list with a gate, not approved). */
+    given() {
+        const keeper = { id: 'person:keeper', kind: 'person', name: 'keeper' };
+        const out = {};
+        for (const l of this.#keeper.store.lists(keeper)) {
+            const to = Object.keys(l.grants ?? {}).filter((id) => id.startsWith(AGENT));
+            if (l.archived || !to.length) continue;
+            const waiting = l.states.some((s) => s.gate) ? this.#keeper.store.list(l.id, keeper).records.filter((r) => !r.approved).length : 0;
+            for (const id of to) { const one = (out[id.slice(AGENT.length)] ??= { lists: 0, waiting: 0 }); one.lists++; one.waiting += waiting; }
+        }
+        return out;
     }
     /* A number that moves with every change: the page reads again when it moved. */
     changes() { return this.#changes; }

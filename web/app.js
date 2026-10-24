@@ -1613,6 +1613,7 @@
     /* THE BAR (G): Chat | Terminal | Assets N, then its settings. What was
        given to it is counted on "Assets", and shown there. */
     let assetsShown = false; let roomPick = '';
+    let listsShown = false; let listsOf = ''; let listsView = null;   /* its Lists tab: below */
     /* A secret near or past its expiry (secrets.mjs, WARN_DAYS): a dot on Assets, and on the
        Assets of a conversation that has it. Read with the list, at most once a minute. */
     let secretsKnown = []; let secretsReadAt = 0;
@@ -1633,6 +1634,12 @@
         if (Date.now() - secretsReadAt > 60_000) { secretsReadAt = Date.now(); void readSecretsNow().catch(() => {}); }
         /* Its title names each of them, with what it may do. */
         $('view-assets').title = c ? [...(c.offline === true ? ['offline'] : []), ...(c.resources ?? []).map((r) => `${r.name} - ${r.access}`), ...(c.secrets ?? [])].join(', ') || 'Nothing given yet' : '';
+        /* Lists: a tab once it was given one; counted, what waits for the owner's tick. */
+        const given = c?.lists ?? null;
+        $('view-lists').hidden = !given?.lists;
+        $('lists-count').textContent = given?.waiting ? String(given.waiting) : '';
+        $('view-lists').title = given?.waiting ? `${given.waiting} to approve` : LISTS_WORD.its;
+        if (listsShown && !given?.lists) leaveLists();
         paintViews();
         /* Drawn again only when what it was given changed (not at each look at the list). */
         const sig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
@@ -1642,21 +1649,22 @@
     function paintViews() {
         if (DEVICE) return;
         const now = tabNow();
-        for (const [id, tab] of [['view-chat', 'chat'], ['view-terminal', 'terminal'], ['view-assets', 'assets'], ['folders', 'settings']]) $(id).setAttribute('aria-pressed', String(now === tab));
+        for (const [id, tab] of [['view-chat', 'chat'], ['view-terminal', 'terminal'], ['view-assets', 'assets'], ['view-lists', 'lists'], ['folders', 'settings']]) $(id).setAttribute('aria-pressed', String(now === tab));
     }
     /* THE FOUR TABS: Chat, Terminal, Assets, Settings. The one it opened on
        takes no step; any other is one step (one only, whichever other tab is
        shown), and Back comes back to the first. Changing tab closes what was
        open in the one before, and anything over the screen. */
     let panelShown = false;
-    const tabNow = () => (assetsShown ? 'assets' : panelShown ? 'settings' : simple ? 'chat' : 'terminal');
-    const TAB_WORD = { chat: 'Chat', terminal: 'Terminal', assets: 'Assets', settings: 'Settings' };
-    function openPanelZone() { if (panelShown) return; panelShown = true; $('panel').hidden = false; paintViews(); }
+    const tabNow = () => (assetsShown ? 'assets' : listsShown ? 'lists' : panelShown ? 'settings' : simple ? 'chat' : 'terminal');
+    const TAB_WORD = { chat: 'Chat', terminal: 'Terminal', assets: 'Assets', get lists() { return LISTS_WORD.many; }, settings: 'Settings' };
+    function openPanelZone() { closeRoomLists(); if (panelShown) return; panelShown = true; $('panel').hidden = false; paintViews(); }
     function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; $('attach-picker').hidden = true; paintViews(); }
     function showTab(which, pick) {
         if (which === 'assets') { closePanelZone(); void openRoomAssets(pick); return; }
         if (which === 'settings') { closeRoomAssets(); openPanelZone(); return; }
-        closeRoomAssets(); closePanelZone();
+        if (which === 'lists') { closeRoomAssets(); closePanelZone(); void openRoomLists(); return; }
+        closeRoomAssets(); closePanelZone(); closeRoomLists();
         if ((which === 'chat') !== simple) toggleSimple(); else { paintViews(); if (!simple) focusTerminal(); }
     }
     /* The tab it opened on: the one shown before any step of a tab, or the one a review came from. */
@@ -1683,7 +1691,7 @@
     function resetTabs() {
         if (!DEVICE) nav.cut(nav.first(['tab', 'asset', 'review', 'over']));
         else nav.cut(nav.first(['over']));
-        closeRoomAssets(); closePanelZone();
+        closeRoomAssets(); closePanelZone(); closeRoomLists();
         $('files').hidden = $('copy').hidden = true;
     }
     /* Its settings closed for a question asked over its screen (a restart, a move). */
@@ -1691,6 +1699,23 @@
     $('view-chat').addEventListener('click', () => goTab('chat'));
     $('view-terminal').addEventListener('click', () => goTab('terminal'));
     $('view-assets').addEventListener('click', () => goTab('assets'));
+    $('view-lists').addEventListener('click', () => goTab('lists'));
+    /* ITS LISTS: Binder's screen, cut to the lists given to it (read or write). */
+    async function openRoomLists() {
+        if (DEVICE || !current) return;
+        listsShown = true; $('clists').hidden = false; paintViews();
+        if (listsView && listsOf === current) { void listsView.refresh(); return; }
+        const name = current; listsOf = name;
+        listsView = null;
+        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]));
+        if (listsOf === name) listsView = view;
+    }
+    function closeRoomLists() { if (!listsShown) return; listsShown = false; $('clists').hidden = true; paintViews(); }
+    /* Its last list taken back: its first tab again. */
+    function leaveLists() {
+        /* Under a place (Assets, where it was taken back): changed in place, the place left open. */
+        if (place !== 'conversations' || !nav.close('tab')) showTab(simple ? 'chat' : 'terminal');
+    }
     /* ONE RULE: the left column is the platform, the bar is this conversation.
          Its Access chapter  what THIS conversation has: attached folders,
                    repositories and mailboxes, secrets handed to its tool,
@@ -3003,10 +3028,20 @@
        own (the bar's "Assets N"): what it was given, the same rows; a folder
        opened shows its files (the Files sheet, moved in), a repository its
        branches. On a phone, the list, then one asset with "All assets". */
-    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round']];
+    /* BINDER'S LISTS, AS THIS PAGE NAMES THEM: the one place for the word (Assets, a conversation's tab). */
+    const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
+    $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
-    const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
+    function listIcon() {
+        const SVG = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(SVG, 'svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+        for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); svg.append(path); }
+        return svg;
+    }
     const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
     /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
     function paintAsList(holder, items, { chosen, choose, add, empty }) {
@@ -3016,7 +3051,7 @@
             if (mine.length === 0 && !add) continue;
             const section = el('section', 'as-kind'); section.dataset.kind = kind;
             const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret' }[kind]}`, () => add(kind)));
+            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
             section.append(head);
             if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
             for (const item of mine) {
@@ -3564,6 +3599,7 @@
         $('copy').hidden = true;
         if (!$('files').classList.contains('embedded')) $('files').hidden = true;
         if (pick !== undefined) roomPick = pick;
+        closeRoomLists();
         assetsShown = true; $('cassets').hidden = false; paintViews();
         await paintRoomAssets();
     }
@@ -3624,10 +3660,27 @@
     }
 
     /* ---- the server's ---- */
-    let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false;
+    let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false; let listOpen = ''; let listsSig = '';
+    /* A list given to a conversation, or taken back: a grant of Binder's. */
+    const givenTo = (l) => Object.keys(l.grants ?? {}).filter((id) => id.startsWith('conversation:'));
+    async function grantList(list, name, value) {
+        $('assets-error').hidden = true;
+        const done = await binderCall('grant', { list, to: `conversation:${name}`, access: value === 'none' ? null : value });
+        if (!done.ok) { $('assets-error').textContent = done.text; $('assets-error').hidden = false; }
+        await refresh();
+    }
+    /* A new list: Binder's templates, read once. */
+    async function fillTemplates() {
+        const pick = $('listnew-template');
+        if (pick.options.length) return;
+        const names = await binderCall('templates', {});
+        if (!names.ok || pick.options.length) return;
+        for (const [key, name] of Object.entries(names.data)) { const o = document.createElement('option'); o.value = key; o.textContent = name[binderLang()] ?? name.en; pick.append(o); }
+    }
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
-        const [all, boxes, secrets, keys] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), readDevices()]);
+        const [all, boxes, secrets, keys, lists] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), readDevices()]);
+        if (place !== 'assets') return;
         paintKeys(keys);
         markSecrets(secrets);
         const items = [];
@@ -3638,6 +3691,13 @@
                 sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
         for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
+        /* Binder's lists: given to a conversation (read, write) in Binder itself. */
+        const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
+        listsSig = binderSig(lists.data);
+        for (const l of shownLists) {
+            const users = givenTo(l).length;
+            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: `${l.count} record${l.count === 1 ? '' : 's'}` });
+        }
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
@@ -3654,7 +3714,7 @@
             if (assetsAdding === 'choose') {
                 detail.append(el('h3', '', 'New asset'));
                 const kinds = el('div', 'as-kinds');
-                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['secret', 'Secret']]) {
+                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
                     const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
                     b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
                     b.prepend(kindIcon(kind)); kinds.append(b);
@@ -3665,6 +3725,7 @@
             const form = $(`${assetsAdding}-box`); form.hidden = false;
             detail.append(form);
             if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
+            if (assetsAdding === 'list') void fillTemplates();
             focusField(form.querySelector('input:not([type=radio])'));
             return;
         }
@@ -3673,6 +3734,7 @@
             const form = $(`${assetsAdding}-box`); form.hidden = false;
             detail.append(all2, form);
             if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
+            if (assetsAdding === 'list') void fillTemplates();
             focusField(form.querySelector('input:not([type=radio])'));
             return;
         }
@@ -3704,7 +3766,7 @@
         }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
         const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : r.attachments?.[c.name] ?? 'none');
+        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none' : r.attachments?.[c.name] ?? 'none');
         const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
         const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
         const users = el('div', 'as-users');
@@ -3713,6 +3775,7 @@
             const line = el('div', 'given-row'); line.dataset.conversation = c.name;
             line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
                 if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
+                else if (chosen.kind === 'list') await grantList(chosen.list.id, c.name, value);
                 else await attachTo(c.name, chosen.name, value, 'assets-error');
                 await paintAssets();
             }, `What ${c.name} may do with ${chosen.name}`));
@@ -3723,6 +3786,15 @@
         for (const c of others) picker.append(row(c));
         if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation has it.' : 'No conversation is ready.'));
         detail.append(chapter('Used by', roundPlus('Give it to a conversation', () => { picker.hidden = !picker.hidden; })), users, picker);
+        if (chosen.kind === 'list') {
+            /* The list itself, Binder's screen, here: that list alone. */
+            const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
+            const holder = el('div', 'binder-holder as-binder');
+            open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
+            detail.append(chapter('Records', open), holder);
+            const id = chosen.list.id;
+            if (listOpen === chosen.key) void mountBinder(holder, (l) => l.id === id, { onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } });
+        }
         if (chosen.kind === 'git') {
             const holder = el('div', 'as-git'); detail.append(holder);
             /* Settings: where it is sent, with what. */
@@ -3746,15 +3818,20 @@
         const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
         const why = el('small', 'hint');
         const inUse = chosen.kind !== 'secret' && using.length > 0;
+        const lost = { secret: 'Its value is lost for good.', list: 'Its records are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
         if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
         remove.addEventListener('click', () => {
-            const sure = el('button', 'danger', chosen.kind === 'secret' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
+            const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
             const keep = el('button', '', 'Keep'); keep.type = 'button';
             keep.addEventListener('click', () => { void paintAssets(); });
             const ask = el('div', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog');
-            ask.append(el('span', '', chosen.kind === 'secret' ? 'Its value is lost for good.' : 'Its files are kept aside on the server.'), keep, sure);
+            ask.append(el('span', '', lost), keep, sure);
             sure.addEventListener('click', async () => {
-                try { await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`); assetOpen = ''; }
+                try {
+                    if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
+                    else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
+                    assetOpen = '';
+                }
                 catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
                 await paintAssets();
             });
@@ -3764,7 +3841,7 @@
         /* Given to a device: from here too (the map shows who has it). */
         const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
         share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
-        const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' ? [] : [share, el('br')]), remove, why);
+        const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' || chosen.kind === 'list' ? [] : [share, el('br')]), remove, why);
         detail.append(foot);
     }
     /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
@@ -3980,8 +4057,6 @@
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
         $('newconv').hidden = which !== 'new';
-        $('lists').hidden = which !== 'lists';
-        if (which === 'lists') void paintLists(); else stopLists();
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
         if (which !== 'conversations') { for (const id of ['files', 'copy']) $(id).hidden = true; view('room'); }
@@ -4054,34 +4129,49 @@
     }
     /* `of`: the conversation it is filtered on ('' for none; left as it is when not given).
        `face`: on the devices tab, 'compose' keeps what openCompose prepared. */
-    /* LISTS: the binder, drawn by Binder (clavarium-binder) in its place; read again when it changed. */
-    let binderView = null; let binderPeople = []; let binderChanges = -1; let binderTimer = null;
-    function openListsPlace({ push = true } = {}) { if (DEVICE) return; if (place !== 'lists') enterPlace('lists', push); }
-    async function paintLists() {
-        const lang = /^fr\b/i.test(navigator.language ?? '') ? 'fr' : 'en';
-        const seen = await getJson('/binder/people', null);
+    /* BINDER'S SCREEN (clavarium-binder), where a list is seen: one list of Assets opened, a
+       conversation's Lists tab. Binder has no filter: the lists it is answered are cut here to
+       those `keep` says. Every screen shown is read again when the lists changed. */
+    let binderPeople = []; let binderChanges = -1; let binderTimer = null; let binderParts = null;
+    const binderViews = new Set();
+    function binderLang() { return /^fr\b/i.test(navigator.language ?? '') ? 'fr' : 'en'; }
+    function binderCall(op, args) {
+        return fetch(`${API}/binder`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op, args }) })
+            .then((r) => r.json()).catch(() => ({ ok: false, text: 'The server could not be reached.' }));
+    }
+    /* What a page drew from the lists, to know when they changed. */
+    function binderSig(lists) { return JSON.stringify((Array.isArray(lists) ? lists : []).map((l) => [l.id, l.title, l.archived, l.count, l.grants])); }
+    async function mountBinder(holder, keep, { onLists } = {}) {
+        binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
+        const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
-        if (!binderView) {
-            const [{ mount }, words] = await Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${lang}.json`).then((r) => r.json()).catch(() => ({}))]);
-            if (place !== 'lists' || binderView) return;
-            binderView = mount($('lists-binder'), {
-                words, lang, people: () => binderPeople,
-                call: (op, args) => fetch(`${API}/binder`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op, args }) })
-                    .then((r) => r.json()).catch(() => ({ ok: false, text: 'The server could not be reached.' })),
-                /* A message or a file attached opens where this page opens them; a conversation's own, by its path. */
-                openAttached: (a) => { if (a.kind === 'asset') void openAssetsPlace(a.ref); },
-            });
-        } else void binderView.refresh();
-        stopLists();
+        if (!holder.isConnected) return null;
+        const view = mount(holder, {
+            words, lang: binderLang(), people: () => binderPeople,
+            call: async (op, args) => {
+                const r = await binderCall(op, args);
+                if (op === 'lists' && r.ok && Array.isArray(r.data)) { onLists?.(r.data); r.data = r.data.filter(keep); }
+                return r;
+            },
+            /* A thing attached opens where this page opens it. */
+            openAttached: (a) => { if (a.kind === 'asset') void openAssetsPlace(a.ref); },
+        });
+        binderViews.add({ box: holder.firstElementChild, view });
+        watchBinders();
+        return view;
+    }
+    function watchBinders() {
+        if (binderTimer) return;
         binderTimer = setInterval(async () => {
-            if (place !== 'lists' || document.hidden) return;
+            for (const one of binderViews) if (!one.box?.isConnected) { one.view.destroy(); binderViews.delete(one); }
+            if (binderViews.size === 0) { clearInterval(binderTimer); binderTimer = null; return; }
+            if (document.hidden) return;
             const now = await getJson('/binder/people', null);
             if (!now) return;
             binderPeople = now.people;
-            if (now.changes !== binderChanges) { binderChanges = now.changes; void binderView?.refresh(); }
+            if (now.changes !== binderChanges) { binderChanges = now.changes; for (const one of binderViews) void one.view.refresh(); }
         }, 4000);
     }
-    function stopLists() { if (binderTimer) clearInterval(binderTimer); binderTimer = null; }
     async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, pin } = {}) {
         if (DEVICE) return;
         /* Assets left Access: a conversation's own, or the server's. */
@@ -4116,17 +4206,14 @@
             if (/^[a-z]{1,20}$/.test(at)) openChapter(`s-${at}`)?.scrollIntoView({ block: 'start' });
             return;
         }
-        if (open === 'lists') { openListsPlace({ push: false }); return; }
-        /* Assets, a place of its own now (it was a tab of Access). */
-        if (open === 'assets' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
+        /* Assets, a place of its own now (it was a tab of Access); Lists, a kind of asset now. */
+        if (open === 'assets' || open === 'lists' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
         if (former) { await openAccessPage(former[0], { mode: former[1], of: q.get('for') ?? '', push: false }); return; }
         leftPlace(false);
     }
     nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
-    $('nav-lists').addEventListener('click', () => openListsPlace());
-    $('lists-close').addEventListener('click', () => leavePlace());
     $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
     $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
     $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
@@ -5520,6 +5607,14 @@
             assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = ''; $('mailbox-new').reset();
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
+        await paintAssets();
+    });
+    $('list-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('assets-error').hidden = true;
+        const made = await binderCall('create-list', { template: $('listnew-template').value, title: $('listnew-title').value.trim(), lang: binderLang() });
+        if (made.ok) { $('listnew-title').value = ''; assetsAdding = ''; assetOpen = `list:${made.data.id}`; listOpen = assetOpen; remember(); }
+        else { $('assets-error').textContent = made.text; $('assets-error').hidden = false; }
         await paintAssets();
     });
     $('folder-new').addEventListener('submit', async (event) => {

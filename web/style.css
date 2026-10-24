@@ -1699,7 +1699,18 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 
 /* Something asks for the person in this chapter (a callout, a warning): a dot on its title, and on its category. */
 details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after, #nav-assets[data-attention] > span::after, #view-assets[data-attention] > span::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
-/* LISTS: Binder's screen, in this page's colours. */
-#lists-binder { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 16px 16px 24px; }
-#lists-binder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
+/* LISTS: Binder's screen, in this page's colours (above Binder's own dark ones, whatever the theme): a conversation's Lists tab, one list of Assets opened.
+   Lists are made in Assets: Binder's own "+ New list" is not offered here. */
+.binder-holder { display: flex; flex-direction: column; min-height: 0; }
+#clists { padding: 0; }
+#clists-binder { overflow: auto; padding: 16px 16px 24px; }
+body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
   --binder-action: var(--brass); --binder-on-action: #1b1405; --binder-ok: var(--ok); --binder-ask: var(--warn); --binder-danger: var(--danger); }
+.binder-holder .binder-new-list, .binder-holder .binder-empty .binder-primary { display: none; }
+/* One list opened in Assets: no row of tabs for it alone. */
+.as-binder .binder-top { display: none; }
+.as-binder { margin-top: 8px; }
+/* A box to tick stays a box on a touch screen (buttons are 44px high there), a little larger. */
+@media (pointer: coarse) { .binder-holder .binder-tick { min-height: 0; width: 1.75rem; height: 1.75rem; } }
+/* On the tab, what waits for the owner's tick: the colour of what asks. */
+.views #lists-count { background: var(--brass); color: var(--on-brass, #1b1405); font-weight: 700; }

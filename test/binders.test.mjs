@@ -44,3 +44,21 @@ test('the owner acts as a person; a tool is told by its docket when given a reco
     clock = Date.parse('2026-11-04T09:05:00');
     assert.equal(posted.length, 2);
 });
+
+test('what each conversation was given: its lists, and the records waiting for a tick', (t) => {
+    const { b } = bench(t);
+    const batches = b.act('create-list', { template: 'batches' }).data;
+    const tasks = b.act('create-list', { template: 'simple' }).data;
+    assert.deepEqual(b.given(), {});
+    b.act('grant', { list: batches.id, to: 'conversation:coder', access: 'write' });
+    b.act('grant', { list: tasks.id, to: 'conversation:coder', access: 'read' });
+    b.act('grant', { list: tasks.id, to: 'conversation:writer', access: 'read' });
+    b.act('add', { list: batches.id, title: 'Dark mode' });
+    const r = b.act('add', { list: batches.id, title: 'Search' }).data;
+    b.act('add', { list: tasks.id, title: 'No gate here' });
+    assert.deepEqual(b.given(), { coder: { lists: 2, waiting: 2 }, writer: { lists: 1, waiting: 0 } });
+    b.act('approve', { id: r.id });
+    assert.equal(b.given().coder.waiting, 1);
+    b.act('archive-list', { list: batches.id });
+    assert.deepEqual(b.given().coder, { lists: 1, waiting: 0 });
+});

@@ -2,6 +2,7 @@
  *
  *   GET  /api/tools
  *   GET  /api/conversations
+ *                                                each with lists: {lists, waiting} (binders.mjs given) or null
  *   POST /api/conversations                 {name, tool, memoryMb?}
  *   POST /api/conversations/<name>/sleep
  *   POST /api/conversations/<name>/restart       a clean stop (by force if it hangs), then a start
@@ -231,7 +232,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (request.method === 'GET') {
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
-                return send(200, conversations.list().map((c) => ({ ...c, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
+                const lists = binders?.given() ?? {};
+                return send(200, conversations.list().map((c) => ({ ...c, lists: lists[c.name] ?? null, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
