@@ -32,6 +32,9 @@ export const AGAIN_MS = 30 * 60_000;
 /* ...this many times at most (the first included); then its chat says so. */
 export const TOLD_MAX = 3;
 
+/* One line in the chat: what was handled, cut short; the docket keeps it whole. */
+const cut = (text, max) => { const s = String(text ?? '').replace(/\s+/g, ' ').trim(); return s.length > max ? `${s.slice(0, max - 1)}…` : s; };
+
 export class Dockets {
     #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone;
     #listening = new Map(); #zoned = new Set(); #busy = false;
@@ -97,7 +100,7 @@ export class Dockets {
 
     /* What the tool did: said in its chat; a failure alerts its owner. */
     #heard(name, e) {
-        if (e.type === 'acked' && e.ack.kind === 'done') this.#line(name, { kind: 'docket-done', text: `Handled: ${e.event.text}${e.ack.note ? ` -- ${e.ack.note}` : ''}`, topic: 'Handled', brief: e.event.text.slice(0, 60) });
+        if (e.type === 'acked' && e.ack.kind === 'done') this.#line(name, { kind: 'docket-done', text: `Handled: ${cut(e.event.text, 80)}${e.ack.note ? ` -- ${cut(e.ack.note, 120)}` : ''}`, topic: 'Handled', brief: e.event.text.slice(0, 60) });
         if (e.type === 'acked' && e.ack.kind === 'failed') {
             this.#line(name, { kind: 'docket-failed', text: `Could not be handled: ${e.event.text} -- ${e.ack.note}`, tone: 'warn', topic: 'Not handled' });
             try { this.#alert({ title: `${name}: could not be handled`, body: `${e.event.text}: ${e.ack.note}`, url: `/?c=${name}` }); } catch { /* as said */ }

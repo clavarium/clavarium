@@ -148,7 +148,8 @@ export const EVENT_LEVELS = Object.freeze({
     /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
     'tools-updated': 'news',
     /* Its docket (dockets.mjs): what it handled, what it could not, what it never did; a reminder it set itself. */
-    'docket-done': 'news',
+    /* What it handled is a trace by default: one line, in the detailed view; what failed or was never handled calls. */
+    'docket-done': 'trace',
     'docket-failed': 'needs-you',
     'docket-unhandled': 'needs-you',
     'docket-reminder': 'trace',
