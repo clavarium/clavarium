@@ -117,7 +117,7 @@ function machine(b, { versions = {}, npm = true, sum, npmFails = false } = {}) {
     const of = (path) => b.box.list().find((x) => path.endsWith(`/${x.file}`));
     b.vms.exec = async (name, argv) => {
         m.calls.push(argv.join(' '));
-        if (argv[0] === 'parley' || argv[0] === 'docket') return m.versions[argv[0]] ? { code: 0, stdout: `${m.versions[argv[0]]}\n`, stderr: '' } : { code: 127, stdout: '', stderr: `${argv[0]}: not found` };
+        if (['parley', 'docket', 'binder'].includes(argv[0])) return m.versions[argv[0]] ? { code: 0, stdout: `${m.versions[argv[0]]}\n`, stderr: '' } : { code: 127, stdout: '', stderr: `${argv[0]}: not found` };
         if (argv[0] === 'which') return { code: npm ? 0 : 1, stdout: npm ? '/usr/local/bin/npm\n' : '', stderr: '' };
         if (argv[0] === 'sha256sum') return { code: 0, stdout: `${sum ?? of(argv.at(-1)).sha256}  ${argv.at(-1)}\n`, stderr: '' };
         if (argv.includes('npm')) {
@@ -135,7 +135,7 @@ test('Parley and Docket are installed by the server, in every machine: each sha2
     await b.box.prepare();
     const m = machine(b);
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley', 'docket'].flatMap((name) => { const tool = b.box.find(name); return [`${name} --version`, 'which npm', `sha256sum -- ${tool.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${tool.path}`, `${name} --version`]; }));
+    assert.deepEqual(m.calls, ['parley', 'docket', 'binder'].flatMap((name) => { const tool = b.box.find(name); return [`${name} --version`, 'which npm', `sha256sum -- ${tool.path}`, `sudo -n npm install -g --offline --no-audit --no-fund ${tool.path}`, `${name} --version`]; }));
     /* Known there: an opening asks nothing of the machine. */
     m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
@@ -147,7 +147,7 @@ test('Parley and Docket are installed by the server, in every machine: each sha2
     /* Already the version of the index (a machine that kept its disk): looked at, not installed again. */
     b.box.forget('helper'); m.calls.length = 0;
     assert.equal(await b.box.installIn('helper'), '');
-    assert.deepEqual(m.calls, ['parley --version', 'docket --version']);
+    assert.deepEqual(m.calls, ['parley --version', 'docket --version', 'binder --version']);
 });
 
 test('a tool is not installed from an archive that is not the one of the index, nor where there is no npm; npm failing is said', async (t) => {

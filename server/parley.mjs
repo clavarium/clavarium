@@ -21,12 +21,14 @@ const require = createRequire(import.meta.url);
 export const APP = fileURLToPath(new URL('..', import.meta.url));
 export const PARLEY = 'clavarium-parley';
 export const DOCKET = 'clavarium-docket';
+export const BINDER = 'clavarium-binder';
 /* THE TOOLS EVERY MACHINE IS GIVEN, each an npm dependency at an exact version, as Parley is:
    installed by this server in every machine (toolbox.mjs), from its archive here. `usage`
    is what /tools/index.json says of it. Adding one is adding a line here and its dependency. */
 export const MACHINE_TOOLS = Object.freeze([
     { name: 'parley', pkg: PARLEY, usage: 'Installed in every machine: parley --help. Talk with the person you work for, on their screen, when their chat is on.' },
     { name: 'docket', pkg: DOCKET, usage: 'Installed in every machine: docket --help. What woke you, waiting until you say done or failed; and reminders you set yourself.' },
+    { name: 'binder', pkg: BINDER, usage: 'Installed in every machine: binder --help. The lists you were given (batches, tasks, customers...): read them, add to them, note and attach; a person approves.' },
 ]);
 
 /* Where an installed package is, by the lookup Node itself makes from here

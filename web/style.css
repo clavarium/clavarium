@@ -1699,3 +1699,7 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 
 /* Something asks for the person in this chapter (a callout, a warning): a dot on its title, and on its category. */
 details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after, #nav-assets[data-attention] > span::after, #view-assets[data-attention] > span::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
+/* LISTS: Binder's screen, in this page's colours. */
+#lists-binder { display: flex; flex-direction: column; min-height: 0; overflow: auto; padding: 16px 16px 24px; }
+#lists-binder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
+  --binder-action: var(--brass); --binder-on-action: #1b1405; --binder-ok: var(--ok); --binder-ask: var(--warn); --binder-danger: var(--danger); }

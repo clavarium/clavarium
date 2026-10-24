@@ -65,7 +65,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     /* Every right in its machine: the default, given at its first start. */
     await me.sees('\nset rights:full');
     /* Its tools (Parley, Docket) were installed in it by the server (never by the tool), from /tools, offline. */
-    assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
+    assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-binder-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     report(b, 'silent', { silent: true });
     await me.page.locator('#folders').click();
     await me.page.locator('#health-check').click();
@@ -110,8 +110,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.type('echo "mark:${MARK:-gone} resumed:${RESUMED:-no} rights:${RIGHTS:-none}"');
     /* ... asking before acting now, as the owner chose before the restart. */
     await me.sees('\nmark:gone resumed:1 rights:ask');
-    /* Known there already: not installed again (Parley and Docket, once each). */
-    assert.equal(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8').split('\n').filter(Boolean).length, 2);
+    /* Known there already: not installed again (Parley, Docket and Binder, once each). */
+    assert.equal(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8').split('\n').filter(Boolean).length, 3);
     /* Looked at again after the start: nothing wrong, nothing said over the terminal. */
     await me.until('looked at after the restart', async () => (await me.api('/api/conversations/silent/health')).body?.level === 'ok');
     await me.page.locator('#folders').click();

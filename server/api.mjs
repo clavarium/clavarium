@@ -56,6 +56,8 @@
  *   POST /api/conversations/<c>/git/<name>/auto   {branches?, quietSeconds?, perHour?, create?, checks?, sure?}
  *   POST /api/git/<name>/refresh            fetch the origin into its mirror now
  *   POST /api/git/<name>/check              {head, target?}: run the checks in the machine
+ *   GET  /api/binder/people                 who may own a record, or be given a list; and the number of changes so far
+ *   POST /api/binder                        {op, args}: the owner's change to the lists (binders.mjs), as Binder's keeper answers it
  *   POST /api/resources/<name>/remove       only when attached nowhere; content is moved aside
  *   POST /api/conversations/<name>/resources {resource, access: read|write|none}
  *   POST /api/conversations/<name>/share    {rights?} -> {url, minutes, qr}: a one-use pairing code;
@@ -137,7 +139,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -273,6 +275,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/wifi' && wifi) return send(200, await wifi.status()), true;
             if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
+            if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: binders.changes() }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
@@ -345,6 +348,8 @@ export async function handleApi(request, response, conversations, headers, resou
         /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
         if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
         if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
+        /* The lists: every answer is 200, a refusal said in it ({ ok: false, text }), as the keeper says it to a tool. */
+        if (pathname === '/api/binder' && binders) return send(200, binders.act(body.op, body.args, identity)), true;
         /* Who gets what, and a whole setup in one file: see setup.mjs. */
         if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
             if (!setup) return send(404, { error: 'Not found.' }), true;

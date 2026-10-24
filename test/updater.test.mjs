@@ -15,6 +15,7 @@ import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 const DOCKET_REPO = 'https://github.com/clavarium/clavarium-docket';
+const BINDER_REPO = 'https://github.com/clavarium/clavarium-binder';
 
 async function setup(t) {
     const reg = await fakeRegistry();
@@ -22,15 +23,16 @@ async function setup(t) {
     t.after(() => { reg.close(); rmSync(root, { recursive: true, force: true }); });
     const parley = reg.publish('clavarium-parley', '0.9.0', { 'bin/parley.mjs': 'console.log("0.9.0")\n' }, { repo: PARLEY_REPO });
     const docket = reg.publish('clavarium-docket', '0.1.0', { 'bin/docket.mjs': 'console.log("0.1.0")\n' }, { repo: DOCKET_REPO });
-    const shrink = (version) => JSON.stringify({ name: 'clavarium', version, lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0' } },
-        'node_modules/clavarium-parley': { version: '0.9.0', resolved: parley.tarball, integrity: parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: docket.tarball, integrity: docket.integrity } } });
+    const binder = reg.publish('clavarium-binder', '0.1.0', { 'bin/binder.mjs': 'console.log("0.1.0")\n' }, { repo: BINDER_REPO });
+    const shrink = (version) => JSON.stringify({ name: 'clavarium', version, lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' } },
+        'node_modules/clavarium-parley': { version: '0.9.0', resolved: parley.tarball, integrity: parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: docket.tarball, integrity: docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: binder.tarball, integrity: binder.integrity } } });
     /* A Clavarium as small as can be: its smoke test passes, or fails on purpose. */
     const publish = (version, { smoke = true, dataFormat = 1, repo, attest, tag, ref } = {}) => reg.publish('clavarium', version, {
         'npm-shrinkwrap.json': shrink(version),
         'server/smoke.mjs': smoke ? 'console.log("smoke: ok")\n' : 'console.error("broken on purpose"); process.exit(1);\n',
         'server/tools.mjs': "export const NODE_VERSION = 'v24.20.0';\n",
         'deploy/clavarium-host': '#!/bin/bash\n',
-    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }), ...(ref === undefined ? {} : { ref }) });
+    }, { packageJson: { clavarium: { dataFormat }, dependencies: { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' } }, repo, attest, ...(tag === undefined ? {} : { tag }), ...(ref === undefined ? {} : { ref }) });
     const dirs = { code: join(root, 'opt'), conf: join(root, 'etc', 'update.conf'), stateDir: join(root, 'state'), data: join(root, 'data') };
     mkdirSync(dirs.data, { recursive: true });
     const calls = []; const broken = new Set();
@@ -56,7 +58,7 @@ async function setup(t) {
         restarts: async () => service.restarts,
         sleep: (ms) => hooks.sleep(ms),
     });
-    return { reg, u, dirs, calls, broken, publish, parley, docket, service, hooks, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
+    return { reg, u, dirs, calls, broken, publish, parley, docket, binder, service, hooks, at: (d) => { clock = d; }, current: () => basename(realpathSync(join(dirs.code, 'current'))) };
 }
 
 /* The first installation, as install.sh makes it: a release, then the link. */
@@ -258,10 +260,10 @@ test('for development, a release from a working tree: copied, installed from its
     mkdirSync(join(tree, 'server'), { recursive: true });
     writeFileSync(join(tree, 'server', 'smoke.mjs'), 'console.log("smoke: ok")\n');
     writeFileSync(join(tree, 'server', 'tools.mjs'), "export const NODE_VERSION = 'v24.20.0';\n");
-    const deps = { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0' };
+    const deps = { 'clavarium-parley': '0.9.0', 'clavarium-docket': '0.1.0', 'clavarium-binder': '0.1.0' };
     writeFileSync(join(tree, 'package.json'), JSON.stringify({ name: 'clavarium', version: '1.1.0-dev', clavarium: { dataFormat: 1 }, dependencies: deps }));
     writeFileSync(join(tree, 'package-lock.json'), JSON.stringify({ name: 'clavarium', version: '1.1.0-dev', lockfileVersion: 3, requires: true, packages: { '': { name: 'clavarium', version: '1.1.0-dev', dependencies: deps },
-        'node_modules/clavarium-parley': { version: '0.9.0', resolved: s.parley.tarball, integrity: s.parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: s.docket.tarball, integrity: s.docket.integrity } } }));
+        'node_modules/clavarium-parley': { version: '0.9.0', resolved: s.parley.tarball, integrity: s.parley.integrity }, 'node_modules/clavarium-docket': { version: '0.1.0', resolved: s.docket.tarball, integrity: s.docket.integrity }, 'node_modules/clavarium-binder': { version: '0.1.0', resolved: s.binder.tarball, integrity: s.binder.integrity } } }));
     const r = await s.u.prepare({ fromDir: tree });
     assert.match(r.id, /^local-\d{8}-\d{6}$/);
     assert.equal(r.version, '1.1.0-dev'); assert.equal(r.source, 'local');

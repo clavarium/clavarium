@@ -61,7 +61,7 @@ export { ensureTunnel, tunnelUnit, relayOfUnit, TUNNEL_UNIT, TUNNEL_PROGRAM };
 export const PATHS = { code: '/opt/clavarium', conf: '/etc/clavarium/update.conf', stateDir: '/var/lib/clavarium/update', data: '/home/clavarium', host: '/usr/local/sbin/clavarium-host', gitRead: '/usr/lib/clavarium/git-read', tunnel: '/usr/local/sbin/clavarium-tunnel' };
 export const NAME = 'clavarium';
 /* Where each package checked here must have been built: its provenance says so. */
-export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley', 'clavarium-docket': 'https://github.com/clavarium/clavarium-docket' };
+export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'clavarium-parley': 'https://github.com/clavarium/clavarium-parley', 'clavarium-docket': 'https://github.com/clavarium/clavarium-docket', 'clavarium-binder': 'https://github.com/clavarium/clavarium-binder' };
 export const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
 export const LOCAL = /^local-\d{8}-\d{6}$/;
 export const MODES = ['auto', 'asap', 'ask', 'off'];

@@ -120,6 +120,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
     /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
     if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
+    /* Its lists (binders.mjs): kept on the server, asked for through .binder; a person approves. */
+    out.push('- Lists kept with the person (batches, tasks, customers...): binder shows those you were given; add, note, attach, move them; a gate waits for the person\'s tick. binder --help says all.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);

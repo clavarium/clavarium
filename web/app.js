@@ -3940,6 +3940,8 @@
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
         $('newconv').hidden = which !== 'new';
+        $('lists').hidden = which !== 'lists';
+        if (which === 'lists') void paintLists(); else stopLists();
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
         if (which !== 'conversations') { for (const id of ['files', 'copy']) $(id).hidden = true; view('room'); }
@@ -4012,6 +4014,34 @@
     }
     /* `of`: the conversation it is filtered on ('' for none; left as it is when not given).
        `face`: on the devices tab, 'compose' keeps what openCompose prepared. */
+    /* LISTS: the binder, drawn by Binder (clavarium-binder) in its place; read again when it changed. */
+    let binderView = null; let binderPeople = []; let binderChanges = -1; let binderTimer = null;
+    function openListsPlace({ push = true } = {}) { if (DEVICE) return; if (place !== 'lists') enterPlace('lists', push); }
+    async function paintLists() {
+        const lang = /^fr\b/i.test(navigator.language ?? '') ? 'fr' : 'en';
+        const seen = await getJson('/binder/people', null);
+        if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
+        if (!binderView) {
+            const [{ mount }, words] = await Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${lang}.json`).then((r) => r.json()).catch(() => ({}))]);
+            if (place !== 'lists' || binderView) return;
+            binderView = mount($('lists-binder'), {
+                words, lang, people: () => binderPeople,
+                call: (op, args) => fetch(`${API}/binder`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ op, args }) })
+                    .then((r) => r.json()).catch(() => ({ ok: false, text: 'The server could not be reached.' })),
+                /* A message or a file attached opens where this page opens them; a conversation's own, by its path. */
+                openAttached: (a) => { if (a.kind === 'asset') void openAssetsPlace(a.ref); },
+            });
+        } else void binderView.refresh();
+        stopLists();
+        binderTimer = setInterval(async () => {
+            if (place !== 'lists' || document.hidden) return;
+            const now = await getJson('/binder/people', null);
+            if (!now) return;
+            binderPeople = now.people;
+            if (now.changes !== binderChanges) { binderChanges = now.changes; void binderView?.refresh(); }
+        }, 4000);
+    }
+    function stopLists() { if (binderTimer) clearInterval(binderTimer); binderTimer = null; }
     async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, pin } = {}) {
         if (DEVICE) return;
         /* Assets left Access: a conversation's own, or the server's. */
@@ -4046,6 +4076,7 @@
             if (/^[a-z]{1,20}$/.test(at)) openChapter(`s-${at}`)?.scrollIntoView({ block: 'start' });
             return;
         }
+        if (open === 'lists') { openListsPlace({ push: false }); return; }
         /* Assets, a place of its own now (it was a tab of Access). */
         if (open === 'assets' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
@@ -4054,6 +4085,8 @@
     }
     nav.outside = () => { if (!DEVICE) void followAddress(); };
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
+    $('nav-lists').addEventListener('click', () => openListsPlace());
+    $('lists-close').addEventListener('click', () => leavePlace());
     $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
     $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
     $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
