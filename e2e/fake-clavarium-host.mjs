@@ -179,6 +179,25 @@ if (area === 'wifi') {
         process.exit(0);
     }
 }
+/* THE REMOTE SCREEN (MeshCentral): off at first; FAKE_VM_DIR/meshcentral.json keeps the state.
+   A turn-on installs then runs a second after it was asked; a turn-off stops it (install kept). */
+if (area === 'meshcentral') {
+    const at = join(DIR, 'meshcentral.json');
+    const m = existsSync(at) ? JSON.parse(readFileSync(at, 'utf8')) : { installed: false, running: false, step: null, since: 0 };
+    const keep = () => writeFileSync(at, JSON.stringify(m));
+    const url = 'https://clav.example.com/meshcentral/';
+    /* The turn-on ends a second after it was asked: installed, then running. */
+    if (m.step === 'installing' && Date.now() - m.since > 1000) { m.installed = true; m.step = 'running'; m.running = true; keep(); }
+    if (verb === 'enable') { m.step = 'installing'; m.since = Date.now(); keep(); console.log('enabling'); process.exit(0); }
+    if (verb === 'disable') { m.running = false; m.step = 'idle'; keep(); console.log('disabled'); process.exit(0); }
+    if (verb === 'status') {
+        console.log([`installed ${m.installed ? 'yes' : 'no'}`, `running ${m.running ? 'yes' : 'no'}`,
+            `version ${m.installed ? '1.1.35' : 'none'}`, `url ${m.installed || m.running ? url : '/meshcentral/'}`,
+            ...(m.step ? [`step ${m.step}`] : [])].join('\n'));
+        process.exit(0);
+    }
+    console.error(`REFUSED: unknown verb: meshcentral ${verb}`); process.exit(78);
+}
 /* UPDATES: the updater played on two files (the ones the server reads, as the
    real updater writes them): FAKE_VM_DIR/update/state.json and update.conf.
    What the registry has out: update/registry; a version that will not come up: update/broken. */
