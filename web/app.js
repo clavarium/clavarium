@@ -4490,6 +4490,7 @@
         $('settings-about').textContent = `Clavarium ${platform.version ?? ''}`;
         void paintInstance();
         if ($('settings-wifi-top').open) void paintWifi();
+        if ($('settings-mesh-top').open) void paintScreen();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
 
@@ -5094,6 +5095,41 @@
             void paintWifi();
         }).catch((error) => {
             $('wifi-join-error').textContent = error.message; $('wifi-join-error').hidden = false; $('wifi-join-go').disabled = false;
+        });
+    });
+    /* ---------- Remote screen, in Settings: a self-hosted MeshCentral (server/meshcentral.mjs) ----------
+       OFF by default. Turning it on installs it (minutes, the first time) then starts it, in the background:
+       its progress is shown and the outcome read back from status(). */
+    let meshTimer;
+    async function paintScreen() {
+        clearTimeout(meshTimer);
+        const s = await fetch(`${API}/meshcentral`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        const line = $('mesh-line'); const state = $('mesh-state'); const toggle = $('mesh-toggle');
+        const url = $('mesh-url'); const progress = $('mesh-progress');
+        if (!s) { state.textContent = 'State cannot be read just now.'; line.dataset.tone = 'warn'; toggle.hidden = true; url.hidden = true; progress.hidden = true; return; }
+        const turningOn = ['installing', 'starting'].includes(s.step);
+        /* One short line of state. */
+        state.textContent = turningOn ? 'Turning on...' : s.running ? 'On' : s.step === 'failed' ? 'Off (turn-on failed)' : s.installed ? 'Installed, off' : 'Off';
+        line.dataset.tone = s.running ? 'ok' : s.step === 'failed' ? 'bad' : turningOn ? 'warn' : '';
+        /* On: its address. */
+        if (s.running && s.url) { url.replaceChildren('At ', el('a', '', s.url)); const a = url.querySelector('a'); a.href = s.url; a.target = '_blank'; a.rel = 'noreferrer'; url.hidden = false; }
+        else url.hidden = true;
+        /* Turning on: install can take a while; the page keeps watching. */
+        progress.textContent = turningOn ? (s.step === 'installing' ? 'Installing, this can take a few minutes...' : 'Starting...') : '';
+        progress.hidden = !turningOn;
+        toggle.hidden = false; toggle.disabled = turningOn;
+        toggle.textContent = turningOn ? 'Turning on...' : s.running ? 'Turn off' : 'Turn on';
+        toggle.dataset.on = s.running ? 'yes' : '';
+        if (turningOn && $('settings-mesh-top').open && !$('settings').hidden) meshTimer = setTimeout(() => { void paintScreen(); }, 4000);
+    }
+    $('settings-mesh-top').addEventListener('toggle', () => { if ($('settings-mesh-top').open) void paintScreen(); else clearTimeout(meshTimer); });
+    $('mesh-toggle').addEventListener('click', () => {
+        const toggle = $('mesh-toggle'); const on = toggle.dataset.on === 'yes';
+        $('mesh-error').hidden = true;
+        toggle.disabled = true;
+        const path = on ? `${API}/meshcentral/disable` : `${API}/meshcentral/enable`;
+        void post(path, {}).then(() => { void paintScreen(); }).catch((error) => {
+            $('mesh-error').textContent = error.message; $('mesh-error').hidden = false; toggle.disabled = false;
         });
     });
     /* WHAT HAPPENED: newest first, a page at a time; chosen by kind, searched. */

@@ -689,6 +689,20 @@
           </div>
           </div>
         </details>
+        <!-- REMOTE SCREEN: a self-hosted MeshCentral (server/meshcentral.mjs), OFF by default. Installed,
+             run isolated under a hardened unit, and reached only through the front (Caddy) by the host program. -->
+        <details class="chapter" id="settings-mesh-top" data-chapter="s-remote-screen">
+          <summary><span class="chapter-title">Remote screen</span><span class="chapter-about">See a screen remotely.</span></summary>
+          <div class="chapter-body">
+          <div id="mesh" tabindex="-1">
+            <div class="set-row mesh-head"><div class="status-line" id="mesh-line" role="status"><span id="mesh-state"></span></div><div class="set-control"><button type="button" class="primary" id="mesh-toggle"></button></div></div>
+            <div class="set-row"><div class="set-what"><span>MeshCentral</span><small>A screen reached through this server, off unless on</small></div></div>
+            <p id="mesh-url" class="hint" hidden></p>
+            <p id="mesh-progress" class="hint" role="status" hidden></p>
+            <p id="mesh-error" class="error" role="alert" hidden></p>
+          </div>
+          </div>
+        </details>
         <details class="chapter" id="settings-updates-top" data-chapter="s-updates">
           <summary><span class="chapter-title">Updates</span><span class="chapter-about">Version and updates.</span></summary>
           <div class="chapter-body">
