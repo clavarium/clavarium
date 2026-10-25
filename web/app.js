@@ -1721,7 +1721,7 @@
         if (listsView && listsOf === current) { void listsView.refresh(); return; }
         const name = current; listsOf = name;
         listsView = null;
-        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]));
+        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name });
         if (listsOf === name) listsView = view;
     }
     function closeRoomLists() { if (!listsShown) return; listsShown = false; $('clists').hidden = true; paintViews(); }
@@ -4220,24 +4220,58 @@
     }
     /* What a page drew from the lists, to know when they changed. */
     function binderSig(lists) { return JSON.stringify((Array.isArray(lists) ? lists : []).map((l) => [l.id, l.title, l.archived, l.count, l.grants])); }
-    async function mountBinder(holder, keep, { onLists } = {}) {
+    /* `of`: the conversation its cards are of (its Binders tab); else the one the list was given to. */
+    async function mountBinder(holder, keep, { onLists, of } = {}) {
         binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
         const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
         if (!holder.isConnected) return null;
+        let shown = [];
+        const whose = () => {
+            if (of) return of();
+            const given = [...new Set(shown.flatMap((l) => Object.keys(l.grants ?? {})).filter((k) => k.startsWith('conversation:')).map((k) => k.slice('conversation:'.length)))];
+            return given.includes(current) ? current : given[0] ?? '';
+        };
         const view = mount(holder, {
             words, lang: binderLang(), people: () => binderPeople,
             call: async (op, args) => {
                 const r = await binderCall(op, args);
-                if (op === 'lists' && r.ok && Array.isArray(r.data)) { onLists?.(r.data); r.data = r.data.filter(keep); }
+                if (op === 'lists' && r.ok && Array.isArray(r.data)) { onLists?.(r.data); r.data = r.data.filter(keep); shown = r.data; }
                 return r;
             },
             /* A thing attached opens where this page opens it. */
-            openAttached: (a) => { if (a.kind === 'asset') void openAssetsPlace(a.ref); },
+            openAttached: (a) => {
+                if (a.kind === 'asset') void openAssetsPlace(a.ref);
+                else if (a.kind === 'message') void openCardMessage(whose(), a.ref);
+                else if (a.kind === 'file') void openCardFile(whose(), a.ref);
+                else if (a.kind === 'link' && /^https?:\/\//i.test(a.ref)) window.open(a.ref, '_blank', 'noopener');
+            },
         });
         binderViews.add({ box: holder.firstElementChild, view });
         watchBinders();
         return view;
+    }
+    /* A card's thing attached, of its conversation: that conversation shown first (from a place, or another one). */
+    function toConversation(name) {
+        if (!name || !conversations.some((c) => c.name === name)) return false;
+        if (place !== 'conversations') leavePlace();
+        if (current !== name) select(name);
+        return true;
+    }
+    /* A message of its chat: the Chat tab, at that message (Parley's reveal, by its id as read shows it). */
+    async function openCardMessage(name, ref) {
+        if (DEVICE || !toConversation(name)) return;
+        goTab('chat');
+        for (let i = 0; i < 50 && !(thread && threadOf === name); i++) await new Promise((r) => setTimeout(r, 100));
+        if (thread && threadOf === name && current === name && typeof thread.reveal === 'function') await thread.reveal(String(ref ?? '').trim());
+    }
+    /* A file of its shared folders (/work/..., /resources/NAME/...; a path without a folder is of /work): the viewer, as from the chat. */
+    function openCardFile(name, ref) {
+        const path = String(ref ?? '').trim().replace(/^file:/, '');
+        const m = /^\/(work|resources\/[^/]+)\/(.+)$/.exec(path.startsWith('/') ? path : `/work/${path}`);
+        if (DEVICE || !m || m[2].split('/').includes('..') || !toConversation(name)) return;
+        const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length);
+        void preview(tab, m[2], m[2].split('/').pop(), 0);
     }
     function watchBinders() {
         if (binderTimer) return;
