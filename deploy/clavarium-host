@@ -1387,7 +1387,7 @@ case "$AREA $VERB" in
         [ $# -eq 2 ] || usage
         case "$1" in
             mode) [[ "$2" =~ ^(auto|asap|ask|off)$ ]] || refuse "not a mode: $2" ;;
-            channel) [[ "$2" =~ ^(latest|next)$ ]] || refuse "not a channel: $2" ;;
+            channel) [[ "$2" =~ ^(latest|beta|next)$ ]] || refuse "not a channel: $2" ;;
             window) [[ "$2" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]-([01][0-9]|2[0-3]):[0-5][0-9]$ ]] && [ "${2%-*}" != "${2#*-}" ] || refuse "not a window: $2" ;;
             *) refuse "not a setting: $1" ;;
         esac

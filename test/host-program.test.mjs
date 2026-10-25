@@ -383,9 +383,10 @@ test('updates: the updater of the release that runs, asked only in the forms it 
     const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
     assert.equal(say('update', 'check').stdout, '/opt/clavarium/current/node/bin/node /opt/clavarium/current/app/deploy/updater.mjs check\n');
     assert.equal(say('update', 'set', 'window', '01:00-04:30').stdout, '/opt/clavarium/current/node/bin/node /opt/clavarium/current/app/deploy/updater.mjs set window 01:00-04:30\n');
+    assert.equal(say('update', 'set', 'channel', 'beta').stdout, '/opt/clavarium/current/node/bin/node /opt/clavarium/current/app/deploy/updater.mjs set channel beta\n');
     assert.equal(say('update', 'apply', '0.2.0-next.3').stdout, 'echo apply 0.2.0-next.3 > /var/lib/clavarium/update/request\nsystemctl start --no-block clavarium-update.service\n');
     assert.equal(say('update', 'rollback', 'local-20261018-010203').status, 0);
-    for (const bad of [['update', 'check', 'x'], ['update', 'set', 'mode', 'always'], ['update', 'set', 'channel', 'beta'], ['update', 'set', 'window', '03:00-03:00'], ['update', 'set', 'registry', 'http://x'],
+    for (const bad of [['update', 'check', 'x'], ['update', 'set', 'mode', 'always'], ['update', 'set', 'channel', 'alpha'], ['update', 'set', 'window', '03:00-03:00'], ['update', 'set', 'registry', 'http://x'],
         ['update', 'apply', '1.0'], ['update', 'apply', '1.0.0 --registry=x'], ['update', 'apply', 'local-20261018-010203'], ['update', 'rollback', '../1.0.0'], ['update', 'install', '1.0.0']]) {
         const r = say(...bad);
         assert.ok(r.status === 78 || r.status === 64, `${bad.join(' ')}: ${r.status}`);
