@@ -1085,6 +1085,8 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as { display: grid; grid-template-columns: minmax(240px, 34%) minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
 .as-list { border-right: 1px solid var(--line); padding: 12px 10px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .as-detail { padding: 16px 20px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* The detail scrolls as a whole: nothing in it is squeezed (a branch diagram cut, its buttons over it) when a folder's files open below. */
+.as-detail > * { flex-shrink: 0; }
 #assets-search { width: 100%; padding: 9px 12px; border-radius: 9px; margin-bottom: 4px; }
 .as-kind { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .as-kind-head, .as-chapter { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
