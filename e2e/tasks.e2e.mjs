@@ -38,10 +38,11 @@ test('Batches beside the chat: none until its tool makes its binder of batches; 
     assert.match(await panel.innerText(), /Nothing yet/);
 
     /* Its tool adds a batch: shown, waiting for the owner's tick, counted. */
-    await run('binder add Batches "Fix diff line numbers" >/dev/null && binder add Batches "Dictation language" >/dev/null && echo added-ok', 'added-ok');
+    await run('binder add Batches "Fix diff line numbers" --description "They **slide** off their lines when the page scrolls." >/dev/null && binder add Batches "Dictation language" >/dev/null && echo added-ok', 'added-ok');
     const row = panel.locator('.parley-panel-item').filter({ hasText: 'Fix diff line numbers' });
     await me.until('shown beside the chat', async () => (await row.count()) === 1, 15_000);
     assert.match(await row.innerText(), /Proposed/);
+    assert.equal(await row.locator('.parley-panel-text').innerText(), 'They slide off their lines when the page scrolls.', 'what it is, in plain words');
     await me.until('counted on its button', async () => (await button.locator('.parley-panel-count').innerText()) === '2');
 
     /* Ticked here: approved in Binder; the tool may go on. */

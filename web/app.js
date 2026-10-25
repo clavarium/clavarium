@@ -2527,6 +2527,8 @@
         if (!lists.ok || !Array.isArray(lists.data)) return undefined;
         return lists.data.find((l) => !l.archived && l.template === TASKS_TEMPLATE && l.grants?.[`conversation:${name}`]) ?? null;
     }
+    /* A card's description, as the panel shows it: plain words, no Markdown signs. */
+    const plainText = (md) => String(md ?? '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s+/g, ' ').trim();
     async function paintTasks(name) {
         if (DEVICE || !thread || threadOf !== name) return;
         const list = await batchesOf(name);
@@ -2537,7 +2539,7 @@
         const states = new Map(shown.data.list.states.map((st) => [st.id, st]));
         const nameOf = (id) => binderPeople.find((p) => p.id === id)?.name ?? id.replace(/^[a-z]+:/, '');
         const items = shown.data.records.map((r) => ({
-            id: r.id, title: r.title, state: states.get(r.state)?.name ?? '', done: Boolean(states.get(r.state)?.done), checked: r.approved === true,
+            id: r.id, title: r.title, text: plainText(r.description), state: states.get(r.state)?.name ?? '', done: Boolean(states.get(r.state)?.done), checked: r.approved === true,
             /* Its own conversation owning it goes without saying. */
             owner: r.owners.filter((o) => o !== `conversation:${name}`).map(nameOf).join(', '), tone: TASKS_TONE[r.state] ?? '' }));
         thread.side = { onFold: (on) => keepTasksFolded(name, on), title: list.title, items, folded: tasksFolded(name) ?? false,

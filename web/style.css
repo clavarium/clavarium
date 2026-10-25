@@ -1706,6 +1706,8 @@ details.chapter[data-attention] > summary .chapter-title::after, #settings-nav b
 /* LISTS: Binder's screen, in this page's colours (above Binder's own dark ones, whatever the theme): a conversation's Lists tab, one list of Assets opened.
    Lists are made in Assets: Binder's own "+ New list" is not offered here. */
 .binder-holder { display: flex; flex-direction: column; min-height: 0; }
+/* Binder's screen keeps its whole height: the holder scrolls (shrunk to it, the last rows were cut off). */
+.binder-holder > .binder { flex: none; }
 #clists { padding: 0; }
 #clists-binder { overflow: auto; padding: 16px 16px 24px; }
 body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
