@@ -87,6 +87,7 @@
  *   POST /api/wifi/join {ssid, password}: the switch started, back by itself if it does not work
  *   POST /api/wifi/forget {ssid}: a kept network deleted (never the one in use)
  *   POST /api/wifi/handover: the network handed over to NetworkManager (back as it was if it does not work)
+ *   GET  /api/meshcentral: the remote screen (MeshCentral); POST /api/meshcentral/enable (turned on, in the background) /disable
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
@@ -145,7 +146,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -282,6 +283,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;
             if (pathname === '/api/wifi' && wifi) return send(200, await wifi.status()), true;
             if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
+            if (pathname === '/api/meshcentral' && meshcentral) return send(200, await meshcentral.status()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
             if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: binders.changes() }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
@@ -422,6 +424,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/wifi/join' && wifi) return send(202, await wifi.join(body.ssid, body.password ?? '')), true;
         if (pathname === '/api/wifi/forget' && wifi) return send(200, await wifi.forget(body.ssid)), true;
         if (pathname === '/api/wifi/handover' && wifi) return send(202, await wifi.handover()), true;
+        if (pathname === '/api/meshcentral/enable' && meshcentral) return send(202, await meshcentral.enable()), true;
+        if (pathname === '/api/meshcentral/disable' && meshcentral) return send(200, await meshcentral.disable()), true;
         if (pathname === '/api/operators' && team) return send(201, await team.add(body.email)), true;
         const op = /^\/api\/operators\/([^/]{3,200})\/(password|disable|enable|remove)$/.exec(pathname);
         if (op && team) {
