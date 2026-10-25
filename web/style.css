@@ -512,6 +512,8 @@ footer button[data-keys="backspace"] { display: none; }
   footer#keys > #keys-more { flex: 1.3 1 0; }
   footer#keys > button.extra { display: none; }
   footer#keys[data-more="true"] > button.extra:not([hidden]) { display: block; order: 10; flex: 1 1 22%; }
+  /* "Copy / paste", the longest of them, takes the room the short ones leave: its words whole. */
+  footer#keys[data-more="true"] > #copy-open:not([hidden]) { flex: 2 1 30%; }
   /* The extra keys start a line of their own. */
   footer#keys[data-more="true"]::after { content: ""; order: 9; flex: 0 0 100%; height: 0; }
   /* The row is as wide as the screen: its labels grow with the text only as far as they fit. */
