@@ -1737,3 +1737,24 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 /* A sheet over the terminal (Binders, Assets, Settings): the terminal's typing field (xterm's
    helpers, z-index 5, at its cursor) stays under it: a tap on a binder there went to the terminal. */
 #room:has(.sheet:not([hidden])) #terminal .xterm-helpers { pointer-events: none; }
+
+/* ON A TOUCH SCREEN THE SMALL CONTROLS TOO TAKE A FINGERTIP (last, above the rules that make them small):
+   the back arrow and «, the round "+", a box to tick and its line, an "i" that opens more, "Show more" under Recent. */
+@media (pointer: coarse) {
+  html:not([data-door="device"]) #room > header :is(#back, #fold) { min-width: 40px; }
+  button.as-add { width: 36px; height: 36px; }
+  :is(input[type=checkbox], input[type=radio]):not(.binder *) { width: 20px; height: 20px; }
+  .ts-row input[type=checkbox] { width: 24px; height: 24px; }
+  label:is(.check, .lk-switch), label:has(> input[type=radio]) { min-height: 32px; }
+  label:has(> input[type=radio]) { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 6px; }
+  details.more > summary, :is(#assets, #gitview, #panel) details.more > summary { min-height: 32px; }
+  :is(#words-box, #wifi-saved-box, #move-machines-box) > summary { padding-block: 8px; }
+  button.inline.more-recent { min-height: 32px; min-width: 64px; justify-content: center; }
+  button.inline { min-height: 32px; min-width: 32px; }
+  .lk-x { min-width: 36px; min-height: 36px; }
+}
+/* A wide touch screen (a tablet held sideways): the same fingertip, and the keys wrap rather than run off its edge. */
+@media (pointer: coarse) and (min-width: 701px) {
+  button, a.button, .file { min-height: 40px; }
+  footer#keys { flex-wrap: wrap; overflow-x: visible; }
+}
