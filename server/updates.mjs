@@ -25,7 +25,7 @@ import { compareVersions, inWindow } from '../deploy/updater.mjs';
 export const STATE_FILE = '/var/lib/clavarium/update/state.json';
 export const CONF_FILE = '/etc/clavarium/update.conf';
 export const MODES = ['auto', 'asap', 'ask', 'off'];
-export const CHANNELS = ['latest', 'next'];
+export const CHANNELS = ['latest', 'beta', 'next'];
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
 const LOCAL = /^local-\d{8}-\d{6}$/;
 const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;

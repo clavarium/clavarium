@@ -84,7 +84,7 @@ test('versions compare as npm does; a window may pass midnight; settings keep th
         assert.deepEqual(readConf(file), { MODE: 'auto', CHANNEL: 'latest', WINDOW: '02:00-05:00', PORT: '7717' });
         writeConf(file, 'mode', 'asap'); writeConf(file, 'window', '01:30-04:00');
         assert.deepEqual(readConf(file), { MODE: 'asap', CHANNEL: 'latest', WINDOW: '01:30-04:00', PORT: '7717' });
-        for (const [k, v] of [['mode', 'sometimes'], ['channel', 'beta'], ['window', '02:00-02:00'], ['window', '2:00-5:00'], ['registry', 'http://x']]) assert.throws(() => writeConf(file, k, v), Refused, `${k} ${v}`);
+        for (const [k, v] of [['mode', 'sometimes'], ['channel', 'alpha'], ['window', '02:00-02:00'], ['window', '2:00-5:00'], ['registry', 'http://x']]) assert.throws(() => writeConf(file, k, v), Refused, `${k} ${v}`);
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -472,4 +472,16 @@ test('the pages told before the server stops: "Switching" said in state.json, wi
     assert.ok(!seen[0].calls.includes('restart'), 'not restarted yet');
     assert.equal(s.current(), '1.0.1');
     assert.equal(s.u.about().running, null, 'nothing announced once done');
+});
+
+test('check: the beta channel sees beta versions and a newer stable, never the dev (next) one', async (t) => {
+    const s = await setup(t);
+    await installed(s);
+    s.u.set('channel', 'beta');
+    s.publish('1.0.1-next.1');                        // dev: goes to the "next" tag
+    assert.equal(await s.u.check(), null, 'beta ignores a dev (next) version');
+    s.publish('1.0.1-beta.1', { tag: 'beta' });
+    assert.equal(await s.u.check(), '1.0.1-beta.1', 'beta sees the beta version');
+    s.publish('1.0.1', { tag: 'latest' });
+    assert.equal(await s.u.check(), '1.0.1', 'beta jumps forward to the newer stable');
 });

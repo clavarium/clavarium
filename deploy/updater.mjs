@@ -65,7 +65,10 @@ export const REPOS = { clavarium: 'https://github.com/clavarium/clavarium', 'cla
 export const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}(-[0-9A-Za-z.-]{1,40})?$/;
 export const LOCAL = /^local-\d{8}-\d{6}$/;
 export const MODES = ['auto', 'asap', 'ask', 'off'];
-export const CHANNELS = ['latest', 'next'];
+/* The update channels, least stable to most: `next` (what I push and test on test-c), `beta` (an
+   infrastructure runs it: proven by the tests, a few small things left), `latest` (the public stable).
+   Code flows next -> beta -> latest. */
+export const CHANNELS = ['next', 'beta', 'latest'];
 export const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
 export const DEFAULTS = { MODE: 'auto', CHANNEL: 'latest', WINDOW: '02:00-05:00', PORT: '7717' };
 /* A conversation in one of these phases is in the middle of something the restart would cut. */
@@ -345,7 +348,10 @@ export class Updater {
             const p = await this.#packument(NAME);
             const tags = p['dist-tags'] ?? {};
             let candidate = tags.latest;
+            /* A channel also sees a newer stable (a jump forward is never a downgrade); it never
+               reaches for a less stable channel's tag. */
             if (conf.CHANNEL === 'next' && tags.next && (!candidate || compareVersions(tags.next, candidate) > 0)) candidate = tags.next;
+            if (conf.CHANNEL === 'beta' && tags.beta && (!candidate || compareVersions(tags.beta, candidate) > 0)) candidate = tags.beta;
             if (candidate && (!VERSION.test(candidate) || !p.versions?.[candidate])) candidate = undefined;
             const available = candidate && (!current || compareVersions(candidate, current.version) > 0) ? candidate : null;
             this.#save({ checkedAt: this.#o.now().toISOString(), available, checkError: null });

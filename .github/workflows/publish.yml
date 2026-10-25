@@ -2,21 +2,25 @@
 # token (trusted publishing, OIDC) and with provenance: each installation
 # checks that what it updates to was built here (deploy/updater.mjs).
 #
-# TWO BRANCHES. "next" publishes the versions to try (with a "-": 1.3.0-next.1,
-# under the tag "next"); "main" publishes the versions for everybody, and only
-# them. main is moved to a commit of next that was validated, never given a
-# commit of its own: what everybody gets is what was tried, byte for byte. So a
-# version without "-" on next is not published from there (main will), and a
+# THREE BRANCHES, least to most stable: next -> beta -> main. "next" publishes
+# the versions to try first (1.3.0-next.1, under the tag "next"); "beta"
+# publishes the versions being proven on real infrastructure (1.3.0-beta.1,
+# under the tag "beta"); "main" publishes the versions for everybody, and only
+# them. Each branch takes only its own suffix (-next.N on next, -beta.N on
+# beta), so a version published under a channel is exactly the one tried there.
+# main is moved to a commit that was validated, never given a commit of its
+# own: what everybody gets is what was tried, byte for byte. So a version
+# without "-" on next or beta is not published from there (main will), and a
 # version with "-" on main is refused: a forgotten "-" can no longer send a
 # version nobody tried to everybody.
 #
-# On every push to main or next: the gate first (the checks a GitHub runner can run,
+# On every push to main, beta or next: the gate first (the checks a GitHub runner can run,
 # and the unit tests); then the declared version is looked up on the
 # registry, and only a version that is not online is published -- from the
 # repository root, with the lock file as npm-shrinkwrap.json so that every
-# installation gets exactly the dependencies tested here. A version with a
-# "-" (1.3.0-next.1) goes out under the tag "next": only installations on
-# the "next" channel see it. The end-to-end tests need a browser and a
+# installation gets exactly the dependencies tested here. A "-next.N" version
+# goes out under the tag "next" and a "-beta.N" version under the tag "beta":
+# only installations on that channel see it. The end-to-end tests need a browser and a
 # machine of their own: they are run before a version is set (npm run check).
 #
 # THE RELAY'S PROGRAM, relay/, is a package of its own, "clavarium-relay",
@@ -32,7 +36,7 @@ name: publish
 
 on:
   push:
-    branches: [main, next]
+    branches: [main, beta, next]
   workflow_dispatch:
 
 permissions:
@@ -88,10 +92,13 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           # The branch says what may go out (see the top of this file); the last "publish" said counts.
           case "${GITHUB_REF_NAME}:${version}" in
-            main:*-*) echo "::error::clavarium-relay@${version} is a version to try: it goes out from next, never from main"; exit 1 ;;
-            next:*-*|main:*) : ;;
-            next:*) echo "::notice::clavarium-relay@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
-            *) echo "::error::published from main or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
+            main:*-*) echo "::error::clavarium-relay@${version} is a version to try: it goes out from next or beta, never from main"; exit 1 ;;
+            main:*) : ;;
+            next:*-next.*) : ;;
+            beta:*-beta.*) : ;;
+            next:*-*|beta:*-*) echo "::error::on ${GITHUB_REF_NAME}, a version to try must end in -${GITHUB_REF_NAME}.N (got ${version})"; exit 1 ;;
+            next:*|beta:*) echo "::notice::clavarium-relay@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::published from main, beta or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
           esac
       - name: The relay's package holds its program, and nothing else
         if: steps.relay.outputs.publish == 'yes'
@@ -110,8 +117,9 @@ jobs:
         run: |
           set -eu
           case "${{ steps.relay.outputs.version }}" in
-            *-*) npm publish --provenance --tag next ;;
-            *)   npm publish --provenance ;;
+            *-beta.*) npm publish --provenance --tag beta ;;
+            *-*)      npm publish --provenance --tag next ;;
+            *)        npm publish --provenance ;;
           esac
       - name: Is this version online already?
         id: target
@@ -126,10 +134,13 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           # The same rule as for the relay (see the top of this file).
           case "${GITHUB_REF_NAME}:${version}" in
-            main:*-*) echo "::error::${name}@${version} is a version to try: it goes out from next, never from main"; exit 1 ;;
-            next:*-*|main:*) : ;;
-            next:*) echo "::notice::${name}@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
-            *) echo "::error::published from main or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
+            main:*-*) echo "::error::${name}@${version} is a version to try: it goes out from next or beta, never from main"; exit 1 ;;
+            main:*) : ;;
+            next:*-next.*) : ;;
+            beta:*-beta.*) : ;;
+            next:*-*|beta:*-*) echo "::error::on ${GITHUB_REF_NAME}, a version to try must end in -${GITHUB_REF_NAME}.N (got ${version})"; exit 1 ;;
+            next:*|beta:*) echo "::notice::${name}@${version} is for everybody: published from main once main is moved here"; echo "publish=no" >> "$GITHUB_OUTPUT" ;;
+            *) echo "::error::published from main, beta or next only, not from ${GITHUB_REF_NAME}"; exit 1 ;;
           esac
       - name: The package holds what a server needs, and nothing else
         if: steps.target.outputs.publish == 'yes'
@@ -150,6 +161,7 @@ jobs:
         run: |
           set -eu
           case "${{ steps.target.outputs.version }}" in
-            *-*) npm publish --provenance --tag next ;;
-            *)   npm publish --provenance ;;
+            *-beta.*) npm publish --provenance --tag beta ;;
+            *-*)      npm publish --provenance --tag next ;;
+            *)        npm publish --provenance ;;
           esac
