@@ -339,29 +339,27 @@
        width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost
        nothing -- so nothing is left blank, and nothing jumps at the end. */
     const sliders = () => ['list', 'nav'].map((id) => $(id)).filter(Boolean);
-    const slide = (out, width) => {
-        /* Quick at first, gentle at the end, both ways (a reversed curve started slowly: it felt late). */
-        const how = { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' };
-        const away = [{ transform: 'none' }, { transform: 'translateX(-100%)' }];
-        const shifted = [{ transform: `translateX(${width}px)` }, { transform: 'none' }];
-        const moving = sliders().map((e) => e.animate(out ? away : [...away].reverse(), how));
-        moving.push($('room').animate(out ? shifted : [...shifted].reverse(), how));
-        return Promise.all(moving.map((a) => a.finished.catch(() => {})));
-    };
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
     $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
         if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
-        /* Measured once it slides: folded, the list has no width until then (the room did not move, then jumped). */
+        /* ONE layout, up front: the final columns and the terminal's new size are set first, while the panel is
+           held over the room (.sliding). Only transforms animate then -- the room never changes width mid-slide,
+           so nothing is recomputed at the end (the open no longer "catches up" to the panel). */
         app.classList.add('sliding');
         const width = $('list').getBoundingClientRect().width;
-        if (folded) { applyFold(true); fit.fit(); }
-        await slide(folded, width);
+        applyFold(folded); fit.fit();
+        const how = { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' };
+        const listFrames = folded ? [{ transform: 'none' }, { transform: 'translateX(-100%)' }]
+                                  : [{ transform: 'translateX(-100%)' }, { transform: 'none' }];
+        const moving = sliders().map((e) => e.animate(listFrames, how));
+        /* Opening: the room starts shifted left over the list's place, then slides right into its final column. */
+        if (!folded) moving.push($('room').animate([{ transform: `translateX(${-width}px)` }, { transform: 'none' }], how));
+        await Promise.all(moving.map((a) => a.finished.catch(() => {})));
         app.classList.remove('sliding');
         if (listFolded !== folded) return;
-        if (!folded) { applyFold(false); fit.fit(); }
         focusTerminal();
     });
 
