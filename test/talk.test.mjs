@@ -109,7 +109,8 @@ test('the line that wakes it: typed once until it has read, and the message itse
     assert.deepEqual(b.typed, [WAKE, 'Enter']);
     assert.equal((await b.talk.say('helper', 'And in French.')).told, 'told', 'not typed again before it has read');
     assert.equal(b.typed.length, 2);
-    assert.equal(b.parley('read').out, 'Message: Keep it under two pages.\nMessage: And in French.\nWhen you start on it, say so: parley doing "what you do"; when you finish: parley status done.\nForgot how to work with them? parley guide\n');
+    /* Each with its id (Parley 0.17): what a card can point to. */
+    assert.match(b.parley('read').out, /^\[[0-9a-f]{8}\] Message: Keep it under two pages\.\n\[[0-9a-f]{8}\] Message: And in French\.\nWhen you start on it, say so: parley doing "what you do"; when you finish: parley status done\.\nForgot how to work with them\? parley guide\n$/);
     assert.equal(b.talk.of('helper').unread, 0);
     await until('it is known to have read', () => b.talk.of('helper').unread === 0 && JSON.parse(readFileSync(join(b.dir, 'talk.json'), 'utf8'))[0].woke === false);
     assert.equal((await b.talk.say('helper', 'One more thing.')).told, 'typed', 'read, so the next message wakes it again');
