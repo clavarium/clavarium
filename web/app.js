@@ -332,8 +332,10 @@
         $('fold').setAttribute('aria-pressed', String(folded));
         $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
     };
-    let listFolded = false;
-    try { listFolded = localStorage.getItem('clavarium-list') === 'folded'; } catch { /* a private window */ }
+    /* Folded by default: the list takes room few need all the time; the fold is remembered, so opening it
+       keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */
+    let listFolded = true;
+    try { listFolded = localStorage.getItem('clavarium-list') !== 'open'; } catch { /* a private window */ }
     /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
        redrew the terminal) at every frame: it stuttered. The columns change once, the room taking the whole
        width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost

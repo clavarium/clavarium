@@ -133,7 +133,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     async function person({ phone = false, at = '/', context: given, locale, chapters = { general: true, machine: true, access: true } } = {}) {
         const context = given ?? await browser.newContext({ ...(microphone ? { viewport: { width: 1200, height: 760 }, permissions: ['microphone'] } : phone ? { viewport: { width: 390, height: 780 }, isMobile: true, hasTouch: true } : { viewport: { width: 1200, height: 760 }, acceptDownloads: true }), ...(locale ? { locale } : {}) });
         contexts.push(context);
-        await context.addInitScript((open) => { try { if (sessionStorage.getItem('clavarium-chapters') === null) sessionStorage.setItem('clavarium-chapters', open); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
+        await context.addInitScript((open) => { try { if (sessionStorage.getItem('clavarium-chapters') === null) sessionStorage.setItem('clavarium-chapters', open); if (localStorage.getItem('clavarium-list') === null) localStorage.setItem('clavarium-list', 'open'); } catch { /* an opaque page */ } }, JSON.stringify(chapters));
         const page = await context.newPage();
         const errors = [];
         page.on('pageerror', (e) => errors.push(String(e)));
