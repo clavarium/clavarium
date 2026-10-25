@@ -128,9 +128,36 @@ HAND_UNIT="clavarium-network-handover"
 HAND_WAIT="90"
 # Where the kernel lists the network devices (a physical one has a "device" link there).
 SYS_NET="/sys/class/net"
+# THE REMOTE SCREEN (verbs "meshcentral ..."): a self-hosted MeshCentral server (Apache-2.0),
+# OFF by default, turned on from Settings. It is installed in a directory of its own, owned by
+# a dedicated unprivileged account, and run under a hardened unit; it is reached only through
+# the existing front (Caddy), under a path -- no second name and no second certificate. The
+# turn-on (install, which can take minutes, then start) runs in a unit of its own, and the
+# outcome is read back by "meshcentral status".
+#   MESH_DATA   the install and its data (the account's; npm tree + meshcentral-data)
+#   MESH_STATE  root's record of the turn-on, read back by "meshcentral status"
+#   MESH_USER   the dedicated unprivileged account
+#   MESH_UNIT / MESH_SETUP_UNIT   the server unit; the unit the turn-on runs in
+#   MESH_PORT   the loopback port it listens on (TLS is done by Caddy in front)
+#   MESH_PATH   where the front publishes it
+#   MESH_VERSION   the version pinned (confirmed on a real host; bump here)
+MESH_DATA="/var/lib/clavarium-meshcentral"
+MESH_STATE="/var/lib/clavarium/meshcentral"
+MESH_USER="clavarium-mesh"
+MESH_UNIT="clavarium-meshcentral"
+MESH_SETUP_UNIT="clavarium-meshcentral-setup"
+MESH_PORT="4443"
+MESH_PATH="/meshcentral"
+MESH_VERSION="1.1.35"
+# Node and npm: the release's own if it is there (always present on a server), else the system's.
+MESH_NODE="/opt/clavarium/current/node/bin/node"
+MESH_NPM="/opt/clavarium/current/node/bin/npm"
+# The front's config, and the snippet imported into it for the remote screen's route.
+CADDYFILE="/etc/caddy/Caddyfile"
+MESH_CADDY="/etc/caddy/clavarium-meshcentral.caddy"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi|meshcentral> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""; TEST=""
 while [ $# -gt 0 ]; do
@@ -141,7 +168,8 @@ while [ $# -gt 0 ]; do
         --test) [ "$(id -u)" != "0" ] || refuse "--test is never for root"; [ "$SAY" = "no" ] || refuse "--test runs for real: not with --say-only"
                 TEST="${2:-}"; case "$TEST" in /*) : ;; *) refuse "--test takes an absolute path" ;; esac
                 DATA="$TEST"; MNT="$TEST"; WIFI_STATE="$TEST/wifi"; NM_KEYFILES="$TEST/system-connections"; WIFI_WAIT="3"; WIFI_UP_WAIT="3"; WIFI_STEP="0.2"
-                HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; SYS_NET="$TEST/sys-net"; shift 2 ;;
+                HAND_STATE="$TEST/network"; NETPLAN_DIR="$TEST/netplan"; HAND_WAIT="3"; SYS_NET="$TEST/sys-net"
+                MESH_DATA="$TEST/mesh"; MESH_STATE="$TEST/meshcentral"; CADDYFILE="$TEST/Caddyfile"; MESH_CADDY="$TEST/clavarium-meshcentral.caddy"; shift 2 ;;
         *) break ;;
     esac
 done
@@ -519,6 +547,137 @@ wifi_record() {
     { printf 'last %s %s\n' "$1" "$(date +%s)"; printf 'lastssid %s\n' "$ssid"; printf 'lastback %s\n' "$back"
       [ -z "${2:-}" ] || printf 'lastwhy %s\n' "$2"; } > "$WIFI_STATE/last.new"
     mv -f -- "$WIFI_STATE/last.new" "$WIFI_STATE/last"
+}
+
+# ---- THE REMOTE SCREEN (MeshCentral) ----
+# Installed: the npm tree and a written config are both there. Running: its unit is active.
+mesh_installed() { [ -f "$MESH_DATA/node_modules/meshcentral/package.json" ] && [ -f "$MESH_DATA/meshcentral-data/config.json" ]; }
+mesh_running() { [ -z "$TEST" ] && systemctl is-active --quiet "$MESH_UNIT.service" 2>/dev/null; }
+# The version as the installed package declares it, or nothing.
+mesh_version() {
+    local v
+    v="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([0-9][0-9A-Za-z.+-]*\)".*/\1/p' "$MESH_DATA/node_modules/meshcentral/package.json" 2>/dev/null | head -1 || true)"
+    [[ "$v" =~ ^[0-9][0-9A-Za-z.+-]{0,30}$ ]] && printf '%s' "$v" || printf 'none'
+}
+# Where the front publishes it: the front's own name, this path. Just the path when no name is set yet.
+mesh_url() {
+    local dom
+    dom="$(sed -n 's/^\([A-Za-z0-9][A-Za-z0-9.*-]*\) {[[:space:]]*$/\1/p' "$CADDYFILE" 2>/dev/null | grep -v '^http' | head -1 || true)"
+    if [[ "$dom" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$ ]]; then printf 'https://%s%s/' "$dom" "$MESH_PATH"; else printf '%s/' "$MESH_PATH"; fi
+}
+# The turn-on's step, read back by "meshcentral status": <step> [<why>].
+mesh_record() {
+    install -d -m 0700 "$MESH_STATE"
+    { printf 'step %s %s\n' "$1" "$(date +%s)"; [ -z "${2:-}" ] || printf 'why %s\n' "$2"; } > "$MESH_STATE/last.new"
+    mv -f -- "$MESH_STATE/last.new" "$MESH_STATE/last"
+}
+mesh_step() { sed -n 's/^step \([a-z-]*\) [0-9]*$/\1/p' "$MESH_STATE/last" 2>/dev/null | head -1 || true; }
+mesh_busy() { [ -z "$TEST" ] && systemctl is-active --quiet "$MESH_SETUP_UNIT.service" 2>/dev/null; }
+
+# The route into the front: a snippet of its own, imported once into the site block. Reused on
+# a rerun, never doubled; removed whole when the screen is turned off (an import with no file
+# would stop the front, so the line and the file always go together).
+mesh_caddy_reload() {
+    [ -z "$TEST" ] || return 0
+    /usr/local/bin/caddy validate --config "$CADDYFILE" >/dev/null 2>&1 || return 1
+    systemctl reload caddy.service >/dev/null 2>&1 || systemctl restart caddy.service >/dev/null 2>&1 || true
+}
+mesh_caddy_on() {
+    [ -f "$CADDYFILE" ] || return 1
+    local tmp; tmp="$(mktemp -p "$(dirname "$MESH_CADDY")" .clavarium-mesh.XXXXXX)" || return 1
+    { printf '# Written by Clavarium (Settings, Remote screen). Removed when it is turned off.\n'
+      printf 'handle %s* {\n\treverse_proxy 127.0.0.1:%s\n}\n' "$MESH_PATH" "$MESH_PORT"; } > "$tmp"
+    [ -n "$TEST" ] || chown root:root -- "$tmp"; chmod 0644 -- "$tmp"; mv -f -- "$tmp" "$MESH_CADDY"
+    if ! grep -q '# clavarium-meshcentral$' "$CADDYFILE"; then
+        local out; out="$(mktemp -p "$(dirname "$CADDYFILE")" .clavarium-caddy.XXXXXX)" || return 1
+        awk 'BEGIN { done = 0 } { print }
+             done == 0 && $0 !~ /^http/ && /^[A-Za-z0-9].*\{[[:space:]]*$/ { print "\timport " FULL " # clavarium-meshcentral"; done = 1 }' \
+            FULL="$MESH_CADDY" "$CADDYFILE" > "$out" || { rm -f -- "$out"; return 1; }
+        cat -- "$out" > "$CADDYFILE"; rm -f -- "$out"
+    fi
+    mesh_caddy_reload || { mesh_caddy_off; return 1; }
+}
+mesh_caddy_off() {
+    rm -f -- "$MESH_CADDY"
+    if [ -f "$CADDYFILE" ] && grep -q '# clavarium-meshcentral$' "$CADDYFILE"; then
+        local out; out="$(mktemp -p "$(dirname "$CADDYFILE")" .clavarium-caddy.XXXXXX)" || return 1
+        grep -v '# clavarium-meshcentral$' "$CADDYFILE" > "$out" || true
+        cat -- "$out" > "$CADDYFILE"; rm -f -- "$out"
+    fi
+    mesh_caddy_reload || true
+}
+
+# The config the server is given: TLS is the front's, so it listens plain on the loopback; it
+# makes no certificate of its own and asks Let's Encrypt for none. Written once, kept on a rerun.
+mesh_write_config() {
+    install -d -m 0750 "$MESH_DATA/meshcentral-data"
+    [ -n "$TEST" ] || chown -R "$MESH_USER:$MESH_USER" "$MESH_DATA/meshcentral-data"
+    [ ! -f "$MESH_DATA/meshcentral-data/config.json" ] || return 0
+    local tmp; tmp="$(mktemp -p "$MESH_DATA/meshcentral-data" .clavarium-mesh.XXXXXX)" || return 1
+    cat > "$tmp" <<MESHCONF
+{
+  "__comment": "Written by Clavarium (Settings, Remote screen). TLS and the public name are the front's.",
+  "settings": {
+    "cert": "localhost",
+    "TLSOffload": true,
+    "WANproxy": true,
+    "Port": $MESH_PORT,
+    "RedirPort": 0,
+    "ExactPorts": true,
+    "AllowFraming": false,
+    "SelfUpdate": false
+  },
+  "domains": {
+    "": {
+      "certUrl": "https://127.0.0.1:$MESH_PORT/"
+    }
+  },
+  "letsencrypt": null
+}
+MESHCONF
+    chmod 0640 -- "$tmp"; [ -n "$TEST" ] || chown "$MESH_USER:$MESH_USER" -- "$tmp"
+    mv -f -- "$tmp" "$MESH_DATA/meshcentral-data/config.json"
+}
+
+# The hardened unit: a dedicated account, nothing of the system writable but its own data dir,
+# no new privileges, no home, a private /tmp. Written every turn-on (kept in step with this file).
+mesh_write_unit() {
+    [ -z "$TEST" ] || return 0
+    local node; node="$MESH_NODE"; [ -x "$node" ] || node="$(command -v node || true)"
+    [ -n "$node" ] || return 1
+    cat > "/etc/systemd/system/$MESH_UNIT.service" <<MESHUNIT
+[Unit]
+Description=Clavarium - the remote screen (MeshCentral), isolated behind the front
+After=network-online.target caddy.service
+Wants=network-online.target
+
+[Service]
+User=$MESH_USER
+Group=$MESH_USER
+WorkingDirectory=$MESH_DATA
+ExecStart=$node $MESH_DATA/node_modules/meshcentral --datapath $MESH_DATA/meshcentral-data
+Restart=on-failure
+RestartSec=5
+# Isolation: the whole system read-only but its own data, no new privileges, no home, a private /tmp.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+ReadWritePaths=$MESH_DATA
+# Reached only on the loopback (the front is in front): no low port, no raw network.
+IPAddressAllow=localhost
+IPAddressDeny=any
+
+[Install]
+WantedBy=multi-user.target
+MESHUNIT
+    systemctl daemon-reload
 }
 
 [ $# -ge 2 ] || usage
@@ -1509,6 +1668,143 @@ case "$AREA $VERB" in
         [ "$SAY" = "yes" ] || refuse "unknown verb: git code"
         [ $# -eq 3 ] || usage
         unit_code "$1" "$2" "$3"; exit 0 ;;
+    "meshcentral status")
+        # THE REMOTE SCREEN, for Settings (Remote screen): installed, running, version, url, and
+        # how a turn-on is going. Read-only, nothing asked of the server it runs.
+        #   installed <yes|no>   running <yes|no>   version <x.y.z|none>   url <https://.../meshcentral/>
+        #   step <installing|starting|running|interrupted|failed>   why <a word>   (only while or after a turn-on)
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "systemctl is-active $MESH_UNIT; the installed version; the route in $CADDYFILE (read-only)"; exit 0; fi
+        inst=no; mesh_installed && inst=yes
+        up=no; mesh_running && up=yes
+        printf 'installed %s\n' "$inst"
+        printf 'running %s\n' "$up"
+        printf 'version %s\n' "$(mesh_version)"
+        printf 'url %s\n' "$(mesh_url)"
+        step="$(mesh_step)"
+        if [ -n "$step" ]; then
+            # A turn-on cut short (a reboot in its middle): no longer going, and it never finished.
+            if ! mesh_busy && { [ "$step" = "installing" ] || [ "$step" = "starting" ]; }; then step="interrupted"; fi
+            printf 'step %s\n' "$step"
+            why="$(sed -n 's/^why \([a-z-]\{1,20\}\)$/\1/p' "$MESH_STATE/last" 2>/dev/null | head -1 || true)"
+            [ -z "$why" ] || printf 'why %s\n' "$why"
+        fi
+        exit 0 ;;
+    "meshcentral install")
+        # MeshCentral installed into a directory of its own, as a dedicated account: the npm tree
+        # at a pinned version, then its config written (kept on a rerun). Idempotent.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "useradd --system $MESH_USER" "install -d $MESH_DATA" \
+                "npm install --prefix $MESH_DATA --omit=dev meshcentral@$MESH_VERSION" \
+                "write $MESH_DATA/meshcentral-data/config.json"
+            exit 0
+        fi
+        install -d -m 0700 "$MESH_STATE"
+        id "$MESH_USER" >/dev/null 2>&1 || useradd --system --home-dir "$MESH_DATA" --no-create-home --shell /usr/sbin/nologin "$MESH_USER"
+        install -d -o "$MESH_USER" -g "$MESH_USER" -m 0750 "$MESH_DATA"
+        npm="$MESH_NPM"; [ -x "$npm" ] || npm="$(command -v npm || true)"
+        [ -n "$npm" ] || refuse "there is no npm on this server to install the remote screen"
+        # No secret is printed: npm's own output (and only it) goes to a root-only log.
+        if ! HOME="$MESH_DATA" npm_config_cache="$MESH_DATA/.npm" "$npm" install --prefix "$MESH_DATA" \
+                --no-save --no-audit --no-fund --omit=dev "meshcentral@$MESH_VERSION" > "$MESH_STATE/install.log" 2>&1; then
+            refuse "MeshCentral could not be installed (see $MESH_STATE/install.log on the server)"
+        fi
+        [ -f "$MESH_DATA/node_modules/meshcentral/package.json" ] || refuse "MeshCentral was not installed as expected"
+        mesh_write_config || refuse "the remote screen's config could not be written"
+        chown -R "$MESH_USER:$MESH_USER" "$MESH_DATA"
+        printf 'installed %s\n' "$(mesh_version)"
+        exit 0 ;;
+    "meshcentral start")
+        # The hardened unit written and enabled, the server started, and the route added to the
+        # front (Caddy reloaded). Idempotent: a rerun rewrites the unit and the route as they are.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "write /etc/systemd/system/$MESH_UNIT.service (hardened: $MESH_USER, NoNewPrivileges, ProtectSystem=strict, ProtectHome, PrivateTmp, its own data dir)" \
+                "systemctl enable --now $MESH_UNIT.service" \
+                "add 'import $MESH_CADDY' to the site in $CADDYFILE; caddy validate; systemctl reload caddy"
+            exit 0
+        fi
+        mesh_installed || refuse "the remote screen is not installed yet"
+        mesh_write_unit || refuse "the remote screen's unit could not be written (no node found?)"
+        systemctl enable --quiet "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        systemctl restart "$MESH_UNIT.service" || refuse "the remote screen did not start (journalctl -u $MESH_UNIT)"
+        mesh_caddy_on || refuse "the route to the remote screen could not be added to the front"
+        printf 'started %s\n' "$(mesh_url)"
+        exit 0 ;;
+    "meshcentral stop")
+        # The route removed from the front (Caddy reloaded) and the unit stopped and disabled.
+        # What was installed is kept. Idempotent: safe to run when it is off already.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "remove 'import $MESH_CADDY' from $CADDYFILE; rm $MESH_CADDY; systemctl reload caddy" \
+                "systemctl disable --now $MESH_UNIT.service"
+            exit 0
+        fi
+        mesh_caddy_off
+        systemctl disable --quiet "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        systemctl stop "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        systemctl reset-failed "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        echo "stopped"
+        exit 0 ;;
+    "meshcentral enable")
+        # TURNED ON from Settings: install (minutes, the first time) then start, in a unit of its
+        # own, and this returns at once ("enabling"). The outcome is read back by "meshcentral status".
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "systemd-run --unit=$MESH_SETUP_UNIT --collect clavarium-host meshcentral setup (install, then start)"; exit 0; fi
+        ! mesh_busy || refuse "the remote screen is being turned on already: wait for its end"
+        mesh_record installing
+        self=(/bin/bash "$(readlink -f -- "$0")"); [ -z "$TEST" ] || self+=(--test "$TEST")
+        if ! systemd-run --quiet --unit="$MESH_SETUP_UNIT" --collect --description="Clavarium - turning on the remote screen (install, then start)" \
+                --property=TimeoutStartSec=0 "${self[@]}" meshcentral setup; then
+            mesh_record failed start
+            refuse "the turn-on could not be started (another one still running?)"
+        fi
+        echo "enabling"
+        exit 0 ;;
+    "meshcentral setup")
+        # THE TURN-ON ITSELF, run by "meshcentral enable" in its unit, as root: install if it is
+        # not installed, then start; each step recorded for "meshcentral status".
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "see: meshcentral enable"; exit 0; fi
+        [ "$(mesh_step)" = "installing" ] || refuse "no turn-on was asked"
+        self=(/bin/bash "$(readlink -f -- "$0")"); [ -z "$TEST" ] || self+=(--test "$TEST")
+        if ! mesh_installed; then
+            if ! "${self[@]}" meshcentral install >/dev/null 2>&1; then mesh_record failed install; exit 0; fi
+        fi
+        mesh_record starting
+        if ! "${self[@]}" meshcentral start >/dev/null 2>&1; then mesh_record failed start; exit 0; fi
+        mesh_record running
+        exit 0 ;;
+    "meshcentral disable")
+        # TURNED OFF from Settings: stopped and its route removed (what was installed is kept).
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "see: meshcentral stop"; exit 0; fi
+        ! mesh_busy || refuse "the remote screen is being turned on: wait for its end"
+        self=(/bin/bash "$(readlink -f -- "$0")"); [ -z "$TEST" ] || self+=(--test "$TEST")
+        "${self[@]}" meshcentral stop >/dev/null 2>&1 || true
+        mesh_record idle
+        echo "disabled"
+        exit 0 ;;
+    "meshcentral uninstall")
+        # EVERYTHING REMOVED: stopped, its route and unit gone, its data dir and account removed.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "systemctl disable --now $MESH_UNIT; rm the unit; remove the route" \
+                "rm -rf $MESH_DATA; userdel $MESH_USER"
+            exit 0
+        fi
+        ! mesh_busy || refuse "the remote screen is being turned on: wait for its end"
+        mesh_caddy_off
+        systemctl disable --quiet "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        systemctl stop "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        systemctl reset-failed "$MESH_UNIT.service" >/dev/null 2>&1 || true
+        rm -f -- "/etc/systemd/system/$MESH_UNIT.service"; systemctl daemon-reload >/dev/null 2>&1 || true
+        rm -rf -- "$MESH_DATA"
+        ! id "$MESH_USER" >/dev/null 2>&1 || userdel "$MESH_USER" >/dev/null 2>&1 || true
+        rm -f -- "$MESH_STATE/last"
+        echo "uninstalled"
+        exit 0 ;;
     *)
         refuse "unknown verb: $AREA $VERB" ;;
 esac

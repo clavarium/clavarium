@@ -419,3 +419,39 @@ test('disks room / grow: read-only, and grown only at the system or under /mnt, 
     assert.match(say('disks', 'grow', '/').stdout, /lvextend -r -l \+100%FREE/);
     for (const bad of ['/etc', '/var/lib', 'relative', '/mnt/../etc', '/mnt/a b']) assert.equal(say('disks', 'grow', bad).status, 78, bad);
 });
+
+test('meshcentral: each verb maps to one exact thing, and the turn-on runs in a unit of its own', () => {
+    const say = (...args) => spawnSync('/bin/bash', [PROGRAM, '--say-only', '--data', '/var/lib/clavarium', ...args], { encoding: 'utf8' });
+    assert.match(say('meshcentral', 'install').stdout, /npm install --prefix \/var\/lib\/clavarium-meshcentral --omit=dev meshcentral@/);
+    assert.match(say('meshcentral', 'start').stdout, /ProtectSystem=strict/);
+    assert.match(say('meshcentral', 'start').stdout, /import \/etc\/caddy\/clavarium-meshcentral\.caddy/);
+    assert.match(say('meshcentral', 'stop').stdout, /systemctl disable --now clavarium-meshcentral\.service/);
+    assert.match(say('meshcentral', 'enable').stdout, /systemd-run --unit=clavarium-meshcentral-setup --collect/);
+    assert.match(say('meshcentral', 'uninstall').stdout, /rm -rf \/var\/lib\/clavarium-meshcentral/);
+    /* No argument is taken by any of them. */
+    for (const v of ['status', 'install', 'start', 'stop', 'enable', 'disable', 'uninstall']) assert.equal(say('meshcentral', v, 'x').status, 64, v);
+    assert.equal(say('meshcentral', 'nonsense').status, 78);
+});
+
+test('meshcentral status: installed, running, version, url read from the real files; the route added and removed in the front', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-mesh-'));
+    const run = (...args) => spawnSync('/bin/bash', [PROGRAM, '--test', dir, 'meshcentral', ...args], { encoding: 'utf8' });
+    /* Nothing installed yet. */
+    let s = run('status');
+    assert.match(s.stdout, /installed no/); assert.match(s.stdout, /running no/); assert.match(s.stdout, /version none/);
+    /* Made to look installed, with a front that names the server. */
+    mkdirSync(join(dir, 'mesh', 'node_modules', 'meshcentral'), { recursive: true });
+    mkdirSync(join(dir, 'mesh', 'meshcentral-data'), { recursive: true });
+    writeFileSync(join(dir, 'mesh', 'node_modules', 'meshcentral', 'package.json'), '{"version":"1.1.35"}');
+    writeFileSync(join(dir, 'mesh', 'meshcentral-data', 'config.json'), '{}');
+    writeFileSync(join(dir, 'Caddyfile'), 'clav.example.com {\n\thandle {\n\t\treverse_proxy 127.0.0.1:4180\n\t}\n}\n');
+    s = run('status');
+    assert.match(s.stdout, /installed yes/);
+    assert.match(s.stdout, /version 1\.1\.35/);
+    assert.match(s.stdout, /url https:\/\/clav\.example\.com\/meshcentral\//);
+    /* A turn-on recorded but no unit running is read as interrupted, not still going. */
+    mkdirSync(join(dir, 'meshcentral'), { recursive: true });
+    writeFileSync(join(dir, 'meshcentral', 'last'), 'step installing 1792000000\n');
+    assert.match(run('status').stdout, /step interrupted/);
+    rmSync(dir, { recursive: true, force: true });
+});
