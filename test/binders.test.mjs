@@ -5,15 +5,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Binders } from '../server/binders.mjs';
 
-function bench(t, { now = () => Date.now() } = {}) {
-    const dir = mkdtempSync(join(tmpdir(), 'clv-binders-'));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const posted = [];
+function bench(t, { now = () => Date.now(), dir = null } = {}) {
+    if (!dir) { dir = mkdtempSync(join(tmpdir(), 'clv-binders-')); t.after(() => rmSync(dir, { recursive: true, force: true })); }
+    const posted = []; const events = []; const alerts = [];
     const names = ['coder', 'writer'];
     for (const n of names) mkdirSync(join(dir, 'work', n), { recursive: true });
     const b = new Binders({ dataDir: join(dir, 'data'), resources: { workFolder: (n) => join(dir, 'work', n) }, conversations: () => names,
-        dockets: { post: (name, e) => posted.push([name, e.text]) }, now });
-    return { b, dir, posted };
+        dockets: { post: (name, e) => { posted.push([name, e.text]); events.push([name, e]); } }, alert: (m) => { alerts.push(m); }, now });
+    return { b, dir, posted, events, alerts };
 }
 
 test('each conversation is given its .binder; one that is a link is left out', (t) => {
@@ -61,4 +60,48 @@ test('what each conversation was given: its lists, and the records waiting for a
     assert.equal(b.given().coder.waiting, 1);
     b.act('archive-list', { list: batches.id });
     assert.deepEqual(b.given().coder, { lists: 1, waiting: 0 });
+});
+
+test('a card come due: each conversation that owns it gets one event, the devices one alert; a restart says nothing again', (t) => {
+    let clock = Date.parse('2026-11-04T08:00:00');
+    const { b, dir, events, alerts } = bench(t, { now: () => clock });
+    const l = b.act('create-list', { template: 'batches', title: 'Batches' }).data;
+    const card = b.act('add', { list: l.id, title: 'Renew the domain', due: '2026-11-04', owners: ['conversation:coder', 'conversation:writer', 'person:owner'] }).data;
+    const timed = b.act('add', { list: l.id, title: 'Call back', due: '2026-11-04 15:30', owners: ['conversation:coder'] }).data;
+    const done = b.act('add', { list: l.id, title: 'Old', due: '2026-11-04', state: 'done', owners: ['conversation:coder'] }).data;
+    const put = b.act('add', { list: l.id, title: 'Put away', due: '2026-11-04', owners: ['conversation:coder'] }).data;
+    b.act('archive', { id: put.id });
+    events.length = 0;
+    assert.deepEqual(b.remind(), [], 'before 09:00, nothing');
+    clock = Date.parse('2026-11-04T09:00:00');
+    assert.deepEqual(b.remind(), [card.id]);
+    assert.deepEqual(events.map(([n, e]) => [n, e.kind, e.text, e.data.card]), [
+        ['coder', 'binder/due', `Due: #${card.id} Renew the domain (Batches)`, card.id],
+        ['writer', 'binder/due', `Due: #${card.id} Renew the domain (Batches)`, card.id]]);
+    assert.deepEqual(alerts, [{ title: 'Due', body: 'Renew the domain (Batches)', url: `/?open=lists&a=list%3A${l.id}` }]);
+    assert.deepEqual(b.remind(), [], 'once');
+    clock = Date.parse('2026-11-04T15:30:00');
+    assert.deepEqual(b.remind(), [timed.id], 'a time: at that time; a person owns none: no alert');
+    assert.equal(alerts.length, 1);
+    assert.ok(done);
+
+    const again = bench(t, { now: () => clock, dir });
+    assert.deepEqual(again.b.remind(), [], 'a restart says nothing again');
+    again.b.act('edit', { id: card.id, due: '2026-11-06' });
+    clock = Date.parse('2026-11-06T09:01:00');
+    assert.deepEqual(again.b.remind(), [card.id], 'moved later: said again');
+    assert.equal(again.alerts.length, 1);
+    assert.deepEqual(again.events.filter(([, e]) => e.kind === 'binder/due').map(([n]) => n), ['coder', 'writer']);
+});
+
+test('a docket or a device that fails stops nothing', (t) => {
+    let clock = Date.parse('2026-11-04T10:00:00');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-binders-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, 'work', 'coder'), { recursive: true });
+    const b = new Binders({ dataDir: join(dir, 'data'), resources: { workFolder: (n) => join(dir, 'work', n) }, conversations: () => ['coder'],
+        dockets: { post: () => { throw new Error('off'); } }, alert: () => Promise.reject(new Error('no device')), now: () => clock });
+    const l = b.act('create-list', { template: 'simple' }).data;
+    const r = b.act('add', { list: l.id, title: 'Pay', due: '2026-11-04', owners: ['conversation:coder', 'person:owner'] }).data;
+    assert.deepEqual(b.remind(), [r.id]);
 });

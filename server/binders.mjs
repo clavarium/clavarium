@@ -15,6 +15,13 @@
  *
  * ITS DOCKET IS TOLD (dockets.mjs) when the owner gives it a record, approves
  * one it owns, or a record it owns comes due.
+ *
+ * A CARD COMES DUE (Binder's rule: a date alone at 09:00 this server's time,
+ * a date and time at that time; not done, not archived): each conversation
+ * that owns it is posted one event (kind binder/due, its title and list, data
+ * the card), and where a person owns it, the owner's devices are told once
+ * (alerts.mjs). Binder keeps what it gave, so a restart says nothing again;
+ * a due date moved says it again when the new time comes.
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-binder/host';
@@ -22,15 +29,18 @@ import { keeper } from 'clavarium-binder/host';
 export const FOLDER = '.binder';
 export const PUMP_MS = 1000;
 export const DUE_MS = 30_000;
+export const DUE_KIND = 'binder/due';
 const AGENT = 'conversation:';
+const PERSON = 'person:';
 
 export class Binders {
-    #keeper; #resources; #conversations; #dockets; #team; #timers = []; #changes = 0; #ready = new Set();
+    #keeper; #resources; #conversations; #dockets; #team; #alert; #timers = []; #changes = 0; #ready = new Set();
 
     /* `conversations()`: the names of the conversations. `dockets`: Dockets (optional): a tool told.
-       `team`: the operators (optional), each a person who may own a record. */
-    constructor({ dataDir, resources, conversations, dockets = null, team = null, now = () => Date.now() }) {
-        this.#resources = resources; this.#conversations = conversations; this.#dockets = dockets; this.#team = team;
+       `team`: the operators (optional), each a person who may own a record. `alert({title, body, url})`:
+       the owner's devices (optional), told of a card a person owns that came due. */
+    constructor({ dataDir, resources, conversations, dockets = null, team = null, alert = null, now = () => Date.now() }) {
+        this.#resources = resources; this.#conversations = conversations; this.#dockets = dockets; this.#team = team; this.#alert = alert;
         this.#keeper = keeper(`${dataDir}/binder`, { sides: () => this.#sides(), now });
         this.#keeper.store.onChange((line) => { this.#changes++; this.#heard(line); });
     }
@@ -50,10 +60,22 @@ export class Binders {
     }
 
     /* A tool told, through its docket, of what concerns it. */
-    #tell(id, text) {
+    #tell(id, text, kind = 'binder', data = undefined) {
         if (!this.#dockets || !id.startsWith(AGENT)) return;
         const name = id.slice(AGENT.length);
-        try { this.#dockets.post(name, { kind: 'binder', text }); } catch { /* its docket may be off */ }
+        try { this.#dockets.post(name, { kind, text, ...(data ? { data } : {}) }); } catch { /* its docket may be off */ }
+    }
+    /* The cards come due since the last look: told to who owns them, once. */
+    remind() {
+        const told = [];
+        for (const { record: r, list: l } of this.#keeper.due()) {
+            for (const id of r.owners) this.#tell(id, `Due: #${r.id} ${r.title} (${l.title})`, DUE_KIND, { card: r.id, list: l.id, due: r.due });
+            if (this.#alert && r.owners.some((id) => id.startsWith(PERSON))) {
+                try { void Promise.resolve(this.#alert({ title: 'Due', body: `${r.title} (${l.title})`, url: `/?open=lists&a=${encodeURIComponent(`list:${l.id}`)}` })).catch(() => {}); } catch { /* as said */ }
+            }
+            told.push(r.id);
+        }
+        return told;
     }
     #heard(line) {
         if (line.by?.kind !== 'person' || !line.record) return;
@@ -67,9 +89,7 @@ export class Binders {
 
     start() {
         this.#timers.push(setInterval(() => { try { this.#keeper.pump(); } catch { /* the next turn */ } }, PUMP_MS));
-        this.#timers.push(setInterval(() => {
-            try { for (const { record: r } of this.#keeper.due()) for (const id of r.owners) this.#tell(id, `Due in Binder: #${r.id} ${r.title} (${r.due})`); } catch { /* the next turn */ }
-        }, DUE_MS));
+        this.#timers.push(setInterval(() => { try { this.remind(); } catch { /* the next turn */ } }, DUE_MS));
         for (const t of this.#timers) t.unref?.();
         return () => { for (const t of this.#timers) clearInterval(t); this.#timers = []; };
     }

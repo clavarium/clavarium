@@ -393,7 +393,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const wakeTimer = wakeups.start(wakeEveryMs);
     const docketTimer = dockets.start(wakeEveryMs);
     /* Lists kept with the tools, held here: see binders.mjs. */
-    const binders = new Binders({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), dockets, team });
+    const binders = new Binders({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), dockets, team,
+        alert: (message) => alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }) });
     const stopBinders = binders.start();
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
