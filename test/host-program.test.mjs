@@ -448,7 +448,7 @@ test('meshcentral status: installed, running, version, url read from the real fi
     s = run('status');
     assert.match(s.stdout, /installed yes/);
     assert.match(s.stdout, /version 1\.1\.35/);
-    assert.match(s.stdout, /url https:\/\/clav\.example\.com\/meshcentral\//);
+    assert.match(s.stdout, /url https:\/\/clav\.example\.com\/meshcentral-test\//);
     /* A turn-on recorded but no unit running is read as interrupted, not still going. */
     mkdirSync(join(dir, 'meshcentral'), { recursive: true });
     writeFileSync(join(dir, 'meshcentral', 'last'), 'step installing 1792000000\n');

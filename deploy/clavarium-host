@@ -147,8 +147,15 @@ MESH_USER="clavarium-mesh"
 MESH_UNIT="clavarium-meshcentral"
 MESH_SETUP_UNIT="clavarium-meshcentral-setup"
 MESH_PORT="4443"
-MESH_PATH="/meshcentral"
+# The path's base. The real path adds a per-instance random suffix (mesh_resolve_path), so the
+# address is stable here but not the same, nor guessable, from one instance to another.
+MESH_PATH_BASE="/meshcentral"
+MESH_PATH="$MESH_PATH_BASE"
 MESH_VERSION="1.1.35"
+# Modules MeshCentral would otherwise fetch from npm on its first run: installed here, with the
+# network, because the running unit is locked to the loopback and cannot reach npm. Pinned to
+# what MeshCentral 1.1.35 asks for (TOTP two-factor). Revisit if the MeshCentral version moves.
+MESH_MODULES="otplib@10.2.3"
 # Node and npm: the release's own if it is there (always present on a server), else the system's.
 MESH_NODE="/opt/clavarium/current/node/bin/node"
 MESH_NPM="/opt/clavarium/current/node/bin/npm"
@@ -552,6 +559,26 @@ wifi_record() {
 # ---- THE REMOTE SCREEN (MeshCentral) ----
 # Installed: the npm tree and a written config are both there. Running: its unit is active.
 mesh_installed() { [ -f "$MESH_DATA/node_modules/meshcentral/package.json" ] && [ -f "$MESH_DATA/meshcentral-data/config.json" ]; }
+# The path's per-instance random suffix: made once, kept in root's state, reused ever after -- so the
+# address is stable for this server yet not guessable, and differs from one install to the next.
+# Defence in depth, on top of the sign-in and the isolation. In --test a fixed suffix keeps it checkable.
+mesh_resolve_path() {
+    if [ -n "$TEST" ]; then MESH_PATH="$MESH_PATH_BASE-test"; return 0; fi
+    local f="$MESH_STATE/path" tok=""
+    # No "| head" on an endless source: head closing early makes the left side take SIGPIPE, which
+    # under pipefail would stop the whole program. od reads a fixed count, so nothing closes early.
+    if [ -f "$f" ]; then tok="$(LC_ALL=C tr -cd 'a-z0-9' < "$f" 2>/dev/null)"; tok="${tok:0:16}"; fi
+    if ! [[ "$tok" =~ ^[a-z0-9]{8,16}$ ]]; then
+        tok="$(od -An -tx1 -N16 /dev/urandom 2>/dev/null | LC_ALL=C tr -cd '0-9a-f')"; tok="${tok:0:12}"
+        [[ "$tok" =~ ^[a-z0-9]{8,16}$ ]] || tok="$(date +%s)0"
+        # Keep it only on a real run; "say only" invents nothing on disk.
+        if [ "$SAY" != yes ]; then
+            install -d -m 0700 "$MESH_STATE" 2>/dev/null || true
+            { printf '%s' "$tok" > "$f"; } 2>/dev/null && chmod 0600 "$f" 2>/dev/null || true
+        fi
+    fi
+    MESH_PATH="$MESH_PATH_BASE-$tok"
+}
 mesh_running() { [ -z "$TEST" ] && systemctl is-active --quiet "$MESH_UNIT.service" 2>/dev/null; }
 # The version as the installed package declares it, or nothing.
 mesh_version() {
@@ -613,6 +640,10 @@ mesh_write_config() {
     install -d -m 0750 "$MESH_DATA/meshcentral-data"
     [ -n "$TEST" ] || chown -R "$MESH_USER:$MESH_USER" "$MESH_DATA/meshcentral-data"
     [ ! -f "$MESH_DATA/meshcentral-data/config.json" ] || return 0
+    # MeshCentral serves under a path through a NAMED domain (its key is the path): a domain keyed
+    # "meshcentral" is reached at /meshcentral/. The empty key would serve at the root, which the
+    # front has no path for. Derived from MESH_PATH so the two never drift apart.
+    local dom="${MESH_PATH#/}"
     local tmp; tmp="$(mktemp -p "$MESH_DATA/meshcentral-data" .clavarium-mesh.XXXXXX)" || return 1
     cat > "$tmp" <<MESHCONF
 {
@@ -628,7 +659,7 @@ mesh_write_config() {
     "SelfUpdate": false
   },
   "domains": {
-    "": {
+    "$dom": {
       "certUrl": "https://127.0.0.1:$MESH_PORT/"
     }
   },
@@ -655,6 +686,9 @@ Wants=network-online.target
 User=$MESH_USER
 Group=$MESH_USER
 WorkingDirectory=$MESH_DATA
+# node's directory on PATH: MeshCentral installs a module or two on first run by spawning npm,
+# whose shebang is \`/usr/bin/env node\`; without this it stalls at "Installing modules".
+Environment=PATH=$(dirname "$node"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=$node $MESH_DATA/node_modules/meshcentral --datapath $MESH_DATA/meshcentral-data
 Restart=on-failure
 RestartSec=5
@@ -666,7 +700,9 @@ PrivateTmp=yes
 ProtectControlGroups=yes
 ProtectKernelModules=yes
 ProtectKernelTunables=yes
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# AF_NETLINK too: Node reads the host's network interfaces (os.networkInterfaces) through it, and
+# MeshCentral lists them at startup; without it the server dies with "uv_interface_addresses ... 97".
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 RestrictSUIDSGID=yes
 LockPersonality=yes
 ReadWritePaths=$MESH_DATA
@@ -682,6 +718,9 @@ MESHUNIT
 
 [ $# -ge 2 ] || usage
 AREA="$1"; VERB="$2"; shift 2
+
+# The remote screen's path carries a per-instance suffix: resolve it before any of its verbs run.
+[ "$AREA" = meshcentral ] && mesh_resolve_path
 
 case "$AREA $VERB" in
     "vm launch")
@@ -1706,8 +1745,10 @@ case "$AREA $VERB" in
         npm="$MESH_NPM"; [ -x "$npm" ] || npm="$(command -v npm || true)"
         [ -n "$npm" ] || refuse "there is no npm on this server to install the remote screen"
         # No secret is printed: npm's own output (and only it) goes to a root-only log.
-        if ! HOME="$MESH_DATA" npm_config_cache="$MESH_DATA/.npm" "$npm" install --prefix "$MESH_DATA" \
-                --no-save --no-audit --no-fund --omit=dev "meshcentral@$MESH_VERSION" > "$MESH_STATE/install.log" 2>&1; then
+        # npm finds node through PATH (its own shebang is `/usr/bin/env node`), so node's own
+        # directory is put on PATH; without it npm exits at once with "env: node: not found".
+        if ! HOME="$MESH_DATA" npm_config_cache="$MESH_DATA/.npm" PATH="$(dirname "$npm"):$(dirname "$MESH_NODE"):$PATH" "$npm" install --prefix "$MESH_DATA" \
+                --no-save --no-audit --no-fund --omit=dev "meshcentral@$MESH_VERSION" $MESH_MODULES > "$MESH_STATE/install.log" 2>&1; then
             refuse "MeshCentral could not be installed (see $MESH_STATE/install.log on the server)"
         fi
         [ -f "$MESH_DATA/node_modules/meshcentral/package.json" ] || refuse "MeshCentral was not installed as expected"
