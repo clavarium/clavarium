@@ -338,9 +338,12 @@
        nothing -- so nothing is left blank, and nothing jumps at the end. */
     const sliders = () => ['list', 'nav'].map((id) => $(id)).filter(Boolean);
     const slide = (out, width) => {
-        const how = { duration: 200, easing: 'ease', direction: out ? 'normal' : 'reverse' };
-        const moving = sliders().map((e) => e.animate([{ transform: 'none' }, { transform: 'translateX(-100%)' }], how));
-        moving.push($('room').animate([{ transform: `translateX(${width}px)` }, { transform: 'none' }], how));
+        /* Quick at first, gentle at the end, both ways (a reversed curve started slowly: it felt late). */
+        const how = { duration: 220, easing: 'cubic-bezier(.2, .8, .2, 1)' };
+        const away = [{ transform: 'none' }, { transform: 'translateX(-100%)' }];
+        const shifted = [{ transform: `translateX(${width}px)` }, { transform: 'none' }];
+        const moving = sliders().map((e) => e.animate(out ? away : [...away].reverse(), how));
+        moving.push($('room').animate(out ? shifted : [...shifted].reverse(), how));
         return Promise.all(moving.map((a) => a.finished.catch(() => {})));
     };
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
@@ -349,8 +352,9 @@
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
         if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
-        const width = $('list').getBoundingClientRect().width || $('list').offsetWidth;
+        /* Measured once it slides: folded, the list has no width until then (the room did not move, then jumped). */
         app.classList.add('sliding');
+        const width = $('list').getBoundingClientRect().width;
         if (folded) { applyFold(true); fit.fit(); }
         await slide(folded, width);
         app.classList.remove('sliding');

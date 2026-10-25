@@ -115,6 +115,7 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
   #app[data-list="folded"] :is(#list, #nav) { visibility: hidden; }
   /* While it slides: the list keeps its width over the room, the room's far side off the screen. */
   #app.sliding { overflow: hidden; }
+  #app.sliding :is(#list, #nav, #room) { will-change: transform; }
   #app.sliding :is(#list, #nav) { visibility: visible; width: var(--list-width, 260px); box-sizing: border-box; position: relative; z-index: 1; }
 }
 @media (max-width: 700px) { #fold { display: none; } }
