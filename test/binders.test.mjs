@@ -76,9 +76,9 @@ test('a card come due: each conversation that owns it gets one event, the device
     clock = Date.parse('2026-11-04T09:00:00');
     assert.deepEqual(b.remind(), [card.id]);
     assert.deepEqual(events.map(([n, e]) => [n, e.kind, e.text, e.data.card]), [
-        ['coder', 'binder/due', `Due: #${card.id} Renew the domain (Batches)`, card.id],
-        ['writer', 'binder/due', `Due: #${card.id} Renew the domain (Batches)`, card.id]]);
-    assert.deepEqual(alerts, [{ title: 'Due', body: 'Renew the domain (Batches)', url: `/?open=lists&a=list%3A${l.id}` }]);
+        ['coder', 'binder/due', `Échéance : #${card.id} Renew the domain (Batches)`, card.id],
+        ['writer', 'binder/due', `Échéance : #${card.id} Renew the domain (Batches)`, card.id]]);
+    assert.deepEqual(alerts, [{ title: 'Échéance', body: 'Renew the domain (Batches)', url: `/?open=lists&a=list%3A${l.id}` }]);
     assert.deepEqual(b.remind(), [], 'once');
     clock = Date.parse('2026-11-04T15:30:00');
     assert.deepEqual(b.remind(), [timed.id], 'a time: at that time; a person owns none: no alert');
@@ -104,4 +104,41 @@ test('a docket or a device that fails stops nothing', (t) => {
     const l = b.act('create-list', { template: 'simple' }).data;
     const r = b.act('add', { list: l.id, title: 'Pay', due: '2026-11-04', owners: ['conversation:coder', 'person:owner'] }).data;
     assert.deepEqual(b.remind(), [r.id]);
+});
+
+test('a lead reminder is delivered once ahead of the due, the due once at the due, no repeat across a restart', (t) => {
+    let clock = Date.parse('2026-10-27T08:00:00');
+    const { b, dir, events, alerts } = bench(t, { now: () => clock });
+    const l = b.act('create-list', { template: 'simple', title: 'Projets' }).data;
+    const card = b.act('add', { list: l.id, title: 'Voyage à Paris', due: '2026-11-04 09:00', remindBefore: 7, owners: ['conversation:coder', 'person:owner'] }).data;
+    events.length = 0;
+    assert.deepEqual(b.remind(), [], 'before the lead moment, nothing');
+    clock = Date.parse('2026-10-28T09:00:00');            // due − 7 days
+    assert.deepEqual(b.remind(), [card.id], 'the lead fires');
+    assert.deepEqual(events.map(([n, e]) => [n, e.text, e.data.days]), [
+        ['coder', `Dans 7 jours : #${card.id} Voyage à Paris (Projets)`, 7]]);
+    assert.deepEqual(alerts, [{ title: 'Dans 7 jours', body: 'Voyage à Paris (Projets)', url: `/?open=lists&a=list%3A${l.id}` }]);
+    assert.deepEqual(b.remind(), [], 'the lead is delivered only once');
+    events.length = 0;
+    clock = Date.parse('2026-11-04T09:00:00');            // the due time
+    assert.deepEqual(b.remind(), [card.id], 'the due fires');
+    assert.deepEqual(events.map(([, e]) => [e.text, e.data.days]), [[`Échéance : #${card.id} Voyage à Paris (Projets)`, undefined]]);
+    assert.equal(alerts.length, 2);
+    assert.equal(alerts[1].title, 'Échéance');
+    assert.deepEqual(b.remind(), [], 'the due is delivered only once');
+
+    const again = bench(t, { now: () => clock, dir });
+    assert.deepEqual(again.b.remind(), [], 'a restart delivers neither again');
+});
+
+test('a failing docket or device does not stop a lead reminder', (t) => {
+    const clock = Date.parse('2026-10-28T09:00:00');
+    const dir = mkdtempSync(join(tmpdir(), 'clv-binders-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, 'work', 'coder'), { recursive: true });
+    const b = new Binders({ dataDir: join(dir, 'data'), resources: { workFolder: (n) => join(dir, 'work', n) }, conversations: () => ['coder'],
+        dockets: { post: () => { throw new Error('off'); } }, alert: () => Promise.reject(new Error('no device')), now: () => clock });
+    const l = b.act('create-list', { template: 'simple' }).data;
+    const r = b.act('add', { list: l.id, title: 'Trip', due: '2026-11-04 09:00', remindBefore: 7, owners: ['conversation:coder', 'person:owner'] }).data;
+    assert.deepEqual(b.remind(), [r.id], 'the lead is still marked delivered');
 });

@@ -20,8 +20,10 @@
  * a date and time at that time; not done, not archived): each conversation
  * that owns it is posted one event (kind binder/due, its title and list, data
  * the card), and where a person owns it, the owner's devices are told once
- * (alerts.mjs). Binder keeps what it gave, so a restart says nothing again;
- * a due date moved says it again when the new time comes.
+ * (alerts.mjs). A card may also carry a lead time (remindBefore days): then it
+ * is told once that many days ahead too -- "Dans 7 jours : ...", the due itself
+ * staying "Échéance : ...". Binder keeps what it gave, so a restart says
+ * nothing again; a due date or a lead moved says it again when its time comes.
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-binder/host';
@@ -32,6 +34,8 @@ export const DUE_MS = 30_000;
 export const DUE_KIND = 'binder/due';
 const AGENT = 'conversation:';
 const PERSON = 'person:';
+/* A lead time in words: "Dans 1 jour", "Dans 7 jours". */
+const ahead = (days) => `Dans ${days} jour${days > 1 ? 's' : ''}`;
 
 export class Binders {
     #keeper; #resources; #conversations; #dockets; #team; #alert; #timers = []; #changes = 0; #ready = new Set();
@@ -65,13 +69,17 @@ export class Binders {
         const name = id.slice(AGENT.length);
         try { this.#dockets.post(name, { kind, text, ...(data ? { data } : {}) }); } catch { /* its docket may be off */ }
     }
-    /* The cards come due since the last look: told to who owns them, once. */
+    /* The moments come since the last look: told to who owns them, once each.
+       The lead reminder (kind due-soon) leads with "Dans N jours", the due itself
+       with "Échéance"; both short, high level, the card in the event's data. */
     remind() {
         const told = [];
-        for (const { record: r, list: l } of this.#keeper.due()) {
-            for (const id of r.owners) this.#tell(id, `Due: #${r.id} ${r.title} (${l.title})`, DUE_KIND, { card: r.id, list: l.id, due: r.due });
+        for (const { kind, days, record: r, list: l } of this.#keeper.due()) {
+            const soon = kind === 'due-soon';
+            const head = soon ? ahead(days) : 'Échéance';
+            for (const id of r.owners) this.#tell(id, `${head} : #${r.id} ${r.title} (${l.title})`, DUE_KIND, { card: r.id, list: l.id, due: r.due, ...(soon ? { days } : {}) });
             if (this.#alert && r.owners.some((id) => id.startsWith(PERSON))) {
-                try { void Promise.resolve(this.#alert({ title: 'Due', body: `${r.title} (${l.title})`, url: `/?open=lists&a=${encodeURIComponent(`list:${l.id}`)}` })).catch(() => {}); } catch { /* as said */ }
+                try { void Promise.resolve(this.#alert({ title: head, body: `${r.title} (${l.title})`, url: `/?open=lists&a=${encodeURIComponent(`list:${l.id}`)}` })).catch(() => {}); } catch { /* as said */ }
             }
             told.push(r.id);
         }
