@@ -1229,7 +1229,7 @@ select.pill { appearance: auto; }
 :root:not([data-theme="light"]) .rv-diff .d2h-info { background: var(--bar); color: var(--ink2); border-color: var(--line); }
 :root:not([data-theme="light"]) .rv-diff .d2h-emptyplaceholder, :root:not([data-theme="light"]) .rv-diff .d2h-code-side-emptyplaceholder { background: var(--bar); border-color: var(--line); }
 /* Line numbers in the flow of their row: diff2html places them absolutely, and they slide off their lines when the page scrolls. */
-.rv-diff .d2h-code-linenumber, .rv-diff .d2h-code-side-linenumber, .ts-diffs .d2h-code-linenumber, .ts-diffs .d2h-code-side-linenumber { position: static; }
+.rv-diff .d2h-code-linenumber, .rv-diff .d2h-code-side-linenumber, .ts-diffs .d2h-code-linenumber, .ts-diffs .d2h-code-side-linenumber { position: static; display: table-cell; }
 .rv-diff .d2h-code-line, .rv-diff .d2h-code-side-line, .ts-diffs .d2h-code-line, .ts-diffs .d2h-code-side-line { padding: 0 .6em; width: auto; }
 /* Syntax colours (highlight.js classes), both themes. */
 .rv-diff .hljs-keyword, .rv-diff .hljs-selector-tag, .rv-diff .hljs-built_in { color: #d73a49; }
