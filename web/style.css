@@ -1758,3 +1758,8 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
   button, a.button, .file { min-height: 40px; }
   footer#keys { flex-wrap: wrap; overflow-x: visible; }
 }
+/* Batches beside the chat, on a touch screen: each box to tick and each title take a fingertip, their look unchanged. */
+@media (pointer: coarse) {
+  #simple-thread :is(.parley-panel-tick, .parley-panel-title) { position: relative; }
+  #simple-thread :is(.parley-panel-tick, .parley-panel-title)::after { content: ""; position: absolute; inset: -6px; }
+}
