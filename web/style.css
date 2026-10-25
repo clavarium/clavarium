@@ -1709,7 +1709,7 @@ details.chapter[data-attention] > summary .chapter-title::after, #settings-nav b
 .binder-holder { display: flex; flex-direction: column; min-height: 0; }
 /* Binder's screen keeps its whole height: the holder scrolls (shrunk to it, the last rows were cut off). */
 .binder-holder > .binder { flex: none; }
-#clists { padding: 0; }
+#clists { padding: 0; background: var(--bg); }
 #clists-binder { overflow: auto; padding: 16px 16px 24px; }
 body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
   --binder-action: var(--brass); --binder-on-action: #1b1405; --binder-ok: var(--ok); --binder-ask: var(--warn); --binder-danger: var(--danger); }
@@ -1718,7 +1718,8 @@ body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink);
 .as-binder .binder-top { display: none; }
 .as-binder { margin-top: 8px; }
 /* A box to tick stays a box on a touch screen (buttons are 44px high there), a little larger. */
-@media (pointer: coarse) { .binder-holder .binder-tick { min-height: 0; width: 1.75rem; height: 1.75rem; } }
+.binder-holder .binder-tick { min-height: 0; flex: none; }
+@media (pointer: coarse) { .binder-holder .binder-tick { width: 1.75rem; height: 1.75rem; } }
 /* On the tab, what waits for the owner's tick: the colour of what asks. */
 .views #lists-count { background: var(--brass); color: var(--on-brass, #1b1405); font-weight: 700; }
 /* A commit with more to its message: a click on its line opens the rest. */

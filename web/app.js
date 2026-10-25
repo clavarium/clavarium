@@ -50,20 +50,22 @@
         const handle = document.getElementById('list-resize');
         if (!handle) return;
         let kept = LIST_USUAL; try { kept = Number(localStorage.getItem(LIST_WIDTH)) || LIST_USUAL; } catch { /* none */ }
+        /* What the person chose, kept apart from what the window allows: a narrower window (a tablet turned) narrows the list for a while, not for good. */
+        let chosen = kept;
         listWidth(kept);
         let drag = null;
         handle.addEventListener('pointerdown', (e) => { if (e.button !== 0) return; drag = { id: e.pointerId }; handle.setPointerCapture(e.pointerId); handle.dataset.dragging = 'true'; e.preventDefault(); });
         handle.addEventListener('pointermove', (e) => { if (!drag || e.pointerId !== drag.id) return; listWidth(e.clientX - document.getElementById('app').getBoundingClientRect().left); });
-        const end = (e) => { if (!drag || e.pointerId !== drag.id) return; drag = null; delete handle.dataset.dragging; keepWidth(Number(handle.getAttribute('aria-valuenow'))); };
+        const end = (e) => { if (!drag || e.pointerId !== drag.id) return; drag = null; delete handle.dataset.dragging; chosen = Number(handle.getAttribute('aria-valuenow')); keepWidth(chosen); };
         handle.addEventListener('pointerup', end); handle.addEventListener('pointercancel', end);
-        handle.addEventListener('dblclick', () => keepWidth(listWidth(LIST_USUAL)));
+        handle.addEventListener('dblclick', () => { chosen = listWidth(LIST_USUAL); keepWidth(chosen); });
         handle.addEventListener('keydown', (e) => {
             const now = Number(handle.getAttribute('aria-valuenow')) || LIST_USUAL;
             const to = e.key === 'ArrowLeft' ? now - 16 : e.key === 'ArrowRight' ? now + 16 : e.key === 'Home' ? LIST_MIN : e.key === 'End' ? LIST_MAX : e.key === 'Enter' ? LIST_USUAL : null;
             if (to === null) return;
-            e.preventDefault(); keepWidth(listWidth(to));
+            e.preventDefault(); chosen = listWidth(to); keepWidth(chosen);
         });
-        addEventListener('resize', () => listWidth(Number(handle.getAttribute('aria-valuenow')) || LIST_USUAL));
+        addEventListener('resize', () => listWidth(chosen));
     })();
     /* On the device page some controls do not exist; what would have been
        done to them is done to a detached element instead, and is lost. */
