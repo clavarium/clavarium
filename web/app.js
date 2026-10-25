@@ -453,6 +453,15 @@
         if (box) { if (!touchScreen) box.focus({ preventScroll: true }); return; }
         terminal.focus();
     };
+    /* A FIELD THE PERSON IS WRITING IN IS LEFT ALONE by what the page does on its own (a connection opened
+       again, a conversation opened): the focus is not taken from it -- on a touch screen that would put the
+       keyboard away under the finger (a word being corrected, a name being typed). */
+    const writingIn = () => {
+        const field = document.activeElement;
+        if (!(field instanceof HTMLElement) || field === terminal.textarea || field.getClientRects().length === 0) return false;
+        return field.isContentEditable || field.matches('input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]):not([type=file]), textarea, select');
+    };
+    const focusTerminalUnasked = () => { if (writingIn()) applyKeyboard(); else focusTerminal(); };
     /* A field the page would like to put the cursor in for the person. With
        the lock on it is only brought into sight: focusing it would raise the
        keyboard the person asked to keep away. A read-only field raises no
@@ -567,7 +576,7 @@
         else later(T.repair, () => void repairTerminal(name));
         later(T.offer, () => void explainMachine(true, true));
         /* Open means the bridge answered, not that the machine is awake yet. */
-        mine.onopen = () => { say('opening', 'connecting'); focusTerminal(); };
+        mine.onopen = () => { say('opening', 'connecting'); focusTerminalUnasked(); };
         mine.onmessage = (event) => {
             /* Binary is terminal output. Text is the bridge talking to the page. */
             if (typeof event.data !== 'string') {
@@ -2427,7 +2436,11 @@
         /* A device not given the chat does not ask for it: the server would refuse. */
         if (!current || (DEVICE && deviceParts.chat === null)) { talk = { on: false, messages: [] }; talkOf = current; return talk; }
         /* Whether it is on, nothing of the thread: asked every few seconds. */
-        talk = await fetch(talkPath(current, '', { state: 1 })).then((r) => (r.ok ? r.json() : { on: false, messages: [] })).catch(() => ({ on: false, messages: [] }));
+        /* No answer (the network cut for a moment, the server restarting): what was known is kept. Taken
+           for "off", the chat would be taken down and drawn again -- its box with it, and a tablet's keyboard. */
+        const known = talkOf === current ? talk : null;
+        const off = { on: false, messages: [] };
+        talk = await fetch(talkPath(current, '', { state: 1 })).then((r) => (r.ok ? r.json() : r.status >= 500 ? known ?? off : off)).catch(() => known ?? off);
         talkOf = current;
         return talk;
     }
@@ -2676,7 +2689,7 @@
         if (want !== simple) { simple = want; simpleFilesAt = 0; }
         if (!simple) { paintSimple(); return; }
         await paintThread();
-        if (talk.on && name === current) focusTerminal();
+        if (talk.on && name === current) focusTerminalUnasked();
     }
     function languageName(tag) { try { return new Intl.DisplayNames(['en'], { type: 'language' }).of(tag.split('-')[0]) ?? tag; } catch { return tag; } }
     async function paintTalkBox() {

@@ -425,3 +425,71 @@ test('what was selected is offered for what it is: a web address opens elsewhere
     }
     assert.deepEqual(me.errors, []);
 });
+
+/* Said by the owner, on a tablet: a word underlined by the spellchecker, touched to be corrected, and the keyboard
+   went away. The browser's own menu is the browser's; nothing of the page may take the box or its focus meanwhile. */
+test('the chat\'s box on a tablet is left alone: a press or a right click in it, a keyboard that comes and goes, a network cut for a moment, a connection opened again', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('words');
+    assert.equal((await me.api('/api/conversations/words/talk', { on: true })).status, 200);
+    await me.type('clear; export PATH="$FAKE_VM_ROOT"/usr/local/bin:$PATH; parley tell "Ready." >/dev/null && echo told-ok');
+    await me.printed('told-ok', 30_000);
+    const tablet = await b.person({ phone: true });
+    const page = tablet.page;
+    await page.setViewportSize({ width: 800, height: 1200 });
+    await page.goto(`${b.origin}/?c=words`);
+    const chat = page.locator('#simple-thread');
+    await tablet.until('its chat', async () => /Ready\./.test(await chat.innerText()), 30_000);
+    const box = chat.locator('.parley-box');
+    await box.tap();
+    await box.fill('Helo wrld');
+    await page.evaluate(() => { window.theBox = document.activeElement; });
+    const same = () => page.evaluate(() => ({ focused: document.activeElement === window.theBox, kept: document.querySelector('#simple-thread .parley-box') === window.theBox && window.theBox.isConnected, value: window.theBox.value }));
+    const kept = { focused: true, kept: true, value: 'Helo wrld' };
+    assert.deepEqual(await same(), kept);
+    /* A right click and a long press in it: its own menu, not prevented. */
+    assert.equal(await page.evaluate(() => window.theBox.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))), true, 'the browser\'s menu');
+    const r = await box.boundingBox();
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: r.x + 20, y: r.y + r.height / 2 }] });
+    await wait(900);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await page.evaluate(() => window.theBox.setSelectionRange(0, 4));
+    assert.deepEqual(await same(), kept);
+    /* A keyboard that comes, then goes. */
+    await page.setViewportSize({ width: 800, height: 700 }); await wait(500);
+    await page.setViewportSize({ width: 800, height: 1200 }); await wait(500);
+    assert.deepEqual(await same(), kept);
+    /* The network cut for longer than the page's look at the chat: the chat stays, its box too. */
+    await page.route('**/talk?*', (route) => route.abort());
+    await wait(6500);
+    assert.deepEqual(await same(), kept, 'no answer is not "the chat is off"');
+    await page.unroute('**/talk?*');
+    /* The browser says the network is back: the terminal's connection is opened again, the box keeps its focus. */
+    const opened = await page.evaluate(() => window.clavariumTerminal.textarea === document.activeElement);
+    assert.equal(opened, false);
+    await page.evaluate(() => dispatchEvent(new Event('online')));
+    await wait(1500);
+    assert.deepEqual(await same(), kept);
+    assert.deepEqual(tablet.errors, []);
+});
+
+/* With a mouse, the same: a field of the settings being written in keeps the cursor when the connection opens again. */
+test('a field being written in keeps its focus when the terminal\'s connection opens again', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    await me.create('named');
+    assert.equal((await me.api('/api/conversations/named/talk', { on: true })).status, 200);
+    await me.page.reload();
+    await me.until('its chat', async () => me.page.locator('#simple-thread .parley-box').isVisible(), 30_000);
+    await me.page.locator('#folders').click();
+    const field = me.page.locator('#title-name');
+    await field.click();
+    await field.pressSequentially('A new nam');
+    await me.page.evaluate(() => dispatchEvent(new Event('online')));
+    await me.until('opened again', async () => (await me.page.locator('#state').innerText()) === 'live', 20_000);
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(await me.page.evaluate(() => document.activeElement?.id), 'title-name');
+    assert.deepEqual(me.errors, []);
+});
