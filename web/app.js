@@ -1686,7 +1686,7 @@
     function showTab(which, pick) {
         if (which === 'assets') { closePanelZone(); void openRoomAssets(pick); return; }
         if (which === 'settings') { closeRoomAssets(); openPanelZone(); return; }
-        if (which === 'lists') { closeRoomAssets(); closePanelZone(); void openRoomLists(); return; }
+        if (which === 'lists') { closeRoomAssets(); closePanelZone(); void openRoomLists(pick); return; }
         closeRoomAssets(); closePanelZone(); closeRoomLists();
         if ((which === 'chat') !== simple) toggleSimple(); else { paintViews(); if (!simple) focusTerminal(); }
     }
@@ -1712,7 +1712,7 @@
     }
     /* Another conversation, or the same one started again: its first tab, nothing open over it. */
     function resetTabs() {
-        if (!DEVICE) nav.cut(nav.first(['tab', 'asset', 'review', 'over']));
+        if (!DEVICE) nav.cut(nav.first(['tab', 'binder', 'asset', 'review', 'over']));
         else nav.cut(nav.first(['over']));
         closeRoomAssets(); closePanelZone(); closeRoomLists();
         $('files').hidden = $('copy').hidden = true;
@@ -1723,17 +1723,32 @@
     $('view-terminal').addEventListener('click', () => goTab('terminal'));
     $('view-assets').addEventListener('click', () => goTab('assets'));
     $('view-lists').addEventListener('click', () => goTab('lists'));
-    /* ITS LISTS: Binder's screen, cut to the lists given to it (read or write). */
-    async function openRoomLists() {
+    /* ITS LISTS: Binder's screen, cut to the lists given to it (read or write). Its binder and
+       card are in the address (?c=coder&binder=batches&card=3): a reload finds them again. */
+    const listsAddress = (p) => {
+        if (DEVICE || !listsShown || place !== 'conversations' || !current) return;
+        const q = new URLSearchParams({ c: current, ...(p?.list ? { binder: p.list } : {}), ...(p?.page === 'card' && p.card ? { card: p.card } : {}) });
+        nav.replace(`?${q}`);
+    };
+    /* A card opened from the batches beside the chat: its way back is the step of the tab. */
+    const tabFromChat = () => nav.top()?.kind === 'tab' && nav.top().home === 'chat';
+    const listsSteps = binderSteps(() => listsView, { address: listsAddress, covered: tabFromChat, fromBack: () => nav.close('tab'), fromClose: () => showTab('chat') });
+    async function openRoomLists(at = null) {
         if (DEVICE || !current) return;
         listsShown = true; $('clists').hidden = false; paintViews();
-        if (listsView && listsOf === current) { void listsView.refresh(); return; }
+        if (listsView && listsOf === current) { if (at) await listsView.go(at); else void listsView.refresh(); listsAddress(listsView.place); return; }
         const name = current; listsOf = name;
         listsView = null;
-        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name });
+        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name, place: at, steps: listsSteps });
         if (listsOf === name) listsView = view;
     }
-    function closeRoomLists() { if (!listsShown) return; listsShown = false; $('clists').hidden = true; paintViews(); }
+    function closeRoomLists() {
+        if (!listsShown) return;
+        listsShown = false; $('clists').hidden = true; paintViews();
+        /* Left with a card open (the tab changed, Back to the chat): its binder, the next time. */
+        if (listsView && listsView.place.page !== 'list') void listsView.go({ list: listsView.place.list });
+        if (!DEVICE && place === 'conversations' && current) nav.replace(`?c=${encodeURIComponent(current)}`);
+    }
     /* Its last list taken back: its first tab again. */
     function leaveLists() {
         /* Under a place (Assets, where it was taken back): changed in place, the place left open. */
@@ -2572,7 +2587,7 @@
         if (current !== name) return;
         goTab('lists');
         for (let i = 0; i < 50 && !(listsView && listsOf === name); i++) await new Promise((r) => setTimeout(r, 100));
-        if (listsView && listsOf === name) await listsView.open?.(id);
+        if (listsView && listsOf === name) await listsView.open?.(id, { from: TAB_WORD.chat });
     }
     /* Read again when the binders changed (a number that moves with each change), and only then. */
     function watchTasks() {
@@ -3753,6 +3768,9 @@
 
     /* ---- the server's ---- */
     let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false; let listOpen = ''; let listsSig = '';
+    /* A binder opened in Assets: its screen, the card of the address (a reload); a card, a step (binderSteps). */
+    let assetsView = null; let assetsAt = null;
+    const assetsSteps = binderSteps(() => assetsView, { address: () => remember() });
     /* A list given to a conversation, or taken back: a grant of Binder's. */
     const givenTo = (l) => Object.keys(l.grants ?? {}).filter((id) => id.startsWith('conversation:'));
     async function grantList(list, name, value) {
@@ -3885,7 +3903,14 @@
             open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
             detail.append(chapter('Cards', open), holder);
             const id = chosen.list.id;
-            if (listOpen === chosen.key) void mountBinder(holder, (l) => l.id === id, { onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } });
+            if (listOpen === chosen.key) {
+                /* Drawn again (the lists changed): on the card it showed, if it showed one; after a reload, the card of the address. */
+                const was = assetsView?.place;
+                const at = assetsAt?.list === id ? assetsAt : was?.list === id && was.page === 'card' ? { list: id, card: was.card } : null;
+                assetsAt = null;
+                void mountBinder(holder, (l) => l.id === id, { place: at, steps: assetsSteps, onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } })
+                    .then((view) => { if (view) assetsView = view; });
+            }
         }
         if (chosen.kind === 'git') {
             const holder = el('div', 'as-git'); detail.append(holder);
@@ -4159,6 +4184,7 @@
         if (current) q.set('c', current);
         if (place !== 'conversations') q.set('open', place);
         if (place === 'assets' && assetOpen) q.set('a', assetOpen);
+        if (place === 'assets' && assetOpen && assetOpen === listOpen && assetsView?.place.page === 'card') q.set('card', assetsView.place.card);
         if (place === 'access') { q.set('tab', accessTab === 'map' && mapMode === 'flows' ? 'flows' : accessTab); if (accessFor) q.set('for', accessFor); }
         const query = q.toString();
         return query ? `?${query}` : location.pathname;
@@ -4234,7 +4260,7 @@
     /* What a page drew from the lists, to know when they changed. */
     function binderSig(lists) { return JSON.stringify((Array.isArray(lists) ? lists : []).map((l) => [l.id, l.title, l.archived, l.count, l.grants])); }
     /* `of`: the conversation its cards are of (its Binders tab); else the one the list was given to. */
-    async function mountBinder(holder, keep, { onLists, of } = {}) {
+    async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null } = {}) {
         binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
         const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
@@ -4259,6 +4285,8 @@
                 else if (a.kind === 'file') void openCardFile(whose(), a.ref);
                 else if (a.kind === 'link' && /^https?:\/\//i.test(a.ref)) window.open(a.ref, '_blank', 'noopener');
             },
+            /* Where it is: a step of this page's Back (below). */
+            place: at, onPlace: steps?.onPlace, onBack: steps?.onBack,
         });
         binderViews.add({ box: holder.firstElementChild, view });
         watchBinders();
@@ -4298,6 +4326,36 @@
             if (now.changes !== binderChanges) { binderChanges = now.changes; for (const one of binderViews) void one.view.refresh(); }
         }, 4000);
     }
+    /* WHERE A BINDER IS, IN THIS PAGE'S BACK: a card (or a binder's settings) is one step over
+       its list; Back, Escape and its "‹" close it, and the list is there again. Another binder
+       picked takes no step. `viewOf()`: the screen shown now (it may be drawn again).
+       `address(place)`: the address of what is shown. `covered()`: a card opened from
+       elsewhere (`from`) whose way back is already a step of this page (the tab it opened);
+       `fromBack()` takes it. `fromClose()`: the step of such a card closed, where it came from shown. */
+    function binderSteps(viewOf, { address = () => {}, covered = () => false, fromBack = () => false, fromClose = () => {} } = {}) {
+        let step = null;
+        return {
+            onPlace(p) {
+                if (p.page === 'list') { if (step) { const s = step; step = null; s.gone = true; nav.drop(s); } }
+                else if (!step && !(p.from && covered())) {
+                    const from = p.from;
+                    const s = nav.push('binder', ({ quiet }) => {
+                        if (s.gone) return;
+                        if (step === s) step = null;
+                        const view = viewOf();
+                        void view?.go({ list: view.place.list }).then(() => { if (!quiet) address(view.place); });
+                        if (!quiet && from) fromClose();
+                    });
+                    step = s;
+                }
+                address(p);
+            },
+            onBack(p) {
+                if (step) { nav.drop(step); return true; }
+                return p.from && covered() ? fromBack() : false;
+            },
+        };
+    }
     async function openAccessPage(tab = accessTab, { mode, of, face: shown = 'manage', push = true, pin } = {}) {
         if (DEVICE) return;
         /* Assets left Access: a conversation's own, or the server's. */
@@ -4333,6 +4391,9 @@
             return;
         }
         /* Assets, a place of its own now (it was a tab of Access); Lists, a kind of asset now. */
+        /* A card of a binder of Assets (?open=assets&a=list:batches&card=3): that binder opened, on it. */
+        const a = q.get('a') ?? ''; const card = q.get('card') ?? '';
+        if (open === 'assets' && a.startsWith('list:') && /^\d{1,9}$/.test(card)) { listOpen = a; assetsAt = { list: a.slice(5), card }; }
         if (open === 'assets' || open === 'lists' || (open === 'access' && q.get('tab') === 'assets')) { await openAssetsPlace(q.get('a') ?? undefined, { push: false }); return; }
         const former = FORMER[open === 'access' ? (q.get('tab') ?? 'map') : open];
         if (former) { await openAccessPage(former[0], { mode: former[1], of: q.get('for') ?? '', push: false }); return; }
@@ -7790,9 +7851,18 @@
         if (!home) { view('room'); if (!NAME.test(current)) current = ''; }
         enter();
         /* Arriving on a conversation: the list is one Back away, as if it had been picked there. */
-        if (home && current && !new URLSearchParams(location.search).has('open') && !Number.isInteger(history.state?.nav)) {
+        const arrived = new URLSearchParams(location.search);
+        if (home && current && !arrived.has('open') && !Number.isInteger(history.state?.nav)) {
             history.replaceState(null, '', location.pathname);
             nav.push('room', ({ quiet }) => { if (!quiet) select(''); }, { address: `?c=${encodeURIComponent(current)}` });
+        }
+        /* On one of its binders (a reload): that binder, that card, its first tab one Back away. */
+        if (home && current && !arrived.has('open') && /^[\w-]{1,80}$/.test(arrived.get('binder') ?? '')) {
+            nav.replace(`?c=${encodeURIComponent(current)}`);
+            const card = arrived.get('card') ?? '';
+            /* Its first tab known first (its chat, when it talks): Back comes back to it. */
+            await chatFirst();
+            goTab('lists', { pick: { list: arrived.get('binder'), ...(/^\d{1,9}$/.test(card) ? { card } : {}) } });
         }
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();

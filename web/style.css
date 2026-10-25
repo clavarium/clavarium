@@ -1711,6 +1711,8 @@ details.chapter[data-attention] > summary .chapter-title::after, #settings-nav b
 .binder-holder > .binder { flex: none; }
 #clists { padding: 0; background: var(--bg); }
 #clists-binder { overflow: auto; padding: 16px 16px 24px; }
+/* Its whole height: a long card neither runs past its ground nor under what follows it (Assets). */
+.binder-holder > .binder, .as-binder { flex-shrink: 0; }
 body .binder-holder .binder { --binder-bg: var(--bg); --binder-text: var(--ink); --binder-dim: var(--ink2); --binder-line: var(--line); --binder-panel: var(--panel);
   --binder-action: var(--brass); --binder-on-action: #1b1405; --binder-ok: var(--ok); --binder-ask: var(--warn); --binder-danger: var(--danger); }
 .binder-holder .binder-new-list, .binder-holder .binder-empty .binder-primary { display: none; }
@@ -1730,3 +1732,6 @@ details.commit > summary::before { content: '▸'; color: var(--ink2); width: 1e
 details.commit[open] > summary::before { content: '▾'; }
 div.commit::before { content: ''; width: 1em; flex: none; }
 details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink2); font-size: .85em; }
+/* A sheet over the terminal (Binders, Assets, Settings): the terminal's typing field (xterm's
+   helpers, z-index 5, at its cursor) stays under it: a tap on a binder there went to the terminal. */
+#room:has(.sheet:not([hidden])) #terminal .xterm-helpers { pointer-events: none; }
