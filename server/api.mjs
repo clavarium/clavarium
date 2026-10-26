@@ -235,7 +235,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/tools') return send(200, conversations.tools()), true;
             if (pathname === '/api/conversations') {
                 const lists = binders?.given() ?? {};
-                return send(200, conversations.list().map((c) => ({ ...c, lists: lists[c.name] ?? null, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
+                return send(200, conversations.list().map((c) => ({ ...c, lists: lists[c.name] ?? null, resources: resources?.of(c.name) ?? [], secrets: secrets?.of(c.name) ?? [], ephemeralSecrets: secrets?.liveFor(c.name) ?? [], answerer: answerer?.of(c.name) ?? null, wakeups: wakeups?.of(c.name) ?? null, health: health?.of(c.name) ?? null, talk: talk?.brief(c.name) ?? null }))), true;
             }
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
@@ -504,6 +504,14 @@ export async function handleApi(request, response, conversations, headers, resou
             secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
             retell(conversation);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
+        }
+        /* Forget an ephemeral secret now (its stars in the chat have a button): gone from the vault and the machine. */
+        const forgetSecret = /^\/api\/conversations\/([^/]+)\/secrets\/([^/]+)\/forget$/.exec(pathname);
+        if (forgetSecret && secrets) {
+            const conversation = decodeURIComponent(forgetSecret[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            await secrets.drop(conversation, decodeURIComponent(forgetSecret[2]));
+            return send(200, { ok: true }), true;
         }
         const share = /^\/api\/conversations\/([^/]+)\/share$/.exec(pathname);
         if (share && sharing) {

@@ -117,6 +117,9 @@ export class Secrets {
     of(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name)).map((s) => s.name); }
     /* Delivered to it at its next start. */
     given(conversation) { return this.#given(conversation).map((s) => s.name); }
+    /* The EPHEMERAL secrets live for it now (a message of it holds their marker), each with how long it has
+       left -- the chat shows the stars with that, and a way to forget it (talk/parley-ui). Never a value. */
+    liveFor(conversation) { return this.#given(conversation).filter((s) => s.ephemeral === true).map((s) => ({ name: s.name, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) })); }
 
     /* The value, for this server's own use only (the key of the dictation
        engine, put in a request's header): never returned by any route. */

@@ -284,3 +284,33 @@ test('a restart drops ephemeral secrets that ran out, keeps those still alive', 
     assert.deepEqual(reborn.given('alice'), [live], 'the live one stays, the dead one is swept');
     assert.ok(!reborn.list().some((s) => s.name === dead));
 });
+
+test('liveFor lists only live ephemeral secrets, with time left', (t) => {
+    const b = bench(t);
+    b.secrets.set({ name: 'MODEL_KEY', value: 'sk-x' }); b.secrets.attach('alice', 'MODEL_KEY', true);
+    const { name } = b.secrets.stash('alice', 'tok', { ttlMs: 10 * 60_000 });
+    const live = b.secrets.liveFor('alice');
+    assert.deepEqual(live.map((x) => x.name), [name], 'only the ephemeral one, never the ordinary secret');
+    assert.ok(live[0].expiresInMs > 0 && live[0].expiresInMs <= 10 * 60_000);
+    b.clock.at = new Date(b.clock.at.getTime() + 11 * 60_000);
+    assert.deepEqual(b.secrets.liveFor('alice'), [], 'an expired one drops out');
+});
+
+test('through the API: forgetting an ephemeral secret of a conversation drops it', async (t) => {
+    const b = bench(t);
+    const call = async (method, path, body) => {
+        const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? {}))]), { method, url: path, headers: { 'content-type': 'application/json' } });
+        let status; let text = '';
+        const response = { writeHead: (s) => { status = s; return { end: (x) => { text = x; } }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready' }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return { status, text };
+    };
+    const { name } = b.secrets.stash('alpha', 'npm_token-value');
+    assert.deepEqual(b.secrets.liveFor('alpha').map((x) => x.name), [name]);
+    const gone = await call('POST', `/api/conversations/alpha/secrets/${name}/forget`, {});
+    assert.equal(gone.status, 200);
+    assert.equal(b.secrets.reveal(name), undefined, 'the value is gone from the vault');
+    assert.deepEqual(b.secrets.liveFor('alpha'), []);
+    assert.equal((await call('POST', '/api/conversations/alpha/secrets/SECRET_FFFFFFFFFF/forget', {})).status, 404);
+});
