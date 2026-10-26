@@ -1022,7 +1022,8 @@
     const whenWords = (t) => {
         if (!t) return '';
         const d = new Date(t); const now = new Date();
-        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        /* Today: how long ago, not the clock -- the list is sorted by it, so "2 min" reads better than "15:05". */
+        if (d.toDateString() === now.toDateString()) { const m = Math.max(0, Math.floor((now - d) / 60_000)); return m < 1 ? 'now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h`; }
         const y = new Date(now); y.setDate(now.getDate() - 1);
         if (d.toDateString() === y.toDateString()) return 'yesterday';
         return now - d < 6 * 86_400_000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
@@ -1054,7 +1055,9 @@
             const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
             b.append(title);
             /* Its last message, and who said it: so it reads as the last message, not as a subject. */
-            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; const who = c.talk.lastFrom === 'person' ? 'You' : (c.chatName || (c.ai ? 'Agent' : c.toolLabel)); last.textContent = `${who}: ${c.talk.lastText}`; b.append(last); }
+            /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
+               the person's own last word is marked "You:", which tells you it is your move. */
+            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; last.textContent = c.talk.lastFrom === 'person' ? `You: ${c.talk.lastText}` : c.talk.lastText; b.append(last); }
             if (!plain) b.append(sub);
             b.append(when); b.dataset.when = 'true';
         } else b.append(title, ...(plain ? [] : [sub]));
