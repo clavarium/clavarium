@@ -35,6 +35,7 @@ import { Devices } from './devices.mjs';
 import { handleDoor, deviceTerminal } from './door.mjs';
 import { Vault } from './vault.mjs';
 import { Secrets, RUNNER } from './secrets.mjs';
+import { scan, secretRef } from './secret-scan.mjs';
 import { Network } from './network.mjs';
 import { Answerer, answererConfig } from './answerer.mjs';
 import { Dockets } from './dockets.mjs';
@@ -420,6 +421,26 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
            what is already known of a machine used instead of asking (talk.mjs). */
         terminal: { open: (name) => bridge?.open(name) ?? false, type: (name, line, ms) => bridge?.type(name, line, ms) ?? false, droppedAt: (name) => bridge?.droppedAt(name) },
         health: { of: (name) => health?.of(name) ?? null },
+        /* A secret pasted in a message is lifted out before the message is kept:
+           it goes to the short-lived vault and the message keeps only a marker
+           the chat shows as stars; the value reaches the machine as
+           /run/secrets/<name>, and is swept after a few minutes. */
+        screen: async (conversation, text) => {
+            const hits = scan(text);
+            if (!hits.length) return text;
+            let out = ''; let last = 0; let any = false;
+            for (const h of hits) {
+                out += text.slice(last, h.start);
+                try { const { name, expiresAt } = secrets.stash(conversation, h.value); out += secretRef(name, Date.parse(expiresAt)); any = true; }
+                catch { out += text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is */
+                last = h.end;
+            }
+            out += text.slice(last);
+            if (any) { try { await secrets.deliver(conversation); } catch { /* machine not running: delivered at its next open */ } }
+            return out;
+        },
+        /* The agent asked to forget a short-lived secret (parley forget): drop it from the vault and machine. */
+        dropSecret: (conversation, name) => { void secrets.drop(conversation, name).catch(() => {}); },
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);

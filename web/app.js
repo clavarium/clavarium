@@ -1022,7 +1022,8 @@
     const whenWords = (t) => {
         if (!t) return '';
         const d = new Date(t); const now = new Date();
-        if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        /* Today: how long ago, not the clock -- the list is sorted by it, so "2 min" reads better than "15:05". */
+        if (d.toDateString() === now.toDateString()) { const m = Math.max(0, Math.floor((now - d) / 60_000)); return m < 1 ? 'now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h`; }
         const y = new Date(now); y.setDate(now.getDate() - 1);
         if (d.toDateString() === y.toDateString()) return 'yesterday';
         return now - d < 6 * 86_400_000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
@@ -1054,7 +1055,9 @@
             const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
             b.append(title);
             /* Its last message, and who said it: so it reads as the last message, not as a subject. */
-            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; const who = c.talk.lastFrom === 'person' ? 'You' : (c.chatName || (c.ai ? 'Agent' : c.toolLabel)); last.textContent = `${who}: ${c.talk.lastText}`; b.append(last); }
+            /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
+               the person's own last word is marked "You:", which tells you it is your move. */
+            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; last.textContent = c.talk.lastFrom === 'person' ? `You: ${c.talk.lastText}` : c.talk.lastText; b.append(last); }
             if (!plain) b.append(sub);
             b.append(when); b.dataset.when = 'true';
         } else b.append(title, ...(plain ? [] : [sub]));
@@ -2516,6 +2519,11 @@
         const name = current;
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
+        /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
+           stars with its time left and a way to forget it. Kept current on each reload, read on each repaint. */
+        const chatSecrets = {};
+        const refreshSecrets = () => { for (const k of Object.keys(chatSecrets)) delete chatSecrets[k]; for (const s of conversations.find((x) => x.name === name)?.ephemeralSecrets ?? []) chatSecrets[s.name] = { expiresInMs: s.expiresInMs }; };
+        refreshSecrets();
         /* The lines of its machine seen so far: what changed comes alone, and their buttons are worked out on all of them. */
         const lines = new Map();
         const withLines = (data, asked) => {
@@ -2529,7 +2537,7 @@
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
             window: windowFor(chatWindow),
-            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)).then((data) => (refreshSecrets(), data)),
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
@@ -2562,6 +2570,9 @@
             /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
             picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
             diagram: drawDiagram, highlight: colourCode,
+            /* Short-lived secrets of this conversation: the stars say their time left and offer to forget them. */
+            secrets: chatSecrets,
+            forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
             remind: () => post(talkPath(name, '/remind'), {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
             voice: chatVoice(), autoSend: chatAuto,
@@ -3217,6 +3228,8 @@
     const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
     /* A secret's expiry, as said: `due` when it asks for the person (near, or past). */
     const secretState = (s) => {
+        /* Short-lived, lifted from a message (secrets.mjs): minutes, not days -- shown so it can be seen and let go. */
+        if (s.ephemeral) { const mins = Math.max(0, Math.round((s.expiresInMs ?? 0) / 60_000)); return s.expired || mins <= 0 ? { text: 'Expired', tone: 'bad', due: true } : { text: `Short-lived, ${mins} min left`, tone: 'warn', due: true }; }
         if (s.expired) return { text: 'Expired', tone: 'bad', due: true };
         if (s.days === null || s.days === undefined) return { text: 'No expiry', tone: '', due: false };
         if (secretDue(s)) return { text: s.days === 1 ? 'Expires tomorrow' : `Expires in ${s.days} days`, tone: 'warn', due: true };

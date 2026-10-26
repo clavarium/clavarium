@@ -129,6 +129,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
     if (chat) out.push('- When you work in batches: keep them in a binder of batches, shown beside the chat. None yet: make it once (binder new batches; MCP: new-list, template batches). Then one card each (binder add Batches "title"), kept up to date; start only those the person ticked.');
     out.push(online === false ? '- Internet: off.' : '- Internet: on.');
     if (secrets.length) out.push(`- Secrets given, by name only: ${list(secrets.map((s) => plain(s, 40)))}.`);
+    /* A secret pasted in the chat is lifted out (talk.mjs, secret-scan.mjs): the message shows a marker, the value waits in /run/secrets. */
+    if (chat) out.push('- A secret the person pastes in the chat is kept OUT of it: the message shows ⟨secret:NAME⟩ and the value waits at /run/secrets/NAME for a few minutes. Use it only from there, inside a command (clv-run, or $(cat /run/secrets/NAME)); never write its value back into the chat. It clears itself when its time runs out, or at once with `parley forget NAME` when you are done.');
     const own = lines.map((l) => plain(l)).filter(Boolean).slice(0, LINES_MAX);
     if (own.length) out.push('', '## From the owner', '', ...own.map((l) => `- ${l}`));
     out.push('');
