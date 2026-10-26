@@ -429,7 +429,9 @@ export class GitReview {
     /* THE BRANCH DIAGRAM: the agent's branches, the remote's, and their
        last commits, newest first in topological order: { branches: [{name,
        id, side: 'agent'|'remote'}], commits: [{id, parents, subject, date,
-       refs: [{name, side}]}] }. What the agent wrote is escaped as everywhere. */
+       author, refs: [{name, side}]}] }. `author` is who committed it, so a
+       person can see whose work a commit is. What the agent wrote is escaped
+       as everywhere. */
     async graph(name) {
         const r = this.#repository(name);
         try {
@@ -438,13 +440,13 @@ export class GitReview {
                 for (const [b, id] of [...remoteTips].sort(([a], [c]) => a.localeCompare(c)).slice(0, GRAPH_BRANCHES)) branches.push({ name: escaped(b), id, side: 'remote' });
                 const tips = [...new Set(branches.map((b) => b.id))];
                 if (tips.length === 0) return { branches, commits: [] };
-                const log = await this.#runner.in(got.path, ['log', '--topo-order', `--max-count=${GRAPH_COMMITS}`, '-z', '--format=%H%x00%P%x00%aI%x00%s', '--stdin', '--end-of-options'], { input: `${tips.join('\n')}\n`, deadlineMs: 60_000, maxBytes: 4 * 1024 * 1024 });
+                const log = await this.#runner.in(got.path, ['log', '--topo-order', `--max-count=${GRAPH_COMMITS}`, '-z', '--format=%H%x00%P%x00%an%x00%aI%x00%s', '--stdin', '--end-of-options'], { input: `${tips.join('\n')}\n`, deadlineMs: 60_000, maxBytes: 4 * 1024 * 1024 });
                 const fields = log.stdout.toString('utf8').split('\0');
                 const commits = [];
-                for (let i = 0; i + 3 < fields.length; i += 4) {
+                for (let i = 0; i + 4 < fields.length; i += 5) {
                     const id = fields[i].replace(/^\n/, '');
                     if (!isId(id)) break;
-                    commits.push({ id, parents: fields[i + 1].split(' ').filter(isId), date: fields[i + 2], subject: escaped(fields[i + 3]).slice(0, 300),
+                    commits.push({ id, parents: fields[i + 1].split(' ').filter(isId), author: escaped(fields[i + 2]).slice(0, 200), date: fields[i + 3], subject: escaped(fields[i + 4]).slice(0, 300),
                         refs: branches.filter((b) => b.id === id).map((b) => ({ name: b.name, side: b.side })) });
                 }
                 return { branches, commits };
