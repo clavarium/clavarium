@@ -69,6 +69,12 @@
         let allLines = true;
         try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
         let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null; let drawnMany = false;
+        /* A box is shown only if its column's filter is empty or its name holds what was typed: so a
+           crowded map (many assets) is narrowed to a few boxes, their links with them. The layout is
+           kept while typing (no reorder), and a filter cleared brings everything back. */
+        const filters = { device: '', conversation: '', asset: '' };
+        let laidOut = null;
+        const matches = (n, k) => { const f = (filters[k] || '').trim().toLowerCase(); return !f || n.name.toLowerCase().includes(f) || String(n.sub || '').toLowerCase().includes(f); };
         const ph = { screen: 'list', kind: 'device', id: null, adding: false, sheet: null };
         let traceOf = '*';
 
@@ -182,27 +188,39 @@
             }
             return best;
         }
-        function paint() {
+        /* `relayout` false keeps the order found last: used while typing a filter, so boxes do not jump. */
+        function paint(relayout = true) {
             for (const b of document.querySelectorAll('#links-tabs [data-view]')) b.setAttribute('aria-selected', String(b.dataset.view === view));
             $('links-all').checked = allLines;
             legend();
             const bd = board();
             bd.className = `lk-board ${VIEWS[view].cols.length === 3 ? 'three' : 'two'}`;
             bd.querySelectorAll('.lk-col, .lk-knob').forEach((e) => e.remove()); closePop();
-            const lists = layout();
+            if (relayout || !laidOut) laidOut = layout();
+            const lists = laidOut;
             VIEWS[view].cols.forEach((cols, ci) => {
                 const col = h('div', { class: 'lk-col' });
                 cols.forEach((k, i) => {
                     if (i) col.append(h('div', { class: 'lk-gap' }));
-                    col.append(h('h3', { class: 'lk-colh' }, h('span', { text: TITLES[k] }), plus(k)));
-                    const list = lists[ci][i];
+                    col.append(h('h3', { class: 'lk-colh' }, h('span', { class: 'lk-colt', text: TITLES[k] }), find(k), plus(k)));
+                    const whole = lists[ci][i];
+                    const list = whole.filter((n) => matches(n, k));
                     for (const n of list) col.append(nodeEl(n));
-                    if (!list.length) col.append(empty(k));
+                    if (!list.length) col.append(whole.length ? h('p', { class: 'hint lk-none', text: 'Nothing matches.' }) : empty(k));
                 });
                 bd.append(col);
             });
             fit(); draw(); hint(); paintPhone();
         }
+        /* A box in each column's title to narrow it: it filters only what is shown, kept while typing. */
+        const onFind = (e) => {
+            const k = e.target.dataset.k; const at = e.target.selectionStart;
+            filters[k] = e.target.value;
+            paint(false);
+            const ni = board().querySelector(`.lk-find[data-k="${k}"]`);
+            if (ni) { ni.focus(); try { ni.setSelectionRange(at, at); } catch { /* a search input may refuse it */ } }
+        };
+        const find = (k) => h('input', { type: 'search', class: 'lk-find', 'data-k': k, value: filters[k], placeholder: 'Filter…', 'aria-label': `Filter ${TITLES[k]}`, oninput: onFind });
         /* How each kind is made: a device paired, a conversation created, an asset added. The same,
            from the small round "+" by each column's title (always there, however many it holds)
            and from an empty column. */
