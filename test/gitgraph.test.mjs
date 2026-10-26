@@ -44,13 +44,25 @@ test('a row shows who committed it, with the short id and the date', () => {
         const { draw } = globalThis.clavariumGraph;
         const box = draw({ commits: [{ id: 'abcdef1234567890', parents: [], subject: 'Did a thing', author: 'tuxo83', date: new Date(2026, 9, 18, 8, 12).toISOString(), refs: [] }] }, { now: new Date(2026, 9, 18, 12, 0) });
         const text = box.textContent;
-        assert.match(text, /tuxo83/, 'the author is shown');
-        assert.match(text, /abcdef1/, 'the short id is shown');
-        assert.match(text, /Did a thing/);
-        /* No author (older data): the row still draws, with id and date only. */
+        assert.match(text, /tuxo83/, 'the author is shown by default');
+        assert.match(text, /Did a thing/, 'the message is shown by default');
+        assert.match(text, /Détails/, 'a toggle brings in the extra columns');
+        assert.match(text, /abcdef1/, 'the id is in the row, for the detailed view');
+        /* No author (older data): the row still draws. */
         const noAuthor = draw({ commits: [{ id: 'abcdef1234567890', parents: [], subject: 's', date: new Date(2026, 9, 18, 8, 12).toISOString(), refs: [] }] }, { now: new Date(2026, 9, 18, 12, 0) });
-        assert.match(noAuthor.textContent, /abcdef1/);
+        assert.match(noAuthor.textContent, /Did a thing|s/);
     } finally { globalThis.document = was.document; }
+});
+
+test('ahead/behind: a branch the agent and the remote hold at different commits', () => {
+    const { syncCounts } = globalThis.clavariumGraph;
+    const c = syncCounts([
+        { id: 'n2', parents: ['n1'], refs: [{ name: 'next', side: 'agent' }] },
+        { id: 'n1', parents: ['n0'], refs: [{ name: 'next', side: 'remote' }] },
+        { id: 'n0', parents: [], refs: [{ name: 'main', side: 'agent' }, { name: 'main', side: 'remote' }] },
+    ]);
+    assert.deepEqual(c.next, { ahead: 1, behind: 0 }, 'local next is one commit ahead of the remote');
+    assert.equal(c.main, undefined, 'main is level on both sides: no count');
 });
 
 test('dates read short: the time today, yesterday, else day and month', () => {

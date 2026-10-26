@@ -52,12 +52,42 @@
         return d.toLocaleDateString([], { day: 'numeric', month: 'short' });
     }
 
+    /* How far the agent's branch is ahead of or behind the remote's, for a
+       branch that both carry at different commits: counted among the commits
+       drawn (a parent older than the diagram stops the walk). -> { name:
+       { ahead, behind } }. */
+    function syncCounts(commits) {
+        const parents = new Map((commits ?? []).map((c) => [c.id, c.parents ?? []]));
+        const reach = (start) => { const seen = new Set(); const stack = [start]; while (stack.length) { const x = stack.pop(); if (seen.has(x) || !parents.has(x)) continue; seen.add(x); for (const p of parents.get(x)) stack.push(p); } return seen; };
+        const tips = {};
+        for (const c of commits ?? []) for (const ref of c.refs ?? []) (tips[ref.name] ??= {})[ref.side] = c.id;
+        const out = {};
+        for (const [name, t] of Object.entries(tips)) {
+            if (!t.agent || !t.remote || t.agent === t.remote) continue;
+            const a = reach(t.agent); const r = reach(t.remote);
+            let ahead = 0; let behind = 0;
+            for (const x of a) if (!r.has(x)) ahead++;
+            for (const x of r) if (!a.has(x)) behind++;
+            out[name] = { ahead, behind };
+        }
+        return out;
+    }
+
     const NS = 'http://www.w3.org/2000/svg';
     /* graph: what /api/git/<name>/graph answers. pick(commit): a row was chosen. */
     function draw(graph, { pick, now } = {}) {
         const commits = graph?.commits ?? [];
         const box = document.createElement('div'); box.className = 'gg';
         if (commits.length === 0) { const p = document.createElement('p'); p.className = 'hint'; p.textContent = 'Nothing committed yet.'; box.append(p); return box; }
+        const counts = syncCounts(commits);
+        /* By default a row shows its message, who committed it, and its branches.
+           One click brings in the id, the time and the ahead/behind count; the
+           choice is not kept -- it is only how this diagram is being looked at. */
+        const wrap = document.createElement('div'); wrap.className = 'gg-wrap';
+        const bar = document.createElement('div'); bar.className = 'gg-bar';
+        const toggle = document.createElement('button'); toggle.type = 'button'; toggle.className = 'gg-toggle'; toggle.textContent = 'Détails'; toggle.setAttribute('aria-pressed', 'false');
+        toggle.addEventListener('click', () => toggle.setAttribute('aria-pressed', box.classList.toggle('gg-detailed') ? 'true' : 'false'));
+        bar.append(toggle);
         const { rows, edges, cols } = layout(commits);
         const width = PAD * 2 + (cols - 1) * LANE; const height = rows.length * ROW;
         const svg = document.createElementNS(NS, 'svg');
@@ -94,11 +124,14 @@
             const c = commits[i];
             const b = document.createElement('button'); b.type = 'button'; b.className = 'gg-row'; b.dataset.id = c.id;
             b.title = `Open the review of ${c.id.slice(0, 7)}`;
-            const subject = document.createElement('span'); subject.className = 'gg-subject'; subject.textContent = c.subject || '(no message)';
-            /* Who committed it, then its short id and when: set as text, never markup. */
-            const author = c.author ? `${c.author} · ` : '';
-            const meta = document.createElement('small'); meta.textContent = ` · ${author}${c.id.slice(0, 7)} · ${when(c.date, now)}`;
-            b.append(subject, meta);
+            /* Fixed columns, so the author, the time and the branches line up
+               down the rows and read at a glance. All set as text, never markup. */
+            const cell = (cls, tag, text) => { const e = document.createElement(tag); e.className = cls; e.textContent = text; return e; };
+            const subject = cell('gg-subject', 'span', c.subject || '(no message)'); subject.title = c.subject || '';
+            const author = cell('gg-author', 'span', c.author || '');
+            const time = cell('gg-time', 'small', when(c.date, now));
+            const sha = cell('gg-id', 'small', c.id.slice(0, 7));
+            b.append(subject, author, time, sha);
             /* Its branches: the agent's (filled), the remote's (outlined); the same name on both is one label. */
             const names = new Map();
             for (const ref of c.refs ?? []) names.set(ref.name, names.has(ref.name) && names.get(ref.name) !== ref.side ? 'both' : ref.side);
@@ -107,12 +140,22 @@
                 pill.style.setProperty('--c', colour(r.col));
                 pill.title = side === 'agent' ? `The agent's ${name}` : side === 'remote' ? `The remote's ${name}` : `${name}, the same here and on the remote`;
                 b.append(pill);
+                /* On the agent's tip of a branch that is not level with the remote:
+                   how far it is ahead and behind (shown only in the detailed view). */
+                const n = side !== 'remote' && counts[name];
+                if (n && (n.ahead || n.behind)) {
+                    const badge = document.createElement('small'); badge.className = 'gg-count';
+                    badge.textContent = `${n.ahead ? `↑${n.ahead}` : ''}${n.behind ? ` ↓${n.behind}` : ''}`.trim();
+                    badge.title = `${n.ahead} ahead of, ${n.behind} behind the remote`;
+                    b.append(badge);
+                }
             }
             if (pick) b.addEventListener('click', () => pick(c));
             list.append(b);
         });
         box.append(svg, list);
-        return box;
+        wrap.append(bar, box);
+        return wrap;
     }
-    globalThis.clavariumGraph = { layout, draw, when };
+    globalThis.clavariumGraph = { layout, draw, when, syncCounts };
 })();
