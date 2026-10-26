@@ -372,6 +372,12 @@
         <!-- THE MAP (once "Who gets what"): every device, conversation and asset, and the rights between them (links.js). -->
         <div id="links" class="pane">
           <div id="links-legend" class="lk-legend"></div>
+          <!-- The column filters, kept out of the board's zoom so a crowded map does not shrink them (links.js). -->
+          <div id="links-filters" class="lk-filters">
+            <label class="lk-filter"><span>Devices</span><input type="search" class="lk-find" data-k="device" placeholder="Filter&hellip;" aria-label="Filter devices"></label>
+            <label class="lk-filter"><span>Conversations</span><input type="search" class="lk-find" data-k="conversation" placeholder="Filter&hellip;" aria-label="Filter conversations"></label>
+            <label class="lk-filter"><span>Assets</span><input type="search" class="lk-find" data-k="asset" placeholder="Filter&hellip;" aria-label="Filter assets"></label>
+          </div>
           <p id="links-hint" class="hint" aria-live="polite"></p>
           <p id="links-error" class="error" role="alert" hidden></p>
           <div id="links-card" class="lk-card" hidden aria-live="polite"></div>
