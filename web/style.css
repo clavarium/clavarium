@@ -43,7 +43,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .state-dot[data-state="problem"] { background: var(--danger); }
 .state-dot[data-state="wait"] { background: var(--wait); }
 .state-dot[data-state="work"] { background: var(--brass); }
-.state-dot[data-state="busy"] { background: var(--warn); }
+.state-dot[data-state="busy"] { background: var(--ink2); }
 .state-dot[data-state="sleep"] { background: transparent; border: 1.5px solid var(--ink2); }
 .item > .state-dot { position: absolute; right: 10px; top: 13px; }
 .item > .state-dot[data-state="work"], .item > .state-dot[data-state="busy"] { animation: breathe 1.7s ease-in-out infinite; }
