@@ -32,6 +32,27 @@ test('two branch tips side by side, each on its lane, meeting at their common pa
     assert.deepEqual(g.edges.map((e) => e.kind), ['straight', 'fork']);
 });
 
+test('a row shows who committed it, with the short id and the date', () => {
+    /* The smallest document draw() needs: elements that keep their text and children. */
+    class Node { constructor() { this.childNodes = []; } append(...k) { for (const c of k) this.childNodes.push(c); }
+        setAttribute() {} setAttributeNS() {} addEventListener() {} set className(v) { this._c = v; } get className() { return this._c ?? ''; }
+        set textContent(t) { this.childNodes = [{ textContent: String(t) }]; } get textContent() { return this.childNodes.map((c) => c.textContent ?? '').join(''); }
+        set title(t) { this._t = t; } set type(t) {} set style(v) {} get style() { return { setProperty() {} }; } get dataset() { return this._d ?? (this._d = {}); } }
+    const was = { document: globalThis.document };
+    globalThis.document = { createElement: () => new Node(), createElementNS: () => new Node() };
+    try {
+        const { draw } = globalThis.clavariumGraph;
+        const box = draw({ commits: [{ id: 'abcdef1234567890', parents: [], subject: 'Did a thing', author: 'tuxo83', date: new Date(2026, 9, 18, 8, 12).toISOString(), refs: [] }] }, { now: new Date(2026, 9, 18, 12, 0) });
+        const text = box.textContent;
+        assert.match(text, /tuxo83/, 'the author is shown');
+        assert.match(text, /abcdef1/, 'the short id is shown');
+        assert.match(text, /Did a thing/);
+        /* No author (older data): the row still draws, with id and date only. */
+        const noAuthor = draw({ commits: [{ id: 'abcdef1234567890', parents: [], subject: 's', date: new Date(2026, 9, 18, 8, 12).toISOString(), refs: [] }] }, { now: new Date(2026, 9, 18, 12, 0) });
+        assert.match(noAuthor.textContent, /abcdef1/);
+    } finally { globalThis.document = was.document; }
+});
+
 test('dates read short: the time today, yesterday, else day and month', () => {
     const now = new Date(2026, 9, 18, 12, 0);
     assert.equal(when(new Date(2026, 9, 17, 9, 0).toISOString(), now), 'yesterday');

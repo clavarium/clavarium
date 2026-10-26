@@ -95,7 +95,9 @@
             const b = document.createElement('button'); b.type = 'button'; b.className = 'gg-row'; b.dataset.id = c.id;
             b.title = `Open the review of ${c.id.slice(0, 7)}`;
             const subject = document.createElement('span'); subject.className = 'gg-subject'; subject.textContent = c.subject || '(no message)';
-            const meta = document.createElement('small'); meta.textContent = ` · ${c.id.slice(0, 7)} · ${when(c.date, now)}`;
+            /* Who committed it, then its short id and when: set as text, never markup. */
+            const author = c.author ? `${c.author} · ` : '';
+            const meta = document.createElement('small'); meta.textContent = ` · ${author}${c.id.slice(0, 7)} · ${when(c.date, now)}`;
             b.append(subject, meta);
             /* Its branches: the agent's (filled), the remote's (outlined); the same name on both is one label. */
             const names = new Map();

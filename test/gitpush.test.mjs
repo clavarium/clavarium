@@ -508,6 +508,7 @@ test('the branch diagram: the agent\'s branches and the remote\'s, their last co
     assert.deepEqual(drawn.branches.map((x) => `${x.side}:${x.name}`).sort(), ['agent:dev', 'agent:main', 'remote:main']);
     assert.deepEqual(drawn.commits.map((c) => c.subject), ['Add a <b>page</b>', 'Start the site'], 'newest first; the subject is text, the page escapes it');
     assert.deepEqual(drawn.commits[0].parents, [first]);
+    assert.deepEqual(drawn.commits.map((c) => c.author), ['Tool', 'Tool'], 'each commit says who committed it');
     assert.deepEqual(drawn.commits[0].refs, [{ name: 'dev', side: 'agent' }]);
     assert.deepEqual(drawn.commits[1].refs.map((r) => r.side).sort(), ['agent', 'remote']);
     const one = await b.review.commit('site', second);
