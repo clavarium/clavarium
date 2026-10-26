@@ -2,7 +2,7 @@
    a narrow one, the list and the conversation are two screens. */
 :root {
   --bg: #0f141a; --bar: #161d26; --panel: #131a22; --line: #2b3745; --ink: #e7edf4; --ink2: #a3b1c2;
-  --brass: #d2a94e; --on-brass: #1b1405; --ok: #5fc39d; --warn: #e39a5c; --danger: #ee7f79;
+  --brass: #d2a94e; --on-brass: #1b1405; --ok: #5fc39d; --warn: #e39a5c; --danger: #ee7f79; --wait: #5aa9f0;
   /* Brass as the colour of text or of a small sign: darker on a light screen, to be read. */
   --brass-ink: #d2a94e;
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -11,7 +11,7 @@
    colours of its own for it (app.js): a tool's "white" must stay readable. */
 :root[data-theme="light"] {
   --bg: #fbfbfa; --bar: #eef0f3; --panel: #ffffff; --line: #c5cdd8; --ink: #17202b; --ink2: #4f5d6d;
-  --brass: #c79a3a; --on-brass: #1b1405; --ok: #1f7a5a; --warn: #a3581a; --danger: #b3261e; --button: #e6eaef; --brass-ink: #8a5d00;
+  --brass: #c79a3a; --on-brass: #1b1405; --ok: #1f7a5a; --warn: #a3581a; --danger: #b3261e; --wait: #2f7fd6; --button: #e6eaef; --brass-ink: #8a5d00;
 }
 * { box-sizing: border-box; }
 /* TEXT IS IN rem: one size at the root (set per device by app.js, as a
@@ -34,21 +34,41 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item small { color: var(--ink2); }
-/* ITS STATE, one point on the right of its row: needs you, to watch, fine, asleep (a hollow ring). */
-.item { position: relative; padding-right: 26px; }
+/* ITS STATE, on the right of its row: two layers at once -- a point for the
+   machine (green on, amber busy, red a problem, hollow asleep) and a ring
+   around it for the agent (gold at work, blue waits for you, green finished).
+   A flat point of the same colours sums a folded group, with no ring. */
+.item { position: relative; padding-right: 28px; }
 .state-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; background: var(--ok); }
-.state-dot[data-state="need"] { background: var(--danger); }
-.state-dot[data-state="watch"] { background: var(--warn); }
+.state-dot[data-state="problem"] { background: var(--danger); }
+.state-dot[data-state="wait"] { background: var(--wait); }
+.state-dot[data-state="work"] { background: var(--brass); }
+.state-dot[data-state="busy"] { background: var(--warn); }
 .state-dot[data-state="sleep"] { background: transparent; border: 1.5px solid var(--ink2); }
-.item > .state-dot { position: absolute; right: 10px; top: 13px; }
-.item[data-state="watch"] > .state-dot { animation: pulse 1.6s ease-in-out infinite; }
+/* The row indicator: a ring (agent) around a core (machine). */
+.state-ind { position: relative; width: 16px; height: 16px; display: inline-grid; place-items: center; flex-shrink: 0; }
+.item > .state-ind { position: absolute; right: 9px; top: 11px; }
+.state-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; box-sizing: border-box; }
+.state-core { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: var(--ok); }
+.state-ind[data-machine="busy"] .state-core { background: var(--warn); animation: breathe 1.5s ease-in-out infinite; }
+.state-ind[data-machine="problem"] .state-core { background: var(--danger); }
+.state-ind[data-machine="off"] .state-core { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink2); }
+.state-ind[data-agent="work"] .state-ring { border-color: var(--brass); animation: breathe 1.9s ease-in-out infinite; }
+.state-ind[data-agent="wait"] .state-ring { border-color: var(--wait); }
+.state-ind[data-agent="done"] .state-ring { border-color: var(--ok); }
+.state-ind[data-agent="sleep"] .state-ring { border-color: var(--line); }
 /* Folded: up to four points, how its conversations are. */
 .state-sum { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 /* Unfolded: it comes in gently, once. */
 .unfolding { animation: unfold .18s ease-out; }
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes pulse { 50% { opacity: .25; } }
-@media (prefers-reduced-motion: reduce) { .item > .state-dot, .unfolding { animation: none !important; } }
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.82); } }
+/* Movement off: no pulse, and a dashed ring tells "at work" by shape instead. */
+@media (prefers-reduced-motion: reduce) {
+  .state-core, .state-ring, .unfolding { animation: none !important; }
+  .state-ind[data-agent="work"] .state-ring { border-style: dashed; }
+}
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choices button[aria-checked="true"] { border-color: var(--brass); background: rgba(210, 169, 78, .16); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
