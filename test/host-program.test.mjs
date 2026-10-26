@@ -18,6 +18,7 @@ const host = (...args) => {
 test('each thing the server needs has one verb, turned into one exact command', () => {
     const cases = [
         [['vm', 'launch', 'clv-demo', '1024'], 'multipass launch 24.04 --name clv-demo --memory 1024M --disk 8G --cpus 1 --timeout 900'],
+        [['vm', 'launch', 'clv-demo', '1024', '16', '1'], 'multipass launch 24.04 --name clv-demo --memory 1024M --disk 16G --cpus 1 --timeout 900'],
         [['vm', 'exec', 'clv-demo', '--', 'tmux', '-L', 'clavarium', 'has-session'], 'multipass exec clv-demo -- tmux -L clavarium has-session'],
         [['vm', 'info', 'clv-demo'], 'multipass info clv-demo --format json'],
         [['vm', 'ping'], 'timeout 90 multipass list --format csv'],
@@ -81,6 +82,8 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
     for (const args of [
         ['vm', 'exec', 'primary', '--', 'id'], ['vm', 'delete', 'someone-else'], ['vm', 'stop', 'clv-'], ['vm', 'start', 'clv-Bad'],
         ['vm', 'launch', 'clv-demo', '64'], ['vm', 'launch', 'clv-demo', '1024M'], ['vm', 'exec', 'clv-demo', 'id'],
+        /* Launch with a size: disk and cores within bounds, or refused (cores capped at this host's). */
+        ['vm', 'launch', 'clv-demo', '1024', '3', '1'], ['vm', 'launch', 'clv-demo', '1024', '99999', '1'], ['vm', 'launch', 'clv-demo', '1024', '16', '99'], ['vm', 'launch', 'clv-demo', '1024', '16', '0'],
         ['vm', 'shell', 'clv-demo'], ['vm', 'set', 'local.driver=lxd'], ['vm', 'transfer', '/etc/shadow', 'clv-demo:/tmp/x'],
         ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['work', 'make', '../x'], ['work', 'aside', '/etc'], ['work', 'erase', 'demo'], ['work', 'room', '../x'], ['vm', 'unwork', 'primary'],
         /* A work folder goes to its own conversation's machine, never to another. */

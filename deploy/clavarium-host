@@ -724,8 +724,16 @@ AREA="$1"; VERB="$2"; shift 2
 
 case "$AREA $VERB" in
     "vm launch")
-        [ $# -eq 2 ] || usage; vm_of "$1"; memory_ok "$2"
-        run "$MULTIPASS" launch "$IMAGE" --name "$1" --memory "${2}M" --disk "$DISK" --cpus 1 --timeout "$LAUNCH_SECONDS" ;;
+        # <vm> <memory> [<disk-gigabytes> <cores>]: the size chosen at creation;
+        # without the last two, the defaults (DISK, one core).
+        [ $# -eq 2 ] || [ $# -eq 4 ] || usage; vm_of "$1"; memory_ok "$2"
+        disk="$DISK"; cores=1
+        if [ $# -eq 4 ]; then
+            [[ "$3" =~ ^[0-9]{1,4}$ ]] && [ "$3" -ge 5 ] && [ "$3" -le "$DISK_MAX_GB" ] || refuse "disk out of bounds: $3"
+            [[ "$4" =~ ^[0-9]{1,3}$ ]] && [ "$4" -ge 1 ] && [ "$4" -le "$(nproc)" ] || refuse "cores out of bounds: $4 (the host has $(nproc))"
+            disk="${3}G"; cores="$4"
+        fi
+        run "$MULTIPASS" launch "$IMAGE" --name "$1" --memory "${2}M" --disk "$disk" --cpus "$cores" --timeout "$LAUNCH_SECONDS" ;;
     "vm clone")
         # <shelf> <vm> <memory>: a conversation's machine, copied from the
         # ready-made one (which must be stopped: Multipass refuses otherwise).

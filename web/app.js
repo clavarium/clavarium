@@ -1429,6 +1429,15 @@
         select.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = sizeWords(m); return o; }));
         select.value = String(mems.includes(was) ? was : least);
         $('newconv-memory-least').textContent = tool ? `${tool.label} needs ${sizeWords(least)} at least` : '';
+        /* Cores: 1 to what this server has (learnt from any machine we know), default 1. */
+        const hostCpus = Math.max(1, ...conversations.map((c) => c.hostCpus ?? 1));
+        const cpus = $('newconv-cpus'); const wasCpus = Number(cpus.value) || 1;
+        cpus.replaceChildren(...Array.from({ length: hostCpus }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === 1 ? ' (default)' : ''}${n === hostCpus && n > 1 ? ' (all of this server)' : ''}`; return o; }));
+        cpus.value = String(wasCpus <= hostCpus ? wasCpus : 1);
+        /* Disk: from the default up; it only grows afterwards. */
+        const disk = $('newconv-disk'); const wasDisk = Number(disk.value) || 8;
+        disk.replaceChildren(...DISK_CHOICES.map((d) => { const o = document.createElement('option'); o.value = String(d); o.textContent = `${d} GB${d === 8 ? ' (default)' : ''}`; return o; }));
+        disk.value = String(DISK_CHOICES.includes(wasDisk) ? wasDisk : 8);
     }
     function paintNewTools() {
         const box = $('newconv-tools');
@@ -1499,10 +1508,11 @@
         if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
         const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
         const memoryMb = Number($('newconv-memory').value);
+        const cpus = Number($('newconv-cpus').value); const diskGb = Number($('newconv-disk').value);
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}) });
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
             $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
             await refresh();
