@@ -35,6 +35,12 @@ const BLOB = /[0-9A-Za-z+/=_-]{40,}/g;
 const WORD = /[A-Za-z0-9]{20,39}/g;
 const ENTROPY_MIN = 3.5;      /* bits per character */
 const CLASSES_MIN = 3;        /* of: lower, upper, digit, symbol */
+/* With a word nearby that announces a secret, the net is widened: a shorter run (a 10-char password) is
+   lifted, on a lower entropy floor -- because the context already says it is one. A bare short string, with
+   no such word, is left alone (too many false positives). */
+const KEYWORD = /\b(pass(?:word|phrase)s?|mots?\s+de\s+passe|pwd|secrets?|tokens?|jetons?|cl[eé]s?|api[_\s-]?keys?|keys?|auth|credentials?|identifiants?)\b/i;
+const SHORT_WORD = /[A-Za-z0-9]{10,39}/g;
+const ENTROPY_SHORT = 3.2;
 
 function entropy(s) {
     const count = new Map();
@@ -56,9 +62,10 @@ function classes(s) {
 function looksRandom(s) {
     return classes(s) >= CLASSES_MIN && entropy(s) >= ENTROPY_MIN;
 }
-/* The shorter net: all three of upper, lower and digit present (a hash or a word misses one), and high entropy. */
-function improbableWord(s) {
-    return /[a-z]/.test(s) && /[A-Z]/.test(s) && /[0-9]/.test(s) && entropy(s) >= ENTROPY_MIN;
+/* The shorter net: all three of upper, lower and digit present (a hash or a word misses one), and high
+   entropy (a lower floor when a nearby word already announces a secret). */
+function improbableWord(s, floor = ENTROPY_MIN) {
+    return /[a-z]/.test(s) && /[A-Z]/.test(s) && /[0-9]/.test(s) && entropy(s) >= floor;
 }
 
 /* How a lifted secret is written back into the message: a marker the chat
@@ -79,10 +86,14 @@ export function scan(text) {
         if (looksRandom(m[0])) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
     }
     BLOB.lastIndex = 0;
-    for (let m; (m = WORD.exec(str));) {
-        if (improbableWord(m[0])) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
+    /* A word nearby that announces a secret widens the net to shorter runs, on a lower floor. */
+    const near = KEYWORD.test(str);
+    const wordRe = near ? SHORT_WORD : WORD;
+    const floor = near ? ENTROPY_SHORT : ENTROPY_MIN;
+    for (let m; (m = wordRe.exec(str));) {
+        if (improbableWord(m[0], floor)) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
     }
-    WORD.lastIndex = 0;
+    wordRe.lastIndex = 0;
     /* Keep left-to-right, and when two matches overlap keep the one that starts
        first (and, equal, the longer): a known prefix wins over the blob rule. */
     found.sort((a, b) => a.start - b.start || b.end - a.end);

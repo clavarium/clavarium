@@ -61,3 +61,11 @@ test('the shorter net: an improbable alphanumeric word (mixed case + digits) is 
     assert.deepEqual(values('the configuration seems reasonable enough today honestly'), [], 'ordinary prose');
     assert.deepEqual(values('getUserByIdentifierAndName is the method'), [], 'a camelCase name: no digits');
 });
+
+test('with a nearby word that announces a secret, a shorter improbable string is caught; without, it is left alone', () => {
+    assert.deepEqual(values('F9VhOtouT6'), [], 'a bare 10-char string: too short, not flagged');
+    assert.deepEqual(values('mon mot de passe: F9VhOtouT6'), ['F9VhOtouT6'], 'same string, but "mot de passe" nearby');
+    assert.deepEqual(values('the token is Xk9mP2wQ7rT'), ['Xk9mP2wQ7rT'], 'a short key with "token" nearby');
+    assert.deepEqual(values('my password is required for the login page'), [], 'a secret word but no improbable value: nothing');
+    assert.deepEqual(values('password: hello there friend'), [], 'ordinary words after the keyword stay untouched');
+});
