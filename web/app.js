@@ -3228,6 +3228,8 @@
     const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
     /* A secret's expiry, as said: `due` when it asks for the person (near, or past). */
     const secretState = (s) => {
+        /* Short-lived, lifted from a message (secrets.mjs): minutes, not days -- shown so it can be seen and let go. */
+        if (s.ephemeral) { const mins = Math.max(0, Math.round((s.expiresInMs ?? 0) / 60_000)); return s.expired || mins <= 0 ? { text: 'Expired', tone: 'bad', due: true } : { text: `Short-lived, ${mins} min left`, tone: 'warn', due: true }; }
         if (s.expired) return { text: 'Expired', tone: 'bad', due: true };
         if (s.days === null || s.days === undefined) return { text: 'No expiry', tone: '', due: false };
         if (secretDue(s)) return { text: s.days === 1 ? 'Expires tomorrow' : `Expires in ${s.days} days`, tone: 'warn', due: true };
