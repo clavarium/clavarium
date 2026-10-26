@@ -29,6 +29,10 @@ const SHAPES = [
 /* A long run of token characters, caught only when it looks random (not a
    path, a hash or a word). */
 const BLOB = /[0-9A-Za-z+/=_-]{40,}/g;
+/* A SHORTER run of letters and digits only (no symbols, so a UUID's or path's dashes break it up): caught
+   when it is improbable -- it mixes upper, lower AND digits, and its entropy is high. This is the "unusual
+   word" net: a random-looking password or key the known shapes missed, without flagging a hash or an id. */
+const WORD = /[A-Za-z0-9]{20,39}/g;
 const ENTROPY_MIN = 3.5;      /* bits per character */
 const CLASSES_MIN = 3;        /* of: lower, upper, digit, symbol */
 
@@ -52,6 +56,10 @@ function classes(s) {
 function looksRandom(s) {
     return classes(s) >= CLASSES_MIN && entropy(s) >= ENTROPY_MIN;
 }
+/* The shorter net: all three of upper, lower and digit present (a hash or a word misses one), and high entropy. */
+function improbableWord(s) {
+    return /[a-z]/.test(s) && /[A-Z]/.test(s) && /[0-9]/.test(s) && entropy(s) >= ENTROPY_MIN;
+}
 
 /* How a lifted secret is written back into the message: a marker the chat
    shows as stars (ui side), and the tool reads to use /run/secrets/<name>.
@@ -71,6 +79,10 @@ export function scan(text) {
         if (looksRandom(m[0])) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
     }
     BLOB.lastIndex = 0;
+    for (let m; (m = WORD.exec(str));) {
+        if (improbableWord(m[0])) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
+    }
+    WORD.lastIndex = 0;
     /* Keep left-to-right, and when two matches overlap keep the one that starts
        first (and, equal, the longer): a known prefix wins over the blob rule. */
     found.sort((a, b) => a.start - b.start || b.end - a.end);

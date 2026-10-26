@@ -439,6 +439,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             if (any) { try { await secrets.deliver(conversation); } catch { /* machine not running: delivered at its next open */ } }
             return out;
         },
+        /* The agent asked to forget a short-lived secret (parley forget): drop it from the vault and machine. */
+        dropSecret: (conversation, name) => { void secrets.drop(conversation, name).catch(() => {}); },
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);

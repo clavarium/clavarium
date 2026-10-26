@@ -52,3 +52,12 @@ test('empty and non-string input', () => {
     assert.deepEqual(scan(null), []);
     assert.deepEqual(scan(undefined), []);
 });
+
+test('the shorter net: an improbable alphanumeric word (mixed case + digits) is caught; ids, hashes, prose are not', () => {
+    const pw = 'Xk9mP2wQ7rT1yU5iO0pS8d';                                   /* 22 chars, upper+lower+digit */
+    assert.deepEqual(values(`the password is ${pw} ok`), [pw]);
+    assert.deepEqual(values('id 123e4567-e89b-12d3-a456-426614174000 done'), [], 'a uuid: its dashes break it up');
+    assert.deepEqual(values('build abcdef0123456789abcdef0123456789 now'), [], '32 hex: no uppercase, not flagged');
+    assert.deepEqual(values('the configuration seems reasonable enough today honestly'), [], 'ordinary prose');
+    assert.deepEqual(values('getUserByIdentifierAndName is the method'), [], 'a camelCase name: no digits');
+});

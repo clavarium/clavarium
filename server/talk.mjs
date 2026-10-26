@@ -60,7 +60,7 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, lstatSync, rmSync } from 'node:fs';
+import { mkdirSync, lstatSync, rmSync, readFileSync } from 'node:fs';
 import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
@@ -182,7 +182,7 @@ const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept; #screen;
+    #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -192,8 +192,8 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null }) {
-        this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen;
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
+        this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
@@ -643,6 +643,7 @@ export class Talk {
 
     async #tick() {
         for (const r of this.#store.all()) {
+            if (r.on === true) this.#reapForgets(r);
             if (r.on === true && r.reread === true) { await this.#tryReread(r.name).catch(() => {}); continue; }
             if (r.on !== true || (!r.pending && !r.woke)) continue;
             /* It has read: what waited is done, and the next message wakes it again. */
@@ -650,6 +651,20 @@ export class Talk {
             if (this.#now() < (this.#nextTry.get(r.name) ?? 0)) continue;
             await this.#wake(r.name, r.again === true).catch(() => {});
         }
+    }
+
+    /* The agent asked to forget short-lived secrets (parley forget -> forget.jsonl beside its thread): the
+       parloir drops each from its vault and machine at once. Each request is acted on once, counted in the store. */
+    #reapForgets(r) {
+        if (!this.#dropSecret) return;
+        let lines;
+        try { lines = readFileSync(`${this.#dir(r.name)}/forget.jsonl`, 'utf8').split('\n').filter(Boolean); } catch { return; }
+        const done = r.forgotten ?? 0;
+        if (lines.length <= done) return;
+        for (const line of lines.slice(done)) {
+            try { const name = JSON.parse(line)?.name; if (typeof name === 'string' && /^SECRET_[0-9A-F]{10}$/.test(name)) void this.#dropSecret(r.name, name); } catch { /* a stray line */ }
+        }
+        this.#store.put({ ...r, forgotten: lines.length });
     }
 
     forget(name) { this.#deaf(name); if (this.#keep(name)) rmSync(this.#keep(name), { recursive: true, force: true }); this.#store.remove(name); this.#typedAt.delete(name); this.#ranAt.delete(name); this.#nextTry.delete(name); this.#nextTry.delete(`reread:${name}`); }
