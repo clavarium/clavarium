@@ -13,14 +13,14 @@ const mail = (uid, subject, from = 'A friend <friend@example.org>', body = 'Hell
     uid, receivedAt: new Date(Date.UTC(2026, 0, 2, 3, 4) + uid * 60_000), raw: `From: ${from}\r\nSubject: ${subject}\r\n\r\n${body}\r\n`,
 });
 
-function bench(t, read) {
+function bench(t, read, { fetch } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-mail-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const vm = [];
     const host = async (argv) => { if (argv[0] === 'folder' && argv[1] === 'make') mkdirSync(join(dir, 'resources', argv[2]), { recursive: true }); return { code: 0, stdout: '', stderr: '' }; };
     const resources = new Resources({ store: new Store(join(dir, 'resources.json')), vms: new Vms(async (argv) => { vm.push(argv.slice(1).join(' ')); return { code: 0, stdout: '', stderr: '' }; }, ['x']), host, dataDir: dir, uid: 1, gid: 1 });
     const asked = [];
-    const mailboxes = new Mailboxes({ store: new Store(join(dir, 'mailboxes.json')), vault: new Vault(join(dir, 'vault.key')), resources, reader: async (settings) => { asked.push(settings); return read(settings); } });
+    const mailboxes = new Mailboxes({ store: new Store(join(dir, 'mailboxes.json')), vault: new Vault(join(dir, 'vault.key')), resources, fetch, reader: async (settings) => { asked.push(settings); return read(settings); } });
     return { dir, vm, resources, mailboxes, asked, folder: join(dir, 'resources', 'inbox') };
 }
 const SETTINGS = { name: 'inbox', host: 'imap.example.com', user: 'me@example.com', password: 'mail-pass' };
@@ -107,4 +107,34 @@ test('keeping up to date: new mail arrives as files; a failure keeps what was th
     await assert.rejects(b.mailboxes.sync('nope'), /No such mailbox/);
     b.mailboxes.forget('inbox');
     assert.deepEqual(b.mailboxes.list(), []);
+});
+
+test('connecting by token: consent gives the provider URL, the pasted address trades a code for a sealed refresh token', async (t) => {
+    const token = async (url, opts) => {
+        const p = new URLSearchParams(opts.body);
+        assert.equal(p.get('grant_type'), 'authorization_code');
+        assert.equal(p.get('code'), 'THECODE');
+        return new Response(JSON.stringify({ access_token: 'A', refresh_token: 'REFRESH-XYZ', expires_in: 3600 }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const b = bench(t, () => [mail(1, 'Welcome')], { fetch: token });
+    const { url } = b.mailboxes.consent({ name: 'gmail', provider: 'google', user: 'me@example.com' });
+    assert.ok(url.startsWith('https://accounts.google.com/o/oauth2/auth?'));
+    assert.ok(url.includes('code_challenge='), 'PKCE challenge present');
+    const state = new URL(url).searchParams.get('state');
+    assert.ok(state, 'a state is set');
+    const made = await b.mailboxes.connect({ redirected: `http://127.0.0.1:47813/?code=THECODE&state=${state}` });
+    assert.equal(made.name, 'gmail');
+    assert.equal(made.provider, 'google');
+    assert.equal(b.asked.at(-1).provider, 'google', 'the reader is asked with OAuth settings');
+    assert.equal(b.asked.at(-1).password, 'REFRESH-XYZ', 'the refresh token is the credential');
+    assert.ok(!readFileSync(join(b.dir, 'mailboxes.json'), 'utf8').includes('REFRESH-XYZ'), 'the refresh token is sealed, not in clear');
+    await assert.rejects(b.mailboxes.connect({ redirected: `http://127.0.0.1:47813/?code=THECODE&state=${state}` }), /expired or was already used/);
+});
+
+test('connect refuses an unknown state and a provider error', async (t) => {
+    const b = bench(t, () => [], { fetch: async () => new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } }) });
+    await assert.rejects(b.mailboxes.connect({ redirected: 'http://127.0.0.1:47813/?code=X&state=nope' }), /expired or was already used/);
+    const { url } = b.mailboxes.consent({ name: 'box', provider: 'microsoft', user: 'me@example.com' });
+    const state = new URL(url).searchParams.get('state');
+    await assert.rejects(b.mailboxes.connect({ redirected: `http://127.0.0.1:47813/?error=access_denied&state=${state}` }), /refused/);
 });

@@ -516,16 +516,33 @@
           </div>
           <div id="mailbox-box" class="as-form" data-kind="mailbox"><h3>New mailbox</h3>
           <div class="hint">Recent messages as files, read only. <details class="more"><summary>Before attaching it</summary><span>Kept up to date in a folder a conversation can read and never write. The mailbox itself is never changed. Mail is written by strangers: attach it only where the tool may read what anyone can send you.</span></details></div>
-          <form id="mailbox-new" autocomplete="off">
+          <form id="mailbox-new" autocomplete="off" data-provider="imap">
             <label for="mailbox-name">Folder name</label>
             <input id="mailbox-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" placeholder="inbox" spellcheck="false" autocapitalize="off" required>
-            <label for="mailbox-host">Mail server (IMAP, TLS)</label>
-            <div class="row"><input id="mailbox-host" placeholder="imap.example.com" spellcheck="false" autocapitalize="off" required><input id="mailbox-port" inputmode="numeric" placeholder="993" aria-label="Port" size="5"></div>
-            <label for="mailbox-user">User</label>
-            <input id="mailbox-user" spellcheck="false" autocapitalize="off" autocomplete="off" required>
-            <label for="mailbox-password">Password</label>
-            <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password" required>
-              <button type="submit" class="primary">Add</button></div>
+            <div id="mailbox-provider" class="choices" role="group" aria-label="Kind of mailbox">
+              <button type="button" data-provider="google">Gmail</button>
+              <button type="button" data-provider="microsoft">Microsoft</button>
+              <button type="button" data-provider="imap" aria-pressed="true">IMAP</button>
+            </div>
+            <div class="mailbox-imap">
+              <label for="mailbox-host">Mail server (IMAP, TLS)</label>
+              <div class="row"><input id="mailbox-host" placeholder="imap.example.com" spellcheck="false" autocapitalize="off"><input id="mailbox-port" inputmode="numeric" placeholder="993" aria-label="Port" size="5"></div>
+              <label for="mailbox-user">User</label>
+              <input id="mailbox-user" spellcheck="false" autocapitalize="off" autocomplete="off">
+              <label for="mailbox-password">Password</label>
+              <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password">
+                <button type="submit" class="primary">Add</button></div>
+            </div>
+            <div class="mailbox-oauth" hidden>
+              <label for="mailbox-email">Email address</label>
+              <input id="mailbox-email" type="email" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="your email address">
+              <p class="hint" id="mailbox-notice"></p>
+              <div class="row"><button type="button" id="mailbox-open" class="primary">Open the sign-in page</button></div>
+              <div id="mailbox-paste" hidden>
+                <label for="mailbox-code">After you allow, the page will not load — copy its full address and paste it here</label>
+                <div class="row"><input id="mailbox-code" spellcheck="false" autocapitalize="off" placeholder="http://127.0.0.1..."><button type="button" id="mailbox-connect" class="primary">Connect</button></div>
+              </div>
+            </div>
             <p id="mailbox-error" class="error" role="alert" hidden></p>
           </form>
           </div>

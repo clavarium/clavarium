@@ -23,6 +23,7 @@
 import { connect as tlsConnect } from 'node:tls';
 import { Refusal } from './conversations.mjs';
 import { Exchange, quoted, imapDate } from './imap.mjs';
+import { refreshAccess, thunderbird, xoauth2 } from './oauth.mjs';
 
 export { quoted, imapDate };
 
@@ -111,15 +112,50 @@ export function readSettings(body) {
     return { host, port, user, password };
 }
 
+/* The IMAP server for each OAuth provider: when a mailbox is connected by token,
+   the person never types a host -- it is the provider's own. */
+export const PROVIDER_IMAP = {
+    google: { host: 'imap.gmail.com', port: 993 },
+    microsoft: { host: 'outlook.office365.com', port: 993 },
+};
+
+/* Settings for a token-connected mailbox, from the provider, the address and the
+   refresh token obtained at consent. The stored secret (`password` here) is that
+   refresh token; a fresh access token is spent from it at each read. */
+export function oauthSettings({ provider, user, refresh }) {
+    const client = PROVIDER_IMAP[String(provider ?? '')];
+    if (!client) throw new Refusal(400, 'Choose Gmail or Microsoft.');
+    const address = String(user ?? '').trim();
+    if (address === '' || address.length > 200) throw new Refusal(400, 'The mailbox needs its email address.');
+    if (!refresh || String(refresh).length > 4096) throw new Refusal(400, 'The connection did not return a usable token.');
+    return { host: client.host, port: client.port, user: address, provider: String(provider), password: String(refresh) };
+}
+
+/* The IMAP auth step, shared by both readers: AUTHENTICATE XOAUTH2 with a fresh
+   access token when the mailbox is OAuth (its stored secret being the refresh
+   token), a plain LOGIN with the password otherwise. `fetch` is injectable. */
+export async function imapAuthenticate(imap, settings, { fetch: fetchImpl = globalThis.fetch } = {}) {
+    if (!settings.provider) {
+        await imap.command(`LOGIN ${quoted(settings.user)} ${quoted(settings.password)}`, 'The mailbox refused the user or the password.');
+        return;
+    }
+    const { clientId, clientSecret } = thunderbird(settings.provider);
+    let accessToken;
+    try {
+        ({ accessToken } = await refreshAccess(settings.provider, { clientId, clientSecret, refreshToken: settings.password, fetch: fetchImpl }));
+    } catch { throw new Refusal(502, 'The mail account must be reconnected: its authorisation was refused.'); }
+    await imap.authenticateXoauth2(xoauth2(settings.user, accessToken), 'The mailbox refused the token: reconnect the account.');
+}
+
 /* Recent sign-in messages of this mailbox, newest first. `connect` and `now`
    are injectable; a connection is always TLS, and never anything else. */
-export async function recentSignIns(settings, rules, { connect = tlsConnect, now = new Date(), ca } = {}) {
+export async function recentSignIns(settings, rules, { connect = tlsConnect, now = new Date(), ca, fetch: fetchImpl = globalThis.fetch } = {}) {
     const socket = connect({ host: settings.host, port: settings.port, servername: settings.host, ...(ca ? { ca } : {}) });
     const timer = setTimeout(() => socket.destroy(new Error('timeout')), TIMEOUT_MS);
     try {
         const imap = new Exchange(socket, BYTES_MAX);
         await imap.greeting();
-        await imap.command(`LOGIN ${quoted(settings.user)} ${quoted(settings.password)}`, 'The mailbox refused the user or the password.');
+        await imapAuthenticate(imap, settings, { fetch: fetchImpl });
         await imap.command('EXAMINE INBOX', 'The inbox could not be opened.');
         const since = new Date(now.getTime() - 24 * 3_600_000);
         const found = await imap.command(`UID SEARCH SINCE ${imapDate(since)}`, 'The mailbox could not be searched.');
