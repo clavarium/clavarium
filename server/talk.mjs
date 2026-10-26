@@ -182,7 +182,7 @@ const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
     #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
-    #terminal; #health; #ranAt = new Map(); #kept;
+    #terminal; #health; #ranAt = new Map(); #kept; #screen;
 
     /* `alert({ title, body, url })`: told when the tool asks, or waits.
        `words`: a store for the owner's choice of words (one record). */
@@ -192,8 +192,8 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null }) {
-        this.#terminal = terminal; this.#health = health; this.#kept = keptDir;
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null }) {
+        this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen;
         this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
@@ -448,7 +448,13 @@ export class Talk {
             const note = item && typeof item === 'object' && typeof item.note === 'string' ? item.note : '';
             return { path, name: m[2], size: info.size, ...(note ? { note } : {}) };
         });
-        try { this.#parley(name).say(text ?? '', answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        /* A secret pasted in the message (a token, a key) is lifted into a
+           short-lived store, and the message keeps only a reference -- the
+           thread never holds the value (secret-scan.mjs, secrets.mjs). It must
+           never lose a message: on any trouble the text is sent as it came. */
+        let said = text ?? '';
+        if (this.#screen && said) { try { said = await this.#screen(name, said); } catch { said = text ?? ''; } }
+        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }

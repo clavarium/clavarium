@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { Vault } from '../server/vault.mjs';
-import { Secrets, isSecretName, expiryOf, daysTo, RUNNER_SCRIPT, RUNNER, SECRETS_DIR } from '../server/secrets.mjs';
+import { Secrets, isSecretName, expiryOf, daysTo, RUNNER_SCRIPT, RUNNER, SECRETS_DIR, EPHEMERAL_PREFIX, TTL_MAX_MS } from '../server/secrets.mjs';
 import { Grants } from '../server/grants.mjs';
 import { Readable } from 'node:stream';
 import { handleApi } from '../server/api.mjs';
@@ -226,4 +226,61 @@ test('through the API: made with an expiry, replaced in place; no answer ever ca
     assert.deepEqual(JSON.parse(listed.text).map((s) => [s.name, s.expires]), [['API_KEY', null]]);
     assert.equal(b.secrets.reveal('API_KEY'), 'sk-api-two');
     for (const text of answers) assert.ok(!/sk-api|sealed/.test(text), text);
+});
+
+test('an ephemeral secret: random name, sealed, handed to its conversation, listed as short-lived', (t) => {
+    const b = bench(t);
+    const { name, expiresAt } = b.secrets.stash('alice', 'npm_realtokenvalue123');
+    assert.ok(name.startsWith(EPHEMERAL_PREFIX) && isSecretName(name), name);
+    assert.ok(Date.parse(expiresAt) > b.clock.at.getTime());
+    const onDisk = readFileSync(join(b.dir, 'secrets.json'), 'utf8');
+    assert.ok(onDisk.includes(name) && !onDisk.includes('npm_realtokenvalue123'), 'name kept, value sealed');
+    assert.deepEqual(b.secrets.given('alice'), [name], 'handed to the conversation it came from');
+    assert.deepEqual(b.secrets.given('bob'), [], 'not to another conversation');
+    const row = b.secrets.list().find((s) => s.name === name);
+    assert.equal(row.ephemeral, true);
+    assert.ok(row.expiresInMs > 0 && row.expiresInMs <= TTL_MAX_MS);
+});
+
+test('an ephemeral secret is delivered to the running machine like any other', async (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'the-secret-value');
+    b.calls.length = 0;
+    await b.secrets.deliver('alice');
+    const wrote = b.calls.find((c) => c.argv.includes(`${SECRETS_DIR}/${name}`));
+    assert.ok(wrote, 'a file is installed for it');
+    assert.equal(wrote.input, 'the-secret-value', 'its value is delivered, never in an argument');
+    assert.ok(!b.calls.some((c) => c.argv.includes('the-secret-value')), 'the value is never in an argument list');
+});
+
+test('an ephemeral secret stops being delivered once its minute passes', (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'short-lived', { ttlMs: 5 * 60_000 });
+    assert.deepEqual(b.secrets.given('alice'), [name]);
+    assert.equal(b.secrets.isExpired(name), false);
+    b.clock.at = new Date(b.clock.at.getTime() + 6 * 60_000);
+    assert.equal(b.secrets.isExpired(name), true);
+    assert.deepEqual(b.secrets.given('alice'), [], 'gone from the delivery set');
+    assert.equal(b.secrets.signature('alice'), '', 'a changed signature triggers a re-delivery');
+});
+
+test('dropping an ephemeral secret removes it and rewrites the machine', async (t) => {
+    const b = bench(t);
+    const { name } = b.secrets.stash('alice', 'to-forget');
+    b.calls.length = 0;
+    await b.secrets.drop('alice', name);
+    assert.equal(b.secrets.reveal(name), undefined, 'value gone from the vault');
+    assert.ok(!b.secrets.list().some((s) => s.name === name));
+    assert.ok(b.calls.some((c) => c.argv.includes(RUNNER) || c.argv.includes(SECRETS_DIR)), 'the machine was rewritten');
+    await assert.rejects(b.secrets.drop('alice', name), /No such short-lived secret/);
+});
+
+test('a restart drops ephemeral secrets that ran out, keeps those still alive', (t) => {
+    const b = bench(t);
+    const live = b.secrets.stash('alice', 'still-good', { ttlMs: 30 * 60_000 }).name;
+    const dead = b.secrets.stash('alice', 'too-late', { ttlMs: 5 * 60_000 }).name;
+    b.clock.at = new Date(b.clock.at.getTime() + 10 * 60_000);
+    const reborn = b.make();                                   /* same store + grants, after the clock moved */
+    assert.deepEqual(reborn.given('alice'), [live], 'the live one stays, the dead one is swept');
+    assert.ok(!reborn.list().some((s) => s.name === dead));
 });

@@ -21,6 +21,7 @@
  * should use on the agent's behalf (a push key, a mailbox password) does not
  * belong here, and never enters a VM.
  */
+import { randomBytes } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 import { Grants, conversationSubject } from './grants.mjs';
 import { isConversationName } from './names.mjs';
@@ -30,6 +31,12 @@ export const SECRETS_DIR = '/run/secrets';
 export const RUNNER = '/usr/local/bin/clv-run';
 export const VALUE_MAX = 8 * 1024;
 export const WARN_DAYS = 7;
+/* A secret lifted from a message (secret-scan.mjs): a random name, a short
+   life in MINUTES (not days), swept when it runs out. */
+export const EPHEMERAL_PREFIX = 'SECRET_';
+export const TTL_DEFAULT_MS = 10 * 60_000;
+export const TTL_MIN_MS = 60_000;
+export const TTL_MAX_MS = 60 * 60_000;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DAY_MS = 86_400_000;
 const NAME = /^[A-Z][A-Z0-9_]{0,39}$/;
@@ -69,7 +76,7 @@ export function daysTo(day, now = new Date()) {
 const firstLine = (text) => String(text ?? '').trim().split('\n').filter(Boolean).pop()?.slice(0, 200) ?? '';
 
 export class Secrets {
-    #store; #vault; #vms; #grants; #now;
+    #store; #vault; #vms; #grants; #now; #timers = new Map();
 
     /* `grants`: the one table of rights. "Handed to a conversation" is a
        line of it: the conversation may USE the secret. */
@@ -80,9 +87,19 @@ export class Secrets {
             for (const conversation of Object.keys(s.attachments)) this.#grants.give(conversationSubject(conversation), `secret:${s.name}`, 'x');
             delete s.attachments; store.put(s);
         }
+        /* A restart loses the sweep timers: drop the ephemeral secrets that ran
+           out while down, and set a fresh timer for those still alive. */
+        for (const s of store.all()) {
+            if (s.ephemeral !== true) continue;
+            const who = this.#users(s.name)[0];
+            const left = who ? Date.parse(s.expiresAt) - this.#now().getTime() : 0;
+            if (!who || !(left > 0)) { store.remove(s.name); this.#grants.forgetAsset(`secret:${s.name}`); }
+            else this.#schedule(who, s.name, left);
+        }
     }
     #handed(conversation, name) { return this.#grants.can(conversationSubject(conversation), `secret:${name}`, 'x'); }
-    #expired(s) { return Boolean(s.expires) && daysTo(s.expires, this.#now()) <= 0; }
+    /* Ephemeral: gone at its moment (minutes). Otherwise: gone from its day on. */
+    #expired(s) { return s.expiresAt ? Date.parse(s.expiresAt) <= this.#now().getTime() : (Boolean(s.expires) && daysTo(s.expires, this.#now()) <= 0); }
     #users(name) { return this.#grants.on(`secret:${name}`).map((g) => g.subject.slice('conversation:'.length)); }
     /* What is delivered to this conversation: handed, and not expired. */
     #given(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name) && !this.#expired(s)); }
@@ -91,7 +108,8 @@ export class Secrets {
        days left (null without an expiry); `expired`: no longer delivered. */
     list() {
         return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
-            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s) }));
+            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s),
+            ...(s.ephemeral ? { ephemeral: true, expiresAt: s.expiresAt, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) } : {}) }));
     }
     /* Past its expiry day: kept, not used (nor by dictation, voice.mjs). */
     isExpired(name) { const s = this.#store.get(name); return Boolean(s) && this.#expired(s); }
@@ -186,6 +204,48 @@ export class Secrets {
     forget(conversation) {
         for (const s of this.#store.all()) this.#grants.take(conversationSubject(conversation), `secret:${s.name}`);
     }
+
+    /* AN EPHEMERAL SECRET lifted from a message of `conversation` (talk.mjs):
+       a random name, a few minutes to live, handed at once to that
+       conversation, swept when it runs out. Returns { name, expiresAt } -- the
+       name is the reference the message keeps (its value is masked there). As
+       with every secret the value is sealed and never returned by any route;
+       the tool uses it only as /run/secrets/<name>, and never sees it. */
+    stash(conversation, value, { ttlMs } = {}) {
+        if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
+        const sealed = this.#seal(value);
+        const ttl = Math.min(TTL_MAX_MS, Math.max(TTL_MIN_MS, Number.isFinite(ttlMs) ? ttlMs : TTL_DEFAULT_MS));
+        let name; do { name = EPHEMERAL_PREFIX + randomBytes(5).toString('hex').toUpperCase(); } while (this.#store.get(name));
+        const expiresAt = new Date(this.#now().getTime() + ttl).toISOString();
+        this.#store.put({ name, sealed, createdAt: this.#now().toISOString(), expiresAt, ephemeral: true });
+        this.#grants.give(conversationSubject(conversation), `secret:${name}`, 'x');
+        this.#schedule(conversation, name, ttl);
+        return { name, expiresAt };
+    }
+
+    /* Forgotten before it runs out, on the tool's word or the owner's: gone
+       from the vault and, at once, from the running machine. */
+    async drop(conversation, name) {
+        const s = this.#store.get(name);
+        if (!s || s.ephemeral !== true) throw new Refusal(404, 'No such short-lived secret.');
+        const t = this.#timers.get(name); if (t) { clearTimeout(t); this.#timers.delete(name); }
+        await this.#reap(conversation, name);
+        return { name };
+    }
+
+    #schedule(conversation, name, ttl) {
+        const t = setTimeout(() => { this.#timers.delete(name); void this.#reap(conversation, name); }, ttl);
+        t.unref?.();
+        this.#timers.set(name, t);
+    }
+    /* Remove it, then rewrite the machine's /run/secrets without it (a tmpfs
+       already cleared if the machine is gone -- so a failure here is fine). */
+    async #reap(conversation, name) {
+        if (this.#store.get(name)) { this.#store.remove(name); this.#grants.forgetAsset(`secret:${name}`); }
+        try { await this.deliver(conversation); } catch { /* machine asleep or busy: /run/secrets is tmpfs */ }
+        try { this.reaped(conversation, name); } catch { /* told nowhere: never a reason to fail */ }
+    }
+    reaped = () => {};
 
     /* What a delivery to this conversation would contain, as one string that
        changes whenever a delivery would differ: names and sealed values. */
