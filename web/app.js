@@ -111,8 +111,10 @@
         $('notice-spin').hidden = true; $('notice-steps').hidden = true;
         $('notice-head').hidden = true; delete notice.dataset.progress; delete notice.dataset.loading;
     };
-    /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. */
-    const loading = () => { show('Loading the terminal\u2026'); $('notice-spin').hidden = false; notice.dataset.loading = 'yes'; };
+    /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. It
+       covers only when the terminal is what is on screen -- not the chat already there, which a tab
+       resume (its channel reopened) used to blank behind "Loading the terminal..." (found 26-10). */
+    const loading = () => { if (tabNow() !== 'terminal') return; show('Loading the terminal\u2026'); $('notice-spin').hidden = false; notice.dataset.loading = 'yes'; };
     /* A restart: when the page first saw it (when the server did not say), and the clock that tells it. */
     const restartSeen = new Map(); let restartTicking = 0;
     /* A START TOLD STEP BY STEP (a build, a restart, a wake: `progress`, see
@@ -1672,6 +1674,9 @@
     function paintViews() {
         if (DEVICE) return;
         const now = tabNow();
+        /* The "Loading the terminal..." veil belongs to the terminal: leaving it for the chat (or
+           any other tab) takes the veil away, so a tab already there is not covered. */
+        if (notice.dataset.loading && now !== 'terminal') notice.hidden = true;
         for (const [id, tab] of [['view-chat', 'chat'], ['view-terminal', 'terminal'], ['view-assets', 'assets'], ['view-lists', 'lists'], ['folders', 'settings']]) $(id).setAttribute('aria-pressed', String(now === tab));
     }
     /* THE FOUR TABS: Chat, Terminal, Assets, Settings. The one it opened on
