@@ -835,6 +835,11 @@
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
         $('sleep').hidden = !usable || c.asleep === true;
         $('restart').hidden = DEVICE || !usable;
+        /* The same gestures, surfaced at the top of the panel: wake when asleep, else restart and sleep. */
+        $('quick-sleep').hidden = !usable || c.asleep === true;
+        $('quick-restart').hidden = DEVICE || !usable;
+        $('quick-wake').hidden = !c || c.asleep !== true;
+        $('panel-actions').hidden = DEVICE || !c || !(usable || c.asleep === true);
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -7714,7 +7719,7 @@
     $('share-done').addEventListener('click', leaveCompose);
 
     /* ---------- resting and archiving ---------- */
-    $('sleep').addEventListener('click', async () => {
+    async function sleepMachine() {
         const name = current;
         leavePanel();
         disconnect();
@@ -7722,7 +7727,12 @@
         show('Going to sleep...');
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
-    });
+    }
+    $('sleep').addEventListener('click', () => void sleepMachine());
+    /* The quick actions at the top of the panel do the same as the Machine chapter's. */
+    $('quick-sleep').addEventListener('click', () => void sleepMachine());
+    $('quick-restart').addEventListener('click', () => { leavePanel(); void restartMachine(false); });
+    $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     async function rebuild() {
         const name = current;
         disconnect();

@@ -111,6 +111,12 @@
       <div id="clists" class="sheet as-room" hidden><div id="clists-binder" class="binder-holder"></div></div>
       <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b id="panel-title">This conversation</b></div>
+        <!-- The gestures done often on the machine, without opening the Machine chapter (app.js, paintMachine). -->
+        <div class="row panel-actions" id="panel-actions" hidden>
+          <button type="button" id="quick-wake" class="primary" hidden>Wake it</button>
+          <button type="button" id="quick-restart" hidden>Restart&hellip;</button>
+          <button type="button" id="quick-sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+        </div>
         <p id="panel-error" class="error" role="alert" hidden></p>
         <details class="chapter" id="chapter-general" data-chapter="general">
           <summary><span class="chapter-title">General</span><span class="chapter-about">Name, group, chat.</span></summary>

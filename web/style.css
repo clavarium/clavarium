@@ -127,6 +127,7 @@ footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var
 .chip[data-access="write"] { color: var(--ok); border-color: var(--ok); }
 .sheet { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--panel); overflow-y: auto; }
 .panel-top { display: flex; align-items: center; justify-content: space-between; }
+.panel-actions { margin: 2px 0 12px; }
 #panel-rows { display: flex; flex-direction: column; }
 .folder { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .folder b { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; }
