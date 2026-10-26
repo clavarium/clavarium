@@ -116,6 +116,24 @@ test('what is installed: an exact version from npm, checked, or a working tree f
     assert.match(text, /^ExecStart=\$CODE\/current\/node\/bin\/node \$CODE\/current\/app\/deploy\/updater\.mjs run$/m);
 });
 
+test('the sign-in client id is random by default, can be given, and is never the old literal "clavarium"', () => {
+    const base = ['--domain', 'clav.example.com', '--operator', 'owner@example.com', '--dry-run'];
+    assert.match(install(...base).out, /sign-in id\s+a random string, made at install: tells nothing/);
+    assert.match(install(...base, '--client-id', 'acme-crm').out, /sign-in id\s+acme-crm \(given\)/);
+    assert.match(install('--local', '--dry-run').out, /sign-in id\s+none \(--local\): no sign-in/);
+    for (const bad of [['--client-id', 'has space'], ['--client-id', 'a:b'], ['--client-id', 'a"b'], ['--client-id', '']]) {
+        const r = install(...base, ...bad);
+        assert.equal(r.code, 64, bad.join(' ')); assert.equal(r.out, '');
+    }
+    /* dex and the proxy are both written from the one $client_id; nothing hard-codes "clavarium". */
+    const text = readFileSync(SCRIPT, 'utf8');
+    assert.match(text, /client_id="\$\{CLIENT_ID:-\$\(openssl rand -hex 16\)\}"/);
+    assert.match(text, /^  - id: \$client_id$/m);
+    assert.match(text, /^    name: \$client_id$/m);
+    assert.match(text, /^client_id = "\$client_id"$/m);
+    assert.ok(!/- id: clavarium|client_id = "clavarium"/.test(text), 'the product name is not baked into the sign-in client');
+});
+
 test('going online later: the settings change, the release that runs stays; local mode ends with the keys and the next command', () => {
     const r = install('--domain', 'clav.example.com', '--operator', 'you@example.com', '--relay', 'relay.example.net', '--relay-installed', '--keep-release', '--dry-run');
     assert.equal(r.code, 0, r.err);
