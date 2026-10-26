@@ -408,6 +408,8 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, { ok: true }), true;
         }
         if (pathname === '/api/mailboxes' && mailboxes) { const made = await mailboxes.add(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
+        if (pathname === '/api/mailboxes/consent' && mailboxes) return send(200, mailboxes.consent(body)), true;
+        if (pathname === '/api/mailboxes/connect' && mailboxes) { const made = await mailboxes.connect(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
         const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;

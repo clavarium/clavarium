@@ -222,6 +222,12 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .auto-send label:not(.check) { display: flex; flex-direction: column; gap: 4px; }
 #mailbox-new input, #git-new input { min-width: 0; min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 #mailbox-new .row input, #git-new .row input { flex: 1; }
+#mailbox-provider { margin: 10px 0; }
+#mailbox-provider button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink); background: rgba(210, 169, 78, .16); }
+/* The provider sections stack their fields like the form itself (a flex column);
+   :not([hidden]) keeps the hidden attribute winning when a section is off. */
+.mailbox-imap:not([hidden]), .mailbox-oauth:not([hidden]), #mailbox-paste:not([hidden]) { display: flex; flex-direction: column; gap: 6px; }
+#mailbox-new #mailbox-notice { margin: 8px 0; }
 #mailbox-new #mailbox-port { flex: 0 0 90px; }
 #mailbox-new label, #git-new label { font-size: .8125rem; color: var(--muted, inherit); margin-top: 4px; }
 

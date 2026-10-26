@@ -5861,6 +5861,7 @@
 
     $('mailbox-new').addEventListener('submit', async (event) => {
         event.preventDefault();
+        if ($('mailbox-new').dataset.provider !== 'imap') return;
         $('mailbox-error').hidden = true;
         const button = $('mailbox-new').querySelector('button[type=submit]');
         button.disabled = true; button.textContent = 'Reading the mailbox...';
@@ -5869,6 +5870,49 @@
             assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = ''; $('mailbox-new').reset();
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
         button.disabled = false; button.textContent = 'Add';
+        await paintAssets();
+    });
+    /* Gmail / Microsoft / IMAP, in the New-mailbox form. For a provider, the person
+       signs in in their own browser (as Thunderbird) and pastes the address back;
+       Clavarium trades it for a token and never sees a password. */
+    const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft' };
+    const setMailboxProvider = (provider) => {
+        const form = $('mailbox-new');
+        form.dataset.provider = provider;
+        for (const b of $('mailbox-provider').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
+        const oauth = provider !== 'imap';
+        form.querySelector('.mailbox-imap').hidden = oauth;
+        form.querySelector('.mailbox-oauth').hidden = !oauth;
+        $('mailbox-paste').hidden = true;
+        $('mailbox-error').hidden = true;
+        if (oauth) {
+            const who = MAILBOX_PROVIDER[provider];
+            $('mailbox-notice').textContent = `Clavarium signs in as Thunderbird — that is what ${who} will see. You sign in in your own browser; Clavarium never sees your password.`;
+            $('mailbox-open').textContent = `Open the ${who} sign-in page`;
+            $('mailbox-email').placeholder = provider === 'google' ? 'your Gmail address' : 'your Microsoft address';
+        }
+    };
+    for (const b of $('mailbox-provider').querySelectorAll('button')) b.addEventListener('click', () => setMailboxProvider(b.dataset.provider));
+    $('mailbox-open').addEventListener('click', async () => {
+        $('mailbox-error').hidden = true;
+        const btn = $('mailbox-open'); btn.disabled = true;
+        try {
+            const { url } = await post(`${API}/mailboxes/consent`, { name: $('mailbox-name').value.trim(), provider: $('mailbox-new').dataset.provider, user: $('mailbox-email').value.trim() });
+            window.open(url, '_blank', 'noopener');
+            $('mailbox-paste').hidden = false;
+            $('mailbox-code').focus();
+        } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('mailbox-connect').addEventListener('click', async () => {
+        $('mailbox-error').hidden = true;
+        const btn = $('mailbox-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting...';
+        try {
+            await post(`${API}/mailboxes/connect`, { redirected: $('mailbox-code').value.trim() });
+            assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = '';
+            $('mailbox-new').reset(); setMailboxProvider('imap');
+        } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
+        btn.disabled = false; btn.textContent = was;
         await paintAssets();
     });
     $('list-new').addEventListener('submit', async (event) => {
