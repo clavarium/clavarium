@@ -41,6 +41,10 @@
 #   --name NAME        the name of this Clavarium, under its icon and in its
 #                      tab (default: drawn from --domain); changed in Settings.
 #                      Letters, digits, spaces, dots, hyphens: 30 at most
+#   --client-id ID     the OAuth client id, seen in the open when a browser is
+#                      sent to sign in. Default: a random string that tells
+#                      nothing. Give one for a third party that connects here.
+#                      Changed later: sudo clavarium client-id [ID]
 #   --dry-run          check the parameters, say what would be done, do nothing
 #
 # AFTER --local, going online is one command: `sudo clavarium online --relay
@@ -110,12 +114,12 @@ DEX_LAYER="680f1119fdbcdd7f0ad8985b2534ded871b08b5b77c40f337c38aebd062b59c2"
 DEX_SHA256="217aa675738d1cbaf25fe8d7bc04cb00dbc60f91d8465b76b8d8af963d571337"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
+bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator EMAIL [--operator EMAIL...] [--port N] [--relay HOST [--relay-port N]] [--core-only] [--version X.Y.Z | --from-dir DIR] [--updates auto|asap|ask|off] [--update-window HH:MM-HH:MM] [--channel latest|next] [--name NAME] [--client-id ID] [--dry-run]" >&2; echo "   or: install.sh --local [--port N] [same options] [--dry-run]     to try it on this machine, with no domain" >&2; exit 64; }
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
 DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
-VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""
+VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""; CLIENT_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 || bad "--domain needs a value" ;;
@@ -133,6 +137,7 @@ while [ $# -gt 0 ]; do
         --keep-release) KEEP_RELEASE="yes"; shift ;;
         --relay-installed) RELAY_INSTALLED="yes"; shift ;;
         --name) APP_NAME="${2:-}"; [ -n "$APP_NAME" ] || bad "--name needs a value"; shift 2 ;;
+        --client-id) CLIENT_ID="${2:-}"; [ -n "$CLIENT_ID" ] || bad "--client-id needs a value"; shift 2 ;;
         --dry-run) DRY="yes"; shift ;;
         *) bad "unknown parameter: $1" ;;
     esac
@@ -176,6 +181,10 @@ fi
 [ -z "$CHANNEL" ] || [[ "$CHANNEL" =~ ^(latest|next)$ ]] || bad "--channel is latest or next"
 # It goes in the unit file, between quotes: plain characters only (any other is chosen in Settings).
 [ -z "$APP_NAME" ] || [[ "$APP_NAME" =~ ^[A-Za-z0-9]([A-Za-z0-9\ ._-]{0,28}[A-Za-z0-9.])?$ ]] || bad "--name is letters, digits, spaces, dots and hyphens, 30 at most, like \"Home lab\""
+# The OAuth client id, seen in the open when a browser is sent to sign in. Default:
+# a random string, made below, that tells nothing. A value given here is for an
+# installation that a particular third party connects to (deploy/oidc.mjs).
+[ -z "$CLIENT_ID" ] || [[ "$CLIENT_ID" =~ ^[A-Za-z0-9]([A-Za-z0-9._-]{0,62}[A-Za-z0-9])?$ ]] || bad "--client-id is letters, digits, dots, underscores and hyphens (no spaces), 64 at most"
 # What the updates will be, as the settings file has them or as asked now.
 had() { { sed -n "s/^$1=//p" "$UPDATE_CONF" 2>/dev/null || true; } | head -1; }
 SHOW_MODE="${UPDATES:-$(had MODE)}"; SHOW_MODE="${SHOW_MODE:-auto}"
@@ -195,6 +204,7 @@ would install Clavarium:
   address     $([ "$LOCAL" = "yes" ] && echo "http://127.0.0.1:$PORT, from this machine only (--local)" || echo "https://$DOMAIN")
   operators   $([ "$LOCAL" = "yes" ] && echo "whoever can open a page on this machine: no sign-in" || echo "$OPERATORS")
   name        $([ -n "$APP_NAME" ] && echo "$APP_NAME" || echo "drawn from the address; changed in Settings")
+  sign-in id  $([ "$LOCAL" = "yes" ] && echo "none (--local): no sign-in" || [ -n "$CLIENT_ID" ] && echo "$CLIENT_ID (given)" || echo "a random string, made at install: tells nothing (sudo clavarium client-id to change)")
   server      127.0.0.1:$PORT, as the account "$ACCOUNT", Node.js $NODE_VERSION
   release     $([ "$KEEP_RELEASE" = "yes" ] && echo "the one that runs, kept (--keep-release)" || [ -n "$VERSION" ] && echo "clavarium@$VERSION from npm, checked (integrity, provenance from github.com/clavarium/clavarium, npm audit signatures)" || echo "the working tree $FROM_DIR, as it is (development: not checked)")
   updates     $(case "$SHOW_MODE" in auto) echo "automatic, between ${SHOW_WINDOW%-*} and ${SHOW_WINDOW#*-}" ;; asap) echo "as soon as a version is out" ;; ask) echo "said in Settings, done when you say" ;; off) echo "off" ;; esac), channel $SHOW_CHANNEL
@@ -473,6 +483,11 @@ PASSWORDS=""
 if [ ! -e /etc/dex/config.yaml ]; then
     client_secret="$(openssl rand -hex 32)"
     cookie_secret="$(openssl rand -base64 32 | tr '+/' '-_')"
+    # The OAuth client id is seen in the open (the sign-in redirect). By default
+    # it is random, so it tells nothing about what this is; --client-id sets a
+    # chosen one. dex and the proxy below MUST carry the same value. The display
+    # name is the id too: nothing here names the product (deploy/oidc.mjs).
+    client_id="${CLIENT_ID:-$(openssl rand -hex 16)}"
     identity="$(mktemp)"
     cat > "$identity" <<DEX
 # Who may sign in to Clavarium on THIS machine. Written by install.sh.
@@ -487,8 +502,8 @@ web:
 oauth2:
   skipApprovalScreen: true
 staticClients:
-  - id: clavarium
-    name: Clavarium
+  - id: $client_id
+    name: $client_id
     secret: $client_secret
     redirectURIs:
       - https://$DOMAIN/oauth2/callback
@@ -512,7 +527,7 @@ DEX
     proxy="$(mktemp)"
     cat > "$proxy" <<PROXY
 provider = "oidc"
-client_id = "clavarium"
+client_id = "$client_id"
 client_secret = "$client_secret"
 cookie_secret = "$cookie_secret"
 oidc_issuer_url = "https://$DOMAIN/dex"

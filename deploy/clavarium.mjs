@@ -14,6 +14,7 @@
  *   sudo clavarium relay status | repair | update-os | update-relay | forget-setup-key
  *   sudo clavarium doctor [--fix]                            what works, what does not, what to do
  *   sudo clavarium password EMAIL                            a new password for an administrator
+ *   sudo clavarium client-id [ID]                            the sign-in client id (no ID: a random one)
  *
  * `install` runs deploy/install.sh of this package, which installs THIS
  * version from npm (checked) into /opt/clavarium/releases/X.Y.Z; every other
@@ -27,11 +28,18 @@ import { fileURLToPath } from 'node:url';
 const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 const [verb, ...rest] = process.argv.slice(2);
 if (verb === '--version' || verb === '-v') { console.log(version); process.exit(0); }
-if (['doctor', 'password'].includes(verb)) {
+if (['doctor', 'password', 'client-id'].includes(verb)) {
     const { doctor, newPassword, certificateWatch, installWatch } = await import('./doctor.mjs');
     if (process.getuid?.() !== 0) { console.error(`clavarium ${verb}: run it as root: sudo clavarium ${verb} ...`); process.exit(78); }
     const sys = (await import('./online.mjs')).realSys();
     try {
+        if (verb === 'client-id') {
+            if (rest.length > 1) throw new Error('usage: sudo clavarium client-id [ID]   (no ID: a random one)');
+            const { setClientId } = await import('./oidc.mjs');
+            const r = await setClientId({ value: rest[0], run: sys.run, isRoot: true });
+            sys.print(r.changed.length ? `The sign-in client id is now "${r.id}" (dex and the proxy restarted).` : `The sign-in client id is already "${r.id}".`);
+            process.exit(0);
+        }
         if (verb === 'password') { await newPassword(sys, rest[0]); process.exit(0); }
         if (rest.length === 1 && rest[0] === '--certificate') process.exit(await certificateWatch(sys));
         if (rest.length === 1 && rest[0] === '--install-watch') { await installWatch(sys); process.exit(0); }
@@ -64,7 +72,8 @@ if (verb !== 'install') {
         + '  sudo clavarium key                                                the public keys again (text and QR)\n'
         + '  sudo clavarium relay status|repair|update-os|update-relay|forget-setup-key\n'
         + '  sudo clavarium doctor [--fix]                                     what works, what does not, what to do\n'
-        + '  sudo clavarium password EMAIL                                     a new password for an administrator\n\n'
+        + '  sudo clavarium password EMAIL                                     a new password for an administrator\n'
+        + '  sudo clavarium client-id [ID]                                     the sign-in client id (no ID: a random one)\n\n'
         + 'https://clavarium.org');
     process.exit(verb ? 64 : 0);
 }
