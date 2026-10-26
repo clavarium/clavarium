@@ -274,7 +274,7 @@ export class Updater {
         this.restart = restart ?? (() => this.#restart());
         /* What was seen when the server did not come up: its journal, its unit, who holds its port. */
         this.diagnose = diagnose ?? (() => this.#diagnose());
-        this.health = health ?? ((release) => this.#health(release));
+        this.health = health ?? ((release, opts) => this.#health(release, opts));
         this.backup = backup ?? ((app) => this.#backup(app));
         this.restoreData = restoreData ?? ((app, archive) => this.#restoreData(app, archive));
         this.installPrivileged = installPrivileged ?? ((app) => this.#installPrivileged(app));
@@ -606,13 +606,16 @@ export class Updater {
             await this.installPrivileged(release.app);
         } catch (error) { return `it could not be put in place: ${error.message}`; }
         this.#step(action, version, 'Restarting');
-        return this.#restartAndCheck(release);
+        /* Once the new server answers, the maintenance page is gone but a minute or two of
+           watching that it stays up is left: said as "Confirming", not "Restarting", so a page
+           back up does not look stuck restarting (deploy/updater.mjs, #health onUp). */
+        return this.#restartAndCheck(release, () => this.#step(action, version, 'Confirming'));
     }
     /* '' when it came up, or why not. */
-    async #restartAndCheck(release) {
+    async #restartAndCheck(release, onUp) {
         const r = await this.restart().catch((e) => ({ code: 1, stderr: e.message }));
         if (r?.code) return `the server did not restart: ${lastLine(r)}`;
-        const h = await this.health(release).catch((e) => e.message || 'no answer');
+        const h = await this.health(release, { onUp }).catch((e) => e.message || 'no answer');
         return h || '';
     }
 
@@ -802,7 +805,7 @@ export class Updater {
 
     /* Comes up (answers, from this release) within healthMs, then STAYS up: watched until watchMs after
        the restart; one restart by systemd is forgiven if it answers at the end, not two. */
-    async #health(release) {
+    async #health(release, { onUp } = {}) {
         const { clock, sleep } = this.#o;
         const start = clock();
         const target = realpathSync(release.dir);
@@ -820,7 +823,8 @@ export class Updater {
             if (clock() - start > this.#o.healthMs) return said;
             await sleep(1000);
         }
-        /* And it stays up. */
+        /* It answers, from this release: the maintenance page gives way. Now it must stay up. */
+        onUp?.();
         const until = Math.max(start + this.#o.watchMs, clock() + this.#o.settleMs);
         let restarts = 0;
         while (clock() < until) {

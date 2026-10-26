@@ -405,7 +405,7 @@ test('health after a switch: it must stay up two minutes; one restart by systemd
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const release = { dir: join(root, 'r') }; mkdirSync(release.dir);
     /* A story in seconds: what systemd says (pid; 0 = down) at each moment. */
-    const run = async (story, answersAtEnd = true) => {
+    const run = async (story, answersAtEnd = true, opts) => {
         let ms = 0;
         const at = () => story.filter(([sec]) => sec * 1000 <= ms).at(-1)[1];
         const u = new Updater({
@@ -417,9 +417,16 @@ test('health after a switch: it must stay up two minutes; one restart by systemd
             mainPid: async () => String(at()),
             pidCwd: () => release.dir,
         });
-        return u.health(release);
+        return u.health(release, opts);
     };
     assert.equal(await run([[0, 0], [3, 100]]), '');
+    /* The moment it answers (the maintenance page gives way) is told once, so the final wait is "Confirming". */
+    let ups = 0;
+    assert.equal(await run([[0, 0], [3, 100]], true, { onUp: () => { ups += 1; } }), '');
+    assert.equal(ups, 1, 'onUp fires once, when the server first answers');
+    ups = 0;
+    await run([[0, 0]], true, { onUp: () => { ups += 1; } });
+    assert.equal(ups, 0, 'onUp does not fire when the server never answers');
     assert.equal(await run([[0, 0], [3, 100], [40, 0], [44, 101]]), '', 'one restart, answering at the end');
     assert.match(await run([[0, 0], [3, 100], [40, 0], [44, 101], [80, 0], [84, 102]]), /more than once/);
     assert.match(await run([[0, 0], [3, 100], [100, 0]]), /stopped soon after it started/);
