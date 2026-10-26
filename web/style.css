@@ -190,6 +190,8 @@ a.button { font: 600 .8125rem var(--sans); text-decoration: none; border-radius:
   #mic { flex-basis: 55%; padding-block: 12px; }
 }
 .item[data-asleep="true"] .dot { background: var(--ink2); }
+/* Asleep: faded in the list (and sorted to the bottom of Recent, app.js), so it is plainly not where you are. */
+.item[data-asleep="true"]:not([aria-current="true"]) { opacity: .62; }
 footer button.careful { border-style: dashed; color: var(--ink2); }
 /* On a touch screen every control is at least a fingertip high. */
 @media (max-width: 700px) {

@@ -1127,7 +1127,9 @@
             /* One in Needs you just above is not said twice. */
             /* The last day only: what is older is found in its group. */
             const dayAgo = Date.now() - 24 * 3600_000;
-            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo).sort((a, b) => activityOf(b) - activityOf(a));
+            /* Asleep ones go to the bottom of Recent: they are frozen, not what you came back to. */
+            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo)
+                .sort((a, b) => (Number(a.asleep === true) - Number(b.asleep === true)) || (activityOf(b) - activityOf(a)));
             const few = 4;
             if (recent.length && groups.length && section(RECENT, 'Recent', recent)) {
                 top.append(...unfolding(RECENT, recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true))));
