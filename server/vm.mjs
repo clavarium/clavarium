@@ -93,8 +93,10 @@ export class Vms {
         return this.#asking;
     }
 
-    launch(conversation, memoryMb) {
-        return this.run(['vm', 'launch', vmName(conversation), String(memoryMb)], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
+    launch(conversation, memoryMb, diskGb, cpus) {
+        /* The disk and cores go with the memory only when they are the chosen size, not the defaults. */
+        const size = diskGb && cpus ? [String(diskGb), String(cpus)] : [];
+        return this.run(['vm', 'launch', vmName(conversation), String(memoryMb), ...size], { timeoutMs: (LAUNCH_SECONDS + 60) * 1000 });
     }
 
     /* The machine of a conversation as a COPY of the ready-made one (see

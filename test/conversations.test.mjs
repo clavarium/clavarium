@@ -62,6 +62,18 @@ test('creating a conversation launches its own VM, makes the work folder, instal
     assert.equal(all.list()[0].toolLabel, 'Tool');
 });
 
+test('a machine is created with the chosen disk and cores: launched with them, and they are kept', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'tool', diskGb: 16 });
+    await all.built;
+    assert.ok(b.calls.includes('launch clv-demo 1024 16 1'), `the disk and cores go to the launch: ${b.calls.join(' | ')}`);
+    const c = all.list()[0];
+    assert.equal(c.diskGb, 16); assert.equal(c.cpus, 1);
+    /* Out of bounds is refused before any VM exists (cores are capped at what this host has). */
+    for (const bad of [{ name: 'x', tool: 'tool', diskGb: 4 }, { name: 'x', tool: 'tool', diskGb: 999 }, { name: 'x', tool: 'tool', cpus: 0 }, { name: 'x', tool: 'tool', cpus: 9999 }]) assert.throws(() => all.create(bad), Refusal);
+});
+
 test('a bad name, an unknown tool, too little memory and a name already taken are refused before any VM exists', async (t) => {
     const b = bench(t);
     const all = b.make();

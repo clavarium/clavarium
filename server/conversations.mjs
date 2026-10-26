@@ -260,7 +260,7 @@ export class Conversations {
         return { name: id, title: title !== undefined && title !== id ? title : undefined };
     }
 
-    create({ name: given, title: read, tool, memoryMb, workOnDisk, group }) {
+    create({ name: given, title: read, tool, memoryMb, cpus, diskGb, workOnDisk, group }) {
         const { name, title } = this.#naming({ name: given, title: read });
         if (group !== undefined) { const problem = groupProblem(group); if (problem) throw new Refusal(400, problem); }
         if (!isConversationName(name)) throw new Refusal(400, 'A name is 1 to 32 lower-case letters, digits or hyphens; it starts with a letter and does not end with a hyphen.');
@@ -270,9 +270,14 @@ export class Conversations {
         if (!Number.isInteger(memory) || memory < chosen.memoryMb || memory > 16384) {
             throw new Refusal(400, `This tool needs at least ${chosen.memoryMb} MB of memory.`);
         }
+        /* Cores and disk, chosen at creation like the memory; their defaults when not given. */
+        const cores = cpus ?? 1;
+        if (!Number.isInteger(cores) || cores < 1 || cores > availableParallelism()) throw new Refusal(400, `Cores are 1 to ${availableParallelism()} (what this server has).`);
+        const disk = diskGb ?? DISK_GB;
+        if (!Number.isInteger(disk) || disk < DISK_GB || disk > DISK_MAX_GB) throw new Refusal(400, `Disk is ${DISK_GB} to ${DISK_MAX_GB} GB.`);
         if (this.#store.get(name)) throw new Refusal(409, 'A conversation already has this name.');
         const now = new Date().toISOString();
-        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, diskGb: DISK_GB, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
+        const conversation = { name, ...(title ? { title } : {}), ...(group ? { group } : {}), tool, memoryMb: memory, cpus: cores, diskGb: disk, fixed: FIXES, work: workOnDisk === true ? 'disk' : 'kept', phase: 'building', step: 'Starting the machine', createdAt: now, buildingSince: now, progress: buildProgress(now) };
         /* A new one comes first in its folder (or first of those in none). */
         const { order, groups } = this.#order();
         this.#store.put(conversation);
@@ -284,6 +289,11 @@ export class Conversations {
     /* `again`: a machine built anew for a conversation that had one. */
     async #build(name, tool, memoryMb, again = false) {
         const fail = (what, r) => { this.#store.patch(name, { phase: 'failed', step: undefined, progress: undefined, error: `${what}: ${firstLine(r.stderr) || firstLine(r.stdout) || `exit ${r.code}`}` }); };
+        /* The size chosen at creation (stored by create, kept on a rebuild): launched with it, or, for a
+           copy of a ready-made machine, brought to it while the copy is still stopped. */
+        const made = this.#store.get(name);
+        const diskGb = made?.diskGb ?? DISK_GB; const cpus = made?.cpus ?? 1;
+        const custom = diskGb !== DISK_GB || cpus !== 1;
         /* A COPY OF THE READY-MADE MACHINE when there is one that holds this
            tool (see shelf.mjs): it only has to boot. Anything wrong with the
            copy -- an older VM manager without "clone", a copy that does not
@@ -293,13 +303,18 @@ export class Conversations {
         let readyMade = false;
         if (from) {
             const cloned = await this.#vms.clone(name, from, memoryMb);
+            if (cloned.code === 0 && custom) {
+                /* Still stopped, like the memory the clone set: its cores, and its disk grown to the chosen size. */
+                if (cpus !== 1) await this.#vms.setCpus(name, cpus).catch(() => {});
+                if (diskGb !== DISK_GB) await this.#vms.setDisk(name, diskGb).catch(() => {});
+            }
             const started = cloned.code === 0 ? await this.#vms.start(name) : cloned;
             readyMade = started.code === 0;
             if (!readyMade && await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
             if (!this.#store.get(name)) return undefined; /* archived meanwhile */
         }
         if (!readyMade) {
-            const launched = await this.#vms.launch(name, memoryMb);
+            const launched = await this.#vms.launch(name, memoryMb, custom ? diskGb : undefined, custom ? cpus : undefined);
             if (launched.code !== 0) return fail('The machine did not start', launched);
         }
         this.#store.patch(name, { step: 'Preparing the machine', readyMade: readyMade || undefined });

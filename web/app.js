@@ -835,6 +835,11 @@
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
         $('sleep').hidden = !usable || c.asleep === true;
         $('restart').hidden = DEVICE || !usable;
+        /* The same gestures, surfaced at the top of the panel: wake when asleep, else restart and sleep. */
+        $('quick-sleep').hidden = !usable || c.asleep === true;
+        $('quick-restart').hidden = DEVICE || !usable;
+        $('quick-wake').hidden = !c || c.asleep !== true;
+        $('panel-actions').hidden = DEVICE || !c || !(usable || c.asleep === true);
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -1127,7 +1132,9 @@
             /* One in Needs you just above is not said twice. */
             /* The last day only: what is older is found in its group. */
             const dayAgo = Date.now() - 24 * 3600_000;
-            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo).sort((a, b) => activityOf(b) - activityOf(a));
+            /* Asleep ones go to the bottom of Recent: they are frozen, not what you came back to. */
+            const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo)
+                .sort((a, b) => (Number(a.asleep === true) - Number(b.asleep === true)) || (activityOf(b) - activityOf(a)));
             const few = 4;
             if (recent.length && groups.length && section(RECENT, 'Recent', recent)) {
                 top.append(...unfolding(RECENT, recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true))));
@@ -1422,6 +1429,15 @@
         select.replaceChildren(...mems.map((m) => { const o = document.createElement('option'); o.value = String(m); o.textContent = sizeWords(m); return o; }));
         select.value = String(mems.includes(was) ? was : least);
         $('newconv-memory-least').textContent = tool ? `${tool.label} needs ${sizeWords(least)} at least` : '';
+        /* Cores: 1 to what this server has (learnt from any machine we know), default 1. */
+        const hostCpus = Math.max(1, ...conversations.map((c) => c.hostCpus ?? 1));
+        const cpus = $('newconv-cpus'); const wasCpus = Number(cpus.value) || 1;
+        cpus.replaceChildren(...Array.from({ length: hostCpus }, (_, i) => i + 1).map((n) => { const o = document.createElement('option'); o.value = String(n); o.textContent = `${n}${n === 1 ? ' (default)' : ''}${n === hostCpus && n > 1 ? ' (all of this server)' : ''}`; return o; }));
+        cpus.value = String(wasCpus <= hostCpus ? wasCpus : 1);
+        /* Disk: from the default up; it only grows afterwards. */
+        const disk = $('newconv-disk'); const wasDisk = Number(disk.value) || 8;
+        disk.replaceChildren(...DISK_CHOICES.map((d) => { const o = document.createElement('option'); o.value = String(d); o.textContent = `${d} GB${d === 8 ? ' (default)' : ''}`; return o; }));
+        disk.value = String(DISK_CHOICES.includes(wasDisk) ? wasDisk : 8);
     }
     function paintNewTools() {
         const box = $('newconv-tools');
@@ -1492,10 +1508,11 @@
         if (id && !ID_SHAPE.test(id)) { newError('id', 'Lower-case letters, digits, hyphens'); return; }
         const least = newTools.find((t) => t.id === chosenTool)?.memoryMb;
         const memoryMb = Number($('newconv-memory').value);
+        const cpus = Number($('newconv-cpus').value); const diskGb = Number($('newconv-disk').value);
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}) });
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
             $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
             await refresh();
@@ -7712,7 +7729,7 @@
     $('share-done').addEventListener('click', leaveCompose);
 
     /* ---------- resting and archiving ---------- */
-    $('sleep').addEventListener('click', async () => {
+    async function sleepMachine() {
         const name = current;
         leavePanel();
         disconnect();
@@ -7720,7 +7737,12 @@
         show('Going to sleep...');
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
-    });
+    }
+    $('sleep').addEventListener('click', () => void sleepMachine());
+    /* The quick actions at the top of the panel do the same as the Machine chapter's. */
+    $('quick-sleep').addEventListener('click', () => void sleepMachine());
+    $('quick-restart').addEventListener('click', () => { leavePanel(); void restartMachine(false); });
+    $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     async function rebuild() {
         const name = current;
         disconnect();

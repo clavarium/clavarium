@@ -111,6 +111,12 @@
       <div id="clists" class="sheet as-room" hidden><div id="clists-binder" class="binder-holder"></div></div>
       <div id="panel" class="sheet" hidden>
         <div class="panel-top"><b id="panel-title">This conversation</b></div>
+        <!-- The gestures done often on the machine, without opening the Machine chapter (app.js, paintMachine). -->
+        <div class="row panel-actions" id="panel-actions" hidden>
+          <button type="button" id="quick-wake" class="primary" hidden>Wake it</button>
+          <button type="button" id="quick-restart" hidden>Restart&hellip;</button>
+          <button type="button" id="quick-sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+        </div>
         <p id="panel-error" class="error" role="alert" hidden></p>
         <details class="chapter" id="chapter-general" data-chapter="general">
           <summary><span class="chapter-title">General</span><span class="chapter-about">Name, group, chat.</span></summary>
@@ -898,10 +904,12 @@
             <details class="more"><summary>Which one?</summary>A code project that installs packages: its disk. Can be changed later.</details>
           </div>
           <details class="chapter" id="newconv-more">
-            <summary><span class="chapter-title">More</span><span class="chapter-about">Identifier, memory.</span></summary>
+            <summary><span class="chapter-title">More</span><span class="chapter-about">Identifier, memory, cores, disk.</span></summary>
             <div class="chapter-body">
               <div class="set-row"><div class="set-what"><label for="newconv-id">Identifier</label><small>Its machine and address. Never changes</small><span id="newconv-id-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" placeholder="website-redesign" spellcheck="false" autocapitalize="none"></div></div>
               <div class="set-row"><div class="set-what"><label for="newconv-memory">Memory</label><small id="newconv-memory-least"></small><span id="newconv-memory-error" class="err" role="alert" hidden></span></div><div class="set-control"><select id="newconv-memory"></select></div></div>
+              <div class="set-row"><div class="set-what"><label for="newconv-cpus">Cores</label><small>Shared with the server's machines</small></div><div class="set-control"><select id="newconv-cpus"></select></div></div>
+              <div class="set-row"><div class="set-what"><label for="newconv-disk">Disk</label><small>For code kept on the machine; a disk only grows</small></div><div class="set-control"><select id="newconv-disk"></select></div></div>
             </div>
           </details>
         </div>
