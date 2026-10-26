@@ -966,31 +966,17 @@
        full -- not marked "Seen"; a program stopped for lack of memory (its files safe) is only said. */
     const healthNeeds = (c) => c.phase === 'ready' && !c.asleep && (c.health?.problems ?? []).some((p) => (p.level === 'bad' || (p.level === 'warn' && ['memory', 'disk'].includes(p.kind) && !String(p.key).startsWith('oom:'))) && !(c.health.seen ?? []).includes(p.key));
     const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
-    /* TWO LAYERS per conversation: a point for its MACHINE (green on, amber busy, red a problem, hollow asleep)
-       and a ring around it for its AGENT (gold at work, blue waits for you, green finished). The agent asking or
-       waiting is the blue ring, not the red point -- red is kept for a machine that failed or is unwell. */
+    /* ONE FLAT POINT per conversation, its colour the state -- the worst that applies: a machine problem (red),
+       the agent waits for you (blue), the agent at work (gold, pulsing), the machine busy (amber, pulsing),
+       fine (green), asleep (a hollow ring). The same point, same colours, sums a folded group below. */
     const machineState = (c) => (c.asleep ? 'off' : (c.phase === 'failed' || healthNeeds(c)) ? 'problem'
         : (holds(c) || ['building', 'restarting', 'moving'].includes(c.phase)) ? 'busy' : 'online');
     const agentState = (c) => (c.asleep ? 'sleep' : (talkNeeds(c) || c.answerer?.needs) ? 'wait'
         : c.talk?.state === 'working' ? 'work' : c.talk?.state === 'done' ? 'done' : 'idle');
-    const MACHINE_WORDS = { online: '', busy: 'machine busy', problem: 'a problem', off: 'asleep' };
-    const AGENT_WORDS = { work: 'at work', wait: 'waits for you', done: 'finished', idle: '', sleep: '' };
-    const stateIndicator = (c) => {
-        const m = machineState(c); const a = agentState(c);
-        const ind = document.createElement('span'); ind.className = 'state-ind'; ind.dataset.machine = m; ind.dataset.agent = a;
-        const ring = document.createElement('span'); ring.className = 'state-ring';
-        const core = document.createElement('span'); core.className = 'state-core';
-        ind.append(ring, core); ind.setAttribute('role', 'img');
-        const words = [MACHINE_WORDS[m], AGENT_WORDS[a]].filter(Boolean).join(' · ') || 'idle';
-        ind.title = words; ind.setAttribute('aria-label', words);
-        return ind;
-    };
-    const statePoint = (state) => { const d = document.createElement('span'); d.className = 'state-dot'; d.dataset.state = state; return d; };
-    /* Folded, a heading sums its conversations: one flat point each, same colours, no ring -- the worst kept first
-       (a problem, waits for you, at work, busy, fine, asleep) -- and the same in words for a screen reader. */
     const STATE_WORDS = { problem: 'a problem', wait: 'waits for you', work: 'at work', busy: 'busy', ok: 'fine', sleep: 'asleep' };
     const rollup = (c) => { const m = machineState(c); const a = agentState(c);
         return (m === 'off' ? 'sleep' : m === 'problem' ? 'problem' : a === 'wait' ? 'wait' : a === 'work' ? 'work' : m === 'busy' ? 'busy' : 'ok'); };
+    const statePoint = (state) => { const d = document.createElement('span'); d.className = 'state-dot'; d.dataset.state = state; return d; };
     const STATE_ORDER = ['problem', 'wait', 'work', 'busy', 'ok', 'sleep'];
     function stateSummary(list) {
         const count = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
@@ -1073,7 +1059,7 @@
             b.append(when); b.dataset.when = 'true';
         } else b.append(title, ...(plain ? [] : [sub]));
         /* Its state: one point, on the right. */
-        b.append(stateIndicator(c));
+        const point = statePoint(rollup(c)); point.title = STATE_WORDS[point.dataset.state]; b.append(point);
         /* Found by a search while hidden: said. */
         if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
         /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
