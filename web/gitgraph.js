@@ -127,11 +127,14 @@
             /* Fixed columns, so the author, the time and the branches line up
                down the rows and read at a glance. All set as text, never markup. */
             const cell = (cls, tag, text) => { const e = document.createElement(tag); e.className = cls; e.textContent = text; return e; };
+            /* The message takes all the room it can and is cut only when it must;
+               the other columns are a fixed block on the right. */
             const subject = cell('gg-subject', 'span', c.subject || '(no message)'); subject.title = c.subject || '';
+            const meta = document.createElement('div'); meta.className = 'gg-meta';
             const author = cell('gg-author', 'span', c.author || '');
             const time = cell('gg-time', 'small', when(c.date, now));
             const sha = cell('gg-id', 'small', c.id.slice(0, 7));
-            b.append(subject, author, time, sha);
+            const refs = document.createElement('div'); refs.className = 'gg-refs';
             /* Its branches: the agent's (filled), the remote's (outlined); the same name on both is one label. */
             const names = new Map();
             for (const ref of c.refs ?? []) names.set(ref.name, names.has(ref.name) && names.get(ref.name) !== ref.side ? 'both' : ref.side);
@@ -139,7 +142,7 @@
                 const pill = document.createElement('span'); pill.className = `gg-ref gg-${side}`; pill.textContent = name;
                 pill.style.setProperty('--c', colour(r.col));
                 pill.title = side === 'agent' ? `The agent's ${name}` : side === 'remote' ? `The remote's ${name}` : `${name}, the same here and on the remote`;
-                b.append(pill);
+                refs.append(pill);
                 /* On the agent's tip of a branch that is not level with the remote:
                    how far it is ahead and behind (shown only in the detailed view). */
                 const n = side !== 'remote' && counts[name];
@@ -147,9 +150,11 @@
                     const badge = document.createElement('small'); badge.className = 'gg-count';
                     badge.textContent = `${n.ahead ? `↑${n.ahead}` : ''}${n.behind ? ` ↓${n.behind}` : ''}`.trim();
                     badge.title = `${n.ahead} ahead of, ${n.behind} behind the remote`;
-                    b.append(badge);
+                    refs.append(badge);
                 }
             }
+            meta.append(author, time, sha, refs);
+            b.append(subject, meta);
             if (pick) b.addEventListener('click', () => pick(c));
             list.append(b);
         });
