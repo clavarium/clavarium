@@ -118,12 +118,15 @@ test('refused before anything changes: built elsewhere, no provenance, a smoke t
     await assert.rejects(s.u.apply('1.1.4'), /was built from refs\/heads\/next: a version for everybody comes from refs\/heads\/main/);
     s.publish('1.1.5-next.1', { ref: 'refs/heads/feature' });
     await assert.rejects(s.u.apply('1.1.5-next.1'), /was built from refs\/heads\/feature: a version to try comes from refs\/heads\/next or refs\/heads\/main/);
+    /* A beta version comes from the beta branch, not next. */
+    s.publish('1.1.6-beta.1', { ref: 'refs/heads/next' });
+    await assert.rejects(s.u.apply('1.1.6-beta.1'), /was built from refs\/heads\/next: a version to try comes from refs\/heads\/beta or refs\/heads\/main/);
     s.publish('1.1.2', { smoke: false });
     await assert.rejects(s.u.apply('1.1.2'), /smoke test failed: broken on purpose/);
     assert.equal(s.current(), '1.0.0');
     assert.deepEqual(s.calls.filter((c) => !c.startsWith('signatures')), [], 'no backup, no restart');
     assert.deepEqual(readdirSync(join(s.dirs.code, 'releases')), ['1.0.0'], 'nothing half made is left');
-    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.5-next.1 failed', '1.1.4 failed', '1.1.1 failed', '1.1.0 failed']);
+    assert.deepEqual(s.u.about().history.map((h) => `${h.to} ${h.result}`), ['1.1.2 failed', '1.1.6-beta.1 failed', '1.1.5-next.1 failed', '1.1.4 failed', '1.1.1 failed', '1.1.0 failed']);
     /* Not newer, not a version: refused by name. */
     await assert.rejects(s.u.apply('0.9.0'), /not newer than 1\.0\.0/);
     await assert.rejects(s.u.apply('1.0.0; id'), Refused);

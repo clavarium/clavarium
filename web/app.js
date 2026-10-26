@@ -4283,6 +4283,7 @@
                 if (a.kind === 'asset') void openAssetsPlace(a.ref);
                 else if (a.kind === 'message') void openCardMessage(whose(), a.ref);
                 else if (a.kind === 'file') void openCardFile(whose(), a.ref);
+                else if (a.kind === 'commit' || a.kind === 'branch') void openCardGit(whose(), a.ref, a.kind);
                 else if (a.kind === 'link' && /^https?:\/\//i.test(a.ref)) window.open(a.ref, '_blank', 'noopener');
             },
             /* Where it is: a step of this page's Back (below). */
@@ -4313,6 +4314,14 @@
         if (DEVICE || !m || m[2].split('/').includes('..') || !toConversation(name)) return;
         const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length);
         void preview(tab, m[2], m[2].split('/').pop(), 0);
+    }
+    /* A commit or a branch of a repository of its conversation (ref "repository:sha" / "repository:branch"): the git review, at it. */
+    function openCardGit(name, ref, kind) {
+        const raw = String(ref ?? '').trim(); const at = raw.indexOf(':');
+        if (at < 1 || DEVICE || !toConversation(name)) return;
+        const repo = raw.slice(0, at); const rest = raw.slice(at + 1).trim();
+        if (!repo || !rest) return;
+        void openGit(repo, kind === 'commit' ? { commit: rest } : { branch: rest });
     }
     function watchBinders() {
         if (binderTimer) return;

@@ -468,9 +468,11 @@ export class Updater {
         const repository = statement.predicate?.buildDefinition?.externalParameters?.workflow?.repository;
         if (repository !== REPOS[name]) throw new Error(`${name}@${version} was built from ${repository ?? 'an unknown place'}, not ${REPOS[name]}`);
         /* And from the branch its kind of version comes from (publish.yml): a version for everybody
-           from main only; one to try from next (or main, as before there was a next). */
+           from main only; a -beta.N from beta; any other version to try from next (or main). */
         const ref = statement.predicate?.buildDefinition?.externalParameters?.workflow?.ref;
-        const branches = version.includes('-') ? ['refs/heads/next', 'refs/heads/main'] : ['refs/heads/main'];
+        const branches = /-beta\.\d/.test(version) ? ['refs/heads/beta', 'refs/heads/main']
+            : version.includes('-') ? ['refs/heads/next', 'refs/heads/main']
+            : ['refs/heads/main'];
         if (!branches.includes(ref)) throw new Error(`${name}@${version} was built from ${ref ?? 'an unknown branch'}: a version ${version.includes('-') ? 'to try' : 'for everybody'} comes from ${branches.join(' or ')}`);
     }
 
