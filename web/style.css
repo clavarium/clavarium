@@ -1280,6 +1280,9 @@ select.pill { appearance: auto; }
 #copy-close, #files-close, #preview-close { font-size: 1.375rem; line-height: 1; min-width: 40px; padding: 4px 10px; }
 /* The title of a column of the map, and its round "+" (a new device, conversation, asset): always there. */
 .lk-col h3.lk-colh, .lk-phead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.lk-col h3.lk-colh .lk-colt { flex: none; }
+.lk-col h3.lk-colh .lk-find { flex: 1 1 auto; min-width: 0; width: auto; font: inherit; font-size: .72rem; letter-spacing: 0; text-transform: none; padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--ink); }
+.lk-col h3.lk-colh .lk-find::placeholder { color: var(--ink2); }
 .lk-col h3.lk-colh .lk-add { width: 26px; height: 26px; font-size: .95rem; letter-spacing: 0; }
 .lk-phead { margin: 4px 0 6px; }
 .as-kinds { display: flex; flex-wrap: wrap; gap: 8px; } .as-kinds button { display: inline-flex; align-items: center; gap: 8px; }
