@@ -202,7 +202,7 @@
                 const col = h('div', { class: 'lk-col' });
                 cols.forEach((k, i) => {
                     if (i) col.append(h('div', { class: 'lk-gap' }));
-                    col.append(h('h3', { class: 'lk-colh' }, h('span', { class: 'lk-colt', text: TITLES[k] }), find(k), plus(k)));
+                    col.append(h('h3', { class: 'lk-colh' }, h('span', { class: 'lk-colt', text: TITLES[k] }), plus(k)));
                     const whole = lists[ci][i];
                     const list = whole.filter((n) => matches(n, k));
                     for (const n of list) col.append(nodeEl(n));
@@ -212,15 +212,11 @@
             });
             fit(); draw(); hint(); paintPhone();
         }
-        /* A box in each column's title to narrow it: it filters only what is shown, kept while typing. */
-        const onFind = (e) => {
-            const k = e.target.dataset.k; const at = e.target.selectionStart;
-            filters[k] = e.target.value;
-            paint(false);
-            const ni = board().querySelector(`.lk-find[data-k="${k}"]`);
-            if (ni) { ni.focus(); try { ni.setSelectionRange(at, at); } catch { /* a search input may refuse it */ } }
-        };
-        const find = (k) => h('input', { type: 'search', class: 'lk-find', 'data-k': k, value: filters[k], placeholder: 'Filter…', 'aria-label': `Filter ${TITLES[k]}`, oninput: onFind });
+        /* The filters sit in a bar of their own, ABOVE the board and out of its zoom, so that fitting
+           a crowded map (which zooms it down) never shrinks them. Each narrows its column; the board
+           is repainted without a relayout (the inputs are not rebuilt, so the caret stays). */
+        const onFind = (e) => { filters[e.target.dataset.k] = e.target.value; paint(false); };
+        for (const inp of document.querySelectorAll('#links-filters .lk-find')) inp.addEventListener('input', onFind);
         /* How each kind is made: a device paired, a conversation created, an asset added. The same,
            from the small round "+" by each column's title (always there, however many it holds)
            and from an empty column. */
