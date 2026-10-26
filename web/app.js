@@ -2519,6 +2519,11 @@
         const name = current;
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
+        /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
+           stars with its time left and a way to forget it. Kept current on each reload, read on each repaint. */
+        const chatSecrets = {};
+        const refreshSecrets = () => { for (const k of Object.keys(chatSecrets)) delete chatSecrets[k]; for (const s of conversations.find((x) => x.name === name)?.ephemeralSecrets ?? []) chatSecrets[s.name] = { expiresInMs: s.expiresInMs }; };
+        refreshSecrets();
         /* The lines of its machine seen so far: what changed comes alone, and their buttons are worked out on all of them. */
         const lines = new Map();
         const withLines = (data, asked) => {
@@ -2532,7 +2537,7 @@
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
             window: windowFor(chatWindow),
-            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)).then((data) => (refreshSecrets(), data)),
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
@@ -2565,6 +2570,9 @@
             /* Its pictures, from the shared folders only, by the same route as the thumbnails of Files (type proved by the bytes, never SVG). */
             picture: (file) => { if (!file.open) return null; const at = file.open.indexOf(':'); return `${API}/files/thumb?${new URLSearchParams({ c: name, r: file.open.slice(0, at), p: file.open.slice(at + 1) })}`; },
             diagram: drawDiagram, highlight: colourCode,
+            /* Short-lived secrets of this conversation: the stars say their time left and offer to forget them. */
+            secrets: chatSecrets,
+            forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
             remind: () => post(talkPath(name, '/remind'), {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
             voice: chatVoice(), autoSend: chatAuto,
