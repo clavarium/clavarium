@@ -34,41 +34,26 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item small { color: var(--ink2); }
-/* ITS STATE, on the right of its row: two layers at once -- a point for the
-   machine (green on, amber busy, red a problem, hollow asleep) and a ring
-   around it for the agent (gold at work, blue waits for you, green finished).
-   A flat point of the same colours sums a folded group, with no ring. */
-.item { position: relative; padding-right: 28px; }
+/* ITS STATE, one point on the right of its row, its colour the worst that
+   applies: a machine problem (red), the agent waits for you (blue), the agent
+   at work (gold, pulsing), the machine busy (amber, pulsing), fine (green),
+   asleep (a hollow ring). The same point, same colours, sums a folded group. */
+.item { position: relative; padding-right: 26px; }
 .state-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; background: var(--ok); }
 .state-dot[data-state="problem"] { background: var(--danger); }
 .state-dot[data-state="wait"] { background: var(--wait); }
 .state-dot[data-state="work"] { background: var(--brass); }
 .state-dot[data-state="busy"] { background: var(--warn); }
 .state-dot[data-state="sleep"] { background: transparent; border: 1.5px solid var(--ink2); }
-/* The row indicator: a ring (agent) around a core (machine). */
-.state-ind { position: relative; width: 16px; height: 16px; display: inline-grid; place-items: center; flex-shrink: 0; }
-.item > .state-ind { position: absolute; right: 9px; top: 11px; }
-.state-ring { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; box-sizing: border-box; }
-.state-core { width: 7px; height: 7px; border-radius: 50%; box-sizing: border-box; background: var(--ok); }
-.state-ind[data-machine="busy"] .state-core { background: var(--warn); animation: breathe 1.5s ease-in-out infinite; }
-.state-ind[data-machine="problem"] .state-core { background: var(--danger); }
-.state-ind[data-machine="off"] .state-core { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink2); }
-.state-ind[data-agent="work"] .state-ring { border-color: var(--brass); animation: breathe 1.9s ease-in-out infinite; }
-.state-ind[data-agent="wait"] .state-ring { border-color: var(--wait); }
-.state-ind[data-agent="done"] .state-ring { border-color: var(--ok); }
-.state-ind[data-agent="sleep"] .state-ring { border-color: var(--line); }
+.item > .state-dot { position: absolute; right: 10px; top: 13px; }
+.item > .state-dot[data-state="work"], .item > .state-dot[data-state="busy"] { animation: breathe 1.7s ease-in-out infinite; }
 /* Folded: up to four points, how its conversations are. */
 .state-sum { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 /* Unfolded: it comes in gently, once. */
 .unfolding { animation: unfold .18s ease-out; }
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
-@keyframes pulse { 50% { opacity: .25; } }
-@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.82); } }
-/* Movement off: no pulse, and a dashed ring tells "at work" by shape instead. */
-@media (prefers-reduced-motion: reduce) {
-  .state-core, .state-ring, .unfolding { animation: none !important; }
-  .state-ind[data-agent="work"] .state-ring { border-style: dashed; }
-}
+@keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
+@media (prefers-reduced-motion: reduce) { .item > .state-dot, .unfolding { animation: none !important; } }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choices button[aria-checked="true"] { border-color: var(--brass); background: rgba(210, 169, 78, .16); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
