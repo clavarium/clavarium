@@ -4681,7 +4681,7 @@
         $('updates-state').textContent = running ? `${running.action === 'back' ? 'Going back to' : 'Updating to'} ${running.version}: ${running.step.toLowerCase()}...`
             : u.checkError ? 'Could not check just now.'
             : u.available ? `${u.available} is out.`
-            : u.checkedAt ? `Up to date · checked ${sinceWords(u.checkedAt)}` : 'Up to date';
+            : u.checkedAt ? `Nothing newer to install · checked ${sinceWords(u.checkedAt)}` : 'Nothing newer to install';
         $('updates-check').disabled = Boolean(running);
         $('updates-offer').hidden = !u.available || Boolean(running);
         /* A version that already failed here is not offered as usual: tried again only on purpose, warned. */

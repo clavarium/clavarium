@@ -23,7 +23,7 @@ test('Settings, Updates: the version, what is out, the mode and its window, the 
     await p.locator('#settings-close').click();
     await p.locator('#nav-settings').click();
     await me.until('installed', async () => (await p.locator('#updates-version').innerText()) === 'Clavarium 0.1.0');
-    assert.equal(await p.locator('#updates-state').innerText(), 'Up to date · checked just now');
+    assert.equal(await p.locator('#updates-state').innerText(), 'Nothing newer to install · checked just now');
     assert.equal(await p.inputValue('#updates-mode'), 'auto');
     assert.deepEqual([await p.inputValue('#updates-from'), await p.inputValue('#updates-to')], ['02:00', '05:00']);
     /* When: in the window only, said with when it opens (or, inside it, when it closes). */
