@@ -431,7 +431,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             let out = ''; let last = 0; let any = false;
             for (const h of hits) {
                 out += text.slice(last, h.start);
-                try { const { name } = secrets.stash(conversation, h.value); out += secretRef(name); any = true; }
+                try { const { name, expiresAt } = secrets.stash(conversation, h.value); out += secretRef(name, Date.parse(expiresAt)); any = true; }
                 catch { out += text.slice(h.start, h.end); }      /* cannot be stashed (too large): left as it is */
                 last = h.end;
             }

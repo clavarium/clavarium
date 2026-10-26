@@ -57,8 +57,8 @@ function looksRandom(s) {
    shows as stars (ui side), and the tool reads to use /run/secrets/<name>.
    Named like `SECRET_` + 10 hex (secrets.mjs stash). The angle brackets
    (U+27E8/U+27E9) are vanishingly rare in a real message. */
-export const secretRef = (name) => `⟨secret:${name}⟩`;
-export const SECRET_REF = /⟨secret:(SECRET_[0-9A-F]{10})⟩/g;
+export const secretRef = (name, at) => `⟨secret:${name}${Number.isFinite(at) ? `@${at}` : ''}⟩`;
+export const SECRET_REF = /⟨secret:(SECRET_[0-9A-F]{10})(?:@(\d+))?⟩/g;
 
 export function scan(text) {
     const str = String(text ?? '');
