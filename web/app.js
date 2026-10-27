@@ -6166,6 +6166,8 @@
        a live Connexion (dynamic connector, token kept on the server): this jumps
        straight to adding one. */
     const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft' };
+    /* Which kinds each provider can be connected for (from the server). */
+    let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'] };
     $('mailbox-to-connexion').addEventListener('click', () => { assetsAdding = 'connexion'; void paintAssets(); });
     /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
        in in their own browser; the token is kept on the server, never in a machine.
@@ -6174,16 +6176,15 @@
         const form = $('connexion-new');
         form.dataset.provider = provider;
         for (const b of $('connexion-provider').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
-        const google = provider === 'google';
-        for (const id of ['connexion-calendar', 'connexion-contacts']) { const c = $(id); if (!google) c.checked = false; c.disabled = !google; }
-        $('connexion-calendar-label').classList.toggle('off', !google);
-        $('connexion-contacts-label').classList.toggle('off', !google);
+        const kinds = accountSupported[provider] ?? ['mail'];
+        for (const [id, k] of [['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']]) { const c = $(id); const ok = kinds.includes(k); if (!ok) c.checked = false; c.disabled = !ok; $(`${id}-label`).classList.toggle('off', !ok); }
         $('connexion-paste').hidden = true;
         $('connexion-error').hidden = true;
         const who = MAILBOX_PROVIDER[provider];
-        $('connexion-notice').textContent = google
-            ? "Clavarium signs in with GNOME Online Accounts' app — that is what Google sees. Mail, calendar and contacts can be connected together."
-            : 'Clavarium signs in as Thunderbird — that is what Microsoft sees. Mail for now; calendar and contacts are coming.';
+        const all = kinds.includes('calendar') && kinds.includes('contacts');
+        $('connexion-notice').textContent = provider === 'google'
+            ? `Clavarium signs in with GNOME Online Accounts' app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
+            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
@@ -6214,6 +6215,7 @@
         await paintAssets();
     });
     setConnexionProvider('google');
+    getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = d.supported; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
