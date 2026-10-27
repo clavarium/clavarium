@@ -78,6 +78,11 @@
  *   POST /api/secrets/<NAME>/replace        {value?, expires?}: in place, its name and grants kept; '' removes the expiry
  *   POST /api/secrets/<NAME>/remove
  *   POST /api/secrets/<NAME>/rename         {name}: its value and where it is handed go with it
+ *   GET  /api/asset-groups                  the owner's asset groups: [{id, label, members}]
+ *   POST /api/asset-groups                  {label}: a new, empty group
+ *   POST /api/asset-groups/place            {asset, group}: put an asset in a group (group null to take it out)
+ *   POST /api/asset-groups/<id>/rename      {label}
+ *   POST /api/asset-groups/<id>/remove
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
@@ -146,7 +151,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -240,6 +245,10 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
+            /* The owner's asset groups (groups.mjs): a label and the asset ids each
+               holds. Distinct from /api/groups/* above, which are the conversation
+               list's folders. */
+            if (pathname === '/api/asset-groups' && groups) return send(200, groups.list()), true;
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Which providers and kinds an account can be connected for here. */
             if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
@@ -428,6 +437,14 @@ export async function handleApi(request, response, conversations, headers, resou
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
+        /* Asset groups (groups.mjs): a folder-style tidy-up, not a right. */
+        if (pathname === '/api/asset-groups' && groups) return send(201, groups.create(body.label)), true;
+        if (pathname === '/api/asset-groups/place' && groups) return send(200, groups.place(body.asset, body.group ?? null)), true;
+        const groupOp = /^\/api\/asset-groups\/([0-9a-f]{12})\/(rename|remove)$/.exec(pathname);
+        if (groupOp && groups) {
+            if (groupOp[2] === 'rename') return send(200, groups.rename(groupOp[1], body.label)), true;
+            return groups.remove(groupOp[1]), send(200, { ok: true }), true;
+        }
         const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
