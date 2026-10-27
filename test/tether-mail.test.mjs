@@ -72,6 +72,6 @@ test('a granted mail target runs for a conversation with the token revealed host
     assert.ok(!readFileSync(answersFile, 'utf8').includes('the-refresh-token'), 'the answer never carries the token');
     assert.ok(!readFileSync(join(side, 'asks.jsonl'), 'utf8').includes('the-refresh-token'), 'the ask never carried it');
     /* And the secret is host-only: it cannot be attached to any conversation. */
-    const tokenName = secrets.list().find((s) => s.hostOnly).name;
+    const tokenName = secrets.list({ held: true }).find((s) => s.hostOnly).name;
     assert.throws(() => secrets.attach('alpha', tokenName, true), /held by the server/);
 });

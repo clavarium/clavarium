@@ -54,7 +54,7 @@ test('a Google connect keeps the token host-only and makes one target per kind, 
     assert.equal(calls.length, 1, 'the code was traded once');
     assert.deepEqual(res.targets.map((x) => x.kind).sort(), ['calendar', 'contacts', 'mail']);
     /* One host-only secret, named by each target, holding the refresh token. */
-    const secretRow = b.secrets.list().find((s) => s.hostOnly);
+    const secretRow = b.secrets.list({ held: true }).find((s) => s.hostOnly);
     assert.ok(secretRow, 'a host-only secret was created');
     assert.equal(b.secrets.reveal(secretRow.name), 'refresh-abc-123', 'the token is kept, revealed host-side');
     for (const t2 of b.made.values()) assert.equal(t2.secrets.refresh, secretRow.name, 'every target names that one secret');
@@ -82,11 +82,11 @@ test('Microsoft is connected for mail alone here, even when more is asked', asyn
 test('reconnecting the same account reuses the secret name and replaces the token', async (t) => {
     const first = bench(t, { token: 'token-one' });
     await connect(first.accounts, { provider: 'google', user: 'dave@example.com', kinds: ['mail'] });
-    const name = first.secrets.list().find((s) => s.hostOnly).name;
+    const name = first.secrets.list({ held: true }).find((s) => s.hostOnly).name;
     /* A second connect for the same account, with a new token value. */
     const again = new Accounts({ secrets: first.secrets, targets: first.targets, fetch: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'at', refresh_token: 'token-two', expires_in: 3600 }) }) });
     await connect(again, { provider: 'google', user: 'dave@example.com', kinds: ['mail'] });
-    assert.deepEqual(first.secrets.list().filter((s) => s.hostOnly).map((s) => s.name), [name], 'the same one host-only secret');
+    assert.deepEqual(first.secrets.list({ held: true }).filter((s) => s.hostOnly).map((s) => s.name), [name], 'the same one host-only secret');
     assert.equal(first.secrets.reveal(name), 'token-two', 'its value is the new token');
 });
 

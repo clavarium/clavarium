@@ -105,9 +105,11 @@ export class Secrets {
     #given(conversation) { return this.#store.all().filter((s) => this.#handed(conversation, s.name) && !this.#expired(s)); }
 
     /* Names, where they are attached, the expiry. Never a value. `days`: whole
-       days left (null without an expiry); `expired`: no longer delivered. */
-    list() {
-        return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
+       days left (null without an expiry); `expired`: no longer delivered. A
+       host-only secret (an account token the server holds) is left out -- it is
+       never given to a machine, so the page never lists it; `held` includes it. */
+    list({ held = false } = {}) {
+        return this.#store.all().filter((s) => held || !s.hostOnly).map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
             expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s), ...(s.hostOnly ? { hostOnly: true } : {}),
             ...(s.ephemeral ? { ephemeral: true, expiresAt: s.expiresAt, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) } : {}) }));
     }

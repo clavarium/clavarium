@@ -79,9 +79,11 @@ test('a host-only secret is held by the server: it cannot be attached, never rea
     assert.deepEqual(b.secrets.of('alpha'), ['PLAIN'], 'not among a conversation Assets');
     /* The server uses it on the agent behalf: revealed by name, host-side, like any secret. */
     assert.equal(b.secrets.reveal('MAIL_TOKEN'), 'refresh-token-value');
-    /* The listing marks it so the UI leaves it out of what can be given. */
-    assert.equal(b.secrets.list().find((s) => s.name === 'MAIL_TOKEN').hostOnly, true);
+    /* The ordinary listing leaves it out entirely (never a giveable secret on the page);
+       `held` reveals it for a management view, marked host-only. */
+    assert.equal(b.secrets.list().find((s) => s.name === 'MAIL_TOKEN'), undefined, 'not in the page listing');
     assert.equal(b.secrets.list().find((s) => s.name === 'PLAIN').hostOnly, undefined);
+    assert.equal(b.secrets.list({ held: true }).find((s) => s.name === 'MAIL_TOKEN').hostOnly, true);
     /* Detaching (take) is always allowed; it is attaching that is refused. */
     assert.doesNotThrow(() => b.secrets.attach('alpha', 'MAIL_TOKEN', false));
 });
