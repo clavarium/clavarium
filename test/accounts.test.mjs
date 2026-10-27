@@ -99,6 +99,19 @@ test('a partial grant makes a target only for the kinds actually allowed, and na
     assert.deepEqual([...res.denied].sort(), ['calendar', 'contacts'], 'the two it did not grant are reported');
 });
 
+test('verify reads an account\'s current permissions live and records them on its targets', async (t) => {
+    const b = bench(t);
+    await connect(b.accounts, { provider: 'google', user: 'ivan@example.com', kinds: ['mail', 'calendar', 'contacts'] });
+    const target = [...b.made.values()][0];
+    /* A later check where the provider now reports only the mail scope. */
+    const accounts = new Accounts({ secrets: b.secrets, targets: b.targets, fetch: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'at', refresh_token: 'r2', expires_in: 3600, scope: 'https://mail.google.com/' }) }) });
+    const res = await accounts.verify({ id: target.id });
+    assert.deepEqual(res.authorized, ['mail'], 'it reads what is allowed now');
+    assert.deepEqual([...res.all].sort(), ['calendar', 'contacts', 'mail']);
+    for (const x of b.made.values()) assert.deepEqual(x.config.authorizedKinds, ['mail'], 'every target of the account records it');
+    await assert.rejects(accounts.verify({ id: 'nope' }), /No such connexion/);
+});
+
 test('when the scope cannot be read, every asked kind is trusted (no false denial)', async (t) => {
     const b = bench(t);
     /* The default bench returns scope:"x" -- unmatched; fall back to the request. */

@@ -59,6 +59,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .hint { color: var(--ink2); font-size: .75rem; margin: 0; }
 .error { color: var(--danger); font-size: .8125rem; margin: 0; }
+.as-perms { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin: 8px 0; }
+.as-perms button { font-size: .75rem; padding: 4px 10px; }
 #room { grid-column: 2; grid-row: 1 / span 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* The bar wraps onto a second line rather than squeeze the name away or break a button's label in two. */
 header { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px; background: var(--bar); border-bottom: 1px solid var(--line); min-height: 44px; }
