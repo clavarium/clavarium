@@ -6218,9 +6218,10 @@
         $('connexion-error').hidden = true;
         const who = MAILBOX_PROVIDER[provider];
         const all = kinds.includes('calendar') && kinds.includes('contacts');
-        $('connexion-notice').textContent = provider === 'google'
-            ? `Clavarium signs in with Thunderbird's app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
-            : `Clavarium signs in with Thunderbird's app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
+        /* Say plainly whose app Clavarium borrows (it is what the provider sees),
+           and -- before anyone clicks -- that allowing lands on a page that will
+           not load, which is expected: the address is what to copy back here. */
+        $('connexion-notice').textContent = `Clavarium signs in as Thunderbird's app — that is what ${who} sees.${all ? ' Mail, calendar and contacts together.' : ''} After you allow, your browser lands on an error page — that is normal, nothing is running at that address. Copy the whole address from the bar and paste it below.`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
