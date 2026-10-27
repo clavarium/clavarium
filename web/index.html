@@ -546,6 +546,29 @@
             <p id="mailbox-error" class="error" role="alert" hidden></p>
           </form>
           </div>
+          <div id="connexion-box" class="as-form" data-kind="connexion"><h3>Connect an account</h3>
+          <div class="hint">A live link to a mailbox, calendar or address book. The agent uses it through Tether, within the rights you give; the account's token stays on the server and never enters a machine. <details class="more"><summary>How the sign-in works</summary><span>Clavarium signs in as Thunderbird — that is what the provider sees. You sign in in your own browser; Clavarium never sees your password, and keeps only a token it uses on your behalf.</span></details></div>
+          <form id="connexion-new" autocomplete="off" data-provider="google">
+            <div id="connexion-provider" class="choices" role="group" aria-label="Kind of account">
+              <button type="button" data-provider="google" aria-pressed="true">Google</button>
+              <button type="button" data-provider="microsoft">Microsoft</button>
+            </div>
+            <label for="connexion-email">Email address</label>
+            <input id="connexion-email" type="email" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="your email address">
+            <div id="connexion-kinds" class="choices" role="group" aria-label="What to connect">
+              <label class="check"><input type="checkbox" id="connexion-mail" checked> Mail</label>
+              <label class="check" id="connexion-calendar-label"><input type="checkbox" id="connexion-calendar"> Calendar</label>
+              <label class="check" id="connexion-contacts-label"><input type="checkbox" id="connexion-contacts"> Contacts</label>
+            </div>
+            <p class="hint" id="connexion-notice"></p>
+            <div class="row"><button type="button" id="connexion-open" class="primary">Open the sign-in page</button></div>
+            <div id="connexion-paste" hidden>
+              <label for="connexion-code">After you allow, the page will not load — copy its full address and paste it here</label>
+              <div class="row"><input id="connexion-code" spellcheck="false" autocapitalize="off" placeholder="http://127.0.0.1..."><button type="button" id="connexion-connect" class="primary">Connect</button></div>
+            </div>
+            <p id="connexion-error" class="error" role="alert" hidden></p>
+          </form>
+          </div>
           <div id="list-box" class="as-form" data-kind="list"><h3 id="listnew-head">New binder</h3>
         <form id="list-new" autocomplete="off">
           <label for="listnew-template">Template</label>
