@@ -140,7 +140,7 @@ export const MAINTENANCE_BLOCK = [
     '\t\t\t\t@api path /api/* /c/api/*',
     '\t\t\t\thandle @api {',
     '\t\t\t\t\theader Content-Type "application/json; charset=utf-8"',
-    '\t\t\t\t\trespond "{\\"error\\":\\"Clavarium is being updated or restarted: it comes back by itself in a moment.\\",\\"down\\":true}" 503',
+    '\t\t\t\t\trespond "{\\"error\\":\\"Clavarium did not answer just now -- it may be busy or restarting. It comes back by itself; try again in a moment.\\",\\"down\\":true}" 503',
     '\t\t\t\t}',
     '\t\t\t\thandle {',
     `\t\t\t\t\troot * ${MAINTENANCE_DIR}`,

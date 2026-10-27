@@ -605,7 +605,7 @@ $BIND
 				@api path /api/* /c/api/*
 				handle @api {
 					header Content-Type "application/json; charset=utf-8"
-					respond "{\"error\":\"Clavarium is being updated or restarted: it comes back by itself in a moment.\",\"down\":true}" 503
+					respond "{\"error\":\"Clavarium did not answer just now -- it may be busy or restarting. It comes back by itself; try again in a moment.\",\"down\":true}" 503
 				}
 				handle {
 					root * /var/lib/clavarium/maintenance
