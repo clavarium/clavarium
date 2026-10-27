@@ -3166,7 +3166,15 @@
     /* BINDER'S LISTS, AS THIS PAGE NAMES THEM: the one place for the word (Assets, a conversation's tab). */
     const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
     $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
-    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['connexion', 'Connexions', 'link-2'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['agenda', 'Calendars', 'calendar'], ['contacts', 'Contacts', 'users'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
+    /* A live Tether target shows in the category of its kind (a mailbox among the
+       mailboxes), not apart. Its connecting account is the rest of its id. */
+    const TETHER_CAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
+    const tetherCat = (k) => TETHER_CAT[k] ?? 'acces';
+    const tetherAccount = (id) => String(id).replace(/^(mail|calendar|contacts|files|ssh|browser|screen|computer)-/, '');
+    /* Adding to a type category of live links (a calendar, an address book, an
+       access) is connecting an account: they all open the connect-account form. */
+    const addForm = (k) => (['agenda', 'contacts', 'acces'].includes(k) ? 'connexion' : k);
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     /* A commit: its line, and the rest of its message under it, opened by a click. */
@@ -3195,7 +3203,7 @@
             if (mine.length === 0 && !add) continue;
             const section = el('section', 'as-kind'); section.dataset.kind = kind;
             const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', connexion: 'a connexion', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
+            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', agenda: 'a calendar', contacts: 'an address book', acces: 'an access', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
             section.append(head);
             if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
             for (const item of mine) {
@@ -3713,7 +3721,7 @@
         if (keepFiles) { void paintFiles(); return; }
         detail.append(asTitle(chosen, back));
         if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
-            if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+            if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
             embedFiles(detail, chosen.name);
         } else if (chosen.kind === 'send') await sendDetail(detail, gits);
         else if (chosen.kind === 'git') await gitDetail(detail, chosen.name, { others: gits.length > 1 });
@@ -3859,9 +3867,14 @@
         for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
         /* Tether targets ("Connexions"): a mailbox, calendar or address book connected
            by token, given to a conversation at a level. The token lives on the server. */
-        for (const tgt of Array.isArray(tether.targets) ? tether.targets : []) {
+        const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
+        for (const tgt of allTargets) {
             const users = Object.keys(tgt.grants ?? {}).filter((id) => id.startsWith('conversation:')).length;
-            items.push({ key: `connexion:${tgt.id}`, kind: 'connexion', name: tgt.title, target: tgt, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: connexionSub(tgt.kind) });
+            const acct = tetherAccount(tgt.id);
+            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true,
+                badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
+                sub: siblings.length ? `linked: ${siblings.join(', ')}` : connexionSub(tgt.kind) });
         }
         /* Binder's lists: given to a conversation (read, write) in Binder itself. */
         const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
@@ -3886,7 +3899,7 @@
             if (assetsAdding === 'choose') {
                 detail.append(el('h3', '', 'New asset'));
                 const kinds = el('div', 'as-kinds');
-                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['connexion', 'Connexion'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
+                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['agenda', 'Calendar'], ['contacts', 'Address book'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
                     const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
                     b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
                     b.prepend(kindIcon(kind)); kinds.append(b);
@@ -3894,7 +3907,7 @@
                 detail.append(kinds);
                 return;
             }
-            const form = $(`${assetsAdding}-box`); form.hidden = false;
+            const form = $(`${addForm(assetsAdding)}-box`); form.hidden = false;
             detail.append(form);
             if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
             if (assetsAdding === 'list') void fillTemplates();
@@ -3903,7 +3916,7 @@
         }
         if (assetsAdding) {
             const all2 = el('button', 'as-link as-back', '‹ Assets'); all2.type = 'button'; all2.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-            const form = $(`${assetsAdding}-box`); form.hidden = false;
+            const form = $(`${addForm(assetsAdding)}-box`); form.hidden = false;
             detail.append(all2, form);
             if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
             if (assetsAdding === 'list') void fillTemplates();
@@ -3915,7 +3928,17 @@
         const ready = conversations.filter((c) => c.phase === 'ready');
         const r = chosen.resource;
         /* State, in a line. */
-        if (chosen.kind === 'mailbox') detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        /* A live link: what it is, and that it is associated with the same account's others. */
+        if (chosen.target) {
+            const t = chosen.target;
+            detail.append(el('p', 'hint', ['live', connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
+            if (chosen.siblings?.length) {
+                const a = el('p', 'as-assoc hint');
+                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's token (kept on the server); rights are given separately.`));
+                detail.append(a);
+            }
+        }
         if (chosen.kind === 'secret') {
             /* Renamed: its value and the conversations it is handed to go with it. */
             const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
@@ -3937,11 +3960,12 @@
             detail.append(box, ...replace.card);
         }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
-        const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']]
-            : chosen.kind === 'connexion' ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
+        const options = chosen.target ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
+            : chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']]
             : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none'
-            : chosen.kind === 'connexion' ? chosen.target.grants?.[`conversation:${c.name}`]?.level ?? 'none' : r.attachments?.[c.name] ?? 'none');
+        const has = (c) => (chosen.target ? chosen.target.grants?.[`conversation:${c.name}`]?.level ?? 'none'
+            : chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none'
+            : r.attachments?.[c.name] ?? 'none');
         const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
         const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
         const users = el('div', 'as-users');
@@ -3949,9 +3973,9 @@
         const row = (c) => {
             const line = el('div', 'given-row'); line.dataset.conversation = c.name;
             line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
-                if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
+                if (chosen.target) await grantTarget(chosen.target.id, c.name, value);
+                else if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
                 else if (chosen.kind === 'list') await grantList(chosen.list.id, c.name, value);
-                else if (chosen.kind === 'connexion') await grantTarget(chosen.target.id, c.name, value);
                 else await attachTo(c.name, chosen.name, value, 'assets-error');
                 await paintAssets();
             }, `What ${c.name} may do with ${chosen.name}`));
@@ -3997,9 +4021,8 @@
             edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
             void gitDetail(holder, chosen.name, { place: true });
         }
-        if (chosen.kind === 'connexion') {
+        if (chosen.target) {
             const t = chosen.target;
-            detail.append(el('p', 'hint', [connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
             detail.append(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
             /* Calls waiting for a person (propose/frame). Accept or refuse each. */
             const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
@@ -4021,7 +4044,7 @@
         const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
         const why = el('small', 'hint');
         const inUse = chosen.kind !== 'secret' && using.length > 0;
-        const lost = { secret: 'Its value is lost for good.', list: 'Its cards are lost for good.', connexion: 'The connection is removed; the account token stays on the server.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
+        const lost = chosen.target ? 'The connection is removed; the account token stays on the server.' : ({ secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.');
         if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
         remove.addEventListener('click', () => {
             const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
@@ -4032,7 +4055,7 @@
             sure.addEventListener('click', async () => {
                 try {
                     if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
-                    else if (chosen.kind === 'connexion') await post(`${API}/tether/remove-target`, { target: chosen.target.id });
+                    else if (chosen.target) await post(`${API}/tether/remove-target`, { target: chosen.target.id });
                     else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
                     assetOpen = '';
                 }
@@ -4045,7 +4068,7 @@
         /* Given to a device: from here too (the map shows who has it). */
         const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
         share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
-        const foot = el('div', 'as-foot'); foot.append(...(['secret', 'list', 'connexion'].includes(chosen.kind) ? [] : [share, el('br')]), remove, why);
+        const foot = el('div', 'as-foot'); foot.append(...(['secret', 'list'].includes(chosen.kind) || chosen.target ? [] : [share, el('br')]), remove, why);
         detail.append(foot);
     }
     /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
@@ -7448,7 +7471,7 @@
        what). Nothing is ever chosen for the owner but the thing they came
        from; writing is never chosen for them. */
     const KINDS = [['', 'All'], ['conversation', 'Conversations'], ['folder', 'Folders'], ['git', 'Repositories'], ['mailbox', 'Mailboxes']];
-    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', connexion: 'connexion' };
+    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', acces: 'access' };
     const ago = (date) => {
         if (!date) return 'never opened';
         const minutes = Math.max(0, Math.round((Date.now() - Date.parse(date)) / 60000));
