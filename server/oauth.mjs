@@ -37,14 +37,16 @@ const b64url = (buf) => Buffer.from(buf).toString('base64url');
 
 /* Per-provider endpoints, the scopes we may ask for by kind, and a built-in,
    already-verified open-source desktop client as the default (the `thunderbird`
-   field, kept by that name for its callers). WHICH client matters: a client is
-   only granted the scopes its app was verified for. For GOOGLE we borrow GNOME
-   Online Accounts' client, verified for mail AND calendar AND contacts, so one
-   consent gives all three. For MICROSOFT we use Thunderbird's client, verified
-   for mail (IMAP) only; Microsoft calendar/contacts go over Graph and need a
-   Graph-verified client -- see card #110. `consentExtra` is what a provider
-   needs on the consent URL to return a refresh token; `offlineScope` is the same
-   thing when it is a scope rather than a parameter (Microsoft). */
+   field, kept by that name for its callers). WHICH client matters -- not for the
+   scopes (both are multitenant public clients that take any delegated scope the
+   person consents to), but for the REDIRECT it registered, since we reach it
+   through a loopback address the person copies. For GOOGLE we borrow GNOME Online
+   Accounts' client (any 127.0.0.1 port). For MICROSOFT we use Thunderbird's own
+   client, which likewise registered the loopback 127.0.0.1 (any port) -- so both
+   land the person on the same copy-pastable http://127.0.0.1 address, and mail,
+   calendar and contacts all go over Graph. `consentExtra` is what a provider needs
+   on the consent URL to return a refresh token; `offlineScope` is the same thing
+   when it is a scope rather than a parameter (Microsoft). */
 export const PROVIDERS = {
     google: {
         label: 'Google',
@@ -73,17 +75,23 @@ export const PROVIDERS = {
         pkce: true,
         consentExtra: {},
         offlineScope: 'offline_access',
-        /* Microsoft over Graph: GNOME Online Accounts' client is a Graph client,
-           so mail, calendar and contacts all go through graph.microsoft.com (the
-           mail connector uses its Graph path for Microsoft). mail.send is needed
-           to send. GOA's client is verified for all of these. */
+        /* Microsoft over Graph: mail, calendar and contacts all go through
+           graph.microsoft.com (the mail connector uses its Graph path for
+           Microsoft). mail.send is needed to send. Thunderbird's public client
+           takes these delegated scopes by dynamic consent. */
         scopes: {
             mail: 'mail.readwrite mail.send',
             calendar: 'calendars.readwrite',
             contacts: 'contacts.readwrite',
         },
+        /* Thunderbird's built-in Microsoft client (open source, public, no secret;
+           comm-central OAuth2Providers.sys.mjs). It registered the loopback
+           127.0.0.1 redirect on ANY port, so we reuse the same http://127.0.0.1
+           address as Google -- the person copies it from the bar. (GNOME Online
+           Accounts' Graph client, b155a604-..., registered only a custom-scheme
+           goa-oauth2:// redirect a browser cannot surface, so we left it.) */
         thunderbird: {
-            clientId: 'b155a604-3c31-4079-93b0-6bb6aa9d5464',
+            clientId: '9e5f94bc-e8a4-4e73-b8be-63364c29d753',
             clientSecret: null,
         },
     },

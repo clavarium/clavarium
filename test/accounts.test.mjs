@@ -47,12 +47,12 @@ test('consent builds the provider page with the scopes for the kinds asked, and 
     assert.equal(u.searchParams.get('access_type'), 'offline', 'offline, so a refresh token comes back');
 });
 
-test('Microsoft consents on GNOME Online Accounts\' registered redirect; Google on the loopback IP', (t) => {
+test('both providers consent on the same copy-pastable loopback redirect', (t) => {
     const b = bench(t);
     const g = new URL(b.accounts.consent({ provider: 'google', user: 'a@example.com', kinds: ['mail'] }).url);
     assert.match(g.searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:47813\//);
     const m = new URL(b.accounts.consent({ provider: 'microsoft', user: 'a@example.com', kinds: ['mail'] }).url);
-    assert.match(m.searchParams.get('redirect_uri'), /^goa-oauth2:\/\/localhost\/[0-9a-f-]{36}$/);
+    assert.match(m.searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:47813\//);
 });
 
 test('a Google connect keeps the token host-only and makes one target per kind, all naming it', async (t) => {
@@ -72,6 +72,8 @@ test('a Google connect keeps the token host-only and makes one target per kind, 
     const mail = [...b.made.values()].find((x) => x.kind === 'mail');
     assert.equal(mail.config.user, 'alice@example.com');
     assert.equal(mail.config.provider, 'google');
+    /* The minting client is pinned on every target, so refresh uses the same one. */
+    for (const t2 of b.made.values()) assert.ok(t2.config.clientId, 'the client id is pinned on the target');
     assert.equal([...b.made.values()].find((x) => x.kind === 'calendar').config.user, undefined);
 });
 
