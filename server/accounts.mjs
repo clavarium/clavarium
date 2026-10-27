@@ -28,13 +28,11 @@ import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, pkcePair,
 /* The loopback the provider sends the code back to; nothing listens there. The
    person's browser lands on a page that will not load, and they copy the whole
    address -- which carries the code -- back into Clavarium. The same address
-   trades the code, so it must match what the borrowed client registered. Google's
-   desktop client takes any 127.0.0.1 port. Microsoft's (GNOME Online Accounts')
-   registered one exact redirect, a custom scheme goa-oauth2://localhost/<id>, so
-   that is the one to send: after allowing, the browser shows that goa-oauth2://
-   address (it cannot open it -- that is expected) and the person copies it. */
+   trades the code, so it must match what the borrowed client registered. Both
+   borrowed clients (Google's GNOME Online Accounts one, Microsoft's Thunderbird
+   one) registered the loopback on any 127.0.0.1 port, so one address serves both. */
 const REDIRECT = 'http://127.0.0.1:47813/';
-const redirectFor = (provider) => (provider === 'microsoft' ? `goa-oauth2://localhost/${thunderbird('microsoft').clientId}` : REDIRECT);
+const redirectFor = () => REDIRECT;
 const PENDING_MS = 10 * 60_000;
 const PENDING_MAX = 20;
 
@@ -118,7 +116,11 @@ export class Accounts {
         const made = [];
         for (const k of p.kinds) {
             const spec = KIND[k];
-            const config = { provider: p.provider };
+            /* Pin the client that minted the token onto the target, so the keeper
+               refreshes with the same one -- a refresh token is bound to its client,
+               and this keeps a target working even if the built-in default later
+               moves (the connector prefers config.clientId over its own default). */
+            const config = { provider: p.provider, clientId };
             if (spec.needsUser) config.user = p.user;
             const target = this.#targets.put({
                 id: targetId(k, p.provider, p.user),

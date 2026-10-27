@@ -6180,7 +6180,8 @@
     $('mailbox-to-connexion').addEventListener('click', () => { assetsAdding = 'connexion'; void paintAssets(); });
     /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
        in in their own browser; the token is kept on the server, never in a machine.
-       Google covers mail+calendar+contacts in one go; Microsoft, mail only here. */
+       Both cover mail+calendar+contacts in one go, each landing on the same
+       copy-pastable http://127.0.0.1 address. */
     const setConnexionProvider = (provider) => {
         const form = $('connexion-new');
         form.dataset.provider = provider;
@@ -6193,7 +6194,7 @@
         const all = kinds.includes('calendar') && kinds.includes('contacts');
         $('connexion-notice').textContent = provider === 'google'
             ? `Clavarium signs in with GNOME Online Accounts' app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
-            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''} After you allow, the browser shows a goa-oauth2://… address it cannot open — copy that one and paste it below.`;
+            : `Clavarium signs in with Thunderbird's app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
