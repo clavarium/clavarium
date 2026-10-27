@@ -37,16 +37,14 @@ const b64url = (buf) => Buffer.from(buf).toString('base64url');
 
 /* Per-provider endpoints, the scopes we may ask for by kind, and a built-in,
    already-verified open-source desktop client as the default (the `thunderbird`
-   field, kept by that name for its callers). WHICH client matters -- not for the
-   scopes (both are multitenant public clients that take any delegated scope the
-   person consents to), but for the REDIRECT it registered, since we reach it
-   through a loopback address the person copies. For GOOGLE we borrow GNOME Online
-   Accounts' client (any 127.0.0.1 port). For MICROSOFT we use Thunderbird's own
-   client, which likewise registered the loopback 127.0.0.1 (any port) -- so both
-   land the person on the same copy-pastable http://127.0.0.1 address, and mail,
-   calendar and contacts all go over Graph. `consentExtra` is what a provider needs
-   on the consent URL to return a refresh token; `offlineScope` is the same thing
-   when it is a scope rather than a parameter (Microsoft). */
+   field). We borrow THUNDERBIRD's own client for BOTH providers: each registered
+   the loopback 127.0.0.1 redirect on any port, so the person always lands on the
+   same copy-pastable http://127.0.0.1 address, and each is cleared for the three
+   kinds -- Google's client carries the mail + CalDAV + CardDAV scopes; Microsoft's
+   takes mail, calendar and contacts over Graph (a multitenant public client, by
+   dynamic consent). `consentExtra` is what a provider needs on the consent URL to
+   return a refresh token; `offlineScope` is the same thing when it is a scope
+   rather than a parameter (Microsoft). */
 export const PROVIDERS = {
     google: {
         label: 'Google',
@@ -60,12 +58,16 @@ export const PROVIDERS = {
             calendar: 'https://www.googleapis.com/auth/calendar',
             contacts: 'https://www.googleapis.com/auth/carddav',
         },
-        /* GNOME Online Accounts' built-in client (open source, embedded secret
-           sanctioned by Google for an installed app). Verified for mail,
-           calendar and contacts -- unlike Thunderbird's, which carries mail only. */
+        /* Thunderbird's own built-in Google client (open source, embedded secret
+           sanctioned by Google for an installed app; comm-central
+           OAuth2Providers.sys.mjs). Its GOOGLE_SCOPES carry mail AND CalDAV AND
+           CardDAV, so one consent gives all three -- the same loopback 127.0.0.1
+           redirect as before. Using Thunderbird for Google too means one borrowed
+           identity for both providers. (GNOME Online Accounts' client
+           44438659992-... worked as well; we unified on Thunderbird.) */
         thunderbird: {
-            clientId: '44438659992-7kgjeitenc16ssihbtdjbgguch7ju55s.apps.googleusercontent.com',
-            clientSecret: '-gMLuQyDiI0XrQS_vx_mhuYF',
+            clientId: '406964657835-aq8lmia8j95dhl1a2bvharmfk3t1hgqj.apps.googleusercontent.com',
+            clientSecret: 'kSmqreRr0qwBWJgbf5Y-PjSU',
         },
     },
     microsoft: {

@@ -12,10 +12,9 @@
  *
  * ONE ACCOUNT, ONE TOKEN, SEVERAL TARGETS. A consent for mail+calendar+contacts
  * yields a single refresh token; this makes one host-only secret and a Tether
- * target per kind, each naming that secret. Both providers borrow an open-source
- * desktop client verified for all three: Google uses GNOME Online Accounts' over
- * IMAP + CalDAV/CardDAV, Microsoft uses its Graph client (mail, calendar and
- * contacts all over Microsoft Graph).
+ * target per kind, each naming that secret. Both providers borrow Thunderbird's
+ * own open-source desktop client, verified for all three: Google over IMAP +
+ * CalDAV/CardDAV, Microsoft over Microsoft Graph (mail, calendar and contacts).
  *
  * A CREATED TARGET IS GIVEN TO NO ONE. The person grants it per conversation, at
  * its own level, from the page (Assets > Access) -- like git: one mailbox, many
@@ -29,8 +28,8 @@ import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, pkcePair,
    person's browser lands on a page that will not load, and they copy the whole
    address -- which carries the code -- back into Clavarium. The same address
    trades the code, so it must match what the borrowed client registered. Both
-   borrowed clients (Google's GNOME Online Accounts one, Microsoft's Thunderbird
-   one) registered the loopback on any 127.0.0.1 port, so one address serves both. */
+   borrowed Thunderbird clients (one for Google, one for Microsoft) registered the
+   loopback on any 127.0.0.1 port, so one address serves both. */
 const REDIRECT = 'http://127.0.0.1:47813/';
 const redirectFor = () => REDIRECT;
 const PENDING_MS = 10 * 60_000;

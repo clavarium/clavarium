@@ -6193,7 +6193,7 @@
         const who = MAILBOX_PROVIDER[provider];
         const all = kinds.includes('calendar') && kinds.includes('contacts');
         $('connexion-notice').textContent = provider === 'google'
-            ? `Clavarium signs in with GNOME Online Accounts' app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
+            ? `Clavarium signs in with Thunderbird's app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
             : `Clavarium signs in with Thunderbird's app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
