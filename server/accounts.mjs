@@ -27,10 +27,14 @@ import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, pkcePair,
 
 /* The loopback the provider sends the code back to; nothing listens there. The
    person's browser lands on a page that will not load, and they copy the whole
-   address -- which carries the code -- back into Clavarium. Desktop OAuth clients
-   accept any 127.0.0.1 port, and the same address trades the code, so it only has
-   to stay constant. (Shared, on purpose, with the older file-copy mailbox.) */
+   address -- which carries the code -- back into Clavarium. The same address
+   trades the code, so it only has to stay constant. Google's desktop client
+   accepts any 127.0.0.1 port; Microsoft (Azure) rejects a 127.0.0.1 whose exact
+   port is not registered but accepts http://localhost with ANY port for a public
+   client, so Microsoft uses localhost. */
 const REDIRECT = 'http://127.0.0.1:47813/';
+const REDIRECT_LOCALHOST = 'http://localhost:47813/';
+const redirectFor = (provider) => (provider === 'microsoft' ? REDIRECT_LOCALHOST : REDIRECT);
 const PENDING_MS = 10 * 60_000;
 const PENDING_MAX = 20;
 
@@ -85,7 +89,7 @@ export class Accounts {
         const { clientId } = thunderbird(prov);
         const state = newState();
         const { verifier, challenge } = pkcePair();
-        const url = consentUrl(prov, { clientId, redirectUri: REDIRECT, scope: scopeFor(prov, chosen), state, codeChallenge: challenge, loginHint: address });
+        const url = consentUrl(prov, { clientId, redirectUri: redirectFor(prov), scope: scopeFor(prov, chosen), state, codeChallenge: challenge, loginHint: address });
         this.#pending.set(state, { provider: prov, user: address, kinds: chosen, verifier, at: Date.now() });
         return { url };
     }
@@ -103,7 +107,7 @@ export class Accounts {
         try { code = extractCode(redirected, { state }); } catch (e) { throw new Refusal(400, e.message); }
         const { clientId, clientSecret } = thunderbird(p.provider);
         let refreshToken;
-        try { ({ refreshToken } = await exchangeCode(p.provider, { clientId, clientSecret, redirectUri: REDIRECT, code, codeVerifier: p.verifier, fetch: this.#fetch })); }
+        try { ({ refreshToken } = await exchangeCode(p.provider, { clientId, clientSecret, redirectUri: redirectFor(p.provider), code, codeVerifier: p.verifier, fetch: this.#fetch })); }
         catch (e) { throw new Refusal(502, `The connection could not be completed: ${e.message}`); }
         if (!refreshToken) throw new Refusal(502, 'The account returned no lasting token; allow offline access and try again.');
         /* The token is kept host-only: it can never be attached to a conversation,
