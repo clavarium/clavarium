@@ -3195,7 +3195,7 @@
             if (mine.length === 0 && !add) continue;
             const section = el('section', 'as-kind'); section.dataset.kind = kind;
             const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
+            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', connexion: 'a connexion', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
             section.append(head);
             if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
             for (const item of mine) {
