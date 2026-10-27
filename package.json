@@ -1,6 +1,6 @@
 {
   "name": "clavarium",
-  "version": "0.2.65-beta.1",
+  "version": "0.2.66-beta.1",
   "license": "MIT",
   "type": "module",
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
@@ -47,7 +47,7 @@
     "clavarium-binder": "0.1.8-next.1",
     "clavarium-docket": "0.1.1",
     "clavarium-parley": "0.17.11-next.1",
-    "clavarium-tether": "0.1.0-next.18",
+    "clavarium-tether": "0.1.0-next.19",
     "mermaid": "11.17.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",

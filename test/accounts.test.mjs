@@ -74,7 +74,8 @@ test('a Google connect keeps the token host-only and makes one target per kind, 
     assert.equal(mail.config.provider, 'google');
     /* The minting client is pinned on every target, so refresh uses the same one. */
     for (const t2 of b.made.values()) assert.ok(t2.config.clientId, 'the client id is pinned on the target');
-    assert.equal([...b.made.values()].find((x) => x.kind === 'calendar').config.user, undefined);
+    /* Calendar carries the address too now: Google CalDAV needs it in the URL. */
+    assert.equal([...b.made.values()].find((x) => x.kind === 'calendar').config.user, 'alice@example.com');
 });
 
 test('a created target is given to no conversation: the person grants it afterwards', async (t) => {
