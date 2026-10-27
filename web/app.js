@@ -3195,6 +3195,20 @@
         return svg;
     }
     const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
+    /* One row, used by both the by-type and the by-group views. The icon
+       follows the item's own kind (a group mixes kinds). */
+    function assetRow(item, { chosen, choose }) {
+        const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
+        if (item.key === chosen) row.setAttribute('aria-current', 'true');
+        const name = el('b', '', item.name);
+        if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
+        const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
+        if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
+        const words = el('span', 'as-words'); words.append(name, sub);
+        row.append(kindIcon(item.kind), words);
+        row.addEventListener('click', () => choose(item.key));
+        return row;
+    }
     /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
     function paintAsList(holder, items, { chosen, choose, add, empty }) {
         holder.replaceChildren();
@@ -3206,21 +3220,196 @@
             if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', agenda: 'a calendar', contacts: 'an address book', acces: 'an access', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
             section.append(head);
             if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
-            for (const item of mine) {
-                const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
-                if (item.key === chosen) row.setAttribute('aria-current', 'true');
-                const name = el('b', '', item.name);
-                if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
-                const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
-                if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
-                const words = el('span', 'as-words'); words.append(name, sub);
-                row.append(kindIcon(kind), words);
-                row.addEventListener('click', () => choose(item.key));
-                section.append(row);
-            }
+            for (const item of mine) section.append(assetRow(item, { chosen, choose }));
             holder.append(section);
         }
         if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+    }
+    /* The group an asset is in, or '' for none. */
+    const groupOf = (key, groups) => groups.find((g) => (g.members ?? []).includes(key))?.id ?? '';
+    /* Groups the owner has folded shut in the by-group view (a convenience). */
+    const groupsFolded = (() => { try { const v = JSON.parse(localStorage.getItem('clavarium-groups-folded') ?? '[]'); return new Set(Array.isArray(v) ? v : []); } catch { return new Set(); } })();
+    const keepGroupsFolded = () => { try { localStorage.setItem('clavarium-groups-folded', JSON.stringify([...groupsFolded])); } catch { /* a private window */ } };
+    /* The rows, by the owner's groups: a foldable section per group, then the
+       loose ones. A group's name opens its own detail (rename, remove, give the
+       whole group); the chevron folds it; "+" makes a new one. An asset is put
+       into a group from the asset's own detail. */
+    function paintAsGroups(holder, items, groups, { chosen, choose, empty }) {
+        holder.replaceChildren();
+        const byKey = new Map(items.map((i) => [i.key, i]));
+        const addBar = el('div', 'as-group-new');
+        if (groupAdding) {
+            const form = el('form', 'as-group-form'); form.autocomplete = 'off';
+            const input = el('input'); input.placeholder = 'Group name'; input.maxLength = 40; input.setAttribute('aria-label', 'New group name');
+            const make = el('button', 'primary', 'Add'); make.type = 'submit';
+            const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
+            form.append(input, make, cancel);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { const made = await post(`${API}/asset-groups`, { label: input.value.trim() }); groupAdding = false; assetOpen = `group:${made.id}`; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            });
+            addBar.append(form);
+            holder.append(addBar);
+            queueMicrotask(() => input.focus());
+        } else {
+            addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
+            holder.append(addBar);
+        }
+        const section = (head, rows, none, { foldable } = {}) => {
+            const s = el('section', 'as-kind as-group'); s.append(head);
+            if (!foldable || !head.dataset.folded) {
+                if (rows.length === 0) s.append(el('p', 'hint as-none', none));
+                for (const item of rows) s.append(assetRow(item, { chosen, choose }));
+            }
+            holder.append(s);
+        };
+        for (const g of groups) {
+            const members = (g.members ?? []).map((k) => byKey.get(k)).filter(Boolean);
+            const folded = groupsFolded.has(g.id);
+            const head = el('div', 'as-kind-head as-group-head'); if (folded) head.dataset.folded = 'true';
+            const chev = el('button', 'as-chev'); chev.type = 'button'; chev.setAttribute('aria-label', folded ? 'Unfold' : 'Fold'); chev.setAttribute('aria-expanded', String(!folded));
+            chev.append(el('span', '', folded ? '▸' : '▾'));
+            chev.addEventListener('click', () => { if (folded) groupsFolded.delete(g.id); else groupsFolded.add(g.id); keepGroupsFolded(); void paintAssets(); });
+            const label = el('button', 'as-group-name'); label.type = 'button';
+            if (`group:${g.id}` === chosen) label.setAttribute('aria-current', 'true');
+            label.append(el('h3', '', g.label), el('span', 'as-badge count', String(members.length)));
+            label.title = 'Open the group (give it, rename it)';
+            label.addEventListener('click', () => choose(`group:${g.id}`));
+            head.append(chev, label);
+            section(head, members, 'Empty. Open an asset to put it here.', { foldable: true });
+        }
+        const grouped = new Set(groups.flatMap((g) => g.members ?? []));
+        const loose = items.filter((i) => !grouped.has(i.key));
+        const looseHead = el('div', 'as-kind-head'); looseHead.append(el('h3', '', 'No group'));
+        section(looseHead, loose, groups.length ? 'Every asset is in a group.' : 'Make a group above, then open an asset to put it in it.');
+        if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+    }
+    /* Give the whole group to a conversation: none / read / write, turned into
+       the right default FOR EACH member's type. A shortcut over the per-asset
+       grants -- those stay the truth, and each asset keeps its own right after. */
+    const GROUP_LEVELS = [['none', 'None'], ['read', 'Read'], ['write', 'Write']];
+    function memberGrantValue(item, level) {
+        if (item.target) return { none: 'none', read: 'watch', write: 'frame' }[level];
+        if (item.kind === 'secret') return level === 'none' ? 'off' : 'use';
+        if (item.kind === 'mailbox') return level === 'none' ? 'none' : 'read'; // a mailbox has only read
+        return level; // folder, git, list: none/read/write line up
+    }
+    async function applyMemberGrant(item, conversationName, value) {
+        if (item.target) return grantTarget(item.target.id, conversationName, value);
+        if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', 'assets-error');
+        if (item.kind === 'list') return grantList(item.list.id, conversationName, value);
+        return attachTo(conversationName, item.name, value, 'assets-error');
+    }
+    /* The group's single level for a conversation, read back from its members:
+       none if all are off, write if any member is given write, else read. */
+    function groupLevelFor(members, conversationName) {
+        let any = false; let write = false;
+        for (const item of members) {
+            const v = memberCurrent(item, conversationName);
+            if (!['none', 'off'].includes(v)) any = true;
+            if (['write', 'rw', 'frame', 'free'].includes(v)) write = true;
+        }
+        return write ? 'write' : any ? 'read' : 'none';
+    }
+    function memberCurrent(item, conversationName) {
+        const id = `conversation:${conversationName}`;
+        if (item.target) return item.target.grants?.[id]?.level ?? 'none';
+        if (item.kind === 'secret') return item.secret.conversations.includes(conversationName) ? 'use' : 'off';
+        if (item.kind === 'list') return item.list.grants?.[id] ?? 'none';
+        return item.resource?.attachments?.[conversationName] ?? 'none';
+    }
+    /* The toggle above the rows: by type (default) or by the owner's groups. */
+    function paintAssetsView() {
+        const bar = $('assets-view'); if (!bar) return;
+        bar.replaceChildren();
+        for (const [by, label] of [['type', 'By type'], ['group', 'By group']]) {
+            const b = el('button', '', label); b.type = 'button'; b.dataset.by = by;
+            b.setAttribute('aria-pressed', String(assetsBy === by));
+            b.addEventListener('click', () => { if (assetsBy === by) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); });
+            bar.append(b);
+        }
+    }
+    /* In an asset's detail: which group it is in. Moving it is a folder move
+       (it leaves any other group). New groups are made in the by-group view. */
+    function groupPicker(chosen, groups) {
+        const wrap = el('div', 'as-group-of'); wrap.append(el('span', 'as-group-of-label', 'Group'));
+        if (!groups.length) { wrap.append(el('small', 'hint', 'Make one in “By group”.')); return wrap; }
+        const sel = el('select'); sel.setAttribute('aria-label', `Group for ${chosen.name}`);
+        const none = el('option', '', 'No group'); none.value = ''; sel.append(none);
+        const inId = groupOf(chosen.key, groups);
+        for (const g of groups) { const o = el('option', '', g.label); o.value = g.id; if (g.id === inId) o.selected = true; sel.append(o); }
+        if (!inId) none.selected = true;
+        sel.addEventListener('change', async () => {
+            $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group: sel.value || null }); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        });
+        wrap.append(sel);
+        return wrap;
+    }
+    /* A group's own detail: rename it, remove it (the assets stay), give the
+       whole group to a conversation at a level, and its members (each opens). */
+    function groupDetail(detail, group, items, back) {
+        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
+        const top = el('div', 'as-title');
+        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
+        const h = el('h2'); h.append(el('span', '', group.label), el('span', 'as-badge count', String(members.length)));
+        top.append(all, h);
+        detail.append(top);
+        /* Rename and remove. Removing a group drops the grouping only; every asset,
+           and every right it was given, stays exactly as it was. */
+        const form = el('form', 'set-row'); form.autocomplete = 'off';
+        const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', 'Group name');
+        const go = el('button', '', 'Rename'); go.type = 'submit';
+        const what = el('div', 'set-what'); what.append(el('span', '', 'Name'));
+        const control = el('div', 'set-control'); control.append(name, go);
+        form.append(what, control);
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault(); $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        });
+        const del = el('button', 'as-danger', 'Remove the group'); del.type = 'button'; del.title = 'The assets stay; only the group is removed.';
+        del.addEventListener('click', async () => {
+            $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/${group.id}/remove`, {}); assetOpen = ''; remember(); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        });
+        const box = el('div', 'set-rows as-block'); box.append(form, del);
+        detail.append(box);
+        /* Give the whole group. none / read / write turned into each type's own
+           default; each asset keeps its own right after (set one by one above). */
+        const ready = conversations.filter((c) => c.phase === 'ready');
+        const give = async (c, level) => {
+            for (const item of members) { try { await applyMemberGrant(item, c.name, memberGrantValue(item, level)); } catch { /* error shown by the grant; keep going */ } }
+            await paintAssets();
+        };
+        const row = (c) => {
+            const line = el('div', 'given-row'); line.dataset.conversation = c.name;
+            line.append(el('span', '', shownName(c)), modes(GROUP_LEVELS, groupLevelFor(members, c.name), (v) => give(c, v), `Give ${group.label} to ${c.name}`));
+            return line;
+        };
+        const using = ready.filter((c) => groupLevelFor(members, c.name) !== 'none');
+        const others = ready.filter((c) => groupLevelFor(members, c.name) === 'none');
+        const givenBox = el('div', 'as-users'); const picker = el('div', 'as-users as-picker'); picker.hidden = true;
+        for (const c of using) givenBox.append(row(c));
+        if (using.length === 0) givenBox.append(el('p', 'hint', members.length ? 'No conversation has the group.' : 'The group is empty.'));
+        for (const c of others) picker.append(row(c));
+        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation has it.' : 'No conversation is ready.'));
+        detail.append(chapter('Give the group to a conversation', roundPlus('Give the group to a conversation', () => { picker.hidden = !picker.hidden; })), givenBox, picker);
+        const note = el('p', 'as-assoc hint');
+        note.append(el('b', '', 'Per type'), document.createTextNode(': repositories and folders read or write, a mailbox reads, a secret is used, a connexion is given at the matching level. Each asset keeps its own right, set one by one.'));
+        detail.append(note);
+        /* The members, each opens its own detail. */
+        const rowsBox = el('div', 'as-group-members');
+        for (const item of members) rowsBox.append(assetRow(item, { chosen: '', choose: (key) => { placeAssetStep(); assetOpen = key; remember(); void paintAssets(); } }));
+        if (members.length === 0) rowsBox.append(el('p', 'hint', 'Open an asset and pick this group to put it here.'));
+        detail.append(chapter('Assets in the group'), rowsBox);
     }
     /* The top of a detail: "All assets" (a phone), the icon, the name, a badge. */
     function asTitle(item, back) {
@@ -3815,6 +4004,13 @@
 
     /* ---- the server's ---- */
     let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false; let listOpen = ''; let listsSig = '';
+    /* How the Assets list is arranged: by type (the categories, the default) or
+       by the owner's groups. A per-viewer convenience, kept in the browser. */
+    let assetsBy = 'type';
+    try { if (localStorage.getItem('clavarium-assets-by') === 'group') assetsBy = 'group'; } catch { /* a private window */ }
+    const keepAssetsBy = () => { try { localStorage.setItem('clavarium-assets-by', assetsBy); } catch { /* as above */ } };
+    /* The "+ New group" inline form being shown in the by-group view. */
+    let groupAdding = false;
     /* A binder opened in Assets: its screen, the card of the address (a reload); a card, a step (binderSteps). */
     let assetsView = null; let assetsAt = null;
     const assetsSteps = binderSteps(() => assetsView, { address: () => remember() });
@@ -3853,7 +4049,7 @@
     }
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
-        const [all, boxes, secrets, keys, lists, tether] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), readDevices()]);
+        const [all, boxes, secrets, keys, lists, tether, assetGroups] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), getJson('/asset-groups', []), readDevices()]);
         if (place !== 'assets') return;
         paintKeys(keys);
         markSecrets(secrets);
@@ -3885,8 +4081,17 @@
         }
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
-        $('assets-as').dataset.open = chosen || assetsAdding ? 'detail' : 'list';
-        paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose: (key) => { placeAssetStep(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); }, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        /* A group can be the open thing too (its own detail: give it, rename it). */
+        const chosenGroup = !assetsAdding && !chosen && assetOpen.startsWith('group:') ? assetGroups.find((g) => `group:${g.id}` === assetOpen) ?? null : null;
+        $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding ? 'detail' : 'list';
+        /* The "by type / by group" toggle sits above the rows (built once, kept). */
+        paintAssetsView();
+        const choose = (key) => { placeAssetStep(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
+        if (assetsBy === 'group') {
+            paintAsGroups($('assets-rows'), shown, assetGroups, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : ''), choose, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        } else {
+            paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        }
         const detail = $('assets-detail');
         /* The forms go back to where they wait before the detail is drawn again. */
         for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
@@ -3923,8 +4128,10 @@
             focusField(form.querySelector('input:not([type=radio])'));
             return;
         }
+        if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
         if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
         detail.append(asTitle(chosen, back));
+        detail.append(groupPicker(chosen, assetGroups));
         const ready = conversations.filter((c) => c.phase === 'ready');
         const r = chosen.resource;
         /* State, in a line. */
