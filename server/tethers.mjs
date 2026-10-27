@@ -32,9 +32,9 @@ export class Tethers {
 
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
        `secrets`: the vault, read by name for a connector only (reveal). */
-    constructor({ dataDir, resources, conversations, secrets, now = () => Date.now() }) {
+    constructor({ dataDir, resources, conversations, secrets, connectors, now = () => Date.now() }) {
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets;
-        this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now });
+        this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now, ...(connectors ? { connectors } : {}) });
         this.#keeper.store.onChange(() => { this.#changes++; });
     }
 
