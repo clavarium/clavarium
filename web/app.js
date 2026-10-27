@@ -3166,7 +3166,7 @@
     /* BINDER'S LISTS, AS THIS PAGE NAMES THEM: the one place for the word (Assets, a conversation's tab). */
     const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
     $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
-    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['connexion', 'Connexions', 'link-2'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
     const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     /* A commit: its line, and the rest of its message under it, opened by a click. */
@@ -3195,7 +3195,7 @@
             if (mine.length === 0 && !add) continue;
             const section = el('section', 'as-kind'); section.dataset.kind = kind;
             const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
+            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', connexion: 'a connexion', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
             section.append(head);
             if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
             for (const item of mine) {
@@ -3818,6 +3818,23 @@
         if (!done.ok) { $('assets-error').textContent = done.text; $('assets-error').hidden = false; }
         await refresh();
     }
+    /* The plain word for a Tether target's kind, in a Connexion's sub-line. */
+    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen' };
+    const connexionSub = (kind) => CONNEXION_SUB[kind] ?? kind;
+    /* Give a Tether target to a conversation at a level, or take it back (none). */
+    async function grantTarget(id, name, level) {
+        $('assets-error').hidden = true;
+        try { await post(`${API}/tether/level`, { target: id, agent: `conversation:${name}`, level }); }
+        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        await refresh();
+    }
+    /* Accept or refuse a Tether call that is waiting for a person. */
+    async function decideTether(id, decision) {
+        $('assets-error').hidden = true;
+        try { await post(`${API}/tether/decide`, { id, decision }); }
+        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        await paintAssets();
+    }
     /* A new list: Binder's templates, read once. */
     async function fillTemplates() {
         const pick = $('listnew-template');
@@ -3828,7 +3845,7 @@
     }
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
-        const [all, boxes, secrets, keys, lists] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), readDevices()]);
+        const [all, boxes, secrets, keys, lists, tether] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), readDevices()]);
         if (place !== 'assets') return;
         paintKeys(keys);
         markSecrets(secrets);
@@ -3840,6 +3857,12 @@
                 sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
         for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
+        /* Tether targets ("Connexions"): a mailbox, calendar or address book connected
+           by token, given to a conversation at a level. The token lives on the server. */
+        for (const tgt of Array.isArray(tether.targets) ? tether.targets : []) {
+            const users = Object.keys(tgt.grants ?? {}).filter((id) => id.startsWith('conversation:')).length;
+            items.push({ key: `connexion:${tgt.id}`, kind: 'connexion', name: tgt.title, target: tgt, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: connexionSub(tgt.kind) });
+        }
         /* Binder's lists: given to a conversation (read, write) in Binder itself. */
         const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
         listsSig = binderSig(lists.data);
@@ -3863,7 +3886,7 @@
             if (assetsAdding === 'choose') {
                 detail.append(el('h3', '', 'New asset'));
                 const kinds = el('div', 'as-kinds');
-                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
+                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['connexion', 'Connexion'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
                     const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
                     b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
                     b.prepend(kindIcon(kind)); kinds.append(b);
@@ -3914,8 +3937,11 @@
             detail.append(box, ...replace.card);
         }
         /* Used by: each conversation that has it, what it may do; "+" offers the others. */
-        const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']] : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none' : r.attachments?.[c.name] ?? 'none');
+        const options = chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']]
+            : chosen.kind === 'connexion' ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
+            : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
+        const has = (c) => (chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none'
+            : chosen.kind === 'connexion' ? chosen.target.grants?.[`conversation:${c.name}`]?.level ?? 'none' : r.attachments?.[c.name] ?? 'none');
         const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
         const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
         const users = el('div', 'as-users');
@@ -3925,6 +3951,7 @@
             line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
                 if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
                 else if (chosen.kind === 'list') await grantList(chosen.list.id, c.name, value);
+                else if (chosen.kind === 'connexion') await grantTarget(chosen.target.id, c.name, value);
                 else await attachTo(c.name, chosen.name, value, 'assets-error');
                 await paintAssets();
             }, `What ${c.name} may do with ${chosen.name}`));
@@ -3970,11 +3997,31 @@
             edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
             void gitDetail(holder, chosen.name, { place: true });
         }
+        if (chosen.kind === 'connexion') {
+            const t = chosen.target;
+            detail.append(el('p', 'hint', [connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
+            detail.append(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
+            /* Calls waiting for a person (propose/frame). Accept or refuse each. */
+            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
+            if (waiting.length) {
+                const box = el('div', 'as-users');
+                for (const q of waiting) {
+                    const line = el('div', 'given-row');
+                    const what = el('span', ''); what.append(el('b', '', q.verb ?? 'action'), document.createTextNode(` ${q.detail ?? ''}`.trimEnd()));
+                    if (q.why) what.append(el('small', 'hint', ` — ${q.why}`));
+                    const yes = el('button', 'primary', 'Accept'); yes.type = 'button'; yes.addEventListener('click', () => { yes.disabled = true; void decideTether(q.id, 'yes'); });
+                    const no = el('button', 'danger', 'Refuse'); no.type = 'button'; no.addEventListener('click', () => { no.disabled = true; void decideTether(q.id, 'no'); });
+                    const acts = el('div', 'levels'); acts.append(yes, no);
+                    line.append(what, acts); box.append(line);
+                }
+                detail.append(chapter('Waiting for you'), box);
+            }
+        }
         /* Delete, out of the way; refused while it is used, and why. */
         const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
         const why = el('small', 'hint');
         const inUse = chosen.kind !== 'secret' && using.length > 0;
-        const lost = { secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
+        const lost = { secret: 'Its value is lost for good.', list: 'Its cards are lost for good.', connexion: 'The connection is removed; the account token stays on the server.' }[chosen.kind] ?? 'Its files are kept aside on the server.';
         if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
         remove.addEventListener('click', () => {
             const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
@@ -3985,6 +4032,7 @@
             sure.addEventListener('click', async () => {
                 try {
                     if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
+                    else if (chosen.kind === 'connexion') await post(`${API}/tether/remove-target`, { target: chosen.target.id });
                     else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
                     assetOpen = '';
                 }
@@ -3997,7 +4045,7 @@
         /* Given to a device: from here too (the map shows who has it). */
         const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
         share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
-        const foot = el('div', 'as-foot'); foot.append(...(chosen.kind === 'secret' || chosen.kind === 'list' ? [] : [share, el('br')]), remove, why);
+        const foot = el('div', 'as-foot'); foot.append(...(['secret', 'list', 'connexion'].includes(chosen.kind) ? [] : [share, el('br')]), remove, why);
         detail.append(foot);
     }
     /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
@@ -5915,6 +5963,53 @@
         btn.disabled = false; btn.textContent = was;
         await paintAssets();
     });
+    /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
+       in in their own browser; the token is kept on the server, never in a machine.
+       Google covers mail+calendar+contacts in one go; Microsoft, mail only here. */
+    const setConnexionProvider = (provider) => {
+        const form = $('connexion-new');
+        form.dataset.provider = provider;
+        for (const b of $('connexion-provider').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
+        const google = provider === 'google';
+        for (const id of ['connexion-calendar', 'connexion-contacts']) { const c = $(id); if (!google) c.checked = false; c.disabled = !google; }
+        $('connexion-calendar-label').classList.toggle('off', !google);
+        $('connexion-contacts-label').classList.toggle('off', !google);
+        $('connexion-paste').hidden = true;
+        $('connexion-error').hidden = true;
+        const who = MAILBOX_PROVIDER[provider];
+        $('connexion-notice').textContent = google
+            ? 'Clavarium signs in as Thunderbird — that is what Google sees. Mail, calendar and contacts can be connected together.'
+            : 'Clavarium signs in as Thunderbird — that is what Microsoft sees. Mail here; calendar and files need a Microsoft app, added later.';
+        $('connexion-open').textContent = `Open the ${who} sign-in page`;
+    };
+    for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
+    const connexionKinds = () => [['connexion-mail', 'mail'], ['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']].filter(([id]) => $(id).checked && !$(id).disabled).map(([, k]) => k);
+    $('connexion-open').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const kinds = connexionKinds();
+        if (!kinds.length) { $('connexion-error').textContent = 'Choose at least mail, calendar or contacts.'; $('connexion-error').hidden = false; return; }
+        const btn = $('connexion-open'); btn.disabled = true;
+        try {
+            const { url } = await post(`${API}/accounts/consent`, { provider: $('connexion-new').dataset.provider, user: $('connexion-email').value.trim(), kinds });
+            window.open(url, '_blank', 'noopener');
+            $('connexion-paste').hidden = false;
+            $('connexion-code').focus();
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        btn.disabled = false;
+    });
+    $('connexion-connect').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const btn = $('connexion-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting...';
+        try {
+            const made = await post(`${API}/accounts/connect`, { redirected: $('connexion-code').value.trim() });
+            if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
+            assetsAdding = '';
+            $('connexion-new').reset(); setConnexionProvider('google');
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        btn.disabled = false; btn.textContent = was;
+        await paintAssets();
+    });
+    setConnexionProvider('google');
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
@@ -7392,7 +7487,7 @@
        what). Nothing is ever chosen for the owner but the thing they came
        from; writing is never chosen for them. */
     const KINDS = [['', 'All'], ['conversation', 'Conversations'], ['folder', 'Folders'], ['git', 'Repositories'], ['mailbox', 'Mailboxes']];
-    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox' };
+    const KIND_WORD = { conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', connexion: 'connexion' };
     const ago = (date) => {
         if (!date) return 'never opened';
         const minutes = Math.max(0, Math.round((Date.now() - Date.parse(date)) / 60000));

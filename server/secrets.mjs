@@ -108,7 +108,7 @@ export class Secrets {
        days left (null without an expiry); `expired`: no longer delivered. */
     list() {
         return this.#store.all().map((s) => ({ name: s.name, conversations: this.#users(s.name), createdAt: s.createdAt,
-            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s),
+            expires: s.expires ?? null, days: s.expires ? daysTo(s.expires, this.#now()) : null, expired: this.#expired(s), ...(s.hostOnly ? { hostOnly: true } : {}),
             ...(s.ephemeral ? { ephemeral: true, expiresAt: s.expiresAt, expiresInMs: Math.max(0, Date.parse(s.expiresAt) - this.#now().getTime()) } : {}) }));
     }
     /* Past its expiry day: kept, not used (nor by dictation, voice.mjs). */
@@ -127,12 +127,15 @@ export class Secrets {
 
     /* Creates, or replaces the value of, a secret. `expires`: a day, '' for
        none, left out to keep the one it had. */
-    set({ name, value, expires }) {
+    set({ name, value, expires, hostOnly }) {
         if (!isSecretName(name)) throw new Refusal(400, 'A secret is named like a variable: capitals, digits and underscores, starting with a letter.');
         const sealed = this.#seal(value);
         const day = expires === undefined ? undefined : expiryOf(expires);
         const before = this.#store.get(name);
-        this.#write({ ...before, name, sealed, createdAt: before?.createdAt ?? new Date().toISOString() }, day);
+        /* hostOnly: a secret the server uses on the agent's behalf (an account token the
+           keeper reveals by name). It is never attached to a conversation, so never
+           delivered to a machine; attach() refuses it, so this cannot be undone by hand. */
+        this.#write({ ...before, name, sealed, createdAt: before?.createdAt ?? new Date().toISOString(), ...(hostOnly ? { hostOnly: true } : {}) }, day);
         return { name };
     }
 
@@ -200,6 +203,7 @@ export class Secrets {
     attach(conversation, name, attached) {
         const secret = this.#store.get(name);
         if (!secret) throw new Refusal(404, 'No such secret.');
+        if (attached && secret.hostOnly) throw new Refusal(403, 'This secret is held by the server (an account token) and is never put in a machine.');
         if (!isConversationName(conversation)) throw new Refusal(400, 'Not a conversation.');
         if (attached) this.#grants.give(conversationSubject(conversation), `secret:${name}`, 'x'); else this.#grants.take(conversationSubject(conversation), `secret:${name}`);
     }

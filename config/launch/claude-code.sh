@@ -33,6 +33,13 @@ if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1 && ! grep 
     claude mcp add --scope user docket -- docket-mcp --dir "$docket" >/dev/null 2>&1 \
         || echo "launch: Docket was not given to Claude Code as tools: the command docket still works" >&2
 fi
+# ITS TETHER AS ITS OWN TOOLS (MCP): the accesses it was given -- a mailbox, a calendar, an address
+# book, an online folder, a machine over SSH. The server holds the keys; it acts within its rights.
+tether="/work/.tether"
+if command -v tether-mcp >/dev/null 2>&1 && ! grep -q "\"$tether\"" "$HOME/.claude.json" 2>/dev/null; then
+    claude mcp add --scope user tether -- tether-mcp --dir "$tether" >/dev/null 2>&1 \
+        || echo "launch: Tether was not given to Claude Code as tools: the command tether still works" >&2
+fi
 # ITS PULSE: Claude Code's own hooks say to the chat that it acts, and when its turn ends, so that
 # the person sees "Working..." while it works without a word (parley pulse; nothing posted).
 if [ -f "$chat/server.mjs" ]; then
