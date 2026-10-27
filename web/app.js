@@ -6193,7 +6193,7 @@
         const all = kinds.includes('calendar') && kinds.includes('contacts');
         $('connexion-notice').textContent = provider === 'google'
             ? `Clavarium signs in with GNOME Online Accounts' app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
-            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
+            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''} After you allow, the browser shows a goa-oauth2://… address it cannot open — copy that one and paste it below.`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));

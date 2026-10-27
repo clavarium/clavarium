@@ -28,13 +28,13 @@ import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, pkcePair,
 /* The loopback the provider sends the code back to; nothing listens there. The
    person's browser lands on a page that will not load, and they copy the whole
    address -- which carries the code -- back into Clavarium. The same address
-   trades the code, so it only has to stay constant. Google's desktop client
-   accepts any 127.0.0.1 port; Microsoft (Azure) rejects a 127.0.0.1 whose exact
-   port is not registered but accepts http://localhost with ANY port for a public
-   client, so Microsoft uses localhost. */
+   trades the code, so it must match what the borrowed client registered. Google's
+   desktop client takes any 127.0.0.1 port. Microsoft's (GNOME Online Accounts')
+   registered one exact redirect, a custom scheme goa-oauth2://localhost/<id>, so
+   that is the one to send: after allowing, the browser shows that goa-oauth2://
+   address (it cannot open it -- that is expected) and the person copies it. */
 const REDIRECT = 'http://127.0.0.1:47813/';
-const REDIRECT_LOCALHOST = 'http://localhost:47813/';
-const redirectFor = (provider) => (provider === 'microsoft' ? REDIRECT_LOCALHOST : REDIRECT);
+const redirectFor = (provider) => (provider === 'microsoft' ? `goa-oauth2://localhost/${thunderbird('microsoft').clientId}` : REDIRECT);
 const PENDING_MS = 10 * 60_000;
 const PENDING_MAX = 20;
 
