@@ -68,6 +68,7 @@ import { Wifi } from './wifi.mjs';
 import { MeshCentral } from './meshcentral.mjs';
 import { Binders } from './binders.mjs';
 import { Tethers } from './tethers.mjs';
+import { Accounts } from './accounts.mjs';
 import { ServerLogs } from './serverlogs.mjs';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
 import { Events } from './events.mjs';
@@ -156,7 +157,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -199,7 +200,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -404,6 +405,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        the vault by name, never in a machine: see tethers.mjs. */
     const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets });
     const stopTethers = tethers.start();
+    /* Connecting a mailbox, calendar or address book by token: the consent happens
+       in the owner's browser, the refresh token is kept host-only (never in a
+       machine) and a Tether target is made for it: see accounts.mjs. */
+    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec) } });
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
@@ -526,7 +531,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {

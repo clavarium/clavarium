@@ -146,7 +146,7 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -241,6 +241,11 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
+            /* Which providers and kinds an account can be connected for here. */
+            if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
+            /* Assets > Access: the targets, who was given each at which level, the
+               calls waiting, and the recent journal -- all the page needs to read. */
+            if (pathname === '/api/tether' && tethers) { const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, ''); return send(200, { given: tethers.given(), changes: tethers.changes(), ...(r.data ?? {}) }), true; }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
@@ -412,6 +417,15 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/mailboxes/connect' && mailboxes) { const made = await mailboxes.connect(body); void setup?.assetAdded(made.name).catch(() => {}); return send(201, made), true; }
         const fetched = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/sync$/.exec(pathname);
         if (fetched && mailboxes) return send(200, await mailboxes.sync(fetched[1])), true;
+        /* Connecting an account by token (consent in the owner's browser, the token
+           kept host-only, a Tether target made): see accounts.mjs. */
+        if (pathname === '/api/accounts/consent' && accounts) return send(200, accounts.consent(body)), true;
+        if (pathname === '/api/accounts/connect' && accounts) { const made = await accounts.connect(body); return send(201, made), true; }
+        /* Assets > Access: the owner sets a conversation's level and rules on a
+           target, decides a call that waited, or removes a target. Each is an op the
+           keeper runs as the owner (person), never as an agent. */
+        const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume)$/.exec(pathname);
+        if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
         const reactSet = /^\/api\/conversations\/([^/]+)\/health-react$/.exec(pathname);

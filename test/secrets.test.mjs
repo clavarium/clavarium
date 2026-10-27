@@ -65,6 +65,27 @@ test('delivery: the value travels on standard input, never in an argument; only 
     assert.equal(b.calls.length, 3);
 });
 
+test('a host-only secret is held by the server: it cannot be attached, never reaches a machine, yet is revealed host-side', async (t) => {
+    const b = bench(t);
+    b.secrets.set({ name: 'MAIL_TOKEN', value: 'refresh-token-value', hostOnly: true });
+    b.secrets.set({ name: 'PLAIN', value: 'ordinary' });
+    /* It cannot be handed to a conversation: the guarantee is structural, not a matter of no one attaching it. */
+    assert.throws(() => b.secrets.attach('alpha', 'MAIL_TOKEN', true), /held by the server/);
+    /* Even so, it never reaches a VM: not in the delivery set, not in a delivered file. */
+    b.secrets.attach('alpha', 'PLAIN', true);
+    await b.secrets.deliver('alpha');
+    assert.ok(!b.calls.some((c) => c.argv.includes('MAIL_TOKEN') || c.input === 'refresh-token-value'), 'never delivered');
+    assert.deepEqual(b.secrets.given('alpha'), ['PLAIN'], 'not in what a machine is given');
+    assert.deepEqual(b.secrets.of('alpha'), ['PLAIN'], 'not among a conversation Assets');
+    /* The server uses it on the agent behalf: revealed by name, host-side, like any secret. */
+    assert.equal(b.secrets.reveal('MAIL_TOKEN'), 'refresh-token-value');
+    /* The listing marks it so the UI leaves it out of what can be given. */
+    assert.equal(b.secrets.list().find((s) => s.name === 'MAIL_TOKEN').hostOnly, true);
+    assert.equal(b.secrets.list().find((s) => s.name === 'PLAIN').hostOnly, undefined);
+    /* Detaching (take) is always allowed; it is attaching that is refused. */
+    assert.doesNotThrow(() => b.secrets.attach('alpha', 'MAIL_TOKEN', false));
+});
+
 test('a secret is named like a variable, and cannot take the place of one the tool needs to start', (t) => {
     const b = bench(t);
     for (const good of ['A', 'MODEL_KEY', 'KEY2']) assert.equal(isSecretName(good), true, good);
