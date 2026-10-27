@@ -24,7 +24,7 @@
 (() => {
     const SVG = 'http://www.w3.org/2000/svg';
     /* Each kind's icon, from the set of the chat (Lucide, see icons.js): the same drawing on every screen, whatever its fonts. */
-    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', secret: 'key-round' };
+    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'users', secret: 'key-round' };
     /* An icon of that set, or, until it is there, nothing in its place. */
     const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
     const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
@@ -112,14 +112,19 @@
             return j;
         }
         /* A link given or changed. `rights` as grants.mjs writes them. */
+        /* A live Tether connexion is given to a conversation at a level; the map gives
+           it at "watch" (read only) and sends finer levels to Assets. */
+        const tetherId = (b) => b.record?.id ?? b.id.replace(/^connexion:/, '');
         async function give(l, rights, extra = {}) {
             const a = node(l.from); const b = node(l.to);
+            if (b.tether) return request('/tether/level', { target: tetherId(b), agent: `conversation:${a.name}`, level: rights.includes('w') ? 'free' : 'watch' });
             if (a.kind === 'device') return request(`/devices/${nameOf(a.id)}/give`, { asset: b.id, rights });
             if (b.kind === 'secret') return request(`/conversations/${encodeURIComponent(a.name)}/secrets`, { secret: b.name, attached: true });
             return request(`/conversations/${encodeURIComponent(a.name)}/resources`, { resource: b.name, access: rights.includes('w') ? 'write' : 'read', ...extra });
         }
         async function takeAway(l) {
             const a = node(l.from); const b = node(l.to);
+            if (b.tether) return request('/tether/level', { target: tetherId(b), agent: `conversation:${a.name}`, level: 'none' });
             if (a.kind === 'device') return request(`/devices/${nameOf(a.id)}/take`, { asset: b.id });
             if (b.kind === 'secret') return request(`/conversations/${encodeURIComponent(a.name)}/secrets`, { secret: b.name, attached: false });
             return request(`/conversations/${encodeURIComponent(a.name)}/resources`, { resource: b.name, access: 'none' });
@@ -582,6 +587,7 @@
             const a = node(l.from); const b = node(l.to);
             if (b.kind === 'conversation') return { type: 'parts' };
             if (b.kind === 'secret') return { type: 'fixed', text: 'Use: handed to its tool as a variable and a file, the next time it starts.' };
+            if (b.tether) return { type: 'fixed', text: 'Given at a level (watch / propose / frame / free). Set the level in Assets.' };
             if (b.kind === 'mailbox') return { type: 'fixed', text: 'Read only: a mailbox is never written here.' };
             return { type: 'levels', write: b.kind === 'git' && a.kind === 'conversation' ? 'Commits; sending stays under your rules' : 'Add, change, delete' };
         }

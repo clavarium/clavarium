@@ -300,6 +300,17 @@ export class Setup {
             nodes.push({ id: `secret:${s.name}`, kind: 'secret', name: s.name, sub: 'secret' });
             for (const c of s.conversations) links.push({ from: `conversation:${c}`, to: `secret:${s.name}`, rights: 'x' });
         }
+        /* Live Tether connexions, shown like any asset: a mailbox among mailboxes, a
+           calendar, an address book -- with the conversations they were given to. */
+        const TCAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
+        for (const t of p.tethers?.store?.().targets() ?? []) {
+            const kind = TCAT[t.kind] ?? 'mailbox';
+            nodes.push({ id: `connexion:${t.id}`, kind, name: t.title, sub: `${t.kind} (live)`, tether: true, record: t });
+            for (const [agent, grant] of Object.entries(t.grants ?? {})) {
+                if (!agent.startsWith('conversation:')) continue;
+                links.push({ from: agent, to: `connexion:${t.id}`, rights: grant?.level === 'watch' ? 'r' : 'rw' });
+            }
+        }
         const labels = new Set();
         for (const d of devices) {
             nodes.push({ id: `device:${d.id}`, kind: 'device', name: d.label, sub: 'paired' });
