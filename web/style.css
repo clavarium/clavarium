@@ -1106,6 +1106,29 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 /* The detail scrolls as a whole: nothing in it is squeezed (a branch diagram cut, its buttons over it) when a folder's files open below. */
 .as-detail > * { flex-shrink: 0; }
 #assets-search { width: 100%; padding: 9px 12px; border-radius: 9px; margin-bottom: 4px; }
+/* By type / by group toggle, above the rows. */
+.as-view { display: flex; margin-bottom: 6px; }
+.as-view button { flex: 1 1 0; border-radius: 0; margin-left: -1px; font-size: .8125rem; padding: 7px 8px; }
+.as-view button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
+.as-view button:last-child { border-radius: 0 8px 8px 0; }
+.as-view button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink); background: rgba(210, 169, 78, .16); position: relative; z-index: 1; }
+/* The by-group view: make-a-group bar, a group's name button, its inline editor. */
+.as-group-new { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
+.as-group-new .hint { color: var(--ink2); }
+.as-group-head { gap: 2px; }
+.as-chev { flex: 0 0 auto; width: 24px; height: 28px; min-width: 0 !important; min-height: 0 !important; padding: 0; background: transparent; border: 0; color: var(--ink2); font-size: .8rem; }
+.as-group-name { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: flex-start; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 2px 6px; }
+.as-group-name:hover { border-color: var(--line); }
+.as-group-name[aria-current="true"] { background: var(--panel); border-color: var(--line); }
+.as-group-members { display: flex; flex-direction: column; gap: 2px; }
+.as-group-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
+.as-group-form input { flex: 1 1 8rem; min-width: 0; padding: 6px 9px; border-radius: 8px; }
+.as-group-form button { font-size: .8125rem; }
+.as-danger, button.as-danger { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+/* The group selector in an asset's detail. */
+.as-group-of { display: flex; align-items: center; gap: 10px; }
+.as-group-of-label { font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
+.as-group-of select { padding: 6px 9px; border-radius: 8px; }
 .as-kind { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .as-kind-head, .as-chapter { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .as-kind-head h3 { margin: 0; padding: 4px 6px; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
