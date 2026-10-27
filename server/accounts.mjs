@@ -10,12 +10,12 @@
  * instead the keeper reveals it to the connector alone, host-side, and acts on
  * the agent's behalf within the level and rules the person set.
  *
- * ONE ACCOUNT, ONE TOKEN, SEVERAL TARGETS. A Google consent for mail+calendar+
- * contacts yields a single refresh token; this makes one host-only secret and a
- * Tether target per kind, each naming that secret. Microsoft's Thunderbird client
- * carries only the mail scope here, so a Microsoft consent makes the mail target
- * alone (calendar and files over Graph need a deployment's own OAuth app, added
- * later as config.clientId + an own client secret).
+ * ONE ACCOUNT, ONE TOKEN, SEVERAL TARGETS. A consent for mail+calendar+contacts
+ * yields a single refresh token; this makes one host-only secret and a Tether
+ * target per kind, each naming that secret. Both providers borrow an open-source
+ * desktop client verified for all three: Google uses GNOME Online Accounts' over
+ * IMAP + CalDAV/CardDAV, Microsoft uses its Graph client (mail, calendar and
+ * contacts all over Microsoft Graph).
  *
  * A CREATED TARGET IS GIVEN TO NO ONE. The person grants it per conversation, at
  * its own level, from the page (Assets > Access) -- like git: one mailbox, many
@@ -42,7 +42,7 @@ const KIND = {
     contacts: { connector: 'contacts', kind: 'contacts', title: 'Contacts', needsUser: true },
 };
 /* What each provider's built-in (Thunderbird) client grants a refresh token for. */
-const SUPPORTED = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'] };
+const SUPPORTED = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail', 'calendar', 'contacts'] };
 
 const emailOk = (s) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(s);
 /* A deterministic, valid secret name for an account's token: a short slug of the

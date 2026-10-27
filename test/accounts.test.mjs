@@ -73,10 +73,10 @@ test('a created target is given to no conversation: the person grants it afterwa
     for (const target of b.made.values()) assert.deepEqual(target.grants ?? {}, {}, 'no grant at birth');
 });
 
-test('Microsoft is connected for mail alone here, even when more is asked', async (t) => {
+test('Microsoft connects mail, calendar and contacts (all over Graph)', async (t) => {
     const b = bench(t);
     const res = await connect(b.accounts, { provider: 'microsoft', user: 'carol@example.com', kinds: ['mail', 'calendar', 'contacts'] });
-    assert.deepEqual(res.targets.map((x) => x.kind), ['mail'], 'only mail from the built-in client');
+    assert.deepEqual(res.targets.map((x) => x.kind).sort(), ['calendar', 'contacts', 'mail']);
 });
 
 test('reconnecting the same account reuses the secret name and replaces the token', async (t) => {
