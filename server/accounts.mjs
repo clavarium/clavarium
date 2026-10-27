@@ -39,7 +39,7 @@ const PENDING_MAX = 20;
    Tether kind each becomes, and whether the target needs the email address. */
 const KIND = {
     mail: { connector: 'mail', kind: 'mail', title: 'Mail', needsUser: true },
-    calendar: { connector: 'calendar', kind: 'calendar', title: 'Agenda', needsUser: false },
+    calendar: { connector: 'calendar', kind: 'calendar', title: 'Agenda', needsUser: true },
     contacts: { connector: 'contacts', kind: 'contacts', title: 'Contacts', needsUser: true },
 };
 /* What each provider's built-in (Thunderbird) client grants a refresh token for. */
