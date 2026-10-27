@@ -412,6 +412,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        in the owner's browser, the refresh token is kept host-only (never in a
        machine) and a Tether target is made for it: see accounts.mjs. */
     const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec), all: () => tethers.store().targets() } });
+    /* A calendar target made before it needed the account address (Google CalDAV
+       puts it in the URL) carries none. The same account's mailbox or address book
+       has it -- they share the one refresh token -- so fill it in from a sibling,
+       once, with no reconnection asked of anyone. */
+    (() => {
+        const store = tethers.store();
+        for (const t of store.targets()) {
+            if (t.kind !== 'calendar' || t.config?.user || !t.secrets?.refresh) continue;
+            const sib = store.targets().find((o) => o.secrets?.refresh === t.secrets.refresh && o.config?.user);
+            if (sib) store.putTarget({ ...t, config: { ...t.config, user: sib.config.user } });
+        }
+    })();
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
