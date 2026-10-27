@@ -138,6 +138,22 @@ export function scopeFor(name, kinds = ['mail']) {
     return [...new Set(parts)].join(' ');
 }
 
+/* Which kinds a granted scope string actually covers. A provider may grant fewer
+   scopes than asked (the person unticks one on the consent screen); the token's
+   `scope` field says what was allowed, so we never have to guess. A kind counts as
+   granted when the first (primary) scope token of its request appears in the
+   granted string, matched case-insensitively -- providers echo scopes back in
+   their own casing and URL form (Microsoft returns
+   `https://graph.microsoft.com/Calendars.ReadWrite` for a requested
+   `calendars.readwrite`). Returns [] when the scope is unknown, so a caller can
+   fall back to trusting what it asked for. */
+export function kindsGranted(name, granted = '') {
+    const p = provider(name);
+    const g = String(granted).toLowerCase();
+    if (!g) return [];
+    return Object.keys(p.scopes).filter((k) => g.includes(p.scopes[k].split(/\s+/)[0].toLowerCase()));
+}
+
 /* The URL the person's browser opens to sign in and allow. `redirectUri` is the
    loopback the provider sends the code back to (http://127.0.0.1:PORT). */
 export function consentUrl(name, { clientId, redirectUri, scope, state, codeChallenge, loginHint } = {}) {

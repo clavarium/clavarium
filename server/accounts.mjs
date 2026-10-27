@@ -22,7 +22,7 @@
  */
 import { Refusal } from './conversations.mjs';
 import { createHash } from 'node:crypto';
-import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, pkcePair, newState, PROVIDERS } from './oauth.mjs';
+import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, kindsGranted, pkcePair, newState, PROVIDERS } from './oauth.mjs';
 
 /* The loopback the provider sends the code back to; nothing listens there. The
    person's browser lands on a page that will not load, and they copy the whole
@@ -103,17 +103,26 @@ export class Accounts {
         let code;
         try { code = extractCode(redirected, { state }); } catch (e) { throw new Refusal(400, e.message); }
         const { clientId, clientSecret } = thunderbird(p.provider);
-        let refreshToken;
-        try { ({ refreshToken } = await exchangeCode(p.provider, { clientId, clientSecret, redirectUri: redirectFor(p.provider), code, codeVerifier: p.verifier, fetch: this.#fetch })); }
+        let refreshToken, grantedScope;
+        try { ({ refreshToken, scope: grantedScope } = await exchangeCode(p.provider, { clientId, clientSecret, redirectUri: redirectFor(p.provider), code, codeVerifier: p.verifier, fetch: this.#fetch })); }
         catch (e) { throw new Refusal(502, `The connection could not be completed: ${e.message}`); }
         if (!refreshToken) throw new Refusal(502, 'The account returned no lasting token; allow offline access and try again.');
+        /* What was actually allowed. A provider may grant fewer kinds than asked
+           (the person unticks one); the token's scope says so, so we make a target
+           only for a kind that was really granted, and tell the caller which were
+           denied -- no guessing. If the scope is unreadable (matched nothing) we
+           trust what was asked, as before. */
+        const matched = kindsGranted(p.provider, grantedScope);
+        const useScope = matched.length > 0;
+        const authorized = useScope ? p.kinds.filter((k) => matched.includes(k)) : p.kinds;
+        const denied = useScope ? p.kinds.filter((k) => !matched.includes(k)) : [];
         /* The token is kept host-only: it can never be attached to a conversation,
            so it is never delivered to a machine -- the keeper reveals it by name. */
         const name = secretName(p.provider, p.user);
         this.#secrets.set({ name, value: refreshToken, hostOnly: true });
         const label = PROVIDERS[p.provider].label;
         const made = [];
-        for (const k of p.kinds) {
+        for (const k of authorized) {
             const spec = KIND[k];
             /* Pin the client that minted the token onto the target, so the keeper
                refreshes with the same one -- a refresh token is bound to its client,
@@ -128,7 +137,7 @@ export class Accounts {
             });
             made.push({ id: target?.id ?? targetId(k, p.provider, p.user), title: target?.title, kind: spec.kind });
         }
-        return { provider: p.provider, user: p.user, targets: made };
+        return { provider: p.provider, user: p.user, targets: made, authorized, denied };
     }
 
     #sweep() { const now = Date.now(); for (const [k, v] of this.#pending) if (now - v.at > PENDING_MS) this.#pending.delete(k); }

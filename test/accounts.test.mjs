@@ -89,6 +89,24 @@ test('Microsoft connects mail, calendar and contacts (all over Graph)', async (t
     assert.deepEqual(res.targets.map((x) => x.kind).sort(), ['calendar', 'contacts', 'mail']);
 });
 
+test('a partial grant makes a target only for the kinds actually allowed, and names the denied', async (t) => {
+    const b = bench(t);
+    /* The provider grants only the mail scope, though all three were asked. */
+    const accounts = new Accounts({ secrets: b.secrets, targets: b.targets, fetch: async () => ({ ok: true, status: 200, json: async () => ({ access_token: 'at', refresh_token: 'r', expires_in: 3600, scope: 'https://mail.google.com/' }) }) });
+    const res = await connect(accounts, { provider: 'google', user: 'grace@example.com', kinds: ['mail', 'calendar', 'contacts'] });
+    assert.deepEqual(res.targets.map((x) => x.kind), ['mail'], 'only the mail target is made');
+    assert.deepEqual(res.authorized, ['mail']);
+    assert.deepEqual([...res.denied].sort(), ['calendar', 'contacts'], 'the two it did not grant are reported');
+});
+
+test('when the scope cannot be read, every asked kind is trusted (no false denial)', async (t) => {
+    const b = bench(t);
+    /* The default bench returns scope:"x" -- unmatched; fall back to the request. */
+    const res = await connect(b.accounts, { provider: 'google', user: 'heidi@example.com', kinds: ['mail', 'calendar'] });
+    assert.deepEqual(res.targets.map((x) => x.kind).sort(), ['calendar', 'mail']);
+    assert.deepEqual(res.denied, []);
+});
+
 test('reconnecting the same account reuses the secret name and replaces the token', async (t) => {
     const first = bench(t, { token: 'token-one' });
     await connect(first.accounts, { provider: 'google', user: 'dave@example.com', kinds: ['mail'] });

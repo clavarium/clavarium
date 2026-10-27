@@ -6217,9 +6217,21 @@
         const btn = $('connexion-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Connecting...';
         try {
             const made = await post(`${API}/accounts/connect`, { redirected: $('connexion-code').value.trim() });
-            if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
-            assetsAdding = '';
-            $('connexion-new').reset(); setConnexionProvider('google');
+            const denied = Array.isArray(made?.denied) ? made.denied : [];
+            if (denied.length) {
+                /* A partial grant: say plainly what was allowed and what was not,
+                   from the token itself, and keep the form so they can allow the rest. */
+                const word = (k) => ({ mail: 'mail', calendar: 'calendar', contacts: 'contacts' }[k] || k);
+                const ok = (made.authorized || []).map(word);
+                const no = denied.map(word);
+                $('connexion-error').textContent = `${ok.length ? `Connected for ${ok.join(', ')}. ` : ''}Not allowed: ${no.join(', ')} — connect again and allow ${no.length > 1 ? 'them' : 'it'} on the provider's screen.`;
+                $('connexion-error').hidden = false;
+                $('connexion-code').value = ''; $('connexion-paste').hidden = true;
+            } else {
+                if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
+                assetsAdding = '';
+                $('connexion-new').reset(); setConnexionProvider('google');
+            }
         } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
         btn.disabled = false; btn.textContent = was;
         await paintAssets();

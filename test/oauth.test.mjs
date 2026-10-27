@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import {
-    PROVIDERS, provider, thunderbird, pkcePair, newState, scopeFor,
+    PROVIDERS, provider, thunderbird, pkcePair, newState, scopeFor, kindsGranted,
     consentUrl, extractCode, exchangeCode, refreshAccess, xoauth2,
 } from '../server/oauth.mjs';
 
@@ -63,6 +63,17 @@ test('scopeFor picks the kinds and appends the offline scope only where it is on
     assert.ok(m.includes('calendars.readwrite') && m.includes('contacts.readwrite'));
     assert.ok(m.split(' ').includes('offline_access'), 'Microsoft gets offline access as a scope');
     assert.throws(() => scopeFor('google', ['sms']), /no sms scope/);
+});
+
+test('kindsGranted reads what the token actually allowed, in either provider\'s form', () => {
+    /* Google echoes the exact URL scopes. */
+    assert.deepEqual(kindsGranted('google', 'https://mail.google.com/').sort(), ['mail']);
+    assert.deepEqual(kindsGranted('google', 'https://mail.google.com/ https://www.googleapis.com/auth/carddav').sort(), ['contacts', 'mail']);
+    /* Microsoft echoes Graph scopes in its own casing and URL form. */
+    assert.deepEqual(kindsGranted('microsoft', 'https://graph.microsoft.com/Mail.ReadWrite https://graph.microsoft.com/Calendars.ReadWrite').sort(), ['calendar', 'mail']);
+    /* An unreadable or empty scope matches nothing, so the caller trusts the request. */
+    assert.deepEqual(kindsGranted('google', 'x'), []);
+    assert.deepEqual(kindsGranted('google', ''), []);
 });
 
 test('consentUrl shapes a valid Google request (offline + PKCE + state)', () => {
