@@ -167,6 +167,8 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; }
 .check { font-size: .8125rem; color: var(--ink2); display: flex; align-items: center; gap: 6px; }
 .check.off { opacity: .5; }
 #connexion-kinds { gap: 16px; }
+/* The Google / Microsoft choice shows which is selected. */
+#connexion-provider button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink); background: rgba(210, 169, 78, .16); }
 footer#keys { border-top: 0; }
 #voice-line { margin: 0; padding: 5px 12px; font-size: .8125rem; color: var(--ink2); background: var(--bar); border-top: 1px solid var(--line); overflow-wrap: anywhere; }
 #voice-line::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--ok); }
@@ -1115,12 +1117,34 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 /* The by-group view: make-a-group bar, a group's name button, its inline editor. */
 .as-group-new { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
 .as-group-new .hint { color: var(--ink2); }
-.as-group-head { gap: 2px; }
-.as-chev { flex: 0 0 auto; width: 24px; height: 28px; min-width: 0 !important; min-height: 0 !important; padding: 0; background: transparent; border: 0; color: var(--ink2); font-size: .8rem; }
-.as-group-name { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: flex-start; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 2px 6px; }
+.as-group-head { gap: 4px; }
+.as-chev { flex: 0 0 auto; width: 16px; text-align: center; color: var(--ink2); font-size: .72rem; }
+.as-group-name { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: flex-start; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; }
 .as-group-name:hover { border-color: var(--line); }
 .as-group-name[aria-current="true"] { background: var(--panel); border-color: var(--line); }
+.as-gear { flex: 0 0 auto; width: 30px; height: 30px; min-width: 0 !important; min-height: 0 !important; padding: 0; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 1rem; opacity: 0; }
+.as-group-head:hover .as-gear, .as-group-name[aria-current="true"] + .as-gear { opacity: 1; }
+.as-gear:hover { border-color: var(--line); color: var(--ink); }
 .as-group-members { display: flex; flex-direction: column; gap: 2px; }
+/* Give the group: a block per conversation, a row per asset at its own level. */
+.as-give { display: flex; flex-direction: column; gap: 12px; }
+.as-give-conv { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+.as-give-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.as-give-acts { display: flex; gap: 6px; }
+.as-mini { font-size: .72rem; padding: 3px 8px; border-radius: 7px; background: transparent; color: var(--ink2); }
+.as-mini:hover { border-color: var(--line); color: var(--ink); }
+.as-give-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 4px 0; }
+.as-give-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.as-give-name > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.as-give-row .levels button { padding: 4px 9px; font-size: .78rem; }
+.as-add-conv { align-self: flex-start; }
+.as-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+.as-pick-conv { font-size: .82rem; padding: 5px 10px; border-radius: 8px; }
+.as-group-rename { display: flex; gap: 8px; align-items: center; }
+.as-group-rename input { flex: 1 1 8rem; min-width: 0; padding: 7px 10px; border-radius: 8px; }
+.as-group-remove { margin-top: 6px; }
+.as-remove-link { background: transparent; border: 0; color: var(--danger); text-decoration: underline; padding: 2px 0; font: inherit; font-size: .82rem; }
+.as-group-remove .hint { margin: 2px 0 0; }
 .as-group-form { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; }
 .as-group-form input { flex: 1 1 8rem; min-width: 0; padding: 6px 9px; border-radius: 8px; }
 .as-group-form button { font-size: .8125rem; }
