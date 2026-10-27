@@ -504,7 +504,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Settings, Updates: what the updater (deploy/updater.mjs, as root) wrote, and how to ask it. */
     const updates = new Updates({ host: asHost, version: platform.version, store: new Store(`${dataDir}/updates.json`), alerts, ...(updateState ? { stateFile: updateState } : {}), ...(updateConf ? { confFile: updateConf } : {}) });
     const stopUpdates = updates.watch();
-    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
+    const setup = new Setup({ store: new Store(`${dataDir}/flows.json`), version: platform.version, conversations: all, resources: folders, secrets, devices, shortcuts, wakeups, answerer, talk, gitKeeper, gitAccess, mailboxes, signin, network, guide, tethers, ...(setupPollMs ? { pollMs: setupPollMs } : {}) });
     /* This server's disk and memory, and the reserve no machine may eat into: see capacity.mjs. */
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
         /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
