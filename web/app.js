@@ -3815,7 +3815,16 @@
             for (const r of p) {
                 r.sending = true; paint();
                 try {
-                    const sent = await post(`${API}/git/${r.name}/push`, { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) });
+                    /* The push runs in the background: the first request starts it, and
+                       while it says "sending" the page asks again (join) until it ends --
+                       a long push never looks like a failure or a restart. */
+                    let sent;
+                    for (let first = true; ; first = false) {
+                        sent = await post(`${API}/git/${r.name}/push`, first
+                            ? { head: r.out.head, target: r.out.target, ...(r.out.guards?.confirm ? { sure: true } : {}) }
+                            : { head: r.out.head, target: r.out.target, join: true });
+                        if (sent?.status !== 'sending') break;
+                    }
                     r.sent = { ok: true, text: sent.already ? `✓ Already in ${sent.branch}` : sent.commits > 0 ? `✓ Sent to ${sent.branch}` : `✓ Made ${sent.branch}` };
                 } catch (error) { r.sent = { ok: false, text: /^Not sent/.test(error.message) ? error.message : `Not sent: ${error.message}` }; }
                 r.sending = false; paint();

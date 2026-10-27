@@ -211,9 +211,15 @@ const seeCommits = (name, head, base, n) => (short(head) && short(base) && Numbe
    long a finished run is kept for the request that asks again just after. */
 export const CHECK_WAIT_MS = 20_000;
 export const CHECK_KEEP_MS = 60_000;
+/* A send (the push to the remote) runs in the background, like a check: one
+   request waits at most this long, then hears { status: 'sending' } and asks
+   again (join), so a long push never outruns the proxy. The push itself is
+   already bounded (PUSH_MS); a finished send is kept this long for the asking. */
+export const SENDING_WAIT_MS = 20_000;
+export const SENDING_KEEP_MS = 60_000;
 
 export class GitKeeper {
-    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map(); #inFlight = new Map();
+    #store; #review; #resources; #checks; #alerts; #now; #tellAgent; #thread; #last; #held = new Map(); #results = new Map(); #running = new Set(); #telling = new Map(); #inFlight = new Map(); #sending = new Map();
 
     /* `review`: GitReview (reads, the reference, Send). `checks`: GitChecks.
        `alerts`: what tells the owner's phone. `tellAgent(repository, line,
@@ -556,7 +562,30 @@ export class GitKeeper {
 
     /* Send, from the page: as GitReview.push, and refused when the owner
        requires passing checks and none passed for this commit and branch. */
+    /* The push runs in the background; the request waits at most SENDING_WAIT_MS,
+       then returns { status: 'sending' } and the page asks again with `join: true`
+       until it ends -- so a slow push never blocks the request past the proxy's
+       patience. The push itself is still bounded (PUSH_MS), so it cannot run on
+       for hours. A send already going is joined; one just ended is re-run only
+       on a fresh click (no `join`), and re-sending the same commit is a no-op. */
     async send(name, body) {
+        const r = this.#repository(name);
+        const key = `${r.name}\n${body?.head ?? ''}\n${body?.target ?? ''}`;
+        let entry = this.#sending.get(key);
+        if (!entry || (entry.done && body?.join !== true)) {
+            const made = { done: false, result: undefined, error: undefined };
+            made.run = this.#doSend(r.name, body)
+                .then((result) => { made.result = result; }, (error) => { made.error = error; })
+                .finally(() => { made.done = true; setTimeout(() => { if (this.#sending.get(key) === made) this.#sending.delete(key); }, SENDING_KEEP_MS).unref?.(); });
+            entry = made; this.#sending.set(key, made);
+        }
+        const ms = Number.isFinite(body?.wait) ? Math.max(0, Math.min(body.wait, SENDING_WAIT_MS)) : SENDING_WAIT_MS;
+        await Promise.race([entry.run, new Promise((res) => { setTimeout(res, ms).unref?.(); })]);
+        if (!entry.done) return { status: 'sending' };
+        if (entry.error) throw entry.error;
+        return entry.result;
+    }
+    async #doSend(name, body) {
         const r = this.#repository(name);
         if (this.settings(r.name).requireForSend) {
             const target = body?.target || undefined;
