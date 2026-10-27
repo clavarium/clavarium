@@ -411,7 +411,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
        machine) and a Tether target is made for it: see accounts.mjs. */
-    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec) } });
+    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec), all: () => tethers.store().targets() } });
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */

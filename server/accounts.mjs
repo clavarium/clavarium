@@ -22,7 +22,7 @@
  */
 import { Refusal } from './conversations.mjs';
 import { createHash } from 'node:crypto';
-import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, kindsGranted, pkcePair, newState, PROVIDERS } from './oauth.mjs';
+import { consentUrl, exchangeCode, extractCode, thunderbird, scopeFor, kindsGranted, refreshAccess, pkcePair, newState, PROVIDERS } from './oauth.mjs';
 
 /* The loopback the provider sends the code back to; nothing listens there. The
    person's browser lands on a page that will not load, and they copy the whole
@@ -128,7 +128,7 @@ export class Accounts {
                refreshes with the same one -- a refresh token is bound to its client,
                and this keeps a target working even if the built-in default later
                moves (the connector prefers config.clientId over its own default). */
-            const config = { provider: p.provider, clientId };
+            const config = { provider: p.provider, clientId, authorizedKinds: authorized };
             if (spec.needsUser) config.user = p.user;
             const target = this.#targets.put({
                 id: targetId(k, p.provider, p.user),
@@ -138,6 +138,32 @@ export class Accounts {
             made.push({ id: target?.id ?? targetId(k, p.provider, p.user), title: target?.title, kind: spec.kind });
         }
         return { provider: p.provider, user: p.user, targets: made, authorized, denied };
+    }
+
+    /* Check, live, what a connected account is really authorized for right now --
+       not only at connection. A refresh host-side (the token never leaves the
+       server) reads the token's current scopes, so the page can say "mail yes,
+       calendar no" at any time and reflect a permission removed since. Records the
+       result on every target of the account, so it shows without another check. */
+    async verify({ id } = {}) {
+        const all = this.#targets.all?.() ?? [];
+        const target = all.find((t) => t.id === id);
+        if (!target) throw new Refusal(404, 'No such connexion.');
+        const provider = target.config?.provider;
+        if (!PROVIDERS[provider]) throw new Refusal(400, 'This connexion is not an account.');
+        const secretRef = target.secrets?.refresh;
+        const refreshToken = secretRef && this.#secrets.reveal(secretRef);
+        if (!refreshToken) throw new Refusal(404, 'The account token is gone; connect it again.');
+        const def = thunderbird(provider);
+        const clientId = target.config?.clientId || def.clientId;
+        let scope, fresh;
+        try { ({ scope, refreshToken: fresh } = await refreshAccess(provider, { clientId, clientSecret: def.clientSecret, refreshToken, fetch: this.#fetch })); }
+        catch (e) { throw new Refusal(502, `The account could not be checked: ${e.message}`); }
+        /* Keep the token current if the provider rotated it on the refresh. */
+        if (fresh && fresh !== refreshToken) this.#secrets.set({ name: secretRef, value: fresh, hostOnly: true });
+        const authorized = kindsGranted(provider, scope);
+        for (const t of all.filter((x) => x.secrets?.refresh === secretRef)) this.#targets.put({ ...t, config: { ...t.config, authorizedKinds: authorized } });
+        return { id, provider, all: SUPPORTED[provider], authorized };
     }
 
     #sweep() { const now = Date.now(); for (const [k, v] of this.#pending) if (now - v.at > PENDING_MS) this.#pending.delete(k); }

@@ -4162,6 +4162,32 @@
         if (chosen.target) {
             const t = chosen.target;
             detail.append(el('p', 'hint', ['live', connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
+            /* The account's real permissions, read from the token (server-side) --
+               shown here so they can be checked at any time, not only at connection.
+               "Re-check" reads them live, to catch a permission removed since. */
+            if (['google', 'microsoft'].includes(t.config?.provider)) {
+                const KINDS3 = ['mail', 'calendar', 'contacts'];
+                const perms = el('div', 'as-perms');
+                detail.append(perms);
+                const draw = (authorized) => {
+                    perms.replaceChildren();
+                    if (Array.isArray(authorized)) {
+                        const line = el('p', 'hint');
+                        line.append(el('b', '', 'Permissions: '));
+                        line.append(document.createTextNode(KINDS3.map((k) => `${k} ${authorized.includes(k) ? '✓' : '✗'}`).join('   ')));
+                        perms.append(line);
+                    } else { perms.append(el('p', 'hint', 'Permissions not checked yet.')); }
+                    const btn = el('button', '', Array.isArray(authorized) ? 'Re-check' : 'Check permissions');
+                    btn.type = 'button';
+                    btn.addEventListener('click', async () => {
+                        btn.disabled = true; btn.textContent = 'Checking…';
+                        try { const r = await post(`${API}/accounts/verify`, { id: t.id }); draw(r.authorized); }
+                        catch (e) { perms.append(el('p', 'error', e.message)); btn.disabled = false; btn.textContent = 'Re-check'; }
+                    });
+                    perms.append(btn);
+                };
+                draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
+            }
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
                 a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's token (kept on the server); rights are given separately.`));
