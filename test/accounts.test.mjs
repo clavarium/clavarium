@@ -47,12 +47,12 @@ test('consent builds the provider page with the scopes for the kinds asked, and 
     assert.equal(u.searchParams.get('access_type'), 'offline', 'offline, so a refresh token comes back');
 });
 
-test('Microsoft consents on localhost (Azure needs it), Google on the loopback IP', (t) => {
+test('Microsoft consents on GNOME Online Accounts\' registered redirect; Google on the loopback IP', (t) => {
     const b = bench(t);
     const g = new URL(b.accounts.consent({ provider: 'google', user: 'a@example.com', kinds: ['mail'] }).url);
     assert.match(g.searchParams.get('redirect_uri'), /^http:\/\/127\.0\.0\.1:47813\//);
     const m = new URL(b.accounts.consent({ provider: 'microsoft', user: 'a@example.com', kinds: ['mail'] }).url);
-    assert.match(m.searchParams.get('redirect_uri'), /^http:\/\/localhost:47813\//);
+    assert.match(m.searchParams.get('redirect_uri'), /^goa-oauth2:\/\/localhost\/[0-9a-f-]{36}$/);
 });
 
 test('a Google connect keeps the token host-only and makes one target per kind, all naming it', async (t) => {

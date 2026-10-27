@@ -2007,7 +2007,7 @@
     }
     /* A chapter that holds something asking for the person -- a callout, or a state said as a warning or a
        fault -- wears a dot on its title, folded or not: one look at Settings says where to go. */
-    const asksForYou = (el2) => [...el2.querySelectorAll('.callout, .status-line[data-tone="warn"], .status-line[data-tone="bad"]')]
+    const asksForYou = (el2) => [...el2.querySelectorAll('.callout:not([data-tone="ok"]), .status-line[data-tone="warn"], .status-line[data-tone="bad"]')]
         .some((x) => !x.closest('[hidden]') && x.textContent.trim());
     let marking;
     const markAttention = () => { clearTimeout(marking); marking = setTimeout(() => {
@@ -5039,7 +5039,7 @@
         const backFailed = /did not come back either/.test(last?.why ?? '');
         const news = !running && last && last.result !== 'done' ? (last.result === 'rolled-back' ? (backFailed ? `${last.to} did not start on this server, and putting ${last.from} back did not work either: ${last.why}` : `${last.to} did not start on this server, so ${last.from} was put back. ${last.from} runs normally.`) : `${last.action === 'back' ? 'Going back to' : 'The update to'} ${last.to} failed: ${last.why ?? ''}`)
             : !running && u.refused && (!last || u.refused.at > last.at) && !/is not newer than/.test(u.refused.why ?? '') ? `Not done: ${u.refused.why}` : '';
-        $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news;
+        $('updates-news').textContent = news.trim(); $('updates-news').hidden = !news; $('updates-news').dataset.tone = news ? 'warn' : 'ok';
         if (![$('updates-mode'), $('updates-from'), $('updates-to'), $('updates-channel')].includes(document.activeElement)) {
             $('updates-mode').value = u.mode; $('updates-channel').value = u.channel;
             [$('updates-from').value, $('updates-to').value] = u.window.split('-');
@@ -5086,7 +5086,7 @@
         await paintUpdates();
         /* The answer to the click, said next to it. */
         const u = lastUpdates;
-        if (!failed && u && !u.checkError) { $('updates-news').textContent = u.available ? `${u.available} is out.` : `No new version: ${u.version} is the latest.`; $('updates-news').hidden = false; }
+        if (!failed && u && !u.checkError) { $('updates-news').textContent = u.available ? `${u.available} is out.` : `No new version: ${u.version} is the latest.`; $('updates-news').hidden = false; $('updates-news').dataset.tone = u.available ? 'warn' : 'ok'; }
     });
     async function applyUpdate() {
         updatesError();
@@ -6193,7 +6193,7 @@
         const all = kinds.includes('calendar') && kinds.includes('contacts');
         $('connexion-notice').textContent = provider === 'google'
             ? `Clavarium signs in with GNOME Online Accounts' app — that is what Google sees.${all ? ' Mail, calendar and contacts can be connected together.' : ''}`
-            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''}`;
+            : `Clavarium signs in with GNOME Online Accounts' app — that is what Microsoft sees.${all ? ' Mail, calendar and contacts together, over Microsoft Graph.' : ''} After you allow, the browser shows a goa-oauth2://… address it cannot open — copy that one and paste it below.`;
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
