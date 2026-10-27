@@ -24,12 +24,12 @@
 (() => {
     const SVG = 'http://www.w3.org/2000/svg';
     /* Each kind's icon, from the set of the chat (Lucide, see icons.js): the same drawing on every screen, whatever its fonts. */
-    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'users', secret: 'key-round' };
+    const KIND_ICON = { device: 'smartphone', conversation: 'square-terminal', folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'users', secret: 'key-round', group: 'layers' };
     /* An icon of that set, or, until it is there, nothing in its place. */
     const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
     const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
-    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', secret: 'secret' };
-    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', agenda: 'asset', contacts: 'asset', secret: 'asset' };
+    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', secret: 'secret', group: 'group' };
+    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', agenda: 'asset', contacts: 'asset', secret: 'asset', group: 'asset' };
     const TITLES = { device: 'Devices', conversation: 'Conversations', asset: 'Assets' };
     const VIEWS = {
         devices: { cols: [['device'], ['conversation', 'asset']], sources: ['device'] },
@@ -69,6 +69,12 @@
         let allLines = true;
         try { allLines = localStorage.getItem('clavarium-links-all') !== '0'; } catch { /* none kept */ }
         let picked = null; let pinned = null; let focus = null; let drag = null; let pop = null; let popLink = null; let drawnMany = false;
+        /* The graph as the server sends it; `graph` below is the folded view of it.
+           A group folds to one node by default; the owner opens the ones they want.
+           Which are open is kept per device. */
+        let rawGraph = { nodes: [], links: [], flows: [] };
+        const expanded = new Set((() => { try { const v = JSON.parse(localStorage.getItem('clavarium-links-open') ?? '[]'); return Array.isArray(v) ? v : []; } catch { return []; } })());
+        const keepExpanded = () => { try { localStorage.setItem('clavarium-links-open', JSON.stringify([...expanded])); } catch { /* none kept */ } };
         /* A box is shown only if its column's filter is empty or its name holds what was typed: so a
            crowded map (many assets) is narrowed to a few boxes, their links with them. The layout is
            kept while typing (no reorder), and a filter cleared brings everything back. */
@@ -95,12 +101,36 @@
         const inView = (n) => VIEWS[view].cols.flat().includes(COLUMN[n.kind]);
         const shown = (l) => VIEWS[view].sources.includes(node(l.from)?.kind) && inView(node(l.to));
 
-        async function load() {
-            const r = await fetch(`${env.API()}/flows`);
-            graph = r.ok ? await r.json() : { nodes: [], links: [], flows: [] };
+        /* The graph as drawn: a folded group becomes a single node, and its members'
+           links move onto it (deduped, rights merged); an opened group shows its
+           members as before. The server gives the parts; the folding is here. */
+        const mergeRights = (a = '', b = '') => [...'rwx'].filter((c) => a.includes(c) || b.includes(c)).join('') || a || b;
+        function foldedGraph(raw) {
+            const toGroup = new Map();
+            for (const n of raw.nodes) if (n.kind === 'group' && !expanded.has(n.id)) for (const m of n.members ?? []) toGroup.set(m, n.id);
+            const nodes = raw.nodes.filter((n) => !toGroup.has(n.id));
+            const at = (id) => toGroup.get(id) ?? id;
+            const merged = new Map();
+            for (const l of raw.links) {
+                const from = at(l.from); const to = at(l.to);
+                if (from === to) continue;
+                const key = `${from}\u0000${to}`;
+                const prev = merged.get(key);
+                merged.set(key, prev ? { ...prev, rights: mergeRights(prev.rights, l.rights), pending: Boolean(prev.pending && l.pending) } : { ...l, from, to });
+            }
+            return { nodes, links: [...merged.values()], flows: raw.flows ?? [] };
+        }
+        function applyFold() {
+            graph = foldedGraph(rawGraph);
             byId = new Map(graph.nodes.map((n) => [n.id, n]));
             if (pinned && !byId.has(pinned)) pinned = null;
             if (picked && !byId.has(picked.id)) picked = null; else if (picked) picked = byId.get(picked.id);
+        }
+        function toggleGroup(id) { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); keepExpanded(); laidOut = null; applyFold(); paint(); }
+        async function load() {
+            const r = await fetch(`${env.API()}/flows`);
+            rawGraph = r.ok ? await r.json() : { nodes: [], links: [], flows: [] };
+            applyFold();
         }
         const err = (text) => { const e = $('links-error'); e.textContent = text ?? ''; e.hidden = !text; };
 
@@ -161,7 +191,7 @@
            times, puts each box at the average place of what it is linked to; the order
            that crossed least is kept. What is linked to nothing goes last, by name. */
         function layout() {
-            const ASSETS = ['folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'];
+            const ASSETS = ['group', 'folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'];
             const base = (k) => graph.nodes.filter((n) => COLUMN[n.kind] === k).sort((a, b) => (ASSETS.indexOf(a.kind) - ASSETS.indexOf(b.kind)) || a.name.localeCompare(b.name));
             let cols = VIEWS[view].cols.map((ks) => ks.map(base));
             const colOf = new Map(); cols.forEach((gs, ci) => gs.flat().forEach((n) => colOf.set(n.id, ci)));
@@ -242,8 +272,9 @@
             const e = h('div', { class: `lk-node lk-c-${COLUMN[n.kind]}${n.pending ? ' pending' : ''}`, 'data-id': n.id, 'data-kind': n.kind, tabindex: 0, role: 'button', title: `${n.name} · ${n.sub}`, 'aria-label': `${n.name}, ${n.sub}, ${cnt} link${cnt === 1 ? '' : 's'}` },
                 kindIcon(n.kind),
                 h('span', { class: 'lk-tx' }, h('span', { class: 'lk-nm', text: n.name })),
+                n.kind === 'group' && h('span', { class: 'lk-fold', text: expanded.has(n.id) ? '▾' : '▸', 'aria-hidden': 'true' }),
                 state && h('span', { class: 'lk-st', 'data-state': state, 'aria-hidden': 'true' }),
-                h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
+                n.kind !== 'group' && h('span', { class: 'lk-cnt', text: String(cnt), title: `${cnt} link${cnt === 1 ? '' : 's'}` }));
             if (VIEWS[view].sources.includes(n.kind) && !n.pending) {
                 const dot = h('span', { class: 'lk-handle', title: 'Drag to what it gets', 'aria-hidden': 'true' });
                 dot.addEventListener('pointerdown', (ev) => startDrag(ev, n));
@@ -372,6 +403,8 @@
         /* A tap shows only what concerns that box; tapped again, everything comes back.
            A box that gives is also ready to be linked: tap a dashed box to link it. */
         function tap(n) {
+            /* A group folds/unfolds on a tap -- it is not something to give or pair. */
+            if (n.kind === 'group') { toggleGroup(n.id); return; }
             if (picked && picked.id !== n.id && allowed(picked, n)) { void link(picked, n); return; }
             const again = pinned === n.id;
             pinned = again ? null : n.id;

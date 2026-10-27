@@ -604,6 +604,10 @@ footer button[data-keys="backspace"] { display: none; }
 .lk-node { position: relative; flex: none; display: flex; align-items: center; gap: 8px; border: 1.5px solid var(--line); border-radius: 10px; padding: 5px 10px 5px 6px; background: var(--panel); cursor: pointer; user-select: none; min-width: 0; }
 .lk-node .lk-tx { flex: 1; }
 .lk-node .lk-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A group folds to one node: a brass accent and a chevron say it opens. */
+.lk-node[data-kind="group"] { border-color: color-mix(in srgb, var(--brass) 55%, var(--line)); border-style: solid; }
+.lk-node[data-kind="group"] .lk-ic { background: rgba(210, 169, 78, .18); color: var(--brass-ink); }
+.lk-node[data-kind="group"] .lk-fold { color: var(--ink2); font-size: .72rem; margin-left: 2px; flex: none; }
 /* What the icon cannot say: a conversation's chat on, or one not ready. */
 .lk-st { width: 8px; height: 8px; border-radius: 50%; flex: none; margin-right: 6px; }
 .lk-st[data-state="chat"] { background: var(--k-chat); }

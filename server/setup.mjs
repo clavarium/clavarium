@@ -338,6 +338,18 @@ export class Setup {
                 if (!links.some((x) => x.from === l.from && x.to === to)) links.push({ from: l.from, to, rights: l.rights, pending: true, ...(l.autoSend ? { autoSend: l.autoSend } : {}) });
             }
         }
+        /* The owner's asset groups: one node per group, and each grouped asset
+           tagged with its group. The page can then FOLD a group to a single node
+           whose links are the union of its members' -- here we give the parts
+           (the members, their real links, the group nodes); the page does the
+           folding so the map declutters without losing the truth. */
+        const nodeById = new Map(nodes.map((n) => [n.id, n]));
+        for (const g of p.groups?.list?.() ?? []) {
+            const members = (g.members ?? []).filter((m) => nodeById.has(m));
+            if (members.length === 0) continue;
+            for (const m of members) nodeById.get(m).group = `group:${g.id}`;
+            nodes.push({ id: `group:${g.id}`, kind: 'group', name: g.label, sub: `${members.length} asset${members.length === 1 ? '' : 's'}`, members });
+        }
         const known = new Set(nodes.map((n) => n.id));
         return { nodes, links: links.filter((l) => known.has(l.from) && known.has(l.to)) };
     }
