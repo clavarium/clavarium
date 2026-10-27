@@ -67,6 +67,7 @@ import { MachinesMove } from './machinesmove.mjs';
 import { Wifi } from './wifi.mjs';
 import { MeshCentral } from './meshcentral.mjs';
 import { Binders } from './binders.mjs';
+import { Tethers } from './tethers.mjs';
 import { ServerLogs } from './serverlogs.mjs';
 import { History, STEP_MS as HISTORY_STEP_MS } from './history.mjs';
 import { Events } from './events.mjs';
@@ -398,6 +399,11 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const binders = new Binders({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), dockets, team,
         alert: (message) => alerts.tell({ ...message, title: `${instance.name()}: ${message.title}` }) });
     const stopBinders = binders.start();
+    /* The accesses an agent was given -- a machine over SSH, an online folder, a
+       mailbox, a calendar, an address book -- held here with their secrets read from
+       the vault by name, never in a machine: see tethers.mjs. */
+    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets });
+    const stopTethers = tethers.start();
     /* A repository's origin kept up to date, checks run in the machine, and
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
@@ -521,7 +527,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),

@@ -47,6 +47,7 @@
     "clavarium-binder": "0.1.8-next.1",
     "clavarium-docket": "0.1.1",
     "clavarium-parley": "0.17.9-next.1",
+    "clavarium-tether": "0.1.0-next.5",
     "mermaid": "11.17.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",
