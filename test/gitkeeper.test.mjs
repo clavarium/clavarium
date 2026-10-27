@@ -835,3 +835,20 @@ test('A check outlives the request: past its wait the page hears "running", asks
     await b.keeper.check('site', { head });
     assert.equal(b.ran.length, 2, 'any other ask is a new run');
 });
+
+test('a slow send waits a moment, says it is still sending, then gives the result on join', async (t) => {
+    let release;
+    const held = new Promise((r) => { release = r; });
+    const b = await bench(t, { wrap: async (argv, options, run) => { if (argv.includes('push')) await held; return run(argv, options); } });
+    git(b.work, 'checkout', '--quiet', 'main');
+    const head = b.commit('slow.txt', 'slow\n', 'slow');
+    await b.review.outgoing('site');
+    /* The push hangs; the request waits only a moment, then hears "sending". */
+    const first = await b.keeper.send('site', { head, target: 'main', wait: 10 });
+    assert.equal(first.status, 'sending');
+    /* The push finishes; asking again (join) gives the real result, not a timeout. */
+    release();
+    const done = await b.keeper.send('site', { head, target: 'main', join: true });
+    assert.equal(done.branch, 'main');
+    assert.equal(done.ok, true);
+});
