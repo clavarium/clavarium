@@ -1047,7 +1047,10 @@ button.inline:hover { color: var(--brass-ink); }
 #updates { display: grid; gap: 10px; outline: none; }
 .updates-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
 #updates-state { color: var(--ink2); font-size: .8125rem; flex: 1 1 10rem; min-width: 0; overflow-wrap: anywhere; }
-.updates-news { margin: 0; font-size: .8125rem; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--warn); background: var(--bar); overflow-wrap: anywhere; }
+.updates-news { margin: 0; font-size: .8125rem; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bar); overflow-wrap: anywhere; }
+/* Amber only when something asks for a look (an update is out, one failed); up to date is neutral. */
+.updates-news[data-tone="warn"] { border-color: var(--warn); }
+.updates-news[data-tone="bad"] { border-color: var(--danger); }
 .updates-grid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 8px 14px; max-width: 30rem; }
 .updates-grid select, .updates-window input { min-height: 40px; font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; max-width: 100%; }
 .updates-window { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink2); font-size: .8125rem; }
