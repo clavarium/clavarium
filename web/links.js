@@ -28,8 +28,8 @@
     /* An icon of that set, or, until it is there, nothing in its place. */
     const ic = (name, cls = 'lk-svg') => window.clavariumIcons?.icon(name, cls) ?? null;
     const kindIcon = (kind) => h('span', { class: 'lk-ic', 'aria-hidden': 'true' }, ic(KIND_ICON[kind]));
-    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', secret: 'secret' };
-    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', secret: 'asset' };
+    const KIND_WORD = { device: 'device', conversation: 'conversation', folder: 'folder', git: 'repository', mailbox: 'mailbox', agenda: 'calendar', contacts: 'address book', secret: 'secret' };
+    const COLUMN = { device: 'device', conversation: 'conversation', folder: 'asset', git: 'asset', mailbox: 'asset', agenda: 'asset', contacts: 'asset', secret: 'asset' };
     const TITLES = { device: 'Devices', conversation: 'Conversations', asset: 'Assets' };
     const VIEWS = {
         devices: { cols: [['device'], ['conversation', 'asset']], sources: ['device'] },
@@ -91,7 +91,7 @@
             if (k === 'chat' && !l.rights.includes('w')) return 'chat, read only';
             return WORDS[k].toLowerCase();
         };
-        const allowed = (a, b) => !a.pending && !b.pending && ((a.kind === 'device' && ['conversation', 'folder', 'git', 'mailbox'].includes(b.kind)) || (a.kind === 'conversation' && ['folder', 'git', 'mailbox', 'secret'].includes(b.kind)));
+        const allowed = (a, b) => !a.pending && !b.pending && ((a.kind === 'device' && ['conversation', 'folder', 'git', 'mailbox'].includes(b.kind)) || (a.kind === 'conversation' && ['folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'].includes(b.kind)));
         const inView = (n) => VIEWS[view].cols.flat().includes(COLUMN[n.kind]);
         const shown = (l) => VIEWS[view].sources.includes(node(l.from)?.kind) && inView(node(l.to));
 
@@ -161,7 +161,7 @@
            times, puts each box at the average place of what it is linked to; the order
            that crossed least is kept. What is linked to nothing goes last, by name. */
         function layout() {
-            const ASSETS = ['folder', 'git', 'mailbox', 'secret'];
+            const ASSETS = ['folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret'];
             const base = (k) => graph.nodes.filter((n) => COLUMN[n.kind] === k).sort((a, b) => (ASSETS.indexOf(a.kind) - ASSETS.indexOf(b.kind)) || a.name.localeCompare(b.name));
             let cols = VIEWS[view].cols.map((ks) => ks.map(base));
             const colOf = new Map(); cols.forEach((gs, ci) => gs.flat().forEach((n) => colOf.set(n.id, ci)));
