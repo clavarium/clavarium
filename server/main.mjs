@@ -524,6 +524,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const capacity = new Capacity({ run: asHost, store: new Store(`${dataDir}/server.json`), conversations: all, shelf, ...(serverRoomMs === undefined ? {} : { roomMs: serverRoomMs }),
         /* Under the reserve: the machine that takes the most put to sleep, the owner told, and its chat. */
         sleep: (name) => { events.add({ kind: 'machine', text: `Machine of ${name} put to sleep: this server was short of room`, conversation: name }); return all.sleep(name); }, alert: (payload) => { events.add({ kind: 'server', text: `${payload.title}: ${payload.body ?? ''}`.trim() }); void alerts.tell(payload); },
+        /* A machine asleep but still holding its RAM (a suspend that did not free it): its memory reclaimed, only that machine touched. */
+        reclaim: (name) => { events.add({ kind: 'machine', text: `Machine of ${name}: memory reclaimed (it was asleep but still held RAM)`, conversation: name }); return vms.reclaim(name); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
     const stopWatch = capacity.start();

@@ -11,16 +11,17 @@ import { Store } from '../server/store.mjs';
 import { MIN_FREE_MB } from '../server/shelf.mjs';
 import { Capacity, readRoom, readUsage, RESERVE_DISK_MB, RESERVE_MEMORY_MB, RESERVE_DISK_PERCENT, RESERVE_MEMORY_PERCENT, ROOM_MS, NEW_MACHINE_MB } from '../server/capacity.mjs';
 
-function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [] } = {}) {
+function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [], reclaim } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-capacity-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const world = { clock: 1_000_000, room: room ?? ['place machines 7 102400 51200', 'place data 7 102400 51200', 'place folders 9 20480 18432', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'), usage: usage ?? 'used data 100\nused folders 2000\nused work 3000\nused machine clv-alpha 4000\nused machine clv-gone 1000\nused shelf 3500\nused images 700\nused others 0' };
     const asked = [];
     const run = async (argv) => { asked.push(argv.join(' ')); if (argv[1] === 'room') return world.room === null ? { code: 1, stdout: '' } : { code: 0, stdout: world.room }; return { code: 0, stdout: world.usage }; };
-    const slept = []; const alerts = []; const said = [];
+    const slept = []; const alerts = []; const said = []; const reclaimed = [];
     const capacity = new Capacity({ run, store: new Store(join(dir, 'server.json')), conversations: { list: () => conversations, awake: () => awake }, shelf: shelfMb ? { about: () => ({ current: { sizeMb: shelfMb } }) } : null, now: () => world.clock,
-        sleep: async (name) => { slept.push(name); }, alert: (payload) => { alerts.push(payload); }, say: (name, text) => { said.push([name, text]); } });
-    return { capacity, world, asked, slept, alerts, said };
+        sleep: async (name) => { slept.push(name); }, alert: (payload) => { alerts.push(payload); }, say: (name, text) => { said.push([name, text]); },
+        reclaim: reclaim ?? (async (name) => { reclaimed.push(name); }) });
+    return { capacity, world, asked, slept, alerts, said, reclaimed };
 }
 
 test('only lines of the expected shape are read: numbers, our machines, known places', () => {
@@ -160,4 +161,45 @@ test('watched: under the reserve, the owner is told and the running machine that
     assert.deepEqual(await n.capacity.watch(), [{ what: 'memory', slept: null }]);
     assert.deepEqual(n.slept, []);
     assert.equal(n.alerts.length, 1);
+});
+
+test('reclaimSleepers frees a sleeping machine still holding RAM, tells its owner, leaves the rest', async (t) => {
+    const FREED = ['place machines 7 102400 51200', 'memory 16384 10240'].join('\n');
+    let b;
+    b = bench(t, {
+        room: ['place machines 7 102400 51200', 'memory 16384 10240', 'machine clv-alpha 1024', 'machine clv-beta 50'].join('\n'),
+        conversations: [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 1024 }],
+        awake: [],   // both asleep; alpha holds 1024MB (the bug), beta only 50MB (< floor)
+        reclaim: async (name) => { b.reclaimed.push(name); b.world.room = FREED; },   // reclaim frees it
+    });
+    const done = await b.capacity.reclaimSleepers();
+    assert.deepEqual(b.reclaimed, ['alpha'], 'only alpha (holds >=128MB); beta (50MB) is left alone');
+    assert.deepEqual(done.map((d) => [d.name, d.freed]), [['alpha', true]]);
+    assert.ok(b.alerts.some((a) => /Reclaimed/.test(a.title)), 'owner is told it was reclaimed');
+    assert.ok(b.said.some(([n]) => n === 'alpha'), 'and it is said in its conversation');
+    assert.ok(b.asked.includes('vm reclaim clv-alpha') === false, 'the host verb is behind the injected reclaim (unit level)');
+});
+
+test('reclaimSleepers never touches an awake machine', async (t) => {
+    let b;
+    b = bench(t, {
+        room: ['place machines 7 102400 51200', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'),
+        awake: ['alpha'],
+        reclaim: async (name) => { b.reclaimed.push(name); },
+    });
+    assert.deepEqual(await b.capacity.reclaimSleepers(), [], 'alpha is awake (in use) -> never reclaimed');
+    assert.deepEqual(b.reclaimed, []);
+});
+
+test('reclaimSleepers does not loop on a stubborn machine (rate-limited, reported once)', async (t) => {
+    let b;
+    b = bench(t, {
+        room: ['place machines 7 102400 51200', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'),
+        awake: [],
+        reclaim: async (name) => { b.reclaimed.push(name); },   // never frees it: room keeps clv-alpha
+    });
+    await b.capacity.reclaimSleepers();
+    await b.capacity.reclaimSleepers();   // same clock -> inside the cooldown
+    assert.deepEqual(b.reclaimed, ['alpha'], 'tried once; not again within the cooldown');
+    assert.ok(b.alerts.some((a) => /still holds memory/.test(a.title)), 'reported as not freed');
 });

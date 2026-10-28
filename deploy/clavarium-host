@@ -808,6 +808,24 @@ case "$AREA $VERB" in
         "$MULTIPASS" stop "$1" >/dev/null 2>&1 || true
         vm_freed "$1" && exit 0
         refuse "suspended $1 but its memory was not freed (its qemu stayed); the VM manager likely needs a restart" ;;
+    "vm reclaim")
+        # Free a machine that is ASLEEP but whose qemu still holds the RAM -- a
+        # suspend (maybe from before this existed) that did not end the process.
+        # Idempotent and safe for an asleep machine (nobody is using it): if its
+        # qemu is already gone, nothing happens. Touches only this machine, and
+        # never restarts the VM manager.
+        [ $# -eq 1 ] || usage; vm_of "$1"
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "if $1's qemu still holds the RAM: $MULTIPASS start $1 && $MULTIPASS suspend $1 (wake+resleep)" \
+                "if it still does: $MULTIPASS stop $1 (free it; it wakes by a boot)"
+            exit 0
+        fi
+        vm_freed "$1" && exit 0
+        "$MULTIPASS" start "$1" >/dev/null 2>&1 && "$MULTIPASS" suspend "$1" >/dev/null 2>&1
+        vm_freed "$1" && exit 0
+        "$MULTIPASS" stop "$1" >/dev/null 2>&1 || true
+        vm_freed "$1" && exit 0
+        refuse "could not free $1's memory (its qemu stayed); the VM manager likely needs a restart" ;;
     "vm kill")
         # A stop that does not wait for the system inside: asked only after a
         # clean stop hung or failed (a restart the owner asked for).
