@@ -49,6 +49,13 @@ export const RESERVE_DISK_MAX_MB = 1024 * 1024;
 export const RESERVE_MEMORY_MAX_MB = 256 * 1024;
 export const ROOM_MS = 10_000;
 export const USAGE_MS = 5 * 60_000;
+/* A sleeping machine whose qemu still holds at least this much host memory is a
+   suspend that did not free it (see the host program's `vm suspend`); the watch
+   reclaims it. */
+export const RECLAIM_MIN_MB = 128;
+/* The same machine is not reclaimed again within this, so a stubborn one (rare,
+   needs a VM-manager restart) is reported once, not looped on. */
+export const RECLAIM_EVERY_MS = 30 * 60_000;
 /* The page shows its small gauge when disk or memory is fuller than this, or
    when what is free is under this many times the reserve. */
 export const HIGH_PERCENT = 85;
@@ -92,7 +99,7 @@ const percent = (part, all) => (all > 0 ? Math.round((part / all) * 100) : 0);
 export class Capacity {
     /* What the machines take on their disk, as last measured (MB), or undefined. */
     machinesUsedMb() { const u = this.#usage; if (!u) return undefined; return Object.values(u.machines ?? {}).reduce((a, b) => a + b, 0) + (u.shelf ?? 0) + (u.images ?? 0); }
-    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
+    #run; #store; #conversations; #shelf; #now; #roomMs; #sleep; #alert; #say; #reclaim; #reclaimEveryMs; #sweeping = false; #short = { disk: false, memory: false }; #room = null; #roomAt = -Infinity; #usage = null; #usageAt = -Infinity; #going = null; #measuring = null;
 
     /* `run(argv)`: the host program. `store`: where the reserve is kept.
        `conversations`: what each machine was given. `shelf`: how large a
@@ -100,8 +107,8 @@ export class Capacity {
     /* `roomMs`: how long what is free is taken as known (ROOM_MS). */
     /* `sleep(name)`, `alert(payload)`, `say(name, text)`: what watch() does
        when what is free falls under the reserve. */
-    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, alert = null, say = null }) {
-        this.#roomMs = roomMs; this.#sleep = sleep; this.#alert = alert; this.#say = say;
+    constructor({ run, store, conversations, shelf = null, now = () => Date.now(), roomMs = ROOM_MS, sleep = null, alert = null, say = null, reclaim = null, reclaimEveryMs = RECLAIM_EVERY_MS }) {
+        this.#roomMs = roomMs; this.#sleep = sleep; this.#alert = alert; this.#say = say; this.#reclaim = reclaim; this.#reclaimEveryMs = reclaimEveryMs;
         this.#run = run; this.#store = store; this.#conversations = conversations; this.#shelf = shelf; this.#now = now;
     }
 
@@ -288,9 +295,50 @@ export class Capacity {
         return done;
     }
 
+    /* WATCHED too, and on its own: machines that are ASLEEP (not awake) yet whose
+       qemu still holds the host RAM -- a suspend that did not end the process,
+       including ones left stuck before this ran. Each is freed through the host
+       program (`vm reclaim`: wake+resleep, then a clean stop if needed), the owner
+       told, and not tried again within reclaimEveryMs, so a stubborn one (rare,
+       the VM manager would need a restart) is reported once, not looped on. Only
+       asleep machines are touched; the others are never disturbed, and the VM
+       manager is never restarted. Resolves with what was reclaimed. */
+    async reclaimSleepers() {
+        if (!this.#reclaim || this.#sweeping) return [];
+        this.#sweeping = true;
+        try {
+            const f = this.#figures(await this.room({ fresh: true }).catch(() => null));
+            if (!f) return [];
+            const awake = new Set(this.#conversations.awake?.() ?? []);
+            const holding = f.machines.filter((m) => m.name && !m.shelf && !awake.has(m.name) && m.rssMb >= RECLAIM_MIN_MB);
+            if (!holding.length) return [];
+            const now = this.#now();
+            const at = this.#store.get('reclaim')?.at ?? {};
+            const done = [];
+            for (const m of holding) {
+                if (at[m.name] && now - at[m.name] < this.#reclaimEveryMs) continue;
+                at[m.name] = now;
+                this.#store.put({ name: 'reclaim', at });
+                const held = m.rssMb;
+                await Promise.resolve(this.#reclaim(m.name)).catch(() => {});
+                const after = this.#figures(await this.room({ fresh: true }).catch(() => null));
+                const freed = !after?.machines.some((x) => x.name === m.name && !awake.has(x.name) && x.rssMb >= RECLAIM_MIN_MB);
+                this.#alert?.(freed
+                    ? { title: "Reclaimed a sleeping machine's memory", body: `${m.name} was asleep but still held ${gb(held)} (its sleep had not freed it); its memory was reclaimed.`, url: '/?open=settings&at=resources' }
+                    : { title: 'A sleeping machine still holds memory', body: `${m.name} was asleep but still held ${gb(held)} and could not be freed; the VM manager may need a restart.`, url: '/?open=settings&at=resources' });
+                this.#say?.(m.name, freed
+                    ? `This machine was asleep but still held ${gb(held)} of memory (its sleep had not freed it). Its memory was reclaimed; it still wakes when you open it.`
+                    : `This machine was asleep but still held ${gb(held)} of memory, and it could not be freed automatically — the VM manager may need a restart.`);
+                done.push({ name: m.name, heldMb: held, freed });
+            }
+            return done;
+        } finally { this.#sweeping = false; }
+    }
+
     /* Watches every `everyMs`; returns what stops it. */
     start(everyMs = WATCH_MS) {
-        const timer = setInterval(() => { void this.watch().catch(() => {}); }, everyMs);
+        const tick = () => { void this.watch().catch(() => {}).finally(() => { void this.reclaimSleepers().catch(() => {}); }); };
+        const timer = setInterval(tick, everyMs);
         timer.unref?.();
         return () => clearInterval(timer);
     }

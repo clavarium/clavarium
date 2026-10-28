@@ -52,7 +52,7 @@ export function runner(prefix) {
 }
 
 /* The verbs that change a machine: its state is asked again after them. */
-const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive']);
+const CHANGES = new Set(['launch', 'clone', 'start', 'stop', 'suspend', 'kill', 'delete', 'purge', 'set', 'rename', 'restore', 'snapshot', 'revive', 'reclaim']);
 export const STATES_FRESH_MS = 3000;
 /* The VM manager did not say what a machine is in: not an answer about the machine. */
 export class VmUnknown extends Error {
@@ -181,5 +181,8 @@ export class Vms {
         return { memoryMb: mb === undefined ? undefined : Math.round(mb), diskGb: disk === undefined ? undefined : Math.round(disk / 1024), cpus };
     }
     suspend(conversation) { return this.run(['vm', 'suspend', vmName(conversation)], { timeoutMs: 300_000 }); }
+    /* Free the RAM of a machine that is asleep but whose qemu still holds it (a
+       suspend that did not end the process): wake+resleep, then a clean stop. */
+    reclaim(conversation) { return this.run(['vm', 'reclaim', vmName(conversation)], { timeoutMs: 300_000 }); }
     remove(conversation) { return this.run(['vm', 'delete', vmName(conversation)], { timeoutMs: 300_000 }); }
 }
