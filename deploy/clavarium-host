@@ -211,6 +211,18 @@ run() { if [ "$SAY" = "yes" ]; then printf '%s\n' "$*"; else exec "$@"; fi; }
 # with a letter; no trailing hyphen; 32 at most. The same rule as the server.
 is_name() { [[ "$1" =~ ^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$ ]]; }
 vm_of() { is_name "${1#clv-}" && [ "$1" != "${1#clv-}" ] || refuse "not one of our VMs: ${1:-<empty>}"; }
+# The qemu process(es) of one of our machines -- a qemu-system whose disk is in
+# that instance, the mapping "server room" also uses. Empty when none is left,
+# which is what a suspend that freed the RAM leaves behind.
+vm_qemu_pids() {
+    local want="$1" pid vm
+    for pid in $(pgrep qemu-system 2>/dev/null || true); do
+        vm="$(tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -oE '/instances/clv(shelf)?-[a-z0-9-]+/' | head -1 | cut -d/ -f3)" || vm=""
+        [ "$vm" = "$want" ] && printf '%s\n' "$pid"
+    done
+}
+# No qemu left for this machine after a short grace: its RAM has been freed.
+vm_freed() { local v="$1" i; for i in $(seq 1 24); do [ -z "$(vm_qemu_pids "$v")" ] && return 0; sleep 0.5; done; return 1; }
 number() { [[ "$1" =~ ^[0-9]{1,6}$ ]] || refuse "not a number: ${1:-<empty>}"; }
 # A disk or partition named by its device: /dev/sdX, /dev/vdX, /dev/nvmeNnN(pN),
 # /dev/xvdX, /dev/mmcblkN(pN), with a digit or two at the end; a loop device only
@@ -770,9 +782,32 @@ case "$AREA $VERB" in
     "vm info")
         [ $# -eq 1 ] || usage; vm_of "$1"
         run "$MULTIPASS" info "$1" --format json ;;
-    "vm start"|"vm stop"|"vm suspend")
+    "vm start"|"vm stop")
         [ $# -eq 1 ] || usage; vm_of "$1"
         run "$MULTIPASS" "$VERB" "$1" ;;
+    "vm suspend")
+        # Veille: suspend must save the machine's state AND free its RAM by ending
+        # its qemu process. Multipass saves the state reliably but at times leaves
+        # qemu alive (canonical/multipass #446, #2152, #5432), so the RAM stays
+        # taken though the machine shows "Suspended". The state being saved, we make
+        # the RAM come back, gentlest first: a second suspend from a clean running
+        # state usually ends qemu (and keeps the ~2s resume); failing that, a clean
+        # stop frees it for sure (it then wakes by a boot). Normally qemu is already
+        # gone after the first suspend and none of this runs.
+        [ $# -eq 1 ] || usage; vm_of "$1"
+        if [ "$SAY" = "yes" ]; then
+            printf '%s\n' "$MULTIPASS suspend $1" \
+                "if its qemu still holds the RAM: $MULTIPASS start $1 && $MULTIPASS suspend $1 (wake+resleep)" \
+                "if it still does: $MULTIPASS stop $1 (free it; it wakes by a boot)"
+            exit 0
+        fi
+        "$MULTIPASS" suspend "$1" || refuse "suspend of $1 failed"
+        vm_freed "$1" && exit 0
+        "$MULTIPASS" start "$1" >/dev/null 2>&1 && "$MULTIPASS" suspend "$1" >/dev/null 2>&1
+        vm_freed "$1" && exit 0
+        "$MULTIPASS" stop "$1" >/dev/null 2>&1 || true
+        vm_freed "$1" && exit 0
+        refuse "suspended $1 but its memory was not freed (its qemu stayed); the VM manager likely needs a restart" ;;
     "vm kill")
         # A stop that does not wait for the system inside: asked only after a
         # clean stop hung or failed (a restart the owner asked for).
