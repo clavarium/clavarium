@@ -820,11 +820,12 @@ case "$AREA $VERB" in
                 "if it still does: $MULTIPASS stop $1 (free it; it wakes by a boot)"
             exit 0
         fi
-        vm_freed "$1" && exit 0
+        # Each step that frees the RAM says how, so the server can tell the owner.
+        vm_freed "$1" && { echo "freed-already"; exit 0; }
         "$MULTIPASS" start "$1" >/dev/null 2>&1 && "$MULTIPASS" suspend "$1" >/dev/null 2>&1
-        vm_freed "$1" && exit 0
+        vm_freed "$1" && { echo "freed-resleep"; exit 0; }
         "$MULTIPASS" stop "$1" >/dev/null 2>&1 || true
-        vm_freed "$1" && exit 0
+        vm_freed "$1" && { echo "freed-stop"; exit 0; }
         refuse "could not free $1's memory (its qemu stayed); the VM manager likely needs a restart" ;;
     "vm kill")
         # A stop that does not wait for the system inside: asked only after a

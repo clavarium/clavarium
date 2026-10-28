@@ -320,14 +320,17 @@ export class Capacity {
                 at[m.name] = now;
                 this.#store.put({ name: 'reclaim', at });
                 const held = m.rssMb;
-                await Promise.resolve(this.#reclaim(m.name)).catch(() => {});
+                const how = await Promise.resolve(this.#reclaim(m.name)).then((x) => String(x || ''), () => '');
+                const by = how.includes('resleep') ? ' by waking it and putting it back to sleep'
+                    : how.includes('stop') ? ' with a clean stop (it will boot when you open it)'
+                    : '';
                 const after = this.#figures(await this.room({ fresh: true }).catch(() => null));
                 const freed = !after?.machines.some((x) => x.name === m.name && !awake.has(x.name) && x.rssMb >= RECLAIM_MIN_MB);
                 this.#alert?.(freed
-                    ? { title: "Reclaimed a sleeping machine's memory", body: `${m.name} was asleep but still held ${gb(held)} (its sleep had not freed it); its memory was reclaimed.`, url: '/?open=settings&at=resources' }
+                    ? { title: "Reclaimed a sleeping machine's memory", body: `${m.name} was asleep but still held ${gb(held)} (its sleep had not freed it); its memory was reclaimed${by}.`, url: '/?open=settings&at=resources' }
                     : { title: 'A sleeping machine still holds memory', body: `${m.name} was asleep but still held ${gb(held)} and could not be freed; the VM manager may need a restart.`, url: '/?open=settings&at=resources' });
                 this.#say?.(m.name, freed
-                    ? `This machine was asleep but still held ${gb(held)} of memory (its sleep had not freed it). Its memory was reclaimed; it still wakes when you open it.`
+                    ? `This machine was asleep but still held ${gb(held)} of memory (its sleep had not freed it). Its memory was reclaimed${by}; it still wakes when you open it.`
                     : `This machine was asleep but still held ${gb(held)} of memory, and it could not be freed automatically — the VM manager may need a restart.`);
                 done.push({ name: m.name, heldMb: held, freed });
             }
