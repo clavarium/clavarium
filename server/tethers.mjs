@@ -35,7 +35,10 @@ export class Tethers {
     constructor({ dataDir, resources, conversations, secrets, connectors, now = () => Date.now() }) {
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets;
         this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now, ...(connectors ? { connectors } : {}) });
-        this.#keeper.store.onChange(() => { this.#changes++; });
+        /* Every change a page shows -- a new approval waiting, one decided, the targets,
+           the journal -- bumps the counter the client watches, so the approvals screen
+           sees them all at once, not only when a store change happens to wake it. */
+        this.#keeper.onChange(() => { this.#changes++; });
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.
