@@ -31,6 +31,15 @@ test('catches a high-entropy blob but not prose, paths, hashes, UUIDs', () => {
     assert.deepEqual(values(`secret ${blob} ok`), [blob]);
 });
 
+test('a high-entropy run inside a URL is left alone (a tracking link, a profile id), but a known token in a URL is still caught', () => {
+    const blob = 'Xk9aB3dE7fG2hJ5kL8mN1pQ4rS6tU0vWzZ7cD5eF8g';   /* a secret on its own */
+    assert.deepEqual(values(`token ${blob}`), [blob]);
+    assert.deepEqual(values(`see https://www.linkedin.com/feed/update/${blob}/ now`), [], 'not in a URL path');
+    assert.deepEqual(values(`https://example.com/t?ref=${blob}&x=1`), [], 'not in a URL query');
+    const sk = 'sk-ant-api03-abc123DEF456ghi789JKL012mno345';
+    assert.deepEqual(values(`callback https://x.test/cb?key=${sk}`), [sk], 'a known token is still lifted, URL or not');
+});
+
 test('non-overlapping, left to right; a prefix wins over the blob rule', () => {
     const token = 'npm_aZ3kP9mQ2wE7rT1yU5iO0pS8dF4gH6jKxL2n';   /* npm_ + 36 random chars: the blob rule matches it too */
     const got = scan(`a ${token} b`);

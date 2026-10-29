@@ -75,15 +75,25 @@ function improbableWord(s, floor = ENTROPY_MIN) {
 export const secretRef = (name, at) => `⟨secret:${name}${Number.isFinite(at) ? `@${at}` : ''}⟩`;
 export const SECRET_REF = /⟨secret:(SECRET_[0-9A-F]{10})(?:@(\d+))?⟩/g;
 
+/* A URL left alone: the entropy nets skip what falls inside one, so a long
+   random-looking path or query (a tracking link, a LinkedIn profile) is not
+   taken for a secret. A token with a known shape (sk-..., a JWT) is still
+   caught, in a URL or not, because the SHAPES run everywhere. */
+const URL = /\bhttps?:\/\/[^\s<>"'`)\]}]+/gi;
+
 export function scan(text) {
     const str = String(text ?? '');
     const found = [];
+    const urlSpans = [];
+    URL.lastIndex = 0;
+    for (let m; (m = URL.exec(str));) urlSpans.push([m.index, m.index + m[0].length]);
+    const inUrl = (start, end) => urlSpans.some(([s, e]) => start >= s && end <= e);
     for (const { kind, re } of SHAPES) {
         re.lastIndex = 0;
         for (let m; (m = re.exec(str));) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind });
     }
     for (let m; (m = BLOB.exec(str));) {
-        if (looksRandom(m[0])) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
+        if (looksRandom(m[0]) && !inUrl(m.index, m.index + m[0].length)) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
     }
     BLOB.lastIndex = 0;
     /* A word nearby that announces a secret widens the net to shorter runs, on a lower floor. */
@@ -91,7 +101,7 @@ export function scan(text) {
     const wordRe = near ? SHORT_WORD : WORD;
     const floor = near ? ENTROPY_SHORT : ENTROPY_MIN;
     for (let m; (m = wordRe.exec(str));) {
-        if (improbableWord(m[0], floor)) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
+        if (improbableWord(m[0], floor) && !inUrl(m.index, m.index + m[0].length)) found.push({ start: m.index, end: m.index + m[0].length, value: m[0], kind: 'high-entropy' });
     }
     wordRe.lastIndex = 0;
     /* Keep left-to-right, and when two matches overlap keep the one that starts
