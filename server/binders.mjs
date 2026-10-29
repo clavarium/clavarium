@@ -110,9 +110,12 @@ export class Binders {
     }
     /* Who may own a record, or be given a list. */
     people(identity = '') {
+        /* Who signed in, as the store names their ownership ('me' resolves to this). The matrix
+           colours a card "à moi" by matching this, so the page is told which entry is the viewer. */
+        const meId = `person:${identity || 'owner'}`;
         const persons = (this.#team?.list?.() ?? []).map((o) => ({ id: `person:${String(o.email ?? o.id ?? '').toLowerCase()}`, kind: 'person', name: String(o.email ?? o.id ?? '') })).filter((p) => p.name);
-        if (!persons.length) persons.push({ id: `person:${identity || 'owner'}`, kind: 'person', name: identity || 'Owner' });
-        return [...persons, ...this.#conversations().map((name) => ({ id: `${AGENT}${name}`, kind: 'agent', name }))];
+        if (!persons.length) persons.push({ id: meId, kind: 'person', name: identity || 'Owner' });
+        return [...persons.map((p) => (p.id === meId ? { ...p, me: true } : p)), ...this.#conversations().map((name) => ({ id: `${AGENT}${name}`, kind: 'agent', name }))];
     }
     /* What each conversation was given: { name: { lists, waiting } }, waiting being the
        records of those lists that wait for a person's tick (a list with a gate, not approved). */
