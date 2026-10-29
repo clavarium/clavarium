@@ -310,6 +310,7 @@ test('automatic sending: only to a listed branch, only after the quiet delay, on
     assert.match(b.log()[0].what, /Not sent: the checks failed in the machine/);
     assert.equal(b.log().filter((l) => /checks failed/.test(l.what)).length, 1, 'said once');
     assert.equal(b.ran.filter((r) => r.head === third).length, 1, 'run once for that commit');
+    assert.ok(b.agent.some((l) => /the checks failed for try\/one, it was not sent\. The end of the output:/.test(l) && /stand-in/.test(l)), 'the agent is given the end of the check output, not only that it failed');
     /* Checks that cannot be run (no hook, no command) are not a pass. */
     verdict = 'none';
     b.commit('d.txt', 'd\n', 'four');

@@ -696,7 +696,11 @@ export class GitKeeper {
                 /* Its machine did not run them: tried again later, when it may. */
                 if (checks.status !== 'unavailable') held.done.set(b, tip.id);
                 const why = checks.status === 'failed' ? `the checks failed in the machine of ${conversation}` : checks.status === 'none' ? 'automatic sending needs passing checks, and none is set (no pre-push hook, no check command)' : `the checks could not run: the machine of ${conversation} does not run`;
-                return once(`checks-${checks.status}`, { what: `Not sent: ${why}.`, tell: true, ...(checks.status === 'failed' ? { ai: `the checks failed for ${plain(b)}, it was not sent` } : {}) }), false;
+                /* On a failure the agent is given the END OF THE CHECK OUTPUT, not only
+                   that it failed: it is the one that can fix it, and guessing without the
+                   output wastes its time. */
+                const tail = String(checks.output ?? '').trim();
+                return once(`checks-${checks.status}`, { what: `Not sent: ${why}.`, tell: true, ...(checks.status === 'failed' ? { ai: `the checks failed for ${plain(b)}, it was not sent${tail ? `. The end of the output:\n\n${tail}` : ''}` } : {}) }), false;
             }
         }
         const checked = s.checks ? 'checks passed' : 'no checks asked for';
