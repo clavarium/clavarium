@@ -4834,18 +4834,26 @@
         if (!repo || !rest) return;
         void openGit(repo, kind === 'commit' ? { commit: rest } : { branch: rest });
     }
+    /* Read again every screen of a binder when the binders changed. Taken as seen only once every
+       screen read it again: one that failed (the server restarting) is read again at the next turn. */
+    async function catchUpBinders() {
+        const now = await getJson('/binder/people', null);
+        if (!now) return;
+        binderPeople = now.people;
+        if (now.changes === binderChanges) return;
+        const read = await Promise.all([...binderViews].map((one) => Promise.resolve(one.view.refresh()).then((ok) => ok !== false, () => false)));
+        if (read.every(Boolean)) binderChanges = now.changes;
+    }
     function watchBinders() {
         if (binderTimer) return;
-        binderTimer = setInterval(async () => {
+        binderTimer = setInterval(() => {
             for (const one of binderViews) if (!one.box?.isConnected) { one.view.destroy(); binderViews.delete(one); }
             if (binderViews.size === 0) { clearInterval(binderTimer); binderTimer = null; return; }
-            if (document.hidden) return;
-            const now = await getJson('/binder/people', null);
-            if (!now) return;
-            binderPeople = now.people;
-            if (now.changes !== binderChanges) { binderChanges = now.changes; for (const one of binderViews) void one.view.refresh(); }
+            if (!document.hidden) void catchUpBinders();
         }, 4000);
     }
+    /* Back on the page (a tablet woken, a tab shown again): looked at at once, not 4 s later. */
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && binderViews.size) void catchUpBinders(); });
     /* WHERE A BINDER IS, IN THIS PAGE'S BACK: a card (or a binder's settings) is one step over
        its list; Back, Escape and its "‹" close it, and the list is there again. Another binder
        picked takes no step. `viewOf()`: the screen shown now (it may be drawn again).
