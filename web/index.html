@@ -152,6 +152,7 @@
             <div class="set-row"><div class="set-what"><b>Chat</b><small id="talk-about">A chat screen instead of its terminal. What the tool posts there is read by this server</small></div><div class="set-control"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div></div>
             <p class="hint" id="talk-declare" hidden></p>
             <form id="chat-name-form" class="set-row" autocomplete="off"><div class="set-what"><label for="chat-name">Its name in the chat</label><small id="chat-name-hint">Empty: "Assistant"</small></div><div class="set-control"><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></div></form>
+            <div class="set-row" id="tasks-binder-row" hidden><div class="set-what"><label for="tasks-binder">Binder beside the chat</label><small>Automatic: its first binder of batches</small></div><div class="set-control"><select id="tasks-binder"></select></div></div>
             </div>
             <!-- DICTATION INTO ITS TERMINAL: marked once per message, so that the tool knows it may hold recognition mistakes. -->
             <div id="voice-mark-box" hidden>

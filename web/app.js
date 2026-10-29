@@ -2602,11 +2602,16 @@
     let tasksTimer = null; let tasksChanges = -1;
     const tasksFolded = (name) => { try { const v = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}')[name]; return typeof v === 'boolean' ? v : null; } catch { return null; } };
     const keepTasksFolded = (name, on) => { try { const all = JSON.parse(localStorage.getItem('clavarium-tasks-folded') ?? '{}'); all[name] = on; localStorage.setItem('clavarium-tasks-folded', JSON.stringify(all)); } catch { /* a private window */ } };
-    /* Its binder of batches: the first of that template it was given, not archived. */
+    /* Its binder beside the chat: the one chosen for it (its settings, the same on every
+       device), else the first binder of batches it was given; '-' chosen: none. A chosen binder
+       it no longer has, or archived, gives way to the automatic choice. */
     async function batchesOf(name) {
+        const chosen = conversations.find((x) => x.name === name)?.tasksBinder ?? '';
+        if (chosen === '-') return null;
         const lists = await binderCall('lists', {});
         if (!lists.ok || !Array.isArray(lists.data)) return undefined;
-        return lists.data.find((l) => !l.archived && l.template === TASKS_TEMPLATE && l.grants?.[`conversation:${name}`]) ?? null;
+        const given = lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${name}`]);
+        return (chosen && given.find((l) => l.id === chosen)) || given.find((l) => l.template === TASKS_TEMPLATE) || null;
     }
     /* A card's description, as the panel shows it: plain words, no Markdown signs. */
     const plainText = (md) => String(md ?? '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*|__|`/g, '').replace(/^\s*[-*]\s+/gm, '').replace(/\s+/g, ' ').trim();
@@ -2763,6 +2768,7 @@
         if (DEVICE) { $('talk-box').hidden = true; $('voice-mark-box').hidden = true; return; }
         const here = conversations.find((x) => x.name === current);
         if (document.activeElement !== $('chat-name')) $('chat-name').value = here?.chatName ?? '';
+        void paintTasksBinder(here);
         if (document.activeElement !== $('title-name')) $('title-name').value = shownName(here);
         $('title-box').hidden = $('hide-box').hidden = $('group-box').hidden = DEVICE || !here;
         if (document.activeElement !== $('group-name')) $('group-name').value = here?.group ?? '';
@@ -2821,6 +2827,25 @@
             catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         });
     }
+    /* WHICH BINDER BESIDE ITS CHAT (#48): automatic, one of the binders it was given, or none.
+       Shown only once it was given a binder. */
+    async function paintTasksBinder(here) {
+        const row = $('tasks-binder-row'); const pick = $('tasks-binder');
+        if (DEVICE || !here) { row.hidden = true; return; }
+        const lists = await binderCall('lists', {});
+        const given = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${here.name}`]) : [];
+        row.hidden = given.length === 0;
+        if (row.hidden || document.activeElement === pick) return;
+        const option = (value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; return o; };
+        pick.replaceChildren(option('', 'Automatic'), ...given.map((l) => option(l.id, l.title)), option('-', 'None'));
+        const chosen = here.tasksBinder ?? '';
+        pick.value = chosen === '-' || given.some((l) => l.id === chosen) ? chosen : '';
+    }
+    $('tasks-binder').addEventListener('change', async () => {
+        $('panel-error').hidden = true;
+        try { await post(`${API}/conversations/${encodeURIComponent(current)}/tasks-binder`, { binder: $('tasks-binder').value }); await refresh(); void paintTasks(current); }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+    });
     $('chat-name-form').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('panel-error').hidden = true;

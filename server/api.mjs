@@ -19,6 +19,7 @@
  *   POST /api/conversations/<name>/talk          {text, answers?, files?, via?}: written in its chat; files from .../talk/file; via 'voice': dictated
  *   POST /api/conversations/<name>/talk/react    {to, reaction}: the owner's reaction to a message of the tool (null: taken back)
  *   POST /api/conversations/<name>/chat-name     {name}: the name the chat gives its tool ('' : the neutral word of the dictionary)
+ *   POST /api/conversations/<name>/tasks-binder  {binder}: the binder shown beside its chat ('' automatic, '-' none, else an id)
  *   POST /api/conversations/<name>/voice-mark    {on}: what is dictated into its terminal starts with a microphone sign (AI tools only)
  *   POST /api/conversations/<name>/talk/file?name=<file name>   the body IS a file the person attaches -> {path, name, size}
  *   GET  /api/conversations/<name>/talk?last=|days=|before=|from=|since=   a part of its chat: the newest messages, those of the
@@ -638,6 +639,8 @@ export async function handleApi(request, response, conversations, headers, resou
         if (asking) return send(200, conversations.setAskFirst(decodeURIComponent(asking[1]), body.on)), true;
         const naming = /^\/api\/conversations\/([^/]+)\/chat-name$/.exec(pathname);
         if (naming) return send(200, conversations.setChatName(decodeURIComponent(naming[1]), body.name)), true;
+        const beside = /^\/api\/conversations\/([^/]+)\/tasks-binder$/.exec(pathname);
+        if (beside) return send(200, conversations.setTasksBinder(decodeURIComponent(beside[1]), body.binder)), true;
         /* The list: folders and order, the same on every device (conversations.mjs). */
         if (pathname === '/api/instance' && instance) return send(200, instance.setName(body.name)), true;
         if (pathname === '/api/dictation' && voice) return send(200, voice.set(body)), true;
