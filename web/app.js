@@ -3186,7 +3186,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -3887,9 +3887,13 @@
     /* ---- a conversation's own ---- */
     async function paintRoomAssets() {
         if (!assetsShown) return;
+        watchTether();
         const c = conversations.find((x) => x.name === current);
         roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
-        const [all, secrets, boxes] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', [])]);
+        const [all, secrets, boxes, tether] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {})]);
+        /* The calls this conversation's agent asked the owner to allow: validated here,
+           in the parloir, without leaving for the Assets page. */
+        const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
         const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
         const items = [];
         if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write' });
@@ -3904,19 +3908,23 @@
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
-        const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? items.find((i) => i.key === roomPick) ?? null;
+        const demandes = mineDemandes.length ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: `${mineDemandes.length} waiting for you` } : null;
+        const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
         paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
         const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
-        if (outbox) {
-            const row = el('button', 'as-row ts-entry'); row.type = 'button'; row.dataset.asset = outbox.key;
-            if (chosen === outbox) row.setAttribute('aria-current', 'true');
-            const words = el('span', 'as-words'); words.append(el('b', '', outbox.name), el('small', 'as-sub', outbox.sub));
+        const pinnedRow = (entry, extra) => {
+            const row = el('button', `as-row ts-entry${extra ? ` ${extra}` : ''}`); row.type = 'button'; row.dataset.asset = entry.key;
+            if (chosen === entry) row.setAttribute('aria-current', 'true');
+            const words = el('span', 'as-words'); words.append(el('b', '', entry.name), el('small', 'as-sub', entry.sub));
             row.append(kindIcon('send'), words);
-            row.addEventListener('click', () => pickRoomAsset(outbox.key));
-            $('cassets-rows').prepend(row);
-        }
+            if (entry.key === 'demandes:mine') row.append(el('b', 'count', String(mineDemandes.length)));
+            row.addEventListener('click', () => pickRoomAsset(entry.key));
+            return row;
+        };
+        if (outbox) $('cassets-rows').prepend(pinnedRow(outbox));
+        if (demandes) $('cassets-rows').prepend(pinnedRow(demandes, 'demande-entry'));
         $('cassets-rows').prepend(top);
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
@@ -3927,7 +3935,10 @@
         const back = () => { roomPick = ''; void paintRoomAssets(); };
         if (keepFiles) { void paintFiles(); return; }
         detail.append(asTitle(chosen, back));
-        if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
+        if (chosen.kind === 'demandes') {
+            detail.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
+            detail.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
+        } else if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
             if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
             embedFiles(detail, chosen.name);
         } else if (chosen.kind === 'send') await sendDetail(detail, gits);
@@ -4054,12 +4065,62 @@
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         await refresh();
     }
-    /* Accept or refuse a Tether call that is waiting for a person. */
-    async function decideTether(id, decision) {
+    /* Accept or refuse a Tether call that is waiting for a person. `after` repaints the
+       surface the row sits in (the Assets page by default; the room passes its own). */
+    async function decideTether(id, decision, after) {
         $('assets-error').hidden = true;
         try { await post(`${API}/tether/decide`, { id, decision }); }
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-        await paintAssets();
+        if (after) await after(); else await paintAssets();
+    }
+    /* One Tether call waiting for the owner, as a row: what it would do, who asks and on
+       which target, then Accept / Refuse. `withWho`: name the conversation that asks (the
+       exhaustive list spans them all). `after`: repaint the surface once it is decided. */
+    function demandeRow(q, { withWho = false, after } = {}) {
+        const line = el('div', 'given-row demande');
+        const what = el('span', 'demande-what');
+        const head = el('span', 'demande-head'); head.append(el('b', '', q.verb ?? 'action'));
+        if (q.detail) head.append(document.createTextNode(` ${q.detail}`));
+        what.append(head);
+        const tags = [withWho ? q.agent?.name : '', q.target?.title].filter(Boolean);
+        if (tags.length) what.append(el('small', 'as-sub demande-who', tags.join(' · ')));
+        if (q.why) what.append(el('small', 'hint demande-why', q.why));
+        const yes = el('button', 'primary', 'Accept'); yes.type = 'button';
+        const no = el('button', 'danger', 'Refuse'); no.type = 'button';
+        const decide = (d) => { yes.disabled = true; no.disabled = true; void decideTether(q.id, d, after); };
+        yes.addEventListener('click', () => decide('yes'));
+        no.addEventListener('click', () => decide('no'));
+        const acts = el('div', 'levels'); acts.append(yes, no);
+        line.append(what, acts);
+        return line;
+    }
+    /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
+    function demandesList(approvals, { withWho = false, after } = {}) {
+        const box = el('div', 'as-users demandes-box');
+        for (const q of approvals) box.append(demandeRow(q, { withWho, after }));
+        return box;
+    }
+    /* While the owner is on Assets or a room, the calls waiting for them appear and update
+       on their own: nothing on this page is polled for Tether otherwise, so a new call or
+       a decided one would wait for the next click. A light watch of the one number that
+       moves with every change (tethers.changes) repaints the open surface when it moves. */
+    let tetherSeen = null; let tetherTimer = 0;
+    const tetherViewOpen = () => !DEVICE && (place === 'assets' || assetsShown);
+    function watchTether() {
+        if (tetherTimer || !tetherViewOpen()) return;
+        const tick = async () => {
+            if (!tetherViewOpen()) { tetherTimer = 0; tetherSeen = null; return; }
+            const t = await getJson('/tether', null);
+            if (t && typeof t.changes === 'number') {
+                if (tetherSeen !== null && t.changes !== tetherSeen) {
+                    if (place === 'assets') void paintAssets();
+                    else if (assetsShown) void paintRoomAssets();
+                }
+                tetherSeen = t.changes;
+            }
+            tetherTimer = setTimeout(tick, 2500);
+        };
+        tetherTimer = setTimeout(tick, 0);
     }
     /* A new list: Binder's templates, read once. */
     async function fillTemplates() {
@@ -4071,6 +4132,7 @@
     }
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
+        watchTether();
         const [all, boxes, secrets, keys, lists, tether, assetGroups] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), getJson('/asset-groups', []), readDevices()]);
         if (place !== 'assets') return;
         paintKeys(keys);
@@ -4105,7 +4167,11 @@
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         /* A group can be the open thing too (its own detail: give it, rename it). */
         const chosenGroup = !assetsAdding && !chosen && assetOpen.startsWith('group:') ? assetGroups.find((g) => `group:${g.id}` === assetOpen) ?? null : null;
-        $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding ? 'detail' : 'list';
+        /* Every call waiting for the owner, across all the connexions, gathered in one place
+           (in a connexion's own detail they still show, but only that one's). */
+        const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
+        const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
+        $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
         /* The "by type / by group" toggle sits above the rows (built once, kept). */
         paintAssetsView();
         const choose = (key) => { placeAssetStep(); if (key !== assetOpen) groupGiveShow.clear(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
@@ -4113,6 +4179,16 @@
             paintAsGroups($('assets-rows'), shown, assetGroups, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : ''), choose, empty: assetsQuery ? 'Nothing by that name.' : '' });
         } else {
             paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
+        }
+        /* Above them all, once something waits: the owner reaches every call from here,
+           not only by opening the right connexion. */
+        if (allApprovals.length && !assetsQuery) {
+            const row = el('button', 'as-row ts-entry demande-entry'); row.type = 'button'; row.dataset.asset = 'demandes:all';
+            if (onDemandes) row.setAttribute('aria-current', 'true');
+            const words = el('span', 'as-words'); words.append(el('b', '', 'Demandes'), el('small', 'as-sub', `${allApprovals.length} waiting for you`));
+            row.append(kindIcon('send'), words, el('b', 'count', String(allApprovals.length)));
+            row.addEventListener('click', () => choose('demandes:all'));
+            $('assets-rows').prepend(row);
         }
         const detail = $('assets-detail');
         /* The forms go back to where they wait before the detail is drawn again. */
@@ -4151,6 +4227,13 @@
             return;
         }
         if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
+        if (onDemandes) {
+            detail.append(asTitle({ kind: 'send', name: 'Demandes', badge: String(allApprovals.length), badgeTone: 'count' }, back));
+            detail.append(el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'));
+            if (allApprovals.length) detail.append(demandesList(allApprovals, { withWho: true, after: () => paintAssets() }));
+            else detail.append(el('p', 'hint', 'Nothing is waiting now.'));
+            return;
+        }
         if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
         detail.append(asTitle(chosen, back));
         detail.append(groupPicker(chosen, assetGroups));

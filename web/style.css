@@ -1516,6 +1516,13 @@ button.inline.more-recent { text-decoration: none; }
 
 /* TO SEND: every repository of a conversation, one row each, then one review of those ticked. */
 .ts-entry .as-ic { color: var(--brass-ink); }
+/* DEMANDES: the Tether calls waiting for the owner, gathered as one entry (Assets, and each
+   room's own), each a line with what it would do, who asks, why, then Accept / Refuse. */
+.demande-entry .count { margin-left: auto; align-self: center; }
+.demande-what { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.demande-head { overflow-wrap: anywhere; }
+.demande-who { color: var(--ink2); }
+.demande-why { display: block; margin: 0; }
 .ts-rows { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 .ts-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(0, 1.6fr) max-content minmax(0, 1fr); gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
 .ts-row.off { opacity: .6; }
