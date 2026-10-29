@@ -2562,6 +2562,8 @@
             },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
+            /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
+            ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
             act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
@@ -4833,6 +4835,56 @@
         const repo = raw.slice(0, at); const rest = raw.slice(at + 1).trim();
         if (!repo || !rest) return;
         void openGit(repo, kind === 'commit' ? { commit: rest } : { branch: rest });
+    }
+    /* ATTACH TO A CARD (#180): from where a thing is (a file shown, a message of the chat), a card
+       picked among the binders this page may write in -- by its title, typed or scrolled -- and
+       the thing attached to it, as the agent attaches with `binder attach`. */
+    async function attachToCard({ kind, ref, title }) {
+        document.getElementById('attach-pick')?.remove();
+        const box = document.createElement('div'); box.id = 'attach-pick'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Attach to a card');
+        const card = document.createElement('div'); card.className = 'attach-card';
+        const head = document.createElement('div'); head.className = 'row';
+        const h = document.createElement('b'); h.textContent = 'Attach to a card';
+        const sp = document.createElement('span'); sp.className = 'sp';
+        const x = document.createElement('button'); x.type = 'button'; x.textContent = '\u00d7'; x.setAttribute('aria-label', 'Close');
+        head.append(h, sp, x);
+        const what = document.createElement('p'); what.className = 'dim attach-what'; what.textContent = title || ref;
+        const find = document.createElement('input'); find.type = 'search'; find.placeholder = 'Find a card'; find.setAttribute('aria-label', 'Find a card');
+        const list = document.createElement('div'); list.className = 'attach-list';
+        const said = document.createElement('p'); said.className = 'attach-said'; said.hidden = true;
+        card.append(head, what, find, list, said); box.append(card); document.body.append(box);
+        const close = () => { box.remove(); document.removeEventListener('keydown', esc, true); };
+        const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+        document.addEventListener('keydown', esc, true);
+        x.onclick = close; box.addEventListener('pointerdown', (e) => { if (e.target === box) close(); });
+        list.textContent = 'Loading...';
+        /* The cards of every binder this page may change, the conversation's own binder first. */
+        const lists = ((await binderCall('lists', {})).data ?? []).filter((l) => !l.archived && l.access === 'write');
+        const own = (l) => Object.keys(l.grants ?? {}).includes(`conversation:${current}`);
+        lists.sort((a, b) => Number(own(b)) - Number(own(a)));
+        const cards = [];
+        for (const l of lists.slice(0, 12)) { const r = await binderCall('show', { list: l.id }); for (const rec of r.data?.records ?? []) cards.push({ list: l, rec }); }
+        const draw = () => {
+            const q = find.value.trim().toLowerCase();
+            const shown = cards.filter(({ rec, list: l }) => !q || `#${rec.n} ${rec.title} ${l.title}`.toLowerCase().includes(q)).slice(0, 80);
+            list.replaceChildren(...(shown.length ? shown.map(({ rec, list: l }) => {
+                const b = document.createElement('button'); b.type = 'button'; b.className = 'attach-item';
+                const t = document.createElement('span'); t.textContent = `#${rec.n} ${rec.title}`;
+                const w = document.createElement('small'); w.textContent = l.title;
+                b.append(t, w);
+                b.onclick = async () => {
+                    for (const o of list.querySelectorAll('button')) o.disabled = true;
+                    const r = await binderCall('attach', { id: rec.id, kind, ref, ...(title ? { title } : {}) });
+                    said.hidden = false; said.textContent = r.ok ? `Attached to #${rec.n} ${rec.title}.` : (r.text || 'Not attached.');
+                    said.classList.toggle('bad', !r.ok);
+                    if (r.ok) setTimeout(close, 1400); else for (const o of list.querySelectorAll('button')) o.disabled = false;
+                };
+                return b;
+            }) : [Object.assign(document.createElement('p'), { className: 'dim', textContent: cards.length ? 'No card by that name.' : 'No binder you can write in.' })]));
+        };
+        find.addEventListener('input', draw);
+        draw();
+        find.focus();
     }
     /* Read again every screen of a binder when the binders changed. Taken as seen only once every
        screen read it again: one that failed (the server restarting) is read again at the next turn. */
@@ -7464,6 +7516,9 @@
         /* Text in a folder this conversation may write in: editable here. */
         $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
         $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
+        /* A file of the shared folders: attached to a card from here (#180). */
+        $('preview-attach').hidden = Boolean(from) || DEVICE;
+        $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
