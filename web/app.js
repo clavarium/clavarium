@@ -929,6 +929,14 @@
         paint();
         enter();
         void chatFirst();
+        /* Opening a conversation gets the list out of the way, so its room has the room;
+           the "»" button brings the list back. Only on a real pick by the owner, never on a
+           device or when deselecting. */
+        if (step && name && !DEVICE && !listFolded) {
+            listFolded = true;
+            try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
+            applyFold(true); fit.fit?.();
+        }
     }
 
     /* ---------- THE NAME OF THIS CLAVARIUM (server/instance.mjs) ----------
