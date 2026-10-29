@@ -170,12 +170,13 @@ test('reclaimSleepers frees a sleeping machine still holding RAM, tells its owne
         room: ['place machines 7 102400 51200', 'memory 16384 10240', 'machine clv-alpha 1024', 'machine clv-beta 50'].join('\n'),
         conversations: [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 1024 }],
         awake: [],   // both asleep; alpha holds 1024MB (the bug), beta only 50MB (< floor)
-        reclaim: async (name) => { b.reclaimed.push(name); b.world.room = FREED; },   // reclaim frees it
+        reclaim: async (name) => { b.reclaimed.push(name); b.world.room = FREED; return 'freed-resleep'; },   // reclaim frees it, by wake+resleep
     });
     const done = await b.capacity.reclaimSleepers();
     assert.deepEqual(b.reclaimed, ['alpha'], 'only alpha (holds >=128MB); beta (50MB) is left alone');
     assert.deepEqual(done.map((d) => [d.name, d.freed]), [['alpha', true]]);
     assert.ok(b.alerts.some((a) => /Reclaimed/.test(a.title)), 'owner is told it was reclaimed');
+    assert.ok(b.alerts.some((a) => /waking it and putting it back to sleep/.test(a.body)), 'and the message says how (wake+resleep)');
     assert.ok(b.said.some(([n]) => n === 'alpha'), 'and it is said in its conversation');
     assert.ok(b.asked.includes('vm reclaim clv-alpha') === false, 'the host verb is behind the injected reclaim (unit level)');
 });
