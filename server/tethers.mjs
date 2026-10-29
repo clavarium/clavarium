@@ -28,7 +28,10 @@ export const PUMP_MS = 1000;
 const AGENT = 'conversation:';
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0;
+    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map();
+    /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
+       A call waiting for the owner is said in its conversation's thread when there is one. */
+    announce = null;
 
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
        `secrets`: the vault, read by name for a connector only (reveal). */
@@ -38,7 +41,34 @@ export class Tethers {
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
-        this.#keeper.onChange(() => { this.#changes++; });
+        this.#keeper.onChange(() => { this.#changes++; this.#tellNew(); });
+    }
+
+    /* A new call waiting for the owner is said in its conversation's thread -- the same block a
+       machine problem uses -- with Accept / Refuse; when it leaves the queue (decided here or from
+       Assets, or taken back by the agent) a trace carrying its id closes those buttons. Nothing is
+       said until the server wired `announce` (it holds the thread), and nothing to a conversation
+       whose chat is off keeps the line waiting for when it opens. */
+    #tellNew() {
+        if (!this.announce) return;
+        let now;
+        try { now = this.#keeper.approvals() ?? []; } catch { return; }
+        const live = new Set(now.map((r) => r.id));
+        for (const r of now) {
+            if (this.#seen.has(r.id)) continue;
+            const who = r.agent?.id ?? '';
+            if (!who.startsWith(AGENT)) continue;
+            const name = who.slice(AGENT.length);
+            this.#seen.set(r.id, { name, verb: r.verb ?? 'action' });
+            const what = [r.verb ?? 'action', r.detail].filter(Boolean).join(' ');
+            const text = [what, r.target?.title ? `(${r.target.title})` : '', r.why ? `-- ${r.why}` : ''].filter(Boolean).join(' ');
+            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`] }); } catch { /* its chat is off */ }
+        }
+        for (const [id, info] of [...this.#seen]) {
+            if (live.has(id)) continue;
+            this.#seen.delete(id);
+            try { this.announce(info.name, { kind: 'tether-done', text: `Request handled: ${info.verb}`, topic: 'Demande', brief: id }); } catch { /* its chat is off */ }
+        }
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.

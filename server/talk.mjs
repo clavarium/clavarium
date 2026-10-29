@@ -153,6 +153,11 @@ export const EVENT_LEVELS = Object.freeze({
     'docket-failed': 'needs-you',
     'docket-unhandled': 'needs-you',
     'docket-reminder': 'trace',
+    /* A Tether call its agent asks the owner to allow (tethers.mjs): offered in the thread with
+       Accept / Refuse, the same block a machine problem uses. Its closing line (decided here, from
+       Assets, or by the agent) is a trace that carries the call's id, so the buttons close with it. */
+    'tether-demande': 'needs-you',
+    'tether-done': 'trace',
 });
 const TONES = ['warn', 'bad'];
 /* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */
