@@ -65,7 +65,10 @@ function bench({ nmcli = true, hold = false, ...over } = {}) {
     const outcome = async () => {
         for (let i = 0; i < 150; i++) {
             const out = host(['wifi', 'status']).out;
-            if (/^last (?!joining)/m.test(out)) return out;
+            /* A written outcome only: "interrupted" is derived (a "joining" state seen
+               while nothing is busy), so it can flash by while the switch is still
+               finishing -- wait past it for joined/went-back/back-failed. */
+            if (/^last (?!joining|interrupted)/m.test(out)) return out;
             await new Promise((ok) => setTimeout(ok, 100));
         }
         throw new Error('the switch never ended');
@@ -326,7 +329,10 @@ esac`);
     const handed = async () => {
         for (let i = 0; i < 150; i++) {
             const out = b.host(['wifi', 'status']).out;
-            if (/^hand (?!installing|switching)/m.test(out)) return out;
+            /* A written outcome only: "interrupted" is derived (an in-progress state
+               seen while the unit is momentarily not busy), so it can flash by during
+               a handover that is still finishing -- wait past it for handed/went-back/failed. */
+            if (/^hand (?!installing|switching|interrupted)/m.test(out)) return out;
             await new Promise((ok) => setTimeout(ok, 100));
         }
         throw new Error('the handover never ended');
