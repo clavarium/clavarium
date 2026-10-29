@@ -7285,6 +7285,7 @@
     /* The file is shown in a WINDOW over the screen, wherever it was asked
        from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
+        if ($('viewer').classList.contains('viewer-full')) { $('viewer').classList.remove('viewer-full'); $('preview-full').setAttribute('aria-pressed', 'false'); try { if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* already out */ } }
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
         for (const url of mdUrls) URL.revokeObjectURL(url);
         mdUrls.clear();
@@ -7314,12 +7315,14 @@
         const can = what && (what.text !== undefined || (what.picture && pictures));
         button.hidden = !can;
         copyLabel = what?.picture ? 'Copy image' : 'Copy';
-        button.textContent = copyLabel;
+        /* An icon: its word is its name (hover, long press, reader); "Copied" shows a moment as a tick of colour. */
+        const word = (w) => { button.title = w; button.setAttribute('aria-label', w); if (w === 'Copied') button.dataset.done = 'true'; else delete button.dataset.done; };
+        word(copyLabel);
         button.onclick = !can ? null : () => {
             const done = (ok, why) => {
-                button.textContent = ok ? 'Copied' : copyLabel;
+                word(ok ? 'Copied' : copyLabel);
                 if (!ok && why) { $('preview-note').textContent = why; $('preview-note').hidden = false; }
-                if (ok) setTimeout(() => { if (button.textContent === 'Copied') button.textContent = copyLabel; }, 1800);
+                if (ok) setTimeout(() => { if (button.dataset.done) word(copyLabel); }, 1800);
             };
             if (what.text !== undefined) {
                 const fallback = () => { const at = select?.(); done(false, at ? 'The browser did not let this page copy: the text is selected, copy it yourself (Ctrl+C, or a long press).' : 'The browser did not let this page copy.'); };
@@ -7498,7 +7501,7 @@
         /* From the terminal, a way to the folder it sits in. */
         /* From the terminal or the chat, a way to the folder it sits in: the Assets tab, on it (Files, on a device). */
         $('preview-where').hidden = Boolean(from) || (!$('files').hidden && !$('files').classList.contains('embedded')) || noTerminal() || (!DEVICE && assetsShown);
-        $('preview-where').textContent = DEVICE ? 'Show in Files' : 'Show in Assets';
+        { const word = DEVICE ? 'Show in Files' : 'Show in Assets'; $('preview-where').title = word; $('preview-where').setAttribute('aria-label', word); }
         $('preview-where').onclick = async () => {
             closePreview();
             const folder = inner.split('/').slice(0, -1).join('/');
@@ -7518,6 +7521,9 @@
         $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
         /* A file of the shared folders: attached to a card from here (#180). */
         $('preview-attach').hidden = Boolean(from) || DEVICE;
+        /* Full screen: the file takes the whole screen (the real API where granted, else a cover); kept while it is open. */
+        const full = (on) => { $('viewer').classList.toggle('viewer-full', on); $('preview-full').setAttribute('aria-pressed', String(on)); const w2 = on ? 'Leave full screen' : 'Full screen'; $('preview-full').title = w2; $('preview-full').setAttribute('aria-label', w2); try { if (on) $('viewer').requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* the cover stands in */ } };
+        $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
         $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';

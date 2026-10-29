@@ -1888,3 +1888,13 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 #attach-pick .attach-item small { color: var(--dim); }
 #attach-pick .attach-said { margin: 0; font-weight: 600; }
 #attach-pick .attach-said.bad { color: var(--bad, #c0392b); }
+
+/* The file viewer's buttons are icons (#89): each says its name on hover, a long press, a reader;
+   Download stands out. Full screen: the file takes the whole screen. */
+#viewer .ico { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-width: 38px; height: 34px; padding: 0; }
+#viewer .ico svg { width: 18px; height: 18px; }
+#viewer .ico.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+#viewer #preview-copy[data-done="true"] { color: var(--ok); border-color: currentColor; }
+#viewer #preview-full[aria-pressed="true"] { border-color: var(--brass); }
+#viewer.viewer-full { padding: 0; }
+#viewer.viewer-full #viewer-card { width: 100%; max-width: none; border-radius: 0; border: 0; padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
