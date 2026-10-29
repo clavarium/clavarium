@@ -965,7 +965,9 @@
     /* Its machine calls its owner for what needs a hand -- it does not serve, its memory or disk is almost
        full -- not marked "Seen"; a program stopped for lack of memory (its files safe) is only said. */
     const healthNeeds = (c) => c.phase === 'ready' && !c.asleep && (c.health?.problems ?? []).some((p) => (p.level === 'bad' || (p.level === 'warn' && ['memory', 'disk'].includes(p.kind) && !String(p.key).startsWith('oom:'))) && !(c.health.seen ?? []).includes(p.key));
-    const needsYou = (c) => Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
+    /* Asleep, it is frozen and asks nothing until it wakes: it does not belong in "Needs you"
+       (waking it is what answers it). Health already excludes asleep; this covers the rest. */
+    const needsYou = (c) => !c.asleep && Boolean(talkNeeds(c) || c.answerer?.needs || c.phase === 'failed' || healthNeeds(c));
     /* ONE FLAT POINT per conversation, its colour the state -- the worst that applies: a machine problem (red),
        the agent waits for you (blue), the agent at work (gold, pulsing), the machine busy (amber, pulsing),
        fine (green), asleep (a hollow ring). The same point, same colours, sums a folded group below. */
@@ -1069,8 +1071,8 @@
         const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
         if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
         /* It talks through the app, and asks or waits for its owner there. */
-        if (talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
-        if (c.answerer?.on) { const mark = document.createElement('small'); mark.className = c.answerer.needs ? 'needs-mark' : 'shared-mark'; mark.textContent = c.answerer.needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
+        if (!c.asleep && talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
+        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; const mark = document.createElement('small'); mark.className = needs ? 'needs-mark' : 'shared-mark'; mark.textContent = needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
         /* Who else holds it is said in its Access, not in the list (where it said the same on every row). */
         b.addEventListener('click', () => select(c.name, { step: true }));
         return b;
