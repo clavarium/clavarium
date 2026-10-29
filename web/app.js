@@ -2562,6 +2562,8 @@
             },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
+            /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
+            ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
             act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
@@ -4834,18 +4836,76 @@
         if (!repo || !rest) return;
         void openGit(repo, kind === 'commit' ? { commit: rest } : { branch: rest });
     }
+    /* ATTACH TO A CARD (#180): from where a thing is (a file shown, a message of the chat), a card
+       picked among the binders this page may write in -- by its title, typed or scrolled -- and
+       the thing attached to it, as the agent attaches with `binder attach`. */
+    async function attachToCard({ kind, ref, title }) {
+        document.getElementById('attach-pick')?.remove();
+        const box = document.createElement('div'); box.id = 'attach-pick'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-modal', 'true'); box.setAttribute('aria-label', 'Attach to a card');
+        const card = document.createElement('div'); card.className = 'attach-card';
+        const head = document.createElement('div'); head.className = 'row';
+        const h = document.createElement('b'); h.textContent = 'Attach to a card';
+        const sp = document.createElement('span'); sp.className = 'sp';
+        const x = document.createElement('button'); x.type = 'button'; x.textContent = '\u00d7'; x.setAttribute('aria-label', 'Close');
+        head.append(h, sp, x);
+        const what = document.createElement('p'); what.className = 'dim attach-what'; what.textContent = title || ref;
+        const find = document.createElement('input'); find.type = 'search'; find.placeholder = 'Find a card'; find.setAttribute('aria-label', 'Find a card');
+        const list = document.createElement('div'); list.className = 'attach-list';
+        const said = document.createElement('p'); said.className = 'attach-said'; said.hidden = true;
+        card.append(head, what, find, list, said); box.append(card); document.body.append(box);
+        const close = () => { box.remove(); document.removeEventListener('keydown', esc, true); };
+        const esc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+        document.addEventListener('keydown', esc, true);
+        x.onclick = close; box.addEventListener('pointerdown', (e) => { if (e.target === box) close(); });
+        list.textContent = 'Loading...';
+        /* The cards of every binder this page may change, the conversation's own binder first. */
+        const lists = ((await binderCall('lists', {})).data ?? []).filter((l) => !l.archived && l.access === 'write');
+        const own = (l) => Object.keys(l.grants ?? {}).includes(`conversation:${current}`);
+        lists.sort((a, b) => Number(own(b)) - Number(own(a)));
+        const cards = [];
+        for (const l of lists.slice(0, 12)) { const r = await binderCall('show', { list: l.id }); for (const rec of r.data?.records ?? []) cards.push({ list: l, rec }); }
+        const draw = () => {
+            const q = find.value.trim().toLowerCase();
+            const shown = cards.filter(({ rec, list: l }) => !q || `#${rec.n} ${rec.title} ${l.title}`.toLowerCase().includes(q)).slice(0, 80);
+            list.replaceChildren(...(shown.length ? shown.map(({ rec, list: l }) => {
+                const b = document.createElement('button'); b.type = 'button'; b.className = 'attach-item';
+                const t = document.createElement('span'); t.textContent = `#${rec.n} ${rec.title}`;
+                const w = document.createElement('small'); w.textContent = l.title;
+                b.append(t, w);
+                b.onclick = async () => {
+                    for (const o of list.querySelectorAll('button')) o.disabled = true;
+                    const r = await binderCall('attach', { id: rec.id, kind, ref, ...(title ? { title } : {}) });
+                    said.hidden = false; said.textContent = r.ok ? `Attached to #${rec.n} ${rec.title}.` : (r.text || 'Not attached.');
+                    said.classList.toggle('bad', !r.ok);
+                    if (r.ok) setTimeout(close, 1400); else for (const o of list.querySelectorAll('button')) o.disabled = false;
+                };
+                return b;
+            }) : [Object.assign(document.createElement('p'), { className: 'dim', textContent: cards.length ? 'No card by that name.' : 'No binder you can write in.' })]));
+        };
+        find.addEventListener('input', draw);
+        draw();
+        find.focus();
+    }
+    /* Read again every screen of a binder when the binders changed. Taken as seen only once every
+       screen read it again: one that failed (the server restarting) is read again at the next turn. */
+    async function catchUpBinders() {
+        const now = await getJson('/binder/people', null);
+        if (!now) return;
+        binderPeople = now.people;
+        if (now.changes === binderChanges) return;
+        const read = await Promise.all([...binderViews].map((one) => Promise.resolve(one.view.refresh()).then((ok) => ok !== false, () => false)));
+        if (read.every(Boolean)) binderChanges = now.changes;
+    }
     function watchBinders() {
         if (binderTimer) return;
-        binderTimer = setInterval(async () => {
+        binderTimer = setInterval(() => {
             for (const one of binderViews) if (!one.box?.isConnected) { one.view.destroy(); binderViews.delete(one); }
             if (binderViews.size === 0) { clearInterval(binderTimer); binderTimer = null; return; }
-            if (document.hidden) return;
-            const now = await getJson('/binder/people', null);
-            if (!now) return;
-            binderPeople = now.people;
-            if (now.changes !== binderChanges) { binderChanges = now.changes; for (const one of binderViews) void one.view.refresh(); }
+            if (!document.hidden) void catchUpBinders();
         }, 4000);
     }
+    /* Back on the page (a tablet woken, a tab shown again): looked at at once, not 4 s later. */
+    document.addEventListener('visibilitychange', () => { if (!document.hidden && binderViews.size) void catchUpBinders(); });
     /* WHERE A BINDER IS, IN THIS PAGE'S BACK: a card (or a binder's settings) is one step over
        its list; Back, Escape and its "‹" close it, and the list is there again. Another binder
        picked takes no step. `viewOf()`: the screen shown now (it may be drawn again).
@@ -7225,6 +7285,7 @@
     /* The file is shown in a WINDOW over the screen, wherever it was asked
        from: closing it leaves the terminal, or the list, as it was. */
     function closePreview() {
+        if ($('viewer').classList.contains('viewer-full')) { $('viewer').classList.remove('viewer-full'); $('preview-full').setAttribute('aria-pressed', 'false'); try { if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* already out */ } }
         if (shownUrl) { URL.revokeObjectURL(shownUrl); shownUrl = null; }
         for (const url of mdUrls) URL.revokeObjectURL(url);
         mdUrls.clear();
@@ -7254,12 +7315,14 @@
         const can = what && (what.text !== undefined || (what.picture && pictures));
         button.hidden = !can;
         copyLabel = what?.picture ? 'Copy image' : 'Copy';
-        button.textContent = copyLabel;
+        /* An icon: its word is its name (hover, long press, reader); "Copied" shows a moment as a tick of colour. */
+        const word = (w) => { button.title = w; button.setAttribute('aria-label', w); if (w === 'Copied') button.dataset.done = 'true'; else delete button.dataset.done; };
+        word(copyLabel);
         button.onclick = !can ? null : () => {
             const done = (ok, why) => {
-                button.textContent = ok ? 'Copied' : copyLabel;
+                word(ok ? 'Copied' : copyLabel);
                 if (!ok && why) { $('preview-note').textContent = why; $('preview-note').hidden = false; }
-                if (ok) setTimeout(() => { if (button.textContent === 'Copied') button.textContent = copyLabel; }, 1800);
+                if (ok) setTimeout(() => { if (button.dataset.done) word(copyLabel); }, 1800);
             };
             if (what.text !== undefined) {
                 const fallback = () => { const at = select?.(); done(false, at ? 'The browser did not let this page copy: the text is selected, copy it yourself (Ctrl+C, or a long press).' : 'The browser did not let this page copy.'); };
@@ -7438,7 +7501,7 @@
         /* From the terminal, a way to the folder it sits in. */
         /* From the terminal or the chat, a way to the folder it sits in: the Assets tab, on it (Files, on a device). */
         $('preview-where').hidden = Boolean(from) || (!$('files').hidden && !$('files').classList.contains('embedded')) || noTerminal() || (!DEVICE && assetsShown);
-        $('preview-where').textContent = DEVICE ? 'Show in Files' : 'Show in Assets';
+        { const word = DEVICE ? 'Show in Files' : 'Show in Assets'; $('preview-where').title = word; $('preview-where').setAttribute('aria-label', word); }
         $('preview-where').onclick = async () => {
             closePreview();
             const folder = inner.split('/').slice(0, -1).join('/');
@@ -7456,6 +7519,12 @@
         /* Text in a folder this conversation may write in: editable here. */
         $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
         $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
+        /* A file of the shared folders: attached to a card from here (#180). */
+        $('preview-attach').hidden = Boolean(from) || DEVICE;
+        /* Full screen: the file takes the whole screen (the real API where granted, else a cover); kept while it is open. */
+        const full = (on) => { $('viewer').classList.toggle('viewer-full', on); $('preview-full').setAttribute('aria-pressed', String(on)); const w2 = on ? 'Leave full screen' : 'Full screen'; $('preview-full').title = w2; $('preview-full').setAttribute('aria-label', w2); try { if (on) $('viewer').requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* the cover stands in */ } };
+        $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
+        $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };

@@ -152,6 +152,9 @@ function readBody(request, max = BODY_MAX) {
 }
 
 /* Returns true when the request was an API request (answered here). */
+/* This run of the server: a page's count of binder changes is of one run, and starts again with the next. */
+const BOOT = Math.random().toString(36).slice(2, 10);
+
 export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
@@ -300,7 +303,7 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/wifi/scan' && wifi) return send(200, await wifi.scan()), true;
             if (pathname === '/api/meshcentral' && meshcentral) return send(200, await meshcentral.status()), true;
             if (pathname === '/api/operators') return send(200, team ? { operators: team.list(), me: identity } : { local: true }), true;
-            if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: binders.changes() }), true;
+            if (pathname === '/api/binder/people' && binders) return send(200, { people: binders.people(identity), changes: `${BOOT}:${binders.changes()}` }), true;
             if (pathname === '/api/certificate' && certificate) return send(200, await certificate.about({ fresh: query.get('fresh') === '1' })), true;
             /* This server's disk and memory (capacity.mjs): everything for Settings; only whether it is high for the list. */
             if (pathname === '/api/server' && capacity) return send(200, await capacity.about()), true;
