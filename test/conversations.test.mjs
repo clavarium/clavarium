@@ -791,6 +791,23 @@ test('a free name: the identifier drawn from it at creation and fixed; the name 
     assert.throws(() => all.setHidden('demo', 'yes'), /true/);
 });
 
+test('the binder beside its chat: automatic by default, one chosen by id, or none; kept on the conversation for every device (#48)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'demo', tool: 'bold' });
+    await all.built;
+    assert.equal(all.list()[0].tasksBinder, undefined, 'nothing chosen: the automatic choice');
+    all.setTasksBinder('demo', 'lots-2');
+    assert.equal(all.list()[0].tasksBinder, 'lots-2', 'a binder, by its id, seen in the list every page reads');
+    all.setTasksBinder('demo', '-');
+    assert.equal(all.get('demo').tasksBinder, '-', 'none');
+    all.setTasksBinder('demo', '');
+    assert.equal(all.get('demo').tasksBinder, undefined, 'back to automatic');
+    assert.throws(() => all.setTasksBinder('demo', 'Lots 2'), /binder's id/);
+    assert.throws(() => all.setTasksBinder('demo', 7), /binder's id/);
+    assert.throws(() => all.setTasksBinder('nobody', ''), /No such conversation/);
+});
+
 test('its name in the chat, and whether what is dictated into its terminal is marked: the neutral word and the mark by default, never a mark for a tool that is no AI', async (t) => {
     const b = bench(t);
     const all = b.make();

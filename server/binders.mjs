@@ -45,7 +45,7 @@ export class Binders {
        the owner's devices (optional), told of a card a person owns that came due. */
     constructor({ dataDir, resources, conversations, dockets = null, team = null, alert = null, now = () => Date.now() }) {
         this.#resources = resources; this.#conversations = conversations; this.#dockets = dockets; this.#team = team; this.#alert = alert;
-        this.#keeper = keeper(`${dataDir}/binder`, { sides: () => this.#sides(), now });
+        this.#keeper = keeper(`${dataDir}/binder`, { sides: () => this.#sides(), now, people: () => this.people() });
         this.#keeper.store.onChange((line) => { this.#changes++; this.#heard(line); });
     }
 

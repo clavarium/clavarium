@@ -608,6 +608,18 @@ export class Conversations {
         return this.#store.get(name);
     }
 
+    /* WHICH BINDER ITS CHAT SHOWS BESIDE IT (the side panel), the same on every device:
+       '' for the automatic choice (the first binder of batches it was given), '-' for none,
+       else a binder's id. Which binders it was given is Binder's: one it no longer has
+       falls back to the automatic choice on the page. */
+    setTasksBinder(name, given) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (typeof given !== 'string' || given.length > 100 || !/^(|-|[a-z0-9][a-z0-9._-]*)$/.test(given)) throw new Refusal(400, 'Give a binder\'s id, "-" for none, or nothing for the automatic choice.');
+        this.#store.patch(name, { tasksBinder: given || undefined });
+        return this.#store.get(name);
+    }
+
     /* THE NAME A PERSON READS, changed at any time; its identifier stays.
        Kept only when it differs from the identifier: a conversation made
        before free names is read by its identifier, and nothing is rewritten. */

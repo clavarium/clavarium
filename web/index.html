@@ -152,6 +152,7 @@
             <div class="set-row"><div class="set-what"><b>Chat</b><small id="talk-about">A chat screen instead of its terminal. What the tool posts there is read by this server</small></div><div class="set-control"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div></div>
             <p class="hint" id="talk-declare" hidden></p>
             <form id="chat-name-form" class="set-row" autocomplete="off"><div class="set-what"><label for="chat-name">Its name in the chat</label><small id="chat-name-hint">Empty: "Assistant"</small></div><div class="set-control"><input id="chat-name" maxlength="40" placeholder="Assistant" spellcheck="false"><button type="submit">Save</button></div></form>
+            <div class="set-row" id="tasks-binder-row" hidden><div class="set-what"><label for="tasks-binder">Binder beside the chat</label><small>Automatic: its first binder of batches</small></div><div class="set-control"><select id="tasks-binder"></select></div></div>
             </div>
             <!-- DICTATION INTO ITS TERMINAL: marked once per message, so that the tool knows it may hold recognition mistakes. -->
             <div id="voice-mark-box" hidden>
@@ -676,6 +677,20 @@
           <div class="chapter-body">
         <form id="instance-form" class="set-row" autocomplete="off"><div class="set-what"><label for="instance-name">Name</label><small id="instance-hint">In tabs, alerts and the app icon. Empty: from the address</small></div><div class="set-control"><input id="instance-name" maxlength="30" spellcheck="false"><button type="submit">Save</button></div></form>
         <p class="error" id="instance-error" role="alert" hidden></p>
+          </div>
+        </details>
+        <!-- BINDERS (clavarium-binder's own settings, asked of it): what agents may do with binders. -->
+        <details class="chapter" id="settings-ch-binders" data-chapter="s-binders">
+          <summary><span class="chapter-title">Binders</span><span class="chapter-about">What agents may do with them.</span></summary>
+          <div class="chapter-body">
+        <div class="set-rows">
+          <div class="set-row"><div class="set-what"><label for="binders-agent-lists">Binders an agent may make</label><small>Not archived. 0: none</small></div><div class="set-control"><input id="binders-agent-lists" type="number" min="0" max="50" step="1" inputmode="numeric"></div></div>
+          <div class="set-row"><div class="set-what"><b>Agents add or rename columns</b><small>Never remove one, never move the gate</small></div><div class="set-control"><div class="levels" id="binders-agent-columns" role="group" aria-label="Agents add or rename columns"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
+          <div class="set-row"><div class="set-what"><b>Agents add fields or change the type</b><small>Never remove a field</small></div><div class="set-control"><div class="levels" id="binders-agent-fields" role="group" aria-label="Agents add fields or change the type"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
+        </div>
+        <p class="hint">The binder beside a chat is chosen in each conversation's settings (Chat).</p>
+        <p class="hint" id="binders-saved" role="status"></p>
+        <p class="error" id="binders-error" role="alert" hidden></p>
           </div>
         </details>
         <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
