@@ -2953,6 +2953,29 @@
             return [label, select];
         }));
     }
+    /* BINDERS (#49): Binder's own settings -- how many binders an agent may make, whether
+       agents may add columns, fields or change a binder's type -- read and set through it. */
+    async function paintBinderSettings() {
+        if (DEVICE) return;
+        const got = await binderCall('settings', {});
+        if (!got.ok) return;
+        const s = got.data;
+        if (document.activeElement !== $('binders-agent-lists')) $('binders-agent-lists').value = String(s.agentLists ?? '');
+        for (const [id, on] of [['binders-agent-columns', s.agentColumns === true], ['binders-agent-fields', s.agentFields === true]]) {
+            for (const b of $(id).children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === on));
+        }
+    }
+    async function saveBinderSetting(change) {
+        $('binders-error').hidden = true;
+        const done = await binderCall('edit-settings', change);
+        if (done.ok) { $('binders-saved').textContent = 'Saved.'; setTimeout(() => { $('binders-saved').textContent = ''; }, 2500); }
+        else { $('binders-error').textContent = done.text; $('binders-error').hidden = false; }
+        await paintBinderSettings();
+    }
+    $('binders-agent-lists').addEventListener('change', () => void saveBinderSetting({ agentLists: $('binders-agent-lists').value }));
+    for (const [id, key] of [['binders-agent-columns', 'agentColumns'], ['binders-agent-fields', 'agentFields']]) {
+        for (const b of $(id).children) b.addEventListener('click', () => void saveBinderSetting({ [key]: b.dataset.on === 'true' }));
+    }
     async function saveThreadLevel(kind, level) {
         $('thread-error').hidden = true;
         try {
@@ -4966,6 +4989,7 @@
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
         void paintThreadLevels().catch(() => {});
+        void paintBinderSettings().catch(() => {});
         void paintChatWindow().catch(() => {});
         const [platform, saved] = await Promise.all([fetch(`${API}/platform`).then((r) => r.json()).catch(() => ({})), fetch(`${API}/shortcuts`).then((r) => r.json()).catch(() => [])]);
         const list = $('settings-shortcuts'); list.replaceChildren();

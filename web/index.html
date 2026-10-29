@@ -679,6 +679,20 @@
         <p class="error" id="instance-error" role="alert" hidden></p>
           </div>
         </details>
+        <!-- BINDERS (clavarium-binder's own settings, asked of it): what agents may do with binders. -->
+        <details class="chapter" id="settings-ch-binders" data-chapter="s-binders">
+          <summary><span class="chapter-title">Binders</span><span class="chapter-about">What agents may do with them.</span></summary>
+          <div class="chapter-body">
+        <div class="set-rows">
+          <div class="set-row"><div class="set-what"><label for="binders-agent-lists">Binders an agent may make</label><small>Not archived. 0: none</small></div><div class="set-control"><input id="binders-agent-lists" type="number" min="0" max="50" step="1" inputmode="numeric"></div></div>
+          <div class="set-row"><div class="set-what"><b>Agents add or rename columns</b><small>Never remove one, never move the gate</small></div><div class="set-control"><div class="levels" id="binders-agent-columns" role="group" aria-label="Agents add or rename columns"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
+          <div class="set-row"><div class="set-what"><b>Agents add fields or change the type</b><small>Never remove a field</small></div><div class="set-control"><div class="levels" id="binders-agent-fields" role="group" aria-label="Agents add fields or change the type"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
+        </div>
+        <p class="hint">The binder beside a chat is chosen in each conversation's settings (Chat).</p>
+        <p class="hint" id="binders-saved" role="status"></p>
+        <p class="error" id="binders-error" role="alert" hidden></p>
+          </div>
+        </details>
         <!-- WHO MAY SIGN IN (server/operators.mjs): hidden on this machine alone. -->
         <details class="chapter" id="settings-ch-operators" data-chapter="s-operators" hidden>
           <summary><span class="chapter-title">Administrators</span><span class="chapter-about">Who may sign in.</span></summary>
