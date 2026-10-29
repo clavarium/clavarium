@@ -470,6 +470,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         alert: (payload) => { void alerts.tell(payload); } });
     /* Its machine restarted or built again: said in its chat, and the tool told to read it again. */
     all.renewed = (name, text, running) => talk.renewed(name, text, running);
+    /* A Tether call waiting for the owner is said in its conversation's thread, with Accept / Refuse. */
+    tethers.announce = (name, event) => { try { return talk.event(name, event); } catch { return null; } };
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
     /* AFTER AN UPDATE, the machines that run get the new tools at once (parley, docket: they serve from
