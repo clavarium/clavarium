@@ -4480,6 +4480,23 @@
                 };
                 draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
             }
+            /* A mailbox: its signature, in Markdown, added under what the agent sends. */
+            if (t.kind === 'mail') {
+                const box = el('div', 'as-signature');
+                const lab = el('label', '', 'Signature'); lab.htmlFor = `sig-${t.id}`;
+                const ta = document.createElement('textarea'); ta.id = `sig-${t.id}`; ta.rows = 3; ta.value = t.config?.signature ?? ''; ta.placeholder = 'Added under every mail the agent sends from this mailbox (Markdown: **bold**, links…)';
+                const save = el('button', '', 'Save'); save.type = 'button';
+                const said = el('small', 'hint', '');
+                save.addEventListener('click', async () => {
+                    save.disabled = true;
+                    try { await post(`${API}/tether/signature`, { target: t.id, signature: ta.value }); said.textContent = ta.value.trim() ? 'Saved.' : 'Removed.'; t.config = { ...(t.config ?? {}), signature: ta.value.trim() }; }
+                    catch (e) { said.textContent = e.message; }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(lab, ta, row);
+                detail.append(box);
+            }
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
                 a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
