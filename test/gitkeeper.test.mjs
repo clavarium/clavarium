@@ -55,14 +55,14 @@ async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = a
     review.setRemote('site', { url: remote });
     git(work, 'fetch', '--quiet', remote, '+refs/heads/*:refs/remotes/origin/*');
     git(work, 'reset', '--quiet', '--hard', 'origin/main');
-    const ran = []; const told = []; const agent = []; const agentTo = []; const lines = []; const fetched = [];
+    const ran = []; const told = []; const agent = []; const agentTo = []; const agentFull = []; const lines = []; const fetched = [];
     const fakeChecks = {
         machineFor: (name) => machineFor(name, resources),
         runs: runs ? (c, name) => runs(c, name, resources) : async (c, name) => (await machineFor(name, resources)) === c && resources.of(c).some((x) => x.name === name && x.access === 'write'),
         fetchIn: async (c, name) => { fetched.push(`${c} ${name}`); return { ok: true, moved: moved() }; },
         run: async (name, asked) => { ran.push(asked); if (gate) await gate(); return { status: typeof checks === 'function' ? checks() : checks, output: typeof output === 'function' ? output() : output, head: asked.head, branch: asked.branch, target: asked.target, machine: asked.machine ?? 'alpha', at: clock.toISOString() }; },
     };
-    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to) => { agent.push(line); agentTo.push([line, to]); return heard ? heard() : undefined; }, thread: (conversation, event) => lines.push([conversation, event]) });
+    const keeper = new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async (m) => { told.push(m); return 1; } }, now, tellAgent: async (name, line, to, full) => { agent.push(line); agentTo.push([line, to]); if (full) agentFull.push(full); return heard ? heard() : undefined; }, thread: (conversation, event) => lines.push([conversation, event]) });
     const commit = (file, text, subject) => { writeFileSync(join(work, file), text); git(work, 'add', file); git(work, 'commit', '--quiet', '-m', subject); return git(work, 'rev-parse', 'HEAD'); };
     /* Time passes; marks written by git have a resolution that a fast test can beat: the clock moves on. */
     const later = (minutes) => { clock = new Date(clock.getTime() + minutes * 60_000); };
@@ -72,7 +72,7 @@ async function bench(t, { output = 'stand-in', checks = 'passed', machineFor = a
        branch: confirmed) and make branches unless they say otherwise. */
     const auto = (body, conversation = 'alpha') => keeper.setAuto('site', conversation, { sure: true, create: true, ...body });
     const again = () => new GitKeeper({ store: new Store(join(dir, 'git-keep.json')), last: new Store(join(dir, 'git-checks.json')), review, resources, checks: fakeChecks, alerts: { tell: async () => 1 }, now });
-    return { again, dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, reads, theirs, log, runner, auto, lines, fetched };
+    return { again, dir, remote, seed, work, vm, host, resources, review, keeper, commit, later, ran, told, agent, agentTo, agentFull, reads, theirs, log, runner, auto, lines, fetched };
 }
 /* Ticks until a read has happened and its tips were weighed: the read waits READ_DELAY_MS after the last change. */
 async function settle(b) { await b.keeper.tick(); b.later(READ_DELAY_MS / 60_000); await b.keeper.tick(); }
@@ -852,4 +852,26 @@ test('a slow send waits a moment, says it is still sending, then gives the resul
     const done = await b.keeper.send('site', { head, target: 'main', join: true });
     assert.equal(done.branch, 'main');
     assert.equal(done.ok, true);
+});
+
+test('Send from the page, refused by a hook of the remote: the agent is told what the hook said', async (t) => {
+    const b = await bench(t, { checks: () => 'passed' });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "Commit messages must name a ticket." >&2\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const head = b.commit('a.txt', 'a\n', 'one');
+    await b.review.outgoing('site');
+    await assert.rejects(b.keeper.send('site', { head, target: 'main' }), (e) => e.kind === 'refused' && /it said: "Commit messages must name a ticket\."/.test(e.message));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(b.agent.some((l) => /remote refused the sending to main: .*pre-receive hook declined.*it said: "Commit messages must name a ticket\."/.test(l)), b.agent.join('\n'));
+});
+
+test('Send from the page, refused by a talkative hook: the agent is given all it said, besides the line', async (t) => {
+    const b = await bench(t, { checks: () => 'passed' });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\nfor i in $(seq 1 60); do echo "check $i ok" >&2; done\necho "denied: tests missing" >&2\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const head = b.commit('a.txt', 'a\n', 'one');
+    await b.review.outgoing('site');
+    await assert.rejects(b.keeper.send('site', { head, target: 'main' }), (e) => e.kind === 'refused');
+    await new Promise((r) => setTimeout(r, 20));
+    assert.match(b.agentFull.at(-1) ?? '', /^check 1 ok\n[\s\S]*denied: tests missing$/);
 });

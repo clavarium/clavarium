@@ -338,6 +338,24 @@
        keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */
     let listFolded = true;
     try { listFolded = localStorage.getItem('clavarium-list') !== 'open'; } catch { /* a private window */ }
+    /* PINNED OPEN (the pin at the top of the list): it stays open, even when a conversation is opened.
+       Folding it by hand takes the pin out. Kept on this device. */
+    let listPinned = false;
+    try { listPinned = localStorage.getItem('clavarium-list-pin') === 'on'; } catch { /* a private window */ }
+    if (listPinned) listFolded = false;
+    const paintPin = () => {
+        $('list-pin').setAttribute('aria-pressed', String(listPinned));
+        const label = listPinned ? 'The list stays open: click to let it fold when a conversation is opened' : 'Keep the list open: it no longer folds when a conversation is opened';
+        $('list-pin').title = label; $('list-pin').setAttribute('aria-label', listPinned ? 'Unpin the list' : 'Keep the list open');
+    };
+    const pin = (on) => {
+        listPinned = on;
+        try { localStorage.setItem('clavarium-list-pin', on ? 'on' : 'off'); } catch { /* as above */ }
+        paintPin();
+    };
+    paintPin();
+    if (DEVICE) $('list-pin').hidden = true;
+    $('list-pin').addEventListener('click', () => { pin(!listPinned); if (listPinned && listFolded) $('fold').click(); });
     /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
        redrew the terminal) at every frame: it stuttered. The columns change once, the room taking the whole
        width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost
@@ -346,6 +364,7 @@
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
     $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
+        if (listFolded && listPinned) pin(false);
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
         if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
@@ -916,6 +935,8 @@
     function select(name, { step = false } = {}) {
         if (name !== current) { disconnect(); terminal.reset(); }
         current = name;
+        /* The strip over the terminal is the one of the conversation now open, at once -- never the last one's until the next look. */
+        paintHealth();
         /* What was open over the one before -- its tab, an asset, a review,
            what was over it, a place of the menu (Access, Settings) -- gives way. */
         const room = nav.last(['room']);
@@ -932,7 +953,7 @@
         /* Opening a conversation gets the list out of the way, so its room has the room;
            the "»" button brings the list back. Only on a real pick by the owner, never on a
            device or when deselecting. */
-        if (step && name && !DEVICE && !listFolded) {
+        if (step && name && !DEVICE && !listFolded && !listPinned) {
             listFolded = true;
             try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
             applyFold(true); fit.fit?.();
@@ -2756,10 +2777,13 @@
         const seenWords = seenAt ? `\u2713 Seen ${new Date(seenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
         /* Restart, offered by a line, is offered no more once its machine was restarted after it. */
         const restartedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'restarted').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        /* A problem of its machine that went away since (machine-ok): nothing left to see or to do on its line. */
+        const fixedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'machine-ok').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        const FIXED_GOES = new Set(['seen', 'room', 'disk', 'memory']);
         /* A Tether demande decided (here, from Assets, or by the agent) is marked done in the thread,
            carrying its id: Accept / Refuse are then offered no more on the line that asked. */
         const settled = new Set(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => String(m.brief)));
-        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
     }
@@ -2967,6 +2991,7 @@
         ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
         ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
+        ['machine-ok', 'Machine well again', 'What was wrong with it went away'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
         ['tools-updated', 'New tools', 'After an update: a restart gives its tool all of them'],
     ];

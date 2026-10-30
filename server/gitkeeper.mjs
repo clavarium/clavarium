@@ -396,10 +396,11 @@ export class GitKeeper {
     #attached(name) { try { return Object.entries(this.#resources.list().find((x) => x.name === name)?.attachments ?? {}).filter(([, access]) => access && access !== 'none').map(([c]) => c).sort(); } catch { return []; } }
     /* Marked as told only once somebody was: a line typed to no machine
        (all asleep, a terminal that failed) is said again the next time. */
-    #toAgent(name, line, conversation) {
+    /* `full`: a longer text the line stands for (all a remote said), that the agent can be given to read. */
+    #toAgent(name, line, conversation, full) {
         if (this.#record(name).toldAgent === line || this.#telling.get(name) === line) return;
         this.#telling.set(name, line);
-        void Promise.resolve(this.#tellAgent(name, `Clavarium, repository ${name}: ${line}.`, conversation))
+        void Promise.resolve(this.#tellAgent(name, `Clavarium, repository ${name}: ${line}.`, conversation, full))
             .then((heard) => { if (heard !== false) this.#patch(name, { toldAgent: line }); }, () => {})
             .finally(() => { if (this.#telling.get(name) === line) this.#telling.delete(name); });
     }
@@ -608,6 +609,8 @@ export class GitKeeper {
         if (['look', 'confirm', 'busy'].includes(error.kind)) return;
         this.#log(name, { ok: false, branch: branch ?? null, head: head ?? null, what: error.message });
         if (error.alert) this.#tell(`${name}: sending needs a look`, error.message);
+        /* Refused by the remote, sent by hand: what it said is the agent's to act on too. */
+        if (error.kind === 'refused' && error.ai) this.#toAgent(name, error.ai, undefined, error.full);
         if (error.kind === 'unknown-unreachable' && branch) this.#patch(name, { blocked: { ...(this.#record(name).blocked ?? {}), [branch]: { head, at: this.#now().toISOString() } } });
     }
 
@@ -638,10 +641,10 @@ export class GitKeeper {
         const said = held.said.get(b) ?? new Map();
         if (said.get(conversation) === key) return;
         said.set(conversation, key); held.said.set(b, said);
-        const { tell, ai, ...rest } = entry;
+        const { tell, ai, full, ...rest } = entry;
         this.#log(name, { branch: b, head: tip.id, ok: false, ...(conversation ? { conversation } : {}), ...rest });
         if (tell && this.settings(name).alert) this.#tell(`${name}: not sent`, entry.what);
-        if (ai) this.#toAgent(name, ai, conversation || undefined);
+        if (ai) this.#toAgent(name, ai, conversation || undefined, full);
         /* A sending that the owner asked for, refused: said in that
            conversation's chat with what to do. Not a branch outside every
            list -- nothing was asked for it -- nor what is the repository's
@@ -732,7 +735,7 @@ export class GitKeeper {
                routine notices says -- once, and once only. */
             const grave = error instanceof GitFailure && error.alert;
             if (grave && held.said.get(b)?.get(conversation) !== `${tip.id}:${why}`) this.#tell(`${name}: sending needs a look`, error.message);
-            once(why, { what: error instanceof Refusal ? error.message : 'Not sent: the sending failed.', tell: !grave, ...(error.ai ? { ai: error.ai.replace(/origin\/(\S+)/g, (m, x) => `origin/${plain(x)}`) } : {}) });
+            once(why, { what: error instanceof Refusal ? error.message : 'Not sent: the sending failed.', tell: !grave, ...(error.ai ? { ai: error.ai.replace(/origin\/(\S+)/g, (m, x) => `origin/${plain(x)}`) } : {}), ...(error.full ? { full: error.full } : {}) });
             return false;
         }
     }

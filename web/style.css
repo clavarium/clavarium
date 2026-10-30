@@ -1372,6 +1372,11 @@ select.pill { appearance: auto; }
 .icon-btn { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; padding: 0; background: transparent; border-color: transparent; color: var(--ink2); }
 .icon-btn:hover, .icon-btn[aria-expanded="true"] { color: inherit; border-color: var(--line); }
 .icon-btn .ic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+/* The pin that keeps the list open: in brass, filled, while it holds; tilted and quiet when it does not. Wide screens only (the fold is theirs). */
+#list-pin .ic { stroke-linejoin: round; transform: rotate(35deg); transition: transform .15s; }
+#list-pin[aria-pressed="true"] { color: var(--brass-ink); }
+#list-pin[aria-pressed="true"] .ic { transform: none; fill: currentColor; fill-opacity: .25; }
+@media (max-width: 700px) { #list-pin { display: none; } }
 #search[hidden] { display: none; }
 #search-field { width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: .9rem; border-radius: 8px; }
 #search-none { margin: 0 .25rem; }

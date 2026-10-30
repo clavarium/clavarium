@@ -4,7 +4,7 @@
    itself, its verbs and its cleaning are tested where they live, in Parley. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -258,8 +258,12 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk', 'seen']);
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
+    /* Gone, it is said once: the lines that asked are answered (the page offers their "Seen" no more). */
+    const ok = b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1);
+    assert.deepEqual([ok.event, ok.text, ok.level, ok.actions], ['machine-ok', 'Its memory is no longer short. What was wrong with its machine is gone. Its disk has room again.', 'news', []]);
+    b.talk.machine('helper', { state: 'Running', level: 'info', problems: [] });
     b.talk.machine('helper', memory);
-    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 4);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 5, 'said once when gone; then short again: said again');
     assert.deepEqual(b.typed.filter((x) => x !== WAKE && x !== 'Enter'), [], 'nothing of it is typed to the tool');
 });
 
@@ -464,7 +468,7 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
     assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
     const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
-    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace', 'tether-demande': 'needs-you', 'tether-done': 'trace' });
+    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', 'machine-ok': 'news', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace', 'tether-demande': 'needs-you', 'tether-done': 'trace' });
     assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
     assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
     /* Bounds: topic, brief, text; a tone only of the two. */
@@ -577,4 +581,29 @@ test('the thread is kept in this server\'s data, out of its machine: a line the 
     assert.deepEqual(b.talk.of('helper').messages.map((m) => m.text).at(-1), 'Done.');
     b.talk.forget('helper');
     assert.equal(existsSync(kept), false, 'gone with the conversation');
+});
+
+test('a text this server gives the tool to read: in the bridge folder, a folder of its own; never through a link; nothing when the chat is off', async (t) => {
+    const b = bench(t);
+    assert.equal(b.talk.keepText('helper', 'git-remote-refused.txt', 'all of it'), null, 'chat off');
+    await b.talk.set('helper', true);
+    const path = b.talk.keepText('helper', 'git remote/../refused.txt', 'line 1\nline 2');
+    assert.match(path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/git-remote-..-refused\.txt$/);
+    assert.equal(readFileSync(join(b.dir, 'work', 'helper', path.slice(6)), 'utf8'), 'line 1\nline 2');
+    /* Kept a week, ten at most: the older ones go when another is given. */
+    const files = join(b.bridge, 'files');
+    const given = Array.from({ length: 12 }, (_, i) => b.talk.keepText('helper', 'git-remote-refused.txt', `n${i}`));
+    const left = () => readdirSync(files).filter((d) => existsSync(join(files, d, 'git-remote-refused.txt')));
+    assert.equal(left().length, 10);
+    for (const d of left().slice(3)) rmSync(join(files, d), { recursive: true });
+    const old = left()[0];
+    utimesSync(join(files, old, 'git-remote-refused.txt'), new Date(Date.now() - 8 * 86_400_000), new Date(Date.now() - 8 * 86_400_000));
+    b.talk.keepText('helper', 'git-remote-refused.txt', 'newest');
+    assert.ok(!existsSync(join(files, old)), 'a week old: gone');
+    assert.ok(existsSync(join(b.dir, 'work', 'helper', path.slice(6))), 'another name is left alone');
+    const outside = join(b.dir, 'outside-text'); mkdirSync(outside);
+    rmSync(join(b.bridge, 'files'), { recursive: true, force: true });
+    symlinkSync(outside, join(b.bridge, 'files'));
+    assert.equal(b.talk.keepText('helper', 'x.txt', 'x'), null);
+    assert.deepEqual(readdirSync(outside), []);
 });

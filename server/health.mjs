@@ -113,7 +113,11 @@ export function judge(record) {
         if (!kinds && record.oomKills > 0) add('info', 'memory', 'oom', `${record.oomKills} program${record.oomKills === 1 ? ' was' : 's were'} stopped for lack of memory since it started (whether the machine or a limit of their own, it could not be told). Its files are safe.`);
         if (record.memory && record.memory.totalMb > 0 && record.memory.availableMb < Math.max(MEMORY_LOW_MB, record.memory.totalMb * 0.05)) add('warn', 'memory', 'memory-low', `Its memory is almost full: ${record.memory.availableMb} MB free of ${record.memory.totalMb} MB.`);
         for (const [path, d] of Object.entries(record.disks ?? {})) {
-            if (d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1)) add('warn', 'disk', `disk:${path}`, `${path === '/' ? 'Its disk' : `Its work folder (${path})`} is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            if (!(d.sizeMb > 0 && d.availableMb < Math.max(DISK_LOW_MB, d.sizeMb * 0.1))) continue;
+            /* A work folder kept here is on THIS SERVER's disk: short of room, every conversation that keeps
+               one would say it at once. Noted quietly; the server's own gauge says it, once. */
+            if (path === '/') add('warn', 'disk', 'disk:/', `Its disk is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
+            else add('info', 'server-disk', `disk:${path}`, `Its work folder (${path}) is kept on this server, whose disk is almost full: ${d.availableMb} MB left of ${d.sizeMb} MB.`);
         }
         for (const path of record.remounted ?? []) add('info', 'mount', `remounted:${path}`, `${path} had come loose in the machine: it was mounted again.`);
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);

@@ -60,7 +60,7 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, lstatSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
@@ -70,6 +70,9 @@ import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
 const IN_MACHINE = `/work/${FOLDER}`;
+/* Texts this server gives the tool to read (keepText): kept this many days, this many at most of one name. */
+export const KEPT_TEXT_DAYS = 7;
+export const KEPT_TEXTS = 10;
 /* A part of the thread as the page asks for it (?last=200, ?days=3, ?before=ID, ?from=ID, ?since=CURSOR): Parley's options, or null. */
 export function partOf(query) {
     if (!query || typeof query !== 'object') return null;
@@ -144,6 +147,7 @@ export const EVENT_LEVELS = Object.freeze({
     origin: 'trace',
     wakeup: 'trace',
     'machine-problem': 'needs-you',
+    'machine-ok': 'news',
     restarted: 'news',
     /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
     'tools-updated': 'news',
@@ -494,6 +498,32 @@ export class Talk {
         return { path: `${IN_MACHINE}/${FILES}/${id}/${kept.name}`, name: kept.name, size: kept.size };
     }
 
+    /* A TEXT THIS SERVER GIVES THE TOOL TO READ (all a git remote said when it refused a sending): put
+       where the person's files go, in a folder of its own. Resolves with where the tool finds it, or
+       null when the chat is off or its folder is not as it should be. */
+    keepText(name, fileName, text) {
+        if (!this.of(name).on) return null;
+        const own = (path) => { const i = lstatSync(path, { throwIfNoEntry: false }); return i === undefined || (i.isDirectory() && !i.isSymbolicLink()); };
+        const dir = this.#dir(name);
+        if (!lstatSync(dir, { throwIfNoEntry: false }) || !own(dir) || !own(join(dir, FILES))) return null;
+        if (!lstatSync(join(dir, FILES), { throwIfNoEntry: false })) mkdirSync(join(dir, FILES));
+        if (!own(join(dir, FILES))) return null;
+        const id = randomUUID();
+        const file = String(fileName).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80) || 'text.txt';
+        /* Those of the same name given before go after KEPT_TEXT_DAYS, and beyond the newest KEPT_TEXTS. */
+        const before = [];
+        for (const d of readdirSync(join(dir, FILES), { withFileTypes: true })) {
+            if (!d.isDirectory()) continue;
+            const f = lstatSync(join(dir, FILES, d.name, file), { throwIfNoEntry: false });
+            if (f?.isFile() && readdirSync(join(dir, FILES, d.name)).length === 1) before.push({ name: d.name, at: f.mtimeMs });
+        }
+        before.sort((a, b) => b.at - a.at);
+        before.forEach((x, i) => { if (i >= KEPT_TEXTS - 1 || Date.now() - x.at > KEPT_TEXT_DAYS * 86_400_000) rmSync(join(dir, FILES, x.name), { recursive: true, force: true }); });
+        mkdirSync(join(dir, FILES, id));
+        writeFileSync(join(dir, FILES, id, file), String(text ?? ''), { flag: 'wx', mode: 0o644 });
+        return `${IN_MACHINE}/${FILES}/${id}/${file}`;
+    }
+
     /* Whether a file (as the page opens it: "work:report.html") is one of
        this chat: shown by the tool, cited in one of its messages (a path, a
        picture placed in the text), or attached by the person. */
@@ -549,6 +579,12 @@ export class Talk {
         const before = new Set(r.machineKeys ?? []);
         const fresh = serious.filter((p) => !before.has(p.key ?? p.text));
         if (keys.join('|') !== (r.machineKeys ?? []).join('|')) this.#store.put({ ...r, machineKeys: keys });
+        /* What went away, said once, the machine running: the lines that asked for it ask no more (app.js). */
+        const gone = record.state === 'Running' ? [...before].filter((k) => !keys.includes(k)) : [];
+        if (gone.length) {
+            const said = [...new Set(gone.map((k) => (/^disk:/.test(k) ? 'Its disk has room again.' : k === 'memory-low' ? 'Its memory is no longer short.' : /^oom:/.test(k) ? '' : 'What was wrong with its machine is gone.')).filter(Boolean))];
+            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine' });
+        }
         if (fresh.length === 0) return;
         this.event(name, {
             kind: 'machine-problem',

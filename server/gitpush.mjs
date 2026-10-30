@@ -27,7 +27,7 @@
  * password, which only ever goes back to the https origin it was given for.
  */
 import { Refusal } from './conversations.mjs';
-import { GitAccess, readAddress, explain } from './gitaccess.mjs';
+import { GitAccess, readAddress, explain, remoteSaid, remoteAll } from './gitaccess.mjs';
 import { GitRunner, GitFailure, EMPTY_TREE, branchProblem, protocolOf, isId } from './gitrunner.mjs';
 
 export { branchProblem };
@@ -653,7 +653,20 @@ export class GitReview {
                 if (line && ours && (flag === '+' || /forced update/.test(summary))) throw new GitFailure(502, 'forced', 'The push was not as reviewed (a forced update): look at the remote.', { alert: true });
                 if (line && !ours && (flag === ' ' || flag === '*' || flag === '+')) throw new GitFailure(502, 'forced', 'The push was not as reviewed (another source): look at the remote.', { alert: true });
                 if (flag === '!' && /stale info|fetch first|non-fast-forward/.test(summary)) throw new GitFailure(409, 'remote-moved', `Not sent: the remote's ${target} moved (the lease was refused). Look again.`, { ai: `origin/${target} moved: pull origin/${target} first` });
-                if (pushed.code !== 0 || !(flag === ' ' || flag === '*')) throw new GitFailure(502, 'refused', `The remote refused: ${explain(pushed.stderr) || firstLine(summary)}`);
+                if (pushed.code !== 0 || !(flag === ' ' || flag === '*')) {
+                    /* Why, as the remote put it: its verdict on our ref ("[remote rejected] (pre-receive hook
+                       declined)") rather than git's closing "failed to push some refs", and what its hooks
+                       said -- to the owner, and to the agent that can fix the commit. */
+                    const verdict = flag === '!' && summary ? firstLine(summary) : '';
+                    const hooks = remoteSaid(pushed.stderr);
+                    const why = verdict || explain(pushed.stderr) || firstLine(summary);
+                    const said = hooks ? `; it said: "${hooks.split('\n').join(' / ').replace(/"/g, "'")}"` : '';
+                    const failure = new GitFailure(502, 'refused', `The remote refused: ${why}${said}`, { detail: hooks, ai: `the remote refused the sending to ${target}: ${why}${said}` });
+                    /* All it said, when the summary left some out: put where the agent can read it (main.mjs). */
+                    const all = remoteAll(pushed.stderr);
+                    if (all && all !== hooks) failure.full = all;
+                    throw failure;
+                }
                 /* (5) The pushed commits enter the reference only as the remote's history. */
                 const after = await this.#refreshLocked(r, { branch: target, head });
                 return sent(after.ok ? {} : { refreshed: false, note: 'Sent; the reference was not refreshed.' });
