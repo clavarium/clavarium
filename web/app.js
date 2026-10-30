@@ -935,6 +935,8 @@
     function select(name, { step = false } = {}) {
         if (name !== current) { disconnect(); terminal.reset(); }
         current = name;
+        /* The strip over the terminal is the one of the conversation now open, at once -- never the last one's until the next look. */
+        paintHealth();
         /* What was open over the one before -- its tab, an asset, a review,
            what was over it, a place of the menu (Access, Settings) -- gives way. */
         const room = nav.last(['room']);

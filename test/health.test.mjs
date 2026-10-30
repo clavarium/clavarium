@@ -39,10 +39,14 @@ test('what is said: the state, a machine that does not answer, memory, disk, fol
         'The whole machine ran out of memory 3 times since it started: a program in it was stopped. Its files are safe.',
         'Its memory is almost full: 30 MB free of 1024 MB.',
         'Its disk is almost full: 100 MB left of 8000 MB.',
-        'Its work folder (/work) is almost full: 50 MB left of 10000 MB.',
+        'Its work folder (/work) is kept on this server, whose disk is almost full: 50 MB left of 10000 MB.',
     ]);
     /* What each is about, and a name that stays the same whatever its numbers (the whole machine short again: a new one). */
-    assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom-machine:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['disk', 'disk:/work']]);
+    assert.deepEqual(full.problems.map((p) => [p.kind, p.key]), [['memory', 'oom-machine:3'], ['memory', 'memory-low'], ['disk', 'disk:/'], ['server-disk', 'disk:/work']]);
+    /* The server's disk, seen through a kept work folder: not this machine's trouble -- every conversation would say it. */
+    const shared = judge({ state: 'Running', answering: true, oomKills: 0, memory: { totalMb: 2048, availableMb: 1200 }, disks: { '/': { availableMb: 4000, sizeMb: 8000 }, '/work': { availableMb: 50, sizeMb: 10000 } } });
+    assert.equal(shared.level, 'info');
+    assert.deepEqual(shared.problems.map((p) => p.level), ['info']);
     /* A program at the limit it was given: noted, quietly; the machine is fine. Not told apart: noted too. */
     const limited = judge({ state: 'Running', answering: true, oomKills: 42, oomKinds: { machine: 0, limit: 42 }, memory: { totalMb: 4096, availableMb: 2200 } });
     assert.equal(limited.level, 'info');
