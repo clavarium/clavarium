@@ -337,3 +337,26 @@ test('through the API: forgetting an ephemeral secret of a conversation drops it
     assert.deepEqual(b.secrets.liveFor('alpha'), []);
     assert.equal((await call('POST', '/api/conversations/alpha/secrets/SECRET_FFFFFFFFFF/forget', {})).status, 404);
 });
+
+test('through the API: a secret given to a running conversation reaches its machine at once; an asleep one waits for its next opening', async (t) => {
+    const b = bench(t);
+    let asleep = false;
+    const call = async (path, body) => {
+        const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? {}))]), { method: 'POST', url: path, headers: { 'content-type': 'application/json' } });
+        let status;
+        const response = { writeHead: (s) => { status = s; return { end: () => {} }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready', asleep }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return status;
+    };
+    b.secrets.set({ name: 'OVH_KEY', value: 'ovh-value-123' });
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-123'), 'written in the machine now');
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: false }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('find /run/secrets')) && !b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY')), 'and taken away now');
+    asleep = true; b.calls.length = 0;
+    await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true });
+    assert.equal(b.calls.length, 0, 'an asleep machine is not woken for it');
+});

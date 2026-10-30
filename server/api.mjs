@@ -567,6 +567,10 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(handed[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
+            /* A machine that runs gets it (or loses it) now, in /run/secrets -- not only at the next
+               opening of a terminal; its tool's variables still wait for the tool's next start. */
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (c?.phase === 'ready' && !c.asleep) await secrets.deliver(conversation).catch(() => {});
             retell(conversation);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
         }
