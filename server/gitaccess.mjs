@@ -83,6 +83,31 @@ export function explain(stderr) {
     return String(text).trim().split('\n').filter(Boolean).pop()?.slice(0, 300) ?? '';
 }
 
+/* What the remote's own hooks said (pre-receive, update: the "remote:" lines of a push), for a
+   person and for the agent: colours and control characters out, git's progress lines out, the
+   last REMOTE_LINES lines, REMOTE_CHARS characters at most. Text of the remote: data, quoted. */
+export const REMOTE_LINES = 20;
+export const REMOTE_CHARS = 1500;
+export function remoteSaid(stderr) {
+    const lines = String(stderr ?? '').split(/\r?\n|\r/)
+        .filter((l) => /^remote:/.test(l))
+        .map((l) => l.replace(/^remote:\s?/, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/[\x00-\x1f\x7f]/g, '').trimEnd())
+        .filter((l) => l.trim() && !/^(Resolving deltas|Counting objects|Compressing objects|Processing changes|Total \d|Enumerating objects|Writing objects)\b/.test(l.trim()));
+    /* A very talkative hook: the lines that say what is wrong first (error, refused, must…), in their
+       order, then the end of what it said, up to REMOTE_LINES; "[N lines left out]" where lines went. */
+    let kept = lines;
+    if (lines.length > REMOTE_LINES) {
+        const telling = new Set(lines.map((l, i) => (/\b(error|errors|denied|reject|rejected|refused|must|fail|failed|failure|forbidden|invalid|not allowed|violation|required|missing|GH\d{3})\b/i.test(l) ? i : -1)).filter((i) => i >= 0).slice(0, REMOTE_LINES - 5));
+        for (let i = lines.length - 1; telling.size < REMOTE_LINES && i >= 0; i -= 1) telling.add(i);
+        const picked = [...telling].sort((a, b) => a - b);
+        kept = [];
+        picked.forEach((i, k) => { const gap = i - (k ? picked[k - 1] + 1 : 0); if (gap > 0) kept.push(`[${gap} line${gap > 1 ? 's' : ''} left out]`); kept.push(lines[i]); });
+    }
+    let text = kept.join('\n');
+    if (text.length > REMOTE_CHARS) text = `…${text.slice(-REMOTE_CHARS)}`;
+    return text;
+}
+
 /* An ed25519 key pair in the formats OpenSSH reads, made with Node's own
    crypto: no program is run and nothing touches the disk. The private key is
    the unencrypted "openssh-key-v1" container (it is encrypted by the vault). */

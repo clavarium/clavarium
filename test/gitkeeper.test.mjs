@@ -853,3 +853,14 @@ test('a slow send waits a moment, says it is still sending, then gives the resul
     assert.equal(done.branch, 'main');
     assert.equal(done.ok, true);
 });
+
+test('Send from the page, refused by a hook of the remote: the agent is told what the hook said', async (t) => {
+    const b = await bench(t, { checks: () => 'passed' });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "Commit messages must name a ticket." >&2\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const head = b.commit('a.txt', 'a\n', 'one');
+    await b.review.outgoing('site');
+    await assert.rejects(b.keeper.send('site', { head, target: 'main' }), (e) => e.kind === 'refused' && /it said: "Commit messages must name a ticket\."/.test(e.message));
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(b.agent.some((l) => /remote refused the sending to main: .*pre-receive hook declined.*it said: "Commit messages must name a ticket\."/.test(l)), b.agent.join('\n'));
+});

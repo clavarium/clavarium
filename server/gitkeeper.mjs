@@ -608,6 +608,8 @@ export class GitKeeper {
         if (['look', 'confirm', 'busy'].includes(error.kind)) return;
         this.#log(name, { ok: false, branch: branch ?? null, head: head ?? null, what: error.message });
         if (error.alert) this.#tell(`${name}: sending needs a look`, error.message);
+        /* Refused by the remote, sent by hand: what it said is the agent's to act on too. */
+        if (error.kind === 'refused' && error.ai) this.#toAgent(name, error.ai);
         if (error.kind === 'unknown-unreachable' && branch) this.#patch(name, { blocked: { ...(this.#record(name).blocked ?? {}), [branch]: { head, at: this.#now().toISOString() } } });
     }
 

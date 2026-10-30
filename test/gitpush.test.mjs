@@ -525,3 +525,41 @@ test('the branch diagram: the agent\'s branches and the remote\'s, their last co
     await assert.rejects(b.review.commit('site', 'f'.repeat(40)), /not in the repository/);
     assert.deepEqual(readdirSync(b.workRoot), [], 'each workspace is gone');
 });
+
+test('refused by a hook of the remote: its verdict and what the hook said reach the owner and the agent, cleaned', async (t) => {
+    const b = bench(t);
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: first });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\necho "\\033[31mGH006: Protected branch update failed\\033[0m" >&2\necho "- Commit messages must name a ticket (ABC-123)." >&2\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    await b.review.outgoing('site');
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => {
+        assert.equal(e.kind, 'refused');
+        assert.match(e.message, /^The remote refused: \[remote rejected\].*pre-receive hook declined/);
+        assert.match(e.message, /; it said: "GH006: Protected branch update failed \/ - Commit messages must name a ticket \(ABC-123\)\."$/, 'one line: the chat and the page show it as it is');
+        assert.equal(e.detail, 'GH006: Protected branch update failed\n- Commit messages must name a ticket (ABC-123).');
+        assert.doesNotMatch(e.message, /\x1b|failed to push some refs/);
+        assert.match(e.ai, /^the remote refused the sending to main: .*pre-receive hook declined.*; it said: "GH006: Protected branch update failed \/ - Commit messages must name a ticket \(ABC-123\)\."$/);
+        assert.doesNotMatch(e.ai, /\n/);
+        return true;
+    });
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first);
+});
+
+test('what the remote said: remote lines only, no colours, no progress, bounded', async () => {
+    const { remoteSaid, REMOTE_LINES } = await import('../server/gitaccess.mjs');
+    assert.equal(remoteSaid('To x\nremote: Resolving deltas: 100%\nremote: \x1b[1mNo\x1b[0m\x07 way\r\nerror: failed to push some refs'), 'No way');
+    assert.equal(remoteSaid('error: nothing from the remote'), '');
+    const many = Array.from({ length: 50 }, (_, i) => `remote: line ${i}`).join('\n');
+    assert.equal(remoteSaid(many).split('\n').filter((l) => !/left out/.test(l)).length, REMOTE_LINES);
+    assert.match(remoteSaid(many), /^\[30 lines left out\]\nline 30\n/);
+    /* A talkative hook: what says it is wrong is kept, wherever it stood. */
+    const chatty = [...Array.from({ length: 40 }, (_, i) => `remote: checking file ${i}`), 'remote: ERROR: secrets found in config.yml', ...Array.from({ length: 200 }, (_, i) => `remote: scanned ${i}`)].join('\n');
+    const kept = remoteSaid(chatty);
+    assert.match(kept, /^\[40 lines left out\]\nERROR: secrets found in config\.yml\n\[\d+ lines left out\]\nscanned \d+/);
+    assert.match(kept, /scanned 199$/);
+    assert.match(remoteSaid(many), /line 49$/);
+    assert.ok(remoteSaid(`remote: ${'x'.repeat(5000)}`).length <= 1501);
+});
