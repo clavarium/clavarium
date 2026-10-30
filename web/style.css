@@ -1898,3 +1898,8 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 #viewer #preview-full[aria-pressed="true"] { border-color: var(--brass); }
 #viewer.viewer-full { padding: 0; }
 #viewer.viewer-full #viewer-card { width: 100%; max-width: none; border-radius: 0; border: 0; padding: max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+/* The viewer (designer review, #184): a picture alone sits centred in the space, whole (contain);
+   the Download icon as large as its neighbours look. */
+#preview-body:has(> img:only-child) { display: flex; align-items: center; justify-content: center; }
+#preview-body > img:only-child { max-height: 100%; width: auto; object-fit: contain; margin: 0; }
+#viewer #preview-download.ico svg { width: 20px; height: 20px; }
