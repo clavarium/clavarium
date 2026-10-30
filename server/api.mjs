@@ -443,6 +443,16 @@ export async function handleApi(request, response, conversations, headers, resou
            keeper runs as the owner (person), never as an agent. */
         const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume)$/.exec(pathname);
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
+        /* A mailbox's signature (Markdown), added under what the agent sends from it. */
+        if (pathname === '/api/tether/signature' && tethers) {
+            const t = tethers.store().target(String(body.target ?? ''));
+            if (!t || t.kind !== 'mail') throw new Refusal(404, 'No such mailbox.');
+            const signature = String(body.signature ?? '').replace(/\r\n?/g, '\n').trim();
+            if (signature.length > 2000) throw new Refusal(400, 'A signature is 2000 characters at most.');
+            const { signature: _old, ...config } = t.config ?? {};
+            tethers.store().putTarget({ ...t, config: signature ? { ...config, signature } : config });
+            return send(200, { ok: true, signature }), true;
+        }
         if (pathname === '/api/shortcuts' && shortcuts) return send(201, shortcuts.add(body)), true;
         if (pathname === '/api/secrets' && secrets) { const made = secrets.set(body); setup?.secretAdded(made.name); return send(201, made), true; }
         /* Asset groups (groups.mjs): a folder-style tidy-up, not a right. */

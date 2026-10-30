@@ -3353,8 +3353,8 @@
             addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
             holder.append(addBar);
         }
-        const section = (head, rows, none, { foldable } = {}) => {
-            const s = el('section', 'as-kind as-group'); s.append(head);
+        const section = (head, rows, none, { foldable, drop } = {}) => {
+            const s = el('section', 'as-kind as-group'); s.append(head); s.dataset.drop = drop;
             if (!foldable || !head.dataset.folded) {
                 if (rows.length === 0) s.append(el('p', 'hint as-none', none));
                 for (const item of rows) s.append(assetRow(item, { chosen, choose }));
@@ -3375,13 +3375,62 @@
             const gear = el('button', 'as-gear', '⚙'); gear.type = 'button'; gear.setAttribute('aria-label', `Settings for ${g.label}`); gear.title = 'Give, rename, remove';
             gear.addEventListener('click', (e) => { e.stopPropagation(); choose(`group:${g.id}`); });
             head.append(toggle, gear);
-            section(head, members, 'Empty. Open an asset to put it here.', { foldable: true });
+            section(head, members, 'Empty. Drag an asset here, or open one to put it here.', { foldable: true, drop: g.id });
         }
         const grouped = new Set(groups.flatMap((g) => g.members ?? []));
         const loose = items.filter((i) => !grouped.has(i.key));
         const looseHead = el('div', 'as-kind-head'); looseHead.append(el('h3', '', 'No group'));
-        section(looseHead, loose, groups.length ? 'Every asset is in a group.' : 'Make a group above, then open an asset to put it in it.');
+        section(looseHead, loose, groups.length ? 'Every asset is in a group.' : 'Make a group above, then open an asset to put it in it.', { drop: '' });
         if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+        if (groups.length) dragToGroups(holder);
+    }
+    /* DRAGGING AN ASSET ONTO A GROUP (#111), like a binder's Kanban: a mouse drags once it
+       has moved a little; a finger after a short hold (so a swipe still scrolls). The row
+       follows the pointer as a light copy; the group under it lights up; let go on it, and
+       the asset is placed there ("No group" takes it out). A tap still opens the asset. */
+    function dragToGroups(holder) {
+        let drag = null;
+        const sectionAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.as-group[data-drop]') ?? null;
+        const end = () => { if (!drag) return; clearTimeout(drag.hold); drag.ghost?.remove(); drag.over?.classList.remove('as-drop-over'); document.body.classList.remove('as-dragging'); drag = null; };
+        const start = (d) => {
+            d.on = true;
+            const r = d.row.getBoundingClientRect();
+            d.ghost = d.row.cloneNode(true); d.ghost.classList.add('as-drag-ghost');
+            Object.assign(d.ghost.style, { width: `${r.width}px`, left: `${r.left}px`, top: `${r.top}px` });
+            d.dx = d.x0 - r.left; d.dy = d.y0 - r.top;
+            document.body.append(d.ghost); document.body.classList.add('as-dragging');
+        };
+        holder.addEventListener('pointerdown', (e) => {
+            const row = e.target.closest('.as-row[data-asset]');
+            if (!row || !holder.contains(row) || e.button > 0) return;
+            drag = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, touch: e.pointerType !== 'mouse', from: row.closest('.as-group')?.dataset.drop };
+            if (drag.touch) { const d = drag; d.hold = setTimeout(() => { if (drag === d) { start(d); try { row.setPointerCapture(d.id); } catch { /* still heard */ } } }, 350); }
+        });
+        holder.addEventListener('pointermove', (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const far = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > 6;
+            if (!drag.on) { if (drag.touch) { if (far) end(); return; } if (!far) return; start(drag); try { drag.row.setPointerCapture(drag.id); } catch { /* still heard */ } }
+            e.preventDefault();
+            drag.ghost.style.left = `${e.clientX - drag.dx}px`; drag.ghost.style.top = `${e.clientY - drag.dy}px`;
+            const over = sectionAt(e.clientX, e.clientY);
+            if (over !== drag.over) { drag.over?.classList.remove('as-drop-over'); drag.over = over; over?.classList.add('as-drop-over'); }
+        });
+        holder.addEventListener('pointerup', async (e) => {
+            if (!drag || e.pointerId !== drag.id) return;
+            const d = drag; const target = d.on ? sectionAt(e.clientX, e.clientY) : null;
+            const was = d.on; end();
+            if (!was) return;
+            /* A drag is not a tap: the click that follows does not open the asset. */
+            d.row.addEventListener('click', (c) => { c.stopImmediatePropagation(); c.preventDefault(); }, { capture: true, once: true });
+            if (!target || target.dataset.drop === d.from) return;
+            $('assets-error').hidden = true;
+            try { await post(`${API}/asset-groups/place`, { asset: d.row.dataset.asset, group: target.dataset.drop || null }); }
+            catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+            void paintAssets();
+        });
+        holder.addEventListener('pointercancel', end);
+        /* Once a finger's drag has begun, the page must not scroll under it. */
+        holder.addEventListener('touchmove', (e) => { if (drag?.on) e.preventDefault(); }, { passive: false });
     }
     /* The level buttons an asset takes, by its type (same sets as its own detail). */
     const levelOptionsFor = (item) => (item.target ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
@@ -4479,6 +4528,23 @@
                     perms.append(btn);
                 };
                 draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
+            }
+            /* A mailbox: its signature, in Markdown, added under what the agent sends. */
+            if (t.kind === 'mail') {
+                const box = el('div', 'as-signature');
+                const lab = el('label', '', 'Signature'); lab.htmlFor = `sig-${t.id}`;
+                const ta = document.createElement('textarea'); ta.id = `sig-${t.id}`; ta.rows = 3; ta.value = t.config?.signature ?? ''; ta.placeholder = 'Added under every mail the agent sends from this mailbox (Markdown: **bold**, links…)';
+                const save = el('button', '', 'Save'); save.type = 'button';
+                const said = el('small', 'hint', '');
+                save.addEventListener('click', async () => {
+                    save.disabled = true;
+                    try { await post(`${API}/tether/signature`, { target: t.id, signature: ta.value }); said.textContent = ta.value.trim() ? 'Saved.' : 'Removed.'; t.config = { ...(t.config ?? {}), signature: ta.value.trim() }; }
+                    catch (e) { said.textContent = e.message; }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(lab, ta, row);
+                detail.append(box);
             }
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
