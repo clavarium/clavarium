@@ -6336,6 +6336,8 @@
     }
     $('usage-measure').addEventListener('click', (event) => { const b = event.target.closest('button[data-m]'); if (!b) return; usage.measure = b.dataset.m; paintUsageAll(); });
     $('usage-span').addEventListener('click', (event) => { const b = event.target.closest('button[data-span]'); if (!b) return; usage.span = b.dataset.span; for (const x of $('usage-span').children) x.setAttribute('aria-pressed', String(x === b)); void paintUsage(); });
+    /* Usage (#203) is kept out of sight while it is reworked on real machines (operator, 30-10). */
+    const USAGE_SHOWN = false;
     $('settings-usage-top').addEventListener('toggle', () => { if ($('settings-usage-top').open) void paintUsage(); });
     /* Drawn again when its width changes only: a phone's bar of address, folding in a scroll, is a resize too. */
     let usageResize; let usageWidth = 0;
@@ -6345,7 +6347,7 @@
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r; $('settings-usage-top').hidden = !r;
+        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r; $('settings-usage-top').hidden = !r || !USAGE_SHOWN;
         if (!r) return;
         void paintCurves($('server-curves'));
         /* The two settings of each: a fixed amount and a share; the larger is kept free. */
