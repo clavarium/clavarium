@@ -500,10 +500,12 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, op[2] === 'password' ? await team.password(email) : { operators: await team[op[2]](email) }), true;
         }
         const renaming = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/rename$/.exec(pathname);
-        if (renaming && secrets) return send(200, secrets.rename(renaming[1], String(body.name ?? '').trim())), true;
+        /* Its machines that run get the new name or value now, as a secret given to them does. */
+        const redeliver = async (name) => { for (const c of conversations.list()) if (c.phase === 'ready' && !c.asleep && secrets.of(c.name).includes(name)) await secrets.deliver(c.name).catch(() => {}); };
+        if (renaming && secrets) { const done = secrets.rename(renaming[1], String(body.name ?? '').trim()); await redeliver(String(body.name ?? '').trim()); return send(200, done), true; }
         /* A new value (never sent back) and/or a new expiry, in place. */
         const replacing = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/replace$/.exec(pathname);
-        if (replacing && secrets) return send(200, secrets.replace(replacing[1], { value: body.value, expires: body.expires })), true;
+        if (replacing && secrets) { const done = secrets.replace(replacing[1], { value: body.value, expires: body.expires }); await redeliver(replacing[1]); return send(200, done), true; }
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
@@ -567,6 +569,10 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(handed[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
+            /* A machine that runs gets it (or loses it) now, in /run/secrets -- not only at the next
+               opening of a terminal; its tool's variables still wait for the tool's next start. */
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (c?.phase === 'ready' && !c.asleep) await secrets.deliver(conversation).catch(() => {});
             retell(conversation);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
         }

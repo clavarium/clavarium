@@ -337,3 +337,58 @@ test('through the API: forgetting an ephemeral secret of a conversation drops it
     assert.deepEqual(b.secrets.liveFor('alpha'), []);
     assert.equal((await call('POST', '/api/conversations/alpha/secrets/SECRET_FFFFFFFFFF/forget', {})).status, 404);
 });
+
+test('through the API: a secret given to a running conversation reaches its machine at once; an asleep one waits for its next opening', async (t) => {
+    const b = bench(t);
+    let asleep = false;
+    const call = async (path, body) => {
+        const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(body ?? {}))]), { method: 'POST', url: path, headers: { 'content-type': 'application/json' } });
+        let status;
+        const response = { writeHead: (s) => { status = s; return { end: () => {} }; } };
+        const conversations = { list: () => [{ name: 'alpha', phase: 'ready', asleep }] };
+        await handleApi(request, response, conversations, {}, { of: () => [] }, () => true, undefined, undefined, undefined, b.secrets);
+        return status;
+    };
+    b.secrets.set({ name: 'OVH_KEY', value: 'ovh-value-123' });
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-123'), 'written in the machine now');
+    b.calls.length = 0;
+    assert.equal(await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: false }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('find /run/secrets')) && !b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY')), 'and taken away now');
+    asleep = true; b.calls.length = 0;
+    await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true });
+    assert.equal(b.calls.length, 0, 'an asleep machine is not woken for it');
+    /* A new value: its running machines get it now too. */
+    asleep = false; b.calls.length = 0;
+    assert.equal(await call('/api/secrets/OVH_KEY/replace', { value: 'ovh-value-456' }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-456'), 'the new value, at once');
+});
+
+test('the guard: a machine missing a secret, holding one too many, or holding an old value is put right; one in order is left alone', async (t) => {
+    const b = bench(t);
+    let listing = '';
+    const calls = [];
+    const vms = { exec: async (name, argv, options) => { calls.push({ argv: argv.join(' '), input: options?.input }); return argv[0] === 'sh' ? { code: 0, stdout: listing, stderr: '' } : { code: 0, stdout: '', stderr: '' }; } };
+    const s = new Secrets({ store: new Store(join(b.dir, 'g.json')), vault: new Vault(join(b.dir, 'g.key')), vms, grants: new Grants(), now: () => b.clock.at });
+    s.set({ name: 'OVH_KEY', value: 'v1' }); s.attach('alpha', 'OVH_KEY', true);
+    const delivered = () => calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY'));
+    /* Missing in the machine: put there. */
+    let last = await s.reconcile('alpha', undefined);
+    assert.ok(delivered(), 'missing: delivered');
+    /* In order: nothing written. */
+    listing = 'OVH_KEY\n'; calls.length = 0;
+    assert.equal(await s.reconcile('alpha', last), last);
+    assert.equal(calls.length, 1, 'only looked at');
+    /* One too many there (taken away elsewhere): rewritten without it. */
+    listing = 'OVH_KEY\nOLD_ONE\n'; calls.length = 0;
+    await s.reconcile('alpha', last);
+    assert.ok(calls.some((c) => c.argv.includes('find /run/secrets')), 'cleared and written again');
+    /* A new value: delivered. */
+    listing = 'OVH_KEY\n'; s.replace('OVH_KEY', { value: 'v2' }); calls.length = 0;
+    last = await s.reconcile('alpha', last);
+    assert.ok(calls.some((c) => c.input === 'v2'));
+    /* A machine that cannot be looked at: left for the next look. */
+    const down = new Secrets({ store: new Store(join(b.dir, 'g.json')), vault: new Vault(join(b.dir, 'g.key')), vms: { exec: async () => { throw new Error('asleep'); } }, grants: new Grants(), now: () => b.clock.at });
+    assert.equal(await down.reconcile('alpha', last), null);
+});

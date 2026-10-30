@@ -677,7 +677,7 @@
                 const keep = h('button', { type: 'button', text: 'Cancel', onclick: () => openPop(l) });
                 sure.addEventListener('click', async () => {
                     sure.disabled = true;
-                    try { await takeAway(l); closePop(); await changed(); if (b.kind === 'secret') err(`${b.name} will no longer be handed to ${a.name}'s tool the next time it starts.`); } catch (e) { fail(e); }
+                    try { await takeAway(l); closePop(); await changed(); if (b.kind === 'secret') err(`${b.name} is taken out of ${a.name}'s machine now; its tool keeps it as a variable until its next start.`); } catch (e) { fail(e); }
                 });
                 row.before(ask);
                 row.replaceChildren(sure, keep);
