@@ -537,6 +537,7 @@
             <div id="connexion-provider" class="choices" role="group" aria-label="Kind of account">
               <button type="button" data-provider="google" aria-pressed="true">Google</button>
               <button type="button" data-provider="microsoft">Microsoft</button>
+              <button type="button" data-provider="classic">Other (OVH, Infomaniak…)</button>
             </div>
             <label for="connexion-email">Email address</label>
             <input id="connexion-email" type="email" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="your email address">
@@ -545,8 +546,22 @@
               <label class="check" id="connexion-calendar-label"><input type="checkbox" id="connexion-calendar"> Calendar</label>
               <label class="check" id="connexion-contacts-label"><input type="checkbox" id="connexion-contacts"> Contacts</label>
             </div>
+            <div id="connexion-classic" hidden>
+              <label for="connexion-password">Password</label>
+              <input id="connexion-password" type="password" autocomplete="new-password" placeholder="the account's password">
+              <label for="connexion-imap" id="connexion-imap-label">Mail server (IMAP)</label>
+              <input id="connexion-imap" spellcheck="false" autocapitalize="off" placeholder="mail.example.com">
+              <label for="connexion-smtp" id="connexion-smtp-label">Sending server (SMTP)</label>
+              <input id="connexion-smtp" spellcheck="false" autocapitalize="off" placeholder="smtp.example.com">
+              <label for="connexion-caldav" id="connexion-caldav-label">Calendar address (CalDAV)</label>
+              <input id="connexion-caldav" spellcheck="false" autocapitalize="off" placeholder="https://dav.example.com">
+              <label for="connexion-carddav" id="connexion-carddav-label">Contacts address (CardDAV)</label>
+              <input id="connexion-carddav" spellcheck="false" autocapitalize="off" placeholder="https://dav.example.com">
+              <p class="hint">Filled from the email address when known; your host's help pages give them otherwise. The password stays on the server and never enters a machine.</p>
+              <div class="row"><button type="button" id="connexion-classic-connect" class="primary">Connect</button></div>
+            </div>
             <p class="hint" id="connexion-notice"></p>
-            <div class="row"><button type="button" id="connexion-open" class="primary">Open the sign-in page</button></div>
+            <div class="row" id="connexion-open-row"><button type="button" id="connexion-open" class="primary">Open the sign-in page</button></div>
             <div id="connexion-paste" hidden>
               <label for="connexion-code">After you allow, the page will not load — copy its full address and paste it here</label>
               <div class="row"><input id="connexion-code" spellcheck="false" autocapitalize="off" placeholder="Paste the whole address from the bar"><button type="button" id="connexion-connect" class="primary">Connect</button></div>

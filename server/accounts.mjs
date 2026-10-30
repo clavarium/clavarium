@@ -16,6 +16,11 @@
  * own open-source desktop client, verified for all three: Google over IMAP +
  * CalDAV/CardDAV, Microsoft over Microsoft Graph (mail, calendar and contacts).
  *
+ * A CLASSIC ACCOUNT (OVH, Infomaniak, Nextcloud... any IMAP/SMTP + CalDAV/CardDAV host)
+ * has no token: it signs in with its password. The password is kept the same way, a
+ * host-only secret the keeper reveals to the connector alone; each kind is tried live
+ * before anything is kept, so a wrong server or password is said at once.
+ *
  * A CREATED TARGET IS GIVEN TO NO ONE. The person grants it per conversation, at
  * its own level, from the page (Assets > Access) -- like git: one mailbox, many
  * conversations, each its own rights.
@@ -45,6 +50,14 @@ const KIND = {
 /* What each provider's built-in (Thunderbird) client grants a refresh token for. */
 const SUPPORTED = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail', 'calendar', 'contacts'] };
 
+/* Servers of common classic hosts, by the address's domain (what ISPDB lacks: the
+   calendar and contacts addresses). */
+const CLASSIC = {
+    'ovh.net': { imap: 'ssl0.ovh.net', smtp: 'ssl0.ovh.net' },
+    'infomaniak.com': { imap: 'mail.infomaniak.com', smtp: 'mail.infomaniak.com', caldav: 'https://sync.infomaniak.com', carddav: 'https://sync.infomaniak.com' },
+    'ik.me': { imap: 'mail.infomaniak.com', smtp: 'mail.infomaniak.com', caldav: 'https://sync.infomaniak.com', carddav: 'https://sync.infomaniak.com' },
+    'fastmail.com': { imap: 'imap.fastmail.com', smtp: 'smtp.fastmail.com', caldav: 'https://caldav.fastmail.com', carddav: 'https://carddav.fastmail.com' },
+};
 const emailOk = (s) => /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/.test(s);
 /* A deterministic, valid secret name for an account's token: a short slug of the
    address plus a hash of it, so reconnecting the same account reuses the name
@@ -62,10 +75,73 @@ export class Accounts {
 
     /* `secrets`: the vault (set host-only, by name). `targets`: { put(spec) } onto
        the Tether store. `fetch`: injected for tests. */
-    constructor({ secrets, targets, fetch = globalThis.fetch }) {
+    #probe;
+    constructor({ secrets, targets, fetch = globalThis.fetch, probe = null }) {
         if (!secrets?.set) throw new Error('accounts needs the secret store');
         if (!targets?.put) throw new Error('accounts needs the Tether target store');
-        this.#secrets = secrets; this.#targets = targets; this.#fetch = fetch;
+        this.#secrets = secrets; this.#targets = targets; this.#fetch = fetch; this.#probe = probe;
+    }
+
+    /* The servers of a classic address, as far as they can be known: a few common
+       hosts, else the public Thunderbird database of mail providers (ISPDB). What
+       is not known stays empty for the person to fill. */
+    async lookup({ user } = {}) {
+        const address = String(user ?? '').trim();
+        if (!emailOk(address)) throw new Refusal(400, 'The account needs its email address.');
+        const domain = address.split('@')[1].toLowerCase();
+        const known = Object.entries(CLASSIC).find(([d]) => domain === d || domain.endsWith(`.${d}`))?.[1];
+        const out = { imap: '', smtp: '', caldav: '', carddav: '', ...(known ?? {}) };
+        if (!out.imap || !out.smtp) {
+            try {
+                const r = await this.#fetch(`https://autoconfig.thunderbird.net/v1.1/${encodeURIComponent(domain)}`);
+                if (r.ok) {
+                    const xml = await r.text();
+                    const servers = (kind) => [...xml.matchAll(new RegExp(`<(incomingServer|outgoingServer) type="${kind}">([\\s\\S]*?)</\\1>`, 'g'))].map((m) => ({ host: /<hostname>([^<]+)</.exec(m[2])?.[1] ?? '', port: /<port>(\\d+)</.exec(m[2])?.[1] ?? '', socket: /<socketType>([^<]+)</.exec(m[2])?.[1] ?? '' }));
+                    const imap = servers('imap').find((x) => x.socket === 'SSL') ?? null;
+                    const smtp = servers('smtp').find((x) => x.socket === 'STARTTLS') ?? null;
+                    if (!out.imap && imap?.host) out.imap = `${imap.host}${imap.port && imap.port !== '993' ? `:${imap.port}` : ''}`;
+                    if (!out.smtp && smtp?.host) out.smtp = `${smtp.host}${smtp.port && smtp.port !== '587' ? `:${smtp.port}` : ''}`;
+                }
+            } catch { /* not known there: the person fills it */ }
+        }
+        return out;
+    }
+
+    /* Connect a classic account: its password kept host-only, a target per kind,
+       each tried live first (nothing is kept if one fails). */
+    async classic({ user, password, imap, smtp, caldav, carddav, kinds } = {}) {
+        const address = String(user ?? '').trim();
+        if (!emailOk(address)) throw new Refusal(400, 'The account needs its email address.');
+        const secret = String(password ?? '');
+        if (!secret) throw new Refusal(400, 'The account needs its password.');
+        const wanted = (Array.isArray(kinds) && kinds.length ? kinds : ['mail']).map(String).filter((k) => KIND[k]);
+        if (!wanted.length) throw new Refusal(400, 'Choose at least mail, calendar or contacts.');
+        const hostPort = (v, what, port) => {
+            const m = /^([a-z0-9.-]+\.[a-z]{2,})(?::(\d{1,5}))?$/i.exec(String(v ?? '').trim());
+            if (!m) throw new Refusal(400, `The ${what} server is a name like mail.example.com.`);
+            return { host: m[1].toLowerCase(), port: Number(m[2] ?? port) };
+        };
+        const davUrl = (v, what) => {
+            let u; try { u = new URL(/^https?:\/\//i.test(String(v ?? '').trim()) ? String(v).trim() : `https://${String(v ?? '').trim()}`); } catch { u = null; }
+            if (!u || u.protocol !== 'https:' || !u.hostname.includes('.')) throw new Refusal(400, `The ${what} address is an https address, like https://dav.example.com.`);
+            return u.href;
+        };
+        const name = secretName('classic', address);
+        const specs = [];
+        for (const k of wanted) {
+            const config = { user: address };
+            if (k === 'mail') { const i = hostPort(imap, 'mail (IMAP)', 993); const o = hostPort(smtp, 'sending (SMTP)', 587); Object.assign(config, { host: i.host, port: i.port, smtpHost: o.host, smtpPort: o.port }); }
+            if (k === 'calendar') config.caldav = davUrl(caldav, 'calendar (CalDAV)');
+            if (k === 'contacts') config.carddav = davUrl(carddav, 'contacts (CardDAV)');
+            specs.push({ id: targetId(k, 'classic', address), title: `${KIND[k].title} — ${address}`, kind: KIND[k].kind, connector: KIND[k].connector, config, secrets: { password: name } });
+        }
+        if (this.#probe) for (const t of specs) {
+            try { await this.#probe(t, secret); }
+            catch (e) { throw new Refusal(400, `${KIND[t.connector === 'mail' ? 'mail' : t.connector].title}: ${String(e?.message ?? e).replace(/^.*?: /, '')}`); }
+        }
+        this.#secrets.set({ name, value: secret, hostOnly: true });
+        const made = specs.map((t) => { const saved = this.#targets.put(t); return { id: saved?.id ?? t.id, title: saved?.title ?? t.title, kind: t.kind }; });
+        return { provider: 'classic', user: address, targets: made, authorized: wanted, denied: [] };
     }
 
     /* Which kinds may be connected, per provider, for the page to offer. */

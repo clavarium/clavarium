@@ -411,7 +411,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
        machine) and a Tether target is made for it: see accounts.mjs. */
-    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec), all: () => tethers.store().targets() } });
+    const accounts = new Accounts({ secrets, targets: { put: (spec) => tethers.store().putTarget(spec), all: () => tethers.store().targets() }, probe: (target, password) => tethers.probe(target, password) });
     /* A calendar target made before it needed the account address (Google CalDAV
        puts it in the URL) carries none. The same account's mailbox or address book
        has it -- they share the one refresh token -- so fill it in from a sibling,

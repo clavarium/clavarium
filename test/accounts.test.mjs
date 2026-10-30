@@ -153,3 +153,41 @@ test('a provider that returns no refresh token is a clear refusal', async (t) =>
     const b = bench(t, { token: null });
     await assert.rejects(connect(b.accounts, { provider: 'google', user: 'frank@example.com', kinds: ['mail'] }), /could not be completed|no lasting token/);
 });
+
+/* ---------- a classic account (OVH, Infomaniak...): a password, no token ---------- */
+function classicBench(t, { probeFails = null, ispdb = null } = {}) {
+    const b = bench(t);
+    const tried = [];
+    const fetch = async (url) => (url.startsWith('https://autoconfig.thunderbird.net/') && ispdb ? new Response(ispdb, { status: 200 }) : new Response('', { status: 404 }));
+    const accounts = new Accounts({ secrets: b.secrets, targets: b.targets, fetch, probe: async (target, password) => { tried.push({ target, password }); if (probeFails === target.connector) throw new Error(`${target.title}: the mailbox refused the user or the password`); } });
+    return { ...b, accounts, tried };
+}
+
+test('a classic account: each kind tried with the password first, then the password kept host-only and a target per kind', async (t) => {
+    const { accounts, made, secrets, tried } = classicBench(t);
+    const r = await accounts.classic({ user: 'artisan@example.com', password: 'Pw-123', kinds: ['mail', 'calendar', 'contacts'], imap: 'ssl0.ovh.net', smtp: 'ssl0.ovh.net', caldav: 'dav.example.com', carddav: 'https://dav.example.com/card/' });
+    assert.deepEqual(r.authorized, ['mail', 'calendar', 'contacts']);
+    assert.deepEqual(tried.map((x) => [x.target.connector, x.password]), [['mail', 'Pw-123'], ['calendar', 'Pw-123'], ['contacts', 'Pw-123']]);
+    const mail = made.get('mail-classic-artisan-example-com');
+    assert.deepEqual(mail.config, { user: 'artisan@example.com', host: 'ssl0.ovh.net', port: 993, smtpHost: 'ssl0.ovh.net', smtpPort: 587 });
+    assert.equal(made.get('calendar-classic-artisan-example-com').config.caldav, 'https://dav.example.com/');
+    assert.equal(made.get('contacts-classic-artisan-example-com').config.carddav, 'https://dav.example.com/card/');
+    const name = mail.secrets.password;
+    assert.ok([...made.values()].every((x) => x.secrets.password === name), 'one secret for the account');
+    assert.equal(secrets.reveal(name), 'Pw-123');
+    assert.ok(!JSON.stringify([...made.values()]).includes('Pw-123'), 'the password is in no target');
+});
+
+test('a classic account that refuses is said, and nothing is kept', async (t) => {
+    const { accounts, made } = classicBench(t, { probeFails: 'calendar' });
+    await assert.rejects(accounts.classic({ user: 'a@example.com', password: 'x', kinds: ['mail', 'calendar'], imap: 'mail.example.com', smtp: 'mail.example.com', caldav: 'https://dav.example.com' }), /Agenda: .*refused the user or the password/);
+    assert.equal(made.size, 0);
+    await assert.rejects(accounts.classic({ user: 'a@example.com', password: 'x', kinds: ['mail'], imap: 'not a host', smtp: 'm.example.com' }), /mail \(IMAP\) server is a name/);
+    await assert.rejects(accounts.classic({ user: 'a@example.com', password: 'x', kinds: ['calendar'], caldav: 'http://dav.example.com' }), /https address/);
+    await assert.rejects(accounts.classic({ user: 'a@example.com', password: '', kinds: ['mail'] }), /needs its password/);
+});
+
+test('lookup asks the Thunderbird provider database for an unknown host', async (t) => {
+    const { accounts } = classicBench(t, { ispdb: '<clientConfig><emailProvider><incomingServer type="imap"><hostname>imap.mail.example</hostname><port>993</port><socketType>SSL</socketType></incomingServer><outgoingServer type="smtp"><hostname>smtp.mail.example</hostname><port>465</port><socketType>SSL</socketType></outgoingServer><outgoingServer type="smtp"><hostname>smtp.mail.example</hostname><port>587</port><socketType>STARTTLS</socketType></outgoingServer></emailProvider></clientConfig>' });
+    assert.deepEqual(await accounts.lookup({ user: 'me@example.org' }), { imap: 'imap.mail.example', smtp: 'smtp.mail.example', caldav: '', carddav: '' }, 'the IMAP over TLS and the SMTP with STARTTLS');
+});

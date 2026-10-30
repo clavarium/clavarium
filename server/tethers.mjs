@@ -110,6 +110,15 @@ export class Tethers {
     /* The store behind it, for the Assets page to create/give/remove targets. */
     store() { return this.#keeper.store; }
 
+    /* A first read of a target not saved yet, its password given here: does the account
+       answer? Used when a classic account is connected, before anything is kept. */
+    async probe(target, password) {
+        const verb = { mail: 'mail.list', calendar: 'calendar.list', contacts: 'contacts.list' }[target.connector];
+        const conn = this.#keeper.connectors?.[target.connector];
+        if (!verb || !conn) throw new Error(`no ${target.connector} connector`);
+        await conn.run(verb, target, {}, { agent: 'person:owner', secret: async () => password });
+    }
+
     /* What each conversation was given: { name: count } -- the targets it may use. */
     given() {
         const out = {};

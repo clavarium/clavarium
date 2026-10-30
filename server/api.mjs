@@ -434,6 +434,8 @@ export async function handleApi(request, response, conversations, headers, resou
            kept host-only, a Tether target made): see accounts.mjs. */
         if (pathname === '/api/accounts/consent' && accounts) return send(200, accounts.consent(body)), true;
         if (pathname === '/api/accounts/connect' && accounts) { const made = await accounts.connect(body); return send(201, made), true; }
+        if (pathname === '/api/accounts/lookup' && accounts) return send(200, await accounts.lookup(body)), true;
+        if (pathname === '/api/accounts/classic' && accounts) { const made = await accounts.classic(body); return send(201, made), true; }
         if (pathname === '/api/accounts/verify' && accounts) { const r = await accounts.verify(body); return send(200, r), true; }
         /* Assets > Access: the owner sets a conversation's level and rules on a
            target, decides a call that waited, or removes a target. Each is an op the
