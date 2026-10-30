@@ -271,7 +271,7 @@ test('isolation: one conversation\'s part goes into its own machine only, on its
 
 test("each tool's own instruction file is a line of its configuration, checked", () => {
     const real = Object.fromEntries(loadTools().map((x) => [x.id, x.instructions]));
-    assert.deepEqual(real, { 'claude-code': '.claude/CLAUDE.md', opencode: '.config/opencode/AGENTS.md', codex: '.codex/AGENTS.md', gemini: '.gemini/GEMINI.md', shell: undefined });
+    assert.deepEqual(real, { 'claude-code': '.claude/CLAUDE.md', opencode: '.config/opencode/AGENTS.md', codex: '.codex/AGENTS.md', gemini: '.gemini/GEMINI.md', guichet: '.guichet/INSTRUCTIONS.md', shell: undefined });
     const one = (instructions) => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 768, install: [], instructions }]));
     for (const bad of ['/etc/passwd', '../x', 'a/../b', './a', 'a//b', 'a b', '$(x)', '']) assert.throws(() => one(bad), /instructions/, bad);
     assert.equal(one('.x/RULES.md')[0].instructions, '.x/RULES.md');
