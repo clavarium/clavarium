@@ -12,6 +12,12 @@
  *                           health }] (health: health.mjs's last record, or null)
  *   series(of, span)        { t: [ms...], <measure>: [percent or null...], marks: [ms...] }
  *                           of: 'server' or a conversation's name; span: '1h' '24h' '7d'
+ *   together(span, machines, server)   Settings, Usage: the server and every machine on ONE
+ *                           time axis, in gigabytes and cores (percent x what each was given):
+ *                           { span, t, capacity: {memoryGb, cores, diskGb}, server: {memory, cpu, disk},
+ *                             itself: {...}, machines: [{ name, alloc, asleep, since, memory, cpu, disk, marks }] }
+ *                           machines [{ name, memoryMb, cores, diskMb, hostDiskMb?, asleep? }],
+ *                           server { memoryMb, cores, diskMb }
  *
  * Kept: every minute for a day, then fifteen-minute blocks (their highest value:
  * a peak stays seen) for a week. A few hundred kilobytes in a file of its own,
@@ -104,6 +110,40 @@ export class History {
         const out = { span: SPANS[span] ? span : '1h', from, to: this.#now(), t: kept.map((r) => r[0]), marks: kept.filter((r) => r[MEASURES.length + 1]).map((r) => r[0]) };
         MEASURES.forEach((m, i) => { out[m] = kept.map((r) => r[i + 1]); });
         return out;
+    }
+
+    /* Who takes what, side by side: every curve on the server's own times (a machine is looked at in
+       the same look as the server, so its times are the same ones), and in gigabytes and cores rather
+       than in percent -- a stack of shares of different sizes says nothing. "This server itself" is
+       what the server uses beyond its machines: the system, Clavarium, the files. */
+    together(span, machines = [], server = {}) {
+        const s = this.series('server', span);
+        const gb = (mb) => (Number.isFinite(mb) && mb > 0 ? Math.round((mb / 1024) * 100) / 100 : null);
+        const abs = (v, all) => (v === null || v === undefined || all === null ? null : Math.round((v / 100) * all * 1000) / 1000);
+        const capacity = { memoryGb: gb(server.memoryMb), cores: server.cores || null, diskGb: gb(server.diskMb) };
+        const out = { span: s.span, from: s.from, to: s.to, t: s.t, capacity, server: {}, itself: {}, machines: [] };
+        for (const m of MEASURES) out.server[m] = s[m].map((v) => abs(v, m === 'cpu' ? capacity.cores : capacity[`${m}Gb`]));
+        for (const x of machines) {
+            const own = this.series(x.name, span);
+            const at = new Map(own.t.map((t, i) => [t, i]));
+            const alloc = { memoryGb: gb(x.memoryMb), cores: x.cores || 1, diskGb: gb(x.diskMb) };
+            const first = own.t[0] ?? Infinity;
+            /* Asleep (or not looked inside), its disk is still taken: what it holds on this server's disk, from its first look on. */
+            const held = gb(x.hostDiskMb);
+            const curve = (m, all) => s.t.map((t) => { const i = at.get(t); const v = i === undefined ? null : abs(own[m][i], all); return v === null && m === 'disk' && held !== null && t >= first ? held : v; });
+            out.machines.push({ name: x.name, alloc, asleep: Boolean(x.asleep), since: x.asleep ? this.lastSeen(x.name) : null, memory: curve('memory', alloc.memoryGb), cpu: curve('cpu', alloc.cores), disk: curve('disk', alloc.diskGb), marks: own.marks });
+        }
+        /* The server itself: its total less its machines, never below nothing (the two are not read at the same instant). */
+        for (const m of MEASURES) out.itself[m] = out.server[m].map((v, i) => (v === null ? null : Math.max(0, Math.round((v - out.machines.reduce((a, x) => a + (x[m][i] ?? 0), 0)) * 1000) / 1000)));
+        return out;
+    }
+
+    /* When a machine was last seen running (its memory known), over the whole week kept; null if never. */
+    lastSeen(of) {
+        const k = this.#keys.get(of); if (!k) return null;
+        const rows = [...k.blocks, ...(k.block ? [k.block] : []), ...k.minutes];
+        let last = null; for (const r of rows) if (r[1] !== null && (last === null || r[0] > last)) last = r[0];
+        return last;
     }
 
     forget(name) { this.#keys.delete(name); }
