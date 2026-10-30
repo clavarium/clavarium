@@ -258,8 +258,12 @@ test('what is wrong with its machine is said in its chat, once, where it happene
     assert.deepEqual(b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1).actions, ['room', 'disk', 'seen']);
     /* Well again, then short of memory again: said again. Information alone is never said. */
     b.talk.machine('helper', { state: 'Running', level: 'info', problems: [{ level: 'info', kind: 'mount', key: 'remounted:/work', text: '/work had come loose' }] });
+    /* Gone, it is said once: the lines that asked are answered (the page offers their "Seen" no more). */
+    const ok = b.talk.of('helper').messages.filter((m) => m.from === 'system').at(-1);
+    assert.deepEqual([ok.event, ok.text, ok.level, ok.actions], ['machine-ok', 'Its memory is no longer short. What was wrong with its machine is gone. Its disk has room again.', 'news', []]);
+    b.talk.machine('helper', { state: 'Running', level: 'info', problems: [] });
     b.talk.machine('helper', memory);
-    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 4);
+    assert.equal(b.talk.of('helper').messages.filter((m) => m.from === 'system').length, 5, 'said once when gone; then short again: said again');
     assert.deepEqual(b.typed.filter((x) => x !== WAKE && x !== 'Enter'), [], 'nothing of it is typed to the tool');
 });
 
@@ -464,7 +468,7 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     const sent = b.talk.event('helper', { kind: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', topic: 'Sent', brief: 'preprod', actions: ['review:app', 'bad action!', 'x'.repeat(30)] });
     assert.deepEqual({ ...sent, id: 'id', at: 'at' }, { id: 'id', at: 'at', event: 'sent', text: 'Sent to preprod: 2 commits, checks passed.', level: 'news', topic: 'Sent', brief: 'preprod', actions: ['review:app'] });
     const levels = Object.fromEntries(Object.keys(EVENT_LEVELS).map((kind) => [kind, b.talk.event('helper', { kind, text: kind }).level]));
-    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace', 'tether-demande': 'needs-you', 'tether-done': 'trace' });
+    assert.deepEqual(levels, { sent: 'news', refused: 'needs-you', 'sent-by-hand': 'news', origin: 'trace', wakeup: 'trace', 'machine-problem': 'needs-you', 'machine-ok': 'news', restarted: 'news', 'tools-updated': 'news', 'docket-done': 'trace', 'docket-failed': 'needs-you', 'docket-unhandled': 'needs-you', 'docket-reminder': 'trace', 'tether-demande': 'needs-you', 'tether-done': 'trace' });
     assert.throws(() => b.talk.event('helper', { kind: 'gossip', text: 'x' }), /No such kind/);
     assert.equal(b.talk.event('helper', { kind: 'sent', text: '  ' }), null, 'nothing to say: no line');
     /* Bounds: topic, brief, text; a tone only of the two. */

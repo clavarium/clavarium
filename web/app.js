@@ -2775,10 +2775,13 @@
         const seenWords = seenAt ? `\u2713 Seen ${new Date(seenAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
         /* Restart, offered by a line, is offered no more once its machine was restarted after it. */
         const restartedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'restarted').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        /* A problem of its machine that went away since (machine-ok): nothing left to see or to do on its line. */
+        const fixedAt = data.messages.filter((m) => m.from === 'system' && m.event === 'machine-ok').map((m) => String(m.at ?? '')).sort().pop() ?? '';
+        const FIXED_GOES = new Set(['seen', 'room', 'disk', 'memory']);
         /* A Tether demande decided (here, from Assets, or by the agent) is marked done in the thread,
            carrying its id: Accept / Refuse are then offered no more on the line that asked. */
         const settled = new Set(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => String(m.brief)));
-        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
+        const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
         return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
     }
@@ -2986,6 +2989,7 @@
         ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
         ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
+        ['machine-ok', 'Machine well again', 'What was wrong with it went away'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
         ['tools-updated', 'New tools', 'After an update: a restart gives its tool all of them'],
     ];

@@ -147,6 +147,7 @@ export const EVENT_LEVELS = Object.freeze({
     origin: 'trace',
     wakeup: 'trace',
     'machine-problem': 'needs-you',
+    'machine-ok': 'news',
     restarted: 'news',
     /* New tools in its machine that its tool reads only when it starts: a restart recommended (main.mjs). */
     'tools-updated': 'news',
@@ -578,6 +579,12 @@ export class Talk {
         const before = new Set(r.machineKeys ?? []);
         const fresh = serious.filter((p) => !before.has(p.key ?? p.text));
         if (keys.join('|') !== (r.machineKeys ?? []).join('|')) this.#store.put({ ...r, machineKeys: keys });
+        /* What went away, said once, the machine running: the lines that asked for it ask no more (app.js). */
+        const gone = record.state === 'Running' ? [...before].filter((k) => !keys.includes(k)) : [];
+        if (gone.length) {
+            const said = [...new Set(gone.map((k) => (/^disk:/.test(k) ? 'Its disk has room again.' : k === 'memory-low' ? 'Its memory is no longer short.' : /^oom:/.test(k) ? '' : 'What was wrong with its machine is gone.')).filter(Boolean))];
+            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine' });
+        }
         if (fresh.length === 0) return;
         this.event(name, {
             kind: 'machine-problem',
