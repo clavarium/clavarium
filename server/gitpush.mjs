@@ -27,7 +27,7 @@
  * password, which only ever goes back to the https origin it was given for.
  */
 import { Refusal } from './conversations.mjs';
-import { GitAccess, readAddress, explain, remoteSaid } from './gitaccess.mjs';
+import { GitAccess, readAddress, explain, remoteSaid, remoteAll } from './gitaccess.mjs';
 import { GitRunner, GitFailure, EMPTY_TREE, branchProblem, protocolOf, isId } from './gitrunner.mjs';
 
 export { branchProblem };
@@ -661,7 +661,11 @@ export class GitReview {
                     const hooks = remoteSaid(pushed.stderr);
                     const why = verdict || explain(pushed.stderr) || firstLine(summary);
                     const said = hooks ? `; it said: "${hooks.split('\n').join(' / ').replace(/"/g, "'")}"` : '';
-                    throw new GitFailure(502, 'refused', `The remote refused: ${why}${said}`, { detail: hooks, ai: `the remote refused the sending to ${target}: ${why}${said}` });
+                    const failure = new GitFailure(502, 'refused', `The remote refused: ${why}${said}`, { detail: hooks, ai: `the remote refused the sending to ${target}: ${why}${said}` });
+                    /* All it said, when the summary left some out: put where the agent can read it (main.mjs). */
+                    const all = remoteAll(pushed.stderr);
+                    if (all && all !== hooks) failure.full = all;
+                    throw failure;
                 }
                 /* (5) The pushed commits enter the reference only as the remote's history. */
                 const after = await this.#refreshLocked(r, { branch: target, head });

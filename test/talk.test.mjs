@@ -578,3 +578,17 @@ test('the thread is kept in this server\'s data, out of its machine: a line the 
     b.talk.forget('helper');
     assert.equal(existsSync(kept), false, 'gone with the conversation');
 });
+
+test('a text this server gives the tool to read: in the bridge folder, a folder of its own; never through a link; nothing when the chat is off', async (t) => {
+    const b = bench(t);
+    assert.equal(b.talk.keepText('helper', 'git-remote-refused.txt', 'all of it'), null, 'chat off');
+    await b.talk.set('helper', true);
+    const path = b.talk.keepText('helper', 'git remote/../refused.txt', 'line 1\nline 2');
+    assert.match(path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/git-remote-..-refused\.txt$/);
+    assert.equal(readFileSync(join(b.dir, 'work', 'helper', path.slice(6)), 'utf8'), 'line 1\nline 2');
+    const outside = join(b.dir, 'outside-text'); mkdirSync(outside);
+    rmSync(join(b.bridge, 'files'), { recursive: true, force: true });
+    symlinkSync(outside, join(b.bridge, 'files'));
+    assert.equal(b.talk.keepText('helper', 'x.txt', 'x'), null);
+    assert.deepEqual(readdirSync(outside), []);
+});

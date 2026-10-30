@@ -428,11 +428,16 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        automatic sending to the branches the owner listed: see gitkeeper.mjs. */
     /* What could not be read is told to the agents that write in the repository, where they can act. */
     /* `only`: the conversation whose automatic sending it is about: its agent alone can act on it. */
-    const tellAgent = async (repository, line, only) => {
+    /* `full`: what the line sums up (all a remote said), put in each one's chat folder for it to read. */
+    const tellAgent = async (repository, line, only, full) => {
         const writers = Object.entries(folders.list().find((x) => x.name === repository)?.attachments ?? {}).filter(([, access]) => access === 'write').map(([conversation]) => conversation).filter((c) => only === undefined || c === only);
         /* Told: at least one of them had the line typed (see GitKeeper #toAgent). */
         let heard = false;
-        for (const conversation of writers) if (await wakeups.say(conversation, line) === true) heard = true;
+        for (const conversation of writers) {
+            let path = null;
+            if (full) { try { path = talk.keepText(conversation, 'git-remote-refused.txt', full); } catch { path = null; } }
+            if (await wakeups.say(conversation, path ? `${line.replace(/\.$/, '')}; all it said: ${path}.` : line) === true) heard = true;
+        }
         return heard;
     };
     /* What happened to a repository is said in the chat of the conversations it is attached to (talk.mjs). */

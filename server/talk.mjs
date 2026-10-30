@@ -60,7 +60,7 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, lstatSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
@@ -492,6 +492,23 @@ export class Talk {
         mkdirSync(join(this.#dir(name), FILES, id));
         const kept = await importFile(join(this.#dir(name), FILES), id, String(fileName ?? ''), request);
         return { path: `${IN_MACHINE}/${FILES}/${id}/${kept.name}`, name: kept.name, size: kept.size };
+    }
+
+    /* A TEXT THIS SERVER GIVES THE TOOL TO READ (all a git remote said when it refused a sending): put
+       where the person's files go, in a folder of its own. Resolves with where the tool finds it, or
+       null when the chat is off or its folder is not as it should be. */
+    keepText(name, fileName, text) {
+        if (!this.of(name).on) return null;
+        const own = (path) => { const i = lstatSync(path, { throwIfNoEntry: false }); return i === undefined || (i.isDirectory() && !i.isSymbolicLink()); };
+        const dir = this.#dir(name);
+        if (!lstatSync(dir, { throwIfNoEntry: false }) || !own(dir) || !own(join(dir, FILES))) return null;
+        if (!lstatSync(join(dir, FILES), { throwIfNoEntry: false })) mkdirSync(join(dir, FILES));
+        if (!own(join(dir, FILES))) return null;
+        const id = randomUUID();
+        const file = String(fileName).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80) || 'text.txt';
+        mkdirSync(join(dir, FILES, id));
+        writeFileSync(join(dir, FILES, id, file), String(text ?? ''), { flag: 'wx', mode: 0o644 });
+        return `${IN_MACHINE}/${FILES}/${id}/${file}`;
     }
 
     /* Whether a file (as the page opens it: "work:report.html") is one of

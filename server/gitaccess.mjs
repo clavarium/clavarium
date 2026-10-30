@@ -86,6 +86,13 @@ export function explain(stderr) {
 /* What the remote's own hooks said (pre-receive, update: the "remote:" lines of a push), for a
    person and for the agent: colours and control characters out, git's progress lines out, the
    last REMOTE_LINES lines, REMOTE_CHARS characters at most. Text of the remote: data, quoted. */
+export const REMOTE_ALL = 64 * 1024;
+/* All of it, cleaned the same way, for a file the agent reads (REMOTE_ALL characters at most, the end kept). */
+export function remoteAll(stderr) {
+    const text = String(stderr ?? '').split(/\r?\n|\r/).filter((l) => /^remote:/.test(l))
+        .map((l) => l.replace(/^remote:\s?/, '').replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]/g, '').replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trimEnd()).join('\n').trim();
+    return text.length > REMOTE_ALL ? `…${text.slice(-REMOTE_ALL)}` : text;
+}
 export const REMOTE_LINES = 20;
 export const REMOTE_CHARS = 1500;
 export function remoteSaid(stderr) {

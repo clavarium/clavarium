@@ -543,6 +543,7 @@ test('refused by a hook of the remote: its verdict and what the hook said reach 
         assert.doesNotMatch(e.message, /\x1b|failed to push some refs/);
         assert.match(e.ai, /^the remote refused the sending to main: .*pre-receive hook declined.*; it said: "GH006: Protected branch update failed \/ - Commit messages must name a ticket \(ABC-123\)\."$/);
         assert.doesNotMatch(e.ai, /\n/);
+        assert.equal(e.full, undefined, 'nothing left out: no file for the agent');
         return true;
     });
     assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), first);
@@ -562,4 +563,22 @@ test('what the remote said: remote lines only, no colours, no progress, bounded'
     assert.match(kept, /scanned 199$/);
     assert.match(remoteSaid(many), /line 49$/);
     assert.ok(remoteSaid(`remote: ${'x'.repeat(5000)}`).length <= 1501);
+});
+
+test('a hook that says a lot: the summary for the line, all of it for a file the agent reads', async (t) => {
+    const b = bench(t);
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoing('site'); await b.review.push('site', { head: first });
+    writeFileSync(join(b.remote, 'hooks', 'pre-receive'), '#!/bin/sh\nfor i in $(seq 1 100); do echo "scanned file $i" >&2; done\necho "ERROR: a secret in config.yml" >&2\nfor i in $(seq 1 100); do echo "scanned more $i" >&2; done\nexit 1\n');
+    chmodSync(join(b.remote, 'hooks', 'pre-receive'), 0o755);
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    await b.review.outgoing('site');
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => {
+        assert.match(e.ai, /ERROR: a secret in config\.yml/);
+        assert.match(e.ai, /lines left out/);
+        assert.equal(e.full.split('\n').length, 201);
+        assert.match(e.full, /^scanned file 1\n[\s\S]*\nERROR: a secret in config\.yml\n[\s\S]*scanned more 100$/);
+        return true;
+    });
 });
