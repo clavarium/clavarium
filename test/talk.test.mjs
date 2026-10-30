@@ -4,7 +4,7 @@
    itself, its verbs and its cleaning are tested where they live, in Parley. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, readFileSync, existsSync, writeFileSync, symlinkSync, readdirSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -586,6 +586,17 @@ test('a text this server gives the tool to read: in the bridge folder, a folder 
     const path = b.talk.keepText('helper', 'git remote/../refused.txt', 'line 1\nline 2');
     assert.match(path, /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/git-remote-..-refused\.txt$/);
     assert.equal(readFileSync(join(b.dir, 'work', 'helper', path.slice(6)), 'utf8'), 'line 1\nline 2');
+    /* Kept a week, ten at most: the older ones go when another is given. */
+    const files = join(b.bridge, 'files');
+    const given = Array.from({ length: 12 }, (_, i) => b.talk.keepText('helper', 'git-remote-refused.txt', `n${i}`));
+    const left = () => readdirSync(files).filter((d) => existsSync(join(files, d, 'git-remote-refused.txt')));
+    assert.equal(left().length, 10);
+    for (const d of left().slice(3)) rmSync(join(files, d), { recursive: true });
+    const old = left()[0];
+    utimesSync(join(files, old, 'git-remote-refused.txt'), new Date(Date.now() - 8 * 86_400_000), new Date(Date.now() - 8 * 86_400_000));
+    b.talk.keepText('helper', 'git-remote-refused.txt', 'newest');
+    assert.ok(!existsSync(join(files, old)), 'a week old: gone');
+    assert.ok(existsSync(join(b.dir, 'work', 'helper', path.slice(6))), 'another name is left alone');
     const outside = join(b.dir, 'outside-text'); mkdirSync(outside);
     rmSync(join(b.bridge, 'files'), { recursive: true, force: true });
     symlinkSync(outside, join(b.bridge, 'files'));

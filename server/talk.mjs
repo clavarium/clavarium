@@ -60,7 +60,7 @@
  */
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
@@ -70,6 +70,9 @@ import { isConversationName } from './names.mjs';
 
 export const FOLDER = '.parley';
 const IN_MACHINE = `/work/${FOLDER}`;
+/* Texts this server gives the tool to read (keepText): kept this many days, this many at most of one name. */
+export const KEPT_TEXT_DAYS = 7;
+export const KEPT_TEXTS = 10;
 /* A part of the thread as the page asks for it (?last=200, ?days=3, ?before=ID, ?from=ID, ?since=CURSOR): Parley's options, or null. */
 export function partOf(query) {
     if (!query || typeof query !== 'object') return null;
@@ -506,6 +509,15 @@ export class Talk {
         if (!own(join(dir, FILES))) return null;
         const id = randomUUID();
         const file = String(fileName).replace(/[^A-Za-z0-9._-]/g, '-').slice(0, 80) || 'text.txt';
+        /* Those of the same name given before go after KEPT_TEXT_DAYS, and beyond the newest KEPT_TEXTS. */
+        const before = [];
+        for (const d of readdirSync(join(dir, FILES), { withFileTypes: true })) {
+            if (!d.isDirectory()) continue;
+            const f = lstatSync(join(dir, FILES, d.name, file), { throwIfNoEntry: false });
+            if (f?.isFile() && readdirSync(join(dir, FILES, d.name)).length === 1) before.push({ name: d.name, at: f.mtimeMs });
+        }
+        before.sort((a, b) => b.at - a.at);
+        before.forEach((x, i) => { if (i >= KEPT_TEXTS - 1 || Date.now() - x.at > KEPT_TEXT_DAYS * 86_400_000) rmSync(join(dir, FILES, x.name), { recursive: true, force: true }); });
         mkdirSync(join(dir, FILES, id));
         writeFileSync(join(dir, FILES, id, file), String(text ?? ''), { flag: 'wx', mode: 0o644 });
         return `${IN_MACHINE}/${FILES}/${id}/${file}`;
