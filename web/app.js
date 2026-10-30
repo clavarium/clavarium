@@ -338,6 +338,24 @@
        keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */
     let listFolded = true;
     try { listFolded = localStorage.getItem('clavarium-list') !== 'open'; } catch { /* a private window */ }
+    /* PINNED OPEN (the pin at the top of the list): it stays open, even when a conversation is opened.
+       Folding it by hand takes the pin out. Kept on this device. */
+    let listPinned = false;
+    try { listPinned = localStorage.getItem('clavarium-list-pin') === 'on'; } catch { /* a private window */ }
+    if (listPinned) listFolded = false;
+    const paintPin = () => {
+        $('list-pin').setAttribute('aria-pressed', String(listPinned));
+        const label = listPinned ? 'The list stays open: click to let it fold when a conversation is opened' : 'Keep the list open: it no longer folds when a conversation is opened';
+        $('list-pin').title = label; $('list-pin').setAttribute('aria-label', listPinned ? 'Unpin the list' : 'Keep the list open');
+    };
+    const pin = (on) => {
+        listPinned = on;
+        try { localStorage.setItem('clavarium-list-pin', on ? 'on' : 'off'); } catch { /* as above */ }
+        paintPin();
+    };
+    paintPin();
+    if (DEVICE) $('list-pin').hidden = true;
+    $('list-pin').addEventListener('click', () => { pin(!listPinned); if (listPinned && listFolded) $('fold').click(); });
     /* THE LIST SLIDES, THE PAGE IS LAID OUT ONCE. Animating the grid's columns laid the whole page out (and
        redrew the terminal) at every frame: it stuttered. The columns change once, the room taking the whole
        width (its far side off the screen), and the list, the menu and the room slide -- transforms, which cost
@@ -346,6 +364,7 @@
     const still = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || window.innerWidth <= 700;
     $('fold').addEventListener('click', async () => {
         listFolded = !listFolded;
+        if (listFolded && listPinned) pin(false);
         try { localStorage.setItem('clavarium-list', listFolded ? 'folded' : 'open'); } catch { /* as above */ }
         const folded = listFolded;
         if (still()) { applyFold(folded); fit.fit(); focusTerminal(); return; }
@@ -932,7 +951,7 @@
         /* Opening a conversation gets the list out of the way, so its room has the room;
            the "»" button brings the list back. Only on a real pick by the owner, never on a
            device or when deselecting. */
-        if (step && name && !DEVICE && !listFolded) {
+        if (step && name && !DEVICE && !listFolded && !listPinned) {
             listFolded = true;
             try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
             applyFold(true); fit.fit?.();
