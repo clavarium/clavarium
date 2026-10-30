@@ -97,6 +97,8 @@
  *   GET  /api/meshcentral: the remote screen (MeshCentral); POST /api/meshcentral/enable (turned on, in the background) /disable
  *   GET  /api/events?kind=&conversation=&q=&before=&limit=   what happened, newest first
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
+ *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
+ *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
  *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
@@ -128,7 +130,7 @@
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
 import { sameOrigin } from './bridge.mjs';
-import { Refusal } from './conversations.mjs';
+import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
@@ -295,6 +297,18 @@ export async function handleApi(request, response, conversations, headers, resou
                     };
                 }
                 return send(200, curves), true;
+            }
+            if (pathname === '/api/history/all' && history) {
+                const a = capacity ? await capacity.about().catch(() => null) : null;
+                const room = capacity ? await capacity.room().catch(() => null) : null;
+                /* What each machine's disk takes on this server, measured now and then (known asleep too). */
+                const held = new Map((a?.usage?.machines?.each ?? []).map((x) => [x.name, x.mb]));
+                const machines = conversations.list().filter((c) => ['ready', 'restarting', 'moving'].includes(c.phase)).map((c) => ({
+                    name: c.name, memoryMb: c.memoryMb, cores: c.cpus ?? 1, asleep: c.asleep === true,
+                    /* Its disk as its machine sees it when known, else the size it was given. */
+                    diskMb: health?.of(c.name)?.disks?.['/']?.sizeMb ?? (c.diskGb ?? DISK_GB) * 1024, hostDiskMb: held.get(c.name),
+                }));
+                return send(200, history.together(query.get('span') ?? '1h', machines, { memoryMb: a?.memory?.totalMb, cores: room?.cpu?.cores, diskMb: a?.disk?.sizeMb })), true;
             }
             if (pathname === '/api/server/logs' && serverLogs) return send(200, await serverLogs.read(query.get('source') ?? 'clavarium', query.get('span') ?? '1')), true;
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;

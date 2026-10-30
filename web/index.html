@@ -855,6 +855,37 @@
              (server/updates.mjs; the updater, as root: deploy/updater.mjs). -->
           </div>
         </details>
+        <!-- USAGE: who takes the memory, the CPU and the disk -- each machine and this server itself,
+             now and over time, in GB and cores (server/history.mjs together(); GET /api/history/all). -->
+        <details class="chapter" id="settings-usage-top" data-chapter="s-usage">
+          <summary><span class="chapter-title">Usage</span><span class="chapter-about">Who takes the memory, the CPU and the disk.</span></summary>
+          <div class="chapter-body">
+        <div id="usage" class="usage">
+          <p id="usage-none" class="hint" hidden>Nothing measured yet.</p>
+          <div class="u-tiles" id="usage-tiles" role="group" aria-label="Measure"></div>
+          <div class="u-legend" id="usage-legend" role="group" aria-label="Conversations"></div>
+          <section class="u-chart">
+            <div class="u-toolbar">
+              <h4 id="usage-chart-title">Memory over time</h4>
+              <span class="u-sp"></span>
+              <div class="levels" id="usage-measure" role="group" aria-label="Measure"><button type="button" data-m="memory" aria-pressed="true">Memory</button><button type="button" data-m="cpu" aria-pressed="false">CPU</button><button type="button" data-m="disk" aria-pressed="false">Disk</button></div>
+              <div class="levels" id="usage-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="false">1 h</button><button type="button" data-span="24h" aria-pressed="true">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div>
+            </div>
+            <div class="u-plot" id="usage-plot"><svg id="usage-svg" role="img"></svg><div class="u-tip" id="usage-tip" hidden></div></div>
+            <div class="u-foot">
+              <span class="u-k"><span class="u-k-cap"></span>Server capacity</span>
+              <span class="u-k"><i class="u-sw" style="background:var(--s0)"></i>This server itself</span>
+              <span class="u-k" id="usage-k-oom"><span class="u-k-oom"></span>Memory full (a program stopped)</span>
+            </div>
+          </section>
+          <section>
+            <div class="u-list-head"><h4 id="usage-list-title">Memory per conversation</h4><p class="hint">Tap a row to see it alone in the chart.</p></div>
+            <table class="u-rank" id="usage-rank"></table>
+            <div class="u-cards" id="usage-cards"></div>
+          </section>
+        </div>
+          </div>
+        </details>
         <details class="chapter" id="settings-ch-backup" data-chapter="s-backup">
           <summary><span class="chapter-title">Backup</span><span class="chapter-about">Export, import, full backup.</span></summary>
           <div class="chapter-body">

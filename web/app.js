@@ -5309,6 +5309,7 @@
         void paintInstance();
         if ($('settings-wifi-top').open) void paintWifi();
         if ($('settings-mesh-top').open) void paintScreen();
+        if ($('settings-usage-top').open) void paintUsage();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
 
@@ -6103,10 +6104,248 @@
     }
     /* Kept current while in sight: a new look a minute. */
     setInterval(() => { for (const box of document.querySelectorAll('.curves')) if (box.offsetParent !== null) void paintCurves(box, { force: true }); }, 60_000);
+    /* SETTINGS, USAGE (server/history.mjs together(); GET /api/history/all): who takes the memory, the CPU
+       and the disk -- each machine and this server itself, in GB and cores, now (three tiles) and over time
+       (one stacked chart), then ranked. One colour per conversation, given by the order of the names: a
+       conversation keeps its colour whatever its rank, and from one span or measure to the next. */
+    const USAGE_WORD = { memory: 'Memory', cpu: 'CPU', disk: 'Disk' };
+    const USAGE_SPAN = { '1h': '1 h', '24h': '24 h', '7d': '7 days' };
+    const usage = { r: null, measure: 'memory', span: '24h', focus: null };
+    const uEsc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+    const uKey = (m) => (m === 'cpu' ? 'cores' : `${m}Gb`);
+    const uFix = (v, d) => (Math.round(v * 10 ** d) / 10 ** d).toFixed(d);
+    const uFmt = (m, v) => (m === 'cpu' ? `${uFix(v, 1)} ${uFix(v, 1) === '1.0' ? 'core' : 'cores'}` : `${uFix(v, m === 'disk' && v >= 10 ? 0 : 1)} GB`);
+    const uAlloc = (m, v) => (m === 'cpu' ? `${v} ${v === 1 ? 'core' : 'cores'}` : `${uFix(v, Number.isInteger(v) ? 0 : 1)} GB`);
+    const uAgo = (ms) => { const m = Math.round(ms / 60_000); return m < 1 ? 'just now' : m < 60 ? `${m} min` : m < 48 * 60 ? `${Math.round(m / 60)} h` : `${Math.round(m / 1440)} days`; };
+    const uWhen = (t) => new Date(t).toLocaleString([], usage.span === '7d' ? { weekday: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' } : { hour: '2-digit', minute: '2-digit' });
+    /* Six colours, then the same six hatched; past twelve, the rest is one "others" (never a colour reused silently). */
+    const uFill = (x) => (x.hatch ? `repeating-linear-gradient(135deg, var(--${x.c}) 0 3px, transparent 3px 5px)` : `var(--${x.c})`);
+    function usageWho(r) {
+        const all = [...r.machines].sort((a, b) => a.name.localeCompare(b.name));
+        const many = all.length > 12; const shown = many ? all.slice(0, 11) : all;
+        const who = shown.map((x, i) => ({ ...x, key: x.name, c: `s${(i % 6) + 1}`, hatch: i >= 6 }));
+        if (many) {
+            const rest = all.slice(11);
+            const sum = (m) => r.t.map((_, i) => (rest.some((x) => x[m][i] !== null) ? rest.reduce((a, x) => a + (x[m][i] ?? 0), 0) : null));
+            const alloc = (k) => rest.reduce((a, x) => a + (x.alloc[k] ?? 0), 0);
+            who.push({ name: `${rest.length} others`, key: '__others', c: 's0', hatch: true, asleep: rest.every((x) => x.asleep), since: null, alloc: { memoryGb: alloc('memoryGb'), cores: alloc('cores'), diskGb: alloc('diskGb') }, memory: sum('memory'), cpu: sum('cpu'), disk: sum('disk'), marks: rest.flatMap((x) => x.marks) });
+        }
+        return who;
+    }
+    const uAsleep = (x, m) => x.asleep && m !== 'disk';
+    const uLast = (r, m) => { for (let i = r.t.length - 1; i >= 0; i -= 1) if (r.server[m][i] !== null) return i; return -1; };
+    const uCap = (r, m) => r.capacity[uKey(m)] ?? Math.max(1, ...r.server[m].filter((v) => v !== null));
+    function paintUsageTiles(r, who) {
+        const box = $('usage-tiles'); box.replaceChildren();
+        for (const m of ['memory', 'cpu', 'disk']) {
+            const i = uLast(r, m); const cap = uCap(r, m);
+            const parts = who.map((x) => ({ x, v: i < 0 ? 0 : x[m][i] ?? 0 }));
+            const itself = i < 0 ? 0 : r.itself[m][i] ?? 0;
+            const used = i < 0 ? 0 : r.server[m][i];
+            const top = [...parts].sort((a, b) => b.v - a.v)[0];
+            const b = el('button', 'u-tile'); b.type = 'button'; b.setAttribute('aria-pressed', String(usage.measure === m));
+            const seg = (name, v, fill, faded) => `<span title="${uEsc(name)} · ${uFmt(m, v)}" style="width:${(v / cap) * 100}%;background:${fill}${faded ? ';opacity:.25' : ''}"></span>`;
+            b.innerHTML = `<div class="u-tile-head"><span class="u-tile-what">${USAGE_WORD[m]}</span><span class="u-tile-pct u-num">${i < 0 ? '' : `${Math.round((used / cap) * 100)} %`}</span></div>
+                <div class="u-tile-big u-num">${i < 0 ? '—' : uFmt(m, used)} <small>of ${uAlloc(m, cap)}</small></div>
+                <div class="u-stack" aria-hidden="true">${parts.filter((p) => p.v > 0).map((p) => seg(p.x.name, p.v, uFill(p.x), usage.focus && usage.focus !== p.x.key)).join('')}${itself > 0 ? seg('This server itself', itself, 'var(--s0)', Boolean(usage.focus)) : ''}</div>
+                <div class="u-tile-foot"><span>Free ${i < 0 ? '—' : uFmt(m, Math.max(0, cap - used))}</span><span>${top?.v > 0 ? `Most: ${uEsc(top.x.name)}` : ''}</span></div>`;
+            b.addEventListener('click', () => { usage.measure = m; paintUsageAll(); });
+            box.append(b);
+        }
+    }
+    function paintUsageLegend(who) {
+        $('usage-legend').replaceChildren(...who.map((x) => {
+            const b = el('button', `u-chip${x.asleep ? ' asleep' : ''}`); b.type = 'button'; b.setAttribute('aria-pressed', String(usage.focus === x.key));
+            const sw = el('i'); sw.style.background = uFill(x);
+            b.append(sw, document.createTextNode(x.name)); if (x.asleep) b.append(document.createTextNode(' '), el('span', 'u-z', 'asleep'));
+            b.addEventListener('click', () => usageFocus(x.key));
+            return b;
+        }));
+    }
+    function uNiceStep(max, ticks) { const raw = max / ticks; const p = 10 ** Math.floor(Math.log10(raw)); for (const k of [1, 2, 2.5, 5, 10]) if (k * p >= raw) return k * p; return 10 * p; }
+    let usageGeo = null;
+    function paintUsageChart(r, who) {
+        const svg = $('usage-svg'); svg.replaceChildren(); $('usage-tip').hidden = true;
+        const m = usage.measure; const N = r.t.length;
+        const W = $('usage-plot').clientWidth || 600; usageWidth = W; const phone = W < 560; const H = phone ? 230 : 300;
+        const M = { l: phone ? 34 : 44, r: phone ? 6 : 128, t: 14, b: 24 };
+        svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.setAttribute('height', H);
+        $('usage-chart-title').textContent = `${USAGE_WORD[m]} over time`;
+        $('usage-k-oom').hidden = m !== 'memory';
+        const cap = uCap(r, m);
+        /* The machines in their fixed order, bottom to top; the server itself on top. */
+        const layers = [...who.map((x) => ({ key: x.key, x, v: x[m] })), { key: '__sys', x: { c: 's0', name: 'This server itself' }, v: r.itself[m] }];
+        const tops = []; let acc = new Array(N).fill(0);
+        for (const L of layers) { const lo = acc; const hi = lo.map((a, i) => a + (L.v[i] ?? 0)); tops.push({ ...L, lo, hi }); acc = hi; }
+        const ymax = Math.max(cap, ...acc) * 1.06;
+        const step = uNiceStep(ymax, phone ? 4 : 5);
+        const t0 = r.from; const t1 = r.to; const pw = W - M.l - M.r;
+        const x = (t) => M.l + ((t - t0) / Math.max(1, t1 - t0)) * pw;
+        const y = (v) => H - M.b - (v / ymax) * (H - M.t - M.b);
+        for (let v = 0; v <= ymax; v += step) { svg.append(svgEl('line', { class: v === 0 ? 'u-base' : 'u-gridline', x1: M.l, x2: W - M.r, y1: y(v), y2: y(v) })); const tx = svgEl('text', { x: M.l - 6, y: y(v) + 4, 'text-anchor': 'end' }); tx.textContent = String(Math.round(v * 10) / 10); svg.append(tx); }
+        const unit = svgEl('text', { x: M.l - 6, y: M.t - 4, 'text-anchor': 'end' }); unit.textContent = m === 'cpu' ? 'cores' : 'GB'; svg.append(unit);
+        /* Time ticks: midnights over a week, round hours (or ten minutes) else. */
+        const tickStep = usage.span === '7d' ? 24 * 3600_000 : usage.span === '1h' ? (phone ? 15 : 10) * 60_000 : (phone ? 6 : 3) * 3600_000;
+        const first = new Date(t0); if (usage.span === '7d') first.setHours(24, 0, 0, 0); else first.setTime(Math.ceil(t0 / tickStep) * tickStep);
+        for (let t = first.getTime(); t <= t1; t += tickStep) {
+            if (x(t) < M.l + 14 || x(t) > W - M.r - 14) continue;
+            const e = svgEl('text', { x: x(t), y: H - 6, 'text-anchor': 'middle' }); e.textContent = new Date(t).toLocaleString([], usage.span === '7d' ? { weekday: 'short', day: 'numeric' } : { hour: '2-digit', minute: '2-digit' }); svg.append(e);
+        }
+        /* Hatched fills, for the seventh conversation on. */
+        const defs = svgEl('defs', {}); svg.append(defs);
+        const fillOf = (L) => { if (!L.x.hatch) return `fill:var(--${L.x.c})`; const id = `u-h-${L.x.c}`; if (!defs.querySelector(`#${id}`)) { const p = svgEl('pattern', { id, width: 5, height: 5, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' }); p.append(svgEl('rect', { width: 3, height: 5, style: `fill:var(--${L.x.c})` })); defs.append(p); } return `fill:url(#${id})`; };
+        /* A gap in the looks (the server was down) is a gap in the chart: one shape per run of looks. */
+        const gap = 3 * (usage.span === '7d' ? 15 * 60_000 : 60_000);
+        const runs = []; let run = null;
+        r.t.forEach((t, i) => { if (r.server[m][i] === null) { run = null; return; } if (!run || t - r.t[i - 1] > gap) { run = []; runs.push(run); } run.push(i); });
+        const g = svgEl('g', {}); svg.append(g);
+        for (const L of tops) {
+            const faded = usage.focus && usage.focus !== L.key; const focused = usage.focus === L.key;
+            for (const ix of runs) {
+                let d = ix.map((i, k) => `${k ? 'L' : 'M'}${x(r.t[i]).toFixed(1)},${y(L.hi[i]).toFixed(1)}`).join('');
+                const top = d;
+                d += [...ix].reverse().map((i) => `L${x(r.t[i]).toFixed(1)},${y(L.lo[i]).toFixed(1)}`).join('');
+                g.append(svgEl('path', { d: `${d}Z`, class: `u-band${faded ? ' u-faded' : ''}`, style: fillOf(L), 'fill-opacity': focused ? 0.95 : L.key === '__sys' ? 0.55 : 0.78 }));
+                if (!faded && L.key !== '__sys') g.append(svgEl('path', { d: top, class: 'u-band-top', style: `stroke:var(--${L.x.c})${L.x.hatch ? ';stroke-dasharray:4 2' : ''}` }));
+            }
+        }
+        svg.append(svgEl('line', { class: 'u-cap', x1: M.l, x2: W - M.r, y1: y(cap), y2: y(cap) }));
+        const capWord = svgEl('text', { x: M.l + 6, y: y(cap) - 6 }); capWord.textContent = `Capacity · ${uAlloc(m, Math.round(cap * 10) / 10)}`; svg.append(capWord);
+        /* Memory full: a red mark on the band of its conversation. */
+        if (m === 'memory') for (const L of tops) for (const at of L.x.marks ?? []) {
+            if (usage.focus && usage.focus !== L.key) continue;
+            const i = r.t.findIndex((t) => t >= at); if (i < 0) continue;
+            svg.append(svgEl('circle', { class: 'u-oom', cx: x(r.t[i]), cy: y(L.hi[i]), r: 5 }));
+            if (!phone) { const end = x(r.t[i]) > W - M.r - 50; const w = svgEl('text', { x: end ? x(r.t[i]) + 4 : x(r.t[i]), y: y(L.hi[i]) - 10, 'text-anchor': end ? 'end' : 'middle', class: 'u-oom-word' }); w.textContent = 'memory full'; svg.append(w); }
+        }
+        /* Names at the right end, for bands thick enough; pushed apart so none overlaps. */
+        const last = runs.at(-1)?.at(-1);
+        if (!phone && last !== undefined) {
+            const words = [];
+            for (const L of tops) { const h = y(L.lo[last]) - y(L.hi[last]); if (L.key === '__sys' || h >= 7) words.push({ L, y: (y(L.lo[last]) + y(L.hi[last])) / 2, text: L.key === '__sys' ? 'server' : L.x.name.length > 18 ? `${L.x.name.slice(0, 17)}…` : L.x.name }); }
+            words.sort((a, b) => b.y - a.y);
+            for (let k = 1; k < words.length; k += 1) if (words[k - 1].y - words[k].y < 14) words[k].y = words[k - 1].y - 14;
+            for (const w of words) { const e = svgEl('text', { x: W - M.r + 8, y: w.y + 4, class: `u-direct${w.L.key === '__sys' || (usage.focus && usage.focus !== w.L.key) ? ' dim' : ''}` }); e.textContent = w.text; svg.append(e); }
+        }
+        const cross = svgEl('line', { class: 'u-cross', y1: M.t, y2: H - M.b, visibility: 'hidden' }); svg.append(cross);
+        const hit = svgEl('rect', { x: M.l, y: 0, width: Math.max(0, pw), height: H, fill: 'transparent' }); svg.append(hit);
+        usageGeo = { x, y, W, H, M, tops, cross, ymax, pw, t0, t1 };
+        svg.setAttribute('aria-label', `${USAGE_WORD[m]} per conversation, ${USAGE_SPAN[usage.span]}. The table below gives the same figures.`);
+        hit.addEventListener('pointermove', usageHover); hit.addEventListener('pointerdown', usageHover);
+        hit.addEventListener('pointerleave', () => { $('usage-tip').hidden = true; cross.setAttribute('visibility', 'hidden'); });
+        hit.addEventListener('click', (event) => { const p = usagePick(event); if (!p) return; const L = usageGeo.tops.find((q) => q.key !== '__sys' && p.v >= q.lo[p.i] && p.v <= q.hi[p.i] && q.hi[p.i] > q.lo[p.i]); usageFocus(L ? L.key : null); });
+    }
+    function usagePick(event) {
+        const r = usage.r; if (!r?.t.length || !usageGeo) return null;
+        const at = $('usage-svg').getBoundingClientRect(); const px = event.clientX - at.left; const py = event.clientY - at.top;
+        const { M, H, ymax, pw, t0, t1 } = usageGeo;
+        const t = t0 + ((px - M.l) / pw) * (t1 - t0);
+        let i = 0; r.t.forEach((u, k) => { if (Math.abs(u - t) < Math.abs(r.t[i] - t)) i = k; });
+        return { i, px, v: ((H - M.b - py) / (H - M.t - M.b)) * ymax };
+    }
+    function usageHover(event) {
+        const p = usagePick(event); if (!p) return;
+        const r = usage.r; const m = usage.measure; const { i, px } = p; const { x, tops, cross, W } = usageGeo;
+        const tip = $('usage-tip');
+        if (r.server[m][i] === null) { tip.hidden = true; cross.setAttribute('visibility', 'hidden'); return; }
+        cross.setAttribute('x1', x(r.t[i])); cross.setAttribute('x2', x(r.t[i])); cross.setAttribute('visibility', 'visible');
+        const rows = [...tops].reverse().map((L) => {
+            const zz = L.key !== '__sys' && L.v[i] === null;
+            return `<div class="u-tip-row${zz ? ' asleep' : ''}${usage.focus === L.key ? ' focus' : ''}"><i class="u-sw" style="background:${L.key === '__sys' ? 'var(--s0)' : uFill(L.x)}"></i><span>${L.key === '__sys' ? 'this server itself' : uEsc(L.x.name)}</span><b>${zz ? 'asleep' : uFmt(m, L.v[i] ?? 0)}</b></div>`;
+        }).join('');
+        const near = usage.span === '7d' ? 15 * 60_000 : 2 * 60_000;
+        const oom = m === 'memory' ? tops.find((L) => (L.x.marks ?? []).some((at) => Math.abs(at - r.t[i]) <= near)) : null;
+        tip.innerHTML = `<div class="u-tip-when">${uWhen(r.t[i])}${usage.span === '7d' ? ' <span class="hint">(peak of 15 min)</span>' : ''}</div>${rows}<div class="u-tip-total"><span>Total</span><b>${uFmt(m, r.server[m][i])} / ${uAlloc(m, Math.round(uCap(r, m) * 10) / 10)}</b></div>${oom ? `<div class="u-tip-oom">▲ ${uEsc(oom.x.name)}: memory full</div>` : ''}`;
+        tip.hidden = false;
+        if (getComputedStyle(tip).position === 'static') return;
+        const tw = tip.offsetWidth;
+        let left = px + 14; if (left + tw > W) left = px - tw - 14; if (left < 0) left = Math.max(0, Math.min(W - tw, px - tw / 2));
+        tip.style.left = `${left}px`;
+    }
+    function usageFacts(r, x, m) {
+        const a = x[m]; const A = x.alloc[uKey(m)] || 1; const pct = a.map((v) => (v === null ? null : (v / A) * 100));
+        const i = uLast(r, m); const now = i < 0 ? null : a[i];
+        let pk = -1; let pi = 0; pct.forEach((v, k) => { if (v !== null && v > pk) { pk = v; pi = k; } });
+        const known = pct.filter((v) => v !== null);
+        const high = known.filter((v) => v >= 95).length;
+        const over80 = known.length ? known.filter((v) => v >= 80).length / known.length : 0;
+        const ooms = m === 'memory' ? (x.marks ?? []).filter((t) => t >= r.from).length : 0;
+        let note = ''; let alert = false;
+        if (uAsleep(x, m)) note = x.since ? `asleep for ${uAgo(r.to - x.since)}` : 'asleep';
+        else if (ooms) { note = `${high ? 'reached 95 % · ' : ''}memory full ${ooms === 1 ? 'once' : `${ooms} times`}`; alert = true; }
+        else if (high) { note = m === 'cpu' ? 'used all its cores' : 'reached 95 %'; alert = m !== 'cpu'; }
+        else if (over80 > 0.2) note = 'often above 80 %';
+        else if (pk >= 0 && pk < 30 && m !== 'disk') note = 'roomy: little used';
+        return { now, nowP: now === null ? null : (now / A) * 100, pk, pkA: pk >= 0 ? a[pi] : 0, pkT: r.t[pi], note, alert, A };
+    }
+    function usageSpark(r, x, m, wide) {
+        const a = x[m]; const lim = x.alloc[uKey(m)] || 1; const W = wide ? 340 : 120; const H = wide ? 34 : 30;
+        const sx = (t) => ((t - r.from) / Math.max(1, r.to - r.from)) * W; const sy = (v) => H - 2 - (Math.min(v, lim) / lim) * (H - 4);
+        let d = ''; let pen = false;
+        a.forEach((v, i) => { if (v === null) { pen = false; return; } d += `${pen ? 'L' : 'M'}${sx(r.t[i]).toFixed(1)},${sy(v).toFixed(1)}`; pen = true; });
+        const marks = m === 'memory' ? (x.marks ?? []).map((at) => { const i = r.t.findIndex((t) => t >= at); return i < 0 || a[i] === null ? '' : `<circle class="u-oom" cx="${sx(r.t[i])}" cy="${sy(a[i])}" r="3.2"/>`; }).join('') : '';
+        const zz = uAsleep(x, m) ? `<line x1="${Math.max(0, sx(x.since ?? r.from))}" x2="${W}" y1="${H - 2}" y2="${H - 2}" stroke="var(--ink2)" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"/>` : '';
+        return `<svg class="u-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true"><line class="u-lim" x1="0" x2="${W}" y1="2" y2="2" vector-effect="non-scaling-stroke"/><path d="${d}" fill="none" stroke="var(--${x.c})" stroke-width="1.75"${x.hatch ? ' stroke-dasharray="4 2"' : ''} vector-effect="non-scaling-stroke" stroke-linejoin="round"/>${zz}${marks}</svg>`;
+    }
+    function paintUsageList(r, who) {
+        const m = usage.measure; const span = USAGE_SPAN[usage.span];
+        $('usage-list-title').textContent = `${USAGE_WORD[m]} per conversation`;
+        const rows = who.map((x) => ({ x, f: usageFacts(r, x, m) })).sort((a, b) => uAsleep(a.x, m) - uAsleep(b.x, m) || (b.f.now ?? -1) - (a.f.now ?? -1));
+        const name = (x) => `<span class="u-who"><i class="u-sw" style="background:${uFill(x)}"></i>${uEsc(x.name)}${uAsleep(x, m) ? ' <span class="u-zz">asleep</span>' : ''}</span>`;
+        const quiet = (x, f) => uAsleep(x, m) || f.now === null;
+        $('usage-rank').innerHTML = `<thead><tr><th>Conversation</th><th class="r">Now</th><th class="r">Peak · ${span}</th><th>Over ${span}</th><th class="r">Given</th><th>Note</th></tr></thead><tbody>${
+            rows.map(({ x, f }) => `<tr data-k="${uEsc(x.key)}" class="${uAsleep(x, m) ? 'asleep' : ''}" aria-selected="${usage.focus === x.key}" tabindex="0">
+                <td>${name(x)}</td>
+                <td class="r u-num">${quiet(x, f) ? '—' : `<span class="u-big">${uFmt(m, f.now)}</span><span class="u-sub">${Math.round(f.nowP)} % of given</span>`}</td>
+                <td class="r u-num">${f.pk < 0 ? '—' : `${uFmt(m, f.pkA)}<span class="u-sub">${Math.round(f.pk)} % · ${uAgo(r.to - f.pkT)} ago</span>`}</td>
+                <td>${usageSpark(r, x, m, false)}</td>
+                <td class="r u-num">${uAlloc(m, f.A)}</td>
+                <td><span class="u-note${f.alert ? ' alert' : ''}">${f.note}</span></td></tr>`).join('')}</tbody>`;
+        $('usage-cards').innerHTML = rows.map(({ x, f }) => `<div role="button" tabindex="0" class="u-card${uAsleep(x, m) ? ' asleep' : ''}" data-k="${uEsc(x.key)}" aria-selected="${usage.focus === x.key}">
+                ${name(x)}
+                <span class="u-now u-num">${quiet(x, f) ? '—' : `<span class="u-big">${uFmt(m, f.now)}</span> <span class="hint">${Math.round(f.nowP)} %</span>`}</span>
+                ${usageSpark(r, x, m, true)}
+                <span class="u-facts u-num"><span>Peak ${f.pk < 0 ? '—' : `${uFmt(m, f.pkA)} (${Math.round(f.pk)} %)`}</span><span>Given ${uAlloc(m, f.A)}</span></span>
+                ${f.note ? `<span class="u-note${f.alert ? ' alert' : ''}">${f.note}</span>` : ''}</div>`).join('');
+        for (const row of document.querySelectorAll('#usage-rank tbody tr, #usage-cards .u-card')) {
+            row.addEventListener('click', () => usageFocus(row.dataset.k));
+            row.addEventListener('keydown', (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); usageFocus(row.dataset.k); } });
+        }
+    }
+    function paintUsageAll() {
+        const r = usage.r; if (!r) return;
+        for (const b of $('usage-measure').children) b.setAttribute('aria-pressed', String(b.dataset.m === usage.measure));
+        for (const b of $('usage-span').children) b.setAttribute('aria-pressed', String(b.dataset.span === usage.span));
+        const who = usageWho(r);
+        paintUsageTiles(r, who); paintUsageLegend(who); paintUsageChart(r, who); paintUsageList(r, who);
+    }
+    /* A second touch on the same one, or on nothing, shows them all again. */
+    const usageFocus = (key) => { usage.focus = usage.focus === key || !key ? null : key; paintUsageAll(); };
+    async function paintUsage() {
+        const span = usage.span;
+        const r = await fetch(`${API}/history/all?span=${span}`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
+        if (span !== usage.span) return;
+        $('usage-none').hidden = Boolean(r?.t?.length);
+        $('usage-none').textContent = r ? 'Nothing measured yet: a look is taken every minute.' : 'Usage cannot be read just now.';
+        for (const id of ['usage-tiles', 'usage-legend']) $(id).hidden = !r?.t?.length;
+        $('usage').querySelector('.u-chart').hidden = !r?.t?.length; $('usage-rank').parentElement.hidden = !r?.t?.length;
+        if (!r?.t?.length) return;
+        usage.r = r;
+        if (usage.focus && !usageWho(r).some((x) => x.key === usage.focus)) usage.focus = null;
+        paintUsageAll();
+    }
+    $('usage-measure').addEventListener('click', (event) => { const b = event.target.closest('button[data-m]'); if (!b) return; usage.measure = b.dataset.m; paintUsageAll(); });
+    $('usage-span').addEventListener('click', (event) => { const b = event.target.closest('button[data-span]'); if (!b) return; usage.span = b.dataset.span; for (const x of $('usage-span').children) x.setAttribute('aria-pressed', String(x === b)); void paintUsage(); });
+    $('settings-usage-top').addEventListener('toggle', () => { if ($('settings-usage-top').open) void paintUsage(); });
+    /* Drawn again when its width changes only: a phone's bar of address, folding in a scroll, is a resize too. */
+    let usageResize; let usageWidth = 0;
+    addEventListener('resize', () => { clearTimeout(usageResize); usageResize = setTimeout(() => { const w = $('usage-plot').clientWidth; if (w !== usageWidth && $('settings-usage-top').open && $('usage').offsetParent !== null) paintUsageAll(); }, 80); });
+    /* Kept current while in sight: a new look a minute. */
+    setInterval(() => { if ($('settings-usage-top').open && $('usage').offsetParent !== null) void paintUsage(); }, 60_000);
     async function paintServer() {
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
-        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r;
+        $('settings-server-top').hidden = !r; $('settings-server').hidden = !r; $('settings-usage-top').hidden = !r;
         if (!r) return;
         void paintCurves($('server-curves'));
         /* The two settings of each: a fixed amount and a share; the larger is kept free. */
