@@ -262,6 +262,20 @@ export class Secrets {
         return this.#given(conversation).map((s) => `${s.name}=${s.sealed}`).sort().join('|');
     }
 
+    /* THE GUARD (main.mjs, each minute, for each machine that runs): the names in its /run/secrets
+       against those it should hold, and `last` (the signature of what was last put there) against
+       what it would be now. Delivered again when either differs. Resolves with the signature now
+       there, or null when the machine could not be looked at. */
+    async reconcile(conversation, last) {
+        const seen = await this.#vms.exec(conversation, ['sh', '-c', `ls -1 ${SECRETS_DIR} 2>/dev/null; true`], { timeoutMs: 10_000 }).catch(() => null);
+        if (!seen || seen.code !== 0) return null;
+        const there = String(seen.stdout ?? '').split('\n').map((x) => x.trim()).filter(Boolean).sort().join('|');
+        const wanted = this.signature(conversation);
+        if (there === this.given(conversation).sort().join('|') && last === wanted) return wanted;
+        await this.deliver(conversation);
+        return wanted;
+    }
+
     /* Puts in the VM exactly the secrets attached NOW and not expired, and the
        runner. Called each time the conversation is opened: a detached or
        expired secret disappears from the VM, a new one appears, and a

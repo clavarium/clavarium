@@ -549,6 +549,14 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const history = new History({ file: `${dataDir}/history.json` });
     const historyLook = () => capacity.room().then((room) => history.sample(room, all.list().filter((c) => c.phase === 'ready').map((c) => ({ name: c.name, vm: `clv-${c.name}`, cores: c.cpus ?? 1, memoryMb: c.memoryMb, health: health.of(c.name) })))).catch(() => {});
     const historyTimer = setInterval(() => { void historyLook(); }, historyEveryMs); historyTimer.unref?.();
+    /* THE SECRETS' GUARD: each minute, every machine that runs is looked at -- the names in its
+       /run/secrets against those it should hold now, and what was last put there against what would
+       be now. A missing one is put back, one too many taken away, a new value given: whatever path
+       changed them (a page, an expiry, a machine restarted behind our back). */
+    const secretsGuard = async () => {
+        for (const name of all.awake()) { const now = await secrets.reconcile(name, delivered.get(name)).catch(() => null); if (now !== null) delivered.set(name, now); }
+    };
+    const secretsTimer = setInterval(() => { void secretsGuard().catch(() => {}); }, 60_000); secretsTimer.unref?.();
     /* The certificate the front serves, said in Settings (certificate.mjs). */
     const certificate = new Certificate({ origin: publicOrigin, alerts });
     /* All the machines to another disk, from Settings (machinesmove.mjs). */
@@ -565,7 +573,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
