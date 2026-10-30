@@ -1222,7 +1222,7 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-foot { margin-top: 10px; }
 .as-form { display: flex; flex-direction: column; gap: 8px; }
 .as-form h3 { margin: 0; font-size: 1.125rem; }
-.as-form form { display: flex; flex-direction: column; gap: 6px; }
+.as-form form, #connexion-classic:not([hidden]) { display: flex; flex-direction: column; gap: 6px; }
 #gitview-remote-box > summary { display: none; }
 #gitview-remote { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .as-none { margin: auto; text-align: center; }
