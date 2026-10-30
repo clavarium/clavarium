@@ -4169,26 +4169,138 @@
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         if (after) await after(); else await paintAssets();
     }
-    /* One Tether call waiting for the owner, as a row: what it would do, who asks and on
-       which target, then Accept / Refuse. `withWho`: name the conversation that asks (the
-       exhaustive list spans them all). `after`: repaint the surface once it is decided. */
+    /* ONE TETHER CALL WAITING FOR THE OWNER, AS A CARD (#190): what it does in plain words,
+       then who / when / where in short lines, what should make one think (someone outside,
+       a time already taken, administrator rights) in an amber band, the AI's reason in a grey
+       line, and one row of buttons -- the act's own verb, Refuse beside it, "Always…" behind
+       "⋯". The whole card opens its detail (the technical line too). An accept waits a few
+       seconds with "Undo" before it goes. Built from `q.card` (Tether); a call without one
+       keeps its line. `withWho`: name the conversation that asks. */
+    const UNDO_MS = 5000;
+    const dayChip = (when) => {
+        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(when ?? ''));
+        if (!m) return null;
+        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
+        const chip = el('div', 'dm-day');
+        chip.append(el('div', 'dm-day-w', d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }).toUpperCase()), el('div', 'dm-day-n', String(+m[3])));
+        return chip;
+    };
+    const hhmm = (when) => /[T ](\d{2}:\d{2})/.exec(String(when ?? ''))?.[1] ?? '';
+    const dayWords = (when) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(when ?? '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' }) : String(when ?? ''); };
+    const span = (from, to) => [hhmm(from), hhmm(to)].filter(Boolean).join(' – ') || [from, to].filter(Boolean).join(' – ');
+    const nameOfAddr = (a) => { const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>/.exec(String(a ?? '')); return m && m[1] ? m[1] : String(a ?? '').split('@')[0]; };
+    const askedAgo = (at) => { const s = Math.round((Date.now() - Date.parse(at)) / 1000); if (!Number.isFinite(s)) return ''; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+    const KIND_ICON = { mail: '✉', calendar: '📅', contacts: '👤', terminal: '⌘', files: '🗎', browser: '🌐', screen: '🖥', other: '•' };
+    /* What a card says, from its facts: { title, day?, sub?, facts: [[icon, text|node]], quote?, risk: [], yes } */
+    function demandeWords(q) {
+        const c = q.card ?? {}; const about = c.about ?? {};
+        const own = String(c.self ?? '').split('@')[1] ?? '';
+        const outside = (list) => (own ? (list ?? []).filter((x) => !String(x).toLowerCase().endsWith(`@${own}`)) : []);
+        const chips = (list, ext = []) => { const box = el('span', 'dm-chips'); for (const x of list ?? []) box.append(el('span', `dm-chip${ext.includes(x) ? ' ext' : ''}`, ext.includes(x) ? `${x} · outside` : x)); return box; };
+        const w = { facts: [], risk: [], yes: 'Accept' };
+        const subj = (s) => (s ? `“${s}”` : 'a message');
+        const filesLine = (files) => (files?.length ? files.map((f) => `${f.name}${f.kb ? ` (${f.kb >= 1024 ? `${(f.kb / 1024).toFixed(1)} MB` : `${f.kb} KB`})` : ''}`).join(', ') : '');
+        if (c.kind === 'mail') {
+            const ext = outside([...(c.to ?? []), ...(c.cc ?? []), ...(c.bcc ?? [])]);
+            if (ext.length) w.risk.push(`Goes outside: ${ext.join(', ')}`);
+            const sendWord = c.draft ? 'Save draft' : c.at ? 'Schedule' : 'Send';
+            if (c.action === 'send') { w.title = `${c.draft ? 'Draft' : 'Send'} ${subj(c.subject)}`; w.yes = sendWord; }
+            else if (c.action === 'reply') { w.title = `${c.all ? 'Reply to all on' : 'Reply to'} ${about.from ? nameOfAddr(about.from) : 'a message'}`; if (about.subject) w.facts.push(['≡', `On “${about.subject}”`]); w.yes = sendWord; }
+            else if (c.action === 'forward') {
+                w.title = `Forward ${subj(about.subject)}`; w.yes = c.draft ? 'Save draft' : 'Forward';
+                const k = String(c.keep ?? 'all').toLowerCase();
+                const kept = /^(none|false|no)$/.test(k) ? 'without its files' : /^(all|true|yes|)$/.test(k) ? (about.files?.length ? `with ${filesLine(about.files)}` : 'with its files') : `keeping ${c.keep}`;
+                w.facts.push(['📎', kept]);
+            } else if (c.action === 'move') { w.title = `Move ${subj(about.subject)} to ${c.mailbox ?? 'a folder'}`; w.yes = 'Move'; }
+            else if (c.action === 'flag') { w.title = `Mark ${subj(about.subject)} ${c.flag ?? ''}`.trim(); w.yes = 'Mark'; }
+            else if (c.action === 'delete') { w.title = `Delete ${subj(about.subject)}`; w.yes = 'Delete'; }
+            else w.title = `${c.action ?? 'mail'} ${q.detail ?? ''}`;
+            if (about.from && c.action !== 'reply') w.facts.push(['👤', `From ${about.from}`]);
+            if (c.to?.length) w.facts.push(['→', chips(c.to, ext)]);
+            if (c.cc?.length) w.facts.push(['cc', chips(c.cc, ext)]);
+            if (c.bcc?.length) w.facts.push(['bcc', chips(c.bcc, ext)]);
+            if (c.at) w.facts.push(['⏰', `Leaves ${dayWords(c.at)}${hhmm(c.at) ? `, ${hhmm(c.at)}` : ''} — waits in Drafts until then`]);
+            if (c.files?.length) w.facts.push(['📎', `Joined: ${filesLine(c.files)}`]);
+            if (c.body) w.quote = c.body;
+        } else if (c.kind === 'calendar') {
+            const ev = c.action === 'create' ? c : { ...about, ...Object.fromEntries(Object.entries(c).filter(([k]) => ['title', 'start', 'end', 'where'].includes(k))) };
+            const answer = { accept: 'Accept', yes: 'Accept', decline: 'Decline', no: 'Decline', refuse: 'Decline', tentative: 'Maybe', maybe: 'Maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
+            w.day = dayChip(ev.start);
+            w.title = c.action === 'respond' ? `${answer || 'Answer'}: ${about.title || 'an invitation'}` : c.action === 'create' ? (c.title ?? 'New event') : c.action === 'delete' ? `Delete “${about.title || 'an event'}”` : c.action === 'update' ? `Change “${about.title || c.title || 'an event'}”` : c.action === 'attach' ? `Attach ${filesLine(c.files)} to “${about.title || 'an event'}”` : `${c.action} ${q.detail ?? ''}`;
+            if (ev.start) w.sub = `${dayWords(ev.start)} · ${span(ev.start, ev.end)}${ev.where ? ` · ${ev.where}` : ''}`;
+            if (about.clashes?.length) w.risk.push(`Clashes with ${about.clashes.join(', ')}`);
+            if (about.organizer && c.action === 'respond') w.facts.push(['👤', `From ${about.organizer}${about.attendees?.length ? ` · with ${about.attendees.length} people` : ''}`]);
+            const guests = c.with ?? [];
+            const ext = outside(guests);
+            if (ext.length) w.risk.push(`Invites someone outside: ${ext.join(', ')}`);
+            if (guests.length) w.facts.push(['👥', chips(guests, ext)]);
+            if (c.online === 'teams' || (c.action === 'create' && guests.length && !c.online)) w.facts.push(['🎥', 'With a Teams meeting (Microsoft)']);
+            if (c.notes) w.quote = c.notes;
+            w.yes = c.action === 'respond' ? (answer || 'Answer') : c.action === 'create' ? (guests.length ? 'Create and invite' : 'Create') : c.action === 'delete' ? 'Delete' : c.action === 'update' ? 'Change' : 'Accept';
+        } else if (c.kind === 'contacts') {
+            w.title = c.action === 'create' ? `Add ${c.name || c.email || 'a contact'}` : c.action === 'update' ? `Update ${c.name || 'a contact'}` : c.action === 'delete' ? 'Delete a contact' : c.action === 'attach' ? 'Set a contact\'s photo' : `${c.action} ${q.detail ?? ''}`;
+            if (c.email) w.facts.push(['✉', c.email]); if (c.phone) w.facts.push(['☎', c.phone]);
+            w.yes = c.action === 'create' ? 'Add' : c.action === 'delete' ? 'Delete' : 'Update';
+        } else if (c.kind === 'terminal') {
+            w.title = c.action === 'run' ? `Run a command on ${q.target?.title ?? 'a machine'}` : c.action === 'type' ? `Type into a terminal on ${q.target?.title ?? 'a machine'}` : `Open a terminal on ${q.target?.title ?? 'a machine'}`;
+            if (/^\s*sudo\b/.test(c.command ?? '')) w.risk.push('As administrator');
+            if (c.command || c.text) { const code = el('code', '', c.command ?? c.text); w.facts.push(['›_', code]); }
+            w.yes = c.action === 'run' ? 'Run' : 'Accept';
+        } else if (c.kind === 'files') {
+            w.title = c.action === 'write' ? `Write ${c.path}` : c.action === 'delete' ? `Delete ${c.path}` : c.action === 'move' ? `Move ${c.from} → ${c.to}` : `${c.action} ${c.path ?? ''}`;
+            if (c.bytes !== undefined) w.facts.push(['≡', `${c.bytes >= 1024 ? `${Math.round(c.bytes / 1024)} KB` : `${c.bytes} bytes`}`]);
+            w.yes = c.action === 'delete' ? 'Delete' : c.action === 'move' ? 'Move' : 'Write';
+        } else if (c.kind === 'browser' && c.action === 'open') { w.title = `Open ${c.url}`; w.yes = 'Open'; }
+        else { w.title = `${q.verb ?? 'action'}${q.detail ? ` ${q.detail}` : ''}`; }
+        return w;
+    }
     function demandeRow(q, { withWho = false, after } = {}) {
-        const line = el('div', 'given-row demande');
-        const what = el('span', 'demande-what');
-        const head = el('span', 'demande-head'); head.append(el('b', '', q.verb ?? 'action'));
-        if (q.detail) head.append(document.createTextNode(` ${q.detail}`));
-        what.append(head);
-        const tags = [withWho ? q.agent?.name : '', q.target?.title].filter(Boolean);
-        if (tags.length) what.append(el('small', 'as-sub demande-who', tags.join(' · ')));
-        if (q.why) what.append(el('small', 'hint demande-why', q.why));
-        const yes = el('button', 'primary', 'Accept'); yes.type = 'button';
-        const no = el('button', 'danger', 'Refuse'); no.type = 'button';
-        const decide = (d) => { yes.disabled = true; no.disabled = true; void decideTether(q.id, d, after); };
-        yes.addEventListener('click', () => decide('yes'));
-        no.addEventListener('click', () => decide('no'));
-        const acts = el('div', 'levels'); acts.append(yes, no);
-        line.append(what, acts);
-        return line;
+        const kind = q.card?.kind ?? String(q.verb ?? '').split('.')[0];
+        const w = demandeWords(q);
+        const card = el('div', `given-row demande dm-card dm-${kind}`);
+        const top = el('div', 'dm-top');
+        top.append(el('span', 'dm-ico', KIND_ICON[kind] ?? '•'), el('span', '', [q.target?.title, withWho ? q.agent?.name : '', askedAgo(q.at)].filter(Boolean).join(' · ')), el('span', 'dm-chev', '›'));
+        const head = el('div', 'dm-head');
+        if (w.day) head.append(w.day);
+        const hw = el('div', 'dm-hw'); hw.append(el('b', 'dm-title', w.title)); if (w.sub) hw.append(el('div', 'dm-sub', w.sub)); head.append(hw);
+        card.append(top, head);
+        for (const r of w.risk) card.append(el('div', 'dm-risk', `⚠ ${r}`));
+        if (w.facts.length) { const f = el('div', 'dm-facts'); for (const [ic, v] of w.facts) { f.append(el('span', 'dm-k', ic)); const cell = el('span', 'dm-v'); if (typeof v === 'string') cell.textContent = v; else cell.append(v); f.append(cell); } card.append(f); }
+        if (w.quote) card.append(el('div', 'dm-quote', w.quote));
+        if (q.why) card.append(el('div', 'dm-why', `Why: ${q.why}`));
+        /* The detail: the whole card opens it -- the technical line, its level, its rule. */
+        const more = el('div', 'dm-more'); more.hidden = true;
+        more.append(el('div', '', `${q.verb ?? ''}${q.detail ? ` — ${q.detail}` : ''}`), el('div', 'hint', [q.target?.title, q.agent?.name, q.level ? `level ${q.level}` : ''].filter(Boolean).join(' · ')));
+        card.append(more);
+        card.addEventListener('click', (e) => { if (e.target.closest('button')) return; more.hidden = !more.hidden; card.classList.toggle('open', !more.hidden); });
+        const acts = el('div', 'dm-acts');
+        const yes = el('button', 'primary', w.yes); yes.type = 'button';
+        const no = el('button', '', 'Refuse'); no.type = 'button';
+        const buttons = [yes, no];
+        let always = null;
+        if (q.rule) {
+            const dots = el('button', 'dm-dots', '⋯'); dots.type = 'button'; dots.setAttribute('aria-label', 'More');
+            always = el('button', '', `Always allow ${q.rule.value ?? 'this'}`); always.type = 'button'; always.hidden = true;
+            dots.addEventListener('click', () => { always.hidden = !always.hidden; });
+            acts.append(dots); buttons.push(always);
+        }
+        acts.append(no, yes);
+        card.append(acts);
+        if (always) card.append(always);
+        const lock = (on) => { for (const b of buttons) b.disabled = on; };
+        /* Accept: a few seconds to take it back, then it goes. Refuse goes at once (nothing happens). */
+        const accept = (decision) => {
+            lock(true);
+            const undo = el('div', 'dm-undo'); const ub = el('button', '', 'Undo'); ub.type = 'button';
+            undo.append(el('span', '', decision === 'always' ? 'Allowed, and from now on' : `${w.yes} — accepted`), ub);
+            acts.replaceWith(undo);
+            const timer = setTimeout(() => { ub.disabled = true; void decideTether(q.id, decision, after); }, UNDO_MS);
+            ub.addEventListener('click', () => { clearTimeout(timer); undo.replaceWith(acts); lock(false); });
+        };
+        yes.addEventListener('click', () => accept('yes'));
+        always?.addEventListener('click', () => accept('always'));
+        no.addEventListener('click', () => { lock(true); void decideTether(q.id, 'no', after); });
+        return card;
     }
     /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
     function demandesList(approvals, { withWho = false, after } = {}) {

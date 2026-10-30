@@ -1910,3 +1910,31 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .tool-exit-one p { margin: .2rem 0; }
 .tool-exit-lines { max-height: 14rem; overflow: auto; font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2, rgba(127,127,127,.08)); padding: .5rem .6rem; border-radius: 8px; margin: .3rem 0; }
 .curve-legend-oom { color: var(--danger); }
+
+/* A request of the AI as a card (#190). */
+.dm-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; cursor: pointer; position: relative; }
+.dm-top { display: flex; gap: 8px; align-items: center; font-size: .82rem; color: var(--ink2); }
+.dm-ico { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; background: rgba(127,127,127,.15); font-size: .8rem; flex: none; }
+.dm-chev { margin-left: auto; font-size: 1.2rem; line-height: 1; transition: transform .15s; }
+.dm-card.open .dm-chev { transform: rotate(90deg); }
+.dm-head { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.dm-hw { min-width: 0; }
+.dm-title { font-size: 1rem; line-height: 1.3; overflow-wrap: anywhere; }
+.dm-sub { color: var(--ink2); font-size: .88rem; }
+.dm-day { width: 46px; flex: none; text-align: center; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.dm-day-w { background: var(--brass); color: #fff; font-size: .66rem; font-weight: 700; letter-spacing: .06em; padding: 1px 0; }
+.dm-day-n { font-size: 1.15rem; font-weight: 700; padding: 1px 0 3px; }
+.dm-risk { padding: 5px 9px; border-radius: 8px; background: rgba(217, 154, 30, .16); color: inherit; font-size: .86rem; font-weight: 600; }
+.dm-facts { display: grid; grid-template-columns: 1.6em 1fr; gap: 3px 6px; font-size: .9rem; }
+.dm-k { color: var(--ink2); text-align: center; }
+.dm-v { min-width: 0; overflow-wrap: anywhere; }
+.dm-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }
+.dm-chip { border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; font-size: .8rem; }
+.dm-chip.ext { border-color: rgba(217, 154, 30, .7); }
+.dm-quote { border-left: 3px solid var(--line); padding: 1px 9px; font-size: .88rem; white-space: pre-line; max-height: 7.5em; overflow: hidden; }
+.dm-card.open .dm-quote { max-height: none; }
+.dm-why { color: var(--ink2); font-size: .86rem; }
+.dm-more { font-size: .8rem; font-family: ui-monospace, monospace; overflow-wrap: anywhere; border-top: 1px dashed var(--line); padding-top: 6px; }
+.dm-acts { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.dm-acts .dm-dots { padding-inline: .7em; }
+.dm-undo { display: flex; gap: 10px; align-items: center; justify-content: space-between; font-size: .9rem; padding: 4px 0; }
