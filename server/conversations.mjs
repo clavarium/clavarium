@@ -1036,6 +1036,11 @@ export class Conversations {
         const alive = await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'has-session', '-t', `=${SESSION}`]);
         /* true: the tool is still there, only the channel to it dropped. */
         if (alive.code === 0) return true;
+        /* Before its machine stops (and its kernel's memory of the night with it): why the tool
+           ended, kept on the conversation and said -- a person without access to the server
+           sees it in Machine, and is told at once when it was cut for lack of memory. */
+        const report = await this.exitReport(name).catch(() => null);
+        if (report) { this.#store.patch(name, { lastExit: report }); try { this.onToolExit?.(name, report); } catch { /* telling is best effort */ } }
         this.#cancelStop(name);
         const timer = setTimeout(() => {
             this.#timers.delete(name);
@@ -1044,6 +1049,28 @@ export class Conversations {
         timer.unref?.();
         this.#timers.set(name, timer);
         return false;
+    }
+
+    /* WHY ITS TOOL ENDED, read inside the machine while it still runs: the kernel's kills for
+       lack of memory since it started (with the program's name), its memory, and the last
+       lines of the tool's own log (`logs` in config/tools.json). Read as the machine's
+       ordinary user; dmesg through sudo when it may. Nothing is changed. */
+    async exitReport(name) {
+        const c = this.#store.get(name);
+        if (!c) throw new Refusal(404, 'No such conversation.');
+        if (await this.#vms.state(name) !== 'Running') throw new Refusal(409, 'Its machine is not running.');
+        const tool = this.#tools.find((t) => t.id === c.tool);
+        const logs = Array.isArray(tool?.logs) ? tool.logs.filter((d) => /^[A-Za-z0-9._/-]+$/.test(d)) : [];
+        const script = [
+            '( sudo -n dmesg -T 2>/dev/null || dmesg -T 2>/dev/null ) | grep -E "Killed process|Out of memory|Memory cgroup out of memory" | tail -n 4 | sed "s/^/oom /"',
+            'awk \'/^MemTotal:/{print "memory", int($2/1024)}\' /proc/meminfo',
+            'for d in "$@"; do f=$(ls -t "$HOME/$d"/*.log 2>/dev/null | head -1); [ -n "$f" ] && { echo "logfile $f"; tail -n 25 "$f" | cut -c1-300 | sed "s/^/log /"; }; done; true',
+        ].join('\n');
+        const r = await this.#vms.exec(name, ['bash', '-c', script, 'report', ...logs], { timeoutMs: 20_000 });
+        const lines = String(r.stdout ?? '').split('\n');
+        const pick = (p) => lines.filter((l) => l.startsWith(`${p} `)).map((l) => l.slice(p.length + 1));
+        const memoryMb = Number(pick('memory')[0]) || null;
+        return { at: new Date().toISOString(), oom: pick('oom'), memoryMb, logFile: pick('logfile')[0] ?? null, log: pick('log') };
     }
 
     /* ONE FILE OF THE MACHINE'S OWN DISK, read for the person who asked to

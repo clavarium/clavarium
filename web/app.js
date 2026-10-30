@@ -2222,6 +2222,36 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/health-react`, { on: $('react-on').checked, message: $('react-message').value, command: $('react-command').value }); $('react-said').textContent = 'Saved.'; }
         catch (error) { $('react-said').textContent = error.message; }
     });
+    /* WHY ITS TOOL STOPPED, said plainly: cut for lack of memory (and what to do), else its log's
+       last lines. `last` was kept when it ended; `now` is read in the machine when it runs. */
+    function paintToolExit(r) {
+        const body = $('tool-exit-body'); body.replaceChildren();
+        const rep = r?.last ?? null; const now = r?.now ?? null;
+        if (!rep && !now) { body.hidden = !r; if (r) body.append(el('p', 'hint', 'Nothing kept yet: its tool has not ended since this was added, and its machine is not running.')); return; }
+        body.hidden = false;
+        const show = (title, x) => {
+            if (!x) return;
+            const box = el('div', 'tool-exit-one');
+            box.append(el('p', '', [title, x.at ? new Date(x.at).toLocaleString() : ''].filter(Boolean).join(' · ')));
+            if (x.oom?.length) {
+                box.append(el('p', 'error', `Stopped for lack of memory: the machine${x.memoryMb ? ` (${sizeWords(x.memoryMb)})` : ''} ran out. Give it more memory below, or start its tool fresh.`));
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.oom.join('\n'); box.append(pre);
+            } else box.append(el('p', 'hint', 'No program was stopped for lack of memory.'));
+            if (x.log?.length) {
+                const d = document.createElement('details'); const sm = document.createElement('summary'); sm.textContent = `Last lines of its own log${x.logFile ? ` (${x.logFile.split('/').pop()})` : ''}`;
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.log.join('\n'); d.append(sm, pre); box.append(d);
+            }
+            body.append(box);
+        };
+        show('Now, in its machine', now);
+        show('When its tool last ended', rep);
+    }
+    $('tool-exit-look').addEventListener('click', async () => {
+        const b = $('tool-exit-look'); b.disabled = true; b.textContent = 'Looking…';
+        try { paintToolExit(await post(`${API}/conversations/${encodeURIComponent(current)}/exit-report`, {})); }
+        catch (error) { $('tool-exit-body').replaceChildren(el('p', 'error', error.message)); $('tool-exit-body').hidden = false; }
+        b.disabled = false; b.textContent = 'Why did its tool stop?';
+    });
     function paintMachine(here) {
         void paintReact(here);
         /* Its curves: asked again when it changes, or once in a while (paintCurves). */
@@ -2239,6 +2269,7 @@
             fact('Works in', here.work === 'kept' ? 'a folder kept here (/work)' : 'the disk of its machine (/work)');
         }
         healthLines($('machine-health'), here?.health ?? null);
+        if ($('tool-exit').dataset.of !== (here?.name ?? '')) { $('tool-exit').dataset.of = here?.name ?? ''; paintToolExit(here?.lastExit ? { last: here.lastExit } : null); }
         $('machine-restarted').textContent = here?.restarted ?? ''; $('machine-restarted').hidden = !here?.restarted;
         /* The choices are not painted over while somebody is choosing. */
         const memory = $('machine-memory'); const disk = $('machine-disk'); const cores = $('machine-cpus');
@@ -4338,7 +4369,7 @@
             }
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
-                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's token (kept on the server); rights are given separately.`));
+                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
                 detail.append(a);
             }
         }
@@ -5842,6 +5873,8 @@
         const foot = el('div', 'curve-foot'); foot.append(el('span', '', curveTime(r.from, r.span)), el('span', '', 'now'));
         box.append(head, plot, foot);
         if (Number.isFinite(level)) box.append(el('small', 'hint curve-legend', '..... the reserve: what must stay free'));
+        /* Said, not only on hover (a tablet has none): what a red dot is, and how many. */
+        if (r.marks?.length) box.append(el('small', 'hint curve-legend curve-legend-oom', `● ${r.marks.length === 1 ? 'a program was' : `${r.marks.length} times a program was`} stopped for lack of memory`));
         return box;
     }
     const curvesAt = new WeakMap();
@@ -6407,9 +6440,9 @@
     /* New mailbox is now the classic IMAP file-copy alone. Gmail and Microsoft are
        a live Connexion (dynamic connector, token kept on the server): this jumps
        straight to adding one. */
-    const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft' };
+    const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft', classic: 'your host' };
     /* Which kinds each provider can be connected for (from the server). */
-    let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'] };
+    let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'], classic: ['mail', 'calendar', 'contacts'] };
     $('mailbox-to-connexion').addEventListener('click', () => { assetsAdding = 'connexion'; void paintAssets(); });
     /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
        in in their own browser; the token is kept on the server, never in a machine.
@@ -6419,7 +6452,12 @@
         const form = $('connexion-new');
         form.dataset.provider = provider;
         for (const b of $('connexion-provider').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.provider === provider));
-        const kinds = accountSupported[provider] ?? ['mail'];
+        const classic = provider === 'classic';
+        $('connexion-classic').hidden = !classic;
+        $('connexion-open-row').hidden = classic;
+        $('connexion-notice').hidden = classic;
+        if (classic) showClassicFields();
+        const kinds = classic ? ['mail', 'calendar', 'contacts'] : accountSupported[provider] ?? ['mail'];
         for (const [id, k] of [['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']]) { const c = $(id); const ok = kinds.includes(k); if (!ok) c.checked = false; c.disabled = !ok; $(`${id}-label`).classList.toggle('off', !ok); }
         $('connexion-paste').hidden = true;
         $('connexion-error').hidden = true;
@@ -6432,6 +6470,39 @@
         $('connexion-open').textContent = `Open the ${who} sign-in page`;
     };
     for (const b of $('connexion-provider').querySelectorAll('button')) b.addEventListener('click', () => setConnexionProvider(b.dataset.provider));
+    /* A CLASSIC ACCOUNT (OVH, Infomaniak, Nextcloud...): a password and its servers,
+       filled from the address when known. Only the servers of the kinds ticked show. */
+    function showClassicFields() {
+        const on = (k) => $(`connexion-${k}`).checked;
+        for (const [f, k] of [['imap', 'mail'], ['smtp', 'mail'], ['caldav', 'calendar'], ['carddav', 'contacts']]) { $(`connexion-${f}`).hidden = !on(k); $(`connexion-${f}-label`).hidden = !on(k); }
+    }
+    for (const id of ['connexion-mail', 'connexion-calendar', 'connexion-contacts']) $(id).addEventListener('change', () => { if ($('connexion-new').dataset.provider === 'classic') showClassicFields(); });
+    let lookedUp = '';
+    $('connexion-email').addEventListener('change', async () => {
+        const user = $('connexion-email').value.trim();
+        if ($('connexion-new').dataset.provider !== 'classic' || !user.includes('@') || user === lookedUp) return;
+        lookedUp = user;
+        try {
+            const found = await post(`${API}/accounts/lookup`, { user });
+            for (const f of ['imap', 'smtp', 'caldav', 'carddav']) if (found?.[f] && !$(`connexion-${f}`).value.trim()) $(`connexion-${f}`).value = found[f];
+        } catch { /* filled by hand */ }
+    });
+    $('connexion-classic-connect').addEventListener('click', async () => {
+        $('connexion-error').hidden = true;
+        const kinds = connexionKinds();
+        if (!kinds.length) { $('connexion-error').textContent = 'Choose at least mail, calendar or contacts.'; $('connexion-error').hidden = false; return; }
+        const btn = $('connexion-classic-connect'); const was = btn.textContent; btn.disabled = true; btn.textContent = 'Trying the account…';
+        try {
+            const made = await post(`${API}/accounts/classic`, { user: $('connexion-email').value.trim(), password: $('connexion-password').value, kinds,
+                imap: $('connexion-imap').value.trim(), smtp: $('connexion-smtp').value.trim(), caldav: $('connexion-caldav').value.trim(), carddav: $('connexion-carddav').value.trim() });
+            if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
+            assetsAdding = ''; lookedUp = '';
+            $('connexion-new').reset(); setConnexionProvider('google');
+        } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
+        $('connexion-password').value = '';
+        btn.disabled = false; btn.textContent = was;
+        await paintAssets();
+    });
     const connexionKinds = () => [['connexion-mail', 'mail'], ['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']].filter(([id]) => $(id).checked && !$(id).disabled).map(([, k]) => k);
     $('connexion-open').addEventListener('click', async () => {
         $('connexion-error').hidden = true;
@@ -6471,7 +6542,7 @@
         await paintAssets();
     });
     setConnexionProvider('google');
-    getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = d.supported; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
+    getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;

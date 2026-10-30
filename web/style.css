@@ -1222,7 +1222,7 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-foot { margin-top: 10px; }
 .as-form { display: flex; flex-direction: column; gap: 8px; }
 .as-form h3 { margin: 0; font-size: 1.125rem; }
-.as-form form { display: flex; flex-direction: column; gap: 6px; }
+.as-form form, #connexion-classic:not([hidden]) { display: flex; flex-direction: column; gap: 6px; }
 #gitview-remote-box > summary { display: none; }
 #gitview-remote { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
 .as-none { margin: auto; text-align: center; }
@@ -1903,3 +1903,10 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 #preview-body:has(> img:only-child) { display: flex; align-items: center; justify-content: center; }
 #preview-body > img:only-child { max-height: 100%; width: auto; object-fit: contain; margin: 0; }
 #viewer #preview-download.ico svg { width: 20px; height: 20px; }
+
+/* Why its tool stopped (Machine). */
+.tool-exit { margin: .4rem 0 .8rem; }
+.tool-exit-one { margin-top: .5rem; }
+.tool-exit-one p { margin: .2rem 0; }
+.tool-exit-lines { max-height: 14rem; overflow: auto; font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2, rgba(127,127,127,.08)); padding: .5rem .6rem; border-radius: 8px; margin: .3rem 0; }
+.curve-legend-oom { color: var(--danger); }
