@@ -1912,8 +1912,10 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .curve-legend-oom { color: var(--danger); }
 
 /* A request of the AI as a card (#190). */
-.dm-card { display: flex; flex-direction: column; align-items: stretch; gap: 6px; padding: 10px 12px; cursor: pointer; position: relative; }
-.dm-top { display: flex; gap: 8px; align-items: center; font-size: .82rem; color: var(--ink2); }
+.dm-card.given-row { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 6px; padding: 10px 12px; cursor: pointer; position: relative; text-align: left; }
+.dm-card > * { align-self: stretch; text-align: left; }
+.dm-card > .dm-risk, .dm-card > .dm-acts { align-self: stretch; }
+.dm-top { display: flex; justify-content: flex-start; gap: 8px; align-items: center; font-size: .82rem; color: var(--ink2); }
 .dm-ico { width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; background: rgba(127,127,127,.15); font-size: .8rem; flex: none; }
 .dm-chev { margin-left: auto; font-size: 1.2rem; line-height: 1; transition: transform .15s; }
 .dm-card.open .dm-chev { transform: rotate(90deg); }
@@ -1925,7 +1927,7 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .dm-day-w { background: var(--brass); color: #fff; font-size: .66rem; font-weight: 700; letter-spacing: .06em; padding: 1px 0; }
 .dm-day-n { font-size: 1.15rem; font-weight: 700; padding: 1px 0 3px; }
 .dm-risk { padding: 5px 9px; border-radius: 8px; background: rgba(217, 154, 30, .16); color: inherit; font-size: .86rem; font-weight: 600; }
-.dm-facts { display: grid; grid-template-columns: 1.6em 1fr; gap: 3px 6px; font-size: .9rem; }
+.dm-facts { display: grid; justify-content: start; justify-items: start; grid-template-columns: 1.6em minmax(0, 1fr); gap: 3px 6px; font-size: .9rem; }
 .dm-k { color: var(--ink2); text-align: center; }
 .dm-v { min-width: 0; overflow-wrap: anywhere; }
 .dm-chips { display: inline-flex; flex-wrap: wrap; gap: 3px; }

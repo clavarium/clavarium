@@ -4221,7 +4221,8 @@
             if (c.bcc?.length) w.facts.push(['bcc', chips(c.bcc, ext)]);
             if (c.at) w.facts.push(['⏰', `Leaves ${dayWords(c.at)}${hhmm(c.at) ? `, ${hhmm(c.at)}` : ''} — waits in Drafts until then`]);
             if (c.files?.length) w.facts.push(['📎', `Joined: ${filesLine(c.files)}`]);
-            if (c.body) w.quote = c.body;
+            /* The body as it will read: the Markdown marks taken off. */
+            if (c.body) w.quote = c.body.replace(/\*\*(\S[^*\n]*?)\*\*/g, '$1').replace(/__(\S[^_\n]*?)__/g, '$1').replace(/(^|[^*\w])\*(\S[^*\n]*?)\*(?!\w)/g, '$1$2').replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '$1 ($2)').replace(/^#{1,6}\s+/gm, '');
         } else if (c.kind === 'calendar') {
             const ev = c.action === 'create' ? c : { ...about, ...Object.fromEntries(Object.entries(c).filter(([k]) => ['title', 'start', 'end', 'where'].includes(k))) };
             const answer = { accept: 'Accept', yes: 'Accept', decline: 'Decline', no: 'Decline', refuse: 'Decline', tentative: 'Maybe', maybe: 'Maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
