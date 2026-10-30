@@ -64,7 +64,9 @@
   {
     "id": "opencode",
     "instructions": ".config/opencode/AGENTS.md",
-    "logs": [".local/share/opencode/log"],
+    "logs": [
+      ".local/share/opencode/log"
+    ],
     "label": "OpenCode",
     "command": [
       "opencode"
@@ -93,6 +95,53 @@
       ],
       "npm-writable"
     ]
+  },
+  {
+    "id": "guichet",
+    "instructions": ".guichet/INSTRUCTIONS.md",
+    "label": "Guichet (prototype)",
+    "command": [
+      "node",
+      "/tools/launch/guichet.mjs"
+    ],
+    "memoryMb": 1024,
+    "install": [
+      "node",
+      [
+        "sudo",
+        "-n",
+        "npm",
+        "install",
+        "-g",
+        "--no-fund",
+        "--no-audit",
+        "@anthropic-ai/claude-code"
+      ],
+      "npm-writable",
+      {
+        "argv": [
+          "install",
+          "-D",
+          "-m",
+          "0600",
+          "/dev/stdin",
+          ".claude/settings.json"
+        ],
+        "input": "{\n  \"theme\": \"dark-ansi\",\n  \"permissions\": {\n    \"allow\": [\n      \"Bash(parley:*)\"\n    ]\n  }\n}\n"
+      }
+    ],
+    "signin": {
+      "senders": [
+        "anthropic.com",
+        "claude.com",
+        "claude.ai"
+      ],
+      "links": [
+        "claude.ai",
+        "claude.com",
+        "anthropic.com"
+      ]
+    }
   },
   {
     "id": "codex",
