@@ -359,4 +359,8 @@ test('through the API: a secret given to a running conversation reaches its mach
     asleep = true; b.calls.length = 0;
     await call('/api/conversations/alpha/secrets', { secret: 'OVH_KEY', attached: true });
     assert.equal(b.calls.length, 0, 'an asleep machine is not woken for it');
+    /* A new value: its running machines get it now too. */
+    asleep = false; b.calls.length = 0;
+    assert.equal(await call('/api/secrets/OVH_KEY/replace', { value: 'ovh-value-456' }), 200);
+    assert.ok(b.calls.some((c) => c.argv.includes('/run/secrets/OVH_KEY') && c.input === 'ovh-value-456'), 'the new value, at once');
 });
