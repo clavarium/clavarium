@@ -1903,3 +1903,9 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 #preview-body:has(> img:only-child) { display: flex; align-items: center; justify-content: center; }
 #preview-body > img:only-child { max-height: 100%; width: auto; object-fit: contain; margin: 0; }
 #viewer #preview-download.ico svg { width: 20px; height: 20px; }
+
+/* Why its tool stopped (Machine). */
+.tool-exit { margin: .4rem 0 .8rem; }
+.tool-exit-one { margin-top: .5rem; }
+.tool-exit-one p { margin: .2rem 0; }
+.tool-exit-lines { max-height: 14rem; overflow: auto; font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2, rgba(127,127,127,.08)); padding: .5rem .6rem; border-radius: 8px; margin: .3rem 0; }

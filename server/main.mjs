@@ -530,6 +530,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         reclaim: (name) => { events.add({ kind: 'machine', text: `Machine of ${name}: memory reclaimed (it was asleep but still held RAM)`, conversation: name }); return vms.reclaim(name).then((r) => (r.stdout || '').trim()); },
         say: (name, text) => { try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ } } });
     all.room = (ask) => capacity.check(ask);
+    /* A tool that ended cut for lack of memory: said in the events, to the owner, and in its chat. */
+    all.onToolExit = (name, report) => {
+        if (!report?.oom?.length) return;
+        const size = report.memoryMb ? ` (${Math.round(report.memoryMb / 1024 * 10) / 10} GB)` : '';
+        const text = `Its tool was stopped: the machine ran out of memory${size}. Give it more in Settings → Machine → Memory, or start it fresh.`;
+        events.add({ kind: 'machine', text: `Machine of ${name}: its tool was stopped for lack of memory${size}`, conversation: name });
+        void alerts.tell({ title: `${name}: its tool ran out of memory`, body: text, url: `/?c=${encodeURIComponent(name)}&open=settings` });
+        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ }
+    };
     const stopWatch = capacity.start();
     /* The curves of the resources (history.mjs): one look a minute, from what the server knows already. */
     const history = new History({ file: `${dataDir}/history.json` });

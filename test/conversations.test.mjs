@@ -134,6 +134,27 @@ test('the tool has exited: the machine stops after the delay, unless someone cam
     assert.equal(b.states.get('clv-demo'), 'Running', 'reopening cancels the stop');
 });
 
+test('the tool ended for lack of memory: why is kept on the conversation and told, before its machine stops', async (t) => {
+    const report = 'oom [Fri Oct 30 06:50:01 2026] Out of memory: Killed process 4242 (opencode) total-vm:9000kB\nmemory 1961\nlogfile ~/.local/share/opencode/log/x.log\nlog ERROR boom\n';
+    const gone = { exec: (argv) => (argv.includes('has-session') ? { code: 1, stdout: '', stderr: 'no session' } : argv.includes('bash') && argv.includes('report') ? { code: 0, stdout: report, stderr: '' } : undefined) };
+    const b = bench(t, gone);
+    const all = b.make({ stopDelayMs: 30 });
+    const told = [];
+    all.onToolExit = (name, r) => told.push([name, r]);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    await all.open('demo'); all.left('demo');
+    await all.ended('demo');
+    const kept = all.list().find((c) => c.name === 'demo').lastExit;
+    assert.deepEqual(kept.oom, ['[Fri Oct 30 06:50:01 2026] Out of memory: Killed process 4242 (opencode) total-vm:9000kB']);
+    assert.equal(kept.memoryMb, 1961);
+    assert.deepEqual(kept.log, ['ERROR boom']);
+    assert.equal(told.length, 1);
+    assert.equal(told[0][0], 'demo');
+    await new Promise((r) => setTimeout(r, 80));
+    assert.equal(b.states.get('clv-demo'), 'Stopped', 'and its machine stops as before');
+});
+
 test('a link that merely broke stops nothing: the session is still there, the tool keeps working', async (t) => {
     const b = bench(t);
     const all = b.make({ stopDelayMs: 20 });

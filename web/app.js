@@ -2222,6 +2222,36 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/health-react`, { on: $('react-on').checked, message: $('react-message').value, command: $('react-command').value }); $('react-said').textContent = 'Saved.'; }
         catch (error) { $('react-said').textContent = error.message; }
     });
+    /* WHY ITS TOOL STOPPED, said plainly: cut for lack of memory (and what to do), else its log's
+       last lines. `last` was kept when it ended; `now` is read in the machine when it runs. */
+    function paintToolExit(r) {
+        const body = $('tool-exit-body'); body.replaceChildren();
+        const rep = r?.last ?? null; const now = r?.now ?? null;
+        if (!rep && !now) { body.hidden = !r; if (r) body.append(el('p', 'hint', 'Nothing kept yet: its tool has not ended since this was added, and its machine is not running.')); return; }
+        body.hidden = false;
+        const show = (title, x) => {
+            if (!x) return;
+            const box = el('div', 'tool-exit-one');
+            box.append(el('p', '', [title, x.at ? new Date(x.at).toLocaleString() : ''].filter(Boolean).join(' · ')));
+            if (x.oom?.length) {
+                box.append(el('p', 'error', `Stopped for lack of memory: the machine${x.memoryMb ? ` (${sizeWords(x.memoryMb)})` : ''} ran out. Give it more memory below, or start its tool fresh.`));
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.oom.join('\n'); box.append(pre);
+            } else box.append(el('p', 'hint', 'No program was stopped for lack of memory.'));
+            if (x.log?.length) {
+                const d = document.createElement('details'); const sm = document.createElement('summary'); sm.textContent = `Last lines of its own log${x.logFile ? ` (${x.logFile.split('/').pop()})` : ''}`;
+                const pre = el('pre', 'tool-exit-lines'); pre.textContent = x.log.join('\n'); d.append(sm, pre); box.append(d);
+            }
+            body.append(box);
+        };
+        show('Now, in its machine', now);
+        show('When its tool last ended', rep);
+    }
+    $('tool-exit-look').addEventListener('click', async () => {
+        const b = $('tool-exit-look'); b.disabled = true; b.textContent = 'Looking…';
+        try { paintToolExit(await post(`${API}/conversations/${encodeURIComponent(current)}/exit-report`, {})); }
+        catch (error) { $('tool-exit-body').replaceChildren(el('p', 'error', error.message)); $('tool-exit-body').hidden = false; }
+        b.disabled = false; b.textContent = 'Why did its tool stop?';
+    });
     function paintMachine(here) {
         void paintReact(here);
         /* Its curves: asked again when it changes, or once in a while (paintCurves). */
@@ -2239,6 +2269,7 @@
             fact('Works in', here.work === 'kept' ? 'a folder kept here (/work)' : 'the disk of its machine (/work)');
         }
         healthLines($('machine-health'), here?.health ?? null);
+        if ($('tool-exit').dataset.of !== (here?.name ?? '')) { $('tool-exit').dataset.of = here?.name ?? ''; paintToolExit(here?.lastExit ? { last: here.lastExit } : null); }
         $('machine-restarted').textContent = here?.restarted ?? ''; $('machine-restarted').hidden = !here?.restarted;
         /* The choices are not painted over while somebody is choosing. */
         const memory = $('machine-memory'); const disk = $('machine-disk'); const cores = $('machine-cpus');

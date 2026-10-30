@@ -165,6 +165,11 @@
           <div class="chapter-body">
             <div class="panel-top"><b>Health</b><button type="button" id="health-check">Look now</button></div>
             <ul id="machine-health" class="health-lines" aria-live="polite"></ul>
+            <!-- WHY ITS TOOL STOPPED: kept when the tool ends, read again on demand (no server access needed). -->
+            <div id="tool-exit" class="tool-exit">
+              <div class="row"><button type="button" id="tool-exit-look">Why did its tool stop?</button></div>
+              <div id="tool-exit-body" hidden></div>
+            </div>
             <!-- ITS CURVES: memory, CPU and disk over time (server/history.mjs). -->
             <div class="curves" id="machine-curves" data-of="" hidden>
               <div class="curves-head"><b>Over time</b><div class="levels curves-span" role="group" aria-label="Over"><button type="button" data-span="1h" aria-pressed="true">1 h</button><button type="button" data-span="24h" aria-pressed="false">24 h</button><button type="button" data-span="7d" aria-pressed="false">7 days</button></div></div>

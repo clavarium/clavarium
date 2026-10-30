@@ -12,6 +12,7 @@
  *   GET  /api/conversations/<name>/health        what was last seen of its machine
  *   POST /api/conversations/<name>/health        look now (never wakes a machine)
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
+ *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
  *   POST /api/conversations/<name>/archive
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
@@ -619,6 +620,15 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
         if (moved) return send(202, await conversations.moveWork(decodeURIComponent(moved[1]), body.to)), true;
+        /* Why its tool ended: read now in its machine when it runs, else the last kept at its end. */
+        const exitOf = /^\/api\/conversations\/([^/]+)\/exit-report$/.exec(pathname);
+        if (exitOf) {
+            const conversation = decodeURIComponent(exitOf[1]);
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (!c) throw new Refusal(404, 'No such conversation.');
+            const now = await conversations.exitReport(conversation).catch(() => null);
+            return send(200, { now, last: c.lastExit ?? null }), true;
+        }
         /* "Seen": what its machine says now no longer calls its owner (health.mjs). */
         const seenOf = /^\/api\/conversations\/([^/]+)\/health\/seen$/.exec(pathname);
         if (seenOf && health) {
