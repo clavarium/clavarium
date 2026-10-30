@@ -1909,3 +1909,4 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .tool-exit-one { margin-top: .5rem; }
 .tool-exit-one p { margin: .2rem 0; }
 .tool-exit-lines { max-height: 14rem; overflow: auto; font-size: .78rem; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--panel-2, rgba(127,127,127,.08)); padding: .5rem .6rem; border-radius: 8px; margin: .3rem 0; }
+.curve-legend-oom { color: var(--danger); }

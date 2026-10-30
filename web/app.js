@@ -5873,6 +5873,8 @@
         const foot = el('div', 'curve-foot'); foot.append(el('span', '', curveTime(r.from, r.span)), el('span', '', 'now'));
         box.append(head, plot, foot);
         if (Number.isFinite(level)) box.append(el('small', 'hint curve-legend', '..... the reserve: what must stay free'));
+        /* Said, not only on hover (a tablet has none): what a red dot is, and how many. */
+        if (r.marks?.length) box.append(el('small', 'hint curve-legend curve-legend-oom', `● ${r.marks.length === 1 ? 'a program was' : `${r.marks.length} times a program was`} stopped for lack of memory`));
         return box;
     }
     const curvesAt = new WeakMap();
