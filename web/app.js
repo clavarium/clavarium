@@ -8818,16 +8818,24 @@
             });
             const remove = el('button', '', 'Remove'); remove.type = 'button';
             remove.addEventListener('click', () => takeBack(remove, `Remove ${b.name}: its key stops working now, and it goes back to its setup`, () => post(`${API}/boxes/${b.id}/revoke`)));
-            const acts = el('div', 'action-row'); acts.append(rename, remove);
+            /* Its conversation: where what it hears is said, and whose answers it speaks. Changed here at any time. */
+            const where = el('select'); where.setAttribute('aria-label', `Conversation of ${b.name}`);
+            for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; where.append(o); }
+            where.value = b.conversation;
+            where.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/move`, { conversation: where.value }).catch(() => {}); await paintBoxes(); });
+            const whereRow = el('label', 'box-where'); whereRow.append('Speaks in ', where);
+            const acts = el('div', 'action-row'); acts.append(whereRow, rename, remove);
             card.append(head, acts);
             rows.append(card);
         }
     }
     $('box-new').addEventListener('click', () => {
         const add = $('box-add'); add.hidden = !add.hidden;
+        /* Which conversation it speaks in: chosen on purpose, never a silent default. */
         const pick = $('box-conversation'); pick.replaceChildren();
+        const none = el('option', '', 'Choose a conversation...'); none.value = ''; pick.append(none);
         for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; pick.append(o); }
-        if (accessFor && conversations.some((c) => c.name === accessFor)) pick.value = accessFor;
+        pick.value = accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '';
         $('box-ready').hidden = true;
     });
     $('box-key-copy').addEventListener('click', async () => {
@@ -8837,6 +8845,7 @@
         setTimeout(() => { $('box-key-copy').textContent = 'Copy the key'; }, 2000);
     });
     $('box-code').addEventListener('click', async () => {
+        if (!$('box-conversation').value) { $('box-conversation').focus(); $('box-code-minutes').textContent = 'Choose the conversation it speaks in first.'; $('box-ready').hidden = false; return; }
         try {
             const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
