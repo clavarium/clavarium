@@ -76,6 +76,9 @@ import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
+import { Boxes, handleBoxes, PAIR_PATH as BOX_PAIR_PATH } from './boxes.mjs';
+import { Speech } from './speech.mjs';
+import { WebSocketServer } from 'ws';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const MAINTENANCE = 'deploy/maintenance.html';
@@ -98,6 +101,12 @@ export const FILES = {
     /* The review's diff, drawn by diff2html (vendored, pinned: web/vendor/diff2html/LICENSE). */
     '/vendor/diff2html.js': ['web/vendor/diff2html/diff2html-ui-slim.min.js', 'text/javascript; charset=utf-8'],
     '/vendor/diff2html.css': ['web/vendor/diff2html/diff2html.min.css', 'text/css; charset=utf-8'],
+    /* Tether's own module that flashes a device from this browser (ui/device-flash.js), and what it loads. */
+    '/vendor/tether/jobs.js': [packageFile('clavarium-tether', 'ui/jobs.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/device-flash.js': [packageFile('clavarium-tether', 'ui/device-flash.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/improv.js': [packageFile('clavarium-tether', 'ui/improv.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/vendor/esptool-0.6.1.js': [packageFile('clavarium-tether', 'ui/vendor/esptool-0.6.1.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/tether/vendor/web-serial-polyfill-1.0.15.js': [packageFile('clavarium-tether', 'ui/vendor/web-serial-polyfill-1.0.15.js'), 'text/javascript; charset=utf-8'],
     '/vendor/xterm.js': [packageFile('@xterm/xterm', 'lib/xterm.js'), 'text/javascript; charset=utf-8'],
     '/vendor/xterm.css': [packageFile('@xterm/xterm', 'css/xterm.css'), 'text/css; charset=utf-8'],
     '/vendor/fit.js': [packageFile('@xterm/addon-fit', 'lib/addon-fit.js'), 'text/javascript; charset=utf-8'],
@@ -158,7 +167,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -188,6 +197,16 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             say(happened === 'typed' ? 202 : happened === 'capped' ? 429 : 409, { woken: happened === 'typed', why: happened });
             return;
         }
+        /* A voice box pairing: under /c/, no sign-on; the one-use code is the right (boxes.mjs). */
+        if (boxes && pathname === BOX_PAIR_PATH) {
+            const say = (status, body) => response.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
+            if (request.method !== 'POST') { say(405, { error: 'Call this address with POST.' }); return; }
+            let text = ''; let over = false;
+            for await (const piece of request) { text += piece; if (text.length > 4096) { over = true; break; } }
+            if (over) { say(413, { error: 'Too long.' }); return; }
+            try { say(200, boxes.pair(JSON.parse(text || '{}'))); } catch (error) { say(error.status ?? 400, { error: error instanceof SyntaxError ? 'Not JSON.' : error.message }); }
+            return;
+        }
         if (door && pathname.startsWith('/c/')) {
             if (await handleDoor(request, response, door)) return;
             if (pathname === '/c/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
@@ -201,6 +220,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
+        if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS)) return;
         if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
@@ -446,7 +466,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         checks: new GitChecks({ vms, conversations: all, resources: folders }) });
     const gitTimer = gitKeeper.start(gitEveryMs);
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
-    const talk = new Talk({ store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
+    let boxes;
+    const talk = new Talk({ spoke: (name, text) => { void boxes?.agentSaid(name, text); }, store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
@@ -572,9 +594,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }) });
+    boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
+        exists: (name) => all.list().some((c) => c.name === name),
+        hear: (wav) => voice.transcribe(wav),
+        /* Said as the person's own message, the room named (one speaker for now). */
+        say: (name, text, room) => talk.say(name, `[${room}] ${text}`, undefined, undefined, 'voice'),
+        speak: (text) => speech.speak(text),
+        log: (line) => events.add({ kind: 'server', text: line }) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
+    boxes.attach(server, WebSocketServer);
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },

@@ -304,6 +304,8 @@ export class Setup {
            calendar, an address book -- with the conversations they were given to. */
         const TCAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
         for (const t of p.tethers?.store?.().targets() ?? []) {
+            /* The USB device of the owner's browser is not an asset: nothing of it to show or carry. */
+            if (t.kind === 'device') continue;
             const kind = TCAT[t.kind] ?? 'mailbox';
             nodes.push({ id: `connexion:${t.id}`, kind, name: t.title, sub: `${t.kind} (live)`, tether: true, record: t });
             for (const [agent, grant] of Object.entries(t.grants ?? {})) {

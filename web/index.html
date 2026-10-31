@@ -452,6 +452,22 @@
           <div id="sharing-devices"></div>
           <p id="sharing-none" class="hint" hidden>Nothing is shared with any device.</p>
           <div id="share-things" hidden></div>
+          <!-- Voice boxes: a speaker in a room, bound to one conversation (boxes.mjs). -->
+          <section id="boxes" aria-label="Voice boxes">
+            <div class="row"><b>Voice boxes</b><span class="sp"></span><button type="button" id="box-new" class="primary">+ Voice box</button></div>
+            <div id="box-add" class="card" hidden>
+              <div class="row">
+                <label>Conversation <select id="box-conversation"></select></label>
+                <label>Room <input id="box-room" maxlength="40" placeholder="Living room"></label>
+                <button type="button" id="box-code" class="primary">Get a code</button>
+              </div>
+              <div id="box-ready" hidden>
+                <p>Pairing code <b id="box-code-shown"></b> <span class="hint" id="box-code-minutes"></span></p>
+                <p class="hint">Hold the box's button 5 s, join its Wi-Fi « Boitier-… » with a phone, and type this code. A new box: ask the assistant of its conversation to flash it; you plug it in here when it asks.</p>
+              </div>
+            </div>
+            <div id="box-list"></div>
+          </section>
         </div>
       </div>
       </div>

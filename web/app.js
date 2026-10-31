@@ -4064,6 +4064,8 @@
         /* The calls this conversation's agent asked the owner to allow: validated here,
            in the parloir, without leaving for the Assets page. */
         const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
+        /* Approved calls only this browser can do (a device to flash over USB): Tether's jobs. */
+        const mineJobs = (Array.isArray(tether.jobs) ? tether.jobs : []).filter((j) => j.agent === `conversation:${current}`);
         const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
         const items = [];
         if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write' });
@@ -4078,7 +4080,8 @@
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
-        const demandes = mineDemandes.length ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: `${mineDemandes.length} waiting for you` } : null;
+        const waitingCount = mineDemandes.length + mineJobs.length;
+        const demandes = waitingCount ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: `${waitingCount} waiting for you` } : null;
         const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
@@ -4089,7 +4092,7 @@
             if (chosen === entry) row.setAttribute('aria-current', 'true');
             const words = el('span', 'as-words'); words.append(el('b', '', entry.name), el('small', 'as-sub', entry.sub));
             row.append(kindIcon('send'), words);
-            if (entry.key === 'demandes:mine') row.append(el('b', 'count', String(mineDemandes.length)));
+            if (entry.key === 'demandes:mine') row.append(el('b', 'count', String(waitingCount)));
             row.addEventListener('click', () => pickRoomAsset(entry.key));
             return row;
         };
@@ -4106,8 +4109,11 @@
         if (keepFiles) { void paintFiles(); return; }
         detail.append(asTitle(chosen, back));
         if (chosen.kind === 'demandes') {
-            detail.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
-            detail.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
+            for (const j of mineJobs) detail.append(jobCard(j, () => paintRoomAssets()));
+            if (mineDemandes.length) {
+                detail.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
+                detail.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
+            }
         } else if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
             if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
             embedFiles(detail, chosen.name);
@@ -4378,6 +4384,35 @@
         return card;
     }
     /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
+    /* A JOB: a call the owner approved that only this browser can do -- a device to flash
+       over USB. The browser lets only a click reach a USB device, so it waits for one; then
+       Tether's own module runs here (/vendor/tether/jobs.js) and its end is the agent's answer.
+       Its element is kept from one paint to the next: the module draws in it while it runs. */
+    const jobPlaces = new Map();
+    function jobCard(job, after) {
+        if (!jobPlaces.has(job.id)) {
+            const card = el('div', 'card job-card'); card.dataset.job = job.id;
+            const what = job.args?.name ? `Flash ${job.args.name}` : 'Flash a device';
+            card.append(el('b', '', `${what} from this browser`), el('p', 'hint', 'Plug it into this computer (or this Android phone) by USB, then start. Chrome or Edge.'));
+            const place = el('div', 'job-place');
+            const start = el('button', 'primary', 'Plug it in and start'); start.type = 'button';
+            const cancel = el('button', '', 'Cancel'); cancel.type = 'button';
+            const row = el('div', 'action-row'); row.append(start, cancel);
+            start.addEventListener('click', async () => {
+                row.hidden = true;
+                const call = async (op, args) => { try { return { ok: true, data: await post(`${API}/tether/${op}`, args) }; } catch (error) { return { ok: false, text: error.message }; } };
+                /* A device that pairs (a voice box): a one-use code for the conversation that asked, made here. */
+                const pair = async (room) => { const r = await post(`${API}/boxes/code`, { conversation: String(job.agent).replace(/^conversation:/, ''), name: room }); return { url: location.origin, code: r.code }; };
+                try { const { runJob } = await import('/vendor/tether/jobs.js'); await runJob(job, { call, root: place, pair }); }
+                catch (error) { place.textContent = `It could not start: ${error.message}`; }
+                setTimeout(() => { jobPlaces.delete(job.id); after?.(); }, 4000);
+            });
+            cancel.addEventListener('click', async () => { await post(`${API}/tether/job-done`, { id: job.id, ok: false, text: 'cancelled by the owner' }).catch(() => {}); jobPlaces.delete(job.id); after?.(); });
+            card.append(row, place);
+            jobPlaces.set(job.id, card);
+        }
+        return jobPlaces.get(job.id);
+    }
     function demandesList(approvals, { withWho = false, after } = {}) {
         const box = el('div', 'as-users demandes-box');
         for (const q of approvals) box.append(demandeRow(q, { withWho, after }));
@@ -8747,8 +8782,49 @@
         card.append(head, body);
         return card;
     }
+    /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
+    async function paintBoxes() {
+        const list = await getJson('/boxes', []);
+        const rows = $('box-list'); rows.replaceChildren();
+        if (!list.length) rows.append(el('p', 'hint', 'No voice box yet.'));
+        for (const b of list) {
+            const card = el('div', 'device card box-card'); card.dataset.box = b.id;
+            const head = el('div', 'device-head');
+            const conv = conversations.find((c) => c.name === b.conversation);
+            head.append(el('b', '', b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
+            const rename = el('button', '', 'Rename'); rename.type = 'button';
+            rename.addEventListener('click', () => {
+                const field = el('input'); field.value = b.name; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this voice box');
+                const save = el('button', 'primary', 'Save'); save.type = 'button';
+                const done = async () => { if (field.value.trim()) await post(`${API}/boxes/${b.id}/rename`, { name: field.value.trim() }).catch(() => {}); await paintBoxes(); };
+                save.addEventListener('click', () => { void done(); });
+                field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+                rename.replaceWith(save); head.firstChild.replaceWith(field); focusField(field);
+            });
+            const remove = el('button', '', 'Remove'); remove.type = 'button';
+            remove.addEventListener('click', () => takeBack(remove, `Remove ${b.name}: its key stops working now, and it goes back to its setup`, () => post(`${API}/boxes/${b.id}/revoke`)));
+            const acts = el('div', 'action-row'); acts.append(rename, remove);
+            card.append(head, acts);
+            rows.append(card);
+        }
+    }
+    $('box-new').addEventListener('click', () => {
+        const add = $('box-add'); add.hidden = !add.hidden;
+        const pick = $('box-conversation'); pick.replaceChildren();
+        for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; pick.append(o); }
+        if (accessFor && conversations.some((c) => c.name === accessFor)) pick.value = accessFor;
+        $('box-ready').hidden = true;
+    });
+    $('box-code').addEventListener('click', async () => {
+        try {
+            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim() });
+            $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
+            $('box-ready').hidden = false;
+        } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
+    });
     async function paintManage() {
         await readDevices();
+        void paintBoxes();
         $('share-by-device').setAttribute('aria-pressed', String(manageBy === 'device')); $('share-by-thing').setAttribute('aria-pressed', String(manageBy === 'thing'));
         const rows = $('sharing-devices'); rows.replaceChildren(); rows.hidden = manageBy !== 'device';
         const things = $('share-things'); things.replaceChildren(); things.hidden = manageBy !== 'thing';
