@@ -116,7 +116,17 @@ export function cleanDictation(raw, seconds) {
 const noTemperature = new Set();
 
 /* `audio` is a WAV file, as bytes. Resolves with the text to type. */
-export async function transcribe(config, audio, fetcher = fetch) {
+/* ONE VOICE: a voice box hears a room, a TV included. OVH's engine tells voices apart (diarize): only the
+   voice that spoke first -- the person who called the box -- is kept (31-10). Other engines: the whole text. */
+const DIARIZES = /^https:\/\/oai\.endpoints\.kepler\.ai\.cloud\.ovh\.net\//;
+export function firstVoice(body) {
+    const parts = Array.isArray(body?.diarization) ? body.diarization.filter((p) => typeof p?.text === 'string') : [];
+    if (parts.length === 0) return null;
+    const who = parts[0].speaker;
+    return parts.filter((p) => p.speaker === who).map((p) => p.text.trim()).join(' ');
+}
+
+export async function transcribe(config, audio, fetcher = fetch, { oneVoice = false } = {}) {
     if (!config) throw new Refusal(503, 'No speech-to-text engine is configured.');
     if (audio.length === 0) throw new Refusal(400, 'The recording is empty.');
     if (audio.length > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.');
@@ -132,7 +142,9 @@ export async function transcribe(config, audio, fetcher = fetch) {
         form.append('file', new Blob([audio], { type: 'audio/wav' }), 'dictation.wav');
         form.append('model', config.model);
         if (config.language) form.append('language', config.language);
-        form.append('response_format', 'json');
+        const diarize = oneVoice && DIARIZES.test(String(config.url));
+        form.append('response_format', diarize ? 'verbose_json' : 'json');
+        if (diarize) form.append('diarize', 'true');
         if (withTemperature) form.append('temperature', '0');
         return fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(TIMEOUT_MS) });
     };
@@ -152,7 +164,7 @@ export async function transcribe(config, audio, fetcher = fetch) {
     if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
     const body = await response.json().catch(() => undefined);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
-    return cleanDictation(body.text, wavSeconds(audio));
+    return cleanDictation((oneVoice && firstVoice(body)) || body.text, wavSeconds(audio));
 }
 
 /* ---------- THE ENGINE CHOSEN IN SETTINGS ----------
@@ -288,11 +300,11 @@ export class Dictation {
     /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
     #fresh(c) { if (c?.secret && this.#expired(c.secret)) throw new Refusal(409, KEY_EXPIRED); }
     /* `device`: the language of the device that dictates (a tag such as fr-FR), if it said. */
-    async transcribe(audio, device) {
+    async transcribe(audio, device, how = {}) {
         this.#fresh(this.#saved());
         const config = this.current();
         if (config) await this.#guard(config);
-        return transcribe(config && { ...config, language: languageOf(config.language, device) }, audio, this.#fetcher);
+        return transcribe(config && { ...config, language: languageOf(config.language, device) }, audio, this.#fetcher, how);
     }
     /* "Try it": what is in the form, not saved, on one short recording. */
     async try(body, audio, device) {

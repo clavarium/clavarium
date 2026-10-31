@@ -336,7 +336,10 @@ export class Boxes {
        addressed to (`to`: box ids, #215). Anything else stays in the thread, silent -- a box
        read a whole technical message aloud once (31-10), which nobody wants. */
     async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
-        const words = forSpeech(text);
+        /* What it is doing is written for a screen ("Tâche de fond : bêta 0.2.113…"): read aloud, it was words
+           from nowhere (31-10). Aloud, only a short plain one; otherwise a word that it is at work. */
+        const plain = forSpeech(text);
+        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? 'Je regarde, un instant.' : plain;
         if (!words) return;
         let boxes;
         if (doing) {

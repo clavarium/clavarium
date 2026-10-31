@@ -87,6 +87,7 @@ test('a sentence is heard, said in the conversation with the room, and the answe
     assert.equal(starts(), 2);
     await boxes.agentSaid('kitchen-help', 'À quelle heure ?', [box.id]);
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
 });
 
 test('a box not addressed stays quiet; a press too short is not a sentence', async () => {
@@ -340,4 +341,15 @@ test('conversation: after two sentences within three minutes the box stays liste
     assert.deepEqual(s.sent.at(-1), { t: 'cue', name: 'done' });
     await boxes.agentSaid('kitchen-help', 'Bonne soirée.', [box.id]);
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'nobody answered: the conversation is over');
+});
+
+test('what it is doing, written for a screen, is not read aloud: a short word instead', async () => {
+    const spoken = [];
+    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' }); await tick(); await tick();
+    await boxes.agentSaid('kitchen-help', 'Tâche de fond : bêta 0.2.113 après publication (test-c)', null, { doing: true });
+    assert.equal(spoken.at(-1), 'Je regarde, un instant.');
 });
