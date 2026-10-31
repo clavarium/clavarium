@@ -48,7 +48,7 @@ Text frames carry one JSON object each, with its type in `t`. Binary frames carr
 |---|---|---|
 | `hello` | `firmware`, `capabilities`, `rssi`, `volume`, `muted` | on every connection |
 | `listen.start` | `reason`: `button` \| `wake` | a sentence begins; binary frames follow |
-| `listen.end` | `reason`: `silence` \| `button` \| `timeout` (60 s at most) | the sentence ends |
+| `listen.end` | `reason`: `silence` \| `button` \| `timeout` (60 s at most) \| `nobody` (no voice: dropped, a conversation ends) | the sentence ends |
 | `event` | `name`: `button` (+`alert`), `button.long`, `mute.on`, `mute.off`, `battery` (+`level`), `error` (+`detail`) | when it happens |
 | `wifi.scan.result` | `id`, `networks`: [{`ssid`, `rssi`, `secure`}] | answers `wifi.scan` |
 | `ack` | `id`, `ok`, `detail`? | answers any command that has an `id` |
