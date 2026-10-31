@@ -91,10 +91,14 @@ export function forSpeech(text) {
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
         .replace(/https?:\/\/\S+/g, ' ')
         .replace(/[*_#>|~]+/g, ' ')
+        /* Times as said: "14h30" -> "14 heures 30", "14h" -> "14 heures" (read "14 H" otherwise, 31-10). */
+        .replace(/\b([01]?\d|2[0-3])\s?[hH](?:\s?([0-5]\d))?\b/g, (_, h, m) => `${h} heure${h === '1' || h === '0' ? '' : 's'}${m ? ` ${m}` : ''}`)
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
 }
+
+export const DOING_WITHIN_MS = 120_000;
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
@@ -248,14 +252,24 @@ export class Boxes {
     /* The tool said or asked something in a conversation: said aloud only by the boxes it is
        addressed to (`to`: box ids, #215). Anything else stays in the thread, silent -- a box
        read a whole technical message aloud once (31-10), which nobody wants. */
-    async agentSaid(conversation, text, to = null) {
+    async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
         const words = forSpeech(text);
-        if (!words || !Array.isArray(to) || to.length === 0) return;
-        const boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && to.includes(l.box().id));
+        if (!words) return;
+        let boxes;
+        if (doing) {
+            /* "I'm looking in the calendar": once per sentence heard, on the box that heard it, within two minutes. */
+            boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && l.heardAt && !l.doingSaid && this.#now() - l.heardAt < DOING_WITHIN_MS);
+            for (const l of boxes) l.doingSaid = true;
+        } else {
+            if (!Array.isArray(to) || to.length === 0) return;
+            boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && to.includes(l.box().id));
+        }
         if (boxes.length === 0) return;
+        /* A question: the box listens again right after, no wake word needed. */
+        const then = !doing && (asked || /\?\s*$/.test(words)) ? 'listen' : null;
         let pcm;
         try { pcm = await this.#speak(words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); for (const l of boxes) l.send({ t: 'cue', name: 'error' }); return; }
-        for (const l of boxes) l.play(pcm);
+        for (const l of boxes) l.play(pcm, then);
     }
 
     /* A box connected with its key: speaks protocol v1 on `socket` (a ws WebSocket). */
@@ -265,10 +279,10 @@ export class Boxes {
         const link = {
             socket, send, waiting: new Map(), heardAt: 0, muted: null, volume: null,
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
-            play: (pcm) => {
+            play: (pcm, then = null) => {
                 send({ t: 'speak.start', rate: 16_000 });
                 for (let at = 0; at < pcm.length; at += 640) if (socket.readyState === 1) socket.send(pcm.subarray(at, at + 640));
-                send({ t: 'speak.end' });
+                send({ t: 'speak.end', ...(then ? { then } : {}) });
             },
         };
         this.#links.set(box.id, link);
@@ -325,6 +339,7 @@ export class Boxes {
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
+        link.doingSaid = false;
     }
 
     /* Wires the box link on an HTTP server: the key in Authorization, else 401. */

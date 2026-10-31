@@ -78,6 +78,15 @@ test('a sentence is heard, said in the conversation with the room, and the answe
     assert.ok(start > 0);
     assert.deepEqual(s.sent.slice(start + 1, start + 4), [{ bytes: 640 }, { bytes: 640 }, { bytes: 320 }]);
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
+
+    /* What it is doing: said once, by the box just spoken to; a question: the box listens again after. */
+    const starts = () => s.sent.filter((m) => m.t === 'speak.start').length;
+    await boxes.agentSaid('kitchen-help', 'Je regarde dans le calendrier.', null, { doing: true });
+    assert.equal(starts(), 2);
+    await boxes.agentSaid('kitchen-help', 'Encore un instant.', null, { doing: true });
+    assert.equal(starts(), 2);
+    await boxes.agentSaid('kitchen-help', 'À quelle heure ?', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
 });
 
 test('a box not addressed stays quiet; a press too short is not a sentence', async () => {
