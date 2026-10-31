@@ -102,6 +102,7 @@ export function forSpeech(text) {
 }
 
 export const DOING_WITHIN_MS = 120_000;
+export const CHAT_WITHIN_MS = 3 * 60_000;
 export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
 /* A LONG SENTENCE, IN PIECES: dictation takes 16 s at most (voice.mjs, AUDIO_MAX), a box a minute; five
@@ -347,11 +348,24 @@ export class Boxes {
             boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && to.includes(l.box().id));
         }
         if (boxes.length === 0) return;
-        /* A question: the box listens again right after, no wake word needed. */
-        const then = !doing && (asked || /\?\s*$/.test(words)) ? 'listen' : null;
-        let pcm;
-        try { pcm = await this.#speak(words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); for (const l of boxes) l.send({ t: 'cue', name: 'error' }); return; }
-        for (const l of boxes) l.play(pcm, then);
+        /* A question: the box listens again right after, no wake word needed. So does a box in CONVERSATION:
+           asked for ("mode conversation"), or by itself after two sentences within three minutes (31-10);
+           it ends when nobody answers, or on "fin de la conversation". */
+        const question = !doing && (asked || /\?\s*$/.test(words));
+        for (const l of boxes) {
+            const chatting = !doing && this.#chatting(l);
+            const opening = chatting && !l.chat;
+            if (chatting) l.chat = true;
+            let pcm;
+            try { pcm = await this.#speak(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); continue; }
+            l.play(pcm, question || chatting ? 'listen' : null);
+        }
+    }
+    #chatting(link) {
+        if (link.chat) return true;
+        const now = this.#now();
+        link.recent = (link.recent ?? []).filter((t) => now - t < CHAT_WITHIN_MS);
+        return link.recent.length >= 2;
     }
 
     /* A box connected with its key: speaks protocol v1 on `socket` (a ws WebSocket). */
@@ -391,6 +405,14 @@ export class Boxes {
             }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
+            if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
+                /* Listened again, nobody spoke: a conversation ends there, in silence. */
+                sentence = null;
+                if (link.chat) this.#log(`voice box ${box.name}: conversation ended, nobody answered`);
+                link.chat = false; link.recent = [];
+                link.send({ t: 'cue', name: 'done' });
+                return;
+            }
             if (m.t === 'listen.end' && sentence) {
                 const pcm = Buffer.concat(sentence);
                 sentence = null;
@@ -429,6 +451,9 @@ export class Boxes {
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
+        link.recent = [...(link.recent ?? []), link.heardAt];
+        if (/\bmode conversation\b/i.test(text)) link.chat = true;
+        if (/\b(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)\b/i.test(text)) { link.chat = false; link.recent = []; }
         link.doingSaid = false;
     }
 
