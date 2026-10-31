@@ -278,3 +278,16 @@ test('with an ElevenLabs key among the secrets, the boxes speak with its voice',
     assert.equal(asked.init.headers['xi-api-key'], 'k-test');
     assert.equal(JSON.parse(asked.init.body).text, 'Bonjour');
 });
+
+test('a long sentence is dictated in pieces of 14 s at most, cut at its quietest moment', async () => {
+    const { piecesOf } = await import('../server/boxes.mjs');
+    const pcm = Buffer.alloc(32_000 * 40);
+    for (let i = 0; i < pcm.length; i += 2) pcm.writeInt16LE(3000 * Math.sin(i / 7), i);
+    pcm.fill(0, 32_000 * 11, 32_000 * 11 + 3200);   /* a pause at 11 s */
+    const pieces = piecesOf(pcm);
+    assert.ok(pieces.length >= 3);
+    assert.ok(pieces.every((p) => p.length <= 32_000 * 14));
+    assert.equal(pieces.reduce((n, p) => n + p.length, 0), pcm.length);
+    assert.ok(Math.abs(pieces[0].length - (32_000 * 11 + 1600)) <= 1600, 'cut in the pause');
+    assert.equal(piecesOf(Buffer.alloc(32_000 * 5)).length, 1);
+});

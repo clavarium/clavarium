@@ -100,6 +100,26 @@ export function forSpeech(text) {
 
 export const DOING_WITHIN_MS = 120_000;
 
+/* A LONG SENTENCE, IN PIECES: dictation takes 16 s at most (voice.mjs, AUDIO_MAX), a box a minute; five
+   long sentences were lost so (31-10). Each piece ends at the quietest 20 ms between 8 and 14 s: a pause,
+   most often, rather than a word cut in two. PCM 16 kHz 16-bit mono in, pieces out. */
+export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
+    const second = 32_000; const step = 640; const out = [];
+    let at = 0;
+    while (pcm.length - at > most * second) {
+        let best = at + most * second; let quietest = Infinity;
+        for (let i = at + least * second; i + step <= at + most * second; i += step) {
+            let e = 0;
+            for (let k = i; k < i + step; k += 2) { const v = pcm.readInt16LE(k); e += v * v; }
+            if (e < quietest) { quietest = e; best = i + step / 2; }
+        }
+        best -= best % 2;
+        out.push(pcm.subarray(at, best)); at = best;
+    }
+    out.push(pcm.subarray(at));
+    return out;
+}
+
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
     #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin;
@@ -337,7 +357,11 @@ export class Boxes {
         const lost = async (words) => {
             try { link.play(await this.#speak(words), 'listen'); } catch { link.send({ t: 'cue', name: 'error' }); }
         };
-        try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
+        try {
+            const said = [];
+            for (const piece of piecesOf(pcm)) said.push(String(await this.#hear(wavOf(piece)) ?? '').trim());
+            text = said.filter(Boolean).join(' ');
+        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
