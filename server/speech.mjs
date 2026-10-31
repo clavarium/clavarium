@@ -35,11 +35,31 @@ export function toPcm16k(samples, from) {
     return out;
 }
 
-export class Speech {
-    #dir; #lang; #engine = null; #loading = null; #fetch; #log;
+/* A NICER VOICE, ONLINE: ElevenLabs, when the owner put its key among the secrets (by this name).
+   The text then leaves this server for theirs; without the key, or when it fails (quota, network),
+   the voice of this server answers instead. The voice: chosen by ear on the real box (31-10). */
+export const ELEVEN_SECRET = 'ELEVENLABS_API_KEY';
+export const ELEVEN_VOICE = 'onwK4e9ZLuTAKqWW03F9';   /* "Daniel" */
+export const ELEVEN_MODEL = 'eleven_multilingual_v2';
 
-    constructor({ dir, lang = 'fr', fetcher = fetch, log = () => {} }) {
-        this.#dir = dir; this.#lang = VOICES[lang] ? lang : 'fr'; this.#fetch = fetcher; this.#log = log;
+export class Speech {
+    #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret;
+
+    constructor({ dir, lang = 'fr', fetcher = fetch, log = () => {}, secret = () => undefined }) {
+        this.#dir = dir; this.#lang = VOICES[lang] ? lang : 'fr'; this.#fetch = fetcher; this.#log = log; this.#secret = secret;
+    }
+
+    async #eleven(text) {
+        const key = this.#secret(ELEVEN_SECRET);
+        if (!key) return null;
+        try {
+            const r = await this.#fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}?output_format=pcm_16000`, {
+                method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
+                body: JSON.stringify({ text, model_id: ELEVEN_MODEL }), signal: AbortSignal.timeout(20_000),
+            });
+            if (!r.ok) { this.#log(`speech: ElevenLabs answered ${r.status}, this server's voice instead`); return null; }
+            return Buffer.from(await r.arrayBuffer());
+        } catch (error) { this.#log(`speech: ElevenLabs unreachable (${error.message}), this server's voice instead`); return null; }
     }
 
     get voice() { return VOICES[this.#lang]; }
@@ -81,6 +101,8 @@ export class Speech {
 
     /* Text -> PCM 16 kHz. */
     async speak(text) {
+        const online = await this.#eleven(text);
+        if (online && online.length) return online;
         const engine = await this.#load();
         const audio = engine.generate({ text, sid: 0, speed: 1.0 });
         return toPcm16k(audio.samples, audio.sampleRate);

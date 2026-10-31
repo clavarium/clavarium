@@ -246,3 +246,15 @@ test('a .wav played on a box: mixed to mono, brought to 16 kHz', async () => {
     assert.deepEqual(boxes.play(a.id, Buffer.concat([h, stereo])), { seconds: 1 });
     assert.equal(s.sent.filter((m) => m.t === 'speak.start').length, 1);
 });
+
+test('with an ElevenLabs key among the secrets, the boxes speak with its voice', async () => {
+    const { Speech, ELEVEN_SECRET, ELEVEN_VOICE } = await import('../server/speech.mjs');
+    let asked;
+    const speech = new Speech({ dir: '/nonexistent', secret: (name) => (name === ELEVEN_SECRET ? 'k-test' : undefined),
+        fetcher: async (url, init) => { asked = { url, init }; return { ok: true, arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).buffer }; } });
+    const pcm = await speech.speak('Bonjour');
+    assert.deepEqual([...pcm], [1, 2, 3, 4]);
+    assert.match(asked.url, new RegExp(`${ELEVEN_VOICE}\\?output_format=pcm_16000`));
+    assert.equal(asked.init.headers['xi-api-key'], 'k-test');
+    assert.equal(JSON.parse(asked.init.body).text, 'Bonjour');
+});
