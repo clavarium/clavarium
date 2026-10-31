@@ -82,7 +82,7 @@ export class Tethers {
             if (!who.startsWith(AGENT)) continue;
             const name = who.slice(AGENT.length);
             this.#seen.set(j.id, { name, verb: j.verb });
-            try { this.announce(name, { kind: 'tether-job', text: `To do in your browser: ${j.args?.name ? `flash ${j.args.name}` : 'flash a device'}. Open this conversation's Demandes, plug it in by USB, and start.`, topic: 'Demande', tone: 'warn' }); } catch { /* its chat is off */ }
+            try { this.announce(name, { kind: 'tether-job', text: `To do in your browser: ${j.args?.name ? `flash ${j.args.name}` : 'flash a device'}. Plug it in by USB here, then start.`, topic: 'Demande', tone: 'warn', actions: [`flash:${j.id}`] }); } catch { /* its chat is off */ }
         }
         for (const [id, info] of [...this.#seen]) {
             if (live.has(id)) continue;
