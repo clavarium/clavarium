@@ -4442,7 +4442,7 @@
                 row.hidden = true;
                 const call = async (op, args) => { try { return { ok: true, data: await post(`${API}/tether/${op}`, args) }; } catch (error) { return { ok: false, text: error.message }; } };
                 /* A device that pairs (a voice box): a one-use code for the conversation that asked, made here. */
-                const pair = async (room) => { const r = await post(`${API}/boxes/code`, { conversation: String(job.agent).replace(/^conversation:/, ''), name: room }); return { url: location.origin, code: r.code }; };
+                const pair = async (room) => { const r = await post(`${API}/boxes/code`, { conversation: String(job.agent).replace(/^conversation:/, ''), name: room, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }); return { url: location.origin, code: r.code }; };
                 try { const { runJob } = await import('/vendor/tether/jobs.js'); await runJob(job, { call, root: place, pair }); }
                 catch (error) { place.textContent = `It could not start: ${error.message}`; }
                 setTimeout(() => { jobPlaces.delete(job.id); after?.(); }, 4000);
@@ -8864,6 +8864,8 @@
             /* Where it is (a home): typed once, then offered for the next ones. */
             const place = el('input'); place.value = b.place ?? ''; place.maxLength = 40; place.placeholder = 'Place (a home)'; place.setAttribute('list', 'box-places'); place.setAttribute('aria-label', `Place of ${b.name}`);
             place.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/place`, { place: place.value.trim() }).catch(() => {}); await paintBoxes(); });
+            /* A box paired before it knew its time zone takes this page's: its lights follow the hours here. */
+            if (!b.zone) void post(`${API}/boxes/${b.id}/zone`, { zone: Intl.DateTimeFormat().resolvedOptions().timeZone }).catch(() => {});
             /* Louder, softer: kept here, given to the box now or when it comes back. */
             const vol = el('input'); vol.type = 'range'; vol.min = '0'; vol.max = '100'; vol.step = '5'; vol.value = String(b.volume ?? 80); vol.setAttribute('aria-label', `Volume of ${b.name}`);
             const volSaid = el('small', 'hint', `${vol.value} %`);
@@ -8893,7 +8895,7 @@
     $('box-code').addEventListener('click', async () => {
         if (!$('box-conversation').value) { $('box-conversation').focus(); $('box-code-minutes').textContent = 'Choose the conversation it speaks in first.'; $('box-ready').hidden = false; return; }
         try {
-            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
+            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin, zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
             $('box-key').textContent = r.key ?? '';
             $('box-link').href = r.link ?? '#';

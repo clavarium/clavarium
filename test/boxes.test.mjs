@@ -420,3 +420,18 @@ test('a dictation that fails once is tried again by itself: the person need not 
     assert.equal(calls, 2);
     assert.equal(said[0].text, 'quelle heure est-il');
 });
+
+test('a box is told its clock: the offset of its time zone, given by the page that made its code', async () => {
+    const { offsetOf, zoneOf } = await import('../server/boxes.mjs');
+    assert.equal(offsetOf('Europe/Paris', Date.UTC(2026, 10, 1, 12)), 60);
+    assert.equal(offsetOf('Europe/Paris', Date.UTC(2026, 6, 1, 12)), 120, 'summer time by itself');
+    assert.equal(zoneOf('Europe/Paris; rm -rf /'), '');
+    const { boxes } = make();
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon', 'America/New_York').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'hello', firmware: '0.1.28', volume: 60, muted: false });
+    assert.ok(s.sent.some((m) => m.t === 'clock' && (m.offset === -300 || m.offset === -240)));
+    boxes.zone(box.id, 'Asia/Tokyo');
+    assert.deepEqual(s.sent.at(-1), { t: 'clock', offset: 540 });
+});

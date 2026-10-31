@@ -106,6 +106,21 @@ export function forSpeech(text) {
         .slice(0, 1500);
 }
 
+/* THE BOX'S CLOCK: its lights follow the hours of its place. The time zone is the page's that made its code
+   (its browser's), else this server's; the box is told its offset from UTC at each connection and every hour
+   after, so summer time comes by itself. */
+export function zoneOf(zone) {
+    const z = String(zone ?? '').trim();
+    try { if (z && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(z)) { new Intl.DateTimeFormat('en', { timeZone: z }); return z; } } catch { /* unknown */ }
+    return '';
+}
+export function offsetOf(zone, now) {
+    const z = zoneOf(zone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: z, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(now)).map((p) => [p.type, p.value]));
+    const local = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+    return Math.round((local - Math.floor(now / 60_000) * 60_000) / 60_000);
+}
+
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -178,11 +193,11 @@ export class Boxes {
         return this.#all().map(({ keyHash, ...b }) => ({ ...b, online: this.#links.has(b.id), muted: this.#links.get(b.id)?.muted ?? null, volume: b.volume ?? this.#links.get(b.id)?.volume ?? VOLUME_DEFAULT }));
     }
 
-    code(conversation, name) {
+    code(conversation, name, zone = '') {
         if (!this.#exists(conversation)) throw new Refusal(404, 'No such conversation.');
         const code = newCode();
         const label = String(name ?? '').trim().slice(0, NAME_MAX);
-        this.#codes.set(plainCode(code), { conversation, name: label, until: this.#now() + CODE_MINUTES * 60_000 });
+        this.#codes.set(plainCode(code), { conversation, name: label, zone: zoneOf(zone), until: this.#now() + CODE_MINUTES * 60_000 });
         return { code, minutes: CODE_MINUTES };
     }
 
@@ -202,6 +217,7 @@ export class Boxes {
             type: String(body.type ?? '').slice(0, 40), firmware: String(body.firmware ?? '').slice(0, 20),
             capabilities: Array.isArray(body.capabilities) ? body.capabilities.map(String).slice(0, 20) : [],
             createdAt: new Date(now).toISOString(), seenAt: null,
+            ...(wanted.zone ? { zone: wanted.zone } : {}),
         };
         this.#save([...this.#all(), box]);
         this.#log(`voice box paired: ${name} (${box.conversation})`);
@@ -324,7 +340,13 @@ export class Boxes {
     }
 
     /* Where it is (a home, a family house): grouped by it, named with it. */
-    place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
+    zone(id, zone) {
+        const z = zoneOf(zone);
+        if (!z) throw new Refusal(400, 'Not a time zone.');
+        this.#change(id, { zone: z });
+        this.#links.get(id)?.send({ t: 'clock', offset: offsetOf(z, this.#now()) });
+    }
+        place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
 
     move(id, conversation) {
         if (!this.#exists(conversation)) throw new Refusal(404, 'No such conversation.');
@@ -450,6 +472,8 @@ export class Boxes {
                 const wanted = link.box().volume ?? VOLUME_DEFAULT;
                 if (m.volume !== wanted) { send({ t: 'volume', id: randomUUID(), level: wanted }); m.volume = wanted; }
             }
+            if (m.t === 'hello') send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) });
+            if (m.t === 'ping' && this.#now() - (link.clockAt ?? 0) > 3_600_000) { link.clockAt = this.#now(); send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) }); }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'record.start' && this.#recordDir) {
                 mkdirSync(this.#recordDir, { recursive: true });
@@ -584,6 +608,7 @@ export class Boxes {
  *   POST /api/boxes/<id>/rename           {name}
  *   POST /api/boxes/<id>/move             {conversation}: one conversation at a time
  *   POST /api/boxes/<id>/place            {place}: where it is (a home), shown with its name
+ *   POST /api/boxes/<id>/zone             {zone}: its time zone (IANA), for its clock; the page gives its own
  *   POST /api/boxes/<id>/revoke
  *   POST /api/boxes/<id>/volume           {level 0-100}
  *   POST /api/boxes/<id>/wifi-scan        -> {networks}
@@ -602,7 +627,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         for await (const piece of request) { text += piece; if (text.length > 8192) return send(413, { error: 'Too long.' }); }
         const body = text ? JSON.parse(text) : {};
         if (pathname === '/api/boxes/code') {
-            const made = boxes.code(String(body.conversation ?? ''), body.name);
+            const made = boxes.code(String(body.conversation ?? ''), body.name, body.zone);
             /* With this page's address: the key, and a link (its QR code) that opens the box's page filled in. */
             const origin = /^https?:\/\/[^/\s]+$/.test(String(body.origin ?? '')) ? String(body.origin) : '';
             if (!origin) return send(201, made);
@@ -618,6 +643,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'rename': boxes.rename(id, body.name); return send(200, { ok: true });
         case 'move': boxes.move(id, String(body.conversation ?? '')); return send(200, { ok: true });
         case 'place': boxes.place(id, body.place); return send(200, { ok: true });
+        case 'zone': boxes.zone(id, body.zone); return send(200, { ok: true });
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
         case 'volume': return answered(await boxes.setVolume(id, body.level));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }
