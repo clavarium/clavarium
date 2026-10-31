@@ -16,6 +16,7 @@
  * Both are under /c/: the edge lets them through without sign-on, as the
  * device door. Nothing is kept of the audio, here or on the box.
  */
+import { spawn as spawnProcess } from 'node:child_process';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 
@@ -93,12 +94,15 @@ export function forSpeech(text) {
         .replace(/[*_#>|~]+/g, ' ')
         /* Times as said: "14h30" -> "14 heures 30", "14h" -> "14 heures" (read "14 H" otherwise, 31-10). */
         .replace(/\b([01]?\d|2[0-3])\s?[hH](?:\s?([0-5]\d))?\b/g, (_, h, m) => `${h} heure${h === '1' || h === '0' ? '' : 's'}${m ? ` ${m}` : ''}`)
+        /* Never its own wake word aloud: the box heard itself and cut its own sentence (31-10). */
+        .replace(/\b(?:hey|hé|eh)[\s,]+jarvis\b/giu, 'le mot d\'éveil')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
 }
 
 export const DOING_WITHIN_MS = 120_000;
+export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
 /* A LONG SENTENCE, IN PIECES: dictation takes 16 s at most (voice.mjs, AUDIO_MAX), a box a minute; five
    long sentences were lost so (31-10). Each piece ends at the quietest 20 ms between 8 and 14 s: a pause,
@@ -122,11 +126,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin;
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map();
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {} }) {
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch }) {
+        this.#spawn = spawn; this.#fetch = fetcher;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
 
@@ -229,6 +234,63 @@ export class Boxes {
         return this.#images.get(String(token).replace(/\.bin$/, ''))?.bytes;
     }
 
+    /* LISTENING TO THE INTERNET: a radio, a podcast, a music file, a playlist, read by this server (ffmpeg,
+       any format it knows) and sent on to the box at the pace it is played, a few seconds ahead -- until it
+       ends, stop(), or the person presses the button or says the wake word (the box then starts a sentence). */
+    async listen(id, url, name = '') {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        this.stop(id);
+        const source = await this.#resolve(url);
+        let child;
+        try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+        catch { throw new Refusal(501, 'This server cannot read sounds: ffmpeg is not installed (an update installs it).'); }
+        const box = link.box(); const label = name || new URL(url).host;
+        const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '' };
+        this.#streams.set(id, stream);
+        link.send({ t: 'speak.start', rate: 16_000 });
+        child.stdout.on('data', (d) => { stream.queue.push(d); stream.queued += d.length; if (stream.queued > LISTEN_AHEAD * 4) child.stdout.pause(); });
+        child.stderr.on('data', (d) => { stream.failed = `${stream.failed}${d}`.slice(-300); });
+        child.on('error', (e) => { stream.failed = e.code === 'ENOENT' ? 'ffmpeg is not installed on this server' : e.message; stream.ended = true; });
+        child.on('close', () => { stream.ended = true; });
+        let carry = Buffer.alloc(0);
+        stream.timer = setInterval(() => {
+            if (this.#streams.get(id) !== stream) return;
+            const due = (this.#now() - stream.started) * 32 + LISTEN_AHEAD;   /* bytes the box should have by now, a few seconds ahead */
+            while (stream.sent + 640 <= due && (carry.length >= 640 || stream.queue.length)) {
+                if (carry.length < 640) { const d = stream.queue.shift(); stream.queued -= d.length; carry = Buffer.concat([carry, d]); continue; }
+                if (link.socket.readyState === 1) link.socket.send(carry.subarray(0, 640));
+                carry = carry.subarray(640); stream.sent += 640;
+            }
+            if (stream.queued < LISTEN_AHEAD) child.stdout.resume();
+            if (stream.ended && !stream.queue.length && carry.length < 640) {
+                this.#log(`voice box ${box.name}: ${label} ended after ${Math.round(stream.sent / 32_000)} s${stream.failed && stream.sent < 32_000 ? ` (${stream.failed.trim().split('\n').pop()})` : ''}`);
+                this.stop(id);
+            }
+        }, 100);
+        stream.timer.unref?.();
+        this.#log(`voice box ${box.name}: plays ${label}`);
+        return { ok: true };
+    }
+    stop(id) {
+        const stream = this.#streams.get(id);
+        if (!stream) return false;
+        this.#streams.delete(id);
+        clearInterval(stream.timer);
+        try { stream.child.kill('SIGTERM'); } catch { /* gone */ }
+        this.#links.get(id)?.send({ t: 'speak.end' });
+        return true;
+    }
+    /* A playlist (.m3u, .pls) is a list of addresses: its first one. */
+    async #resolve(url) {
+        if (!/\.(m3u|pls)(\?|$)/i.test(new URL(url).pathname)) return url;
+        try {
+            const r = await this.#fetch(url, { signal: AbortSignal.timeout(10_000) });
+            const text = await r.text();
+            return text.split(/\r?\n/).map((l) => l.replace(/^File\d+=/i, '').trim()).find((l) => /^https?:\/\//.test(l)) ?? url;
+        } catch { return url; }
+    }
+
     /* Where it is (a home, a family house): grouped by it, named with it. */
     place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
 
@@ -328,7 +390,7 @@ export class Boxes {
                 if (m.volume !== wanted) { send({ t: 'volume', id: randomUUID(), level: wanted }); m.volume = wanted; }
             }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
-            if (m.t === 'listen.start') { sentence = []; size = 0; return; }
+            if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence) {
                 const pcm = Buffer.concat(sentence);
                 sentence = null;
@@ -342,7 +404,7 @@ export class Boxes {
             }
             if ((m.t === 'ack' || m.t === 'wifi.scan.result') && typeof m.id === 'string') { link.waiting.get(m.id)?.(m); link.waiting.delete(m.id); }
         });
-        socket.on('close', () => { if (this.#links.get(box.id) === link) { this.#links.delete(box.id); this.#log(`voice box ${box.name}: disconnected`); } });
+        socket.on('close', () => { if (this.#links.get(box.id) === link) { this.stop(box.id); this.#links.delete(box.id); this.#log(`voice box ${box.name}: disconnected`); } });
         socket.on('error', () => {});
     }
 
@@ -448,6 +510,8 @@ export function voiceboxConnector(boxes) {
         async run(verb, t, a = {}) {
             const id = t.config?.box;
             if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
+            if (verb === 'voicebox.listen') { await boxes.listen(id, String(a.url), String(a.name ?? '')); return { text: `Playing ${a.name || a.url}: it goes on until it ends, voicebox-stop, or the person presses the button or says the wake word.` }; }
+            if (verb === 'voicebox.stop') return { text: boxes.stop(id) ? 'Stopped.' : 'Nothing was playing.' };
             if (verb === 'voicebox.play') { const r = boxes.play(id, Buffer.from(String(a.image ?? ''), 'base64')); return { text: `Played (${r.seconds} s).` }; }
             if (verb === 'voicebox.update') { await boxes.update(id, a.image, a.version); return { text: `Installed${a.version ? ` (${a.version})` : ''}: the box restarts and comes back in a moment.` }; }
             if (verb === 'voicebox.alert') { await boxes.command(id, { t: 'alert', text: String(a.text ?? '').slice(0, 300) }, 10 * 60_000); return { text: 'The alert was seen: someone pressed its button.' }; }

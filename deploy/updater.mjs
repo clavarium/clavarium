@@ -132,6 +132,15 @@ export async function ensureQuietSudo({ file = SUDOERS, run = runCommand } = {})
     return true;
 }
 
+/* FFMPEG, kept by the updater: the voice boxes play a radio, a podcast, a music file through it
+   (server/boxes.mjs, listen). Installed by install.sh; added once to a machine installed before. */
+export async function ensureFfmpeg({ run = runCommand, has = () => ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].some((f) => existsSync(f)) } = {}) {
+    if (has()) return false;
+    if (process.getuid?.() !== 0) return false;
+    await run(['apt-get', 'install', '-y', '-qq', 'ffmpeg'], { timeoutMs: 15 * 60_000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+    return has();
+}
+
 /* THE MAINTENANCE PAGE, kept by the updater: while the server is down (an update, a restart) the
    front (Caddy) answers it instead of the sign-in proxy's "Bad Gateway". The sign-in proxy answers
    502 in HTML when the server does not; the server's own errors are JSON and pass as they are. A
@@ -931,6 +940,7 @@ async function main(argv) {
                update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
+            try { if (await ensureFfmpeg()) console.error('updater: ffmpeg installed, for the sounds the voice boxes play'); } catch (error) { console.error(`updater: ffmpeg could not be installed: ${error.message}`); }
             try { if (await ensureQuietSudo()) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); }
             try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             try { const c = await ensureGenericClientId({ run: runCommand }); if (c.changed.length) console.error('updater: the sign-in client id was made generic (nothing names the product in the open)'); } catch (error) { console.error(`updater: the sign-in client id could not be made generic: ${error.message}`); }

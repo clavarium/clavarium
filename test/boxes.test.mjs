@@ -291,3 +291,31 @@ test('a long sentence is dictated in pieces of 14 s at most, cut at its quietest
     assert.ok(Math.abs(pieces[0].length - (32_000 * 11 + 1600)) <= 1600, 'cut in the pause');
     assert.equal(piecesOf(Buffer.alloc(32_000 * 5)).length, 1);
 });
+
+test('an internet sound plays on a box at its pace, a few seconds ahead, until someone speaks', async () => {
+    const { EventEmitter } = await import('node:events');
+    const { PassThrough } = await import('node:stream');
+    const { LISTEN_AHEAD } = await import('../server/boxes.mjs');
+    let clock = 1_000_000; const spawned = [];
+    const spawn = (cmd, args) => { const c = new EventEmitter(); c.stdout = new PassThrough(); c.stderr = new PassThrough(); c.kill = () => { c.killed = true; }; spawned.push({ cmd, args, c }); return c; };
+    const fetcher = async () => ({ text: async () => '[playlist]\nFile1=https://radio.example.org/live.mp3\n' });
+    const { boxes } = make({ spawn, fetcher, now: () => clock });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    await boxes.listen(box.id, 'https://radio.example.org/station.pls', 'Radio');
+    assert.equal(spawned[0].cmd, 'ffmpeg');
+    assert.ok(spawned[0].args.includes('https://radio.example.org/live.mp3'), 'the playlist read: its first address');
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000 });
+    spawned[0].c.stdout.write(Buffer.alloc(32_000 * 20));
+    await new Promise((r) => setTimeout(r, 250));
+    const bytes = () => s.sent.filter((m) => m.bytes).reduce((n, m) => n + m.bytes, 0);
+    assert.ok(bytes() >= LISTEN_AHEAD - 640 && bytes() <= LISTEN_AHEAD + 640, `a few seconds ahead, not all at once (${bytes()})`);
+    clock += 2000;
+    await new Promise((r) => setTimeout(r, 150));
+    assert.ok(bytes() >= LISTEN_AHEAD + 2 * 32_000 - 640, 'then at its pace');
+    s.box({ t: 'listen.start', reason: 'wake' });
+    assert.equal(spawned[0].c.killed, true, 'someone speaks: it stops');
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
+    assert.equal(boxes.stop(box.id), false);
+});
