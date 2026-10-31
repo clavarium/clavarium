@@ -71,14 +71,16 @@ test('a sentence is heard, said in the conversation with the room, and the answe
 
     await boxes.agentSaid('other-conversation', 'Not for this box.');
     assert.equal(s.sent.filter((m) => m.t === 'speak.start').length, 0);
-    await boxes.agentSaid('kitchen-help', 'C\'est **fait** : voir https://example.com');
+    await boxes.agentSaid('kitchen-help', 'Not addressed: stays silent.');
+    assert.equal(s.sent.filter((m) => m.t === 'speak.start').length, 0);
+    await boxes.agentSaid('kitchen-help', 'C\'est **fait** : voir https://example.com', [box.id]);
     const start = s.sent.findIndex((m) => m.t === 'speak.start');
     assert.ok(start > 0);
     assert.deepEqual(s.sent.slice(start + 1, start + 4), [{ bytes: 640 }, { bytes: 640 }, { bytes: 320 }]);
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
 });
 
-test('a box nobody talked to stays quiet; a press too short is not a sentence', async () => {
+test('a box not addressed stays quiet; a press too short is not a sentence', async () => {
     const { boxes, said } = make();
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
     const s = new FakeSocket();
