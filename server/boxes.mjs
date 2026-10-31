@@ -214,6 +214,7 @@ export class Boxes {
             try { m = JSON.parse(String(data)); } catch { return; }
             if (!m || typeof m !== 'object') return;
             if (m.t === 'ping') { send({ t: 'pong' }); return; }
+            if (m.t === 'hello' && typeof m.problem === 'string' && m.problem) this.#log(`voice box ${box.name}: back online after ${Number(m.tries) || '?'} tries; it had: ${m.problem.slice(0, 160)}`);
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'listen.start') { sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence) {
