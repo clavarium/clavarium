@@ -333,10 +333,14 @@ export class Boxes {
         if (pcm.length < 16_000) { this.#log(`voice box ${box0.name}: ${seconds} s heard, too short for a sentence`); link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
         link.send({ t: 'cue', name: 'thinking' });
         let text;
-        try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
-        if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); link.send({ t: 'cue', name: 'error' }); return; }
+        /* A sentence that goes nowhere is said so, in words, rather than with a beep nobody can read (31-10). */
+        const lost = async (words) => {
+            try { link.play(await this.#speak(words), 'listen'); } catch { link.send({ t: 'cue', name: 'error' }); }
+        };
+        try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
+        if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         link.doingSaid = false;
