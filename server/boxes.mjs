@@ -26,6 +26,14 @@ export const SENTENCE_MAX = 15 * 32_000 + 32_000;      /* 15 s of 16 kHz 16-bit 
 export const ANSWER_MINUTES = 5;                        /* after a sentence, what the tool says is spoken */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
+/* Where a box in setup answers, on its own Wi-Fi: ESP-IDF's access point address, the same on
+   every box (written from its parts: it is no machine of anybody's). */
+export const SETUP_ADDRESS = `http://${[192, 168, 4, 1].join('.')}/`;
+
+/* The setup key: this server's address, the room, a pairing code -- one paste, or one link. */
+export function setupKey(origin, room, code) {
+    return `GAMBELI-${Buffer.from(JSON.stringify({ u: origin, r: room, c: code })).toString('base64url')}`;
+}
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';    /* nothing read two ways: no 0/O, 1/I */
 
 export const hashOf = (key) => createHash('sha256').update(String(key)).digest('hex');
@@ -244,7 +252,7 @@ export class Boxes {
 
 /* The operator's side, behind the sign-on:
  *   GET  /api/boxes                       the boxes, online or not
- *   POST /api/boxes/code                  {conversation, name?} -> {code, minutes}
+ *   POST /api/boxes/code                  {conversation, name?, origin?} -> {code, minutes, key?, link?, qr?}
  *   POST /api/boxes/<id>/rename           {name}
  *   POST /api/boxes/<id>/move             {conversation}
  *   POST /api/boxes/<id>/revoke
@@ -254,7 +262,7 @@ export class Boxes {
  *   POST /api/boxes/<id>/alert            {text?}
  *   POST /api/boxes/<id>/reboot
  */
-export async function handleBoxes(request, response, boxes, originOk, headers = {}) {
+export async function handleBoxes(request, response, boxes, originOk, headers = {}, qr = null) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     const send = (status, body) => { response.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body)); return true; };
     try {
@@ -264,7 +272,15 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         let text = '';
         for await (const piece of request) { text += piece; if (text.length > 8192) return send(413, { error: 'Too long.' }); }
         const body = text ? JSON.parse(text) : {};
-        if (pathname === '/api/boxes/code') return send(201, boxes.code(String(body.conversation ?? ''), body.name));
+        if (pathname === '/api/boxes/code') {
+            const made = boxes.code(String(body.conversation ?? ''), body.name);
+            /* With this page's address: the key, and a link (its QR code) that opens the box's page filled in. */
+            const origin = /^https?:\/\/[^/\s]+$/.test(String(body.origin ?? '')) ? String(body.origin) : '';
+            if (!origin) return send(201, made);
+            const key = setupKey(origin, String(body.name ?? '').trim().slice(0, NAME_MAX), made.code);
+            const link = `${SETUP_ADDRESS}?k=${key}`;
+            return send(201, { ...made, key, link, qr: qr ? await qr(link) : undefined });
+        }
         const m = /^\/api\/boxes\/([0-9a-f-]{36})\/([a-z-]+)$/.exec(pathname);
         if (!m) return false;
         const [, id, what] = m;

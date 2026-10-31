@@ -220,7 +220,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             response.writeHead(403, { ...HEADERS, 'content-type': 'text/plain; charset=utf-8' }).end(REFUSED);
             return;
         }
-        if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS)) return;
+        if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS, (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))) return;
         if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];

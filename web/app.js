@@ -5269,6 +5269,8 @@
     $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
+    /* Voice boxes are on the page of all devices: opened there, at them. */
+    $('map-voice-boxes').addEventListener('click', async () => { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); });
     $('share-manage-close').addEventListener('click', () => { if (!nav.close('sub')) void openAccessPage('map', { push: false }); });
     $('nav-settings').addEventListener('click', () => { if (place !== 'settings') void openSettings(); });
     $('access-close').addEventListener('click', () => leavePlace());
@@ -8836,11 +8838,11 @@
     });
     $('box-code').addEventListener('click', async () => {
         try {
-            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim() });
+            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
-            /* One paste instead of three fields on the box's page: this address, the room, the code. */
-            const json = JSON.stringify({ u: location.origin, r: $('box-room').value.trim(), c: r.code });
-            $('box-key').textContent = `GAMBELI-${btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
+            $('box-key').textContent = r.key ?? '';
+            $('box-link').href = r.link ?? '#';
+            $('box-qr').innerHTML = r.qr ?? '';
             $('box-ready').hidden = false;
         } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
     });
