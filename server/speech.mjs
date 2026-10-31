@@ -41,6 +41,7 @@ export function toPcm16k(samples, from) {
 export const ELEVEN_SECRET = 'ELEVENLABS_API_KEY';
 export const ELEVEN_VOICE = 'onwK4e9ZLuTAKqWW03F9';   /* "Daniel" */
 export const ELEVEN_MODEL = 'eleven_multilingual_v2';
+export const SPEED = 1.1;   /* a little quicker than the voices' own pace: found slow on the real box (31-10) */
 
 export class Speech {
     #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret;
@@ -55,7 +56,7 @@ export class Speech {
         try {
             const r = await this.#fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}?output_format=pcm_16000`, {
                 method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
-                body: JSON.stringify({ text, model_id: ELEVEN_MODEL }), signal: AbortSignal.timeout(20_000),
+                body: JSON.stringify({ text, model_id: ELEVEN_MODEL, voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: SPEED } }), signal: AbortSignal.timeout(20_000),
             });
             if (!r.ok) { this.#log(`speech: ElevenLabs answered ${r.status}, this server's voice instead`); return null; }
             return Buffer.from(await r.arrayBuffer());
@@ -104,7 +105,7 @@ export class Speech {
         const online = await this.#eleven(text);
         if (online && online.length) return online;
         const engine = await this.#load();
-        const audio = engine.generate({ text, sid: 0, speed: 1.0 });
+        const audio = engine.generate({ text, sid: 0, speed: SPEED });
         return toPcm16k(audio.samples, audio.sampleRate);
     }
 }
