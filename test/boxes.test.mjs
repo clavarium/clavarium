@@ -381,3 +381,17 @@ test('a long recording: asked in words, written to disk, transcribed in parts wi
     assert.match(said[0].text, /^Enregistrement de 0 min terminé et transcrit .*enregistrement-\d+\.txt/);
     assert.deepEqual(readdirSync(dir), [], 'the sound is not kept');
 });
+
+test('the mixer: words over a stream, the stream lowered with a fade, then back', async () => {
+    const { mix, DUCK } = await import('../server/boxes.mjs');
+    const radio = Buffer.alloc(640); for (let i = 0; i < 640; i += 2) radio.writeInt16LE(10_000, i);
+    const words = Buffer.alloc(640 * 30); for (let i = 0; i < words.length; i += 2) words.writeInt16LE(1000, i);
+    const stream = { over: [words], gain: 1 };
+    const first = mix(stream, radio);
+    assert.ok(first.readInt16LE(0) > 9_000, 'no jump: it fades');
+    let out; for (let i = 0; i < 20; i++) out = mix(stream, radio);
+    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK) + 1000, 'lowered, the words over it');
+    for (let i = 0; i < 60; i++) out = mix(stream, radio);
+    assert.equal(stream.over.length, 0);
+    assert.equal(out.readInt16LE(638), 10_000, 'back to full');
+});

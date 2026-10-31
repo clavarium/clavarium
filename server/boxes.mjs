@@ -107,6 +107,27 @@ export const DOING_WITHIN_MS = 120_000;
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
 export const RECORD_MAX_BYTES = 4 * 3600 * 32_000;   /* four hours */
 export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+/* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
+   they last, with a fade down and up (a quarter of a second) rather than a jump. One 20 ms chunk at a time. */
+export const DUCK = 0.2;
+export function mix(stream, chunk) {
+    const words = stream.over[0];
+    const target = words ? DUCK : 1;
+    const out = Buffer.alloc(chunk.length);
+    const step = (1 - DUCK) / (0.25 * 16_000);
+    for (let i = 0; i < chunk.length; i += 2) {
+        stream.gain += Math.max(-step, Math.min(step, target - stream.gain));
+        let v = chunk.readInt16LE(i) * stream.gain;
+        if (words && stream.gain <= DUCK + 0.05) {
+            stream.at ??= 0;
+            if (stream.at + 1 < words.length) { v += words.readInt16LE(stream.at); stream.at += 2; }
+        }
+        out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i);
+    }
+    if (words && stream.at + 1 >= words.length) { stream.over.shift(); stream.at = 0; }
+    return out;
+}
+
 export const CHAT_WITHIN_MS = 3 * 60_000;
 export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
@@ -252,7 +273,7 @@ export class Boxes {
         try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
         catch { throw new Refusal(501, 'This server cannot read sounds: ffmpeg is not installed (an update installs it).'); }
         const box = link.box(); const label = name || new URL(url).host;
-        const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '' };
+        const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
         this.#streams.set(id, stream);
         link.send({ t: 'speak.start', rate: 16_000 });
         child.stdout.on('data', (d) => { stream.queue.push(d); stream.queued += d.length; if (stream.queued > LISTEN_AHEAD * 4) child.stdout.pause(); });
@@ -265,7 +286,7 @@ export class Boxes {
             const due = (this.#now() - stream.started) * 32 + LISTEN_AHEAD;   /* bytes the box should have by now, a few seconds ahead */
             while (stream.sent + 640 <= due && (carry.length >= 640 || stream.queue.length)) {
                 if (carry.length < 640) { const d = stream.queue.shift(); stream.queued -= d.length; carry = Buffer.concat([carry, d]); continue; }
-                if (link.socket.readyState === 1) link.socket.send(carry.subarray(0, 640));
+                if (link.socket.readyState === 1) link.socket.send(mix(stream, carry.subarray(0, 640)));
                 carry = carry.subarray(640); stream.sent += 640;
             }
             if (stream.queued < LISTEN_AHEAD) child.stdout.resume();
@@ -385,6 +406,9 @@ export class Boxes {
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
             play: (pcm, then = null) => {
                 pcm = pcm.subarray(0, pcm.length & ~1);   /* whole samples only: an odd byte shifts every sample after it */
+                /* Something is playing (a radio): the words go over it, the radio lowered meanwhile (the mixer, listen()). */
+                const playing = this.#streams.get(box.id);
+                if (playing) { playing.over.push(pcm); return; }
                 send({ t: 'speak.start', rate: 16_000 });
                 for (let at = 0; at < pcm.length; at += 640) if (socket.readyState === 1) socket.send(pcm.subarray(at, at + 640));
                 send({ t: 'speak.end', ...(then ? { then } : {}) });
