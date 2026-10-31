@@ -602,7 +602,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }) });
+    const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }), secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } } });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
         exists: (name) => all.list().some((c) => c.name === name),
         hear: (wav) => voice.transcribe(wav),
