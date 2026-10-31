@@ -25,7 +25,7 @@ export const LINK_PATH = '/c/api/box/ws';
 /* A firmware a box downloads to update itself: a one-use address, kept a few minutes. */
 export const FIRMWARE_PATH = '/c/api/box/firmware/';
 export const FIRMWARE_MINUTES = 10;
-export const SENTENCE_MAX = 15 * 32_000 + 32_000;      /* 15 s of 16 kHz 16-bit mono, and some slack */
+export const SENTENCE_MAX = 60 * 32_000 + 32_000;      /* 60 s of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
 /* The volume a box is given when it connects, until someone sets another (its own default was soft). */
