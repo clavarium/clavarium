@@ -97,6 +97,8 @@ export function forSpeech(text) {
         .replace(/\b([01]?\d|2[0-3])\s?[hH](?:\s?([0-5]\d))?\b/g, (_, h, m) => `${h} heure${h === '1' || h === '0' ? '' : 's'}${m ? ` ${m}` : ''}`)
         /* Never its own wake word aloud: the box heard itself and cut its own sentence (31-10). */
         .replace(/\b(?:hey|hé|eh)[\s,]+jarvis\b/giu, 'le mot d\'éveil')
+        .replace(/(?<![\p{L}])m[ée]sanges?(?![\p{L}])/giu, 'le mot d\'éveil')
+        .replace(/(?<![\p{L}])m[eéè]s[\s-]+anges?(?![\p{L}])/giu, 'le mot d\'éveil')   /* what sounds like it: « mes anges » woke it (31-10) */
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
@@ -128,6 +130,7 @@ export function mix(stream, chunk) {
     return out;
 }
 
+export const ANSWER_WITHIN_MS = 90_000;
 export const CHAT_WITHIN_MS = 3 * 60_000;
 export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
@@ -382,12 +385,15 @@ export class Boxes {
            it ends when nobody answers, or on "fin de la conversation". */
         const question = !doing && (asked || /\?\s*$/.test(words));
         for (const l of boxes) {
-            const chatting = !doing && this.#chatting(l);
+            /* An answer -- to a sentence heard within a minute -- may open the conversation; something said
+               of itself (a news item, a reminder) does not: the box listened after it for nothing (31-10). */
+            const answering = l.heardAt && this.#now() - l.heardAt < ANSWER_WITHIN_MS;
+            const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
             if (chatting) l.chat = true;
             let pcm;
             try { pcm = await this.#speak(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); continue; }
-            l.play(pcm, question || chatting ? 'listen' : null);
+            l.play(pcm, question || chatting ? 'listen' : null);   /* a question is always listened after: an answer is expected */
         }
     }
     #chatting(link) {
@@ -524,7 +530,18 @@ export class Boxes {
         };
         try {
             const said = [];
-            for (const piece of piecesOf(pcm)) said.push(String(await this.#hear(wavOf(piece)) ?? '').trim());
+            /* The dictation fails now and then (the network, the engine): tried again by itself, twice, before
+               anything is said to the person -- who should not have to repeat (31-10). */
+            const hear = async (wav) => {
+                for (let attempt = 0; ; attempt++) {
+                    try { return await this.#hear(wav); } catch (error) {
+                        if (attempt >= 2 || error?.status === 413 || error?.status === 400) throw error;
+                        this.#log(`voice box ${box0.name}: dictation failed (${error.message}), tried again`);
+                        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+                    }
+                }
+            };
+            for (const piece of piecesOf(pcm)) said.push(String(await hear(wavOf(piece)) ?? '').trim());
             text = said.filter(Boolean).join(' ');
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }

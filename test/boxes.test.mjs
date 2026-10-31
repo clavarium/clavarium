@@ -113,7 +113,7 @@ test('a dictation that fails is said to the box in words, and it listens again; 
     s.box({ t: 'listen.start' });
     for (let i = 0; i < 30; i++) s.emit('message', Buffer.alloc(640), true);
     s.box({ t: 'listen.end' });
-    await tick(); await tick();
+    for (let i = 0; i < 60 && !s.sent.some((m) => m.t === 'speak.end'); i++) await new Promise((r) => setTimeout(r, 100));   /* tried twice more first */
     assert.ok(s.sent.some((m) => m.t === 'speak.start'));
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
 
@@ -124,7 +124,7 @@ test('a dictation that fails is said to the box in words, and it listens again; 
     s2.box({ t: 'listen.start' });
     for (let i = 0; i < 30; i++) s2.emit('message', Buffer.alloc(640), true);
     s2.box({ t: 'listen.end' });
-    await tick(); await tick();
+    for (let i = 0; i < 60 && !s2.sent.some((m) => m.t === 'cue' && m.name === 'error'); i++) await new Promise((r) => setTimeout(r, 100));
     assert.deepEqual(s2.sent.at(-1), { t: 'cue', name: 'error' });
 });
 
@@ -394,4 +394,29 @@ test('the mixer: words over a stream, the stream lowered with a fade, then back'
     for (let i = 0; i < 60; i++) out = mix(stream, radio);
     assert.equal(stream.over.length, 0);
     assert.equal(out.readInt16LE(638), 10_000, 'back to full');
+});
+
+test('something said of itself, long after the last sentence, does not open a conversation', async () => {
+    let clock = 1_000_000;
+    const { boxes } = make({ now: () => clock });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    const sentence = async () => { s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' }); await tick(); await tick(); };
+    await sentence(); await sentence();
+    clock += 5 * 60_000;
+    await boxes.agentSaid('kitchen-help', 'Coucou, il est 21 heures.', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
+});
+
+test('a dictation that fails once is tried again by itself: the person need not repeat', async () => {
+    let calls = 0;
+    const { boxes, said } = make({ hear: async () => { if (++calls === 1) throw new Error('engine busy'); return 'quelle heure est-il'; } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start' }); for (let i = 0; i < 30; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end' });
+    for (let i = 0; i < 40 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
+    assert.equal(calls, 2);
+    assert.equal(said[0].text, 'quelle heure est-il');
 });
