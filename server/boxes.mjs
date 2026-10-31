@@ -22,6 +22,9 @@ import { Refusal } from './conversations.mjs';
 export const CODE_MINUTES = 10;
 export const PAIR_PATH = '/c/api/box/pair';
 export const LINK_PATH = '/c/api/box/ws';
+/* A firmware a box downloads to update itself: a one-use address, kept a few minutes. */
+export const FIRMWARE_PATH = '/c/api/box/firmware/';
+export const FIRMWARE_MINUTES = 10;
 export const SENTENCE_MAX = 15 * 32_000 + 32_000;      /* 15 s of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
@@ -71,12 +74,12 @@ export function forSpeech(text) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed;
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, now = () => Date.now(), log = () => {} }) {
-        this.#file = file; this.#changed = changed; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {} }) {
+        this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
 
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
@@ -142,6 +145,31 @@ export class Boxes {
         const a = await this.command(id, { t: 'volume', level: n });
         if (a?.ok !== false) link.volume = n;
         return a;
+    }
+
+    /* UPDATED OVER ITS WI-FI: the image is offered at a one-use address on this server (under /c/,
+       no sign-on: the token is the right), the box told to fetch it with its sha256; it answers
+       once installed, then restarts. */
+    async update(id, image, version = '') {
+        if (!this.#links.has(id)) throw new Refusal(409, 'This voice box is not connected: it is updated when it is online.');
+        const bytes = Buffer.isBuffer(image) ? image : Buffer.from(String(image ?? ''), 'base64');
+        if (bytes.length < 1024 || bytes[0] !== 0xe9) throw new Refusal(400, 'Not an ESP32 program image (it starts with 0xE9; a merged image is for a cable flash only).');
+        const origin = this.#origin();
+        if (!origin) throw new Refusal(409, 'This server does not know its public address: the box could not fetch the image.');
+        const token = randomBytes(24).toString('base64url');
+        this.#images.set(token, { bytes, until: this.#now() + FIRMWARE_MINUTES * 60_000 });
+        const sha256 = createHash('sha256').update(bytes).digest('hex');
+        try {
+            const a = await this.command(id, { t: 'ota', url: `${origin}${FIRMWARE_PATH}${token}.bin`, sha256 }, 5 * 60_000);
+            if (a?.ok === false) throw new Refusal(502, `The box did not install it: ${a.detail ?? 'no reason given'}.`);
+            this.#log(`voice box ${this.#all().find((b) => b.id === id)?.name ?? id}: updated${version ? ` to ${version}` : ''}, restarting`);
+            return { ok: true };
+        } finally { this.#images.delete(token); }
+    }
+    image(token) {
+        const now = this.#now();
+        for (const [k, v] of this.#images) if (v.until < now) this.#images.delete(k);
+        return this.#images.get(String(token).replace(/\.bin$/, ''))?.bytes;
     }
 
     /* Where it is (a home, a family house): grouped by it, named with it. */
@@ -344,6 +372,7 @@ export function voiceboxConnector(boxes) {
         async run(verb, t, a = {}) {
             const id = t.config?.box;
             if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
+            if (verb === 'voicebox.update') { await boxes.update(id, a.image, a.version); return { text: `Installed${a.version ? ` (${a.version})` : ''}: the box restarts and comes back in a moment.` }; }
             if (verb === 'voicebox.alert') { await boxes.command(id, { t: 'alert', text: String(a.text ?? '').slice(0, 300) }, 10 * 60_000); return { text: 'The alert was seen: someone pressed its button.' }; }
             throw new Error(`${verb} is not for a voice box`);
         },

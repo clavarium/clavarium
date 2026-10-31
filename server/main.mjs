@@ -76,7 +76,7 @@ import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
-import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH } from './boxes.mjs';
+import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
 import { Speech } from './speech.mjs';
 import { WebSocketServer } from 'ws';
 
@@ -198,6 +198,13 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             return;
         }
         /* A voice box pairing: under /c/, no sign-on; the one-use code is the right (boxes.mjs). */
+        /* A firmware a box fetches to update itself: the one-use token in the address is the right. */
+        if (boxes && pathname.startsWith(BOX_FIRMWARE_PATH) && request.method === 'GET') {
+            const bytes = boxes.image(pathname.slice(BOX_FIRMWARE_PATH.length));
+            if (!bytes) { response.writeHead(404, HEADERS).end(); return; }
+            response.writeHead(200, { ...HEADERS, 'content-type': 'application/octet-stream', 'content-length': bytes.length, 'cache-control': 'no-store' }).end(bytes);
+            return;
+        }
         if (boxes && pathname === BOX_PAIR_PATH) {
             const say = (status, body) => response.writeHead(status, { ...HEADERS, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body));
             if (request.method !== 'POST') { say(405, { error: 'Call this address with POST.' }); return; }
@@ -602,6 +609,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
+        origin: () => publicOrigin ?? null,
         changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });

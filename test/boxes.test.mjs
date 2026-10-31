@@ -207,3 +207,26 @@ test('the volume is kept and given to the box; each box is a Tether target of it
     syncTargets(store, []);
     assert.equal(store.targets().length, 0, 'a box gone: its target too');
 });
+
+test('updated over its Wi-Fi: a one-use address for the image, its sha256, the box answers once installed', async () => {
+    const { createHash } = await import('node:crypto');
+    const { FIRMWARE_PATH } = await import('../server/boxes.mjs');
+    const { boxes } = make({ origin: () => 'https://clavarium.example.org' });
+    const a = boxes.pair({ code: boxes.code('kitchen-help', 'Kitchen').code });
+    await assert.rejects(boxes.update(a.id, Buffer.alloc(2048, 0xe9)), { status: 409 }, 'offline: not now');
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(a.key));
+    await assert.rejects(boxes.update(a.id, Buffer.alloc(2048, 0x00)), { status: 400 }, 'not a program image');
+    const image = Buffer.alloc(4096, 7); image[0] = 0xe9;
+    const going = boxes.update(a.id, image.toString('base64'), '0.1.4');
+    const ota = s.sent.at(-1);
+    assert.equal(ota.t, 'ota');
+    assert.equal(ota.sha256, createHash('sha256').update(image).digest('hex'));
+    const prefix = `https://clavarium.example.org${FIRMWARE_PATH}`;
+    assert.ok(ota.url.startsWith(prefix));
+    const token = ota.url.slice(prefix.length);
+    assert.deepEqual(boxes.image(token), image, 'served while it updates');
+    s.box({ t: 'ack', id: ota.id, ok: true });
+    assert.deepEqual(await going, { ok: true });
+    assert.equal(boxes.image(token), undefined, 'one use');
+});
