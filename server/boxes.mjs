@@ -86,8 +86,8 @@ export function pcmOfWav(wav) {
 }
 
 /* Text for the ear: what a written message holds and a voice should not read. */
-export function forSpeech(text) {
-    return String(text ?? '')
+export function forSpeech(text, { callOthers = false } = {}) {
+    const said = String(text ?? '')
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/`([^`]*)`/g, '$1')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -102,8 +102,27 @@ export function forSpeech(text) {
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
+    /* Nor another assistant's call: « OK Google » said in an example woke the Google Home beside it (31-10).
+       Only speakTo() calls it, on purpose. */
+    return callOthers ? said : said.replace(/\b(?:ok|okay|hey|dis)[\s,]+(?:google|siri|alexa)\b/giu, 'l\'appel de l\'enceinte');
 }
 
+/* THE BOX'S CLOCK: its lights follow the hours of its place. The time zone is the page's that made its code
+   (its browser's), else this server's; the box is told its offset from UTC at each connection and every hour
+   after, so summer time comes by itself. */
+export function zoneOf(zone) {
+    const z = String(zone ?? '').trim();
+    try { if (z && /^[A-Za-z_]+(?:\/[A-Za-z0-9_+-]+){0,2}$/.test(z)) { new Intl.DateTimeFormat('en', { timeZone: z }); return z; } } catch { /* unknown */ }
+    return '';
+}
+export function offsetOf(zone, now) {
+    const z = zoneOf(zone) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: z, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).formatToParts(new Date(now)).map((p) => [p.type, p.value]));
+    const local = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute);
+    return Math.round((local - Math.floor(now / 60_000) * 60_000) / 60_000);
+}
+
+export const RELAY_WITHIN_MS = 20_000;
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -176,11 +195,11 @@ export class Boxes {
         return this.#all().map(({ keyHash, ...b }) => ({ ...b, online: this.#links.has(b.id), muted: this.#links.get(b.id)?.muted ?? null, volume: b.volume ?? this.#links.get(b.id)?.volume ?? VOLUME_DEFAULT }));
     }
 
-    code(conversation, name) {
+    code(conversation, name, zone = '') {
         if (!this.#exists(conversation)) throw new Refusal(404, 'No such conversation.');
         const code = newCode();
         const label = String(name ?? '').trim().slice(0, NAME_MAX);
-        this.#codes.set(plainCode(code), { conversation, name: label, until: this.#now() + CODE_MINUTES * 60_000 });
+        this.#codes.set(plainCode(code), { conversation, name: label, zone: zoneOf(zone), until: this.#now() + CODE_MINUTES * 60_000 });
         return { code, minutes: CODE_MINUTES };
     }
 
@@ -200,6 +219,7 @@ export class Boxes {
             type: String(body.type ?? '').slice(0, 40), firmware: String(body.firmware ?? '').slice(0, 20),
             capabilities: Array.isArray(body.capabilities) ? body.capabilities.map(String).slice(0, 20) : [],
             createdAt: new Date(now).toISOString(), seenAt: null,
+            ...(wanted.zone ? { zone: wanted.zone } : {}),
         };
         this.#save([...this.#all(), box]);
         this.#log(`voice box paired: ${name} (${box.conversation})`);
@@ -264,6 +284,20 @@ export class Boxes {
         return this.#images.get(String(token).replace(/\.bin$/, ''))?.bytes;
     }
 
+    /* SPEAKING TO ANOTHER DEVICE in the room (a Google Home: « OK Google, baisse la clim »): said as given, its
+       call included, then the box listens; what it hears within twenty seconds comes back to the conversation as
+       that device's answer, not as the person's words (31-10: the box set the heating that way). */
+    async speakTo(id, text) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        const words = forSpeech(text, { callOthers: true });
+        if (!words) throw new Refusal(400, 'Nothing to say.');
+        link.play(await this.#speak(words), 'listen');
+        link.relay = this.#now();
+        this.#log(`voice box ${link.box().name}: spoke to a device in the room`);
+        return { ok: true };
+    }
+
     /* LISTENING TO THE INTERNET: a radio, a podcast, a music file, a playlist, read by this server (ffmpeg,
        any format it knows) and sent on to the box at the pace it is played, a few seconds ahead -- until it
        ends, stop(), or the person presses the button or says the wake word (the box then starts a sentence). */
@@ -278,7 +312,7 @@ export class Boxes {
         const box = link.box(); const label = name || new URL(url).host;
         const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
         this.#streams.set(id, stream);
-        link.send({ t: 'speak.start', rate: 16_000 });
+        link.send({ t: 'speak.start', rate: 16_000, kind: 'stream' });   /* not its own voice: the box still hears its word, near-certain only */
         child.stdout.on('data', (d) => { stream.queue.push(d); stream.queued += d.length; if (stream.queued > LISTEN_AHEAD * 4) child.stdout.pause(); });
         child.stderr.on('data', (d) => { stream.failed = `${stream.failed}${d}`.slice(-300); });
         child.on('error', (e) => { stream.failed = e.code === 'ENOENT' ? 'ffmpeg is not installed on this server' : e.message; stream.ended = true; });
@@ -322,7 +356,13 @@ export class Boxes {
     }
 
     /* Where it is (a home, a family house): grouped by it, named with it. */
-    place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
+    zone(id, zone) {
+        const z = zoneOf(zone);
+        if (!z) throw new Refusal(400, 'Not a time zone.');
+        this.#change(id, { zone: z });
+        this.#links.get(id)?.send({ t: 'clock', offset: offsetOf(z, this.#now()) });
+    }
+        place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
 
     move(id, conversation) {
         if (!this.#exists(conversation)) throw new Refusal(404, 'No such conversation.');
@@ -448,6 +488,8 @@ export class Boxes {
                 const wanted = link.box().volume ?? VOLUME_DEFAULT;
                 if (m.volume !== wanted) { send({ t: 'volume', id: randomUUID(), level: wanted }); m.volume = wanted; }
             }
+            if (m.t === 'hello') send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) });
+            if (m.t === 'ping' && this.#now() - (link.clockAt ?? 0) > 3_600_000) { link.clockAt = this.#now(); send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) }); }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'record.start' && this.#recordDir) {
                 mkdirSync(this.#recordDir, { recursive: true });
@@ -552,6 +594,10 @@ export class Boxes {
             link.send({ t: 'record', on: true });
             return;
         }
+        if (link.relay && this.#now() - link.relay < RELAY_WITHIN_MS) {
+            link.relay = 0;
+            text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
+        }
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
@@ -582,6 +628,7 @@ export class Boxes {
  *   POST /api/boxes/<id>/rename           {name}
  *   POST /api/boxes/<id>/move             {conversation}: one conversation at a time
  *   POST /api/boxes/<id>/place            {place}: where it is (a home), shown with its name
+ *   POST /api/boxes/<id>/zone             {zone}: its time zone (IANA), for its clock; the page gives its own
  *   POST /api/boxes/<id>/revoke
  *   POST /api/boxes/<id>/volume           {level 0-100}
  *   POST /api/boxes/<id>/wifi-scan        -> {networks}
@@ -600,7 +647,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         for await (const piece of request) { text += piece; if (text.length > 8192) return send(413, { error: 'Too long.' }); }
         const body = text ? JSON.parse(text) : {};
         if (pathname === '/api/boxes/code') {
-            const made = boxes.code(String(body.conversation ?? ''), body.name);
+            const made = boxes.code(String(body.conversation ?? ''), body.name, body.zone);
             /* With this page's address: the key, and a link (its QR code) that opens the box's page filled in. */
             const origin = /^https?:\/\/[^/\s]+$/.test(String(body.origin ?? '')) ? String(body.origin) : '';
             if (!origin) return send(201, made);
@@ -616,6 +663,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'rename': boxes.rename(id, body.name); return send(200, { ok: true });
         case 'move': boxes.move(id, String(body.conversation ?? '')); return send(200, { ok: true });
         case 'place': boxes.place(id, body.place); return send(200, { ok: true });
+        case 'zone': boxes.zone(id, body.zone); return send(200, { ok: true });
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
         case 'volume': return answered(await boxes.setVolume(id, body.level));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }
@@ -640,6 +688,7 @@ export function voiceboxConnector(boxes) {
             const id = t.config?.box;
             if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
             if (verb === 'voicebox.listen') { await boxes.listen(id, String(a.url), String(a.name ?? '')); return { text: `Playing ${a.name || a.url}: it goes on until it ends, voicebox-stop, or the person presses the button or says the wake word.` }; }
+            if (verb === 'voicebox.speak') { await boxes.speakTo(id, String(a.text ?? '')); return { text: 'Said aloud; the box listens now: what it hears in the next 20 s comes back in the conversation, marked as the device\'s answer.' }; }
             if (verb === 'voicebox.stop') return { text: boxes.stop(id) ? 'Stopped.' : 'Nothing was playing.' };
             if (verb === 'voicebox.play') { const r = boxes.play(id, Buffer.from(String(a.image ?? ''), 'base64')); return { text: `Played (${r.seconds} s).` }; }
             if (verb === 'voicebox.update') { await boxes.update(id, a.image, a.version); return { text: `Installed${a.version ? ` (${a.version})` : ''}: the box restarts and comes back in a moment.` }; }

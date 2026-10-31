@@ -307,7 +307,7 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     await boxes.listen(box.id, 'https://radio.example.org/station.pls', 'Radio');
     assert.equal(spawned[0].cmd, 'ffmpeg');
     assert.ok(spawned[0].args.includes('https://radio.example.org/live.mp3'), 'the playlist read: its first address');
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000 });
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000, kind: 'stream' });
     spawned[0].c.stdout.write(Buffer.alloc(32_000 * 20));
     await new Promise((r) => setTimeout(r, 250));
     const bytes = () => s.sent.filter((m) => m.bytes).reduce((n, m) => n + m.bytes, 0);
@@ -419,4 +419,35 @@ test('a dictation that fails once is tried again by itself: the person need not 
     for (let i = 0; i < 40 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 50));
     assert.equal(calls, 2);
     assert.equal(said[0].text, 'quelle heure est-il');
+});
+
+test('a box is told its clock: the offset of its time zone, given by the page that made its code', async () => {
+    const { offsetOf, zoneOf } = await import('../server/boxes.mjs');
+    assert.equal(offsetOf('Europe/Paris', Date.UTC(2026, 10, 1, 12)), 60);
+    assert.equal(offsetOf('Europe/Paris', Date.UTC(2026, 6, 1, 12)), 120, 'summer time by itself');
+    assert.equal(zoneOf('Europe/Paris; rm -rf /'), '');
+    const { boxes } = make();
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon', 'America/New_York').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'hello', firmware: '0.1.28', volume: 60, muted: false });
+    assert.ok(s.sent.some((m) => m.t === 'clock' && (m.offset === -300 || m.offset === -240)));
+    boxes.zone(box.id, 'Asia/Tokyo');
+    assert.deepEqual(s.sent.at(-1), { t: 'clock', offset: 540 });
+});
+
+test('speaking to a device in the room: its call said on purpose, its answer comes back marked as its own', async () => {
+    const spoken = [];
+    const { boxes, said } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); }, hear: async () => 'Le chauffage est réglé sur 20 degrés' });
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    await boxes.agentSaid('kitchen-help', 'Je dirais « OK Google » pour lui parler.', [box.id]);
+    assert.match(spoken.at(-1), /l'appel de l'enceinte/, 'never by accident');
+    await boxes.speakTo(box.id, 'OK Google, règle la climatisation sur 20 degrés.');
+    assert.equal(spoken.at(-1), 'OK Google, règle la climatisation sur 20 degrés.');
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+    s.box({ t: 'listen.start', reason: 'follow' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
+    for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.match(said[0].text, /^\(réponse entendue de l'appareil, pas de la personne\) Le chauffage/);
 });
