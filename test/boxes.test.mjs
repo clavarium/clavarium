@@ -307,7 +307,7 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     await boxes.listen(box.id, 'https://radio.example.org/station.pls', 'Radio');
     assert.equal(spawned[0].cmd, 'ffmpeg');
     assert.ok(spawned[0].args.includes('https://radio.example.org/live.mp3'), 'the playlist read: its first address');
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000 });
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000, kind: 'stream' });
     spawned[0].c.stdout.write(Buffer.alloc(32_000 * 20));
     await new Promise((r) => setTimeout(r, 250));
     const bytes = () => s.sent.filter((m) => m.bytes).reduce((n, m) => n + m.bytes, 0);

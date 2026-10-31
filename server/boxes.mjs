@@ -280,7 +280,7 @@ export class Boxes {
         const box = link.box(); const label = name || new URL(url).host;
         const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
         this.#streams.set(id, stream);
-        link.send({ t: 'speak.start', rate: 16_000 });
+        link.send({ t: 'speak.start', rate: 16_000, kind: 'stream' });   /* not its own voice: the box still hears its word, near-certain only */
         child.stdout.on('data', (d) => { stream.queue.push(d); stream.queued += d.length; if (stream.queued > LISTEN_AHEAD * 4) child.stdout.pause(); });
         child.stderr.on('data', (d) => { stream.failed = `${stream.failed}${d}`.slice(-300); });
         child.on('error', (e) => { stream.failed = e.code === 'ENOENT' ? 'ffmpeg is not installed on this server' : e.message; stream.ended = true; });
