@@ -59,6 +59,30 @@ export function wavOf(pcm, rate = 16_000) {
     return Buffer.concat([h, pcm]);
 }
 
+/* A .wav (16-bit PCM, any rate, mono or stereo) as a box plays it: 16 kHz mono, a minute at most. */
+export const PLAY_SECONDS = 70;
+export function pcmOfWav(wav) {
+    const b = Buffer.isBuffer(wav) ? wav : Buffer.from(wav);
+    if (b.toString('ascii', 0, 4) !== 'RIFF' || b.toString('ascii', 8, 12) !== 'WAVE') throw new Refusal(400, 'Not a .wav file.');
+    let at = 12; let fmt = null; let data = null;
+    while (at + 8 <= b.length) {
+        const id = b.toString('ascii', at, at + 4); const size = b.readUInt32LE(at + 4);
+        if (id === 'fmt ') fmt = { format: b.readUInt16LE(at + 8), channels: b.readUInt16LE(at + 10), rate: b.readUInt32LE(at + 12), bits: b.readUInt16LE(at + 22) };
+        if (id === 'data') { data = b.subarray(at + 8, Math.min(b.length, at + 8 + size)); break; }
+        at += 8 + size + (size & 1);
+    }
+    if (!fmt || !data || fmt.format !== 1 || fmt.bits !== 16 || !fmt.channels || !fmt.rate) throw new Refusal(400, 'A .wav of 16-bit PCM, please.');
+    const frames = Math.floor(data.length / (2 * fmt.channels));
+    const n = Math.min(Math.floor(frames * 16_000 / fmt.rate), PLAY_SECONDS * 16_000);
+    const out = Buffer.alloc(n * 2);
+    const sample = (f) => { let sum = 0; for (let c = 0; c < fmt.channels; c++) sum += data.readInt16LE((f * fmt.channels + c) * 2); return sum / fmt.channels; };
+    for (let i = 0; i < n; i++) {
+        const x = i * fmt.rate / 16_000; const j = Math.floor(x); const k = Math.min(j + 1, frames - 1);
+        out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(sample(j) + (sample(k) - sample(j)) * (x - j)))), i * 2);
+    }
+    return out;
+}
+
 /* Text for the ear: what a written message holds and a voice should not read. */
 export function forSpeech(text) {
     return String(text ?? '')
@@ -145,6 +169,15 @@ export class Boxes {
         const a = await this.command(id, { t: 'volume', level: n });
         if (a?.ok !== false) link.volume = n;
         return a;
+    }
+
+    /* A sound played on a box (a sample, a recorded message), as its answers are. */
+    play(id, wav) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        const pcm = pcmOfWav(wav);
+        link.play(pcm);
+        return { seconds: Math.round(pcm.length / 32_000) };
     }
 
     /* UPDATED OVER ITS WI-FI: the image is offered at a one-use address on this server (under /c/,
@@ -372,6 +405,7 @@ export function voiceboxConnector(boxes) {
         async run(verb, t, a = {}) {
             const id = t.config?.box;
             if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
+            if (verb === 'voicebox.play') { const r = boxes.play(id, Buffer.from(String(a.image ?? ''), 'base64')); return { text: `Played (${r.seconds} s).` }; }
             if (verb === 'voicebox.update') { await boxes.update(id, a.image, a.version); return { text: `Installed${a.version ? ` (${a.version})` : ''}: the box restarts and comes back in a moment.` }; }
             if (verb === 'voicebox.alert') { await boxes.command(id, { t: 'alert', text: String(a.text ?? '').slice(0, 300) }, 10 * 60_000); return { text: 'The alert was seen: someone pressed its button.' }; }
             throw new Error(`${verb} is not for a voice box`);

@@ -230,3 +230,19 @@ test('updated over its Wi-Fi: a one-use address for the image, its sha256, the b
     assert.deepEqual(await going, { ok: true });
     assert.equal(boxes.image(token), undefined, 'one use');
 });
+
+test('a .wav played on a box: mixed to mono, brought to 16 kHz', async () => {
+    const { pcmOfWav } = await import('../server/boxes.mjs');
+    const frames = 22_050; const stereo = Buffer.alloc(frames * 4);
+    for (let i = 0; i < frames; i++) { stereo.writeInt16LE(1000, i * 4); stereo.writeInt16LE(3000, i * 4 + 2); }
+    const h = Buffer.alloc(44); h.write('RIFF', 0); h.writeUInt32LE(36 + stereo.length, 4); h.write('WAVE', 8); h.write('fmt ', 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(2, 22); h.writeUInt32LE(22_050, 24); h.writeUInt32LE(22_050 * 4, 28); h.writeUInt16LE(4, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(stereo.length, 40);
+    const pcm = pcmOfWav(Buffer.concat([h, stereo]));
+    assert.equal(pcm.length, 32_000, 'one second at 16 kHz');
+    assert.equal(pcm.readInt16LE(200), 2000, 'the two channels mixed');
+    assert.throws(() => pcmOfWav(Buffer.from('not a wav at all, no')), { status: 400 });
+    const { boxes } = make();
+    const a = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket(); boxes.accept(s, boxes.byKey(a.key));
+    assert.deepEqual(boxes.play(a.id, Buffer.concat([h, stereo])), { seconds: 1 });
+    assert.equal(s.sent.filter((m) => m.t === 'speak.start').length, 1);
+});
