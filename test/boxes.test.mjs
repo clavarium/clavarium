@@ -179,3 +179,31 @@ test('addressed by its id, a box says the answer; boxes are named with their pla
     assert.equal(sa.sent.filter((m) => m.t === 'speak.start').length, 0, 'not addressed: silent');
     assert.equal(sb.sent.filter((m) => m.t === 'speak.start').length, 1);
 });
+
+test('the volume is kept and given to the box; each box is a Tether target of its own conversation', async () => {
+    const { syncTargets, targetOf, voiceboxConnector, VOLUME_DEFAULT } = await import('../server/boxes.mjs');
+    const { boxes } = make();
+    const a = boxes.pair({ code: boxes.code('kitchen-help', 'Kitchen').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(a.key));
+    s.box({ t: 'hello', volume: 60, muted: false });
+    assert.equal(s.sent.find((m) => m.t === 'volume').level, VOLUME_DEFAULT, 'given the default at once');
+    const setting = boxes.setVolume(a.id, 95);
+    const asked = s.sent.at(-1); assert.equal(asked.level, 95);
+    s.box({ t: 'ack', id: asked.id, ok: true });
+    await setting;
+    assert.equal(boxes.all()[0].volume, 95);
+    await assert.rejects(boxes.setVolume(a.id, 140), { status: 400 });
+
+    const targets = new Map();
+    const store = { targets: () => [...targets.values()], target: (id) => targets.get(id), putTarget: (t) => targets.set(t.id, { grants: targets.get(t.id)?.grants ?? {}, ...t }), removeTarget: (id) => targets.delete(id), grant: (id, who, level) => { const t = targets.get(id); if (level === null) delete t.grants[who]; else t.grants[who] = { level }; } };
+    syncTargets(store, boxes.all());
+    const t = store.target(targetOf(boxes.all()[0]));
+    assert.equal(t.kind, 'voicebox');
+    assert.deepEqual(t.grants, { 'conversation:kitchen-help': { level: 'free' } });
+    const run = voiceboxConnector(boxes).run('voicebox.volume', t, { level: 70 });
+    const v = s.sent.at(-1); s.box({ t: 'ack', id: v.id, ok: true });
+    assert.match((await run).text, /Volume set to 70/);
+    syncTargets(store, []);
+    assert.equal(store.targets().length, 0, 'a box gone: its target too');
+});

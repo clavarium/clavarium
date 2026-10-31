@@ -8864,7 +8864,13 @@
             /* Where it is (a home): typed once, then offered for the next ones. */
             const place = el('input'); place.value = b.place ?? ''; place.maxLength = 40; place.placeholder = 'Place (a home)'; place.setAttribute('list', 'box-places'); place.setAttribute('aria-label', `Place of ${b.name}`);
             place.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/place`, { place: place.value.trim() }).catch(() => {}); await paintBoxes(); });
-            const acts = el('div', 'action-row'); acts.append(whereRow, place, rename, remove);
+            /* Louder, softer: kept here, given to the box now or when it comes back. */
+            const vol = el('input'); vol.type = 'range'; vol.min = '0'; vol.max = '100'; vol.step = '5'; vol.value = String(b.volume ?? 80); vol.setAttribute('aria-label', `Volume of ${b.name}`);
+            const volSaid = el('small', 'hint', `${vol.value} %`);
+            vol.addEventListener('input', () => { volSaid.textContent = `${vol.value} %`; });
+            vol.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/volume`, { level: Number(vol.value) }).catch((error) => { volSaid.textContent = error.message; }); });
+            const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
+            const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
             rows.append(card);
         }

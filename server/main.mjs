@@ -76,7 +76,7 @@ import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
-import { Boxes, handleBoxes, PAIR_PATH as BOX_PAIR_PATH } from './boxes.mjs';
+import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH } from './boxes.mjs';
 import { Speech } from './speech.mjs';
 import { WebSocketServer } from 'ws';
 
@@ -426,7 +426,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* The accesses an agent was given -- a machine over SSH, an online folder, a
        mailbox, a calendar, an address book -- held here with their secrets read from
        the vault by name, never in a machine: see tethers.mjs. */
-    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets });
+    /* Voice boxes are Tether targets too (boxes.mjs): their connector reaches them through `boxes`, made below. */
+    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) } } });
     const stopTethers = tethers.start();
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
@@ -601,7 +602,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
-        changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); },
+        changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
@@ -609,6 +610,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     let closing = false;
     boxes.attach(server, WebSocketServer);
     for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));
+    try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); }
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },

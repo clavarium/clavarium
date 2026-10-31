@@ -25,6 +25,8 @@ export const LINK_PATH = '/c/api/box/ws';
 export const SENTENCE_MAX = 15 * 32_000 + 32_000;      /* 15 s of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
+/* The volume a box is given when it connects, until someone sets another (its own default was soft). */
+export const VOLUME_DEFAULT = 80;
 /* Where a box in setup answers, on its own Wi-Fi: ESP-IDF's access point address, the same on
    every box (written from its parts: it is no machine of anybody's). */
 export const SETUP_ADDRESS = `http://${[192, 168, 4, 1].join('.')}/`;
@@ -85,7 +87,7 @@ export class Boxes {
 
     /* What the operator sees: never the key, nor its hash. */
     all() {
-        return this.#all().map(({ keyHash, ...b }) => ({ ...b, online: this.#links.has(b.id), muted: this.#links.get(b.id)?.muted ?? null, volume: this.#links.get(b.id)?.volume ?? null }));
+        return this.#all().map(({ keyHash, ...b }) => ({ ...b, online: this.#links.has(b.id), muted: this.#links.get(b.id)?.muted ?? null, volume: b.volume ?? this.#links.get(b.id)?.volume ?? VOLUME_DEFAULT }));
     }
 
     code(conversation, name) {
@@ -128,6 +130,18 @@ export class Boxes {
         const label = String(name ?? '').trim().slice(0, NAME_MAX);
         if (!label) throw new Refusal(400, 'A name, please.');
         this.#change(id, { name: label });
+    }
+
+    /* Louder or softer: kept, and given to the box now if it is connected. */
+    async setVolume(id, level) {
+        const n = Math.round(Number(level));
+        if (!Number.isFinite(n) || n < 0 || n > 100) throw new Refusal(400, 'A volume from 0 to 100.');
+        this.#change(id, { volume: n });
+        const link = this.#links.get(id);
+        if (!link) return { ok: true, offline: true };
+        const a = await this.command(id, { t: 'volume', level: n });
+        if (a?.ok !== false) link.volume = n;
+        return a;
     }
 
     /* Where it is (a home, a family house): grouped by it, named with it. */
@@ -213,6 +227,11 @@ export class Boxes {
             if (!m || typeof m !== 'object') return;
             if (m.t === 'ping') { send({ t: 'pong' }); return; }
             if (m.t === 'hello' && typeof m.problem === 'string' && m.problem) this.#log(`voice box ${box.name}: back online after ${Number(m.tries) || '?'} tries; it had: ${m.problem.slice(0, 160)}`);
+            if (m.t === 'hello') {
+                /* Its volume, as set here: given at each connection (a box keeps its own, softer, otherwise). */
+                const wanted = link.box().volume ?? VOLUME_DEFAULT;
+                if (m.volume !== wanted) { send({ t: 'volume', id: randomUUID(), level: wanted }); m.volume = wanted; }
+            }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'listen.start') { sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence) {
@@ -303,7 +322,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'move': boxes.move(id, String(body.conversation ?? '')); return send(200, { ok: true });
         case 'place': boxes.place(id, body.place); return send(200, { ok: true });
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
-        case 'volume': return answered(await boxes.command(id, { t: 'volume', level: Math.round(Number(body.level)) }));
+        case 'volume': return answered(await boxes.setVolume(id, body.level));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }
         case 'wifi-join': return answered(await boxes.command(id, { t: 'wifi.join', ssid: String(body.ssid ?? ''), password: String(body.password ?? '') }, 90_000));
         case 'alert': return answered(await boxes.command(id, { t: 'alert', text: String(body.text ?? '').slice(0, 300) }, 10 * 60_000));
@@ -312,5 +331,32 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         }
     } catch (error) {
         return send(error.status ?? (error instanceof SyntaxError ? 400 : 500), { error: error instanceof SyntaxError ? 'Not JSON.' : error.message });
+    }
+}
+
+/* VOICE BOXES AS TETHER TARGETS (kind voicebox): what an assistant may do to the boxes of its
+   own conversation -- louder, softer, an alert -- through Tether's rights and journal. One
+   target per box, given to its conversation at "free" (nothing in it is risky), taken back when
+   the box moves or goes. */
+export const targetOf = (box) => `voicebox-${box.id.slice(0, 8)}`;
+export function voiceboxConnector(boxes) {
+    return {
+        async run(verb, t, a = {}) {
+            const id = t.config?.box;
+            if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
+            if (verb === 'voicebox.alert') { await boxes.command(id, { t: 'alert', text: String(a.text ?? '').slice(0, 300) }, 10 * 60_000); return { text: 'The alert was seen: someone pressed its button.' }; }
+            throw new Error(`${verb} is not for a voice box`);
+        },
+    };
+}
+export function syncTargets(store, list) {
+    const wanted = new Map(list.map((b) => [targetOf(b), b]));
+    for (const t of store.targets()) if (t.kind === 'voicebox' && !wanted.has(t.id)) store.removeTarget(t.id);
+    for (const [id, b] of wanted) {
+        const before = store.target(id);
+        store.putTarget({ id, title: `Voice box ${b.name}${b.place ? ` (${b.place})` : ''}`, kind: 'voicebox', connector: 'voicebox', config: { box: b.id } });
+        const agent = `conversation:${b.conversation}`;
+        for (const who of Object.keys(store.target(id)?.grants ?? {})) if (who !== agent) store.grant(id, who, null);
+        if (!before || !store.target(id)?.grants?.[agent]) store.grant(id, agent, 'free');
     }
 }
