@@ -104,7 +104,7 @@ test('a box not addressed stays quiet; a press too short is not a sentence', asy
     assert.equal(said.length, 0);
 });
 
-test('a dictation that fails is said to the box as an error', async () => {
+test('a dictation that fails is said to the box in words, and it listens again; without a voice, a beep', async () => {
     const { boxes } = make({ hear: async () => { throw new Error('engine down'); } });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
     const s = new FakeSocket();
@@ -113,7 +113,18 @@ test('a dictation that fails is said to the box as an error', async () => {
     for (let i = 0; i < 30; i++) s.emit('message', Buffer.alloc(640), true);
     s.box({ t: 'listen.end' });
     await tick(); await tick();
-    assert.deepEqual(s.sent.at(-1), { t: 'cue', name: 'error' });
+    assert.ok(s.sent.some((m) => m.t === 'speak.start'));
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+
+    const mute = make({ hear: async () => { throw new Error('engine down'); }, speak: async () => { throw new Error('no voice'); } });
+    const b2 = mute.boxes.pair({ code: mute.boxes.code('kitchen-help').code });
+    const s2 = new FakeSocket();
+    mute.boxes.accept(s2, mute.boxes.byKey(b2.key));
+    s2.box({ t: 'listen.start' });
+    for (let i = 0; i < 30; i++) s2.emit('message', Buffer.alloc(640), true);
+    s2.box({ t: 'listen.end' });
+    await tick(); await tick();
+    assert.deepEqual(s2.sent.at(-1), { t: 'cue', name: 'error' });
 });
 
 test('commands get their answer; a withdrawn box is closed and its key opens nothing', async () => {

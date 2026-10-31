@@ -78,6 +78,8 @@ const PHANTOMS = [
     /sous[- ]titrage\s*st\s*'?\s*\d+[.!]?/giu,
     /sous[- ]titrage\s+fr(?:ançais)?\s*[.!?]?/giu,
     /sous[- ]titr(?:age|es?)\s+(?:par\s+)?(?:la\s+)?société\s+radio[- ]canada[.!]?/giu,
+    /* A credit to a person, when it is all that was "heard" ("Sous-titres par Jérémy Diaz", 31-10). */
+    /^\s*[Ss]ous[- ]titr(?:age|es?)(?:\s+réalisés?)?\s+par\s+(?:\p{Lu}[\p{L}'-]*\s*){1,3}[.!]?\s*$/gu,
     /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
 ];
 export function withoutPhantoms(text) {
