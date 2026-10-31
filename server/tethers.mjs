@@ -155,7 +155,7 @@ export class Tethers {
     given() {
         const out = {};
         for (const t of this.#keeper.store.targets()) {
-            if (t.kind === 'device') continue;   /* offered to every conversation: not an access worth counting */
+            if (t.kind === 'device' || t.kind === 'voicebox') continue;   /* offered with a conversation or a box: not an access worth counting */
             for (const id of Object.keys(t.grants ?? {})) if (id.startsWith(AGENT)) out[id.slice(AGENT.length)] = (out[id.slice(AGENT.length)] ?? 0) + 1;
         }
         return out;
