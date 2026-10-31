@@ -17,6 +17,7 @@
  * device door. Nothing is kept of the audio, here or on the box.
  */
 import { spawn as spawnProcess } from 'node:child_process';
+import { createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 
@@ -26,7 +27,7 @@ export const LINK_PATH = '/c/api/box/ws';
 /* A firmware a box downloads to update itself: a one-use address, kept a few minutes. */
 export const FIRMWARE_PATH = '/c/api/box/firmware/';
 export const FIRMWARE_MINUTES = 10;
-export const SENTENCE_MAX = 60 * 32_000 + 32_000;      /* 60 s of 16 kHz 16-bit mono, and some slack */
+export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
 /* The volume a box is given when it connects, until someone sets another (its own default was soft). */
@@ -102,6 +103,31 @@ export function forSpeech(text) {
 }
 
 export const DOING_WITHIN_MS = 120_000;
+/* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
+export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
+export const RECORD_MAX_BYTES = 4 * 3600 * 32_000;   /* four hours */
+export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+/* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
+   they last, with a fade down and up (a quarter of a second) rather than a jump. One 20 ms chunk at a time. */
+export const DUCK = 0.2;
+export function mix(stream, chunk) {
+    const words = stream.over[0];
+    const target = words ? DUCK : 1;
+    const out = Buffer.alloc(chunk.length);
+    const step = (1 - DUCK) / (0.25 * 16_000);
+    for (let i = 0; i < chunk.length; i += 2) {
+        stream.gain += Math.max(-step, Math.min(step, target - stream.gain));
+        let v = chunk.readInt16LE(i) * stream.gain;
+        if (words && stream.gain <= DUCK + 0.05) {
+            stream.at ??= 0;
+            if (stream.at + 1 < words.length) { v += words.readInt16LE(stream.at); stream.at += 2; }
+        }
+        out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(v))), i);
+    }
+    if (words && stream.at + 1 >= words.length) { stream.over.shift(); stream.at = 0; }
+    return out;
+}
+
 export const CHAT_WITHIN_MS = 3 * 60_000;
 export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
@@ -127,12 +153,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map();
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch }) {
-        this.#spawn = spawn; this.#fetch = fetcher;
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null }) {
+        this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
 
@@ -247,7 +273,7 @@ export class Boxes {
         try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
         catch { throw new Refusal(501, 'This server cannot read sounds: ffmpeg is not installed (an update installs it).'); }
         const box = link.box(); const label = name || new URL(url).host;
-        const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '' };
+        const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
         this.#streams.set(id, stream);
         link.send({ t: 'speak.start', rate: 16_000 });
         child.stdout.on('data', (d) => { stream.queue.push(d); stream.queued += d.length; if (stream.queued > LISTEN_AHEAD * 4) child.stdout.pause(); });
@@ -260,7 +286,7 @@ export class Boxes {
             const due = (this.#now() - stream.started) * 32 + LISTEN_AHEAD;   /* bytes the box should have by now, a few seconds ahead */
             while (stream.sent + 640 <= due && (carry.length >= 640 || stream.queue.length)) {
                 if (carry.length < 640) { const d = stream.queue.shift(); stream.queued -= d.length; carry = Buffer.concat([carry, d]); continue; }
-                if (link.socket.readyState === 1) link.socket.send(carry.subarray(0, 640));
+                if (link.socket.readyState === 1) link.socket.send(mix(stream, carry.subarray(0, 640)));
                 carry = carry.subarray(640); stream.sent += 640;
             }
             if (stream.queued < LISTEN_AHEAD) child.stdout.resume();
@@ -379,6 +405,10 @@ export class Boxes {
             socket, send, waiting: new Map(), heardAt: 0, muted: null, volume: null,
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
             play: (pcm, then = null) => {
+                pcm = pcm.subarray(0, pcm.length & ~1);   /* whole samples only: an odd byte shifts every sample after it */
+                /* Something is playing (a radio): the words go over it, the radio lowered meanwhile (the mixer, listen()). */
+                const playing = this.#streams.get(box.id);
+                if (playing) { playing.over.push(pcm); return; }
                 send({ t: 'speak.start', rate: 16_000 });
                 for (let at = 0; at < pcm.length; at += 640) if (socket.readyState === 1) socket.send(pcm.subarray(at, at + 640));
                 send({ t: 'speak.end', ...(then ? { then } : {}) });
@@ -391,6 +421,12 @@ export class Boxes {
         seen();
         socket.on('message', (data, binary) => {
             if (binary) {
+                if (link.recording) {
+                    const r = link.recording;
+                    if (r.bytes + data.length > RECORD_MAX_BYTES) { if (!r.full) { r.full = true; send({ t: 'record', on: false }); } return; }
+                    r.out.write(data); r.bytes += data.length;
+                    return;
+                }
                 if (!sentence || link.muted) return;
                 size += data.length;
                 if (size <= SENTENCE_MAX) sentence.push(Buffer.from(data));
@@ -407,6 +443,18 @@ export class Boxes {
                 if (m.volume !== wanted) { send({ t: 'volume', id: randomUUID(), level: wanted }); m.volume = wanted; }
             }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
+            if (m.t === 'record.start' && this.#recordDir) {
+                mkdirSync(this.#recordDir, { recursive: true });
+                const file = `${this.#recordDir}/${box.id}-${this.#now()}.pcm`;
+                link.recording = { file, out: createWriteStream(file), bytes: 0, at: this.#now() };
+                this.#log(`voice box ${box.name}: recording`);
+                return;
+            }
+            if (m.t === 'record.end' && link.recording) {
+                const r = link.recording; link.recording = null;
+                r.out.end(() => { void this.#recorded(link, r); });
+                return;
+            }
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -429,8 +477,38 @@ export class Boxes {
             }
             if ((m.t === 'ack' || m.t === 'wifi.scan.result') && typeof m.id === 'string') { link.waiting.get(m.id)?.(m); link.waiting.delete(m.id); }
         });
-        socket.on('close', () => { if (this.#links.get(box.id) === link) { this.stop(box.id); this.#links.delete(box.id); this.#log(`voice box ${box.name}: disconnected`); } });
+        socket.on('close', () => { if (link.recording) { const r = link.recording; link.recording = null; r.out.end(() => { void this.#recorded(link, r); }); }
+            if (this.#links.get(box.id) === link) { this.stop(box.id); this.#links.delete(box.id); this.#log(`voice box ${box.name}: disconnected`); } });
         socket.on('error', () => {});
+    }
+
+    /* A recording ended: transcribed in parts of five minutes (cut at a quiet moment), who speaks noted when the
+       engine tells voices apart; the text kept beside the conversation, and said there in a short line, so its
+       assistant writes what was asked of it. The sound itself is not kept. */
+    async #recorded(link, r) {
+        const box = link.box();
+        const minutes = Math.round(r.bytes / 32_000 / 60);
+        this.#log(`voice box ${box.name}: recording ended, ${minutes} min, transcribing`);
+        try { if (link.socket.readyState === 1) link.play(await this.#speak(`Enregistrement terminé, ${minutes} minute${minutes > 1 ? 's' : ''}. Je transcris, je te dis quand c'est prêt.`)); } catch { /* the light says it */ }
+        let pcm;
+        try { pcm = readFileSync(r.file); } catch (error) { this.#log(`voice box ${box.name}: the recording cannot be read (${error.message})`); return; }
+        const lines = []; let offset = 0; let failed = 0;
+        const pieces = piecesOf(pcm, { least: 270, most: 300 });
+        for (const [i, piece] of pieces.entries()) {
+            try {
+                const parts = await this.#parts(wavOf(piece));
+                for (const p of parts) lines.push(`[${mmss(offset + p.start)}]${p.speaker === null ? '' : ` Voix ${p.speaker + 1}${pieces.length > 1 ? ` (partie ${i + 1})` : ''}`} : ${p.text}`);
+            } catch (error) { failed++; lines.push(`[${mmss(offset)}] (cette partie n'a pas pu être transcrite : ${error.message})`); }
+            offset += piece.length / 32_000;
+        }
+        rmSync(r.file, { force: true });
+        const stamp = new Date(r.at).toISOString().slice(0, 16).replace(/[-:T]/g, '');
+        const head = `Enregistrement du boîtier ${box.name}${box.place ? ` (${box.place})` : ''}, ${new Date(r.at).toISOString().slice(0, 16).replace('T', ' ')} UTC, ${minutes} min.\nLes voix sont numérotées par partie de 5 minutes : une même personne peut changer de numéro d'une partie à l'autre.\n\n`;
+        let path = null;
+        try { path = this.#keep?.(box.conversation, `enregistrement-${stamp}.txt`, head + lines.join('\n')) ?? null; } catch (error) { this.#log(`voice box ${box.name}: the transcript cannot be kept (${error.message})`); }
+        this.#log(`voice box ${box.name}: recording transcribed (${lines.length} lines${failed ? `, ${failed} part(s) failed` : ''})`);
+        const note = path ? `Enregistrement de ${minutes} min terminé et transcrit (qui parle, minute par minute) : ${path}. Fais-en ce que la personne demande ; sinon un compte rendu court : sujets, décisions, choses à faire.` : `Enregistrement de ${minutes} min terminé, mais la transcription n'a pas pu être rangée.`;
+        try { await this.#say(box.conversation, note, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: the recording's line not said (${error.message})`); }
     }
 
     /* Each step said in the server's log, never what was said: its length only. */
@@ -451,6 +529,12 @@ export class Boxes {
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
+        if (RECORD_ASKED.test(text) && this.#recordDir && this.#parts) {
+            this.#log(`voice box ${box.name}: a recording asked`);
+            try { link.play(await this.#speak("J'enregistre. Pour arrêter, appuie sur le bouton ou dis le mot d'éveil.")); } catch { /* no voice: the light says it */ }
+            link.send({ t: 'record', on: true });
+            return;
+        }
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();

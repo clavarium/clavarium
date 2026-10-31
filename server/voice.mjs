@@ -167,6 +167,30 @@ export async function transcribe(config, audio, fetcher = fetch, { oneVoice = fa
     return cleanDictation((oneVoice && firstVoice(body)) || body.text, wavSeconds(audio));
 }
 
+/* A LONG RECORDING, in parts of a few minutes (a voice box records a meeting): each part's text, with who
+   speaks when the engine tells voices apart (OVH: diarize). Parts up to 24 MB: what the engines take. */
+export const PART_MAX = 24 * 1024 * 1024;
+export async function transcribeParts(config, audio, fetcher = fetch) {
+    if (!config) throw new Refusal(503, 'No speech-to-text engine is configured.');
+    if (audio.length > PART_MAX) throw new Refusal(413, 'The part is too long.');
+    const diarize = DIARIZES.test(String(config.url));
+    const form = new FormData();
+    form.append('file', new Blob([audio], { type: 'audio/wav' }), 'recording.wav');
+    form.append('model', config.model);
+    if (config.language) form.append('language', config.language);
+    form.append('response_format', diarize ? 'verbose_json' : 'json');
+    if (diarize) form.append('diarize', 'true');
+    let response;
+    try { response = await fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(10 * 60_000) }); }
+    catch { throw new Refusal(502, 'The speech-to-text engine cannot be reached.'); }
+    if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
+    const body = await response.json().catch(() => undefined);
+    if (Array.isArray(body?.diarization) && body.diarization.length) return body.diarization.map((p) => ({ speaker: Number(p.speaker) || 0, start: Number(p.start) || 0, text: withoutPhantoms(String(p.text ?? '')) })).filter((p) => p.text);
+    if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
+    const text = withoutPhantoms(body.text);
+    return text ? [{ speaker: null, start: 0, text }] : [];
+}
+
 /* ---------- THE ENGINE CHOSEN IN SETTINGS ----------
  * Settings > Dictation: a provider fills in the address and the model (both
  * may be changed); the key is one of the SECRETS already kept (Assets >
@@ -300,6 +324,12 @@ export class Dictation {
     /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
     #fresh(c) { if (c?.secret && this.#expired(c.secret)) throw new Refusal(409, KEY_EXPIRED); }
     /* `device`: the language of the device that dictates (a tag such as fr-FR), if it said. */
+    async transcribeParts(audio) {
+        this.#fresh(this.#saved());
+        const config = this.current();
+        if (config) await this.#guard(config);
+        return transcribeParts(config && { ...config, language: languageOf(config.language, undefined) }, audio, this.#fetcher);
+    }
     async transcribe(audio, device, how = {}) {
         this.#fresh(this.#saved());
         const config = this.current();

@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { fakeRegistry } from './fake-registry.mjs';
-import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS } from '../deploy/updater.mjs';
+import { Updater, Refused, compareVersions, inWindow, readConf, writeConf, DROP_IN_TEXT, ensureProxySettings, PROXY_LINES, NOTICE_MS, ensureQuietSudo, quietLine } from '../deploy/updater.mjs';
 
 const PARLEY_REPO = 'https://github.com/clavarium/clavarium-parley';
 const DOCKET_REPO = 'https://github.com/clavarium/clavarium-docket';
@@ -496,4 +496,25 @@ test('check: the beta channel sees beta versions and a newer stable, never the d
     assert.equal(await s.u.check(), '1.0.1-beta.1', 'beta sees the beta version');
     s.publish('1.0.1', { tag: 'latest' });
     assert.equal(await s.u.check(), '1.0.1', 'beta jumps forward to the newer stable');
+});
+
+test('sudo is told not to log the host program\'s probes: once, checked by visudo, the rule kept', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sudoers-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'clavarium');
+    const before = '# Clavarium: the server account may run ONE program as root, and nothing else.\nclavarium ALL=(root) NOPASSWD: /usr/local/sbin/clavarium-host\n';
+    writeFileSync(file, before);
+    const ran = [];
+    const run = async (argv) => { ran.push(argv.join(' ')); return { code: 0 }; };
+    assert.equal(await ensureQuietSudo({ file, run }), true);
+    const after = readFileSync(file, 'utf8');
+    assert.ok(after.startsWith(before));
+    assert.ok(after.endsWith(`${quietLine('clavarium')}\n`));
+    assert.match(ran[0], /^visudo -cf .*\.new$/);
+    assert.equal(await ensureQuietSudo({ file, run }), false, 'once');
+    /* visudo refuses: the file stays as it was. */
+    rmSync(file); writeFileSync(file, before);
+    await assert.rejects(ensureQuietSudo({ file, run: async () => { throw new Error('parse error'); } }));
+    assert.equal(readFileSync(file, 'utf8'), before);
+    assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run }), false);
 });

@@ -114,6 +114,33 @@ export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand }
     return true;
 }
 
+/* SUDO, QUIET FOR CLAVARIUM'S ONE PROGRAM, kept by the updater: the server asks the host program every
+   few seconds (machine states, memory, repositories), and sudo wrote three lines to the system log for
+   each call -- some 800 lines in ten minutes, nothing to read in them (found 31-10). The account may run
+   that one program and nothing else; what changes something, the program logs itself (clavarium-host). */
+export const SUDOERS = '/etc/sudoers.d/clavarium';
+export const quietLine = (account) => `Defaults:${account} !syslog, !pam_session`;
+export async function ensureQuietSudo({ file = SUDOERS, run = runCommand } = {}) {
+    let text;
+    try { text = readFileSync(file, 'utf8'); } catch { return false; }
+    const account = text.match(/^([a-z_][a-z0-9_-]*)\s+ALL=\(root\)\s+NOPASSWD:/m)?.[1];
+    if (!account || text.includes(quietLine(account))) return false;
+    const next = `${text.replace(/\n*$/, '\n')}# Added by the Clavarium updater: its probes every few seconds are not written to the system log.\n${quietLine(account)}\n`;
+    writeFileSync(`${file}.new`, next, { mode: 0o440 });
+    try { await run(['visudo', '-cf', `${file}.new`], { timeoutMs: 30_000 }); } catch (error) { rmSync(`${file}.new`, { force: true }); throw error; }
+    renameSync(`${file}.new`, file);
+    return true;
+}
+
+/* FFMPEG, kept by the updater: the voice boxes play a radio, a podcast, a music file through it
+   (server/boxes.mjs, listen). Installed by install.sh; added once to a machine installed before. */
+export async function ensureFfmpeg({ run = runCommand, has = () => ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].some((f) => existsSync(f)) } = {}) {
+    if (has()) return false;
+    if (process.getuid?.() !== 0) return false;
+    await run(['apt-get', 'install', '-y', '-qq', 'ffmpeg'], { timeoutMs: 15 * 60_000, env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive' } });
+    return has();
+}
+
 /* THE MAINTENANCE PAGE, kept by the updater: while the server is down (an update, a restart) the
    front (Caddy) answers it instead of the sign-in proxy's "Bad Gateway". The sign-in proxy answers
    502 in HTML when the server does not; the server's own errors are JSON and pass as they are. A
@@ -913,6 +940,8 @@ async function main(argv) {
                update that brought it ran the PREVIOUS release's code. Idempotent; never stops the turn. */
             try { const [{ installWatch }, { realSys }] = await Promise.all([import('./doctor.mjs'), import('./online.mjs')]); if (await installWatch(realSys())) console.error('updater: the certificate timer set up'); } catch (error) { console.error(`updater: the certificate timer could not be set up: ${error.message}`); }
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
+            try { if (await ensureFfmpeg()) console.error('updater: ffmpeg installed, for the sounds the voice boxes play'); } catch (error) { console.error(`updater: ffmpeg could not be installed: ${error.message}`); }
+            try { if (await ensureQuietSudo()) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); }
             try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             try { const c = await ensureGenericClientId({ run: runCommand }); if (c.changed.length) console.error('updater: the sign-in client id was made generic (nothing names the product in the open)'); } catch (error) { console.error(`updater: the sign-in client id could not be made generic: ${error.message}`); }
             try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }

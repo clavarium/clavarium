@@ -353,3 +353,45 @@ test('what it is doing, written for a screen, is not read aloud: a short word in
     await boxes.agentSaid('kitchen-help', 'Tâche de fond : bêta 0.2.113 après publication (test-c)', null, { doing: true });
     assert.equal(spoken.at(-1), 'Je regarde, un instant.');
 });
+
+test('a long recording: asked in words, written to disk, transcribed in parts with who speaks, kept and said in a line', async (t) => {
+    const { mkdtempSync, rmSync: rm, readdirSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(`${tmpdir()}/rec-`); t.after(() => rm(dir, { recursive: true, force: true }));
+    const kept = []; const partsAsked = [];
+    const { boxes, said } = make({
+        hear: async () => 'Lance l\'enregistrement de la réunion',
+        recordDir: dir,
+        parts: async (wav) => { partsAsked.push(wav.length); return [{ speaker: 0, start: 1, text: 'Bonjour à tous.' }, { speaker: 1, start: 4, text: 'On commence.' }]; },
+        keep: (c, file, text) => { kept.push({ c, file, text }); return `/work/.parley/files/x/${file}`; },
+    });
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
+    await tick(); await tick(); await tick();
+    assert.deepEqual(s.sent.at(-1), { t: 'record', on: true });
+    assert.equal(said.length, 0, 'the order is not said in the thread');
+    s.box({ t: 'record.start' });
+    for (let i = 0; i < 100; i++) s.emit('message', Buffer.alloc(640, 1), true);
+    s.box({ t: 'record.end' });
+    for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(partsAsked.length, 1);
+    assert.match(kept[0].text, /\[00:01\] Voix 1 : Bonjour à tous\.\n\[00:04\] Voix 2 : On commence\./);
+    assert.match(said[0].text, /^Enregistrement de 0 min terminé et transcrit .*enregistrement-\d+\.txt/);
+    assert.deepEqual(readdirSync(dir), [], 'the sound is not kept');
+});
+
+test('the mixer: words over a stream, the stream lowered with a fade, then back', async () => {
+    const { mix, DUCK } = await import('../server/boxes.mjs');
+    const radio = Buffer.alloc(640); for (let i = 0; i < 640; i += 2) radio.writeInt16LE(10_000, i);
+    const words = Buffer.alloc(640 * 30); for (let i = 0; i < words.length; i += 2) words.writeInt16LE(1000, i);
+    const stream = { over: [words], gain: 1 };
+    const first = mix(stream, radio);
+    assert.ok(first.readInt16LE(0) > 9_000, 'no jump: it fades');
+    let out; for (let i = 0; i < 20; i++) out = mix(stream, radio);
+    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK) + 1000, 'lowered, the words over it');
+    for (let i = 0; i < 60; i++) out = mix(stream, radio);
+    assert.equal(stream.over.length, 0);
+    assert.equal(out.readInt16LE(638), 10_000, 'back to full');
+});
