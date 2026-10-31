@@ -2,7 +2,7 @@
  *
  * A press on its button, a sentence: the box streams it here, the dictation
  * engine (voice.mjs) turns it into text, and the text is said in the box's
- * conversation as the person's own message, the room named. What the tool
+ * conversation by the box itself, in its own name (Parley's speakers, #215). What the tool
  * then says or asks there is read aloud (speech.mjs) and played by the box.
  * Protocol v1: DEVICES.md.
  *
@@ -70,16 +70,19 @@ export function forSpeech(text) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log;
+    #exists; #hear; #say; #speak; #log; #changed;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, now = () => Date.now(), log = () => {} }) {
-        this.#file = file; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, now = () => Date.now(), log = () => {} }) {
+        this.#file = file; this.#changed = changed; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
 
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
-    #save(list) { this.#file.set(list); }
+    #save(list) { this.#file.set(list); try { this.#changed(); } catch { /* the caller's */ } }
+
+    /* The boxes of one conversation, as its thread names them: { id, name, place }. */
+    speakersOf(conversation) { return this.#all().filter((b) => b.conversation === conversation).map((b) => ({ id: b.id, name: b.name, ...(b.place ? { place: b.place } : {}) })); }
 
     /* What the operator sees: never the key, nor its hash. */
     all() {
@@ -128,6 +131,9 @@ export class Boxes {
         this.#change(id, { name: label });
     }
 
+    /* Where it is (a home, a family house): grouped by it, named with it. */
+    place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
+
     move(id, conversation) {
         if (!this.#exists(conversation)) throw new Refusal(404, 'No such conversation.');
         this.#change(id, { conversation });
@@ -165,12 +171,14 @@ export class Boxes {
         });
     }
 
-    /* The tool said or asked something in a conversation: spoken by its boxes that were just talked to. */
-    async agentSaid(conversation, text) {
+    /* The tool said or asked something in a conversation. Addressed (`to`: box ids, #215): said by
+       those boxes of this conversation. Not addressed: said by its boxes that were just talked to. */
+    async agentSaid(conversation, text, to = null) {
         const words = forSpeech(text);
         if (!words) return;
         const now = this.#now();
-        const boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && l.heardAt > now - ANSWER_MINUTES * 60_000);
+        const mine = [...this.#links.values()].filter((l) => l.box().conversation === conversation);
+        const boxes = Array.isArray(to) && to.length ? mine.filter((l) => to.includes(l.box().id)) : mine.filter((l) => l.heardAt > now - ANSWER_MINUTES * 60_000);
         if (boxes.length === 0) return;
         let pcm;
         try { pcm = await this.#speak(words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); for (const l of boxes) l.send({ t: 'cue', name: 'error' }); return; }
@@ -231,7 +239,7 @@ export class Boxes {
         try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box: dictation failed (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
         if (!text) { link.send({ t: 'cue', name: 'error' }); return; }
         const box = link.box();
-        try { await this.#say(box.conversation, text, box.name); } catch (error) { this.#log(`voice box: not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box: not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
         link.heardAt = this.#now();
     }
 
@@ -254,7 +262,8 @@ export class Boxes {
  *   GET  /api/boxes                       the boxes, online or not
  *   POST /api/boxes/code                  {conversation, name?, origin?} -> {code, minutes, key?, link?, qr?}
  *   POST /api/boxes/<id>/rename           {name}
- *   POST /api/boxes/<id>/move             {conversation}
+ *   POST /api/boxes/<id>/move             {conversation}: one conversation at a time
+ *   POST /api/boxes/<id>/place            {place}: where it is (a home), shown with its name
  *   POST /api/boxes/<id>/revoke
  *   POST /api/boxes/<id>/volume           {level 0-100}
  *   POST /api/boxes/<id>/wifi-scan        -> {networks}
@@ -288,6 +297,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         switch (what) {
         case 'rename': boxes.rename(id, body.name); return send(200, { ok: true });
         case 'move': boxes.move(id, String(body.conversation ?? '')); return send(200, { ok: true });
+        case 'place': boxes.place(id, body.place); return send(200, { ok: true });
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
         case 'volume': return answered(await boxes.command(id, { t: 'volume', level: Math.round(Number(body.level)) }));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }

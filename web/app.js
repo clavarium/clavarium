@@ -8801,12 +8801,15 @@
     async function paintBoxes() {
         const list = await getJson('/boxes', []);
         const rows = $('box-list'); rows.replaceChildren();
+        const places = el('datalist'); places.id = 'box-places';
+        for (const p of [...new Set(list.map((b) => b.place).filter(Boolean))]) { const o = el('option'); o.value = p; places.append(o); }
+        rows.append(places);
         if (!list.length) rows.append(el('p', 'hint', 'No voice box yet.'));
         for (const b of list) {
             const card = el('div', 'device card box-card'); card.dataset.box = b.id;
             const head = el('div', 'device-head');
             const conv = conversations.find((c) => c.name === b.conversation);
-            head.append(el('b', '', b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
+            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
             const rename = el('button', '', 'Rename'); rename.type = 'button';
             rename.addEventListener('click', () => {
                 const field = el('input'); field.value = b.name; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this voice box');
@@ -8824,7 +8827,10 @@
             where.value = b.conversation;
             where.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/move`, { conversation: where.value }).catch(() => {}); await paintBoxes(); });
             const whereRow = el('label', 'box-where'); whereRow.append('Speaks in ', where);
-            const acts = el('div', 'action-row'); acts.append(whereRow, rename, remove);
+            /* Where it is (a home): typed once, then offered for the next ones. */
+            const place = el('input'); place.value = b.place ?? ''; place.maxLength = 40; place.placeholder = 'Place (a home)'; place.setAttribute('list', 'box-places'); place.setAttribute('aria-label', `Place of ${b.name}`);
+            place.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/place`, { place: place.value.trim() }).catch(() => {}); await paintBoxes(); });
+            const acts = el('div', 'action-row'); acts.append(whereRow, place, rename, remove);
             card.append(head, acts);
             rows.append(card);
         }

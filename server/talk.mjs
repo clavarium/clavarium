@@ -290,7 +290,7 @@ export class Talk {
                 if (event.type === 'person-reacted') { reacted(event); return; }
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
-                if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '');
+                if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null);
                 const words = texts(this.#lastLang, this.settings().own);
                 if (event.type === 'agent-asked') this.#alert({ title: fill(words['alert-asks'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
                 if (event.type === 'agent-status' && event.message.state === 'waiting') this.#alert({ title: fill(words['alert-waits'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
@@ -444,6 +444,9 @@ export class Talk {
         return { ...this.of(name), invited: text };
     }
 
+    /* The voice boxes of a conversation, as Parley names them to its agent and its screen (#215). */
+    speakers(name, list) { try { this.#parley(name).setSpeakers(list); } catch { /* its folder is not there yet */ } }
+
     async say(name, text, answers, files, via, extra) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
         const given = files === undefined || files === null ? [] : files;
@@ -465,7 +468,7 @@ export class Talk {
            never lose a message: on any trouble the text is sent as it came. */
         let said = text ?? '';
         if (this.#screen && said) { try { said = await this.#screen(name, said); } catch { said = text ?? ''; } }
-        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about, by: extra.by } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }
