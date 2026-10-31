@@ -97,6 +97,7 @@ export function forSpeech(text) {
         .replace(/\b([01]?\d|2[0-3])\s?[hH](?:\s?([0-5]\d))?\b/g, (_, h, m) => `${h} heure${h === '1' || h === '0' ? '' : 's'}${m ? ` ${m}` : ''}`)
         /* Never its own wake word aloud: the box heard itself and cut its own sentence (31-10). */
         .replace(/\b(?:hey|hé|eh)[\s,]+jarvis\b/giu, 'le mot d\'éveil')
+        .replace(/(?<![\p{L}])m[ée]sange(?![\p{L}])/giu, 'le mot d\'éveil')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
