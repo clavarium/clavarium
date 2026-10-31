@@ -455,7 +455,7 @@ export async function handleApi(request, response, conversations, headers, resou
         /* Assets > Access: the owner sets a conversation's level and rules on a
            target, decides a call that waited, or removes a target. Each is an op the
            keeper runs as the owner (person), never as an agent. */
-        const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume)$/.exec(pathname);
+        const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume|job-done|job-file)$/.exec(pathname);
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
         /* A mailbox's signature (Markdown), added under what the agent sends from it. */
         if (pathname === '/api/tether/signature' && tethers) {

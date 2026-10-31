@@ -159,3 +159,20 @@ test('the local fetch in the machine: origin/* brought up to date from the refer
         assert.equal(none.status, 90);
     } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('the checks are told they run in a copy at the commit sent, whatever branch the main folder is on', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-checkenv-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const repo = join(dir, 'repo');
+    const git = (...a) => execFileSync('git', ['-C', repo, ...a], { encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'a', GIT_AUTHOR_EMAIL: 'a@example.com', GIT_COMMITTER_NAME: 'a', GIT_COMMITTER_EMAIL: 'a@example.com' } }).trim();
+    mkdirSync(repo);
+    git('init', '-q', '-b', 'dev');
+    writeFileSync(join(repo, 'f'), '1'); git('add', 'f'); git('commit', '-qm', 'one');
+    const sent = git('rev-parse', 'HEAD');
+    git('checkout', '-qb', 'elsewhere'); writeFileSync(join(repo, 'f'), '2'); git('commit', '-qam', 'two');
+    const cmd = 'echo "head=$CLAVARIUM_CHECK_HEAD repo=$CLAVARIUM_CHECK_REPOSITORY"; [ "$(git rev-parse HEAD)" = "$CLAVARIUM_CHECK_HEAD" ] && [ "$PWD" = "$CLAVARIUM_CHECK_COPY" ] && echo same';
+    const r = spawnSync('sh', ['-c', SCRIPT, 'clavarium-check', repo, sent, '', '', cmd, 'no'], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stdout);
+    assert.match(r.stdout, new RegExp(`head=${sent} repo=${repo}`));
+    assert.match(r.stdout, /\nsame\n/);
+});

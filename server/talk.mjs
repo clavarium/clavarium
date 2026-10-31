@@ -117,7 +117,7 @@ export function typeCommand(line) {
    checked out in one folder only, and /tmp is emptied when the machine
    restarts, with the work left there. Typed in a terminal: no quote, no
    backquote, nothing a shell would run. */
-export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts.';
+export const BRANCHES = 'Check out your branches in the main folder of the repository or under /work, never in /tmp: a branch can be checked out in one folder only, and /tmp is emptied when the machine restarts. The checks before sending run in a copy made at exactly the commit to send (CLAVARIUM_CHECK_COPY, CLAVARIUM_CHECK_HEAD): never write a check that needs the main folder on a branch or at that commit.';
 /* After a restart, the tool is given this long to start before REREAD is typed. */
 export const REREAD_AFTER_MS = 10_000;
 /* READY, NOT JUST STARTED. The tool starts when its terminal is opened, which
@@ -189,7 +189,7 @@ export const windowOf = (choice) => { const [kind, n] = String(choice).split(':'
 /* What the page may ask for: a part of the thread (Parley's read(options)), its own cursor for "since". */
 const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
-    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #listening = new Map(); #every; #now;
+    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
     #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret;
 
@@ -201,9 +201,9 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
         this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
-        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
+        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
         this.#timer.unref?.();
@@ -289,6 +289,8 @@ export class Talk {
             on: (event) => {
                 if (event.type === 'person-reacted') { reacted(event); return; }
                 if (event.type === 'person-wrote') { this.#want(name); return; }
+                /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
+                if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '');
                 const words = texts(this.#lastLang, this.settings().own);
                 if (event.type === 'agent-asked') this.#alert({ title: fill(words['alert-asks'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
                 if (event.type === 'agent-status' && event.message.state === 'waiting') this.#alert({ title: fill(words['alert-waits'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });

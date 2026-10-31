@@ -26,6 +26,7 @@ export const FOLDER = '.tether';
 /* The keeper takes what the agents asked, this often. */
 export const PUMP_MS = 1000;
 const AGENT = 'conversation:';
+export const USB_DEVICE = 'usb-device';
 
 export class Tethers {
     #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map();
@@ -42,6 +43,11 @@ export class Tethers {
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
         this.#keeper.onChange(() => { this.#changes++; this.#tellNew(); });
+        /* A device plugged into the owner's computer: one target, always there, flashed from the
+           owner's browser (Tether's device connector). The owner gives it to a conversation as any other. */
+        try {
+            if (!this.#keeper.store.target(USB_DEVICE)) this.#keeper.store.putTarget({ id: USB_DEVICE, title: 'USB device (your browser)', kind: 'device', connector: 'device' });
+        } catch { /* a Tether without devices */ }
     }
 
     /* A new call waiting for the owner is said in its conversation's thread -- the same block a
@@ -63,6 +69,18 @@ export class Tethers {
             const what = [r.verb ?? 'action', r.detail].filter(Boolean).join(' ');
             const text = [what, r.target?.title ? `(${r.target.title})` : '', r.why ? `-- ${r.why}` : ''].filter(Boolean).join(' ');
             try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`] }); } catch { /* its chat is off */ }
+        }
+        /* An approved call only the owner's browser can do (a device to flash): said once, with where to do it. */
+        let jobs = [];
+        try { jobs = this.#keeper.jobs?.() ?? []; } catch { jobs = []; }
+        for (const j of jobs) {
+            live.add(j.id);
+            if (this.#seen.has(j.id)) continue;
+            const who = String(j.agent ?? '');
+            if (!who.startsWith(AGENT)) continue;
+            const name = who.slice(AGENT.length);
+            this.#seen.set(j.id, { name, verb: j.verb });
+            try { this.announce(name, { kind: 'tether-job', text: `To do in your browser: ${j.args?.name ? `flash ${j.args.name}` : 'flash a device'}. Open this conversation's Demandes, plug it in by USB, and start.`, topic: 'Demande', tone: 'warn' }); } catch { /* its chat is off */ }
         }
         for (const [id, info] of [...this.#seen]) {
             if (live.has(id)) continue;

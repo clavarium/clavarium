@@ -20,7 +20,9 @@
  * after them -- never in the folder the tool works in, which may be on
  * another branch or hold changes not committed. What was checked is always
  * what would be sent. A copy has no installed dependencies: a check that
- * needs them installs them ("npm ci && npm test").
+ * needs them installs them ("npm ci && npm test"). They are told so: CLAVARIUM_CHECK_COPY (the
+ * copy), CLAVARIUM_CHECK_HEAD (the commit sent), CLAVARIUM_CHECK_REPOSITORY (the main folder,
+ * never to be required on a branch or at that commit).
  *
  * Bounded: a time limit (killed after it), and only the end of the output
  * comes back.
@@ -65,6 +67,9 @@ git cat-file -e "$head^{commit}" 2>/dev/null || { echo "The commit to send ($hea
 git worktree add --detach --quiet "$tmp/at" "$head" >/dev/null 2>&1 || { echo "A copy at the commit to send ($head) could not be made. Look again."; exit ${MOVED}; }
 made="$tmp/at"; cd "$made" || exit ${MOVED}
 where="Checked in a copy made at this commit, then taken away."
+# Said to the checks: they run in a copy, at exactly this commit -- never in the main
+# folder, whatever branch it is on. A check needs nothing else to know what is sent.
+export CLAVARIUM_CHECK_COPY="$made" CLAVARIUM_CHECK_HEAD="$head" CLAVARIUM_CHECK_REPOSITORY="$repo"
 [ "$(git rev-parse --verify --quiet HEAD)" = "$head" ] || { echo "What would be checked is not the commit to send ($head). Look again."; exit ${MOVED}; }
 status=0; ran=0
 {
