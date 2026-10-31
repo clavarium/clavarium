@@ -199,6 +199,7 @@ export class Boxes {
             },
         };
         this.#links.set(box.id, link);
+        this.#log(`voice box ${box.name}: connected`);
         let sentence = null; let size = 0;
         const seen = () => { try { this.#change(box.id, { seenAt: new Date(this.#now()).toISOString() }); } catch { /* withdrawn meanwhile */ } };
         seen();
@@ -228,18 +229,22 @@ export class Boxes {
             }
             if ((m.t === 'ack' || m.t === 'wifi.scan.result') && typeof m.id === 'string') { link.waiting.get(m.id)?.(m); link.waiting.delete(m.id); }
         });
-        socket.on('close', () => { if (this.#links.get(box.id) === link) this.#links.delete(box.id); });
+        socket.on('close', () => { if (this.#links.get(box.id) === link) { this.#links.delete(box.id); this.#log(`voice box ${box.name}: disconnected`); } });
         socket.on('error', () => {});
     }
 
+    /* Each step said in the server's log, never what was said: its length only. */
     async #heard(link, pcm) {
-        if (pcm.length < 16_000) { link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
+        const box0 = link.box();
+        const seconds = (pcm.length / 32_000).toFixed(1);
+        if (pcm.length < 16_000) { this.#log(`voice box ${box0.name}: ${seconds} s heard, too short for a sentence`); link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
         link.send({ t: 'cue', name: 'thinking' });
         let text;
-        try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box: dictation failed (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
-        if (!text) { link.send({ t: 'cue', name: 'error' }); return; }
+        try { text = String(await this.#hear(wavOf(pcm)) ?? '').trim(); } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
+        if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); link.send({ t: 'cue', name: 'error' }); return; }
         const box = link.box();
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box: not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); link.send({ t: 'cue', name: 'error' }); return; }
+        this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
     }
 
