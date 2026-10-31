@@ -250,3 +250,16 @@ test('a picture the person attached in a chat has its thumbnail, by that one sha
     symlinkSync(other, join(root, '.parley'));
     await assert.rejects(thumb(`.parley/files/${id}/shot.png`), /No such file/);
 });
+
+test('a sound is served for the thread\'s player as a picture is: proved by its bytes', async (t) => {
+    const { root } = folder(t);
+    const wav = Buffer.alloc(64); wav.write('RIFF', 0, 'latin1'); wav.write('WAVE', 8, 'latin1');
+    writeFileSync(join(root, 'voice.wav'), wav);
+    writeFileSync(join(root, 'song.mp3'), Buffer.concat([Buffer.from('ID3'), Buffer.alloc(40)]));
+    writeFileSync(join(root, 'fake.mp3'), '<html><script>alert(1)</script>');
+    writeFileSync(join(root, 'png.wav'), Buffer.from('89504e470d0a1a0a0000', 'hex'));
+    assert.equal((await picture(root, 'voice.wav')).type, 'audio/wav');
+    assert.equal((await picture(root, 'song.mp3')).type, 'audio/mpeg');
+    await assert.rejects(picture(root, 'fake.mp3'), (e) => e.status === 415);
+    await assert.rejects(picture(root, 'png.wav'), (e) => e.status === 415, 'a picture named as a sound is not served as one');
+});

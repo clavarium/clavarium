@@ -395,3 +395,16 @@ test('the mixer: words over a stream, the stream lowered with a fade, then back'
     assert.equal(stream.over.length, 0);
     assert.equal(out.readInt16LE(638), 10_000, 'back to full');
 });
+
+test('something said of itself, long after the last sentence, does not open a conversation', async () => {
+    let clock = 1_000_000;
+    const { boxes } = make({ now: () => clock });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    const sentence = async () => { s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' }); await tick(); await tick(); };
+    await sentence(); await sentence();
+    clock += 5 * 60_000;
+    await boxes.agentSaid('kitchen-help', 'Coucou, il est 21 heures.', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
+});

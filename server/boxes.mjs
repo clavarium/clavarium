@@ -128,6 +128,7 @@ export function mix(stream, chunk) {
     return out;
 }
 
+export const ANSWER_WITHIN_MS = 90_000;
 export const CHAT_WITHIN_MS = 3 * 60_000;
 export const LISTEN_AHEAD = 3 * 32_000;   /* bytes: what a box is sent ahead of what it plays (its buffer holds 16 s) */
 
@@ -382,12 +383,15 @@ export class Boxes {
            it ends when nobody answers, or on "fin de la conversation". */
         const question = !doing && (asked || /\?\s*$/.test(words));
         for (const l of boxes) {
-            const chatting = !doing && this.#chatting(l);
+            /* An answer -- to a sentence heard within a minute -- may open the conversation; something said
+               of itself (a news item, a reminder) does not: the box listened after it for nothing (31-10). */
+            const answering = l.heardAt && this.#now() - l.heardAt < ANSWER_WITHIN_MS;
+            const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
             if (chatting) l.chat = true;
             let pcm;
             try { pcm = await this.#speak(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); continue; }
-            l.play(pcm, question || chatting ? 'listen' : null);
+            l.play(pcm, question || chatting ? 'listen' : null);   /* a question is always listened after: an answer is expected */
         }
     }
     #chatting(link) {

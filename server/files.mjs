@@ -162,6 +162,8 @@ export async function importFile(root, relative, name, request, { exists = 'keep
  */
 export const EDIT_MAX = 1024 * 1024;
 export const THUMB_MAX = 8 * 1024 * 1024;
+/* A sound played in the thread: a few minutes of speech or music. */
+export const SOUND_MAX = 40 * 1024 * 1024;
 /* One drop of files or of a folder: as a whole, this many bytes and files at most. */
 export const BATCH_MAX = 2 * 1024 * 1024 * 1024;
 export const BATCH_FILES = 2000;
@@ -391,6 +393,11 @@ const SIGNATURES = [
     ['image/jpeg', (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff],
     ['image/gif', (b) => b.length >= 6 && /^GIF8[79]a$/.test(b.subarray(0, 6).toString('latin1'))],
     ['image/webp', (b) => b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WEBP'],
+    /* Sounds, played in the thread as the pictures are shown (Parley's player): proved by their bytes too. */
+    ['audio/wav', (b) => b.length >= 12 && b.subarray(0, 4).toString('latin1') === 'RIFF' && b.subarray(8, 12).toString('latin1') === 'WAVE'],
+    ['audio/mpeg', (b) => b.length >= 3 && (b.subarray(0, 3).toString('latin1') === 'ID3' || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0))],
+    ['audio/ogg', (b) => b.length >= 4 && b.subarray(0, 4).toString('latin1') === 'OggS'],
+    ['audio/mp4', (b) => b.length >= 12 && b.subarray(4, 8).toString('latin1') === 'ftyp'],
 ];
 export const IMAGE_HEADERS = Object.freeze({
     'content-security-policy': "default-src 'none'; sandbox",
@@ -401,15 +408,17 @@ export const IMAGE_HEADERS = Object.freeze({
 });
 export async function picture(root, relative) {
     const at = await regular(root, relative);
-    if (!/\.(png|jpe?g|gif|webp)$/i.test(at.name)) throw new Refusal(415, 'Only a PNG, JPEG, GIF or WebP picture has a thumbnail.');
-    if (at.info.size > THUMB_MAX) throw new Refusal(413, 'This picture is too large for a thumbnail.');
+    const sound = /\.(wav|mp3|ogg|oga|opus|m4a)$/i.test(at.name);
+    if (!sound && !/\.(png|jpe?g|gif|webp)$/i.test(at.name)) throw new Refusal(415, 'Only a PNG, JPEG, GIF or WebP picture, or a WAV, MP3, Ogg or M4A sound, is shown in the thread.');
+    const most = sound ? SOUND_MAX : THUMB_MAX;
+    if (at.info.size > most) throw new Refusal(413, sound ? 'This sound is too large to play here.' : 'This picture is too large for a thumbnail.');
     const handle = await open(at.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
         const info = await handle.stat();
-        if (!info.isFile() || info.size > THUMB_MAX) throw new Refusal(413, 'This picture is too large for a thumbnail.');
+        if (!info.isFile() || info.size > most) throw new Refusal(413, 'This file is too large to show here.');
         const bytes = await readAll(handle, info.size);
-        const type = SIGNATURES.find(([, is]) => is(bytes))?.[0];
-        if (!type) throw new Refusal(415, 'This file is not the picture its name says.');
+        const type = SIGNATURES.find(([kind, is]) => kind.startsWith(sound ? 'audio/' : 'image/') && is(bytes))?.[0];
+        if (!type) throw new Refusal(415, `This file is not the ${sound ? 'sound' : 'picture'} its name says.`);
         return { type, bytes, version: versionOf(info) };
     } finally { await handle.close(); }
 }
