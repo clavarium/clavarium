@@ -1,7 +1,7 @@
 /* SPEECH: text read aloud, for the voice boxes (boxes.mjs).
  *
  * On this server, with nothing sent anywhere: a Piper voice (open, French by
- * default) run by sherpa-onnx. The voice is fetched once, the first time it is
+ * default: UPMC, its first speaker) run by sherpa-onnx. The voice is fetched once, the first time it is
  * needed, into the data folder; then it works offline. About 0.3 s of work for
  * 4 s of speech on one core.
  *
@@ -14,7 +14,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
 export const VOICES = Object.freeze({
-    fr: 'vits-piper-fr_FR-siwis-medium',
+    fr: 'vits-piper-fr_FR-upmc-medium',   /* chosen by ear on the real box (31-10), over Siwis, Tom, Gilles and Kokoro */
     en: 'vits-piper-en_US-amy-medium',
 });
 export const VOICE_URL = (name) => `https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/${name}.tar.bz2`;
