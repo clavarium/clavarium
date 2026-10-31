@@ -980,9 +980,13 @@
     pointManifest(installName());
 
     /* ---------- the list ---------- */
+    /* THE FRONT'S "NO ANSWER" (503, down): the server was busy a moment, or restarting -- it does
+       not know which. Said as busy, never as an update (#220); a read is tried again by itself. */
+    const BUSY = 'The server is busy just now: try again in a moment.';
     const post = async (path, body) => {
         const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body ?? {}) });
         const j = await r.json().catch(() => ({}));
+        if (!r.ok && r.status === 503 && j.down === true) throw Object.assign(new Error(BUSY), { retry: true });
         if (!r.ok) throw Object.assign(new Error(j.error || 'The request failed.'), { kind: j.kind, retry: j.retry === true });
         return j;
     };
@@ -3296,7 +3300,30 @@
     /* Adding to a type category of live links (a calendar, an address book, an
        access) is connecting an account: they all open the connect-account form. */
     const addForm = (k) => (['agenda', 'contacts', 'acces'].includes(k) ? 'connexion' : k);
-    const getJson = (path, fallback) => fetch(`${API}${path}`).then((r) => (r.ok ? r.json() : fallback)).catch(() => fallback);
+    /* Its answer, or { state: 'error', message }: the server's own words, or busy (asked again first). */
+    const readOrSay = async (path) => {
+        for (let i = 0; i < 3; i++) {
+            try {
+                const r = await fetch(`${API}${path}`);
+                const j = await r.json().catch(() => ({}));
+                if (r.ok) return j;
+                if (!(r.status === 503 && j.down === true)) return { state: 'error', message: j.error || 'It could not be read.' };
+            } catch { return { state: 'error', message: 'It could not be read.' }; }
+            await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
+        }
+        return { state: 'error', message: BUSY };
+    };
+    const getJson = async (path, fallback) => {
+        for (let i = 0; i < 3; i++) {
+            try {
+                const r = await fetch(`${API}${path}`);
+                if (r.ok) return await r.json();
+                if (r.status !== 503) return fallback;
+            } catch { return fallback; }
+            await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));   /* busy a moment: asked again */
+        }
+        return fallback;
+    };
     const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; };
     /* A commit: its line, and the rest of its message under it, opened by a click. */
     function commitRow(c) {
@@ -3728,7 +3755,7 @@
             const query = new URLSearchParams();
             if (r.branch) query.set('branch', r.branch);
             if (r.target) query.set('target', r.target);
-            const [out, keep] = await Promise.all([fetch(`${API}/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`).then(async (x) => { const j = await x.json().catch(() => ({})); return x.ok ? j : { state: 'error', message: j.error || 'It could not be read.' }; }).catch(() => ({ state: 'error', message: 'It could not be read.' })), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
+            const [out, keep] = await Promise.all([readOrSay(`/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
             r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             /* What the server knows of this very commit and target: a check still running is followed again; the last
                one that ran is shown with its age (left and come back, even the next day: nothing run again for nothing). */

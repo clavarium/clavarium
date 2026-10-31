@@ -962,7 +962,7 @@ case "$AREA $VERB" in
         # WHAT THE SERVER'S PROGRAMS SAID, for Settings (This server, Logs): one
         # source, over a span; read-only, bounded. The page masks what looks
         # like a secret before showing it.
-        #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <1|6|24|168|boot>
+        #   server logs <clavarium|machines|updates|web|signin|tunnel|system> <10m|1|6|24|168|boot>
         [ $# -eq 2 ] || usage
         case "$1" in
             clavarium) units=(-u clavarium.service -u 'clavarium-view-*' -u clavarium-tools-view.service -u clavarium-move-machines.service) ;;
@@ -974,9 +974,10 @@ case "$AREA $VERB" in
             system)    units=(-k) ;;
             *) refuse "not a source of logs: $1" ;;
         esac
-        case "$2" in 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; *) refuse "not a span: $2 (1, 6, 24, 168 hours, or boot)" ;; esac
-        if [ "$SAY" = "yes" ]; then echo "journalctl ${units[*]} ${since[*]} -o short-iso --no-pager (the last 200000 lines)"; exit 0; fi
-        journalctl "${units[@]}" "${since[@]}" -o short-iso --no-pager -n 200000 2>/dev/null | cut -c1-2000 || true
+        case "$2" in 10m) since=(--since "-10min") ;; 1|6|24|168) since=(--since "-$2h") ;; boot) since=(-b) ;; *) refuse "not a span: $2 (10m, 1, 6, 24, 168 hours, or boot)" ;; esac
+        # The newest 20000 lines at most: more is too much to read on a page, and to send.
+        if [ "$SAY" = "yes" ]; then echo "journalctl ${units[*]} ${since[*]} -o short-iso --no-pager (the last 20000 lines)"; exit 0; fi
+        journalctl "${units[@]}" "${since[@]}" -o short-iso --no-pager -n 20000 2>/dev/null | cut -c1-2000 || true
         exit 0 ;;
     "server restart")
         # THIS SERVER STARTED AGAIN, asked from the page: in two seconds, by
