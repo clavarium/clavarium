@@ -99,6 +99,8 @@ export function forSpeech(text) {
         .replace(/\b(?:hey|hé|eh)[\s,]+jarvis\b/giu, 'le mot d\'éveil')
         .replace(/(?<![\p{L}])m[ée]sanges?(?![\p{L}])/giu, 'le mot d\'éveil')
         .replace(/(?<![\p{L}])m[eéè]s[\s-]+anges?(?![\p{L}])/giu, 'le mot d\'éveil')   /* what sounds like it: « mes anges » woke it (31-10) */
+        /* Nor another assistant's call: « OK Google » said in an example woke the Google Home beside it (31-10). */
+        .replace(/\b(?:ok|okay|hey|dis)[\s,]+(?:google|siri|alexa)\b/giu, 'l\'appel de l\'enceinte')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
