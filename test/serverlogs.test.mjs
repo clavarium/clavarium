@@ -19,6 +19,7 @@ test('one source over one span, through the host program; anything else refused'
     assert.deepEqual(r, { source: 'machines', span: '24', text: 'a\nb secret=[masked]\n', lines: 2, cut: false });
     await assert.rejects(logs.read('../etc', '1'), /Not a source/);
     await assert.rejects(logs.read('system', '2'), /Not a span/);
+    assert.equal((await logs.read('clavarium', '10m')).span, '10m', 'the last 10 minutes: the shortest, the default');
     assert.deepEqual(await logs.restart(), { restarting: true });
     assert.deepEqual(asked, ['server logs machines 24', 'server restart']);
 });
