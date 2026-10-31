@@ -379,6 +379,7 @@ export class Boxes {
             socket, send, waiting: new Map(), heardAt: 0, muted: null, volume: null,
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
             play: (pcm, then = null) => {
+                pcm = pcm.subarray(0, pcm.length & ~1);   /* whole samples only: an odd byte shifts every sample after it */
                 send({ t: 'speak.start', rate: 16_000 });
                 for (let at = 0; at < pcm.length; at += 640) if (socket.readyState === 1) socket.send(pcm.subarray(at, at + 640));
                 send({ t: 'speak.end', ...(then ? { then } : {}) });
