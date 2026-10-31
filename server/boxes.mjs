@@ -529,7 +529,18 @@ export class Boxes {
         };
         try {
             const said = [];
-            for (const piece of piecesOf(pcm)) said.push(String(await this.#hear(wavOf(piece)) ?? '').trim());
+            /* The dictation fails now and then (the network, the engine): tried again by itself, twice, before
+               anything is said to the person -- who should not have to repeat (31-10). */
+            const hear = async (wav) => {
+                for (let attempt = 0; ; attempt++) {
+                    try { return await this.#hear(wav); } catch (error) {
+                        if (attempt >= 2 || error?.status === 413 || error?.status === 400) throw error;
+                        this.#log(`voice box ${box0.name}: dictation failed (${error.message}), tried again`);
+                        await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
+                    }
+                }
+            };
+            for (const piece of piecesOf(pcm)) said.push(String(await hear(wavOf(piece)) ?? '').trim());
             text = said.filter(Boolean).join(' ');
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
