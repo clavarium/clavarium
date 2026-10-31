@@ -2070,3 +2070,8 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .job-panel .tether-flash progress { width: 100%; }
 .job-panel .tether-flash-extra { display: grid; gap: 8px; }
 .job-panel .tether-flash-bad { color: var(--bad, #ff8a80); }
+.box-key { overflow-wrap: anywhere; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; user-select: all; flex: 1 1 260px; min-width: 0; }
+.box-setup { align-items: center; gap: 14px; flex-wrap: wrap; }
+.box-qr { width: 180px; max-width: 100%; background: #fff; border-radius: 8px; padding: 6px; }
+.box-qr svg { display: block; width: 100%; height: auto; }
+.button-link { display: inline-block; padding: 8px 12px; border-radius: 7px; background: var(--accent, #d4a64a); color: #111; font-weight: 600; text-decoration: none; }

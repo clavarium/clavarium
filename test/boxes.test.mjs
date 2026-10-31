@@ -148,3 +148,17 @@ test('text for the ear, audio for the box', () => {
     assert.equal(pcm.readInt16LE(100), 16384);
 });
 
+
+test('a code asked from the page comes with the setup key and a link that opens the box\'s page filled in', async () => {
+    const { setupKey, SETUP_ADDRESS } = await import('../server/boxes.mjs');
+    const { boxes } = make();
+    let out; let status;
+    const request = Object.assign(Readable.from([JSON.stringify({ conversation: 'kitchen-help', name: 'Salon', origin: 'https://clavarium.example.org' })]), { method: 'POST', url: '/api/boxes/code', headers: {} });
+    await handleBoxes(request, { writeHead(s) { status = s; return this; }, end(b) { out = JSON.parse(b); } }, boxes, () => true, {}, async (text) => `<svg>${text.length}</svg>`);
+    assert.equal(status, 201);
+    assert.equal(out.key, setupKey('https://clavarium.example.org', 'Salon', out.code));
+    assert.deepEqual(JSON.parse(Buffer.from(out.key.slice('GAMBELI-'.length), 'base64url').toString()), { u: 'https://clavarium.example.org', r: 'Salon', c: out.code });
+    assert.equal(out.link, `${SETUP_ADDRESS}?k=${out.key}`);
+    assert.match(out.qr, /^<svg>/);
+    assert.equal(boxes.pair({ code: out.code }).name, 'Salon');
+});
