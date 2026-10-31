@@ -468,7 +468,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
     let boxes;
-    const talk = new Talk({ spoke: (name, text) => { void boxes?.agentSaid(name, text); }, store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    const talk = new Talk({ spoke: (name, text, to) => { void boxes?.agentSaid(name, text, to); }, store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
@@ -599,13 +599,16 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         exists: (name) => all.list().some((c) => c.name === name),
         hear: (wav) => voice.transcribe(wav),
         /* Said as the person's own message, the room named (one speaker for now). */
-        say: (name, text, room) => talk.say(name, `[${room}] ${text}`, undefined, undefined, 'voice'),
+        say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
+        /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
+        changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); },
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
+    for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));
     bridge = attachBridge(server, {
         onRejoin: (name) => all.rejoin(name),
         onTyped: (name, data) => { answerer.typed(name, data); talk.typed(name); all.touch(name); typingWatch.typed(name, data); },

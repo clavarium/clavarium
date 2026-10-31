@@ -20,7 +20,7 @@ const make = (over = {}) => {
     const boxes = new Boxes({
         file: new MemoryFile([]), exists: (c) => c === 'kitchen-help',
         hear: async (wav) => { assert.equal(wav.toString('ascii', 0, 4), 'RIFF'); return 'allume la lumière'; },
-        say: async (c, text, room) => { said.push({ c, text, room }); },
+        say: async (c, text, by) => { said.push({ c, text, room: by.name }); },
         speak: async (text) => Buffer.alloc(1600, 1),
         ...over,
     });
@@ -161,4 +161,19 @@ test('a code asked from the page comes with the setup key and a link that opens 
     assert.equal(out.link, `${SETUP_ADDRESS}?k=${out.key}`);
     assert.match(out.qr, /^<svg>/);
     assert.equal(boxes.pair({ code: out.code }).name, 'Salon');
+});
+
+test('addressed by its id, a box says the answer; boxes are named with their place, and the thread is told', async () => {
+    let told = 0;
+    const { boxes } = make({ changed: () => { told++; } });
+    const a = boxes.pair({ code: boxes.code('kitchen-help', 'Kitchen').code });
+    const b = boxes.pair({ code: boxes.code('kitchen-help', 'Garden').code });
+    assert.ok(told >= 2);
+    boxes.place(a.id, 'Lake house');
+    assert.deepEqual(boxes.speakersOf('kitchen-help'), [{ id: a.id, name: 'Kitchen', place: 'Lake house' }, { id: b.id, name: 'Garden' }]);
+    const sa = new FakeSocket(); const sb = new FakeSocket();
+    boxes.accept(sa, boxes.byKey(a.key)); boxes.accept(sb, boxes.byKey(b.key));
+    await boxes.agentSaid('kitchen-help', 'Dinner is ready.', [b.id]);
+    assert.equal(sa.sent.filter((m) => m.t === 'speak.start').length, 0, 'not addressed: silent');
+    assert.equal(sb.sent.filter((m) => m.t === 'speak.start').length, 1);
 });
