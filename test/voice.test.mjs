@@ -307,3 +307,9 @@ test('a French device gets French asked of the engine, never a guess per phrase'
     await auto.d.transcribe(wav, 'fr-FR');
     assert.equal(auto.sent.at(-1).language, null, 'the environment may ask for "auto" too');
 });
+
+test('a voice box keeps the voice that spoke first: a TV after it is left out', async () => {
+    const { firstVoice } = await import('../server/voice.mjs');
+    assert.equal(firstVoice({ diarization: [{ speaker: 0, text: ' Regarde la météo. ' }, { speaker: 1, text: 'Il était une fois' }, { speaker: 0, text: 'du week-end.' }] }), 'Regarde la météo. du week-end.');
+    assert.equal(firstVoice({ text: 'no voices told apart' }), null);
+});

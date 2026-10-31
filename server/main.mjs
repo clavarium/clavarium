@@ -605,7 +605,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }), secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } } });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
         exists: (name) => all.list().some((c) => c.name === name),
-        hear: (wav) => voice.transcribe(wav),   /* the language of the dictation settings, or found by the engine: no language is assumed (a box has no browser to tell one) */
+        hear: (wav) => voice.transcribe(wav, undefined, { oneVoice: true }),   /* the language of the dictation settings, or found by the engine: no language is assumed (a box has no browser to tell one) */
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
