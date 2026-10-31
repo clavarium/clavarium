@@ -476,7 +476,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* A conversation with a tool on a screen that is not its terminal: see talk.mjs. */
     /* Voice boxes: what the tool says in their conversation is read aloud (boxes.mjs). */
     let boxes;
-    const talk = new Talk({ spoke: (name, text, to) => { void boxes?.agentSaid(name, text, to); }, store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
+    const talk = new Talk({ spoke: (name, text, to, how) => { void boxes?.agentSaid(name, text, to, how); }, store: talkStore, words: new Store(`${dataDir}/talk-words.json`), keptDir: `${dataDir}/talk-kept`, vms, conversations: all, resources: folders, toolbox, warm: (name) => bridge?.warm(name), ...(talkEveryMs ? { listenEveryMs: talkEveryMs } : {}),
         ...(rereadAfterMs === undefined ? {} : { rereadAfterMs }),
         /* A line typed down the terminal already open when there is one, and
            what is already known of a machine used instead of asking (talk.mjs). */
@@ -605,7 +605,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }), secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } } });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
         exists: (name) => all.list().some((c) => c.name === name),
-        hear: (wav) => voice.transcribe(wav),
+        hear: (wav) => voice.transcribe(wav),   /* the language of the dictation settings, or found by the engine: no language is assumed (a box has no browser to tell one) */
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
