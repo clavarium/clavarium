@@ -76,6 +76,7 @@ const PHANTOMS = [
        d'Amara.org", "Untertitel der Amara.org-Community", "Subtítulos por la comunidad de Amara.org"...). */
     /[^.!?。]*amara\.org[^.!?。]*[.!?。]?/giu,
     /sous[- ]titrage\s*st\s*'?\s*\d+[.!]?/giu,
+    /sous[- ]titrage\s+fr(?:ançais)?\s*[.!?]?/giu,
     /sous[- ]titr(?:age|es?)\s+(?:par\s+)?(?:la\s+)?société\s+radio[- ]canada[.!]?/giu,
     /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
 ];

@@ -154,6 +154,7 @@ test('the credits an engine writes on silence (learned from subtitles) are remov
     assert.equal(withoutPhantoms("Sous-titrage ST' 501"), '');
     assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
     assert.equal(withoutPhantoms("Lance les tests. Sous-titrage ST' 501"), 'Lance les tests.');
+    assert.equal(withoutPhantoms('Bonjour, quelle heure est-il dans le salon ? Sous-titrage FR ?'), 'Bonjour, quelle heure est-il dans le salon ?');
     assert.equal(withoutPhantoms('Le sous-titrage de la vidéo est faux'), 'Le sous-titrage de la vidéo est faux');
 });
 test('those credits in any language the engine learned them in', () => {
