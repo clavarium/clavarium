@@ -8828,10 +8828,19 @@
         if (accessFor && conversations.some((c) => c.name === accessFor)) pick.value = accessFor;
         $('box-ready').hidden = true;
     });
+    $('box-key-copy').addEventListener('click', async () => {
+        const key = $('box-key').textContent;
+        try { await navigator.clipboard.writeText(key); $('box-key-copy').textContent = 'Copied'; }
+        catch { const range = document.createRange(); range.selectNodeContents($('box-key')); getSelection().removeAllRanges(); getSelection().addRange(range); }
+        setTimeout(() => { $('box-key-copy').textContent = 'Copy the key'; }, 2000);
+    });
     $('box-code').addEventListener('click', async () => {
         try {
             const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim() });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
+            /* One paste instead of three fields on the box's page: this address, the room, the code. */
+            const json = JSON.stringify({ u: location.origin, r: $('box-room').value.trim(), c: r.code });
+            $('box-key').textContent = `GAMBELI-${btoa(unescape(encodeURIComponent(json))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}`;
             $('box-ready').hidden = false;
         } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
     });

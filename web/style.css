@@ -2070,3 +2070,4 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .job-panel .tether-flash progress { width: 100%; }
 .job-panel .tether-flash-extra { display: grid; gap: 8px; }
 .job-panel .tether-flash-bad { color: var(--bad, #ff8a80); }
+.box-key { overflow-wrap: anywhere; font-size: .8rem; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; user-select: all; flex: 1 1 260px; min-width: 0; }
