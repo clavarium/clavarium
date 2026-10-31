@@ -21,6 +21,7 @@
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-tether/host';
+import { JsonFile } from './store.mjs';
 
 export const FOLDER = '.tether';
 /* The keeper takes what the agents asked, this often. */
@@ -29,7 +30,7 @@ const AGENT = 'conversation:';
 export const USB_DEVICE = 'usb-device';
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map();
+    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered;
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
@@ -38,6 +39,7 @@ export class Tethers {
        `secrets`: the vault, read by name for a connector only (reveal). */
     constructor({ dataDir, resources, conversations, secrets, connectors, now = () => Date.now() }) {
         this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets;
+        this.#offered = new JsonFile(`${dataDir}/tether-offered.json`, []);
         this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now, ...(connectors ? { connectors } : {}) });
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
@@ -97,6 +99,17 @@ export class Tethers {
         return value;
     }
 
+    /* The USB device is offered to every conversation once, at "propose": each flash still asks the
+       owner. Offered once only (the target remembers it): taken back by the owner, it stays taken back. */
+    #offerDevice(agent) {
+        try {
+            const offered = this.#offered.get();
+            if (offered.includes(agent) || !this.#keeper.store.target(USB_DEVICE)) return;
+            if (!this.#keeper.store.target(USB_DEVICE).grants?.[agent]) this.#keeper.store.grant(USB_DEVICE, agent, 'propose');
+            this.#offered.set([...offered, agent]);
+        } catch { /* a Tether without devices */ }
+    }
+
     /* Each conversation's folder, made when missing; one that is anything but a folder of its own is left out. */
     #sides() {
         const out = [];
@@ -107,6 +120,7 @@ export class Tethers {
             if (info === undefined) { try { mkdirSync(dir); } catch { continue; } }
             else if (!info.isDirectory() || info.isSymbolicLink()) continue;
             out.push({ dir, who: { id: `${AGENT}${name}`, kind: 'agent', name } });
+            this.#offerDevice(`${AGENT}${name}`);
         }
         return out;
     }
@@ -141,6 +155,7 @@ export class Tethers {
     given() {
         const out = {};
         for (const t of this.#keeper.store.targets()) {
+            if (t.kind === 'device') continue;   /* offered to every conversation: not an access worth counting */
             for (const id of Object.keys(t.grants ?? {})) if (id.startsWith(AGENT)) out[id.slice(AGENT.length)] = (out[id.slice(AGENT.length)] ?? 0) + 1;
         }
         return out;
