@@ -86,8 +86,8 @@ export function pcmOfWav(wav) {
 }
 
 /* Text for the ear: what a written message holds and a voice should not read. */
-export function forSpeech(text) {
-    return String(text ?? '')
+export function forSpeech(text, { callOthers = false } = {}) {
+    const said = String(text ?? '')
         .replace(/```[\s\S]*?```/g, ' ')
         .replace(/`([^`]*)`/g, '$1')
         .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -99,11 +99,12 @@ export function forSpeech(text) {
         .replace(/\b(?:hey|hé|eh)[\s,]+jarvis\b/giu, 'le mot d\'éveil')
         .replace(/(?<![\p{L}])m[ée]sanges?(?![\p{L}])/giu, 'le mot d\'éveil')
         .replace(/(?<![\p{L}])m[eéè]s[\s-]+anges?(?![\p{L}])/giu, 'le mot d\'éveil')   /* what sounds like it: « mes anges » woke it (31-10) */
-        /* Nor another assistant's call: « OK Google » said in an example woke the Google Home beside it (31-10). */
-        .replace(/\b(?:ok|okay|hey|dis)[\s,]+(?:google|siri|alexa)\b/giu, 'l\'appel de l\'enceinte')
         .replace(/\s+/g, ' ')
         .trim()
         .slice(0, 1500);
+    /* Nor another assistant's call: « OK Google » said in an example woke the Google Home beside it (31-10).
+       Only speakTo() calls it, on purpose. */
+    return callOthers ? said : said.replace(/\b(?:ok|okay|hey|dis)[\s,]+(?:google|siri|alexa)\b/giu, 'l\'appel de l\'enceinte');
 }
 
 /* THE BOX'S CLOCK: its lights follow the hours of its place. The time zone is the page's that made its code
@@ -121,6 +122,7 @@ export function offsetOf(zone, now) {
     return Math.round((local - Math.floor(now / 60_000) * 60_000) / 60_000);
 }
 
+export const RELAY_WITHIN_MS = 20_000;
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -280,6 +282,20 @@ export class Boxes {
         const now = this.#now();
         for (const [k, v] of this.#images) if (v.until < now) this.#images.delete(k);
         return this.#images.get(String(token).replace(/\.bin$/, ''))?.bytes;
+    }
+
+    /* SPEAKING TO ANOTHER DEVICE in the room (a Google Home: « OK Google, baisse la clim »): said as given, its
+       call included, then the box listens; what it hears within twenty seconds comes back to the conversation as
+       that device's answer, not as the person's words (31-10: the box set the heating that way). */
+    async speakTo(id, text) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        const words = forSpeech(text, { callOthers: true });
+        if (!words) throw new Refusal(400, 'Nothing to say.');
+        link.play(await this.#speak(words), 'listen');
+        link.relay = this.#now();
+        this.#log(`voice box ${link.box().name}: spoke to a device in the room`);
+        return { ok: true };
     }
 
     /* LISTENING TO THE INTERNET: a radio, a podcast, a music file, a playlist, read by this server (ffmpeg,
@@ -578,6 +594,10 @@ export class Boxes {
             link.send({ t: 'record', on: true });
             return;
         }
+        if (link.relay && this.#now() - link.relay < RELAY_WITHIN_MS) {
+            link.relay = 0;
+            text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
+        }
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
@@ -668,6 +688,7 @@ export function voiceboxConnector(boxes) {
             const id = t.config?.box;
             if (verb === 'voicebox.volume') { const r = await boxes.setVolume(id, a.level); return { text: r?.offline ? `Volume ${a.level} kept: the box is offline, it gets it when it comes back.` : `Volume set to ${a.level}.` }; }
             if (verb === 'voicebox.listen') { await boxes.listen(id, String(a.url), String(a.name ?? '')); return { text: `Playing ${a.name || a.url}: it goes on until it ends, voicebox-stop, or the person presses the button or says the wake word.` }; }
+            if (verb === 'voicebox.speak') { await boxes.speakTo(id, String(a.text ?? '')); return { text: 'Said aloud; the box listens now: what it hears in the next 20 s comes back in the conversation, marked as the device\'s answer.' }; }
             if (verb === 'voicebox.stop') return { text: boxes.stop(id) ? 'Stopped.' : 'Nothing was playing.' };
             if (verb === 'voicebox.play') { const r = boxes.play(id, Buffer.from(String(a.image ?? ''), 'base64')); return { text: `Played (${r.seconds} s).` }; }
             if (verb === 'voicebox.update') { await boxes.update(id, a.image, a.version); return { text: `Installed${a.version ? ` (${a.version})` : ''}: the box restarts and comes back in a moment.` }; }

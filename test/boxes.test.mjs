@@ -435,3 +435,19 @@ test('a box is told its clock: the offset of its time zone, given by the page th
     boxes.zone(box.id, 'Asia/Tokyo');
     assert.deepEqual(s.sent.at(-1), { t: 'clock', offset: 540 });
 });
+
+test('speaking to a device in the room: its call said on purpose, its answer comes back marked as its own', async () => {
+    const spoken = [];
+    const { boxes, said } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); }, hear: async () => 'Le chauffage est réglé sur 20 degrés' });
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    await boxes.agentSaid('kitchen-help', 'Je dirais « OK Google » pour lui parler.', [box.id]);
+    assert.match(spoken.at(-1), /l'appel de l'enceinte/, 'never by accident');
+    await boxes.speakTo(box.id, 'OK Google, règle la climatisation sur 20 degrés.');
+    assert.equal(spoken.at(-1), 'OK Google, règle la climatisation sur 20 degrés.');
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+    s.box({ t: 'listen.start', reason: 'follow' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
+    for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.match(said[0].text, /^\(réponse entendue de l'appareil, pas de la personne\) Le chauffage/);
+});
