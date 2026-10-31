@@ -2063,3 +2063,10 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .as-group.as-drop-over { outline: 2px dashed var(--brass); outline-offset: 2px; border-radius: 10px; background: rgba(210, 169, 78, .07); }
 body.as-dragging { user-select: none; -webkit-user-select: none; }
 body.as-dragging #assets-rows .as-row { touch-action: none; }
+/* A flash started from its button in the thread: Tether's module draws its steps here, over the page. */
+.job-panel { position: fixed; z-index: 60; left: 50%; top: 18%; transform: translateX(-50%); width: min(520px, calc(100vw - 32px)); max-height: 70vh; overflow-y: auto; display: grid; gap: 10px; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 40px rgb(0 0 0 / .45); }
+.job-panel > button { justify-self: end; }
+.job-panel .tether-flash { display: grid; gap: 8px; }
+.job-panel .tether-flash progress { width: 100%; }
+.job-panel .tether-flash-extra { display: grid; gap: 8px; }
+.job-panel .tether-flash-bad { color: var(--bad, #ff8a80); }

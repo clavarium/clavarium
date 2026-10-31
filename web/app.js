@@ -2617,7 +2617,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -2751,10 +2751,10 @@
     /* "commits:<repository>.<to>.<from>.<n>": those commits, in the review ("See the 3 commits"). A commit a
        line names (7 to 40 hexadecimal characters, a digit among them) is a link to its review, on a line about
        a repository; the agent's own messages are never read for this. */
-    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse' };
+    const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
-    const DEMANDE = /^(allow|deny):[0-9a-f-]{36}$/;
+    const DEMANDE = /^(allow|deny|flash):[0-9a-f-]{36}$/;
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {
         if (DEVICE) return;
@@ -4389,6 +4389,19 @@
        Tether's own module runs here (/vendor/tether/jobs.js) and its end is the agent's answer.
        Its element is kept from one paint to the next: the module draws in it while it runs. */
     const jobPlaces = new Map();
+    /* The same, from its button in the thread: the module draws in a panel over the page, closed once done. */
+    async function flashFromThread(id) {
+        const tether = await getJson('/tether', {});
+        const job = (Array.isArray(tether.jobs) ? tether.jobs : []).find((j) => j.id === id);
+        let panel = $('job-panel');
+        if (!panel) { panel = el('div', 'card job-panel'); panel.id = 'job-panel'; panel.setAttribute('role', 'dialog'); document.body.append(panel); }
+        panel.hidden = false;
+        if (!job) { panel.replaceChildren(el('p', '', 'This flash ended already, or was cancelled.')); setTimeout(() => { panel.hidden = true; }, 3000); return; }
+        const close = el('button', '', 'Close'); close.type = 'button'; close.addEventListener('click', () => { panel.hidden = true; });
+        const card = jobCard(job, () => { void paintRoomAssets(); });
+        panel.replaceChildren(card, close);
+        card.querySelector('.action-row button.primary')?.click();
+    }
     function jobCard(job, after) {
         if (!jobPlaces.has(job.id)) {
             const card = el('div', 'card job-card'); card.dataset.job = job.id;
