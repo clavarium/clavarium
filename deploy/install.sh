@@ -317,7 +317,7 @@ chmod 0755 /usr/local/bin/clavarium
 install -d -o root -g root -m 0755 "$ETC"
 printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
 rule="$(mktemp)"
-printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n' "$ACCOUNT" "$HOST_PROGRAM" > "$rule"
+printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n# Its probes every few seconds are not written to the system log; the program logs what changes something.\nDefaults:%s !syslog, !pam_session\n' "$ACCOUNT" "$HOST_PROGRAM" "$ACCOUNT" > "$rule"
 visudo -cf "$rule" >/dev/null || refuse "the sudo rule did not pass its check"
 install -o root -g root -m 0440 "$rule" /etc/sudoers.d/clavarium; rm -f -- "$rule"
 

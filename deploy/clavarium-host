@@ -731,6 +731,14 @@ MESHUNIT
 [ $# -ge 2 ] || usage
 AREA="$1"; VERB="$2"; shift 2
 
+# What changes something is written to the system log, by this program: sudo itself is told not to log
+# the server's account (its probes every few seconds made some 800 lines in ten minutes, 31-10). Reading
+# verbs, and commands run inside a machine (the server's own probes, mostly), are not written.
+case "$AREA $VERB" in
+    "vm exec"|"vm ping"|"vm states"|"vm info"|"server logs"|"server room"|"server usage"|"shelf info"|"shelf room"|"shelf list"|"shelf size"|"shelf exec"|"git read"|"work room"|"disks list"|"disks room"|"machines places"|"machines moving"|"machines old"|"net taps"|"wifi status"|"wifi scan"|"path held"|"disk room"|"update check"|"meshcentral status"|"operator "*) : ;;
+    *) [ "$SAY" = yes ] || logger -t clavarium-host -- "$AREA $VERB$(printf ' %.80s' "$@" | head -c 400)" 2>/dev/null || true ;;
+esac
+
 # The remote screen's path carries a per-instance suffix: resolve it before any of its verbs run.
 [ "$AREA" = meshcentral ] && mesh_resolve_path
 
