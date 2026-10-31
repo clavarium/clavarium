@@ -310,7 +310,7 @@ export async function handleApi(request, response, conversations, headers, resou
                 }));
                 return send(200, history.together(query.get('span') ?? '1h', machines, { memoryMb: a?.memory?.totalMb, cores: room?.cpu?.cores, diskMb: a?.disk?.sizeMb })), true;
             }
-            if (pathname === '/api/server/logs' && serverLogs) return send(200, await serverLogs.read(query.get('source') ?? 'clavarium', query.get('span') ?? '1')), true;
+            if (pathname === '/api/server/logs' && serverLogs) { const r = await serverLogs.start(query.get('source') ?? 'clavarium', query.get('span') ?? '10m'); return send(r.pending ? 202 : 200, r), true; }
             if (pathname === '/api/machines/disks' && machinesMove) return send(200, await machinesMove.disks()), true;
             if (pathname === '/api/machines/places' && machinesMove) return send(200, await machinesMove.places()), true;
             if (pathname === '/api/machines/moving' && machinesMove) return send(200, await machinesMove.moving()), true;

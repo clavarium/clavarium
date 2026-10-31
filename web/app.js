@@ -6075,8 +6075,15 @@
         const source = $('logs-source').value; const span = $('logs-span').value;
         $('logs-said').textContent = 'Reading...'; $('logs-show').disabled = true;
         try {
-            const r = await fetch(`${API}/server/logs?source=${encodeURIComponent(source)}&span=${encodeURIComponent(span)}`);
-            const body = await r.json().catch(() => ({}));
+            /* A big journal takes a while: the server says "still reading" (202), and is asked again. */
+            let r; let body = {};
+            for (let i = 0; i < 30; i++) {
+                r = await fetch(`${API}/server/logs?source=${encodeURIComponent(source)}&span=${encodeURIComponent(span)}`);
+                body = await r.json().catch(() => ({}));
+                if (r.status === 202 || (r.status === 503 && body.down === true)) { $('logs-said').textContent = `Reading... (a big journal: ${(i + 1) * 12} s)`; continue; }
+                break;
+            }
+            if (r.status === 202) throw new Error('The logs take too long to read: try a shorter span.');
             if (!r.ok) throw new Error(body.error ?? `The logs could not be read (${r.status}).`);
             logsShown = body;
             $('logs-text').textContent = body.text || '';

@@ -23,7 +23,6 @@ export const CODE_MINUTES = 10;
 export const PAIR_PATH = '/c/api/box/pair';
 export const LINK_PATH = '/c/api/box/ws';
 export const SENTENCE_MAX = 15 * 32_000 + 32_000;      /* 15 s of 16 kHz 16-bit mono, and some slack */
-export const ANSWER_MINUTES = 5;                        /* after a sentence, what the tool says is spoken */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
 /* Where a box in setup answers, on its own Wi-Fi: ESP-IDF's access point address, the same on
@@ -171,14 +170,13 @@ export class Boxes {
         });
     }
 
-    /* The tool said or asked something in a conversation. Addressed (`to`: box ids, #215): said by
-       those boxes of this conversation. Not addressed: said by its boxes that were just talked to. */
+    /* The tool said or asked something in a conversation: said aloud only by the boxes it is
+       addressed to (`to`: box ids, #215). Anything else stays in the thread, silent -- a box
+       read a whole technical message aloud once (31-10), which nobody wants. */
     async agentSaid(conversation, text, to = null) {
         const words = forSpeech(text);
-        if (!words) return;
-        const now = this.#now();
-        const mine = [...this.#links.values()].filter((l) => l.box().conversation === conversation);
-        const boxes = Array.isArray(to) && to.length ? mine.filter((l) => to.includes(l.box().id)) : mine.filter((l) => l.heardAt > now - ANSWER_MINUTES * 60_000);
+        if (!words || !Array.isArray(to) || to.length === 0) return;
+        const boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && to.includes(l.box().id));
         if (boxes.length === 0) return;
         let pcm;
         try { pcm = await this.#speak(words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); for (const l of boxes) l.send({ t: 'cue', name: 'error' }); return; }
@@ -214,6 +212,7 @@ export class Boxes {
             try { m = JSON.parse(String(data)); } catch { return; }
             if (!m || typeof m !== 'object') return;
             if (m.t === 'ping') { send({ t: 'pong' }); return; }
+            if (m.t === 'hello' && typeof m.problem === 'string' && m.problem) this.#log(`voice box ${box.name}: back online after ${Number(m.tries) || '?'} tries; it had: ${m.problem.slice(0, 160)}`);
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'listen.start') { sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence) {

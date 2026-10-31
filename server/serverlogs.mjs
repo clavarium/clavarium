@@ -22,9 +22,34 @@ export function mask(text) {
     return String(text).replace(NAMED, (all, word, between) => `${word}${between}[masked]`).replace(LONG, '[masked]');
 }
 
+/* A read longer than this is answered "still reading": the front cuts a request that waits
+   much longer (found 31-10 on a big journal: even 10 minutes took too long there). */
+export const WAIT_MS = 12_000;
+export const KEPT_MS = 120_000;
+
 export class ServerLogs {
-    #host;
-    constructor({ host }) { this.#host = host; }
+    #host; #reads = new Map(); #now;
+    constructor({ host, now = () => Date.now() }) { this.#host = host; this.#now = now; }
+
+    /* The same read asked again while it runs is the same read; once done, kept a moment for
+       the page that comes back for it. Resolves { pending: true } past `wait`. */
+    async start(source, span, wait = WAIT_MS) {
+        const key = `${source}:${span}`;
+        const now = this.#now();
+        for (const [k, r] of this.#reads) if (r.done && now - r.done > KEPT_MS) this.#reads.delete(k);
+        let r = this.#reads.get(key);
+        if (!r) {
+            r = { done: 0 };
+            r.promise = this.read(source, span).then((v) => { r.value = v; }, (e) => { r.error = e; }).finally(() => { r.done = this.#now(); });
+            this.#reads.set(key, r);
+        }
+        await Promise.race([r.promise, new Promise((ok) => { setTimeout(ok, wait).unref?.(); })]);
+        if (!r.done) return { pending: true, source, span: String(span) };
+        this.#reads.delete(key);
+        if (r.error) throw r.error;
+        return r.value;
+    }
+
     async read(source, span) {
         if (!SOURCES.includes(source)) throw new Refusal(400, `Not a source of logs: say one of ${SOURCES.join(', ')}.`);
         if (!SPANS.includes(String(span))) throw new Refusal(400, 'Not a span: 10 minutes (10m), 1, 6, 24 or 168 hours, or since the server started (boot).');

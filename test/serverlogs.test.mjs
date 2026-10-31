@@ -23,3 +23,13 @@ test('one source over one span, through the host program; anything else refused'
     assert.deepEqual(await logs.restart(), { restarting: true });
     assert.deepEqual(asked, ['server logs machines 24', 'server logs clavarium 10m', 'server restart']);
 });
+
+test('a long read is answered "still reading", and the same read is given when asked again', async () => {
+    let release;
+    const logs = new ServerLogs({ host: () => new Promise((ok) => { release = () => ok({ code: 0, stdout: 'one\n', stderr: '' }); }) });
+    assert.deepEqual(await logs.start('clavarium', '10m', 20), { pending: true, source: 'clavarium', span: '10m' });
+    assert.deepEqual(await logs.start('clavarium', '10m', 20), { pending: true, source: 'clavarium', span: '10m' }, 'not read twice');
+    release();
+    const r = await logs.start('clavarium', '10m', 20);
+    assert.equal(r.text, 'one\n');
+});
