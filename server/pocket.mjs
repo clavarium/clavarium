@@ -20,7 +20,7 @@ export const POCKET_SHA256 = Object.freeze({
     x64: '9abff0aa138a804e44052952d8c3bdaae247fb267ca8f4b83fe178897d1a0559',
     arm64: '2b9a727bffd86ea6d73370d675cbd91a7db118f11b7f5a60343c2d5da12b187a',
 });
-export const TEMPO = 0.9;
+export const TEMPO = 0.96;   /* 01-11: 0.9 sounded sleepy; a touch slower than its own pace */
 export const GAP_S = Object.freeze({ sentence: 0.42, pause: 0.25, comma: 0.16 });
 
 /* A text in clauses, each with the silence that follows it. */
