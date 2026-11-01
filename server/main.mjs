@@ -606,6 +606,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
         exists: (name) => all.list().some((c) => c.name === name),
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
+        react: (said) => voice.reaction(said),
         recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
         hear: (wav) => voice.transcribe(wav, undefined, { oneVoice: true }),   /* the language of the dictation settings, or found by the engine: no language is assumed (a box has no browser to tell one) */
         /* Said as the person's own message, the room named (one speaker for now). */

@@ -203,11 +203,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep;
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null }) {
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null }) {
+        this.#react = react;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
@@ -441,7 +442,10 @@ export class Boxes {
         const still = () => link.heardAt === said && !((link.answeredAt ?? 0) >= said);
         const long = String(text).length > 160;   /* a long question: told sooner that it takes a moment */
         const say = async (words) => { if (!still() || link.recording || this.#streams.has(link.box().id)) return; try { link.play(await this.#speak(words)); } catch { /* the light says it */ } };
-        link.thinkingA = setTimeout(() => { void say(THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
+        /* Made at once, used if the answer is still not there: a reaction to THIS sentence, in its language. */
+        let made = null;
+        this.#react(text).then((t) => { made = t; }).catch(() => {});
+        link.thinkingA = setTimeout(() => { void say(made || THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
         link.thinkingB = setTimeout(() => { void say(long ? 'Ta question est riche, je regarde, un instant.' : 'Ça me demande un peu plus de temps, je regarde.'); }, long ? LONGER_AFTER_MS * 0.6 : LONGER_AFTER_MS);
         link.thinkingA.unref?.(); link.thinkingB.unref?.();
     }

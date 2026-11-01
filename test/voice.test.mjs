@@ -313,3 +313,14 @@ test('a voice box keeps the voice that spoke first: a TV after it is left out', 
     assert.equal(firstVoice({ diarization: [{ speaker: 0, text: ' Regarde la météo. ' }, { speaker: 1, text: 'Il était une fois' }, { speaker: 0, text: 'du week-end.' }] }), 'Regarde la météo. du week-end.');
     assert.equal(firstVoice({ text: 'no voices told apart' }), null);
 });
+
+test('a short reaction to what was said, in its language, from the dictation service\'s chat model; none elsewhere', async () => {
+    const { quickReaction } = await import('../server/voice.mjs');
+    const ovh = { url: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/audio/transcriptions', key: 'k' };
+    let asked;
+    const fetcher = async (url, init) => { asked = [url, JSON.parse(init.body)]; return new Response(JSON.stringify({ choices: [{ message: { content: '« Bonne question, voyons… »' } }] })); };
+    assert.equal(await quickReaction(ovh, 'Comment marche une pompe à chaleur ?', fetcher), 'Bonne question, voyons…');
+    assert.equal(asked[0], 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions');
+    assert.equal(await quickReaction({ ...ovh, url: 'https://api.example.org/v1/audio/transcriptions' }, 'x', fetcher), null);
+    assert.equal(await quickReaction(ovh, 'x', async () => new Response('{}', { status: 500 })), null);
+});
