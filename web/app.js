@@ -8874,6 +8874,35 @@
             const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
             const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
+            /* TESTED FROM HERE (01-11): its sound -- it says a test sentence -- and its microphone -- it listens
+               once, and what it heard shows here, not in the conversation. */
+            if (b.online) {
+                const test = el('div', 'action-row box-test');
+                const sound = el('button', '', 'Test the sound'); sound.type = 'button';
+                const mic = el('button', '', 'Test the microphone'); mic.type = 'button';
+                const heard = el('small', 'hint box-test-heard', '');
+                sound.addEventListener('click', async () => {
+                    sound.disabled = true; heard.textContent = 'It says a test sentence…';
+                    try { await post(`${API}/boxes/${b.id}/test-sound`, {}); heard.textContent = 'Sent: you should hear « Test du son ».'; }
+                    catch (error) { heard.textContent = `Not played: ${error.message}`; }
+                    sound.disabled = false;
+                });
+                mic.addEventListener('click', async () => {
+                    mic.disabled = true; heard.textContent = 'It asks you to speak, then listens…';
+                    try { await post(`${API}/boxes/${b.id}/test-mic`, {}); }
+                    catch (error) { heard.textContent = `Not started: ${error.message}`; mic.disabled = false; return; }
+                    for (let i = 0; i < 50; i++) {
+                        await new Promise((r) => setTimeout(r, 1000));
+                        const r = await post(`${API}/boxes/${b.id}/test-result`, {}).catch(() => null);
+                        if (!r || r.state === 'listening') continue;
+                        heard.textContent = r.state === 'heard' ? `Heard: « ${r.text} »` : r.state === 'failed' ? `The dictation failed: ${r.text}` : 'Nothing heard.';
+                        break;
+                    }
+                    mic.disabled = false;
+                });
+                test.append(sound, mic, heard);
+                card.append(test);
+            }
             /* ITS WI-FI NETWORKS (01-11): the box knows several and goes to the strongest it hears; one is added
                here before it moves, from the networks it hears itself -- no phone, no button. */
             if (b.online) {

@@ -144,7 +144,24 @@ export function whyOf(m) {
     return `réveil : ${reason}${score}${cut}`;
 }
 
+/* HOW LOUD WHAT THE BOX SENT WAS (01-11): beside the message, so a sentence that came empty (a wake, then
+   silence: Whisper then invents « Sous-titrage ») is seen at once, and where it went wrong told apart --
+   the box sent nothing, or the dictation misheard. */
+export function levelOf(pcm) {
+    const n = pcm.length >> 1; if (!n) return 0;
+    let sum = 0; for (let i = 0; i < n; i++) { const v = pcm.readInt16LE(i * 2); sum += v * v; }
+    return Math.round(Math.sqrt(sum / n));
+}
+export const QUIET_LEVEL = 150;
+export function soundOf(pcm) {
+    const level = levelOf(pcm);
+    return `son ${(pcm.length / 32_000).toFixed(1).replace('.', ',')} s, niveau ${level}${level < QUIET_LEVEL ? ' (presque silencieux)' : ''}`;
+}
+
 export const DOING_WITHIN_MS = 120_000;
+export const TEST_SOUND = 'Test du son. Un, deux, trois. Si tu m\'entends, le son marche.';
+export const TEST_MIC = 'Test du micro. Parle-moi, je t\'écoute.';
+export const TEST_MIC_MS = 45_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
 export const RECORD_MAX_BYTES = 4 * 3600 * 32_000;   /* four hours */
@@ -286,6 +303,34 @@ export class Boxes {
         const a = await this.command(id, { t: 'volume', level: n });
         if (a?.ok !== false) link.volume = n;
         return a;
+    }
+
+    /* TESTED FROM ITS CARD (01-11): the sound -- it says a test sentence -- and the microphone -- it listens
+       once, and what it heard is shown on the page, not sent to the conversation. */
+    async testSound(id) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        link.play(await this.#speak(TEST_SOUND));
+        return { ok: true };
+    }
+    async testMic(id) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        link.testing = { until: this.#now() + TEST_MIC_MS, state: 'listening', text: '' };
+        link.play(await this.#speak(TEST_MIC), 'listen');
+        return { ok: true };
+    }
+    testResult(id) {
+        const t = this.#links.get(id)?.testing;
+        if (!t) return { state: 'none', text: '' };
+        if (t.state === 'listening' && this.#now() > t.until) t.state = 'nothing';
+        return { state: t.state, text: t.text };
+    }
+    #tested(link, state, text = '') {
+        const t = link.testing;
+        if (!t || t.state !== 'listening' || this.#now() > t.until) return false;
+        t.state = state; t.text = text;
+        return true;
     }
 
     /* A sound played on a box (a sample, a recorded message), as its answers are. */
@@ -567,11 +612,19 @@ export class Boxes {
             }
             if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
             if (m.t === 'event' && m.name === 'noise.dropped') { this.#log(`voice box ${box.name}: a sound near full scale was cut by its noise guard`); return; }
+            /* The box listens for a sentence while this side still records: the two disagree (a reconnection, a
+               lost record.end). The recording is closed here, or the sentence would go into it and arrive empty. */
+            if (m.t === 'listen.start' && link.recording) {
+                const r = link.recording; link.recording = null;
+                this.#log(`voice box ${box.name}: a sentence while recording here, the recording closed`);
+                r.out.end(() => { void this.#recorded(link, r); });
+            }
             if (m.t === 'listen.start') link.why = whyOf(m);
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
                 sentence = null;
+                if (this.#tested(link, 'nothing')) { link.send({ t: 'cue', name: 'done' }); return; }
                 if (link.chat) this.#log(`voice box ${box.name}: conversation ended, nobody answered`);
                 link.chat = false; link.recent = [];
                 link.send({ t: 'cue', name: 'done' });
@@ -628,7 +681,7 @@ export class Boxes {
     async #heard(link, pcm) {
         const box0 = link.box();
         const seconds = (pcm.length / 32_000).toFixed(1);
-        if (pcm.length < 16_000) { this.#log(`voice box ${box0.name}: ${seconds} s heard, too short for a sentence`); link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
+        if (pcm.length < 16_000) { this.#log(`voice box ${box0.name}: ${seconds} s heard, too short for a sentence`); this.#tested(link, 'nothing'); link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
         link.send({ t: 'cue', name: 'thinking' });
         let text;
         /* A sentence that goes nowhere is said so, in words, rather than with a beep nobody can read (31-10). */
@@ -650,8 +703,14 @@ export class Boxes {
             };
             for (const piece of piecesOf(pcm)) said.push(String(await hear(wavOf(piece)) ?? '').trim());
             text = said.filter(Boolean).join(' ');
-        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
-        if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
+        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
+        if (link.testing?.state === 'listening' && this.#now() <= link.testing.until) {
+            this.#tested(link, text ? 'heard' : 'nothing', text);
+            this.#log(`voice box ${box0.name}: microphone test, ${seconds} s heard`);
+            link.send({ t: 'cue', name: 'done' });
+            return;
+        }
+        if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (${soundOf(pcm)})`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
         /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
            mentions recording does not (01-11). */
@@ -665,7 +724,7 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), ...(link.why ? { why: link.why } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${link.why ? `${link.why} ; ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         this.#waitFor(link, text);
@@ -697,6 +756,9 @@ export class Boxes {
  *   POST /api/boxes/<id>/move             {conversation}: one conversation at a time
  *   POST /api/boxes/<id>/place            {place}: where it is (a home), shown with its name
  *   POST /api/boxes/<id>/zone             {zone}: its time zone (IANA), for its clock; the page gives its own
+ *   POST /api/boxes/<id>/test-sound       it says a test sentence
+ *   POST /api/boxes/<id>/test-mic         it listens once; what it heard stays here, not in the conversation
+ *   POST /api/boxes/<id>/test-result      -> {state: listening|heard|nothing|failed|none, text}
  *   POST /api/boxes/<id>/revoke
  *   POST /api/boxes/<id>/volume           {level 0-100}
  *   POST /api/boxes/<id>/wifi-scan        -> {networks}
@@ -742,6 +804,9 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'wifi-forget': return answered(await boxes.command(id, { t: 'wifi.forget', ssid: String(body.ssid ?? '').slice(0, 32) }));
         case 'wifi-join': return answered(await boxes.command(id, { t: 'wifi.join', ssid: String(body.ssid ?? ''), password: String(body.password ?? '') }, 90_000));
         case 'alert': return answered(await boxes.command(id, { t: 'alert', text: String(body.text ?? '').slice(0, 300) }, 10 * 60_000));
+        case 'test-sound': return send(200, await boxes.testSound(id));
+        case 'test-mic': return send(200, await boxes.testMic(id));
+        case 'test-result': return send(200, boxes.testResult(id));
         case 'reboot': return answered(await boxes.command(id, { t: 'reboot' }));
         default: return false;
         }
