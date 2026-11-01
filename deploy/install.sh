@@ -317,8 +317,14 @@ chmod 0755 /usr/local/bin/clavarium
 install -d -o root -g root -m 0755 "$ETC"
 printf 'DATA=%s\nMNT=%s\n' "$DATA" "$MNT" > "$ETC/host.conf"; chmod 0644 "$ETC/host.conf"
 rule="$(mktemp)"
-printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n# Its probes every few seconds are not written to the system log; the program logs what changes something.\nDefaults:%s !syslog, !pam_session\n' "$ACCOUNT" "$HOST_PROGRAM" "$ACCOUNT" > "$rule"
+printf '# Clavarium: the server account may run ONE program as root, and nothing else.\n%s ALL=(root) NOPASSWD: %s\n' "$ACCOUNT" "$HOST_PROGRAM" > "$rule"
 visudo -cf "$rule" >/dev/null || refuse "the sudo rule did not pass its check"
+# Its probes every few seconds kept out of the system log, with what this sudo takes (the updater does the same).
+for quiet in '!syslog, !pam_session' '!pam_session'; do
+    cp "$rule" "$rule.q"; printf 'Defaults:%s %s\n' "$ACCOUNT" "$quiet" >> "$rule.q"
+    if out="$(visudo -cf "$rule.q" 2>&1)" && ! printf '%s' "$out" | grep -qiE 'unknown setting|syntax error|parse error'; then mv "$rule.q" "$rule"; break; fi
+    rm -f "$rule.q"
+done
 install -o root -g root -m 0440 "$rule" /etc/sudoers.d/clavarium; rm -f -- "$rule"
 
 step "what the machines are given, on root's chain"

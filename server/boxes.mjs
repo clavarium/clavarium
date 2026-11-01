@@ -123,6 +123,27 @@ export function offsetOf(zone, now) {
 }
 
 export const RELAY_WITHIN_MS = 20_000;
+/* Sentences to say one by one: cut after . ! ? … and kept at 40 characters at least (a tiny one joins the next). */
+export function sentencesOf(text) {
+    const out = [];
+    for (const piece of String(text).split(/(?<=[.!?…])\s+/)) {
+        if (out.length && out[out.length - 1].length < 40) out[out.length - 1] += ` ${piece}`; else out.push(piece);
+    }
+    return out.filter(Boolean);
+}
+
+export const THINKING_AFTER_MS = 3_500;
+export const LONGER_AFTER_MS = 12_000;
+export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
+/* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
+   what it cut short. */
+export function whyOf(m) {
+    const reason = { wake: 'mot d\'éveil', button: 'bouton', follow: 'suite de la conversation', knock: 'toc-toc' }[m?.reason] ?? (m?.reason ? String(m.reason).slice(0, 30) : 'inconnu');
+    const score = Number.isFinite(m?.score) ? ` (${Math.round(m.score * 100)} %)` : '';
+    const cut = m?.cut ? ` ; a interrompu ${String(m.cut) === 'its own speech' ? 'sa propre phrase' : 'un son'}` : '';
+    return `réveil : ${reason}${score}${cut}`;
+}
+
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -131,6 +152,22 @@ export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${Str
 /* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
    they last, with a fade down and up (a quarter of a second) rather than a jump. One 20 ms chunk at a time. */
 export const DUCK = 0.2;
+/* LEVELS (01-11): like a phone, one volume for the whole box (set, and eased to the room by the box itself),
+   and under it each kind of sound brought to its own steady level -- a loud radio and a quiet one played alike
+   (ffmpeg's loudnorm, EBU R128), the radio a step below the box's voice, its voice always at one loudness. */
+export const STREAM_LUFS = -26;
+export const STREAM_LEVEL = 1;
+export const VOICE_RMS = 3300;   /* about -20 dBFS: the loudness the voice was found right at */
+export function levelled(pcm, target = VOICE_RMS) {
+    let sum = 0; let n = 0;
+    for (let i = 0; i + 1 < pcm.length; i += 2) { const v = pcm.readInt16LE(i); if (Math.abs(v) > 300) { sum += v * v; n++; } }
+    if (n < 100) return pcm;
+    const gain = Math.min(4, target / Math.sqrt(sum / n));
+    if (Math.abs(gain - 1) < 0.05) return pcm;
+    const out = Buffer.alloc(pcm.length & ~1);
+    for (let i = 0; i + 1 < pcm.length; i += 2) out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(pcm.readInt16LE(i) * gain))), i);
+    return out;
+}
 export function mix(stream, chunk) {
     const words = stream.over[0];
     const target = words ? DUCK : 1;
@@ -138,7 +175,7 @@ export function mix(stream, chunk) {
     const step = (1 - DUCK) / (0.25 * 16_000);
     for (let i = 0; i < chunk.length; i += 2) {
         stream.gain += Math.max(-step, Math.min(step, target - stream.gain));
-        let v = chunk.readInt16LE(i) * stream.gain;
+        let v = chunk.readInt16LE(i) * stream.gain * STREAM_LEVEL;
         if (words && stream.gain <= DUCK + 0.05) {
             stream.at ??= 0;
             if (stream.at + 1 < words.length) { v += words.readInt16LE(stream.at); stream.at += 2; }
@@ -175,11 +212,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep;
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null }) {
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null }) {
+        this.#react = react;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
@@ -307,7 +345,7 @@ export class Boxes {
         this.stop(id);
         const source = await this.#resolve(url);
         let child;
-        try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+        try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-af', `loudnorm=I=${STREAM_LUFS}:TP=-3:LRA=11`, '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
         catch { throw new Refusal(501, 'This server cannot read sounds: ffmpeg is not installed (an update installs it).'); }
         const box = link.box(); const label = name || new URL(url).host;
         const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
@@ -404,6 +442,23 @@ export class Boxes {
     /* The tool said or asked something in a conversation: said aloud only by the boxes it is
        addressed to (`to`: box ids, #215). Anything else stays in the thread, silent -- a box
        read a whole technical message aloud once (31-10), which nobody wants. */
+    /* WHILE THE ANSWER IS THOUGHT (01-11): no long silence after a sentence. A short « hmm » if nothing has
+       come after a little while, then a word that it takes longer; whatever the assistant says first (an answer,
+       what it is doing) ends the wait. A longer question (many words) is told sooner that it takes a moment. */
+    #waitFor(link, text = '') {
+        clearTimeout(link.thinkingA); clearTimeout(link.thinkingB);
+        const said = link.heardAt;
+        const still = () => link.heardAt === said && !((link.answeredAt ?? 0) >= said);
+        const long = String(text).length > 160;   /* a long question: told sooner that it takes a moment */
+        const say = async (words) => { if (!still() || link.recording || this.#streams.has(link.box().id)) return; try { link.play(await this.#speak(words)); } catch { /* the light says it */ } };
+        /* Made at once, used if the answer is still not there: a reaction to THIS sentence, in its language. */
+        let made = null;
+        this.#react(text).then((t) => { made = t; }).catch(() => {});
+        link.thinkingA = setTimeout(() => { void say(made || THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
+        link.thinkingB = setTimeout(() => { void say(long ? 'Ta question est riche, je regarde, un instant.' : 'Ça me demande un peu plus de temps, je regarde.'); }, long ? LONGER_AFTER_MS * 0.6 : LONGER_AFTER_MS);
+        link.thinkingA.unref?.(); link.thinkingB.unref?.();
+    }
+
     async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
         /* What it is doing is written for a screen ("Tâche de fond : bêta 0.2.113…"): read aloud, it was words
            from nowhere (31-10). Aloud, only a short plain one; otherwise a word that it is at work. */
@@ -424,6 +479,7 @@ export class Boxes {
            asked for ("mode conversation"), or by itself after two sentences within three minutes (31-10);
            it ends when nobody answers, or on "fin de la conversation". */
         const question = !doing && (asked || /\?\s*$/.test(words));
+        for (const l of boxes) { l.answeredAt = this.#now(); clearTimeout(l.thinkingA); clearTimeout(l.thinkingB); }
         for (const l of boxes) {
             /* An answer -- to a sentence heard within a minute -- may open the conversation; something said
                of itself (a news item, a reminder) does not: the box listened after it for nothing (31-10). */
@@ -431,9 +487,16 @@ export class Boxes {
             const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
             if (chatting) l.chat = true;
-            let pcm;
-            try { pcm = await this.#speak(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); continue; }
-            l.play(pcm, question || chatting ? 'listen' : null);   /* a question is always listened after: an answer is expected */
+            /* SENTENCE BY SENTENCE: the first is said while the next ones are made -- the answer starts sooner
+               (31-10: a few seconds of silence before each answer). The box queues them, one after the other. */
+            const parts = sentencesOf(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words);
+            let next = this.#speak(parts[0]);
+            for (const [i, part] of parts.entries()) {
+                let pcm;
+                try { pcm = await next; } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); break; }
+                if (i + 1 < parts.length) { next = this.#speak(parts[i + 1]); next.catch(() => {}); }
+                l.play(pcm, i + 1 === parts.length && (question || chatting) ? 'listen' : null);   /* a question is always listened after: an answer is expected */
+            }
         }
     }
     #chatting(link) {
@@ -451,7 +514,7 @@ export class Boxes {
             socket, send, waiting: new Map(), heardAt: 0, muted: null, volume: null,
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
             play: (pcm, then = null) => {
-                pcm = pcm.subarray(0, pcm.length & ~1);   /* whole samples only: an odd byte shifts every sample after it */
+                pcm = levelled(pcm.subarray(0, pcm.length & ~1));   /* whole samples only (an odd byte shifts every sample after it), at the voice's level */
                 /* Something is playing (a radio): the words go over it, the radio lowered meanwhile (the mixer, listen()). */
                 const playing = this.#streams.get(box.id);
                 if (playing) { playing.over.push(pcm); return; }
@@ -503,6 +566,9 @@ export class Boxes {
                 r.out.end(() => { void this.#recorded(link, r); });
                 return;
             }
+            if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
+            if (m.t === 'event' && m.name === 'noise.dropped') { this.#log(`voice box ${box.name}: a sound near full scale was cut by its noise guard`); return; }
+            if (m.t === 'listen.start') link.why = whyOf(m);
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -598,9 +664,10 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), ...(link.why ? { why: link.why } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
+        this.#waitFor(link, text);
         link.recent = [...(link.recent ?? []), link.heardAt];
         if (/\bmode conversation\b/i.test(text)) link.chat = true;
         if (/\b(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)\b/i.test(text)) { link.chat = false; link.recent = []; }

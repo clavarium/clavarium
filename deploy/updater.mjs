@@ -119,17 +119,36 @@ export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand }
    each call -- some 800 lines in ten minutes, nothing to read in them (found 31-10). The account may run
    that one program and nothing else; what changes something, the program logs itself (clavarium-host). */
 export const SUDOERS = '/etc/sudoers.d/clavarium';
-export const quietLine = (account) => `Defaults:${account} !syslog, !pam_session`;
+/* What sudo is told, tried in this order: the first its version takes without a word wins. Some sudo builds do
+   not know « syslog » (found 01-11 on a real server: « unknown setting: 'syslog' » on every call); they keep
+   the session lines quiet at least. A line of ours their sudo does not take is replaced. */
+export const QUIET_SETTINGS = ['!syslog, !pam_session', '!pam_session'];
+export const quietLine = (account, setting = QUIET_SETTINGS[0]) => `Defaults:${account} ${setting}`;
+const QUIET_COMMENT = '# Added by the Clavarium updater: its probes every few seconds are not written to the system log.';
 export async function ensureQuietSudo({ file = SUDOERS, run = runCommand } = {}) {
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { return false; }
     const account = text.match(/^([a-z_][a-z0-9_-]*)\s+ALL=\(root\)\s+NOPASSWD:/m)?.[1];
-    if (!account || text.includes(quietLine(account))) return false;
-    const next = `${text.replace(/\n*$/, '\n')}# Added by the Clavarium updater: its probes every few seconds are not written to the system log.\n${quietLine(account)}\n`;
-    writeFileSync(`${file}.new`, next, { mode: 0o440 });
-    try { await run(['visudo', '-cf', `${file}.new`], { timeoutMs: 30_000 }); } catch (error) { rmSync(`${file}.new`, { force: true }); throw error; }
-    renameSync(`${file}.new`, file);
-    return true;
+    if (!account) return false;
+    const accepted = async (candidate) => {
+        rmSync(`${file}.new`, { force: true });
+        writeFileSync(`${file}.new`, candidate, { mode: 0o440 });
+        const r = await run(['visudo', '-cf', `${file}.new`], { timeoutMs: 30_000 });
+        return r.code === 0 && !/unknown setting|syntax error|parse error/i.test(`${r.stdout}\n${r.stderr}`);
+    };
+    /* The rule as it is, without any line of ours. */
+    const base = text.split('\n').filter((l) => l !== QUIET_COMMENT && !l.startsWith(`Defaults:${account} `)).join('\n').replace(/\n*$/, '\n');
+    const current = QUIET_SETTINGS.map((q) => quietLine(account, q)).find((l) => text.includes(l));
+    try {
+        if (current && await accepted(text)) return false;   /* ours, and taken as it is */
+        for (const setting of QUIET_SETTINGS) {
+            const next = `${base}${QUIET_COMMENT}\n${quietLine(account, setting)}\n`;
+            if (await accepted(next)) { renameSync(`${file}.new`, file); return true; }
+        }
+        /* None taken: the rule alone, as install.sh wrote it -- never a file sudo complains about. */
+        if (current && await accepted(base)) { renameSync(`${file}.new`, file); return true; }
+        return false;
+    } finally { rmSync(`${file}.new`, { force: true }); }
 }
 
 /* FFMPEG, kept by the updater: the voice boxes play a radio, a podcast, a music file through it

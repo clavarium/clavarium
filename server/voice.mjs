@@ -191,6 +191,26 @@ export async function transcribeParts(config, audio, fetcher = fetch) {
     return text ? [{ speaker: null, start: 0, text }] : [];
 }
 
+/* A SHORT REACTION while the answer is thought (a voice box, 01-11): a few words in the person's language that
+   acknowledge what was said without answering it -- « bonne question, voyons… ». Only where the dictation's
+   service also offers a fast chat model (OVH AI Endpoints); null otherwise, or when it is not quick. */
+export const REACTION_MODEL = 'Mistral-Small-3.2-24B-Instruct-2506';
+export async function quickReaction(config, said, fetcher = fetch) {
+    if (!config?.key || !DIARIZES.test(String(config.url))) return null;
+    const base = String(config.url).replace(/\/audio\/transcriptions\/?$/, '');
+    try {
+        const r = await fetcher(`${base}/chat/completions`, {
+            method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(3000),
+            body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.8, max_tokens: 24, messages: [
+                { role: 'system', content: 'Someone just spoke to a voice assistant, which needs a few seconds to answer. Write ONE very short spoken reaction (2 to 7 words) in the SAME language as what they said, natural and warm, that acknowledges it without answering it and without promising anything: e.g. "Bonne question, voyons…", "Ah, intéressant, je regarde.", "Hmm, let me see…". No quotes, no emoji. Answer with the reaction only.' },
+                { role: 'user', content: String(said).slice(0, 600) }] }),
+        });
+        if (!r.ok) return null;
+        const t = String((await r.json())?.choices?.[0]?.message?.content ?? '').replace(/["«»]/g, '').trim();
+        return t && t.length <= 60 && !/\n/.test(t) ? t : null;
+    } catch { return null; }
+}
+
 /* ---------- THE ENGINE CHOSEN IN SETTINGS ----------
  * Settings > Dictation: a provider fills in the address and the model (both
  * may be changed); the key is one of the SECRETS already kept (Assets >
@@ -324,6 +344,10 @@ export class Dictation {
     /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
     #fresh(c) { if (c?.secret && this.#expired(c.secret)) throw new Refusal(409, KEY_EXPIRED); }
     /* `device`: the language of the device that dictates (a tag such as fr-FR), if it said. */
+    async reaction(said) {
+        const config = this.current();
+        return config ? quickReaction(config, said, this.#fetcher) : null;
+    }
     async transcribeParts(audio) {
         this.#fresh(this.#saved());
         const config = this.current();
