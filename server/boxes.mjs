@@ -132,6 +132,24 @@ export function sentencesOf(text) {
     return out.filter(Boolean);
 }
 
+/* The words said while an answer is awaited (« Hmm… », « ça prend plus de temps ») -- off (01-11: heard all
+   the time while the box misheard, they made it worse; back once the sound path is sound). */
+export const WAITING_WORDS = false;
+/* WHAT THE BOX MEASURED, its sentence ended (firmware 0.1.38): how long, when a voice was heard, the bar it
+   used -- beside the message, with what reached this side. */
+export function endOf(ep) {
+    if (!ep || typeof ep !== 'object') return '';
+    const n = (v) => (Number.isFinite(v) ? v : null);
+    const sec = (v) => `${v.toFixed(1).replace('.', ',')} s`;
+    const parts = [];
+    if (n(ep.s) !== null) parts.push(`écoute ${sec(ep.s)}`);
+    parts.push(n(ep.heard_at) !== null && ep.heard_at >= 0 ? `voix dès ${sec(ep.heard_at)}` : 'aucune voix détectée');
+    if (n(ep.bar) !== null) parts.push(`seuil ${Math.round(ep.bar)}`);
+    if (n(ep.voice) !== null && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`);
+    if (n(ep.mean) !== null) parts.push(`moyenne ${Math.round(ep.mean)}`);
+    if (n(ep.room) !== null) parts.push(`pièce ${Math.round(ep.room)}`);
+    return `boîtier : ${parts.join(', ')}`;
+}
 export const THINKING_AFTER_MS = 3_500;
 export const LONGER_AFTER_MS = 12_000;
 export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
@@ -630,6 +648,11 @@ export class Boxes {
                 link.send({ t: 'cue', name: 'done' });
                 return;
             }
+            if (m.t === 'listen.end' && m.ep) {
+                const end = endOf(m.ep);
+                link.why = `${link.why ? `${link.why} ; ` : ''}fin : ${String(m.reason ?? '').slice(0, 20)} ; ${end}`;
+                this.#log(`voice box ${box.name}: listen ended (${String(m.reason ?? '').slice(0, 20)}), ${end}`);
+            }
             if (m.t === 'listen.end' && sentence) {
                 const pcm = Buffer.concat(sentence);
                 sentence = null;
@@ -727,7 +750,7 @@ export class Boxes {
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${link.why ? `${link.why} ; ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
-        this.#waitFor(link, text);
+        if (WAITING_WORDS) this.#waitFor(link, text);
         link.recent = [...(link.recent ?? []), link.heardAt];
         if (/\bmode conversation\b/i.test(text)) link.chat = true;
         if (/\b(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)\b/i.test(text)) { link.chat = false; link.recent = []; }
