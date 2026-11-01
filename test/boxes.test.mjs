@@ -487,15 +487,15 @@ test('while the answer is thought: a short « hmm » after a while, then a word 
 
 test('why a box listened goes beside the message: the wake word and its score, what it cut short', async () => {
     const { whyOf } = await import('../server/boxes.mjs');
-    assert.equal(whyOf({ reason: 'wake', score: 0.934, cut: 'its own speech' }), 'réveil : mot d\'éveil (93 %) ; a interrompu sa propre phrase');
-    assert.equal(whyOf({ reason: 'button' }), 'réveil : bouton');
+    assert.equal(whyOf({ reason: 'wake', score: 0.934, cut: 'its own speech' }), 'éveil 93 % · a coupé sa phrase');
+    assert.equal(whyOf({ reason: 'button' }), 'bouton');
     const { boxes, said } = make({ say: async (c, text, by) => { said.push(by); } });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
     const s = new FakeSocket();
     boxes.accept(s, boxes.byKey(box.key));
     s.box({ t: 'listen.start', reason: 'wake', score: 0.95 }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
     for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(said[0].why, 'réveil : mot d\'éveil (95 %) ; son 0,8 s, niveau 0 (presque silencieux)');
+    assert.equal(said[0].why, 'éveil 95 % · reçu 0,8 s niv 0 (silence)');
 });
 
 test('a sentence that only mentions recording does not start one', async () => {
@@ -532,9 +532,9 @@ test('tested from its card: the sound says a sentence; the microphone listens on
 
 test('how loud the sentence came, beside it: an empty one is seen at once', async () => {
     assert.equal(levelOf(Buffer.alloc(3200)), 0);
-    assert.match(soundOf(Buffer.alloc(32_000)), /^son 1,0 s, niveau 0 \(presque silencieux\)$/);
+    assert.equal(soundOf(Buffer.alloc(32_000)), 'reçu 1,0 s niv 0 (silence)');
     const loud = Buffer.alloc(32_000); for (let i = 0; i < 16_000; i++) loud.writeInt16LE(i % 2 ? 3000 : -3000, i * 2);
-    assert.equal(soundOf(loud), 'son 1,0 s, niveau 3000');
+    assert.equal(soundOf(loud), 'reçu 1,0 s niv 3000');
     const whys = [];
     const { boxes } = make({ say: async (c, text, by) => { whys.push(by.why); } });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
@@ -544,7 +544,7 @@ test('how loud the sentence came, beside it: an empty one is seen at once', asyn
     for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true);
     s.box({ t: 'listen.end', reason: 'silence' });
     await tick(); await tick();
-    assert.equal(whys[0], 'réveil : mot d\'éveil (93 %) ; son 0,8 s, niveau 0 (presque silencieux)');
+    assert.equal(whys[0], 'éveil 93 % · reçu 0,8 s niv 0 (silence)');
 });
 
 test('a sentence while this side still records: the recording is closed, the sentence is heard', async () => {
@@ -578,8 +578,8 @@ test('waiting words are off: nothing is said before the answer (01-11)', async (
 
 test('what the box measured, its sentence ended, goes beside the message', async () => {
     const { endOf } = await import('../server/boxes.mjs');
-    assert.equal(endOf({ s: 7.42, heard_at: 0.6, quiet_max: 2.5, room: 80, voice: 950, bar: 285, mean: 310 }), 'boîtier : écoute 7,4 s, voix dès 0,6 s, seuil 285, voix 950, moyenne 310, pièce 80');
-    assert.equal(endOf({ s: 15, heard_at: -1, bar: 160, voice: 0, mean: 40, room: 80 }), 'boîtier : écoute 15,0 s, aucune voix détectée, seuil 160, moyenne 40, pièce 80');
+    assert.equal(endOf({ s: 7.42, heard_at: 0.6, quiet_max: 2.5, room: 80, voice: 950, bar: 285, mean: 310 }, 'silence'), 'fin silence 7,4 s · voix dès 0,6 s · seuil 285 · voix 950 · moy 310');
+    assert.equal(endOf({ s: 15, heard_at: -1, bar: 160, voice: 0, mean: 40, room: 80 }, 'nobody'), 'fin nobody 15,0 s · sans voix · seuil 160 · moy 40');
     assert.equal(endOf(null), '');
     const whys = [];
     const { boxes } = make({ say: async (c, text, by) => { whys.push(by.why); } });
@@ -589,6 +589,6 @@ test('what the box measured, its sentence ended, goes beside the message', async
     s.box({ t: 'listen.start', reason: 'button' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true);
     s.box({ t: 'listen.end', reason: 'silence', ep: { s: 3.1, heard_at: 0.4, room: 70, voice: 800, bar: 240, mean: 300 } });
     await tick(); await tick();
-    assert.match(whys[0], /^réveil : bouton ; fin : silence ; boîtier : écoute 3,1 s, voix dès 0,4 s/);
-    assert.match(whys[0], /; son 0,8 s, niveau 0 \(presque silencieux\)$/);
+    assert.equal(whys[0], 'bouton · fin silence 3,1 s · voix dès 0,4 s · seuil 240 · voix 800 · moy 300 · reçu 0,8 s niv 0 (silence)');
+    assert.ok(whys[0].length <= 120, String(whys[0].length));
 });
