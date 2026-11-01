@@ -476,7 +476,7 @@ export class Boxes {
         }
         if (boxes.length === 0) return;
         /* A question: the box listens again right after, no wake word needed. So does a box in CONVERSATION:
-           asked for ("mode conversation"), or by itself after two sentences within three minutes (31-10);
+           asked for ("mode conversation") -- never by itself any more (01-11);
            it ends when nobody answers, or on "fin de la conversation". */
         const question = !doing && (asked || /\?\s*$/.test(words));
         for (const l of boxes) { l.answeredAt = this.#now(); clearTimeout(l.thinkingA); clearTimeout(l.thinkingB); }
@@ -499,11 +499,10 @@ export class Boxes {
             }
         }
     }
+    /* Only when asked ("mode conversation"): opened by itself after two sentences, it stayed listening and
+       took in the room's talk -- the circle kept lit, stray words sent (01-11). */
     #chatting(link) {
-        if (link.chat) return true;
-        const now = this.#now();
-        link.recent = (link.recent ?? []).filter((t) => now - t < CHAT_WITHIN_MS);
-        return link.recent.length >= 2;
+        return Boolean(link.chat);
     }
 
     /* A box connected with its key: speaks protocol v1 on `socket` (a ws WebSocket). */

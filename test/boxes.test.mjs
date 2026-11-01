@@ -322,7 +322,7 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     assert.equal(boxes.stop(box.id), false);
 });
 
-test('conversation: after two sentences within three minutes the box stays listening, until nobody answers', async () => {
+test('conversation: never by itself; asked for, the box stays listening until nobody answers', async () => {
     const spoken = [];
     const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); } });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
@@ -331,17 +331,10 @@ test('conversation: after two sentences within three minutes the box stays liste
     const sentence = async () => { s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' }); await tick(); await tick(); };
     await sentence();
     await boxes.agentSaid('kitchen-help', 'Il fait beau.', [box.id]);
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'one sentence: no conversation yet');
     await sentence();
     await boxes.agentSaid('kitchen-help', 'Vingt degrés.', [box.id]);
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
-    assert.ok(spoken.some((t) => /^Je passe en mode conversation/.test(t)));
-    await boxes.agentSaid('kitchen-help', 'Et du soleil.', [box.id]);
-    assert.equal(spoken.at(-1), 'Et du soleil.', 'said once');
-    s.box({ t: 'listen.start', reason: 'follow' }); s.box({ t: 'listen.end', reason: 'nobody' }); await tick();
-    assert.deepEqual(s.sent.at(-1), { t: 'cue', name: 'done' });
-    await boxes.agentSaid('kitchen-help', 'Bonne soirée.', [box.id]);
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'nobody answered: the conversation is over');
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'two sentences: still no conversation (01-11)');
+    assert.ok(!spoken.some((t) => /mode conversation/.test(t)));
 });
 
 test('what it is doing, written for a screen, is not read aloud: a short word instead', async () => {
