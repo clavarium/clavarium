@@ -44,11 +44,10 @@ export const ELEVEN_MODEL = 'eleven_multilingual_v2';
 export const SPEED = 1.1;   /* a little quicker than the voices' own pace: found slow on the real box (31-10) */
 
 export class Speech {
-    #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret; #pocket; #pocketDown = 0;
+    #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret;
 
-    /* `pocket`: the default voice (pocket.mjs), else null. Then ElevenLabs when its key is set, then Piper. */
-    constructor({ dir, lang = 'fr', fetcher = fetch, log = () => {}, secret = () => undefined, pocket = null }) {
-        this.#dir = dir; this.#lang = VOICES[lang] ? lang : 'fr'; this.#fetch = fetcher; this.#log = log; this.#secret = secret; this.#pocket = pocket;
+    constructor({ dir, lang = 'fr', fetcher = fetch, log = () => {}, secret = () => undefined }) {
+        this.#dir = dir; this.#lang = VOICES[lang] ? lang : 'fr'; this.#fetch = fetcher; this.#log = log; this.#secret = secret;
     }
 
     async #eleven(text) {
@@ -103,12 +102,6 @@ export class Speech {
 
     /* Text -> PCM 16 kHz. */
     async speak(text) {
-        /* Pocket first; failed, it rests five minutes and the next voice answers meanwhile. */
-        if (this.#pocket && Date.now() - this.#pocketDown > 5 * 60_000) {
-            try { const pcm = await this.#pocket.speak(text); if (pcm.length) return pcm; } catch (error) {
-                if (!/getting ready/.test(error.message)) { this.#pocketDown = Date.now(); this.#log(`speech: Pocket TTS failed (${error.message}), another voice meanwhile`); }
-            }
-        }
         const online = await this.#eleven(text);
         if (online && online.length) return online;
         const engine = await this.#load();

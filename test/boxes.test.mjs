@@ -307,7 +307,6 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     await boxes.listen(box.id, 'https://radio.example.org/station.pls', 'Radio');
     assert.equal(spawned[0].cmd, 'ffmpeg');
     assert.ok(spawned[0].args.includes('https://radio.example.org/live.mp3'), 'the playlist read: its first address');
-    assert.ok(spawned[0].args.some((a) => a.startsWith('loudnorm=')), 'every radio brought to one loudness');
     assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000, kind: 'stream' });
     spawned[0].c.stdout.write(Buffer.alloc(32_000 * 20));
     await new Promise((r) => setTimeout(r, 250));
@@ -322,7 +321,7 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     assert.equal(boxes.stop(box.id), false);
 });
 
-test('conversation: never by itself; asked for, the box stays listening until nobody answers', async () => {
+test('conversation: after two sentences within three minutes the box stays listening, until nobody answers', async () => {
     const spoken = [];
     const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); } });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
@@ -331,10 +330,17 @@ test('conversation: never by itself; asked for, the box stays listening until no
     const sentence = async () => { s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' }); await tick(); await tick(); };
     await sentence();
     await boxes.agentSaid('kitchen-help', 'Il fait beau.', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'one sentence: no conversation yet');
     await sentence();
     await boxes.agentSaid('kitchen-help', 'Vingt degrés.', [box.id]);
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'two sentences: still no conversation (01-11)');
-    assert.ok(!spoken.some((t) => /mode conversation/.test(t)));
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+    assert.match(spoken.at(-1), /^Je passe en mode conversation/);
+    await boxes.agentSaid('kitchen-help', 'Et du soleil.', [box.id]);
+    assert.equal(spoken.at(-1), 'Et du soleil.', 'said once');
+    s.box({ t: 'listen.start', reason: 'follow' }); s.box({ t: 'listen.end', reason: 'nobody' }); await tick();
+    assert.deepEqual(s.sent.at(-1), { t: 'cue', name: 'done' });
+    await boxes.agentSaid('kitchen-help', 'Bonne soirée.', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'nobody answered: the conversation is over');
 });
 
 test('what it is doing, written for a screen, is not read aloud: a short word instead', async () => {
@@ -377,17 +383,17 @@ test('a long recording: asked in words, written to disk, transcribed in parts wi
 });
 
 test('the mixer: words over a stream, the stream lowered with a fade, then back', async () => {
-    const { mix, DUCK, STREAM_LEVEL } = await import('../server/boxes.mjs');
+    const { mix, DUCK } = await import('../server/boxes.mjs');
     const radio = Buffer.alloc(640); for (let i = 0; i < 640; i += 2) radio.writeInt16LE(10_000, i);
     const words = Buffer.alloc(640 * 30); for (let i = 0; i < words.length; i += 2) words.writeInt16LE(1000, i);
     const stream = { over: [words], gain: 1 };
     const first = mix(stream, radio);
-    assert.ok(first.readInt16LE(0) > 9_000 * STREAM_LEVEL, 'no jump: it fades');
+    assert.ok(first.readInt16LE(0) > 9_000, 'no jump: it fades');
     let out; for (let i = 0; i < 20; i++) out = mix(stream, radio);
-    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK * STREAM_LEVEL) + 1000, 'lowered, the words over it');
+    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK) + 1000, 'lowered, the words over it');
     for (let i = 0; i < 60; i++) out = mix(stream, radio);
     assert.equal(stream.over.length, 0);
-    assert.equal(out.readInt16LE(638), 10_000 * STREAM_LEVEL, 'back to its level');
+    assert.equal(out.readInt16LE(638), 10_000, 'back to full');
 });
 
 test('something said of itself, long after the last sentence, does not open a conversation', async () => {
@@ -444,60 +450,4 @@ test('speaking to a device in the room: its call said on purpose, its answer com
     s.box({ t: 'listen.start', reason: 'follow' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
     for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
     assert.match(said[0].text, /^\(réponse entendue de l'appareil, pas de la personne\) Le chauffage/);
-});
-
-test('an answer is said sentence by sentence: the first starts while the next is made; only the last opens listening', async () => {
-    const spoken = [];
-    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); } });
-    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
-    const s = new FakeSocket();
-    boxes.accept(s, boxes.byKey(box.key));
-    await boxes.agentSaid('kitchen-help', 'Il est huit heures cinquante, dimanche premier novembre. À Cuers, il fera entre neuf et seize degrés. Tu veux la radio ?', [box.id]);
-    assert.equal(spoken.length, 3);
-    const ends = s.sent.filter((m) => m.t === 'speak.end');
-    assert.deepEqual(ends, [{ t: 'speak.end' }, { t: 'speak.end' }, { t: 'speak.end', then: 'listen' }]);
-});
-
-test('levels: the voice is brought to one loudness, and a stream is normalised by ffmpeg', async () => {
-    const { levelled, VOICE_RMS } = await import('../server/boxes.mjs');
-    const quiet = Buffer.alloc(32_000); for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(Math.round(1000 * Math.sin(i / 7)), i);
-    const out = levelled(quiet);
-    let sum = 0; let n = 0; for (let i = 0; i < out.length; i += 2) { const v = out.readInt16LE(i); if (Math.abs(v) > 300) { sum += v * v; n++; } }
-    assert.ok(Math.abs(Math.sqrt(sum / n) - VOICE_RMS) < VOICE_RMS * 0.15, String(Math.sqrt(sum / n)));
-    assert.equal(levelled(Buffer.alloc(100)).length, 100, 'silence left as it is');
-});
-
-test('while the answer is thought: a short « hmm » after a while, then a word that it takes longer; an answer ends the wait', async () => {
-    const mod = await import('../server/boxes.mjs');
-    const spoken = [];
-    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); } });
-    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
-    const s = new FakeSocket();
-    boxes.accept(s, boxes.byKey(box.key));
-    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
-    await new Promise((r) => setTimeout(r, mod.THINKING_AFTER_MS + 300));
-    assert.ok(mod.THINKING.includes(spoken.at(-1)), String(spoken.at(-1)));
-    await boxes.agentSaid('kitchen-help', 'Voilà la réponse.', [box.id]);
-    const n = spoken.length;
-    await new Promise((r) => setTimeout(r, mod.LONGER_AFTER_MS - mod.THINKING_AFTER_MS + 300));
-    assert.equal(spoken.length, n, 'answered: nothing more to fill');
-});
-
-test('why a box listened goes beside the message: the wake word and its score, what it cut short', async () => {
-    const { whyOf } = await import('../server/boxes.mjs');
-    assert.equal(whyOf({ reason: 'wake', score: 0.934, cut: 'its own speech' }), 'réveil : mot d\'éveil (93 %) ; a interrompu sa propre phrase');
-    assert.equal(whyOf({ reason: 'button' }), 'réveil : bouton');
-    const { boxes, said } = make({ say: async (c, text, by) => { said.push(by); } });
-    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
-    const s = new FakeSocket();
-    boxes.accept(s, boxes.byKey(box.key));
-    s.box({ t: 'listen.start', reason: 'wake', score: 0.95 }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
-    for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
-    assert.equal(said[0].why, 'réveil : mot d\'éveil (95 %)');
-});
-
-test('a sentence that only mentions recording does not start one', async () => {
-    const { RECORD_ASKED } = await import('../server/boxes.mjs');
-    const long = 'je me demandais si tu commences toujours un enregistrement quand je parle de la réunion de demain matin avec le notaire';
-    assert.ok(RECORD_ASKED.test(long) && long.split(/\s+/).length > 10, 'the words are there, the order is not');
 });

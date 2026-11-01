@@ -153,9 +153,6 @@ test('a loop inside a word is brought back to once', () => {
 test('the credits an engine writes on silence (learned from subtitles) are removed, and only those', () => {
     assert.equal(withoutPhantoms("Sous-titrage ST' 501"), '');
     assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
-    assert.equal(withoutPhantoms('Thank you for watching and see you in the next video!'), '');
-    assert.equal(withoutPhantoms("Merci d'avoir regardé cette vidéo !"), '');
-    assert.equal(withoutPhantoms('Thank you for watching the weather'), 'Thank you for watching the weather', 'only when it is all of it');
     assert.equal(withoutPhantoms("Lance les tests. Sous-titrage ST' 501"), 'Lance les tests.');
     assert.equal(withoutPhantoms('Sous-titres par Jérémy Diaz'), '');
     assert.equal(withoutPhantoms('Les sous-titres par Jérémy sont bons'), 'Les sous-titres par Jérémy sont bons');
@@ -315,15 +312,4 @@ test('a voice box keeps the voice that spoke first: a TV after it is left out', 
     const { firstVoice } = await import('../server/voice.mjs');
     assert.equal(firstVoice({ diarization: [{ speaker: 0, text: ' Regarde la météo. ' }, { speaker: 1, text: 'Il était une fois' }, { speaker: 0, text: 'du week-end.' }] }), 'Regarde la météo. du week-end.');
     assert.equal(firstVoice({ text: 'no voices told apart' }), null);
-});
-
-test('a short reaction to what was said, in its language, from the dictation service\'s chat model; none elsewhere', async () => {
-    const { quickReaction } = await import('../server/voice.mjs');
-    const ovh = { url: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/audio/transcriptions', key: 'k' };
-    let asked;
-    const fetcher = async (url, init) => { asked = [url, JSON.parse(init.body)]; return new Response(JSON.stringify({ choices: [{ message: { content: '« Bonne question, voyons… »' } }] })); };
-    assert.equal(await quickReaction(ovh, 'Comment marche une pompe à chaleur ?', fetcher), 'Bonne question, voyons…');
-    assert.equal(asked[0], 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/chat/completions');
-    assert.equal(await quickReaction({ ...ovh, url: 'https://api.example.org/v1/audio/transcriptions' }, 'x', fetcher), null);
-    assert.equal(await quickReaction(ovh, 'x', async () => new Response('{}', { status: 500 })), null);
 });

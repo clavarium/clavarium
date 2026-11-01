@@ -8874,48 +8874,6 @@
             const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
             const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
-            /* ITS WI-FI NETWORKS (01-11): the box knows several and goes to the strongest it hears; one is added
-               here before it moves, from the networks it hears itself -- no phone, no button. */
-            if (b.online) {
-                const wifi = el('div', 'box-wifi');
-                const known = el('div', 'box-wifi-known');
-                const add = el('button', '', 'Add a Wi-Fi'); add.type = 'button';
-                const paintKnown = async () => {
-                    known.replaceChildren(el('small', 'hint', 'Its Wi-Fi networks…'));
-                    const r = await post(`${API}/boxes/${b.id}/wifi-known`, {}).catch(() => null);
-                    known.replaceChildren();
-                    if (!r) { known.append(el('small', 'hint', 'Its networks cannot be read just now.')); return; }
-                    for (const ssid of r.networks) {
-                        const chip = el('span', 'box-wifi-net', ssid === r.current ? `${ssid} (now)` : ssid);
-                        if (ssid !== r.current) {
-                            const x = el('button', 'quiet', '×'); x.type = 'button'; x.setAttribute('aria-label', `Forget ${ssid}`);
-                            x.addEventListener('click', async () => { await post(`${API}/boxes/${b.id}/wifi-forget`, { ssid }).catch(() => {}); await paintKnown(); });
-                            chip.append(x);
-                        }
-                        known.append(chip);
-                    }
-                };
-                add.addEventListener('click', async () => {
-                    add.disabled = true; add.textContent = 'Listening for networks…';
-                    const r = await post(`${API}/boxes/${b.id}/wifi-scan`, {}).catch(() => ({ networks: [] }));
-                    add.disabled = false; add.textContent = 'Add a Wi-Fi';
-                    const pick = el('select'); pick.setAttribute('aria-label', 'Network');
-                    for (const n of r.networks ?? []) { const o = el('option', '', `${n.ssid}${n.secure ? '' : ' (open)'}`); o.value = n.ssid; pick.append(o); }
-                    const pass = el('input'); pass.type = 'password'; pass.placeholder = 'Password'; pass.autocomplete = 'off'; pass.setAttribute('aria-label', 'Password of the network');
-                    const join = el('button', 'primary', 'Add'); join.type = 'button';
-                    const said = el('small', 'hint', '');
-                    join.addEventListener('click', async () => {
-                        join.disabled = true; said.textContent = 'The box tries it (up to 20 s); it comes back on its network after.';
-                        try { await post(`${API}/boxes/${b.id}/wifi-join`, { ssid: pick.value, password: pass.value }); said.textContent = `Added: ${pick.value}.`; form.remove(); await paintKnown(); }
-                        catch (error) { said.textContent = `Not joined: ${error.message}`; join.disabled = false; }
-                    });
-                    const form = el('div', 'action-row box-wifi-add'); form.append(pick, pass, join, said);
-                    wifi.append(form); focusField(pass);
-                });
-                wifi.append(el('small', 'hint', 'Wi-Fi it knows (it goes to the strongest): '), known, add);
-                card.append(wifi);
-                void paintKnown();
-            }
             rows.append(card);
         }
     }

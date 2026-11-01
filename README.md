@@ -301,7 +301,3 @@ Without a guard, nothing commits. That is on purpose.
 ## Licence
 
 MIT. See `LICENSE`.
-
-## Credits
-
-The voice boxes speak with **Pocket TTS** by **Kyutai** (program MIT, weights CC-BY-4.0), fetched at run time; Piper voices (sherpa-onnx) are the fallback. See CREDITS.md in the repository.

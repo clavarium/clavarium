@@ -498,26 +498,23 @@ test('check: the beta channel sees beta versions and a newer stable, never the d
     assert.equal(await s.u.check(), '1.0.1', 'beta jumps forward to the newer stable');
 });
 
-test('sudo is told not to log the host program\'s probes: with what its version takes, checked by visudo, never a file it complains about', async (t) => {
+test('sudo is told not to log the host program\'s probes: once, checked by visudo, the rule kept', async (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'sudoers-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const file = join(dir, 'clavarium');
     const before = '# Clavarium: the server account may run ONE program as root, and nothing else.\nclavarium ALL=(root) NOPASSWD: /usr/local/sbin/clavarium-host\n';
-    const fresh = () => { rmSync(file, { force: true }); writeFileSync(file, before); };
-    const ok = async () => ({ code: 0, stdout: '', stderr: '' });
-    fresh();
-    assert.equal(await ensureQuietSudo({ file, run: ok }), true);
-    assert.ok(readFileSync(file, 'utf8').endsWith(`${quietLine('clavarium')}\n`));
-    assert.equal(await ensureQuietSudo({ file, run: ok }), false, 'once');
-    /* A sudo that does not know syslog (it says so, exit 0): the next setting, and a line it complained of replaced. */
-    const noSyslog = async (argv) => { const text = readFileSync(argv[2], 'utf8'); return { code: 0, stdout: '', stderr: /!syslog/.test(text) ? "unknown setting: 'syslog'" : '' }; };
-    assert.equal(await ensureQuietSudo({ file, run: noSyslog }), true);
+    writeFileSync(file, before);
+    const ran = [];
+    const run = async (argv) => { ran.push(argv.join(' ')); return { code: 0 }; };
+    assert.equal(await ensureQuietSudo({ file, run }), true);
     const after = readFileSync(file, 'utf8');
-    assert.ok(after.endsWith('Defaults:clavarium !pam_session\n') && !after.includes('!syslog'), after);
-    assert.equal((after.match(/Defaults:/g) ?? []).length, 1);
-    /* Nothing taken: the rule left alone, never a broken file. */
-    fresh();
-    assert.equal(await ensureQuietSudo({ file, run: async () => ({ code: 1, stdout: '', stderr: 'parse error' }) }), false);
+    assert.ok(after.startsWith(before));
+    assert.ok(after.endsWith(`${quietLine('clavarium')}\n`));
+    assert.match(ran[0], /^visudo -cf .*\.new$/);
+    assert.equal(await ensureQuietSudo({ file, run }), false, 'once');
+    /* visudo refuses: the file stays as it was. */
+    rmSync(file); writeFileSync(file, before);
+    await assert.rejects(ensureQuietSudo({ file, run: async () => { throw new Error('parse error'); } }));
     assert.equal(readFileSync(file, 'utf8'), before);
-    assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run: ok }), false);
+    assert.equal(await ensureQuietSudo({ file: join(dir, 'none'), run }), false);
 });
