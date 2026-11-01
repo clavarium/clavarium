@@ -473,3 +473,19 @@ test('levels: the voice is brought to one loudness, and a stream is normalised b
     assert.ok(Math.abs(Math.sqrt(sum / n) - VOICE_RMS) < VOICE_RMS * 0.15, String(Math.sqrt(sum / n)));
     assert.equal(levelled(Buffer.alloc(100)).length, 100, 'silence left as it is');
 });
+
+test('while the answer is thought: a short « hmm » after a while, then a word that it takes longer; an answer ends the wait', async () => {
+    const mod = await import('../server/boxes.mjs');
+    const spoken = [];
+    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
+    await new Promise((r) => setTimeout(r, mod.THINKING_AFTER_MS + 300));
+    assert.ok(mod.THINKING.includes(spoken.at(-1)), String(spoken.at(-1)));
+    await boxes.agentSaid('kitchen-help', 'Voilà la réponse.', [box.id]);
+    const n = spoken.length;
+    await new Promise((r) => setTimeout(r, mod.LONGER_AFTER_MS - mod.THINKING_AFTER_MS + 300));
+    assert.equal(spoken.length, n, 'answered: nothing more to fill');
+});

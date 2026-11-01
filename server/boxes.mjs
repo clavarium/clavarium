@@ -132,6 +132,9 @@ export function sentencesOf(text) {
     return out.filter(Boolean);
 }
 
+export const THINKING_AFTER_MS = 3_500;
+export const LONGER_AFTER_MS = 12_000;
+export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -429,6 +432,20 @@ export class Boxes {
     /* The tool said or asked something in a conversation: said aloud only by the boxes it is
        addressed to (`to`: box ids, #215). Anything else stays in the thread, silent -- a box
        read a whole technical message aloud once (31-10), which nobody wants. */
+    /* WHILE THE ANSWER IS THOUGHT (01-11): no long silence after a sentence. A short « hmm » if nothing has
+       come after a little while, then a word that it takes longer; whatever the assistant says first (an answer,
+       what it is doing) ends the wait. A longer question (many words) is told sooner that it takes a moment. */
+    #waitFor(link, text = '') {
+        clearTimeout(link.thinkingA); clearTimeout(link.thinkingB);
+        const said = link.heardAt;
+        const still = () => link.heardAt === said && !((link.answeredAt ?? 0) >= said);
+        const long = String(text).length > 160;   /* a long question: told sooner that it takes a moment */
+        const say = async (words) => { if (!still() || link.recording || this.#streams.has(link.box().id)) return; try { link.play(await this.#speak(words)); } catch { /* the light says it */ } };
+        link.thinkingA = setTimeout(() => { void say(THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
+        link.thinkingB = setTimeout(() => { void say(long ? 'Ta question est riche, je regarde, un instant.' : 'Ça me demande un peu plus de temps, je regarde.'); }, long ? LONGER_AFTER_MS * 0.6 : LONGER_AFTER_MS);
+        link.thinkingA.unref?.(); link.thinkingB.unref?.();
+    }
+
     async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
         /* What it is doing is written for a screen ("Tâche de fond : bêta 0.2.113…"): read aloud, it was words
            from nowhere (31-10). Aloud, only a short plain one; otherwise a word that it is at work. */
@@ -449,6 +466,7 @@ export class Boxes {
            asked for ("mode conversation"), or by itself after two sentences within three minutes (31-10);
            it ends when nobody answers, or on "fin de la conversation". */
         const question = !doing && (asked || /\?\s*$/.test(words));
+        for (const l of boxes) { l.answeredAt = this.#now(); clearTimeout(l.thinkingA); clearTimeout(l.thinkingB); }
         for (const l of boxes) {
             /* An answer -- to a sentence heard within a minute -- may open the conversation; something said
                of itself (a news item, a reminder) does not: the box listened after it for nothing (31-10). */
@@ -633,6 +651,7 @@ export class Boxes {
         try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
+        this.#waitFor(link, text);
         link.recent = [...(link.recent ?? []), link.heardAt];
         if (/\bmode conversation\b/i.test(text)) link.chat = true;
         if (/\b(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)\b/i.test(text)) { link.chat = false; link.recent = []; }
