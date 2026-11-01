@@ -137,18 +137,16 @@ export function sentencesOf(text) {
 export const WAITING_WORDS = false;
 /* WHAT THE BOX MEASURED, its sentence ended (firmware 0.1.38): how long, when a voice was heard, the bar it
    used -- beside the message, with what reached this side. */
-export function endOf(ep) {
+export function endOf(ep, reason = '') {
     if (!ep || typeof ep !== 'object') return '';
-    const n = (v) => (Number.isFinite(v) ? v : null);
+    const n = (v) => Number.isFinite(v);
     const sec = (v) => `${v.toFixed(1).replace('.', ',')} s`;
-    const parts = [];
-    if (n(ep.s) !== null) parts.push(`écoute ${sec(ep.s)}`);
-    parts.push(n(ep.heard_at) !== null && ep.heard_at >= 0 ? `voix dès ${sec(ep.heard_at)}` : 'aucune voix détectée');
-    if (n(ep.bar) !== null) parts.push(`seuil ${Math.round(ep.bar)}`);
-    if (n(ep.voice) !== null && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`);
-    if (n(ep.mean) !== null) parts.push(`moyenne ${Math.round(ep.mean)}`);
-    if (n(ep.room) !== null) parts.push(`pièce ${Math.round(ep.room)}`);
-    return `boîtier : ${parts.join(', ')}`;
+    const parts = [`fin ${String(reason).slice(0, 12)}${n(ep.s) ? ` ${sec(ep.s)}` : ''}`.replace(/\s+/g, ' ').trim()];
+    parts.push(n(ep.heard_at) && ep.heard_at >= 0 ? `voix dès ${sec(ep.heard_at)}` : 'sans voix');
+    if (n(ep.bar)) parts.push(`seuil ${Math.round(ep.bar)}`);
+    if (n(ep.voice) && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`);
+    if (n(ep.mean)) parts.push(`moy ${Math.round(ep.mean)}`);
+    return parts.join(' · ');
 }
 export const THINKING_AFTER_MS = 3_500;
 export const LONGER_AFTER_MS = 12_000;
@@ -156,10 +154,10 @@ export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
 /* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
    what it cut short. */
 export function whyOf(m) {
-    const reason = { wake: 'mot d\'éveil', button: 'bouton', follow: 'suite de la conversation', knock: 'toc-toc' }[m?.reason] ?? (m?.reason ? String(m.reason).slice(0, 30) : 'inconnu');
-    const score = Number.isFinite(m?.score) ? ` (${Math.round(m.score * 100)} %)` : '';
-    const cut = m?.cut ? ` ; a interrompu ${String(m.cut) === 'its own speech' ? 'sa propre phrase' : 'un son'}` : '';
-    return `réveil : ${reason}${score}${cut}`;
+    const reason = { wake: 'éveil', button: 'bouton', follow: 'suite', knock: 'toc-toc' }[m?.reason] ?? (m?.reason ? String(m.reason).slice(0, 20) : 'inconnu');
+    const score = Number.isFinite(m?.score) ? ` ${Math.round(m.score * 100)} %` : '';
+    const cut = m?.cut ? ` · a coupé ${String(m.cut) === 'its own speech' ? 'sa phrase' : 'un son'}` : '';
+    return `${reason}${score}${cut}`;
 }
 
 /* HOW LOUD WHAT THE BOX SENT WAS (01-11): beside the message, so a sentence that came empty (a wake, then
@@ -173,7 +171,7 @@ export function levelOf(pcm) {
 export const QUIET_LEVEL = 150;
 export function soundOf(pcm) {
     const level = levelOf(pcm);
-    return `son ${(pcm.length / 32_000).toFixed(1).replace('.', ',')} s, niveau ${level}${level < QUIET_LEVEL ? ' (presque silencieux)' : ''}`;
+    return `reçu ${(pcm.length / 32_000).toFixed(1).replace('.', ',')} s niv ${level}${level < QUIET_LEVEL ? ' (silence)' : ''}`;
 }
 
 export const DOING_WITHIN_MS = 120_000;
@@ -654,9 +652,9 @@ export class Boxes {
                 return;
             }
             if (m.t === 'listen.end' && m.ep) {
-                const end = endOf(m.ep);
-                link.why = `${link.why ? `${link.why} ; ` : ''}fin : ${String(m.reason ?? '').slice(0, 20)} ; ${end}`;
-                this.#log(`voice box ${box.name}: listen ended (${String(m.reason ?? '').slice(0, 20)}), ${end}`);
+                const end = endOf(m.ep, m.reason ?? '');
+                link.why = `${link.why ? `${link.why} · ` : ''}${end}`;
+                this.#log(`voice box ${box.name}: ${end}`);
             }
             if (m.t === 'listen.end' && sentence) {
                 const pcm = Buffer.concat(sentence);
@@ -752,7 +750,7 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${link.why ? `${link.why} ; ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         if (WAITING_WORDS) this.#waitFor(link, text);

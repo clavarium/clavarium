@@ -85,10 +85,15 @@ const PHANTOMS = [
     /^\s*(?:thank(?:s| you) (?:so much )?for watching[.!,]?\s*(?:(?:and )?see you (?:in the |on the )?next (?:video|time)[.!]?)?|see you (?:in the )?next (?:video|time)[.!]?|merci d'avoir regardé(?: cette vidéo)?\s*[.!]?(?:\s*[àa] bient[ôo]t[.!]?)?)\s*$/giu,
     /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
 ];
+/* Chinese, Japanese or Korean mixed into Latin words: written on a room's silence (01-11: « Sous 谢谢 大家 »);
+   a sentence wholly in one of them is kept. And the « Sous » its credits leave behind, when it is all. */
+const FOREIGN_SCRIPT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+/gu;
 export function withoutPhantoms(text) {
     let t = text;
     for (const re of PHANTOMS) t = t.replace(re, ' ');
-    return t.replace(/\s+/gu, ' ').trim();
+    if (/\p{Script=Latin}/u.test(t)) t = t.replace(FOREIGN_SCRIPT, ' ');
+    t = t.replace(/\s+/gu, ' ').trim();
+    return /^sous[.!,…]*$/iu.test(t) ? '' : t;
 }
 
 /* SPEECH HAS A SPEED: nobody says more than ~25 characters a second. More
