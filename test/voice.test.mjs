@@ -152,6 +152,7 @@ test('a loop inside a word is brought back to once', () => {
 });
 test('the credits an engine writes on silence (learned from subtitles) are removed, and only those', () => {
     assert.equal(withoutPhantoms("Sous-titrage ST' 501"), '');
+    assert.equal(withoutPhantoms("Sous-titrage ST'"), '', 'without its number too (01-11)');
     assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
     assert.equal(withoutPhantoms('Thank you for watching and see you in the next video!'), '');
     assert.equal(withoutPhantoms("Merci d'avoir regardé cette vidéo !"), '');
