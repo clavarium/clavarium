@@ -86,6 +86,8 @@ test('a sentence is heard, said in the conversation with the room, and the answe
     await boxes.agentSaid('kitchen-help', 'Encore un instant.', null, { doing: true });
     assert.equal(starts(), 2);
     await boxes.agentSaid('kitchen-help', 'À quelle heure ?', [box.id]);
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' }, 'a « ? » alone does not open listening (01-11)');
+    await boxes.agentSaid('kitchen-help', 'À quelle heure ?', [box.id], { asked: true });
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
 });
@@ -115,7 +117,7 @@ test('a dictation that fails is said to the box in words, and it listens again; 
     s.box({ t: 'listen.end' });
     for (let i = 0; i < 60 && !s.sent.some((m) => m.t === 'speak.end'); i++) await new Promise((r) => setTimeout(r, 100));   /* tried twice more first */
     assert.ok(s.sent.some((m) => m.t === 'speak.start'));
-    assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
+    assert.deepEqual(s.sent.at(-1), { t: 'speak.end' });
 
     const mute = make({ hear: async () => { throw new Error('engine down'); }, speak: async () => { throw new Error('no voice'); } });
     const b2 = mute.boxes.pair({ code: mute.boxes.code('kitchen-help').code });
@@ -455,7 +457,7 @@ test('an answer is said sentence by sentence: the first starts while the next is
     await boxes.agentSaid('kitchen-help', 'Il est huit heures cinquante, dimanche premier novembre. À Cuers, il fera entre neuf et seize degrés. Tu veux la radio ?', [box.id]);
     assert.equal(spoken.length, 3);
     const ends = s.sent.filter((m) => m.t === 'speak.end');
-    assert.deepEqual(ends, [{ t: 'speak.end' }, { t: 'speak.end' }, { t: 'speak.end', then: 'listen' }]);
+    assert.deepEqual(ends, [{ t: 'speak.end' }, { t: 'speak.end' }, { t: 'speak.end' }]);
 });
 
 test('levels: the voice is brought to one loudness, and a stream is normalised by ffmpeg', async () => {

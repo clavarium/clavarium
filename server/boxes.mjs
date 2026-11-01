@@ -541,7 +541,9 @@ export class Boxes {
         /* A question: the box listens again right after, no wake word needed. So does a box in CONVERSATION:
            asked for ("mode conversation") -- never by itself any more (01-11);
            it ends when nobody answers, or on "fin de la conversation". */
-        const question = !doing && (asked || /\?\s*$/.test(words));
+        /* Only a question asked on purpose (parley ask) opens listening; one that merely ends in « ? » does not
+           any more (01-11: each follow-up listen took in the room and came back as invented words). */
+        const question = !doing && asked;
         for (const l of boxes) { l.answeredAt = this.#now(); clearTimeout(l.thinkingA); clearTimeout(l.thinkingB); }
         for (const l of boxes) {
             /* An answer -- to a sentence heard within a minute -- may open the conversation; something said
@@ -709,7 +711,7 @@ export class Boxes {
         let text;
         /* A sentence that goes nowhere is said so, in words, rather than with a beep nobody can read (31-10). */
         const lost = async (words) => {
-            try { link.play(await this.#speak(words), 'listen'); } catch { link.send({ t: 'cue', name: 'error' }); }
+            try { link.play(await this.#speak(words)); } catch { link.send({ t: 'cue', name: 'error' }); }   /* not listened after: a loop of « pardon » on room noise (01-11) */
         };
         try {
             const said = [];
