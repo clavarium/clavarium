@@ -502,3 +502,9 @@ test('why a box listened goes beside the message: the wake word and its score, w
     for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
     assert.equal(said[0].why, 'réveil : mot d\'éveil (95 %)');
 });
+
+test('a sentence that only mentions recording does not start one', async () => {
+    const { RECORD_ASKED } = await import('../server/boxes.mjs');
+    const long = 'je me demandais si tu commences toujours un enregistrement quand je parle de la réunion de demain matin avec le notaire';
+    assert.ok(RECORD_ASKED.test(long) && long.split(/\s+/).length > 10, 'the words are there, the order is not');
+});

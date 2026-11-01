@@ -654,7 +654,9 @@ export class Boxes {
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
-        if (RECORD_ASKED.test(text) && this.#recordDir && this.#parts) {
+        /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
+           mentions recording does not (01-11). */
+        if (RECORD_ASKED.test(text) && text.split(/\s+/).length <= 10 && this.#recordDir && this.#parts) {
             this.#log(`voice box ${box.name}: a recording asked`);
             try { link.play(await this.#speak("J'enregistre. Pour arrêter, appuie sur le bouton ou dis le mot d'éveil.")); } catch { /* no voice: the light says it */ }
             link.send({ t: 'record', on: true });
