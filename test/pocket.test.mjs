@@ -17,3 +17,12 @@ test('the quiet at both ends of a clause is cut, a little kept', () => {
     assert.equal(t.length / 2, 800 + 1000 + 1600 - 1);
     assert.equal(trimmed(Buffer.alloc(100)).length, 0);
 });
+
+test('Pocket is never waited for: not ready, it says so at once and gets ready behind', async () => {
+    const { Pocket } = await import('../server/pocket.mjs');
+    let fetched = 0;
+    const p = new Pocket({ dir: '/nonexistent-dir-for-test', fetcher: async () => { fetched++; await new Promise((r) => setTimeout(r, 50)); return { ok: false, status: 503 }; }, log: () => {} });
+    const t = Date.now();
+    await assert.rejects(p.speak('Bonjour.'), /getting ready/);
+    assert.ok(Date.now() - t < 40, 'at once');
+});

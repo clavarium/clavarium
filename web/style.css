@@ -2075,3 +2075,9 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .box-qr { width: 180px; max-width: 100%; background: #fff; border-radius: 8px; padding: 6px; }
 .box-qr svg { display: block; width: 100%; height: auto; }
 .button-link { display: inline-block; padding: 8px 12px; border-radius: 7px; background: var(--accent, #d4a64a); color: #111; font-weight: 600; text-decoration: none; }
+
+/* A voice box's Wi-Fi networks: names as small chips, the one it uses marked. */
+.box-wifi { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.box-wifi-known { display: flex; flex-wrap: wrap; gap: 6px; }
+.box-wifi-net { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line, #ccc); border-radius: 999px; font-size: 0.85em; }
+.box-wifi-add { width: 100%; }

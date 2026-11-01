@@ -654,7 +654,9 @@ export class Boxes {
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (silence?)`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
-        if (RECORD_ASKED.test(text) && this.#recordDir && this.#parts) {
+        /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
+           mentions recording does not (01-11). */
+        if (RECORD_ASKED.test(text) && text.split(/\s+/).length <= 10 && this.#recordDir && this.#parts) {
             this.#log(`voice box ${box.name}: a recording asked`);
             try { link.play(await this.#speak("J'enregistre. Pour arrêter, appuie sur le bouton ou dis le mot d'éveil.")); } catch { /* no voice: the light says it */ }
             link.send({ t: 'record', on: true });
@@ -699,7 +701,10 @@ export class Boxes {
  *   POST /api/boxes/<id>/revoke
  *   POST /api/boxes/<id>/volume           {level 0-100}
  *   POST /api/boxes/<id>/wifi-scan        -> {networks}
- *   POST /api/boxes/<id>/wifi-join        {ssid, password}: the password goes to the box, and is kept nowhere here
+ *   POST /api/boxes/<id>/wifi-join        {ssid, password}: the password goes to the box, and is kept nowhere here;
+ *                                          the box ADDS it to the networks it knows (8 at most) and goes to the strongest
+ *   POST /api/boxes/<id>/wifi-known       -> {networks, current}: the names it knows (never a password)
+ *   POST /api/boxes/<id>/wifi-forget      {ssid}: not the one it uses now
  *   POST /api/boxes/<id>/alert            {text?}
  *   POST /api/boxes/<id>/reboot
  */
@@ -734,6 +739,8 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
         case 'volume': return answered(await boxes.setVolume(id, body.level));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }
+        case 'wifi-known': { const r = await boxes.command(id, { t: 'wifi.list' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks.map(String) : [], current: String(r.current ?? '') }); }
+        case 'wifi-forget': return answered(await boxes.command(id, { t: 'wifi.forget', ssid: String(body.ssid ?? '').slice(0, 32) }));
         case 'wifi-join': return answered(await boxes.command(id, { t: 'wifi.join', ssid: String(body.ssid ?? ''), password: String(body.password ?? '') }, 90_000));
         case 'alert': return answered(await boxes.command(id, { t: 'alert', text: String(body.text ?? '').slice(0, 300) }, 10 * 60_000));
         case 'reboot': return answered(await boxes.command(id, { t: 'reboot' }));

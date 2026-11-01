@@ -94,8 +94,16 @@ export class Pocket {
         return this.#starting;
     }
 
+    /* Never waited for: while it is fetched or starts (minutes, the first time), the next voice speaks and this
+       one gets ready behind (01-11: answers held minutes while it downloaded). */
+    #warm() {
+        if (this.#child && this.#port) return this.#port;
+        if (!this.#starting) this.#ready().catch((error) => this.#log(`speech: Pocket TTS could not start (${error.message})`));
+        throw new Error('Pocket TTS is getting ready');
+    }
+
     async #clause(text) {
-        const port = await this.#ready();
+        const port = this.#warm();
         const form = new FormData(); form.append('text', text);
         const r = await this.#fetch(`http://127.0.0.1:${port}/tts`, { method: 'POST', body: form, signal: AbortSignal.timeout(30_000) });
         if (!r.ok) throw new Error(`Pocket TTS answered ${r.status}`);

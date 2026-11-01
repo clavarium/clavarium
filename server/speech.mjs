@@ -105,7 +105,9 @@ export class Speech {
     async speak(text) {
         /* Pocket first; failed, it rests five minutes and the next voice answers meanwhile. */
         if (this.#pocket && Date.now() - this.#pocketDown > 5 * 60_000) {
-            try { const pcm = await this.#pocket.speak(text); if (pcm.length) return pcm; } catch (error) { this.#pocketDown = Date.now(); this.#log(`speech: Pocket TTS failed (${error.message}), another voice meanwhile`); }
+            try { const pcm = await this.#pocket.speak(text); if (pcm.length) return pcm; } catch (error) {
+                if (!/getting ready/.test(error.message)) { this.#pocketDown = Date.now(); this.#log(`speech: Pocket TTS failed (${error.message}), another voice meanwhile`); }
+            }
         }
         const online = await this.#eleven(text);
         if (online && online.length) return online;
