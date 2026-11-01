@@ -135,6 +135,15 @@ export function sentencesOf(text) {
 export const THINKING_AFTER_MS = 3_500;
 export const LONGER_AFTER_MS = 12_000;
 export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
+/* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
+   what it cut short. */
+export function whyOf(m) {
+    const reason = { wake: 'mot d\'éveil', button: 'bouton', follow: 'suite de la conversation', knock: 'toc-toc' }[m?.reason] ?? (m?.reason ? String(m.reason).slice(0, 30) : 'inconnu');
+    const score = Number.isFinite(m?.score) ? ` (${Math.round(m.score * 100)} %)` : '';
+    const cut = m?.cut ? ` ; a interrompu ${String(m.cut) === 'its own speech' ? 'sa propre phrase' : 'un son'}` : '';
+    return `réveil : ${reason}${score}${cut}`;
+}
+
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -557,6 +566,9 @@ export class Boxes {
                 r.out.end(() => { void this.#recorded(link, r); });
                 return;
             }
+            if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
+            if (m.t === 'event' && m.name === 'noise.dropped') { this.#log(`voice box ${box.name}: a sound near full scale was cut by its noise guard`); return; }
+            if (m.t === 'listen.start') link.why = whyOf(m);
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -652,7 +664,7 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), ...(link.why ? { why: link.why } : {}) }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         this.#waitFor(link, text);

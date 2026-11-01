@@ -489,3 +489,16 @@ test('while the answer is thought: a short « hmm » after a while, then a word 
     await new Promise((r) => setTimeout(r, mod.LONGER_AFTER_MS - mod.THINKING_AFTER_MS + 300));
     assert.equal(spoken.length, n, 'answered: nothing more to fill');
 });
+
+test('why a box listened goes beside the message: the wake word and its score, what it cut short', async () => {
+    const { whyOf } = await import('../server/boxes.mjs');
+    assert.equal(whyOf({ reason: 'wake', score: 0.934, cut: 'its own speech' }), 'réveil : mot d\'éveil (93 %) ; a interrompu sa propre phrase');
+    assert.equal(whyOf({ reason: 'button' }), 'réveil : bouton');
+    const { boxes, said } = make({ say: async (c, text, by) => { said.push(by); } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'wake', score: 0.95 }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
+    for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
+    assert.equal(said[0].why, 'réveil : mot d\'éveil (95 %)');
+});
