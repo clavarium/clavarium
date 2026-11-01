@@ -123,6 +123,15 @@ export function offsetOf(zone, now) {
 }
 
 export const RELAY_WITHIN_MS = 20_000;
+/* Sentences to say one by one: cut after . ! ? … and kept at 40 characters at least (a tiny one joins the next). */
+export function sentencesOf(text) {
+    const out = [];
+    for (const piece of String(text).split(/(?<=[.!?…])\s+/)) {
+        if (out.length && out[out.length - 1].length < 40) out[out.length - 1] += ` ${piece}`; else out.push(piece);
+    }
+    return out.filter(Boolean);
+}
+
 export const DOING_WITHIN_MS = 120_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
@@ -431,9 +440,16 @@ export class Boxes {
             const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
             if (chatting) l.chat = true;
-            let pcm;
-            try { pcm = await this.#speak(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words); } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); continue; }
-            l.play(pcm, question || chatting ? 'listen' : null);   /* a question is always listened after: an answer is expected */
+            /* SENTENCE BY SENTENCE: the first is said while the next ones are made -- the answer starts sooner
+               (31-10: a few seconds of silence before each answer). The box queues them, one after the other. */
+            const parts = sentencesOf(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words);
+            let next = this.#speak(parts[0]);
+            for (const [i, part] of parts.entries()) {
+                let pcm;
+                try { pcm = await next; } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); break; }
+                if (i + 1 < parts.length) { next = this.#speak(parts[i + 1]); next.catch(() => {}); }
+                l.play(pcm, i + 1 === parts.length && (question || chatting) ? 'listen' : null);   /* a question is always listened after: an answer is expected */
+            }
         }
     }
     #chatting(link) {

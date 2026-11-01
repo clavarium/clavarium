@@ -334,7 +334,7 @@ test('conversation: after two sentences within three minutes the box stays liste
     await sentence();
     await boxes.agentSaid('kitchen-help', 'Vingt degrés.', [box.id]);
     assert.deepEqual(s.sent.at(-1), { t: 'speak.end', then: 'listen' });
-    assert.match(spoken.at(-1), /^Je passe en mode conversation/);
+    assert.ok(spoken.some((t) => /^Je passe en mode conversation/.test(t)));
     await boxes.agentSaid('kitchen-help', 'Et du soleil.', [box.id]);
     assert.equal(spoken.at(-1), 'Et du soleil.', 'said once');
     s.box({ t: 'listen.start', reason: 'follow' }); s.box({ t: 'listen.end', reason: 'nobody' }); await tick();
@@ -450,4 +450,16 @@ test('speaking to a device in the room: its call said on purpose, its answer com
     s.box({ t: 'listen.start', reason: 'follow' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true); s.box({ t: 'listen.end', reason: 'silence' });
     for (let i = 0; i < 20 && said.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
     assert.match(said[0].text, /^\(réponse entendue de l'appareil, pas de la personne\) Le chauffage/);
+});
+
+test('an answer is said sentence by sentence: the first starts while the next is made; only the last opens listening', async () => {
+    const spoken = [];
+    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    await boxes.agentSaid('kitchen-help', 'Il est huit heures cinquante, dimanche premier novembre. À Cuers, il fera entre neuf et seize degrés. Tu veux la radio ?', [box.id]);
+    assert.equal(spoken.length, 3);
+    const ends = s.sent.filter((m) => m.t === 'speak.end');
+    assert.deepEqual(ends, [{ t: 'speak.end' }, { t: 'speak.end' }, { t: 'speak.end', then: 'listen' }]);
 });
