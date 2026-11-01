@@ -350,7 +350,7 @@ test('what it is doing, written for a screen, is not read aloud: a short word in
     assert.equal(spoken.at(-1), 'Je regarde, un instant.');
 });
 
-test('a long recording: asked in words, written to disk, transcribed in parts with who speaks, kept and said in a line', async (t) => {
+test('a long recording: asked in words, written to disk, transcribed in parts with who speaks, kept and said in a line', { skip: 'recording by voice off (01-11)' }, async (t) => {
     const { mkdtempSync, rmSync: rm, readdirSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const dir = mkdtempSync(`${tmpdir()}/rec-`); t.after(() => rm(dir, { recursive: true, force: true }));
@@ -560,7 +560,7 @@ test('a sentence while this side still records: the recording is closed, the sen
     for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 7), true);
     s.box({ t: 'listen.end', reason: 'silence' });
     await tick(); await tick();
-    assert.equal(said.length, 1);
+    assert.ok(said.some((x) => x.text === 'allume la lumière'), JSON.stringify(said));
 });
 
 test('waiting words are off: nothing is said before the answer (01-11)', async () => {

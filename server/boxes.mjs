@@ -182,6 +182,9 @@ export const TEST_MIC = 'Test du micro. Parle-moi, je t\'écoute.';
 export const TEST_MIC_MS = 45_000;
 /* A LONG RECORDING (a meeting, a class): asked in words, stopped by the button or the wake word. */
 export const RECORD_ASKED = /\b(?:lance|d[ée]marre|commence|d[ée]bute)\w*\b.{0,25}\benregistrement\b|\benregistre\b.{0,20}\b(?:r[ée]union|conversation|cours|discussion|consultation)\b/i;
+/* Off (01-11): a recording started without being asked, twice in a morning; back once it is asked for on
+   purpose (a button on the page). */
+export const RECORD_BY_VOICE = false;
 export const RECORD_MAX_BYTES = 4 * 3600 * 32_000;   /* four hours */
 export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 /* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
@@ -739,7 +742,7 @@ export class Boxes {
         const box = link.box();
         /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
            mentions recording does not (01-11). */
-        if (RECORD_ASKED.test(text) && text.split(/\s+/).length <= 10 && this.#recordDir && this.#parts) {
+        if (RECORD_BY_VOICE && RECORD_ASKED.test(text) && text.split(/\s+/).length <= 10 && this.#recordDir && this.#parts) {
             this.#log(`voice box ${box.name}: a recording asked`);
             try { link.play(await this.#speak("J'enregistre. Pour arrêter, appuie sur le bouton ou dis le mot d'éveil.")); } catch { /* no voice: the light says it */ }
             link.send({ t: 'record', on: true });
