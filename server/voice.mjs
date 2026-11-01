@@ -75,7 +75,7 @@ const PHANTOMS = [
     /* Any sentence that credits Amara.org, in whatever language ("Sous-titres réalisés par la communauté
        d'Amara.org", "Untertitel der Amara.org-Community", "Subtítulos por la comunidad de Amara.org"...). */
     /[^.!?。]*amara\.org[^.!?。]*[.!?。]?/giu,
-    /sous[- ]titrage\s*st\s*'?\s*\d+[.!]?/giu,
+    /sous[- ]titrage\s*st\b\s*'?\s*\d*[.!]?/giu,
     /sous[- ]titrage\s+fr(?:ançais)?\s*[.!?]?/giu,
     /sous[- ]titr(?:age|es?)\s+(?:par\s+)?(?:la\s+)?société\s+radio[- ]canada[.!]?/giu,
     /* A credit to a person, when it is all that was "heard" ("Sous-titres par Jérémy Diaz", 31-10). */
