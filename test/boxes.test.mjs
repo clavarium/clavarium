@@ -307,6 +307,7 @@ test('an internet sound plays on a box at its pace, a few seconds ahead, until s
     await boxes.listen(box.id, 'https://radio.example.org/station.pls', 'Radio');
     assert.equal(spawned[0].cmd, 'ffmpeg');
     assert.ok(spawned[0].args.includes('https://radio.example.org/live.mp3'), 'the playlist read: its first address');
+    assert.ok(spawned[0].args.some((a) => a.startsWith('loudnorm=')), 'every radio brought to one loudness');
     assert.deepEqual(s.sent.at(-1), { t: 'speak.start', rate: 16_000, kind: 'stream' });
     spawned[0].c.stdout.write(Buffer.alloc(32_000 * 20));
     await new Promise((r) => setTimeout(r, 250));
@@ -462,4 +463,13 @@ test('an answer is said sentence by sentence: the first starts while the next is
     assert.equal(spoken.length, 3);
     const ends = s.sent.filter((m) => m.t === 'speak.end');
     assert.deepEqual(ends, [{ t: 'speak.end' }, { t: 'speak.end' }, { t: 'speak.end', then: 'listen' }]);
+});
+
+test('levels: the voice is brought to one loudness, and a stream is normalised by ffmpeg', async () => {
+    const { levelled, VOICE_RMS } = await import('../server/boxes.mjs');
+    const quiet = Buffer.alloc(32_000); for (let i = 0; i < quiet.length; i += 2) quiet.writeInt16LE(Math.round(1000 * Math.sin(i / 7)), i);
+    const out = levelled(quiet);
+    let sum = 0; let n = 0; for (let i = 0; i < out.length; i += 2) { const v = out.readInt16LE(i); if (Math.abs(v) > 300) { sum += v * v; n++; } }
+    assert.ok(Math.abs(Math.sqrt(sum / n) - VOICE_RMS) < VOICE_RMS * 0.15, String(Math.sqrt(sum / n)));
+    assert.equal(levelled(Buffer.alloc(100)).length, 100, 'silence left as it is');
 });

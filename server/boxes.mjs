@@ -140,8 +140,22 @@ export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${Str
 /* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
    they last, with a fade down and up (a quarter of a second) rather than a jump. One 20 ms chunk at a time. */
 export const DUCK = 0.2;
-/* A stream plays at half the box's level: the radio quieter, the box's own voice as loud as ever (01-11). */
-export const STREAM_LEVEL = 0.5;
+/* LEVELS (01-11): like a phone, one volume for the whole box (set, and eased to the room by the box itself),
+   and under it each kind of sound brought to its own steady level -- a loud radio and a quiet one played alike
+   (ffmpeg's loudnorm, EBU R128), the radio a step below the box's voice, its voice always at one loudness. */
+export const STREAM_LUFS = -26;
+export const STREAM_LEVEL = 1;
+export const VOICE_RMS = 3300;   /* about -20 dBFS: the loudness the voice was found right at */
+export function levelled(pcm, target = VOICE_RMS) {
+    let sum = 0; let n = 0;
+    for (let i = 0; i + 1 < pcm.length; i += 2) { const v = pcm.readInt16LE(i); if (Math.abs(v) > 300) { sum += v * v; n++; } }
+    if (n < 100) return pcm;
+    const gain = Math.min(4, target / Math.sqrt(sum / n));
+    if (Math.abs(gain - 1) < 0.05) return pcm;
+    const out = Buffer.alloc(pcm.length & ~1);
+    for (let i = 0; i + 1 < pcm.length; i += 2) out.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(pcm.readInt16LE(i) * gain))), i);
+    return out;
+}
 export function mix(stream, chunk) {
     const words = stream.over[0];
     const target = words ? DUCK : 1;
@@ -318,7 +332,7 @@ export class Boxes {
         this.stop(id);
         const source = await this.#resolve(url);
         let child;
-        try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
+        try { child = this.#spawn('ffmpeg', ['-nostdin', '-loglevel', 'error', '-reconnect', '1', '-reconnect_streamed', '1', '-reconnect_delay_max', '5', '-i', source, '-vn', '-af', `loudnorm=I=${STREAM_LUFS}:TP=-3:LRA=11`, '-ac', '1', '-ar', '16000', '-f', 's16le', '-'], { stdio: ['ignore', 'pipe', 'pipe'] }); }
         catch { throw new Refusal(501, 'This server cannot read sounds: ffmpeg is not installed (an update installs it).'); }
         const box = link.box(); const label = name || new URL(url).host;
         const stream = { child, queue: [], queued: 0, sent: 0, started: this.#now(), timer: null, ended: false, failed: '', over: [], gain: 1 };
@@ -469,7 +483,7 @@ export class Boxes {
             socket, send, waiting: new Map(), heardAt: 0, muted: null, volume: null,
             box: () => this.#all().find((b) => b.id === box.id) ?? box,
             play: (pcm, then = null) => {
-                pcm = pcm.subarray(0, pcm.length & ~1);   /* whole samples only: an odd byte shifts every sample after it */
+                pcm = levelled(pcm.subarray(0, pcm.length & ~1));   /* whole samples only (an odd byte shifts every sample after it), at the voice's level */
                 /* Something is playing (a radio): the words go over it, the radio lowered meanwhile (the mixer, listen()). */
                 const playing = this.#streams.get(box.id);
                 if (playing) { playing.over.push(pcm); return; }
