@@ -77,6 +77,7 @@ import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
+import { Pocket } from './pocket.mjs';
 import { Speech } from './speech.mjs';
 import { WebSocketServer } from 'ws';
 
@@ -602,7 +603,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         void team.refresh().catch((error) => console.error(`operators: ${error.message}`));
         const watching = setInterval(() => { void team.watch().catch(() => {}); }, 60_000); watching.unref?.();
     }
-    const speech = new Speech({ dir: `${dataDir}/voices`, log: (line) => events.add({ kind: 'server', text: line }), secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } } });
+    const speechLog = (line) => events.add({ kind: 'server', text: line });
+    const speech = new Speech({ dir: `${dataDir}/voices`, log: speechLog, secret: (name) => { try { return secrets.reveal(name) ?? undefined; } catch { return undefined; } },
+        /* The voice by default: Kyutai's Pocket TTS, run here (pocket.mjs); CLAVARIUM_POCKET=0 to leave it out. */
+        pocket: process.env.CLAVARIUM_POCKET === '0' ? null : new Pocket({ dir: `${dataDir}/voices`, log: speechLog }) });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
         exists: (name) => all.list().some((c) => c.name === name),
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
