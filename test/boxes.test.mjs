@@ -383,17 +383,17 @@ test('a long recording: asked in words, written to disk, transcribed in parts wi
 });
 
 test('the mixer: words over a stream, the stream lowered with a fade, then back', async () => {
-    const { mix, DUCK } = await import('../server/boxes.mjs');
+    const { mix, DUCK, STREAM_LEVEL } = await import('../server/boxes.mjs');
     const radio = Buffer.alloc(640); for (let i = 0; i < 640; i += 2) radio.writeInt16LE(10_000, i);
     const words = Buffer.alloc(640 * 30); for (let i = 0; i < words.length; i += 2) words.writeInt16LE(1000, i);
     const stream = { over: [words], gain: 1 };
     const first = mix(stream, radio);
-    assert.ok(first.readInt16LE(0) > 9_000, 'no jump: it fades');
+    assert.ok(first.readInt16LE(0) > 9_000 * STREAM_LEVEL, 'no jump: it fades');
     let out; for (let i = 0; i < 20; i++) out = mix(stream, radio);
-    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK) + 1000, 'lowered, the words over it');
+    assert.equal(out.readInt16LE(0), Math.round(10_000 * DUCK * STREAM_LEVEL) + 1000, 'lowered, the words over it');
     for (let i = 0; i < 60; i++) out = mix(stream, radio);
     assert.equal(stream.over.length, 0);
-    assert.equal(out.readInt16LE(638), 10_000, 'back to full');
+    assert.equal(out.readInt16LE(638), 10_000 * STREAM_LEVEL, 'back to its level');
 });
 
 test('something said of itself, long after the last sentence, does not open a conversation', async () => {

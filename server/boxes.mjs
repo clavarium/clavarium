@@ -140,6 +140,8 @@ export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${Str
 /* THE MIXER of a box that plays a stream: words said meanwhile go over it, the stream lowered to DUCK while
    they last, with a fade down and up (a quarter of a second) rather than a jump. One 20 ms chunk at a time. */
 export const DUCK = 0.2;
+/* A stream plays at half the box's level: the radio quieter, the box's own voice as loud as ever (01-11). */
+export const STREAM_LEVEL = 0.5;
 export function mix(stream, chunk) {
     const words = stream.over[0];
     const target = words ? DUCK : 1;
@@ -147,7 +149,7 @@ export function mix(stream, chunk) {
     const step = (1 - DUCK) / (0.25 * 16_000);
     for (let i = 0; i < chunk.length; i += 2) {
         stream.gain += Math.max(-step, Math.min(step, target - stream.gain));
-        let v = chunk.readInt16LE(i) * stream.gain;
+        let v = chunk.readInt16LE(i) * stream.gain * STREAM_LEVEL;
         if (words && stream.gain <= DUCK + 0.05) {
             stream.at ??= 0;
             if (stream.at + 1 < words.length) { v += words.readInt16LE(stream.at); stream.at += 2; }
