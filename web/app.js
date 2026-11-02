@@ -8229,17 +8229,28 @@
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
+        /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
+        const cannot = (why) => {
+            const box = el('div', 'preview-cannot');
+            const icon = el('div', 'preview-cannot-icon'); icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+            const get = el('a', 'button primary preview-cannot-get'); get.href = address; get.setAttribute('download', name);
+            get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+            get.append(document.createTextNode(' Download'));
+            box.append(icon, el('b', 'preview-cannot-name', name), el('p', 'hint', why), get);
+            $('preview-body').replaceChildren(box); note('');
+        };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
-        if (!known) { note('This kind of file is not shown here. Download it to open it.'); return; }
-        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { note(`This file is too large to be shown here (${sizeOf(size)}). Download it to open it.`); return; }
+        if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
+        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
         try {
             const r = await fetch(address);
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
             bytes = await r.arrayBuffer();
-        } catch (error) { note(error.message); return; }
+        } catch (error) { cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -8269,7 +8280,7 @@
                     if ($('viewer').hidden) return;
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
-            } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
+            } catch { cannot('This PDF could not be shown here.'); }
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };

@@ -2114,3 +2114,11 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 /* New conversation: a + like its neighbours, in the brass of an action (02-11: the words were loud). */
 #new.new-btn { color: var(--brass); }
 #new.new-btn:hover { border-color: var(--brass); }
+
+/* A file that cannot be shown: its icon, its name, why, and Download, in the middle of the viewer. */
+.preview-cannot { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; min-height: 40vh; padding: 24px 16px; text-align: center; }
+.preview-cannot-icon .ic { width: 56px; height: 56px; stroke-width: 1.2; color: var(--ink2); }
+.preview-cannot-name { overflow-wrap: anywhere; max-width: 32rem; }
+.preview-cannot .hint { margin: 0; max-width: 32rem; }
+.preview-cannot-get { display: inline-flex; align-items: center; gap: 6px; padding: 10px 18px; text-decoration: none; }
+.preview-cannot-get .ic { width: 18px; height: 18px; }
