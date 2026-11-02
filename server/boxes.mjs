@@ -142,6 +142,8 @@ export function endOf(ep, reason = '') {
     const n = (v) => Number.isFinite(v);
     const sec = (v) => `${v.toFixed(1).replace('.', ',')} s`;
     const parts = [`fin ${String(reason).slice(0, 12)}${n(ep.s) ? ` ${sec(ep.s)}` : ''}`.replace(/\s+/g, ' ').trim()];
+    /* The four slots of the chip, when the box says them (0.1.43): which one carries the voice. Short, the line is short. */
+    if (Array.isArray(ep.slots) && ep.slots.length === 4) { parts.push(`voies ${ep.slots.map((v) => Math.round(Number(v) || 0)).join('/')}`); if (n(ep.voice) && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`); return parts.join(' · '); }
     parts.push(n(ep.heard_at) && ep.heard_at >= 0 ? `voix dès ${sec(ep.heard_at)}` : 'sans voix');
     if (n(ep.bar)) parts.push(`seuil ${Math.round(ep.bar)}`);
     if (n(ep.voice) && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`);
@@ -458,10 +460,13 @@ export class Boxes {
     }
 
     /* Where it is (a home, a family house): grouped by it, named with it. */
-    zone(id, zone) {
+    zone(id, zone, lang) {
         const z = zoneOf(zone);
         if (!z) throw new Refusal(400, 'Not a time zone.');
-        this.#change(id, { zone: z });
+        /* Its language too, from the page that manages it (02-11: unsaid, the dictation guessed Danish on a
+           short French sentence). A tag such as fr or fr-FR, nothing else. */
+        const l = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/.test(String(lang ?? '')) ? String(lang) : null;
+        this.#change(id, { zone: z, ...(l ? { lang: l } : {}) });
         this.#links.get(id)?.send({ t: 'clock', offset: offsetOf(z, this.#now()) });
     }
         place(id, place) { this.#change(id, { place: String(place ?? '').trim().slice(0, NAME_MAX) }); }
@@ -720,7 +725,7 @@ export class Boxes {
                anything is said to the person -- who should not have to repeat (31-10). */
             const hear = async (wav) => {
                 for (let attempt = 0; ; attempt++) {
-                    try { return await this.#hear(wav); } catch (error) {
+                    try { return await this.#hear(wav, box0.lang); } catch (error) {
                         if (attempt >= 2 || error?.status === 413 || error?.status === 400) throw error;
                         this.#log(`voice box ${box0.name}: dictation failed (${error.message}), tried again`);
                         await new Promise((r) => setTimeout(r, 800 * (attempt + 1)));
@@ -822,7 +827,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'rename': boxes.rename(id, body.name); return send(200, { ok: true });
         case 'move': boxes.move(id, String(body.conversation ?? '')); return send(200, { ok: true });
         case 'place': boxes.place(id, body.place); return send(200, { ok: true });
-        case 'zone': boxes.zone(id, body.zone); return send(200, { ok: true });
+        case 'zone': boxes.zone(id, body.zone, body.lang); return send(200, { ok: true });
         case 'revoke': boxes.revoke(id); return send(200, { ok: true });
         case 'volume': return answered(await boxes.setVolume(id, body.level));
         case 'wifi-scan': { const r = await boxes.command(id, { t: 'wifi.scan' }); return send(200, { networks: Array.isArray(r.networks) ? r.networks : [] }); }

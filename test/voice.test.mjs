@@ -331,3 +331,16 @@ test('a short reaction to what was said, in its language, from the dictation ser
     assert.equal(await quickReaction({ ...ovh, url: 'https://api.example.org/v1/audio/transcriptions' }, 'x', fetcher), null);
     assert.equal(await quickReaction(ovh, 'x', async () => new Response('{}', { status: 500 })), null);
 });
+
+test('a voice box: any language heard; one neither its own nor English heard again in its own (02-11)', async () => {
+    const { hearBox, codeOfLanguage } = await import('../server/voice.mjs');
+    assert.equal(codeOfLanguage('french'), 'fr'); assert.equal(codeOfLanguage('en'), 'en'); assert.equal(codeOfLanguage('fr-FR'), 'fr'); assert.equal(codeOfLanguage(''), null);
+    const calls = [];
+    const dictation = (answers) => ({ transcribe: async (wav, lang, how) => { calls.push([lang, Boolean(how?.withLanguage)]); return how?.withLanguage ? answers.shift() : 'Quelle heure est-il ?'; } });
+    assert.equal(await hearBox(dictation([{ text: 'What time is it?', language: 'english' }]), 'w', 'fr-FR'), 'What time is it?', 'English kept');
+    assert.equal(await hearBox(dictation([{ text: 'Bonjour', language: 'french' }]), 'w', 'fr-FR'), 'Bonjour');
+    calls.length = 0;
+    assert.equal(await hearBox(dictation([{ text: 'Fertiliseringskontrollen', language: 'danish' }]), 'w', 'fr-FR'), 'Quelle heure est-il ?', 'Danish heard again in French');
+    assert.deepEqual(calls, [[undefined, true], ['fr-FR', false]]);
+    assert.equal(await hearBox(dictation([{ text: 'Hej', language: 'danish' }]), 'w', null), 'Hej', 'no language known: as heard');
+});

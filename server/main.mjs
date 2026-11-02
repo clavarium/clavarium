@@ -29,7 +29,7 @@ import { Vms, runner } from './vm.mjs';
 import { Resources } from './resources.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 import { Shortcuts } from './shortcuts.mjs';
-import { Dictation } from './voice.mjs';
+import { hearBox, Dictation } from './voice.mjs';
 import QRCode from 'qrcode';
 import { Devices } from './devices.mjs';
 import { handleDoor, deviceTerminal } from './door.mjs';
@@ -616,7 +616,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
         react: (said) => voice.reaction(said),
         recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
-        hear: (wav) => voice.transcribe(wav, undefined, { oneVoice: true }),   /* the language of the dictation settings, or found by the engine: no language is assumed (a box has no browser to tell one) */
+        hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
