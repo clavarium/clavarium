@@ -99,6 +99,62 @@
     };
 
     const say = (label, kind) => { state.textContent = label; state.dataset.state = kind; };
+    /* THE MASCOT (02-11): a small animal drawn above the words while a conversation goes to sleep, sleeps,
+       or wakes. All of it is HERE -- the drawing -- and in style.css under .mascot -- its poses: another
+       animal, or other movements, is changed in one place. Poses: 'asleep' (lies, eyes shut, breathes, z's),
+       'waking' (rises in one movement, an ear flick, a blink), '' (standing). A device asking for less
+       motion sees still pictures. */
+    const scallops = (cx, cy, rx, ry, n, depth) => {
+        let d = '';
+        for (let i = 0; i <= n; i++) {
+            const a = (i / n) * Math.PI * 2; const x = cx + rx * Math.cos(a); const y = cy + ry * Math.sin(a);
+            if (i === 0) { d += `M${x.toFixed(1)} ${y.toFixed(1)}`; continue; }
+            const m = ((i - 0.5) / n) * Math.PI * 2;
+            d += ` Q${(cx + (rx + depth) * Math.cos(m)).toFixed(1)} ${(cy + (ry + depth) * Math.sin(m)).toFixed(1)} ${x.toFixed(1)} ${y.toFixed(1)}`;
+        }
+        return `${d} Z`;
+    };
+    const MASCOTS = {
+        sheep: () => `<svg viewBox="0 0 150 112" aria-hidden="true">
+            <g class="m-legs"><path class="m-line m-leg" d="M46 82 l-1 16 h4"/><path class="m-line m-leg" d="M60 85 l0 14 h4"/><path class="m-line m-leg" d="M84 85 l0 14 h4"/><path class="m-line m-leg" d="M97 82 l1 16 h4"/></g>
+            <g class="m-body">
+              <path class="m-line m-fill" d="${scallops(72, 62, 42, 27, 14, 9)}"/>
+              <path class="m-soft" d="M52 56 q4 -6 8 0"/><path class="m-soft" d="M70 48 q4 -6 8 0"/><path class="m-soft" d="M60 70 q4 -6 8 0"/><path class="m-soft" d="M80 66 q4 -6 8 0"/>
+              <g class="m-head">
+                <path class="m-line m-fill m-ear" d="M110 47 c-4 -6 -12 -8 -17 -5 c4 5 11 7 17 5 z"/>
+                <path class="m-line m-fill" d="M106 44 c8 -6 20 -2 24 10 c3 9 2 18 -4 22 c-5 3 -12 1 -16 -4 c-5 -6 -8 -14 -6 -22 z"/>
+                <path class="m-line m-fill" d="${scallops(114, 43, 9, 4.5, 6, 3.5)}"/>
+                <ellipse class="m-eye" cx="120" cy="53" rx="2.1" ry="2.7"/>
+                <path class="m-shut" d="M117 54 q3 2.4 6 0"/>
+                <ellipse class="m-blush" cx="117" cy="62" rx="3.4" ry="2.1"/>
+                <path class="m-line m-thin" d="M126 70 q-2 2 -4 1"/>
+              </g>
+            </g>
+          </svg>`,
+    };
+    const MASCOT = 'sheep';
+    const mascot = (pose) => {
+        let m = document.getElementById('notice-mascot');   /* not $(): it gives a stand-in when there is none */
+        if (pose === null) { if (m) m.hidden = true; return; }
+        if (!m) {
+            m = document.createElement('div'); m.id = 'notice-mascot'; m.className = 'mascot';
+            m.innerHTML = `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span>`;
+            $('notice-text').before(m);
+        }
+        m.hidden = false;
+        const was = m.dataset.pose ?? '';
+        if (pose === 'waking') {
+            if (was === 'waking') return;
+            /* From lying, in one movement: the breathing stops first, then it rises. */
+            m.classList.add('asleep', 'stirring'); m.dataset.pose = 'waking';
+            requestAnimationFrame(() => requestAnimationFrame(() => { m.classList.remove('asleep'); m.classList.add('waking'); }));
+            return;
+        }
+        m.classList.remove('waking', 'stirring');
+        m.classList.toggle('asleep', pose === 'asleep');
+        m.dataset.pose = pose;
+    };
+
     const show = (text, action, run, cancel) => {
         $('notice-text').textContent = text;
         $('notice-action').textContent = action ?? '';
@@ -110,6 +166,7 @@
         notice.hidden = false;
         $('notice-spin').hidden = true; $('notice-steps').hidden = true;
         $('notice-head').hidden = true; delete notice.dataset.progress; delete notice.dataset.loading;
+        mascot(null);
     };
     /* A terminal on its way: a neutral word and the wheel, nothing that sounds like a fault. It
        covers only when the terminal is what is on screen -- not the chat already there, which a tab
@@ -200,6 +257,7 @@
         }
         const s = Math.max(0, Math.floor((Date.now() - (Date.parse(p.since ?? '') || Date.now())) / 1000));
         $('notice-title').textContent = PROGRESS_TITLES[p.kind] ?? 'Starting';
+        mascot(p.kind === 'wake' ? 'waking' : null);
         $('notice-count').textContent = `Step ${at + 1} of ${p.steps.length} \u00b7 ${clockOf(s)}`;
         $('notice-text').textContent = usualFor(p.kind, s);
         return true;
@@ -914,7 +972,7 @@
         /* Given its chat and not its terminal: the chat is the whole page, and no terminal is ever opened. */
         if (noTerminal()) { chatAlone(); return; }
         /* Asleep because somebody asked: it stays asleep until somebody asks. */
-        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`Asleep. The tool is frozen as it was.${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, 'Wake it', connect); return; }
+        if (c && c.asleep === true && !socket) { say('asleep', 'waiting'); show(`Asleep. The tool is frozen as it was.${c.sizeAtWake ? ` When it wakes, its machine is restarted with its new size (${laterWords(c.sizeAtWake)}), and the tool takes up its session.` : ''}`, 'Wake it', connect); mascot('asleep'); return; }
         if (!socket) { terminal.reset(); connect(); }
         void watchSignIn();
     }
@@ -2661,7 +2719,7 @@
             math: { url: new URL('vendor/katex/katex.mjs', new URL(DEVICE ? '/c/' : '/', location.href)).href },
             refs: {
                 label: (ref) => (/^file:\/(work|resources)\//.test(ref) ? 'Open' : null),
-                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void preview(tab, m[2], m[2].split('/').pop(), 0); },
+                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void openFromChat(tab, m[2]); },
             },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
@@ -2675,7 +2733,7 @@
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
-            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
+            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void openFromChat(tab, inner); },
             ...(noTerminal() ? {} : { terminal: () => seeTerminal() }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
             /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
@@ -8229,17 +8287,28 @@
         /* A file read from the machine's disk says so, whatever else is said. */
         const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
+        /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
+        const cannot = (why) => {
+            const box = el('div', 'preview-cannot');
+            const icon = el('div', 'preview-cannot-icon'); icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>';
+            const get = el('a', 'button primary preview-cannot-get'); get.href = address; get.setAttribute('download', name);
+            get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+            get.append(document.createTextNode(' Download'));
+            box.append(icon, el('b', 'preview-cannot-name', name), el('p', 'hint', why), get);
+            $('preview-body').replaceChildren(box); note('');
+        };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
-        if (!known) { note('This kind of file is not shown here. Download it to open it.'); return; }
-        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { note(`This file is too large to be shown here (${sizeOf(size)}). Download it to open it.`); return; }
+        if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
+        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
         try {
             const r = await fetch(address);
             if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
             bytes = await r.arrayBuffer();
-        } catch (error) { note(error.message); return; }
+        } catch (error) { cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -8269,7 +8338,7 @@
                     if ($('viewer').hidden) return;
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
-            } catch { body.replaceChildren(); note('This PDF could not be shown here. Download it to open it.'); }
+            } catch { cannot('This PDF could not be shown here.'); }
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
@@ -8519,6 +8588,16 @@
        else on the machine's disk is said to be out of reach. */
     const PATH_ONLY = /^\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+$/;
     const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
+    /* FROM THE CHAT (02-11): a folder named in a message is listed, as in Assets -- not an empty preview. */
+    async function openFromChat(tab, inner) {
+        const clean = String(inner).replace(/\/+$/, '');
+        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: clean })}`).catch(() => null);
+        if (asFolder?.ok) {
+            if (!DEVICE) { showInAssets(tab, clean); return; }
+            filesOf = tab; filesAt = clean; await paintFiles(); showFiles(); return;
+        }
+        await preview(tab, clean, clean.split('/').pop(), 0);
+    }
     async function openPath(text) {
         /* A finger on the terminal also calls the on-screen keyboard: it is
            sent away, the file is what was asked for. */
@@ -9206,7 +9285,7 @@
         leavePanel();
         disconnect();
         say('going to sleep', 'connecting');
-        show('Going to sleep...');
+        show('Going to sleep...'); mascot('asleep');
         try { await post(`${API}/conversations/${encodeURIComponent(name)}/sleep`); await refresh(); enter(); }
         catch (error) { say('awake', 'ended'); show(error.message, 'Back to the terminal', connect); }
     }
