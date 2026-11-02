@@ -1019,12 +1019,13 @@
             <details class="more"><summary>Which one?</summary>A code project that installs packages: its disk. Can be changed later.</details>
           </div>
           <details class="chapter" id="newconv-more">
-            <summary><span class="chapter-title">More</span><span class="chapter-about">Identifier, memory, cores, disk.</span></summary>
+            <summary><span class="chapter-title">More</span><span class="chapter-about">Identifier, memory, cores, disk, chat.</span></summary>
             <div class="chapter-body">
               <div class="set-row"><div class="set-what"><label for="newconv-id">Identifier</label><small>Its machine and address. Never changes</small><span id="newconv-id-error" class="err" role="alert" hidden></span></div><div class="set-control"><input id="newconv-id" maxlength="32" pattern="[a-z]([a-z0-9\-]{0,30}[a-z0-9])?" placeholder="website-redesign" spellcheck="false" autocapitalize="none"></div></div>
               <div class="set-row"><div class="set-what"><label for="newconv-memory">Memory</label><small id="newconv-memory-least"></small><span id="newconv-memory-error" class="err" role="alert" hidden></span></div><div class="set-control"><select id="newconv-memory"></select></div></div>
               <div class="set-row"><div class="set-what"><label for="newconv-cpus">Cores</label><small>Shared with the server's machines</small></div><div class="set-control"><select id="newconv-cpus"></select></div></div>
               <div class="set-row"><div class="set-what"><label for="newconv-disk">Disk</label><small>For code kept on the machine; a disk only grows</small></div><div class="set-control"><select id="newconv-disk"></select></div></div>
+              <div class="set-row"><div class="set-what"><label for="newconv-chat">Chat</label><small>Talk with its tool in a chat. Off: its terminal only</small></div><div class="set-control"><input type="checkbox" id="newconv-chat" checked></div></div>
             </div>
           </details>
         </div>

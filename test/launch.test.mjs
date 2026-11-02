@@ -157,13 +157,39 @@ test('json-set merges inside objects: the other keys and projects kept (02-11)',
 
 test('screen-watch: the rules a launcher gives, acted on once, on the bottom of the screen only (02-11)', async () => {
     const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
-    const rules = rulesOf(['link:https://claude\\.ai/[^ ]*oauth[^ ]*', 'restart:(update|installed)[^\\n]{0,80}restart', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
-    assert.deepEqual(rules.map((r) => r.kind), ['link', 'restart', 'keys'], 'a key not in the closed list, or an unknown kind: no rule');
+    const rules = rulesOf(['link:https://claude\\.ai/[^ ]*oauth[^ ]*', 'notice:(update|installed)[^\\n]{0,80}restart=Restart when it suits you.', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
+    assert.deepEqual(rules.map((r) => r.kind), ['link', 'notice', 'keys'], 'a key not in the closed list, or an unknown kind: no rule');
     const seen = new Set();
     const screen = (bottom) => `${'work line\n'.repeat(40)}${bottom}`;
     assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen).map((a) => [a.kind, a.match]), [['link', 'https://claude.ai/oauth/authorize?code=abc']]);
     assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen), [], 'once per link');
-    assert.deepEqual(actionsOn(screen('✓ Update installed · Restart to apply'), rules, seen).map((a) => a.kind), ['restart']);
+    assert.deepEqual(actionsOn(screen('✓ Update installed · Restart to apply'), rules, seen).map((a) => [a.kind, a.value]), [['notice', 'Restart when it suits you.']], 'told to the agent, which decides');
     assert.deepEqual(actionsOn(screen('Do you trust this folder?'), rules, seen).map((a) => [a.kind, a.value]), [['keys', ['Enter']]]);
     assert.deepEqual(actionsOn(`Update installed, restart now\n${'later line\n'.repeat(20)}`, rules, new Set()), [], 'above the bottom: never');
+});
+
+test('toml-block keeps its own block, every other line as it was; codex.sh and vibe.sh give their tools through the relay (02-11)', (t) => {
+    const dir = home(t);
+    const run = (...args) => spawnSync(process.execPath, [join(LAUNCH, 'toml-block.mjs'), ...args], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    mkdirSync(join(dir, '.codex'));
+    writeFileSync(join(dir, '.codex', 'config.toml'), 'model = "gpt-5"\n\n[mine]\na = 1\n');
+    assert.equal(run('.codex/config.toml', 'tools', '[x]\nb = 2').status, 0);
+    assert.equal(run('.codex/config.toml', 'tools', '[x]\nb = 3').status, 0);
+    assert.equal(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), 'model = "gpt-5"\n\n[mine]\na = 1\n\n# >>> clavarium tools\n[x]\nb = 3\n# <<< clavarium tools\n');
+    assert.equal(run('.codex/config.toml', 'tools').status, 0);
+    assert.equal(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), 'model = "gpt-5"\n\n[mine]\na = 1\n', 'no text: the block taken out');
+    assert.equal(run('/etc/passwd', 'tools', 'x').status, 64);
+    /* The launchers themselves, with a Tether on the way. */
+    const bin = join(dir, 'bin'); mkdirSync(bin);
+    writeFileSync(join(bin, 'tether-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const nodeDir = join(dir, 'node'); mkdirSync(nodeDir); symlinkSync(process.execPath, join(nodeDir, 'node'));
+    const PATH = `${bin}:${nodeDir}:/usr/bin:/bin`;
+    for (const [launcher, file] of [['codex.sh', '.codex/config.toml'], ['vibe.sh', '.vibe/config.toml']]) {
+        const r = spawnSync('sh', [join(LAUNCH, launcher), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: join(dir, 'nochat') }, encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr);
+        const text = readFileSync(join(dir, file), 'utf8');
+        assert.ok(text.includes(`"${join(LAUNCH, 'mcp-relay.mjs')}", "tether-mcp"`), `${launcher}: Tether through the relay\n${text}`);
+        assert.doesNotMatch(text, /parley-mcp/, `${launcher}: no chat, no Parley`);
+    }
+    assert.match(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), /\[projects\."\/work"\]\ntrust_level = "trusted"/);
 });

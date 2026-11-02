@@ -1659,9 +1659,9 @@
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
-            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();
             /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);

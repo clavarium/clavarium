@@ -53,10 +53,10 @@ if [ -f "$chat/server.mjs" ]; then
         || echo "launch: the chat will not say when Claude Code works without a word" >&2
 fi
 # WHAT ITS SCREEN ASKS (02-11), read by the generic screen-watch -- Claude Code's own words, here and only
-# here: its sign-in link sent to the person's chat; "restart to apply" an update asked of the server (done
-# when its turn ends). A tool that changes its words: only these lines change.
+# here: its sign-in link sent to the person's chat; an update installed told to the agent, which restarts
+# when it suits it (never in the middle of its work). A tool that changes its words: only these lines change.
 node "$(dirname "$0")/screen-watch.mjs" \
     'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/[^ ]*oauth[^ ]*' \
-    'restart:(update|updated|installed)[^\n]{0,80}restart' \
+    'notice:(update|updated|installed)[^\n]{0,80}restart=Your tool was updated: when nothing runs, touch /work/.parley/restart-asked to take it up.' \
     </dev/null >/dev/null 2>&1 &
 exec "$@"
