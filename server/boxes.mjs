@@ -524,15 +524,17 @@ export class Boxes {
         let made = null;
         this.#react(text).then((t) => { made = t; }).catch(() => {});
         link.thinkingA = setTimeout(() => { void say(made || THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
-        link.thinkingB = setTimeout(() => { void say(long ? 'Ta question est riche, je regarde, un instant.' : 'Ça me demande un peu plus de temps, je regarde.'); }, long ? LONGER_AFTER_MS * 0.6 : LONGER_AFTER_MS);
-        link.thinkingA.unref?.(); link.thinkingB.unref?.();
+        /* One word of waiting, not two (02-11: « je regarde, un instant » again and again). */
+        link.thinkingA.unref?.();
     }
 
     async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
         /* What it is doing is written for a screen ("Tâche de fond : bêta 0.2.113…"): read aloud, it was words
            from nowhere (31-10). Aloud, only a short plain one; otherwise a word that it is at work. */
         const plain = forSpeech(text);
-        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? 'Je regarde, un instant.' : plain;
+        /* 02-11: not even « Je regarde, un instant » in its place -- said each time the agent wrote what it does, it
+           came back again and again. A long or technical one is not said at all. */
+        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? '' : plain;
         if (!words) return;
         let boxes;
         if (doing) {
