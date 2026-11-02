@@ -138,3 +138,11 @@ test('connect refuses an unknown state and a provider error', async (t) => {
     const state = new URL(url).searchParams.get('state');
     await assert.rejects(b.mailboxes.connect({ redirected: `http://127.0.0.1:47813/?error=access_denied&state=${state}` }), /refused/);
 });
+
+test('a classic mailbox gives its credentials to the server alone, for a live link; one by token does not (02-11)', async (t) => {
+    const b = bench(t, () => []);
+    await b.mailboxes.add(SETTINGS);
+    assert.deepEqual(b.mailboxes.credentials('inbox'), { host: 'imap.example.com', port: 993, user: 'me@example.com', password: 'mail-pass' });
+    assert.ok(!JSON.stringify(b.mailboxes.list()).includes('mail-pass'), 'never to the page');
+    assert.throws(() => b.mailboxes.credentials('nowhere'), { status: 404 });
+});

@@ -2103,3 +2103,9 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .sure { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .sure label { flex: 1 1 100%; color: var(--ink2); }
 .sure input { flex: 1 1 12em; min-width: 0; }
+
+/* A mailbox of Assets, given actions too: its small form. */
+.as-live { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.as-live > button { align-self: flex-start; }
+.as-live-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-width: 28rem; }
+.as-live-form > button { justify-self: start; margin-top: 4px; }

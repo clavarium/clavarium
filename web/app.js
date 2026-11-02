@@ -4646,6 +4646,35 @@
         const r = chosen.resource;
         /* State, in a line. */
         if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
+           send, reply, move, flag -- within the rights given. Made here with its address and password (they
+           stay on the server); only its sending server is asked, found from the address when known. */
+        if (chosen.kind === 'mailbox' && !chosen.target && chosen.box && !chosen.box.provider) {
+            const live = el('div', 'as-live');
+            const go = el('button', '', 'Also allow actions (send, move…)'); go.type = 'button';
+            live.append(el('p', 'hint', 'Read only here. Connected live too, an agent can send, reply, move or flag its mail, each within the rights you give.'), go);
+            go.addEventListener('click', async () => {
+                go.hidden = true;
+                const box = chosen.box; const emailLike = String(box.user ?? '').includes('@');
+                const email = el('input'); email.type = 'email'; email.value = emailLike ? box.user : ''; email.placeholder = 'its email address'; email.setAttribute('aria-label', 'Email address');
+                const smtp = el('input'); smtp.placeholder = 'smtp.example.com'; smtp.spellcheck = false; smtp.setAttribute('aria-label', 'Sending server (SMTP)');
+                const make = el('button', 'primary', 'Connect'); make.type = 'button';
+                const said = el('p', 'error'); said.hidden = true;
+                const form = el('div', 'as-live-form');
+                form.append(el('label', '', 'Email address'), email, el('label', '', 'Sending server (SMTP)'), smtp, make, said);
+                live.append(form);
+                const guess = async () => { try { const found = await post(`${API}/accounts/lookup`, { user: email.value.trim() }); if (found?.smtp && !smtp.value.trim()) smtp.value = found.smtp; } catch { /* typed by hand */ } if (!smtp.value.trim() && box.host) smtp.value = String(box.host).replace(/^imap\./, 'smtp.'); };
+                if (email.value) void guess();
+                email.addEventListener('change', () => void guess());
+                make.addEventListener('click', async () => {
+                    make.disabled = true; make.textContent = 'Trying it…'; said.hidden = true;
+                    try { await post(`${API}/mailboxes/${encodeURIComponent(box.name)}/live`, { email: email.value.trim(), smtp: smtp.value.trim() }); void paintAssets(); }
+                    catch (error) { said.textContent = error.message; said.hidden = false; make.disabled = false; make.textContent = 'Connect'; }
+                });
+                focusField(smtp.value ? make : smtp);
+            });
+            detail.append(live);
+        }
         /* A live link: what it is, and that it is associated with the same account's others. */
         if (chosen.target) {
             const t = chosen.target;
@@ -7019,7 +7048,15 @@
     const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft', classic: 'your host' };
     /* Which kinds each provider can be connected for (from the server). */
     let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'], classic: ['mail', 'calendar', 'contacts'] };
-    $('mailbox-to-connexion').addEventListener('click', () => { assetsAdding = 'connexion'; void paintAssets(); });
+    /* From New mailbox: the account form, on the host's kind ("Other") with what was typed here, unless it is Gmail or Microsoft. */
+    $('mailbox-to-connexion').addEventListener('click', async () => {
+        const user = $('mailbox-user').value.trim(); const host = $('mailbox-host').value.trim();
+        assetsAdding = 'connexion'; await paintAssets();
+        const big = /@(gmail|googlemail|outlook|hotmail|live)\./i.test(user) ? (/gmail|googlemail/i.test(user) ? 'google' : 'microsoft') : null;
+        setConnexionProvider(big ?? 'classic');
+        if (user.includes('@')) { $('connexion-email').value = user; $('connexion-email').dispatchEvent(new Event('change')); }
+        if (host && !big && !$('connexion-imap').value.trim()) $('connexion-imap').value = host;
+    });
     /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
        in in their own browser; the token is kept on the server, never in a machine.
        Both cover mail+calendar+contacts in one go, each landing on the same

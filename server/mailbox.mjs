@@ -134,6 +134,15 @@ export class Mailboxes {
         return this.#store.all().map((m) => ({ name: m.name, host: m.host, port: m.port ?? 993, user: m.user, provider: m.provider ?? null, messages: m.messages ?? 0, syncedAt: m.syncedAt ?? null, failure: m.failure ?? null }));
     }
 
+    /* What a live link needs to be made from it (02-11: a mailbox of Assets given the same actions as a
+       connected account): server side only, never to the page. A classic one only (a password). */
+    credentials(name) {
+        const m = this.#store.get(name);
+        if (!m) throw new Refusal(404, 'No such mailbox.');
+        if (m.provider) throw new Refusal(400, 'This mailbox signs in with Google or Microsoft: connect that account in Access instead.');
+        return { host: m.host, port: m.port ?? 993, user: m.user, password: this.#vault.open(m.sealed) };
+    }
+
     /* Adds a mailbox after proving it can be read, as a folder of that name. */
     async add(body) {
         const name = String(body?.name ?? '');
