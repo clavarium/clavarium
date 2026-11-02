@@ -745,7 +745,7 @@ export class Boxes {
             for (const piece of piecesOf(pcm)) { try { said.push(String(await hear(wavOf(piece)) ?? '').trim()); } catch (error) { failed = error; } }
             if (failed && !said.some(Boolean)) throw failed;
             text = said.filter(Boolean).join(' ');
-        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
+        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); try { this.#keep?.(box0.conversation, 'dictee-echec.txt', `${new Date(this.#now()).toISOString()} ${seconds} s: ${error.message}\n`); } catch { /* its chat may be off */ } if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (link.testing?.state === 'listening' && this.#now() <= link.testing.until) {
             this.#tested(link, text ? 'heard' : 'nothing', text);
             this.#log(`voice box ${box0.name}: microphone test, ${seconds} s heard`);
