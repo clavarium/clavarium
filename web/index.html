@@ -480,6 +480,11 @@
            right: who uses it, its state, its settings. The forms that make
            one, and a repository's remote, wait in #assets-forms and are moved
            into the detail when asked for. -->
+      <div id="deck" class="sheet as-place" hidden>
+        <div class="panel-top"><b id="deck-title">Conversations</b><button type="button" id="deck-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <div id="deck-cards" class="deck"></div>
+        <div id="deck-empty" class="deck-empty" hidden><p>No conversation yet.</p><div class="deck-empty-acts"><button type="button" id="deck-empty-new" class="primary">+ Create a conversation</button><button type="button" id="deck-empty-import">Import a configuration</button></div></div>
+      </div>
       <div id="assets" class="sheet as-place" hidden>
         <div class="panel-top"><b>Assets</b><button type="button" id="assets-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
