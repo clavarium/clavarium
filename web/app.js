@@ -9126,7 +9126,7 @@
             const place = el('input'); place.value = b.place ?? ''; place.maxLength = 40; place.placeholder = 'Place (a home)'; place.setAttribute('list', 'box-places'); place.setAttribute('aria-label', `Place of ${b.name}`);
             place.addEventListener('change', async () => { await post(`${API}/boxes/${b.id}/place`, { place: place.value.trim() }).catch(() => {}); await paintBoxes(); });
             /* A box paired before it knew its time zone takes this page's: its lights follow the hours here. */
-            if (!b.zone) void post(`${API}/boxes/${b.id}/zone`, { zone: Intl.DateTimeFormat().resolvedOptions().timeZone }).catch(() => {});
+            if (!b.zone || !b.lang) void post(`${API}/boxes/${b.id}/zone`, { zone: b.zone || Intl.DateTimeFormat().resolvedOptions().timeZone, lang: navigator.language }).catch(() => {});
             /* Louder, softer: kept here, given to the box now or when it comes back. */
             const vol = el('input'); vol.type = 'range'; vol.min = '0'; vol.max = '100'; vol.step = '5'; vol.value = String(b.volume ?? 80); vol.setAttribute('aria-label', `Volume of ${b.name}`);
             const volSaid = el('small', 'hint', `${vol.value} %`);

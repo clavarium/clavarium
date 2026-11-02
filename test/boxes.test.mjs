@@ -592,3 +592,18 @@ test('what the box measured, its sentence ended, goes beside the message', async
     assert.equal(whys[0], 'bouton · fin silence 3,1 s · voix dès 0,4 s · seuil 240 · voix 800 · moy 300 · reçu 0,8 s niv 0 (silence)');
     assert.ok(whys[0].length <= 120, String(whys[0].length));
 });
+
+test('a box is told its language by the page that manages it, and its sentences are dictated in it (02-11)', async () => {
+    const langs = [];
+    const { boxes } = make({ hear: async (wav, lang) => { langs.push(lang); return 'quelle heure est-il'; } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    boxes.zone(box.id, 'Europe/Paris', 'fr-FR');
+    assert.equal(boxes.all()[0].lang, 'fr-FR');
+    boxes.zone(box.id, 'Europe/Paris', '<script>');
+    assert.equal(boxes.all()[0].lang, 'fr-FR', 'only a language tag');
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'button' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 9), true); s.box({ t: 'listen.end', reason: 'silence' });
+    await tick(); await tick();
+    assert.deepEqual(langs, ['fr-FR']);
+});
