@@ -2719,7 +2719,7 @@
             math: { url: new URL('vendor/katex/katex.mjs', new URL(DEVICE ? '/c/' : '/', location.href)).href },
             refs: {
                 label: (ref) => (/^file:\/(work|resources)\//.test(ref) ? 'Open' : null),
-                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void preview(tab, m[2], m[2].split('/').pop(), 0); },
+                open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void openFromChat(tab, m[2]); },
             },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
@@ -2733,7 +2733,7 @@
             ...(!DEVICE || deviceParts.chat === 'write' ? { attach: { upload: (file) => attachToChat(name, file) } } : {}),
             /* Its terminal, when this device was given it. */
             /* A file the tool showed opens in the window when it is in its work folder or an attached folder ("work:report.html"). */
-            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void preview(tab, inner, inner.split('/').pop(), 0); },
+            open: (file) => { if (!file.open) return; const at = file.open.indexOf(':'); const tab = file.open.slice(0, at); const inner = file.open.slice(at + 1); void openFromChat(tab, inner); },
             ...(noTerminal() ? {} : { terminal: () => seeTerminal() }),
             /* What the tool writes is rendered (Parley builds it element by element), and named by its tool. */
             /* Named as its owner chose, else by the neutral word of the dictionary; its tool, small, in the detailed view. */
@@ -8588,6 +8588,16 @@
        else on the machine's disk is said to be out of reach. */
     const PATH_ONLY = /^\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+$/;
     const PATH = /\/(?:work|resources\/[a-z][a-z0-9-]{0,31})(?:\/[A-Za-z0-9._@+%~-]+)+/g;
+    /* FROM THE CHAT (02-11): a folder named in a message is listed, as in Assets -- not an empty preview. */
+    async function openFromChat(tab, inner) {
+        const clean = String(inner).replace(/\/+$/, '');
+        const asFolder = await fetch(`${API}/files?${new URLSearchParams({ c: current, r: tab, p: clean })}`).catch(() => null);
+        if (asFolder?.ok) {
+            if (!DEVICE) { showInAssets(tab, clean); return; }
+            filesOf = tab; filesAt = clean; await paintFiles(); showFiles(); return;
+        }
+        await preview(tab, clean, clean.split('/').pop(), 0);
+    }
     async function openPath(text) {
         /* A finger on the terminal also calls the on-screen keyboard: it is
            sent away, the file is what was asked for. */
