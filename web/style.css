@@ -2152,3 +2152,5 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .mascot.asleep .m-z:nth-of-type(3) { animation-delay: 1.9s; font-size: 10px; }
 @keyframes m-zz { 0% { opacity: 0; transform: translate(0, 0); } 20% { opacity: .9; } 100% { opacity: 0; transform: translate(18px, -42px); } }
 @media (prefers-reduced-motion: reduce) { .mascot *, .mascot { animation: none !important; transition: none !important; } }
+.preview-cannot .ic { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.preview-cannot-get .ic { stroke-width: 2.2; }
