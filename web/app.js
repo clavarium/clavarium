@@ -5259,7 +5259,8 @@
         const got = await post(`${API}/binder/suggest`, { id: r.id }).catch(() => null);
         return (got?.actions ?? []).map((a) => ({ label: a.label, why: a.why, run: async () => {
             if (a.key === 'done') { const end = (l.states ?? []).find((x) => x.done); if (end) await binderCall('move', { id: r.id, state: end.id }); return; }
-            if (a.key === 'archive') { await binderCall('archive', { id: r.id }); return; }
+            if (a.key === 'done-archive') { const end = (l.states ?? []).find((x) => x.done); if (end) await binderCall('move', { id: r.id, state: end.id }); await binderCall('archive', { id: r.id }); return; }
+            if (a.key === 'drop') { await binderCall('note', { id: r.id, text: `Dropped: no longer relevant${a.why ? ` (${a.why})` : ''}.` }); await binderCall('archive', { id: r.id }); return; }
             if (a.key === 'postpone-day' || a.key === 'postpone-week') { await binderCall('edit', { id: r.id, due: dayAfter(a.key === 'postpone-day' ? 1 : 7) }); return; }
             if (a.key === 'urgency-up' || a.key === 'urgency-down') { const u = Number(r.fields?.urgence ?? 50); await binderCall('edit', { id: r.id, fields: { urgence: Math.max(0, Math.min(100, u + (a.key === 'urgency-up' ? 20 : -20))) } }); return; }
             /* Work for an assistant: asked in its chat, where the person follows and approves. */
