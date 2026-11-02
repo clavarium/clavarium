@@ -123,6 +123,10 @@ export const FILES = {
     '/vendor/binder-fr.json': [packageFile('clavarium-binder', 'ui/texts/fr.json'), 'application/json; charset=utf-8'],
     '/vendor/pdf.mjs': [packageFile('pdfjs-dist', 'build/pdf.min.mjs'), 'text/javascript; charset=utf-8'],
     '/vendor/pdf.worker.mjs': [packageFile('pdfjs-dist', 'build/pdf.worker.min.mjs'), 'text/javascript; charset=utf-8'],
+    /* Office files shown (02-11), read in the page alone -- the file goes nowhere: spreadsheets by SheetJS
+       (Apache-2.0, from its own site: its npm copy is old), Word by mammoth (BSD-2). Asked for only when one is opened. */
+    '/vendor/xlsx.js': [packageFile('xlsx', 'dist/xlsx.full.min.js'), 'text/javascript; charset=utf-8'],
+    '/vendor/mammoth.js': [packageFile('mammoth', 'mammoth.browser.min.js'), 'text/javascript; charset=utf-8'],
     /* Drawings in the chat (```mermaid), at the version package.json fixes: asked for only when one is shown. */
     '/vendor/mermaid.js': [packageFile('mermaid', 'dist/mermaid.min.js'), 'text/javascript; charset=utf-8'],
     /* Code coloured in the chat: Prism and the languages it is given, one file; asked for only when code is shown. */

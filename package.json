@@ -1,6 +1,6 @@
 {
   "name": "clavarium",
-  "version": "0.2.131-beta.1",
+  "version": "0.2.132-beta.1",
   "license": "MIT",
   "type": "module",
   "description": "A conversation is a VM with a terminal in it. Everything else is a folder.",
@@ -48,13 +48,15 @@
     "clavarium-docket": "0.1.1",
     "clavarium-parley": "0.17.35-next.1",
     "clavarium-tether": "0.1.0-next.46",
+    "mammoth": "1.13.0",
     "mermaid": "11.17.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "6.4.299",
     "prismjs": "1.30.0",
     "qrcode": "^1.5.4",
     "web-push": "^3.6.7",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "publishConfig": {
     "access": "public"
