@@ -247,6 +247,8 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #viewer button { min-height: 40px; }
 #viewer p { margin: 0; }
 #preview-body { overflow: auto; flex: 1; min-height: 0; }
+#preview-body .preview-media { display: block; width: 100%; max-width: 720px; margin: 16px auto; }
+#preview-body .preview-video { max-height: 100%; background: #000; border-radius: 6px; }
 #preview-body img, #preview-body canvas { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; background: #fff; border-radius: 4px; }
 #preview-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .8125rem/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); margin: 0; }
 
