@@ -863,3 +863,32 @@ test('a resume that finds no session of its own ("No conversation found") starts
     /* No bare ";" for tmux to take as its own. */
     assert.ok(!resumeOrFresh(['a'], ['b']).includes(';'));
 });
+
+test('deleted for good: its machine and its work erased, nothing put aside (01-11)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'gone', tool: 'tool' });
+    await all.built;
+    b.calls.length = 0;
+    await all.erase('gone');
+    assert.ok(b.calls.includes('delete clv-gone'), b.calls.join(' | '));
+    assert.equal(b.calls.at(-1), 'work erase gone');
+    assert.ok(!b.calls.some((c) => c.startsWith('work aside')));
+    assert.equal(all.list().length, 0);
+    await assert.rejects(all.erase('gone'), { status: 404 });
+});
+
+test('reset: a working machine too is deleted with its work, and built anew; refused without reset (01-11)', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    all.create({ name: 'fresh', tool: 'tool' });
+    await all.built;
+    await assert.rejects(all.rebuild('fresh'), { status: 409 });
+    b.calls.length = 0;
+    await all.rebuild('fresh', { reset: true });
+    await all.built;
+    const erased = b.calls.indexOf('work erase fresh');
+    assert.ok(b.calls.indexOf('delete clv-fresh') >= 0 && erased > b.calls.indexOf('delete clv-fresh'), b.calls.join(' | '));
+    assert.ok(b.calls.indexOf('work make fresh') > erased, 'its work made anew, empty');
+    assert.equal(all.list()[0].phase, 'ready');
+});

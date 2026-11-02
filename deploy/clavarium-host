@@ -1137,6 +1137,17 @@ case "$AREA $VERB" in
         if [ -d "$at" ] && [ ! -L "$at" ]; then rmdir "$at" 2>/dev/null || true; fi
         if [ -f "$img" ] && [ ! -L "$img" ]; then mv -n "$img" "$MNT/removed/$1-work-$(date -u +%Y%m%dT%H%M%SZ)-$$.img"; fi
         exit 0 ;;
+    "work erase")
+        # Deleted for good, or its machine reset, BY ITS OWNER, after a confirmation that names the conversation
+        # (01-11): its work disk is ERASED, not put aside. Only that one file and its mount point.
+        [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a conversation name: $1"
+        img="$MNT/work-disks/$1.img"; at="$MNT/work/$1"
+        if [ "$SAY" = "yes" ]; then printf 'disk %s erased\n' "$img"; exit 0; fi
+        kept work; kept work-disks
+        if mountpoint -q "$at"; then umount "$at" || refuse "the work disk of $1 is in use"; fi
+        if [ -d "$at" ] && [ ! -L "$at" ]; then rmdir "$at" 2>/dev/null || true; fi
+        if [ -f "$img" ] && [ ! -L "$img" ]; then rm -f -- "$img"; fi
+        exit 0 ;;
     "view make")
         [ $# -eq 1 ] || usage; is_name "$1" || refuse "not a folder name: $1"
         folder_of "$1"; kept views

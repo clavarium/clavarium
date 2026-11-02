@@ -849,6 +849,7 @@
         const c = conversations.find((x) => x.name === current);
         const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('archive').hidden = !c;
+        $('reset-machine').hidden = $('erase-conversation').hidden = !c || DEVICE;
         $('files-open').hidden = $('share').hidden = !usable;
         /* Given its chat alone: the files of the chat open from the chat; Files holds only what was given to the device itself. */
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
@@ -9181,6 +9182,36 @@
         catch (error) { show(error.message, 'Close', enter); }
     }
     $('archive').addEventListener('click', () => { void archive(false); });
+    /* RESET or DELETE FOR GOOD (01-11): whatever state its machine is in -- one that never started too. Both
+       erase, so its name is typed first; nothing is done until it matches. */
+    let sureAction = null;
+    function askSure(what, button, action) {
+        const c = conversations.find((x) => x.name === current); if (!c) return;
+        sureAction = { name: c.name, shown: shownName(c), action };
+        $('sure-what').textContent = `${what} Type « ${shownName(c)} » to confirm.`;
+        $('sure-go').textContent = button; $('sure-go').disabled = true; $('sure-name').value = '';
+        $('sure-form').hidden = false; focusField($('sure-name'));
+    }
+    const sureClose = () => { sureAction = null; $('sure-form').hidden = true; };
+    $('sure-name').addEventListener('input', () => { $('sure-go').disabled = !sureAction || $('sure-name').value.trim() !== sureAction.shown; });
+    $('sure-cancel').addEventListener('click', sureClose);
+    $('sure-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        if (!sureAction || $('sure-name').value.trim() !== sureAction.shown) return;
+        const { name, action } = sureAction; sureClose(); void action(name);
+    });
+    $('reset-machine').addEventListener('click', () => askSure('Reset: its machine and its files are erased, and a new empty machine is built. Its settings and attached assets stay.', 'Reset', async (name) => {
+        leavePanel(); disconnect();
+        say('building', 'connecting'); show('Resetting: a new machine is being built...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/rebuild`, { reset: true, confirm: name }); await refresh(); enter(); }
+        catch (error) { show(error.message, 'Close', enter); }
+    }));
+    $('erase-conversation').addEventListener('click', () => askSure('Delete for good: its machine and its files are erased; nothing is put aside. Attached assets stay where they are.', 'Delete for good', async (name) => {
+        leavePanel(); disconnect();
+        say('archiving', 'connecting'); show('Deleting for good...');
+        try { await post(`${API}/conversations/${encodeURIComponent(name)}/erase`, { confirm: name }); await refresh(); select(''); }
+        catch (error) { show(error.message, 'Close', enter); }
+    }));
     /* "<" of a conversation (a phone): the list, as Back does. */
     $('back').addEventListener('click', () => { if (!nav.close('room')) select(''); });
 

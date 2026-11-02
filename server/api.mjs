@@ -14,6 +14,8 @@
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
  *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
  *   POST /api/conversations/<name>/archive
+ *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
+ *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
  *   POST /api/conversations/<name>/resume        {on}: its tool takes up its last session when it starts (true), or starts fresh
  *   POST /api/conversations/<name>/terminal/repair   its terminal does not come though its machine runs: repaired
@@ -710,10 +712,16 @@ export async function handleApi(request, response, conversations, headers, resou
             return send(200, await repair(conversation)), true;
         }
         const again = /^\/api\/conversations\/([^/]+)\/rebuild$/.exec(pathname);
-        if (again) return send(202, await conversations.rebuild(decodeURIComponent(again[1]))), true;
-        const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive)$/.exec(pathname);
+        if (again) {
+            const reset = body?.reset === true;
+            if (reset && String(body?.confirm ?? '') !== decodeURIComponent(again[1])) throw new Refusal(400, 'Type the name of the conversation to reset it.');
+            return send(202, await conversations.rebuild(decodeURIComponent(again[1]), { reset })), true;
+        }
+        const action = /^\/api\/conversations\/([^/]+)\/(sleep|archive|erase)$/.exec(pathname);
+        if (action?.[2] === 'erase' && String(body?.confirm ?? '') !== decodeURIComponent(action[1])) throw new Refusal(400, 'Type the name of the conversation to delete it for good.');
         if (!action) return send(404, { error: 'Not found.' }), true;
         await conversations[action[2]](decodeURIComponent(action[1]));
+        if (action[2] === 'erase') action[2] = 'archive';   /* what it leaves behind is forgotten as for an archive */
         if (action[2] === 'archive') resources?.forget(decodeURIComponent(action[1]));
         if (action[2] === 'archive') gitKeeper?.forgetConversation(decodeURIComponent(action[1]));
         if (action[2] === 'archive') sharing?.devices.forget(decodeURIComponent(action[1]));

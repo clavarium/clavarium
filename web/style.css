@@ -2098,3 +2098,8 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .chooser-option:hover, .chooser-option:focus-visible { background: var(--bar); }
 .chooser-option[aria-selected="true"] { font-weight: 600; }
 .chooser-none { padding: 8px 10px; color: var(--ink2); }
+
+/* Typing the conversation's name before an erasing action. */
+.sure { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.sure label { flex: 1 1 100%; color: var(--ink2); }
+.sure input { flex: 1 1 12em; min-width: 0; }
