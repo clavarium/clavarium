@@ -150,7 +150,8 @@ export function endOf(ep, reason = '') {
     if (n(ep.mean)) parts.push(`moy ${Math.round(ep.mean)}`);
     return parts.join(' · ');
 }
-export const THINKING_AFTER_MS = 3_500;
+/* 02-11: the light turning says it is at work; a word only when it really takes long. */
+export const THINKING_AFTER_MS = 15_000;
 export const LONGER_AFTER_MS = 12_000;
 export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
 /* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
@@ -524,19 +525,22 @@ export class Boxes {
         let made = null;
         this.#react(text).then((t) => { made = t; }).catch(() => {});
         link.thinkingA = setTimeout(() => { void say(made || THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
-        link.thinkingB = setTimeout(() => { void say(long ? 'Ta question est riche, je regarde, un instant.' : 'Ça me demande un peu plus de temps, je regarde.'); }, long ? LONGER_AFTER_MS * 0.6 : LONGER_AFTER_MS);
-        link.thinkingA.unref?.(); link.thinkingB.unref?.();
+        /* One word of waiting, not two (02-11: « je regarde, un instant » again and again). */
+        link.thinkingA.unref?.();
     }
 
     async agentSaid(conversation, text, to = null, { doing = false, asked = false } = {}) {
         /* What it is doing is written for a screen ("Tâche de fond : bêta 0.2.113…"): read aloud, it was words
            from nowhere (31-10). Aloud, only a short plain one; otherwise a word that it is at work. */
         const plain = forSpeech(text);
-        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? 'Je regarde, un instant.' : plain;
+        /* 02-11: not even « Je regarde, un instant » in its place -- said each time the agent wrote what it does, it
+           came back again and again. A long or technical one is not said at all. */
+        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? '' : plain;
         if (!words) return;
         let boxes;
         if (doing) {
             /* "I'm looking in the calendar": once per sentence heard, on the box that heard it, within two minutes. */
+            /* 02-11: what it really does, in its words (« je regarde dans ton agenda »); never a stock phrase. */
             boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && l.heardAt && !l.doingSaid && this.#now() - l.heardAt < DOING_WITHIN_MS);
             for (const l of boxes) l.doingSaid = true;
         } else {
@@ -735,9 +739,13 @@ export class Boxes {
                     }
                 }
             };
-            for (const piece of piecesOf(pcm)) said.push(String(await hear(wavOf(piece)) ?? '').trim());
+            /* A part the engine fails on is left out (02-11: « la dictée ne répond pas » said while the rest was
+               understood); only when every part fails is it said. */
+            let failed = null;
+            for (const piece of piecesOf(pcm)) { try { said.push(String(await hear(wavOf(piece)) ?? '').trim()); } catch (error) { failed = error; } }
+            if (failed && !said.some(Boolean)) throw failed;
             text = said.filter(Boolean).join(' ');
-        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
+        } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); try { this.#keep?.(box0.conversation, 'dictee-echec.txt', `${new Date(this.#now()).toISOString()} ${seconds} s: ${error.message}\n`); } catch { /* its chat may be off */ } if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (link.testing?.state === 'listening' && this.#now() <= link.testing.until) {
             this.#tested(link, text ? 'heard' : 'nothing', text);
             this.#log(`voice box ${box0.name}: microphone test, ${seconds} s heard`);

@@ -8073,6 +8073,12 @@
        is offered for download, and nothing is ever run. */
     const PREVIEW_MAX = 25 * 1024 * 1024;
     const TEXT_MAX = 1024 * 1024;
+    /* SOUNDS AND VIDEOS (02-11): played here, by the browser's own player. What it cannot read (an .avi, an
+       .mkv of another codec) says so, with Download. Up to MEDIA_MAX read whole (so it can be moved through),
+       beyond, played as it comes. */
+    const MEDIA = { mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac', flac: 'audio/flac',
+        mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm', mkv: 'video/webm', ogv: 'video/ogg' };
+    const MEDIA_MAX = 200 * 1024 * 1024;
     const PICTURES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
     /* Office files (02-11), read in the page: spreadsheets by SheetJS, Word by mammoth (loaded on first use). */
     const SHEETS = ['xlsx', 'xlsm', 'xls', 'ods'];
@@ -8345,6 +8351,25 @@
             $('preview-body').replaceChildren(box); note('');
         };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
+        if (MEDIA[kind]) {
+            const video = MEDIA[kind].startsWith('video/');
+            const player = document.createElement(video ? 'video' : 'audio');
+            player.controls = true; player.preload = 'metadata'; player.className = `preview-media${video ? ' preview-video' : ''}`;
+            player.setAttribute('playsinline', '');
+            player.addEventListener('error', () => { if (!$('viewer').hidden && $('preview-name').textContent === name) cannot(`${size ? `${sizeOf(size)} · ` : ''}This browser cannot play this file.`); }, { once: true });
+            if (size && size > MEDIA_MAX) { player.src = address; $('preview-body').replaceChildren(player); note(''); return; }
+            note('Loading...');
+            let got;
+            try {
+                const r = await fetch(address);
+                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
+                got = await r.arrayBuffer();
+            } catch (error) { cannot(error.message); return; }
+            if ($('viewer').hidden || $('preview-name').textContent !== name) return;
+            shownUrl = URL.createObjectURL(new Blob([got], { type: MEDIA[kind] }));
+            player.src = shownUrl; $('preview-body').replaceChildren(player); note('');
+            return;
+        }
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind) || SHEETS.includes(kind) || kind === 'docx';
         if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
         if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }

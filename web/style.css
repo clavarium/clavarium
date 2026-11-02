@@ -22,7 +22,9 @@ body { font: .875rem var(--sans); }
 body { height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
 [hidden] { display: none !important; }
 button { font: 600 .8125rem var(--sans); color: var(--ink); background: var(--button, #222c38); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
-button.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+/* The main button (02-11): its words and outline in brass, no fill -- quieter, like a suggestion. */
+button.primary { background: transparent; border-color: var(--brass); color: var(--brass); }
+button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brass) 12%, transparent); }
 button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); outline-offset: 2px; }
 /* The list on the left, the three places under it, the conversation beside them. */
 #app { display: grid; grid-template-columns: var(--list-width, 260px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: 100%; }
@@ -109,7 +111,7 @@ main { position: relative; flex: 1; min-height: 0; }
 #notice button { padding: 10px 18px; font-size: .9375rem; }
 footer { display: flex; gap: 6px; padding: 6px 8px; background: var(--bar); border-top: 1px solid var(--line); overflow-x: auto; }
 footer button { flex: 0 0 auto; min-width: 44px; padding: 9px 12px; }
-footer button.wide { flex: 1 0 auto; background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+footer button.wide { flex: 1 0 auto; background: transparent; border-color: var(--brass); color: var(--brass); }
 @media (max-width: 700px) {
   #app { grid-template-columns: minmax(0, 1fr); }
   #list, #room { grid-column: 1; grid-row: 1; border-right: 0; }
@@ -192,7 +194,7 @@ html[data-door="device"] #room { height: 100%; }
 .chip[data-access="offline"] { color: var(--warn); border-color: var(--warn); }
 #signin-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; background: rgba(210, 169, 78, .14); border-bottom: 1px solid var(--brass); font-size: .8125rem; }
 #signin-text { flex: 1; min-width: 160px; }
-a.button { font: 600 .8125rem var(--sans); text-decoration: none; border-radius: 7px; padding: 7px 11px; background: var(--brass); color: var(--on-brass); }
+a.button { font: 600 .8125rem var(--sans); text-decoration: none; border-radius: 7px; padding: 7px 11px; background: transparent; border: 1px solid var(--brass); color: var(--brass); }
 #signin-form input { flex: 1; min-width: 130px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 /* On a narrow screen the key row wraps instead of hiding its end, and
    dictation comes first: by voice is how a phone is used. */
@@ -243,10 +245,12 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 #viewer .row { align-items: center; gap: 8px; flex-wrap: wrap; }
 #viewer .sp { flex: 1; }
 #viewer #preview-name { overflow-wrap: anywhere; }
-#viewer a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: var(--brass); color: var(--on-brass); font-weight: 600; text-decoration: none; }
+#viewer a.button { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border-radius: 8px; background: transparent; border: 1px solid var(--brass); color: var(--brass); font-weight: 600; text-decoration: none; }
 #viewer button { min-height: 40px; }
 #viewer p { margin: 0; }
 #preview-body { overflow: auto; flex: 1; min-height: 0; }
+#preview-body .preview-media { display: block; width: 100%; max-width: 720px; margin: 16px auto; }
+#preview-body .preview-video { max-height: 100%; background: #000; border-radius: 6px; }
 #preview-body img, #preview-body canvas { display: block; max-width: 100%; height: auto; margin: 0 auto 10px; background: #fff; border-radius: 4px; }
 #preview-body pre { white-space: pre-wrap; overflow-wrap: anywhere; font: .8125rem/1.45 ui-monospace, Menlo, Consolas, monospace; color: var(--ink); margin: 0; }
 
@@ -2017,7 +2021,7 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
    Download stands out. Full screen: the file takes the whole screen. */
 #viewer .ico { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-width: 38px; height: 34px; padding: 0; }
 #viewer .ico svg { width: 18px; height: 18px; }
-#viewer .ico.primary { background: var(--brass); border-color: var(--brass); color: var(--on-brass); }
+#viewer .ico.primary { background: transparent; border-color: var(--brass); color: var(--brass); }
 #viewer #preview-copy[data-done="true"] { color: var(--ok); border-color: currentColor; }
 #viewer #preview-full[aria-pressed="true"] { border-color: var(--brass); }
 #viewer.viewer-full { padding: 0; }
