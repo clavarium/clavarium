@@ -27,3 +27,10 @@ test('the API really loads it: its import is a line of its own, not lost in a co
     const { readFileSync } = await import('node:fs');
     assert.match(readFileSync(new URL('../server/api.mjs', import.meta.url), 'utf8'), /^import \{ suggest \} from '\.\/suggest\.mjs';$/m);
 });
+
+test('two endings, archived either way: done, or dropped (no longer relevant) -- never deleted (02-11)', async () => {
+    assert.equal(CATALOGUE['done-archive'].on, 'card'); assert.equal(CATALOGUE.drop.on, 'card');
+    assert.ok(!Object.keys(CATALOGUE).some((k) => /delete/.test(k)), 'nothing deletes');
+    const got = await suggest({ id: '9', title: 'Doublon' }, {}, { chat: async (system) => { assert.match(system, /drop when/); return '[{"key":"drop","why":"doublon"},{"key":"done-archive","why":"fini"}]'; } });
+    assert.deepEqual(got.map((x) => x.key), ['drop', 'done-archive']);
+});
