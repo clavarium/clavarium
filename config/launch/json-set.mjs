@@ -1,5 +1,6 @@
 /* json-set FILE KEYS: sets KEYS (a JSON object; null takes a key out) in the
- * JSON file FILE of the home, every other key kept. Written only when it
+ * JSON file FILE of the home, every other key kept -- inside objects too (02-11:
+ * {"projects": {"/work": {...}}} keeps the other projects and their other keys). Written only when it
  * changes, readable by its owner alone. A file that is not a JSON object is
  * not touched (exit 3): a person's settings are never overwritten by a guess.
  *
@@ -21,7 +22,9 @@ try { data = JSON.parse(readFileSync(at, 'utf8')); } catch (error) {
 }
 if (!data || typeof data !== 'object' || Array.isArray(data)) { console.error(`json-set: ${file} is not a JSON object: left as it is`); process.exit(3); }
 const was = JSON.stringify(data);
-for (const [k, v] of Object.entries(keys)) { if (v === null) delete data[k]; else data[k] = v; }
+const plain = (v) => v && typeof v === 'object' && !Array.isArray(v);
+const merge = (into, from) => { for (const [k, v] of Object.entries(from)) { if (v === null) delete into[k]; else if (plain(v) && plain(into[k])) merge(into[k], v); else into[k] = v; } };
+merge(data, keys);
 if (JSON.stringify(data) !== was) {
     mkdirSync(dirname(at), { recursive: true, mode: 0o700 });
     writeFileSync(`${at}.new`, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });

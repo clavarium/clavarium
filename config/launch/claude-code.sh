@@ -17,6 +17,10 @@ esac
 [ $# -gt 0 ] || { echo "launch: no command to run" >&2; exit 64; }
 node "$(dirname "$0")/json-set.mjs" .claude/settings.json "$keys" \
     || echo "launch: the settings of Claude Code were not changed: it may ask before acting" >&2
+# ITS FIRST QUESTIONS ANSWERED BEFORE THEY ARE ASKED (02-11): the welcome (theme, tips) taken as seen, and its
+# work folder trusted -- in its own file, as it records them itself; nothing to answer in the terminal.
+node "$(dirname "$0")/json-set.mjs" .claude.json '{"hasCompletedOnboarding": true, "projects": {"/work": {"hasTrustDialogAccepted": true}}}' \
+    || echo "launch: Claude Code may ask its first questions in the terminal" >&2
 # ITS TOOLS (MCP), EACH THROUGH THE RELAY (02-11): a tool updated on the machine is taken up between two of
 # its requests -- whatever the tool, the session never restarted, nothing for the agent to do. Declared
 # once, by Claude Code itself (its other servers kept); an older declaration without the relay is replaced.
@@ -48,4 +52,11 @@ if [ -f "$chat/server.mjs" ]; then
     node "$(dirname "$0")/claude-pulse.mjs" "$chat" \
         || echo "launch: the chat will not say when Claude Code works without a word" >&2
 fi
+# WHAT ITS SCREEN ASKS (02-11), read by the generic screen-watch -- Claude Code's own words, here and only
+# here: its sign-in link sent to the person's chat; "restart to apply" an update asked of the server (done
+# when its turn ends). A tool that changes its words: only these lines change.
+node "$(dirname "$0")/screen-watch.mjs" \
+    'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/[^ ]*oauth[^ ]*' \
+    'restart:(update|updated|installed)[^\n]{0,80}restart' \
+    </dev/null >/dev/null 2>&1 &
 exec "$@"

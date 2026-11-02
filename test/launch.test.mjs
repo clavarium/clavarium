@@ -147,3 +147,23 @@ test('a launcher named in the configuration is a script of config/launch; every 
     for (const bad of ['../x.sh', '/tools/x.sh', 'x', 'x.sh;id', 'X.sh', '']) assert.throws(() => one(bad), /launch/, bad);
     assert.equal(one('x.sh')[0].launch, 'x.sh');
 });
+
+test('json-set merges inside objects: the other keys and projects kept (02-11)', (t) => {
+    const dir = home(t);
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { a: 1 }, projects: { '/other': { x: 1 }, '/work': { allowedTools: ['y'] } } }));
+    assert.equal(jsonSet(dir, '.claude.json', '{"hasCompletedOnboarding": true, "projects": {"/work": {"hasTrustDialogAccepted": true}}}').status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, '.claude.json'), 'utf8')), { mcpServers: { a: 1 }, hasCompletedOnboarding: true, projects: { '/other': { x: 1 }, '/work': { allowedTools: ['y'], hasTrustDialogAccepted: true } } });
+});
+
+test('screen-watch: the rules a launcher gives, acted on once, on the bottom of the screen only (02-11)', async () => {
+    const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
+    const rules = rulesOf(['link:https://claude\\.ai/[^ ]*oauth[^ ]*', 'restart:(update|installed)[^\\n]{0,80}restart', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
+    assert.deepEqual(rules.map((r) => r.kind), ['link', 'restart', 'keys'], 'a key not in the closed list, or an unknown kind: no rule');
+    const seen = new Set();
+    const screen = (bottom) => `${'work line\n'.repeat(40)}${bottom}`;
+    assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen).map((a) => [a.kind, a.match]), [['link', 'https://claude.ai/oauth/authorize?code=abc']]);
+    assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen), [], 'once per link');
+    assert.deepEqual(actionsOn(screen('✓ Update installed · Restart to apply'), rules, seen).map((a) => a.kind), ['restart']);
+    assert.deepEqual(actionsOn(screen('Do you trust this folder?'), rules, seen).map((a) => [a.kind, a.value]), [['keys', ['Enter']]]);
+    assert.deepEqual(actionsOn(`Update installed, restart now\n${'later line\n'.repeat(20)}`, rules, new Set()), [], 'above the bottom: never');
+});
