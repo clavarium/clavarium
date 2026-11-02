@@ -8036,6 +8036,14 @@
     const PREVIEW_MAX = 25 * 1024 * 1024;
     const TEXT_MAX = 1024 * 1024;
     const PICTURES = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+    /* Office files (02-11), read in the page: spreadsheets by SheetJS, Word by mammoth (loaded on first use). */
+    const SHEETS = ['xlsx', 'xlsm', 'xls', 'ods'];
+    const SHEET_ROWS = 2000; const SHEET_COLS = 100;
+    const scriptsLoaded = new Map();
+    const loadScript = (url) => {
+        if (!scriptsLoaded.has(url)) scriptsLoaded.set(url, new Promise((ok, ko) => { const t = document.createElement('script'); t.src = url; t.onload = ok; t.onerror = () => { scriptsLoaded.delete(url); ko(new Error('The reader could not be loaded.')); }; document.head.append(t); }));
+        return scriptsLoaded.get(url);
+    };
     const TEXTS = ['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'log', 'yaml', 'yml', 'toml', 'ini', 'xml', 'html', 'css', 'js', 'mjs', 'ts', 'py', 'sh', 'sql', 'c', 'h', 'go', 'rs', 'java', 'rb', 'php', 'tex', 'eml'];
     const PDF_PAGES = 30;
     /* Beyond this, a Markdown file is shown as its text: formatting it would hold the page. */
@@ -8299,7 +8307,7 @@
             $('preview-body').replaceChildren(box); note('');
         };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
-        const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind);
+        const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind) || SHEETS.includes(kind) || kind === 'docx';
         if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
         if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
@@ -8316,6 +8324,41 @@
             const img = document.createElement('img'); img.alt = name; img.src = shownUrl;
             body.append(img); note('');
             offerCopy({ picture: new Blob([bytes], { type: PICTURES[kind] }) });
+        } else if (SHEETS.includes(kind)) {
+            /* A WORKBOOK: each sheet a table, tabs between them; its cells as text, never as markup. */
+            try {
+                await loadScript(`${DEVICE ? '/c/vendor' : '/vendor'}/xlsx.js`);
+                const book = window.XLSX.read(new Uint8Array(bytes), { type: 'array', cellDates: true, dense: true });
+                const tabs = el('div', 'sheet-tabs'); tabs.setAttribute('role', 'tablist');
+                const view = el('div', 'sheet-view');
+                const showSheet = (sheetName) => {
+                    for (const b of tabs.children) b.setAttribute('aria-selected', String(b.dataset.sheet === sheetName));
+                    const rows = window.XLSX.utils.sheet_to_json(book.Sheets[sheetName], { header: 1, raw: false, defval: '', blankrows: false });
+                    const table = el('table', 'sheet-table');
+                    const width = Math.min(SHEET_COLS, Math.max(0, ...rows.map((r) => r.length)));
+                    const head = el('tr'); head.append(el('th', 'sheet-corner', ''));
+                    for (let c = 0; c < width; c++) head.append(el('th', '', window.XLSX.utils.encode_col(c)));
+                    const thead = el('thead'); thead.append(head); table.append(thead);
+                    const tbody = el('tbody');
+                    rows.slice(0, SHEET_ROWS).forEach((r, i) => { const tr = el('tr'); tr.append(el('th', '', String(i + 1))); for (let c = 0; c < width; c++) tr.append(el('td', '', String(r[c] ?? ''))); tbody.append(tr); });
+                    table.append(tbody);
+                    view.replaceChildren(table);
+                    note(rows.length > SHEET_ROWS ? `The first ${SHEET_ROWS} rows of ${rows.length}. Download the file for the rest.` : '');
+                };
+                for (const sheetName of book.SheetNames) { const b = el('button', 'sheet-tab', sheetName); b.type = 'button'; b.dataset.sheet = sheetName; b.setAttribute('role', 'tab'); b.addEventListener('click', () => showSheet(sheetName)); tabs.append(b); }
+                body.append(...(book.SheetNames.length > 1 ? [tabs] : []), view);
+                showSheet(book.SheetNames[0]);
+            } catch { cannot('This spreadsheet could not be read here.'); }
+        } else if (kind === 'docx') {
+            /* A WORD DOCUMENT, as a readable page: in a frame where nothing runs, as a page written by the tool. */
+            try {
+                await loadScript(`${DEVICE ? '/c/vendor' : '/vendor'}/mammoth.js`);
+                const made = await window.mammoth.convertToHtml({ arrayBuffer: bytes });
+                const frame = document.createElement('iframe'); frame.className = 'doc-frame'; frame.setAttribute('sandbox', ''); frame.title = name;
+                const dark = document.documentElement.dataset.theme === 'dark' || (!document.documentElement.dataset.theme && matchMedia('(prefers-color-scheme: dark)').matches);
+                frame.srcdoc = `<!doctype html><meta charset="utf-8"><style>body{font:15px/1.55 system-ui,sans-serif;max-width:46rem;margin:24px auto;padding:0 16px;${dark ? 'background:#131a22;color:#e7edf4' : 'background:#fff;color:#17202b'}}img{max-width:100%}table{border-collapse:collapse}td,th{border:1px solid #8888;padding:4px 8px}a{color:inherit}</style>${made.value}`;
+                body.append(frame); note('Shown as a page: its exact layout is not kept. Download it for the original.');
+            } catch { cannot('This document could not be read here.'); }
         } else if (kind === 'pdf') {
             try {
                 const base = DEVICE ? '/c/vendor' : '/vendor';

@@ -2154,3 +2154,14 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 @media (prefers-reduced-motion: reduce) { .mascot *, .mascot { animation: none !important; transition: none !important; } }
 .preview-cannot .ic { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 .preview-cannot-get .ic { stroke-width: 2.2; }
+
+/* A spreadsheet shown: tabs for its sheets, the grid with its column letters and row numbers. */
+.sheet-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0; }
+.sheet-tab { padding: 6px 10px; border-radius: 8px; }
+.sheet-tab[aria-selected="true"] { border-color: var(--brass); color: var(--ink); font-weight: 600; }
+.sheet-view { overflow: auto; max-width: 100%; }
+.sheet-table { border-collapse: collapse; font-size: .85rem; }
+.sheet-table th, .sheet-table td { border: 1px solid var(--line); padding: 3px 8px; white-space: nowrap; max-width: 28rem; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+.sheet-table th { position: sticky; background: var(--bar); color: var(--ink2); font-weight: 600; }
+.sheet-table thead th { top: 0; z-index: 1; } .sheet-table tbody th { left: 0; }
+.doc-frame { width: 100%; min-height: 70vh; border: 0; border-radius: 8px; background: transparent; }

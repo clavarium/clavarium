@@ -15,3 +15,10 @@ Clavarium uses, at run time, work by others under open licences. Thank you.
 
 - **FFmpeg** (https://ffmpeg.org) — reads radios and recordings, levels and slows sounds; run as a separate
   program, installed by the system.
+
+## Office files
+
+- **SheetJS Community Edition** (https://sheetjs.com) — reads spreadsheets (xlsx, xls, ods, csv) in the page,
+  to show them. Apache-2.0. Copyright (C) 2012-present SheetJS LLC.
+- **mammoth.js** by Michael Williamson (https://github.com/mwilliamson/mammoth.js) — turns Word documents
+  (docx) into a readable page. BSD-2-Clause.
