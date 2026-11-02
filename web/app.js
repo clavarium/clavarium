@@ -7064,13 +7064,15 @@
     /* Which kinds each provider can be connected for (from the server). */
     let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'], classic: ['mail', 'calendar', 'contacts'] };
     /* From New mailbox: the account form, on the host's kind ("Other") with what was typed here, unless it is Gmail or Microsoft. */
-    $('mailbox-to-connexion').addEventListener('click', async () => {
-        const user = $('mailbox-user').value.trim(); const host = $('mailbox-host').value.trim();
+    /* The kind of mailbox, in plain sight (02-11): Google or Microsoft sign in (the account form, on that
+       provider); any other is the IMAP + SMTP form right here. */
+    for (const b of $('mailbox-provider').querySelectorAll('button')) b.addEventListener('click', async () => {
+        const provider = b.dataset.provider;
+        if (provider === 'classic') return;
+        const user = $('mailbox-user').value.trim();
         assetsAdding = 'connexion'; await paintAssets();
-        const big = /@(gmail|googlemail|outlook|hotmail|live)\./i.test(user) ? (/gmail|googlemail/i.test(user) ? 'google' : 'microsoft') : null;
-        setConnexionProvider(big ?? 'google');
-        if (user.includes('@')) { $('connexion-email').value = user; $('connexion-email').dispatchEvent(new Event('change')); }
-        if (host && !big && !$('connexion-imap').value.trim()) $('connexion-imap').value = host;
+        setConnexionProvider(provider);
+        if (user.includes('@')) $('connexion-email').value = user;
     });
     /* CONNECT AN ACCOUNT (Connexions): a live link through Tether. The person signs
        in in their own browser; the token is kept on the server, never in a machine.
