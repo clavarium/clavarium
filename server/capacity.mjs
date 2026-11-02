@@ -310,7 +310,9 @@ export class Capacity {
             const f = this.#figures(await this.room({ fresh: true }).catch(() => null));
             if (!f) return [];
             const awake = new Set(this.#conversations.awake?.() ?? []);
-            const holding = f.machines.filter((m) => m.name && !m.shelf && !awake.has(m.name) && m.rssMb >= RECLAIM_MIN_MB);
+            /* Only a machine put to sleep: one being built is not awake either, yet must never be touched. */
+            const asleep = this.#conversations.asleep ? new Set(this.#conversations.asleep()) : null;
+            const holding = f.machines.filter((m) => m.name && !m.shelf && !awake.has(m.name) && (!asleep || asleep.has(m.name)) && m.rssMb >= RECLAIM_MIN_MB);
             if (!holding.length) return [];
             const now = this.#now();
             const at = this.#store.get('reclaim')?.at ?? {};

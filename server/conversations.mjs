@@ -1227,6 +1227,9 @@ export class Conversations {
 
     /* The conversations whose machine should be running: built, not asleep. */
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
+    /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
+       suspended mid-build), not a failed one. */
+    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true).map((c) => c.name); }
 
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }
