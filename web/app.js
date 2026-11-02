@@ -1050,7 +1050,43 @@
     const plain = (text) => String(text ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
     const matches = (c) => [shownName(c), c.name, c.group, c.toolLabel].some((x) => plain(x).includes(plain(query)));
     const byRank = (a, b) => (a.rank ?? 0) - (b.rank ?? 0);
+    /* A GROUP FIELD (01-11): typed freely, or chosen from the groups there are -- a ▾ beside it opens them all
+       (a datalist alone shows only what matches what is typed, and not on every browser). */
+    function groupChooser(input, values) {
+        if (!input || input.dataset.chooser) return;
+        input.dataset.chooser = 'true';
+        const wrap = document.createElement('span'); wrap.className = 'chooser';
+        input.replaceWith(wrap); wrap.append(input);
+        const open = document.createElement('button'); open.type = 'button'; open.className = 'chooser-open'; open.textContent = '▾';
+        open.setAttribute('aria-label', 'Existing groups'); open.setAttribute('aria-haspopup', 'listbox'); open.setAttribute('aria-expanded', 'false');
+        const list = document.createElement('div'); list.className = 'chooser-list'; list.setAttribute('role', 'listbox'); list.hidden = true;
+        const close = () => { list.hidden = true; open.setAttribute('aria-expanded', 'false'); };
+        open.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (!list.hidden) { close(); return; }
+            const all = values();
+            list.replaceChildren(...(all.length ? all : [null]).map((v) => {
+                if (v === null) { const none = document.createElement('div'); none.className = 'chooser-none'; none.textContent = 'No group yet: type a name.'; return none; }
+                const o = document.createElement('button'); o.type = 'button'; o.className = 'chooser-option'; o.setAttribute('role', 'option'); o.textContent = v;
+                if (v === input.value) o.setAttribute('aria-selected', 'true');
+                o.addEventListener('click', () => { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); close(); input.focus(); });
+                return o;
+            }));
+            list.hidden = false; open.setAttribute('aria-expanded', 'true');
+            list.querySelector('[aria-selected="true"], .chooser-option')?.focus();
+        });
+        list.addEventListener('keydown', (event) => {
+            const opts = [...list.querySelectorAll('.chooser-option')]; const i = opts.indexOf(document.activeElement);
+            if (event.key === 'Escape') { close(); open.focus(); event.preventDefault(); }
+            if (event.key === 'ArrowDown' && i < opts.length - 1) { opts[i + 1].focus(); event.preventDefault(); }
+            if (event.key === 'ArrowUp' && i > 0) { opts[i - 1].focus(); event.preventDefault(); }
+            event.stopPropagation();
+        });
+        document.addEventListener('click', (event) => { if (!wrap.contains(event.target)) close(); });
+        wrap.append(open, list);
+    }
     const groupsInOrder = () => [...new Set(conversations.filter((c) => c.group).sort((a, b) => (a.groupRank ?? 0) - (b.groupRank ?? 0)).map((c) => c.group))];
+    groupChooser($('group-name'), groupsInOrder); groupChooser($('newconv-group'), groupsInOrder);
     /* WHEN IT WAS LAST USED: what was said in its chat, and what its agent said it does (Parley) -- never what
        its terminal shows. A tool with no chat (a plain terminal): the keys typed in it by hand. */
     const activityOf = (c) => Math.max(...[c.talk?.lastAt, c.talk?.stepAt, c.talk ? null : c.lastActiveAt, c.createdAt].map((x) => (x ? new Date(x).getTime() : 0)));
@@ -1134,6 +1170,15 @@
             keepFolded(); paint();
         });
         box.append(head);
+        /* A conversation added right here, in this group (01-11): the same form as anywhere, its group filled. */
+        if (!DEVICE && !String(g).startsWith('\u0001')) {
+            const add = document.createElement('button'); add.type = 'button'; add.className = 'group-add'; add.textContent = '+';
+            const where = g === NONE ? '' : g;
+            add.title = where ? `New conversation in ${label}` : 'New conversation';
+            add.setAttribute('aria-label', add.title);
+            add.addEventListener('click', (event) => { event.stopPropagation(); void openNew({ group: where }); });
+            box.append(add);
+        }
         if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); unfolding(g, [body]); box.append(body); }
         return box;
     }
@@ -1501,9 +1546,10 @@
         b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
     }
     const newOnDisk = () => $('newconv-work').querySelector('[data-work="disk"]').getAttribute('aria-checked') === 'true';
-    async function openNew({ push = true } = {}) {
+    async function openNew({ push = true, group = null } = {}) {
         if (DEVICE) return;
         newError('', '');
+        if (group !== null) $('newconv-group').value = group;
         if (place !== 'new') {
             /* From the map: a step over it, and back to it. Otherwise a place of its own. */
             if (place === 'access' && push) {
