@@ -22,3 +22,8 @@ test('suggest: the model first, the rules when it says nothing; each with its la
     assert.equal(viaRules[0].key, 'reply-mail');
     assert.deepEqual(await suggest({ title: 'x' }, {}, {}), []);
 });
+
+test('the API really loads it: its import is a line of its own, not lost in a comment (02-11)', async () => {
+    const { readFileSync } = await import('node:fs');
+    assert.match(readFileSync(new URL('../server/api.mjs', import.meta.url), 'utf8'), /^import \{ suggest \} from '\.\/suggest\.mjs';$/m);
+});

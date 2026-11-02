@@ -120,8 +120,7 @@
  *   GET  /api/flows                         who gets what: devices, conversations, assets, the rights between them, the flows
  *   POST /api/flows/name                    {around, name}: a flow named by the owner ('' gives it back its own)
  *   POST /api/setup/export                  {flow?} -> {name, text}: the configuration as one file, never the data
- *   POST /api/setup/preview                 {text, choices?}: what an import { suggest } from './suggest.mjs';
-import would do, said before anything is done
+ *   POST /api/setup/preview                 {text, choices?}: what an import would do, said before anything is done
  *   POST /api/setup/import                  {text, choices?, bundle?}: made in the background; GET says how far it is
  *   GET  /api/setup/bundle?flow=            the flow WITH the files of its folders, a .tar.gz (bundle.mjs)   &stats=1: their sizes only
  *   POST /api/setup/bundle                  the body IS such a file -> {id, text, folders}: then preview and import with {bundle: id}
@@ -134,6 +133,7 @@ import would do, said before anything is done
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
+import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
