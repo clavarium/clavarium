@@ -339,9 +339,9 @@ test('conversation: never by itself; asked for, the box stays listening until no
     assert.ok(!spoken.some((t) => /mode conversation/.test(t)));
 });
 
-test('what it is doing, written for a screen, is not read aloud, nor a word in its place (02-11)', async () => {
-    const spoken = [];
-    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); } });
+test('what it is doing, written for a screen, is not read aloud, nor a word in its place; a short plain one is (02-11)', async () => {
+    const spoken = []; let at = Date.parse('2026-11-02T12:00:00Z');
+    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); }, now: () => at });
     const box = boxes.pair({ code: boxes.code('kitchen-help').code });
     const s = new FakeSocket();
     boxes.accept(s, boxes.byKey(box.key));

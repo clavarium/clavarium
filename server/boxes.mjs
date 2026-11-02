@@ -150,7 +150,8 @@ export function endOf(ep, reason = '') {
     if (n(ep.mean)) parts.push(`moy ${Math.round(ep.mean)}`);
     return parts.join(' · ');
 }
-export const THINKING_AFTER_MS = 3_500;
+/* 02-11: the light turning says it is at work; a word only when it really takes long. */
+export const THINKING_AFTER_MS = 15_000;
 export const LONGER_AFTER_MS = 12_000;
 export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
 /* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
@@ -539,6 +540,7 @@ export class Boxes {
         let boxes;
         if (doing) {
             /* "I'm looking in the calendar": once per sentence heard, on the box that heard it, within two minutes. */
+            /* 02-11: what it really does, in its words (« je regarde dans ton agenda »); never a stock phrase. */
             boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && l.heardAt && !l.doingSaid && this.#now() - l.heardAt < DOING_WITHIN_MS);
             for (const l of boxes) l.doingSaid = true;
         } else {
@@ -737,7 +739,11 @@ export class Boxes {
                     }
                 }
             };
-            for (const piece of piecesOf(pcm)) said.push(String(await hear(wavOf(piece)) ?? '').trim());
+            /* A part the engine fails on is left out (02-11: « la dictée ne répond pas » said while the rest was
+               understood); only when every part fails is it said. */
+            let failed = null;
+            for (const piece of piecesOf(pcm)) { try { said.push(String(await hear(wavOf(piece)) ?? '').trim()); } catch (error) { failed = error; } }
+            if (failed && !said.some(Boolean)) throw failed;
             text = said.filter(Boolean).join(' ');
         } catch (error) { this.#log(`voice box ${box0.name}: ${seconds} s heard, dictation failed (${error.message})`); if (this.#tested(link, 'failed', error.message)) { link.send({ t: 'cue', name: 'error' }); return; } await lost('Pardon, la dictée ne répond pas. Tu peux répéter ?'); return; }
         if (link.testing?.state === 'listening' && this.#now() <= link.testing.until) {
