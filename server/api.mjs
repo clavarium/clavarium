@@ -14,6 +14,7 @@
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
  *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
  *   POST /api/conversations/<name>/archive
+ *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
  *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
  *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
  *   POST /api/conversations/<name>/ask-first     {on}: its tool asks before acting (true), or acts without asking in its machine (false, the default), from its next start
@@ -453,6 +454,14 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/accounts/connect' && accounts) { const made = await accounts.connect(body); return send(201, made), true; }
         if (pathname === '/api/accounts/lookup' && accounts) return send(200, await accounts.lookup(body)), true;
         if (pathname === '/api/accounts/classic' && accounts) { const made = await accounts.classic(body); return send(201, made), true; }
+        /* A mailbox of Assets, connected live too (send, move...): its address and password reused, server side. */
+        const live = /^\/api\/mailboxes\/([a-z0-9-]{1,32})\/live$/.exec(pathname);
+        if (live && accounts && mailboxes) {
+            const c = mailboxes.credentials(live[1]);
+            const user = String(body?.email ?? c.user).trim();
+            const made = await accounts.classic({ user, password: c.password, imap: `${c.host}:${c.port}`, smtp: String(body?.smtp ?? ''), kinds: ['mail'] });
+            return send(201, made), true;
+        }
         if (pathname === '/api/accounts/verify' && accounts) { const r = await accounts.verify(body); return send(200, r), true; }
         /* Assets > Access: the owner sets a conversation's level and rules on a
            target, decides a call that waited, or removes a target. Each is an op the

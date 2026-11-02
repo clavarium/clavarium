@@ -178,6 +178,12 @@ test('a classic account: each kind tried with the password first, then the passw
     assert.ok(!JSON.stringify([...made.values()]).includes('Pw-123'), 'the password is in no target');
 });
 
+test('a classic mailbox without a sending server: it reads, moves and flags; it does not send (02-11)', async (t) => {
+    const { accounts, made } = classicBench(t);
+    await accounts.classic({ user: 'lecture@example.com', password: 'Pw-1', kinds: ['mail'], imap: 'ssl0.ovh.net', smtp: '' });
+    assert.deepEqual(made.get('mail-classic-lecture-example-com').config, { user: 'lecture@example.com', host: 'ssl0.ovh.net', port: 993 });
+});
+
 test('a classic account that refuses is said, and nothing is kept', async (t) => {
     const { accounts, made } = classicBench(t, { probeFails: 'calendar' });
     await assert.rejects(accounts.classic({ user: 'a@example.com', password: 'x', kinds: ['mail', 'calendar'], imap: 'mail.example.com', smtp: 'mail.example.com', caldav: 'https://dav.example.com' }), /Agenda: .*refused the user or the password/);
