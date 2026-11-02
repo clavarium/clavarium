@@ -2110,3 +2110,7 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .as-live-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; max-width: 28rem; }
 .as-live-form > button { justify-self: start; margin-top: 4px; }
 
+
+/* New conversation: a + like its neighbours, in the brass of an action (02-11: the words were loud). */
+#new.new-btn { color: var(--brass); }
+#new.new-btn:hover { border-color: var(--brass); }
