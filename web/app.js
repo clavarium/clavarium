@@ -134,7 +134,7 @@
     };
     const MASCOT = 'sheep';
     const mascot = (pose) => {
-        let m = $('notice-mascot');
+        let m = document.getElementById('notice-mascot');   /* not $(): it gives a stand-in when there is none */
         if (pose === null) { if (m) m.hidden = true; return; }
         if (!m) {
             m = document.createElement('div'); m.id = 'notice-mascot'; m.className = 'mascot';
