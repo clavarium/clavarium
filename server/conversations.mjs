@@ -393,7 +393,8 @@ export class Conversations {
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
         const state = await this.#vms.state(name, { fresh: true });
         if (state !== undefined && c.phase !== 'failed' && !reset) throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
-        await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
+        /* A reset replaces its own machine: the room it takes is given back first. */
+        if (!(reset && state !== undefined)) await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
         this.#cancelStop(name);
         this.drop(name);
         /* Marked first: two requests cannot both start a build. */
