@@ -10,6 +10,8 @@ export const CATALOGUE = Object.freeze({
     'postpone-week': { label: 'Postpone a week', on: 'card' },
     'urgency-up': { label: 'More urgent', on: 'card' },
     'urgency-down': { label: 'Less urgent', on: 'card' },
+    /* A card no longer of use, or one an AI made by mistake: archived (restored in a click), never deleted here. */
+    archive: { label: 'Archive it', on: 'card' },
     'reply-mail': { label: 'Draft the reply to the mail', on: 'agent', ask: 'Draft a reply to the mail attached to this card. Keep it as a draft: show it to me before anything is sent.' },
     'make-event': { label: 'Put it in the calendar', on: 'agent', ask: 'Create the calendar event this card speaks of (ask me before it is created).' },
     split: { label: 'Split into smaller cards', on: 'agent', ask: 'Split this card into a few smaller cards, each one step, in the same binder.' },
@@ -51,7 +53,7 @@ export function cardText(record, list) {
         fields ? `Fields: ${fields}` : '', attached ? `Attached: ${attached}` : '', `Today: ${new Date().toISOString().slice(0, 10)}`].filter(Boolean).join('\n');
 }
 
-export const SUGGEST_SYSTEM = `You suggest quick actions for a to-do card. Choose AT MOST 3 keys from this list, the most useful first, only those that clearly fit the card: ${KEYS.map((k) => `${k} (${CATALOGUE[k].label})`).join(', ')}. Answer ONLY with JSON: [{"key": "...", "why": "a reason of 2 to 6 words, in the card's language"}]. No other text.`;
+export const SUGGEST_SYSTEM = `You suggest quick actions for a to-do card. Choose AT MOST 3 keys from this list, the most useful first, only those that clearly fit the card: ${KEYS.map((k) => `${k} (${CATALOGUE[k].label})`).join(', ')}. Suggest archive when the card no longer matters, is a duplicate, or looks made by mistake. Answer ONLY with JSON: [{"key": "...", "why": "a reason of 2 to 6 words, in the card's language"}]. No other text.`;
 
 /* -> [{ key, label, why, on, ask? }] -- the model's choice when it answers, else the rules'. */
 export async function suggest(record, list, { chat = null, now = Date.now() } = {}) {
