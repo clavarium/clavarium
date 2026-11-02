@@ -14,6 +14,7 @@
  *   POST /api/conversations/<name>/health/seen   what it says now no longer calls its owner (Needs you)
  *   POST /api/conversations/<name>/exit-report   why its tool ended: { now (read in its machine, if it runs), last (kept at its end) }
  *   POST /api/conversations/<name>/archive
+ *   POST /api/binder/suggest                {id}: at most three quick actions for that card -> {actions: [{key, label, why, on, ask?}]}
  *   POST /api/mailboxes/<name>/live          {smtp, email?}: that mailbox connected live too (send, move...), its password reused
  *   POST /api/conversations/<name>/erase         {confirm: <its name>}: deleted for good -- its machine and its work files
  *   POST /api/conversations/<name>/rebuild       {reset?, confirm?}: built again; reset (confirm: its name) for a working one too
@@ -132,6 +133,7 @@
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
+import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
@@ -399,6 +401,12 @@ export async function handleApi(request, response, conversations, headers, resou
         if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
         /* The lists: every answer is 200, a refusal said in it ({ ok: false, text }), as the keeper says it to a tool. */
         if (pathname === '/api/binder' && binders) return send(200, binders.act(body.op, body.args, identity)), true;
+        /* Quick actions on a card: suggested from its content (suggest.mjs), done by the page. */
+        if (pathname === '/api/binder/suggest' && binders) {
+            const got = binders.act('get', { id: String(body?.id ?? '') }, identity);
+            if (!got?.ok || !got.data?.record) return send(404, { error: 'No such card.' }), true;
+            return send(200, { actions: await suggest(got.data.record, got.data.list, { chat: voice?.chat?.() ?? null }) }), true;
+        }
         /* Who gets what, and a whole setup in one file: see setup.mjs. */
         if (pathname.startsWith('/api/setup/') || pathname === '/api/flows/name') {
             if (!setup) return send(404, { error: 'Not found.' }), true;

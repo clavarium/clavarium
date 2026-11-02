@@ -219,6 +219,18 @@ export async function quickReaction(config, said, fetcher = fetch) {
     } catch { return null; }
 }
 
+/* The same small fast model, for a short answer to a given instruction (quick actions on a card, 02-11). */
+export async function quickChat(config, system, user, fetcher = fetch, { maxTokens = 160, timeoutMs = 6000 } = {}) {
+    if (!config?.key || !DIARIZES.test(String(config.url))) return null;
+    const base = String(config.url).replace(/\/audio\/transcriptions\/?$/, '');
+    const r = await fetcher(`${base}/chat/completions`, {
+        method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.2, max_tokens: maxTokens, messages: [{ role: 'system', content: system }, { role: 'user', content: String(user).slice(0, 3000) }] }),
+    });
+    if (!r.ok) return null;
+    return String((await r.json())?.choices?.[0]?.message?.content ?? '');
+}
+
 /* ---------- THE ENGINE CHOSEN IN SETTINGS ----------
  * Settings > Dictation: a provider fills in the address and the model (both
  * may be changed); the key is one of the SECRETS already kept (Assets >
@@ -355,6 +367,12 @@ export class Dictation {
     async reaction(said) {
         const config = this.current();
         return config ? quickReaction(config, said, this.#fetcher) : null;
+    }
+    /* null when no such model is set: the caller then does without. */
+    chat() {
+        const config = this.current();
+        if (!config?.key || !DIARIZES.test(String(config.url))) return null;
+        return (system, user) => quickChat(config, system, user, this.#fetcher);
     }
     async transcribeParts(audio) {
         this.#fresh(this.#saved());
