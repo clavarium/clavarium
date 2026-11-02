@@ -527,7 +527,7 @@ export class Talk {
         before.sort((a, b) => b.at - a.at);
         before.forEach((x, i) => { if (i >= KEPT_TEXTS - 1 || Date.now() - x.at > KEPT_TEXT_DAYS * 86_400_000) rmSync(join(dir, FILES, x.name), { recursive: true, force: true }); });
         mkdirSync(join(dir, FILES, id));
-        writeFileSync(join(dir, FILES, id, file), String(text ?? ''), { flag: 'wx', mode: 0o644 });
+        writeFileSync(join(dir, FILES, id, file), Buffer.isBuffer(text) ? text : String(text ?? ''), { flag: 'wx', mode: 0o644 });
         return `${IN_MACHINE}/${FILES}/${id}/${file}`;
     }
 
