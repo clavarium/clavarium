@@ -351,10 +351,11 @@
           </div>
         </details>
         <details class="chapter" id="chapter-advanced" data-chapter="advanced">
-          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Archive it.</span></summary>
+          <summary><span class="chapter-title">Advanced</span><span class="chapter-about">Archive, reset or delete it.</span></summary>
           <div class="chapter-body">
-            <p class="hint">Deletes its machine and its disk. Attached folders are kept; its work folder is put aside.</p>
-            <div class="row" id="conversation-actions"><button type="button" id="archive" hidden>Archive...</button></div>
+            <p class="hint">Archive: its machine is deleted; its files are put aside on the server. Reset: a new machine, empty; settings and attached assets stay. Delete for good: nothing is kept.</p>
+            <div class="row" id="conversation-actions"><button type="button" id="archive" hidden>Archive...</button><button type="button" id="reset-machine" class="danger" hidden>Reset...</button><button type="button" id="erase-conversation" class="danger" hidden>Delete for good...</button></div>
+            <form id="sure-form" class="row sure" autocomplete="off" hidden><label for="sure-name" id="sure-what"></label><input id="sure-name" spellcheck="false" autocomplete="off"><button type="submit" id="sure-go" class="danger" disabled></button><button type="button" id="sure-cancel">Cancel</button></form>
           </div>
         </details>
       </div>

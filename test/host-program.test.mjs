@@ -37,6 +37,8 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['folder', 'make', 'reports'], 'install -d -o OWNER -g GROUP -m 0755 /var/lib/clavarium/resources/reports'],
         [['work', 'make', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img 10240M mounted at /var/lib/clavarium/work/demo'],
         [['work', 'aside', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img put aside in /var/lib/clavarium/removed'],
+        /* Deleted for good or reset by its owner (01-11): that one disk erased, nothing else. */
+        [['work', 'erase', 'demo'], 'disk /var/lib/clavarium/work-disks/demo.img erased'],
         [['vm', 'mount', 'clv-demo', 'work', 'demo', '998', '997'], 'multipass mount -u 998:1000 -g 997:1000 /var/lib/clavarium/work/demo clv-demo:/work'],
         [['vm', 'unwork', 'clv-demo'], 'multipass umount clv-demo:/work'],
         [['work', 'room', 'demo'], 'df /var/lib/clavarium/work/demo /var/lib/clavarium/work-disks'],
@@ -86,7 +88,7 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
         /* Launch with a size: disk and cores within bounds, or refused (cores capped at this host's). */
         ['vm', 'launch', 'clv-demo', '1024', '3', '1'], ['vm', 'launch', 'clv-demo', '1024', '99999', '1'], ['vm', 'launch', 'clv-demo', '1024', '16', '99'], ['vm', 'launch', 'clv-demo', '1024', '16', '0'],
         ['vm', 'shell', 'clv-demo'], ['vm', 'set', 'local.driver=lxd'], ['vm', 'transfer', '/etc/shadow', 'clv-demo:/tmp/x'],
-        ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['work', 'make', '../x'], ['work', 'aside', '/etc'], ['work', 'erase', 'demo'], ['work', 'room', '../x'], ['vm', 'unwork', 'primary'],
+        ['net', 'flush'], ['host', 'run', 'id'], ['folder', 'make', '../x'], ['work', 'make', '../x'], ['work', 'aside', '/etc'], ['work', 'erase', '../x'], ['work', 'erase', '/etc'], ['work', 'room', '../x'], ['vm', 'unwork', 'primary'],
         /* A work folder goes to its own conversation's machine, never to another. */
         ['vm', 'mount', 'clv-other', 'work', 'demo', '0', '0'], ['vm', 'mount', 'clv-demo', 'work', '../demo', '0', '0'], ['folder', 'aside', '/etc'], ['folder', 'erase', 'reports'],
         /* Memory and disk only, of our machines only, within bounds; nothing else of the VM manager's settings. */

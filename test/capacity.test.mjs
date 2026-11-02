@@ -11,14 +11,14 @@ import { Store } from '../server/store.mjs';
 import { MIN_FREE_MB } from '../server/shelf.mjs';
 import { Capacity, readRoom, readUsage, RESERVE_DISK_MB, RESERVE_MEMORY_MB, RESERVE_DISK_PERCENT, RESERVE_MEMORY_PERCENT, ROOM_MS, NEW_MACHINE_MB } from '../server/capacity.mjs';
 
-function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [], reclaim } = {}) {
+function bench(t, { room, usage, conversations = [{ name: 'alpha', memoryMb: 2048 }, { name: 'beta', memoryMb: 4096 }], shelfMb, awake = [], asleep, reclaim } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-capacity-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const world = { clock: 1_000_000, room: room ?? ['place machines 7 102400 51200', 'place data 7 102400 51200', 'place folders 9 20480 18432', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'), usage: usage ?? 'used data 100\nused folders 2000\nused work 3000\nused machine clv-alpha 4000\nused machine clv-gone 1000\nused shelf 3500\nused images 700\nused others 0' };
     const asked = [];
     const run = async (argv) => { asked.push(argv.join(' ')); if (argv[1] === 'room') return world.room === null ? { code: 1, stdout: '' } : { code: 0, stdout: world.room }; return { code: 0, stdout: world.usage }; };
     const slept = []; const alerts = []; const said = []; const reclaimed = [];
-    const capacity = new Capacity({ run, store: new Store(join(dir, 'server.json')), conversations: { list: () => conversations, awake: () => awake }, shelf: shelfMb ? { about: () => ({ current: { sizeMb: shelfMb } }) } : null, now: () => world.clock,
+    const capacity = new Capacity({ run, store: new Store(join(dir, 'server.json')), conversations: { list: () => conversations, awake: () => awake, ...(asleep ? { asleep: () => asleep } : {}) }, shelf: shelfMb ? { about: () => ({ current: { sizeMb: shelfMb } }) } : null, now: () => world.clock,
         sleep: async (name) => { slept.push(name); }, alert: (payload) => { alerts.push(payload); }, say: (name, text) => { said.push([name, text]); },
         reclaim: reclaim ?? (async (name) => { reclaimed.push(name); }) });
     return { capacity, world, asked, slept, alerts, said, reclaimed };
@@ -203,4 +203,15 @@ test('reclaimSleepers does not loop on a stubborn machine (rate-limited, reporte
     await b.capacity.reclaimSleepers();   // same clock -> inside the cooldown
     assert.deepEqual(b.reclaimed, ['alpha'], 'tried once; not again within the cooldown');
     assert.ok(b.alerts.some((a) => /still holds memory/.test(a.title)), 'reported as not freed');
+});
+
+test('reclaimSleepers never touches a machine being built: only one put to sleep (02-11)', async (t) => {
+    let b;
+    b = bench(t, {
+        room: ['place machines 7 102400 51200', 'memory 16384 10240', 'machine clv-alpha 1024'].join('\n'),
+        awake: [], asleep: [],
+        reclaim: async (name) => { b.reclaimed.push(name); },
+    });
+    assert.deepEqual(await b.capacity.reclaimSleepers(), [], 'alpha is neither awake nor asleep: being built');
+    assert.deepEqual(b.reclaimed, []);
 });

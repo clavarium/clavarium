@@ -383,23 +383,27 @@ export class Conversations {
        on the old machine's disk is not brought back: nothing here can.
        A conversation that has a working machine is refused -- this is not a
        reset button. */
-    async rebuild(name) {
+    /* `reset` (01-11, its owner's ask, confirmed by typing its name): a working machine too -- deleted with
+       everything on it and its work files, and built anew; its settings and what is attached to it stay. */
+    async rebuild(name, { reset = false } = {}) {
         const c = this.#store.get(name);
         if (!c) throw new Refusal(404, 'No such conversation.');
-        if (c.phase === 'building') throw new Refusal(409, 'This conversation is still being built.');
+        if (c.phase === 'building' && !reset) throw new Refusal(409, 'This conversation is still being built.');
         const tool = this.#tools.find((t) => t.id === c.tool);
         if (!tool) throw new Refusal(400, 'The tool of this conversation is no longer offered.');
         const state = await this.#vms.state(name, { fresh: true });
-        if (state !== undefined && c.phase !== 'failed') throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
-        await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
+        if (state !== undefined && c.phase !== 'failed' && !reset) throw new Refusal(409, 'This conversation has its machine: there is nothing to build again.');
+        /* A reset replaces its own machine: the room it takes is given back first. */
+        if (!(reset && state !== undefined)) await this.room({ kind: 'create', name, memoryMb: c.memoryMb });
         this.#cancelStop(name);
         this.drop(name);
         /* Marked first: two requests cannot both start a build. */
         const now = new Date().toISOString();
         this.#store.patch(name, { phase: 'building', step: 'Starting the machine', error: undefined, asleep: false, buildingSince: now, progress: buildProgress(now) });
         this.built = (async () => {
-            /* What a failed build left behind is cleared away first. */
+            /* What a failed build left behind is cleared away first; a reset, its files too. */
             if (state !== undefined) await this.#vms.remove(name);
+            if (reset && c.work === 'kept') await this.#vms.workErase(name);
             return this.#build(name, tool, c.memoryMb, true);
         })();
         return this.#store.get(name);
@@ -1223,6 +1227,9 @@ export class Conversations {
 
     /* The conversations whose machine should be running: built, not asleep. */
     awake() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep !== true).map((c) => c.name); }
+    /* Put to sleep, and nothing else: not one being built (02-11: a reset machine was taken for a sleeper and
+       suspended mid-build), not a failed one. */
+    asleep() { return this.#store.all().filter((c) => c.phase === 'ready' && c.asleep === true).map((c) => c.name); }
 
     /* Whether the machine of a conversation runs right now. */
     async running(name) { return (await this.#vms.state(name)) === 'Running'; }
@@ -1255,6 +1262,21 @@ export class Conversations {
         if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
         /* Its work is moved aside on the server, not erased. */
         if (kept) await this.#vms.workAside(name);
+    }
+
+    /* DELETED FOR GOOD (01-11, its owner's ask, confirmed by typing its name): as archived, but its work is
+       erased, not put aside. Whatever state its machine is in -- one that never started too. */
+    async erase(name) {
+        if (!this.#store.get(name)) throw new Refusal(404, 'No such conversation.');
+        this.#cancelStop(name);
+        this.drop(name);
+        const kept = this.#store.get(name).work === 'kept';
+        this.#store.remove(name);
+        if (await this.#vms.state(name, { fresh: true }) !== undefined) await this.#vms.remove(name);
+        if (kept) {
+            const r = await this.#vms.workErase(name);
+            if (r?.code) throw new Refusal(500, `Its machine is deleted, but its files could not be erased: ${firstLine(r.stderr) || `exit ${r.code}`}`);
+        }
     }
 
     #cancelStop(name) {

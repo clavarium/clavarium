@@ -151,6 +151,8 @@ export class Vms {
         return r.code === 0 && m ? { disk: Number(m[1]), host: Number(m[2]) } : undefined;
     }
     workAside(conversation) { vmName(conversation); return this.run(['work', 'aside', conversation]); }
+    /* Deleted for good, or reset, by its owner: its work disk erased, not put aside. */
+    workErase(conversation) { vmName(conversation); return this.run(['work', 'erase', conversation]); }
 
     /* The tools folder (see toolbox.mjs), shown read-only at /tools. */
     mountTools(conversation, uid, gid) {
