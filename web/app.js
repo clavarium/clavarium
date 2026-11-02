@@ -7030,21 +7030,36 @@
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
     });
 
+    /* NEW MAILBOX (02-11): an IMAP mailbox is connected LIVE by default, as a Microsoft or Google one -- the
+       same levels, through Tether -- with its sending server (SMTP) too, unless "No sending". The former
+       read-only copy as files stays, ticked on purpose. */
+    let mailboxLooked = '';
+    $('mailbox-user').addEventListener('change', async () => {
+        const user = $('mailbox-user').value.trim();
+        if (!user.includes('@') || user === mailboxLooked) return;
+        mailboxLooked = user;
+        try {
+            const found = await post(`${API}/accounts/lookup`, { user });
+            if (found?.imap && !$('mailbox-host').value.trim()) { const [h, p] = String(found.imap).split(':'); $('mailbox-host').value = h; if (p) $('mailbox-port').value = p; }
+            if (found?.smtp && !$('mailbox-smtp').value.trim()) $('mailbox-smtp').value = found.smtp;
+        } catch { /* typed by hand */ }
+    });
     $('mailbox-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('mailbox-error').hidden = true;
         const button = $('mailbox-new').querySelector('button[type=submit]');
-        button.disabled = true; button.textContent = 'Reading the mailbox...';
+        button.disabled = true; button.textContent = 'Trying it...';
+        const host = $('mailbox-host').value.trim(); const port = $('mailbox-port').value.trim();
         try {
-            await post(`${API}/mailboxes`, { name: $('mailbox-name').value.trim(), host: $('mailbox-host').value.trim(), port: $('mailbox-port').value.trim(), user: $('mailbox-user').value.trim(), password: $('mailbox-password').value });
-            assetOpen = `mailbox:${$('mailbox-name').value.trim()}`; assetsAdding = ''; $('mailbox-new').reset();
+            const made = await post(`${API}/accounts/classic`, { user: $('mailbox-user').value.trim(), password: $('mailbox-password').value, imap: port ? `${host}:${port}` : host, smtp: $('mailbox-smtp').value.trim(), kinds: ['mail'] });
+            if (made?.targets?.[0]?.id) assetOpen = `connexion:${made.targets[0].id}`;
+            assetsAdding = ''; $('mailbox-new').reset(); mailboxLooked = '';
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
-        button.disabled = false; button.textContent = 'Add';
+        button.disabled = false; button.textContent = 'Connect';
         await paintAssets();
     });
-    /* New mailbox is now the classic IMAP file-copy alone. Gmail and Microsoft are
-       a live Connexion (dynamic connector, token kept on the server): this jumps
-       straight to adding one. */
+    /* New mailbox: IMAP and SMTP, connected live (02-11). Gmail and Microsoft sign in instead (token kept on
+       the server): "Sign in with them" jumps to that form. */
     const MAILBOX_PROVIDER = { google: 'Google', microsoft: 'Microsoft', classic: 'your host' };
     /* Which kinds each provider can be connected for (from the server). */
     let accountSupported = { google: ['mail', 'calendar', 'contacts'], microsoft: ['mail'], classic: ['mail', 'calendar', 'contacts'] };
@@ -7053,7 +7068,7 @@
         const user = $('mailbox-user').value.trim(); const host = $('mailbox-host').value.trim();
         assetsAdding = 'connexion'; await paintAssets();
         const big = /@(gmail|googlemail|outlook|hotmail|live)\./i.test(user) ? (/gmail|googlemail/i.test(user) ? 'google' : 'microsoft') : null;
-        setConnexionProvider(big ?? 'classic');
+        setConnexionProvider(big ?? 'google');
         if (user.includes('@')) { $('connexion-email').value = user; $('connexion-email').dispatchEvent(new Event('change')); }
         if (host && !big && !$('connexion-imap').value.trim()) $('connexion-imap').value = host;
     });

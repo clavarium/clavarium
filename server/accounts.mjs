@@ -130,7 +130,8 @@ export class Accounts {
         const specs = [];
         for (const k of wanted) {
             const config = { user: address };
-            if (k === 'mail') { const i = hostPort(imap, 'mail (IMAP)', 993); const o = hostPort(smtp, 'sending (SMTP)', 587); Object.assign(config, { host: i.host, port: i.port, smtpHost: o.host, smtpPort: o.port }); }
+            /* Its sending server too, unless none is given: then it reads, moves and flags, and refuses to send (02-11). */
+            if (k === 'mail') { const i = hostPort(imap, 'mail (IMAP)', 993); Object.assign(config, { host: i.host, port: i.port }); if (String(smtp ?? '').trim()) { const o = hostPort(smtp, 'sending (SMTP)', 587); Object.assign(config, { smtpHost: o.host, smtpPort: o.port }); } }
             if (k === 'calendar') config.caldav = davUrl(caldav, 'calendar (CalDAV)');
             if (k === 'contacts') config.carddav = davUrl(carddav, 'contacts (CardDAV)');
             specs.push({ id: targetId(k, 'classic', address), title: `${KIND[k].title} — ${address}`, kind: KIND[k].kind, connector: KIND[k].connector, config, secrets: { password: name } });
