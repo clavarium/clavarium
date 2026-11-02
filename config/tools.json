@@ -179,7 +179,7 @@
   },
   {
     "id": "vibe",
-    "instructions": "AGENTS.md",
+    "instructions": ".vibe/AGENTS.md",
     "label": "Mistral Vibe",
     "launch": "vibe.sh",
     "command": [
