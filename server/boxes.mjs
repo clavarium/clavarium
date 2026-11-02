@@ -142,6 +142,8 @@ export function endOf(ep, reason = '') {
     const n = (v) => Number.isFinite(v);
     const sec = (v) => `${v.toFixed(1).replace('.', ',')} s`;
     const parts = [`fin ${String(reason).slice(0, 12)}${n(ep.s) ? ` ${sec(ep.s)}` : ''}`.replace(/\s+/g, ' ').trim()];
+    /* The four slots of the chip, when the box says them (0.1.43): which one carries the voice. Short, the line is short. */
+    if (Array.isArray(ep.slots) && ep.slots.length === 4) { parts.push(`voies ${ep.slots.map((v) => Math.round(Number(v) || 0)).join('/')}`); if (n(ep.voice) && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`); return parts.join(' · '); }
     parts.push(n(ep.heard_at) && ep.heard_at >= 0 ? `voix dès ${sec(ep.heard_at)}` : 'sans voix');
     if (n(ep.bar)) parts.push(`seuil ${Math.round(ep.bar)}`);
     if (n(ep.voice) && ep.voice > 0) parts.push(`voix ${Math.round(ep.voice)}`);

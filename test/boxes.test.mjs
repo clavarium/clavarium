@@ -607,3 +607,8 @@ test('a box is told its language by the page that manages it, and its sentences 
     await tick(); await tick();
     assert.deepEqual(langs, ['fr-FR']);
 });
+
+test('the four slots of the chip, when the box says them, go beside its message, short (02-11)', async () => {
+    const { endOf } = await import('../server/boxes.mjs');
+    assert.equal(endOf({ s: 4.2, heard_at: 0.3, voice: 900, bar: 300, mean: 200, slots: [120, 950, 31.4, 40] }, 'silence'), 'fin silence 4,2 s · voies 120/950/31/40 · voix 900');
+});

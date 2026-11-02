@@ -134,7 +134,7 @@ export function firstVoice(body) {
     return parts.filter((p) => p.speaker === who).map((p) => p.text.trim()).join(' ');
 }
 
-export async function transcribe(config, audio, fetcher = fetch, { oneVoice = false } = {}) {
+export async function transcribe(config, audio, fetcher = fetch, { oneVoice = false, withLanguage = false } = {}) {
     if (!config) throw new Refusal(503, 'No speech-to-text engine is configured.');
     if (audio.length === 0) throw new Refusal(400, 'The recording is empty.');
     if (audio.length > AUDIO_MAX) throw new Refusal(413, 'The recording is too long.');
@@ -172,7 +172,25 @@ export async function transcribe(config, audio, fetcher = fetch, { oneVoice = fa
     if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
     const body = await response.json().catch(() => undefined);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
-    return cleanDictation((oneVoice && firstVoice(body)) || body.text, wavSeconds(audio));
+    const text = cleanDictation((oneVoice && firstVoice(body)) || body.text, wavSeconds(audio));
+    /* The language the engine heard, when asked for (a voice box checks it, 02-11). */
+    return withLanguage ? { text, language: codeOfLanguage(body.language) } : text;
+}
+/* "french" or "fr" -> "fr": the engines name it either way. */
+const LANGUAGE_NAMES = { french: 'fr', english: 'en', german: 'de', spanish: 'es', italian: 'it', portuguese: 'pt', dutch: 'nl', danish: 'da', norwegian: 'no', swedish: 'sv', chinese: 'zh', japanese: 'ja', russian: 'ru', polish: 'pl', arabic: 'ar' };
+export function codeOfLanguage(given) {
+    const g = String(given ?? '').trim().toLowerCase();
+    if (!g) return null;
+    return LANGUAGE_NAMES[g] ?? (/^[a-z]{2,3}(-|$)/.test(g) ? g.slice(0, 2) : null);
+}
+/* A VOICE BOX'S SENTENCE (02-11): heard in any language -- but a short sentence is sometimes taken for
+   another (Danish for French): when the engine heard neither the box's language nor English, it is heard
+   again in the box's language. Universal, and not fooled. */
+export async function hearBox(dictation, wav, lang) {
+    const first = await dictation.transcribe(wav, undefined, { oneVoice: true, withLanguage: true });
+    const want = codeOfLanguage(lang); const got = codeOfLanguage(first?.language);
+    if (!want || !got || got === want || got === 'en') return first?.text ?? first;
+    return dictation.transcribe(wav, lang, { oneVoice: true });
 }
 
 /* A LONG RECORDING, in parts of a few minutes (a voice box records a meeting): each part's text, with who
