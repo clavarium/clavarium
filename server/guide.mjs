@@ -121,6 +121,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
     /* The thread is kept whole: after a restart, its end is read, and further back on demand. */
     if (chat && reread) out.push(`- After a restart: ${plain(reread, 60)}, the end of the chat; it says how to read further back.`);
+    /* 02-11: the one command a tool may ask of the server. */
+    if (chat) out.push('- To be restarted (new tools to take up, or anything stuck): finish what runs, then `touch /work/.parley/restart-asked`; the server restarts you once your turn ends, and your work picks up where it was.');
     /* Its docket (dockets.mjs): what wakes it waits there until it says done or failed. */
     if (chat) out.push('- What wakes you (a file arrived, the clock, a call) waits in your docket: when told "run docket", run it, do each, then docket done ID or docket failed ID "why". To be reminded later: docket remind --at "2026-10-23 09:00" (or --in 2h, --cron "0 9 * * 1") "what for". docket --help says all.');
     /* Its lists (binders.mjs): kept on the server, asked for through .binder; a person approves. */

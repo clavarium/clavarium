@@ -1659,9 +1659,9 @@
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
-            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false;
+            $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();
             /* The new one is selected: the page gives way to it, with no step of it left behind. */
             select(made.name);
@@ -4959,6 +4959,46 @@
         await paintAssets();
     }
     async function openAssets() { await openAssetsPlace(); }
+    /* ---------- the conversations as cards (02-11) ---------- */
+    /* ONE CONVERSATION AS A CARD, as a playing card: its name and its state on a plate, a picture of its own
+       (its colours drawn from its name, its initial), its agent and its tool, its last word. Reusable: any
+       page that shows conversations as things to pick or move takes it. `onOpen(c)`. */
+    function convCard(c, onOpen) {
+        let h = 0; for (const ch of String(c.name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+        const hue = h % 360;
+        const card = el('button', 'conv-card'); card.type = 'button'; card.dataset.name = c.name;
+        const state = c.asleep ? 'asleep' : c.talk?.state === 'waiting' || (c.talk?.waiting ?? 0) > 0 ? 'waits' : c.phase === 'ready' ? 'ready' : 'busy';
+        const plate = el('span', 'conv-card-plate'); const dot = el('span', 'conv-card-dot'); dot.dataset.state = state;
+        plate.append(dot, el('b', '', shownName(c)));
+        const art = el('span', 'conv-card-art'); art.style.setProperty('--h', String(hue));
+        art.append(el('span', 'conv-card-initial', (shownName(c).trim()[0] ?? '?').toUpperCase()));
+        const kind = el('span', 'conv-card-type', [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' · '));
+        const text = el('span', 'conv-card-text');
+        if (c.talk?.lastText) text.append(el('i', '', c.talk.lastText));
+        text.append(el('small', '', c.asleep ? 'Asleep' : state === 'waits' ? 'Waits for you' : c.talk?.lastAt ? cardAgo(c.talk.lastAt) : c.phase === 'ready' ? 'Ready' : (c.step || c.phase || '')));
+        card.append(plate, art, kind, text);
+        card.setAttribute('aria-label', `${shownName(c)}, ${kind.textContent}`);
+        card.addEventListener('click', () => onOpen(c));
+        return card;
+    }
+    const cardAgo = (at) => { const s = Math.max(0, (Date.now() - Date.parse(at)) / 1000); return s < 90 ? 'Just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+    function paintDeck() {
+        $('deck-title').textContent = appName;
+        const list = [...conversations];
+        const add = el('button', 'conv-card conv-card-new'); add.type = 'button';
+        add.append(el('span', 'conv-card-plus', '+'), el('small', '', 'New conversation'));
+        add.addEventListener('click', () => { void openNew(); });
+        $('deck-cards').replaceChildren(...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add);
+        $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
+    }
+    function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); paintDeck(); }
+    $('deck-close').addEventListener('click', () => leavePlace());
+    $('deck-empty-new').addEventListener('click', () => { void openNew(); });
+    /* Import a configuration: the import of the map (Access, Flows), a file chosen at once. */
+    $('deck-empty-import').addEventListener('click', () => { void openAccessPage('map', { mode: 'flows' }).then(() => document.getElementById('flows-import')?.click()).catch(() => {}); });
+    $('list-title').addEventListener('click', () => openDeck());
+    $('list-title').setAttribute('role', 'button'); $('list-title').tabIndex = 0;
+    $('list-title').addEventListener('keydown', (e) => { if (e.key === 'Enter') openDeck(); });
     /* ---------- private repositories: how this server gets in ---------- */
     /* The host of an address, whatever its form (user@host:path has no URL form). */
     const hostOf = (from) => { try { return new URL(from).hostname; } catch { return /@([^:/]+):/.exec(String(from))?.[1] ?? String(from); } };
@@ -5130,6 +5170,7 @@
         $('access').hidden = which !== 'access';
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
+        $('deck').hidden = which !== 'deck';
         $('newconv').hidden = which !== 'new';
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
@@ -5445,6 +5486,7 @@
         if (home && wanted !== current && conversations.some((c) => c.name === wanted)) select(wanted);
         const open = q.get('open') ?? '';
         if (open === 'new') { await openNew({ push: false }); return; }
+        if (open === 'deck') { openDeck(false); return; }
         if (open === 'settings') {
             await openSettings({ push: false });
             /* A link to one chapter of Settings (?open=settings&at=resources): that one opened, and shown. */

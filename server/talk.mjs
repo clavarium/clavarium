@@ -140,6 +140,8 @@ export const SYSTEM_MAX = 50;
    branch: the owner allowed each one. The owner may move a kind to another
    level (Settings); nothing else of a line changes with it. */
 export const LEVELS = Object.freeze(['needs-you', 'news', 'trace']);
+/* The file a tool puts beside its chat to be restarted (see restartAsked). */
+export const RESTART_ASKED = 'restart-asked';
 export const EVENT_LEVELS = Object.freeze({
     sent: 'news',
     refused: 'needs-you',
@@ -383,6 +385,14 @@ export class Talk {
 
     /* Is its chat on? (cheap: the record alone) */
     isOn(name) { return this.#store.get(name)?.on === true; }
+
+    /* ITS TOOL ASKS TO BE RESTARTED (02-11): a file it puts in its chat's folder (RESTART_ASKED); the server
+       restarts it once its turn has ended -- the one command a tool may ask of the server, nothing typed. */
+    restartAsked(name) {
+        if (this.#store.get(name)?.on !== true) return false;
+        try { return lstatSync(join(this.#dir(name), RESTART_ASKED), { throwIfNoEntry: false })?.isFile() === true; } catch { return false; }
+    }
+    restartTaken(name) { try { rmSync(join(this.#dir(name), RESTART_ASKED), { force: true }); } catch { /* gone already */ } }
 
     /* Its tool's pulse (Parley): { busy, at }, or null. Where the chat is off: null. */
     pulse(name) {

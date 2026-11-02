@@ -398,7 +398,24 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
         /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
         if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
-        if (pathname === '/api/conversations') { await conversations.admit?.(body); return send(201, conversations.create(body)), true; }
+        if (pathname === '/api/conversations') {
+            await conversations.admit?.(body);
+            const made = conversations.create(body);
+            /* Its chat on from the start (02-11), unless asked otherwise ("More": Chat off); a work folder on the
+               machine's disk has no place for it. */
+            if (body?.chat !== false && talk) {
+                /* Its work folder exists once it is built: the chat is put in then (a few minutes at most). */
+                const name = made.name; const until = Date.now() + 30 * 60_000;
+                const tryOn = async () => {
+                    const c = conversations.list().find((x) => x.name === name);
+                    if (!c || Date.now() > until) return;
+                    if (c.phase === 'ready') { try { await talk.set(name, true); void guide?.changed(name).catch(() => {}); } catch { /* left off: its settings turn it on */ } return; }
+                    setTimeout(() => { void tryOn(); }, 2000).unref?.();
+                };
+                void tryOn();
+            }
+            return send(201, made), true;
+        }
         /* The lists: every answer is 200, a refusal said in it ({ ok: false, text }), as the keeper says it to a tool. */
         if (pathname === '/api/binder' && binders) return send(200, binders.act(body.op, body.args, identity)), true;
         /* Quick actions on a card: suggested from its content (suggest.mjs), done by the page. */

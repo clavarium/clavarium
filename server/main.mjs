@@ -524,6 +524,20 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
         }
     });
+    /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): restarted by this server
+       once its turn has ended (its pulse no longer busy), said in its chat; once per ten minutes at most. */
+    const restartedAt = new Map();
+    const restartTimer = setInterval(() => {
+        for (const name of all.awake()) {
+            if (!talk.restartAsked(name)) continue;
+            if (talk.pulse(name)?.busy) continue;
+            talk.restartTaken(name);
+            if (Date.now() - (restartedAt.get(name) ?? 0) < 10 * 60_000) continue;
+            restartedAt.set(name, Date.now());
+            try { talk.event(name, { kind: 'restarted', text: 'Restarted as it asked: its work picks up where it was.', topic: 'Restarted' }); } catch { /* its chat is off */ }
+            void all.restart(name).catch(() => {});
+        }
+    }, 15_000); restartTimer.unref?.();
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
     const health = new Health({ vms, conversations: all, resources: folders, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
@@ -625,7 +639,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
     for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));

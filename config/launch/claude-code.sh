@@ -17,33 +17,46 @@ esac
 [ $# -gt 0 ] || { echo "launch: no command to run" >&2; exit 64; }
 node "$(dirname "$0")/json-set.mjs" .claude/settings.json "$keys" \
     || echo "launch: the settings of Claude Code were not changed: it may ask before acting" >&2
-# PARLEY AS ITS OWN TOOLS (MCP): the chat of the conversation, when it has one (its folder holds
-# Parley's server), given to Claude Code as tools always in its list -- the same as the command
-# "parley", which stays. Declared once, by Claude Code itself (its other servers kept); looked for
-# in its settings first, since asking Claude Code takes seconds. Nothing stops the start.
+# ITS FIRST QUESTIONS ANSWERED BEFORE THEY ARE ASKED (02-11): the welcome (theme, tips) taken as seen, and its
+# work folder trusted -- in its own file, as it records them itself; nothing to answer in the terminal.
+node "$(dirname "$0")/json-set.mjs" .claude.json '{"hasCompletedOnboarding": true, "projects": {"/work": {"hasTrustDialogAccepted": true}}}' \
+    || echo "launch: Claude Code may ask its first questions in the terminal" >&2
+# ITS TOOLS (MCP), EACH THROUGH THE RELAY (02-11): a tool updated on the machine is taken up between two of
+# its requests -- whatever the tool, the session never restarted, nothing for the agent to do. Declared
+# once, by Claude Code itself (its other servers kept); an older declaration without the relay is replaced.
+# Looked for in its settings first, since asking Claude Code takes seconds. Nothing stops the start.
+relay="$(dirname "$0")/mcp-relay.mjs"
+tool() {   # NAME FOLDER COMMAND ARGS...
+    name="$1"; folder="$2"; shift 2
+    if grep -q "\"$folder\"" "$HOME/.claude.json" 2>/dev/null && grep -q "mcp-relay.mjs" "$HOME/.claude.json" 2>/dev/null \
+        && node -e 'const d=require(process.argv[1]);const s=d.mcpServers?.[process.argv[2]];const a=JSON.stringify(s?.args??[]);process.exit(a.includes("mcp-relay.mjs")&&a.includes(JSON.stringify(process.argv[3]))?0:1)' "$HOME/.claude.json" "$name" "$1" 2>/dev/null; then return 0; fi
+    claude mcp remove --scope user "$name" >/dev/null 2>&1
+    claude mcp add --scope user "$name" -- node "$relay" "$@" >/dev/null 2>&1 \
+        || echo "launch: $name was not given to Claude Code as tools: the command $name still works" >&2
+}
+# Parley, the chat of the conversation, when it has one: the version installed on the machine (parley-mcp),
+# else the copy beside the chat.
 chat="${PARLEY_DIR:-/work/.parley}"
-if [ -f "$chat/server.mjs" ] && ! grep -q "\"$chat/server.mjs\"" "$HOME/.claude.json" 2>/dev/null; then
-    claude mcp add --scope user parley -- node "$chat/server.mjs" --dir "$chat" >/dev/null 2>&1 \
-        || echo "launch: Parley was not given to Claude Code as tools: the command parley still works" >&2
+if [ -f "$chat/server.mjs" ]; then
+    if command -v parley-mcp >/dev/null 2>&1; then tool parley "$chat" parley-mcp --dir "$chat"; else tool parley "$chat" node "$chat/server.mjs" --dir "$chat"; fi
 fi
-# ITS DOCKET AS ITS OWN TOOLS (MCP), with its chat: what woke it, to say done or failed; the
-# reminders it sets itself. The same as the command "docket", installed in every machine.
+# Its docket, with its chat: what woke it, to say done or failed; the reminders it sets itself.
 docket="/work/.docket"
-if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1 && ! grep -q "\"$docket\"" "$HOME/.claude.json" 2>/dev/null; then
-    claude mcp add --scope user docket -- docket-mcp --dir "$docket" >/dev/null 2>&1 \
-        || echo "launch: Docket was not given to Claude Code as tools: the command docket still works" >&2
-fi
-# ITS TETHER AS ITS OWN TOOLS (MCP): the accesses it was given -- a mailbox, a calendar, an address
-# book, an online folder, a machine over SSH. The server holds the keys; it acts within its rights.
+if [ -f "$chat/server.mjs" ] && command -v docket-mcp >/dev/null 2>&1; then tool docket "$docket" docket-mcp --dir "$docket"; fi
+# Its tether: the accesses it was given (a mailbox, a calendar, a folder, a machine over SSH).
 tether="/work/.tether"
-if command -v tether-mcp >/dev/null 2>&1 && ! grep -q "\"$tether\"" "$HOME/.claude.json" 2>/dev/null; then
-    claude mcp add --scope user tether -- tether-mcp --dir "$tether" >/dev/null 2>&1 \
-        || echo "launch: Tether was not given to Claude Code as tools: the command tether still works" >&2
-fi
+if command -v tether-mcp >/dev/null 2>&1; then tool tether "$tether" tether-mcp --dir "$tether"; fi
 # ITS PULSE: Claude Code's own hooks say to the chat that it acts, and when its turn ends, so that
 # the person sees "Working..." while it works without a word (parley pulse; nothing posted).
 if [ -f "$chat/server.mjs" ]; then
     node "$(dirname "$0")/claude-pulse.mjs" "$chat" \
         || echo "launch: the chat will not say when Claude Code works without a word" >&2
 fi
+# WHAT ITS SCREEN ASKS (02-11), read by the generic screen-watch -- Claude Code's own words, here and only
+# here: its sign-in link sent to the person's chat; an update installed told to the agent, which restarts
+# when it suits it (never in the middle of its work). A tool that changes its words: only these lines change.
+node "$(dirname "$0")/screen-watch.mjs" \
+    'link:https://(claude\.ai|claude\.com|console\.anthropic\.com)/[^ ]*oauth[^ ]*' \
+    'notice:(update|updated|installed)[^\n]{0,80}restart=Your tool was updated: when nothing runs, touch /work/.parley/restart-asked to take it up.' \
+    </dev/null >/dev/null 2>&1 &
 exec "$@"

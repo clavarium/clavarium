@@ -58,37 +58,45 @@ test('the launcher of Claude Code: its settings file says the rights chosen, the
     assert.match(said.stderr, /were not changed: it may ask before acting/);
 });
 
-test('the launcher of Claude Code gives it the chat as its own tools (Parley, MCP) once, by Claude Code itself; none without a chat; never in the way', (t) => {
+test('the launcher of Claude Code gives it its tools through the relay (MCP), once, by Claude Code itself; an old declaration replaced; none without a chat; never in the way (02-11)', (t) => {
     const dir = home(t);
     const chat = join(dir, 'work', '.parley'); mkdirSync(chat, { recursive: true });
     const bin = join(dir, 'bin'); mkdirSync(bin);
     const asked = join(dir, 'asked.txt');
-    /* A Claude Code that only notes what it is asked, and records the server as the real one does. */
-    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
-    /* Only what this test puts on the way, and node (its launchers' scripts) -- node alone, never what sits beside it (a Docket of this computer's). */
+    const relay = join(LAUNCH, 'mcp-relay.mjs');
+    /* A Claude Code that notes what it is asked, and records a server added as the real one does. */
+    const fake = `#!/bin/sh\necho "$*" >> "${asked}"\nnode -e '
+const fs=require("fs"),f=process.env.HOME+"/.claude.json";let d={};try{d=JSON.parse(fs.readFileSync(f,"utf8"))}catch{}d.mcpServers??={};
+const a=process.argv.slice(1);if(a[0]==="mcp"&&a[1]==="remove")delete d.mcpServers[a[4]];
+if(a[0]==="mcp"&&a[1]==="add"){const i=a.indexOf("--");d.mcpServers[a[4]]={command:a[i+1],args:a.slice(i+2)}}fs.writeFileSync(f,JSON.stringify(d));' "$@"\n`;
+    writeFileSync(join(bin, 'claude'), fake, { mode: 0o755 });
     const nodeDir = join(dir, 'node'); mkdirSync(nodeDir); symlinkSync(process.execPath, join(nodeDir, 'node'));
     const PATH = `${bin}:${nodeDir}:/usr/bin:/bin`;
     const run = (env = {}) => spawnSync('sh', [join(LAUNCH, 'claude-code.sh'), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: chat, ...env }, encoding: 'utf8' });
+    const lines = () => (existsSync(asked) ? readFileSync(asked, 'utf8').split('\n').filter(Boolean) : []);
     assert.equal(run().status, 0);
-    assert.equal(existsSync(asked), false, 'no chat (no server in its folder): nothing asked');
+    assert.deepEqual(lines(), [], 'no chat (no server in its folder): nothing asked');
     writeFileSync(join(chat, 'server.mjs'), '');
     assert.equal(run().status, 0);
-    assert.equal(readFileSync(asked, 'utf8'), `mcp add --scope user parley -- node ${chat}/server.mjs --dir ${chat}\n`, 'no Docket in this machine: Parley alone');
+    assert.equal(lines().at(-1), `mcp add --scope user parley -- node ${relay} node ${chat}/server.mjs --dir ${chat}`, 'Parley, through the relay');
+    const n = lines().length;
     assert.equal(run().status, 0);
-    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).length, 1, 'declared already: Claude Code not asked again');
-    /* Docket installed: given as its tools too, once, its folder beside the chat's. */
+    assert.equal(lines().length, n, 'declared already: Claude Code not asked again');
+    /* An older declaration, without the relay: replaced. */
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { parley: { command: 'node', args: [`${chat}/server.mjs`, '--dir', chat] } } }));
+    assert.equal(run().status, 0);
+    assert.deepEqual(lines().slice(-2), ['mcp remove --scope user parley', `mcp add --scope user parley -- node ${relay} node ${chat}/server.mjs --dir ${chat}`]);
+    /* Parley and Docket installed on the machine: their own commands, through the relay. */
+    writeFileSync(join(bin, 'parley-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     writeFileSync(join(bin, 'docket-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
-    writeFileSync(join(bin, 'claude'), `#!/bin/sh\necho "$*" >> "${asked}"\nprintf '{"mcpServers":{"parley":{"command":"node","args":["${chat}/server.mjs"]},"docket":{"command":"docket-mcp","args":["--dir","/work/.docket"]}}}' > "$HOME/.claude.json"\n`, { mode: 0o755 });
     assert.equal(run().status, 0);
-    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).at(-1), 'mcp add --scope user docket -- docket-mcp --dir /work/.docket');
-    assert.equal(run().status, 0);
-    assert.equal(readFileSync(asked, 'utf8').split('\n').filter(Boolean).length, 2, 'declared already: not asked again');
-    rmSync(join(bin, 'docket-mcp'));
+    assert.ok(lines().includes(`mcp add --scope user docket -- node ${relay} docket-mcp --dir /work/.docket`), lines().join('\n'));
+    assert.ok(lines().includes(`mcp add --scope user parley -- node ${relay} parley-mcp --dir ${chat}`), 'the copy beside the chat replaced by the version installed');
     /* Claude Code refusing: said, and the tool starts all the same. */
     rmSync(join(dir, '.claude.json')); writeFileSync(join(bin, 'claude'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
     const refused = run();
     assert.equal(refused.status, 0);
-    assert.match(refused.stderr, /Parley was not given to Claude Code as tools: the command parley still works/);
+    assert.match(refused.stderr, /parley was not given to Claude Code as tools: the command parley still works/);
 });
 
 test('the launcher of Claude Code gives the chat its pulse: hooks of Claude Code, the others kept, written once; none without a chat; never in the way', (t) => {
@@ -138,4 +146,50 @@ test('a launcher named in the configuration is a script of config/launch; every 
     const one = (launch) => readTools(JSON.stringify([{ id: 'x', label: 'X', command: ['x'], memoryMb: 768, install: [], launch }]));
     for (const bad of ['../x.sh', '/tools/x.sh', 'x', 'x.sh;id', 'X.sh', '']) assert.throws(() => one(bad), /launch/, bad);
     assert.equal(one('x.sh')[0].launch, 'x.sh');
+});
+
+test('json-set merges inside objects: the other keys and projects kept (02-11)', (t) => {
+    const dir = home(t);
+    writeFileSync(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { a: 1 }, projects: { '/other': { x: 1 }, '/work': { allowedTools: ['y'] } } }));
+    assert.equal(jsonSet(dir, '.claude.json', '{"hasCompletedOnboarding": true, "projects": {"/work": {"hasTrustDialogAccepted": true}}}').status, 0);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, '.claude.json'), 'utf8')), { mcpServers: { a: 1 }, hasCompletedOnboarding: true, projects: { '/other': { x: 1 }, '/work': { allowedTools: ['y'], hasTrustDialogAccepted: true } } });
+});
+
+test('screen-watch: the rules a launcher gives, acted on once, on the bottom of the screen only (02-11)', async () => {
+    const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
+    const rules = rulesOf(['link:https://claude\\.ai/[^ ]*oauth[^ ]*', 'notice:(update|installed)[^\\n]{0,80}restart=Restart when it suits you.', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
+    assert.deepEqual(rules.map((r) => r.kind), ['link', 'notice', 'keys'], 'a key not in the closed list, or an unknown kind: no rule');
+    const seen = new Set();
+    const screen = (bottom) => `${'work line\n'.repeat(40)}${bottom}`;
+    assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen).map((a) => [a.kind, a.match]), [['link', 'https://claude.ai/oauth/authorize?code=abc']]);
+    assert.deepEqual(actionsOn(screen('Open https://claude.ai/oauth/authorize?code=abc to sign in'), rules, seen), [], 'once per link');
+    assert.deepEqual(actionsOn(screen('✓ Update installed · Restart to apply'), rules, seen).map((a) => [a.kind, a.value]), [['notice', 'Restart when it suits you.']], 'told to the agent, which decides');
+    assert.deepEqual(actionsOn(screen('Do you trust this folder?'), rules, seen).map((a) => [a.kind, a.value]), [['keys', ['Enter']]]);
+    assert.deepEqual(actionsOn(`Update installed, restart now\n${'later line\n'.repeat(20)}`, rules, new Set()), [], 'above the bottom: never');
+});
+
+test('toml-block keeps its own block, every other line as it was; codex.sh and vibe.sh give their tools through the relay (02-11)', (t) => {
+    const dir = home(t);
+    const run = (...args) => spawnSync(process.execPath, [join(LAUNCH, 'toml-block.mjs'), ...args], { env: { ...process.env, HOME: dir }, encoding: 'utf8' });
+    mkdirSync(join(dir, '.codex'));
+    writeFileSync(join(dir, '.codex', 'config.toml'), 'model = "gpt-5"\n\n[mine]\na = 1\n');
+    assert.equal(run('.codex/config.toml', 'tools', '[x]\nb = 2').status, 0);
+    assert.equal(run('.codex/config.toml', 'tools', '[x]\nb = 3').status, 0);
+    assert.equal(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), 'model = "gpt-5"\n\n[mine]\na = 1\n\n# >>> clavarium tools\n[x]\nb = 3\n# <<< clavarium tools\n');
+    assert.equal(run('.codex/config.toml', 'tools').status, 0);
+    assert.equal(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), 'model = "gpt-5"\n\n[mine]\na = 1\n', 'no text: the block taken out');
+    assert.equal(run('/etc/passwd', 'tools', 'x').status, 64);
+    /* The launchers themselves, with a Tether on the way. */
+    const bin = join(dir, 'bin'); mkdirSync(bin);
+    writeFileSync(join(bin, 'tether-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    const nodeDir = join(dir, 'node'); mkdirSync(nodeDir); symlinkSync(process.execPath, join(nodeDir, 'node'));
+    const PATH = `${bin}:${nodeDir}:/usr/bin:/bin`;
+    for (const [launcher, file] of [['codex.sh', '.codex/config.toml'], ['vibe.sh', '.vibe/config.toml']]) {
+        const r = spawnSync('sh', [join(LAUNCH, launcher), 'full', 'true'], { env: { ...process.env, HOME: dir, PATH, PARLEY_DIR: join(dir, 'nochat') }, encoding: 'utf8' });
+        assert.equal(r.status, 0, r.stderr);
+        const text = readFileSync(join(dir, file), 'utf8');
+        assert.ok(text.includes(`"${join(LAUNCH, 'mcp-relay.mjs')}", "tether-mcp"`), `${launcher}: Tether through the relay\n${text}`);
+        assert.doesNotMatch(text, /parley-mcp/, `${launcher}: no chat, no Parley`);
+    }
+    assert.match(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), /\[projects\."\/work"\]\ntrust_level = "trusted"/);
 });

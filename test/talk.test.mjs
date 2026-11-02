@@ -607,3 +607,17 @@ test('a text this server gives the tool to read: in the bridge folder, a folder 
     assert.equal(b.talk.keepText('helper', 'x.txt', 'x'), null);
     assert.deepEqual(readdirSync(outside), []);
 });
+
+test('a tool asks to be restarted by a file beside its chat: seen, then taken; a link is not it; nothing when the chat is off (02-11)', async (t) => {
+    const b = bench(t);
+    assert.equal(b.talk.restartAsked('helper'), false, 'chat off');
+    await b.talk.set('helper', true);
+    const dir = join(b.dir, 'work', 'helper', '.parley');
+    assert.equal(b.talk.restartAsked('helper'), false);
+    writeFileSync(join(dir, 'restart-asked'), '');
+    assert.equal(b.talk.restartAsked('helper'), true);
+    b.talk.restartTaken('helper');
+    assert.equal(b.talk.restartAsked('helper'), false, 'taken: asked once');
+    symlinkSync('/etc/hostname', join(dir, 'restart-asked'));
+    assert.equal(b.talk.restartAsked('helper'), false, 'a link is not a request');
+});
