@@ -714,6 +714,9 @@ export class Boxes {
         const seconds = (pcm.length / 32_000).toFixed(1);
         if (pcm.length < 16_000) { this.#log(`voice box ${box0.name}: ${seconds} s heard, too short for a sentence`); this.#tested(link, 'nothing'); link.send({ t: 'cue', name: 'done' }); return; }   /* under half a second: a press, not a sentence */
         link.send({ t: 'cue', name: 'thinking' });
+        /* Its sound, kept beside its conversation (the ten last, a week): its assistant can listen to what the box
+           really sent when the dictation goes wrong (02-11: "regarde la qualité de l'audio arrivant"). */
+        try { this.#keep?.(box0.conversation, 'phrase-boitier.wav', wavOf(pcm)); } catch { /* its chat may be off */ }
         let text;
         /* A sentence that goes nowhere is said so, in words, rather than with a beep nobody can read (31-10). */
         const lost = async (words) => {

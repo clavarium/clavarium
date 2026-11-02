@@ -612,3 +612,16 @@ test('the four slots of the chip, when the box says them, go beside its message,
     const { endOf } = await import('../server/boxes.mjs');
     assert.equal(endOf({ s: 4.2, heard_at: 0.3, voice: 900, bar: 300, mean: 200, slots: [120, 950, 31.4, 40] }, 'silence'), 'fin silence 4,2 s · voies 120/950/31/40 · voix 900');
 });
+
+test('a box sentence keeps its sound beside its conversation, for its assistant to listen to (02-11)', async () => {
+    const kept = [];
+    const { boxes, said } = make({ keep: (c, file, data) => { kept.push({ c, file, data }); return `/work/.parley/files/x/${file}`; } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help', 'Salon').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 3), true); s.box({ t: 'listen.end', reason: 'silence' });
+    for (let i = 0; i < 20 && said.length === 0; i++) await tick();
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0].c, 'kitchen-help'); assert.equal(kept[0].file, 'phrase-boitier.wav');
+    assert.equal(kept[0].data.toString('ascii', 0, 4), 'RIFF'); assert.equal(kept[0].data.length, 44 + 40 * 640);
+});
