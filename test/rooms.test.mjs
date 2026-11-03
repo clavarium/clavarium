@@ -77,3 +77,35 @@ test('a room changed: host, members, name; a conversation renamed follows; remov
     assert.deepEqual(rooms.list(), []);
     assert.deepEqual(told.get('hugo'), []);
 });
+
+test('#280: an AI sent a message hands it on (forward: as it is, by who said it), or writes to another AI (split); @Name kept as an id, shown by name; never a loop', async (t) => {
+    const { rooms, said } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'], boxes: ['box-1'] });
+    const box = r.members.find((m) => m.kind === 'box'); const compta = r.members.find((m) => m.ref === 'compta'); const hugo = r.members.find((m) => m.ref === 'hugo');
+    await rooms.say(r.id, 'On a payé la facture ?', { by: box.id });
+    const asked = rooms.read(r.id).messages.at(-1);
+    said.length = 0;
+    /* Forward: Compta gets the box's own words, by the box; nothing new in the room. */
+    assert.equal(rooms.answered('hugo', { room: r.id, text: '', to: [compta.id], forward: asked.id.slice(0, 8) }), asked.id);
+    await new Promise((x) => setImmediate(x));
+    assert.equal(said.length, 1); assert.equal(said[0].name, 'compta'); assert.equal(said[0].text, 'On a payé la facture ?');
+    assert.deepEqual(said[0].extra.by, { id: box.id, name: 'Cuisine', kind: 'box' }); assert.equal(said[0].extra.room.message, asked.id);
+    assert.equal(rooms.read(r.id).messages.length, 1, 'no copy in the room');
+    /* Split: Hugo asks Compta in the room; Compta gets it from Hugo. */
+    said.length = 0;
+    const sub = rooms.answered('hugo', { room: r.id, text: 'Le budget suit, @Compta ?', to: [compta.id], re: asked.id });
+    await new Promise((x) => setImmediate(x));
+    assert.equal(said[0].name, 'compta'); assert.deepEqual(said[0].extra.by, { id: hugo.id, name: 'Hugo', kind: 'ai' }); assert.equal(said[0].extra.room.message, sub);
+    assert.match(said[0].text, new RegExp(`@\\{${compta.id}\\}`), 'kept as its id');
+    const shown = rooms.read(r.id).messages.find((m) => m.id === sub);
+    assert.equal(shown.text, 'Le budget suit, @Compta ?', 'shown by its name of the moment');
+    assert.deepEqual(shown.toNames, ['Compta']);
+    /* Two AIs sending to each other stop after a few. */
+    said.length = 0;
+    for (let i = 0; i < 20; i++) rooms.answered(i % 2 ? 'hugo' : 'compta', { room: r.id, text: `ping ${i}`, to: [i % 2 ? compta.id : hugo.id] });
+    await new Promise((x) => setImmediate(x));
+    assert.ok(said.length <= 8, `a few hand-overs, not ${said.length}`);
+    await rooms.say(r.id, 'Merci.');
+    said.length = 0; rooms.answered('hugo', { room: r.id, text: 'Compta, note-le.', to: [compta.id] }); await new Promise((x) => setImmediate(x));
+    assert.equal(said.length, 1, 'the person spoke: hand-overs again');
+});
