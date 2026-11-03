@@ -143,6 +143,9 @@
         }
         m.hidden = false;
         const was = m.dataset.pose ?? '';
+        /* Trying to wake (03-11): it lifts its head, and lies back, again, until it is up (a restart, a build). */
+        if (pose === 'trying') { m.classList.remove('waking', 'stirring', 'asleep'); m.classList.add('trying'); m.dataset.pose = 'trying'; return; }
+        m.classList.remove('trying');
         if (pose === 'waking') {
             if (was === 'waking') return;
             /* From lying, in one movement: the breathing stops first, then it rises. */
@@ -220,7 +223,7 @@
         return `${s < 180 ? 'A restart usually takes one to two minutes.' : 'This is taking longer than usual: the machine may be slow to stop or to start. It goes on by itself.'} Its files and its chat are kept.`;
     };
     /* `source()`: the latest word of the server (its list, or the terminal opening). */
-    const panel = { source: () => undefined, of: '', key: '', timer: 0 };
+    const panel = { source: () => undefined, of: '', key: '', timer: 0, open: false };
     const paintProgress = () => {
         const p = panel.source();
         if (!p || !Array.isArray(p.steps) || notice.hidden || notice.dataset.progress === undefined) return false;
@@ -257,12 +260,16 @@
         }
         const s = Math.max(0, Math.floor((Date.now() - (Date.parse(p.since ?? '') || Date.now())) / 1000));
         $('notice-title').textContent = PROGRESS_TITLES[p.kind] ?? 'Starting';
-        mascot(p.kind === 'wake' ? 'waking' : null);
-        $('notice-count').textContent = `Step ${at + 1} of ${p.steps.length} \u00b7 ${clockOf(s)}`;
-        $('notice-text').textContent = usualFor(p.kind, s);
+        /* 03-11, less is more: the sheep trying to wake (a wake, a restart, a build), the step under way in one
+           line; the list of the steps stays one tap away, and the usual time is said only when it is passed. */
+        mascot(p.kind === 'wake' ? 'waking' : 'trying');
+        $('notice-steps').hidden = !panel.open; $('notice-spin').hidden = true;
+        $('notice-count').textContent = `${at + 1} / ${p.steps.length} \u00b7 ${clockOf(s)}`;
+        $('notice-text').textContent = `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`;
         return true;
     };
     /* Shown, or brought up to date when it is shown already (its wheel keeps turning). */
+    $('notice-count').addEventListener('click', () => { panel.open = !panel.open; paintProgress(); });
     const progressPanel = (of, source) => {
         panel.source = source;
         if (notice.hidden || notice.dataset.progress === undefined || panel.of !== of) {
