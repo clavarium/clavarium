@@ -568,6 +568,7 @@ export class Boxes {
             const answering = l.heardAt && this.#now() - l.heardAt < ANSWER_WITHIN_MS;
             const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
+            if (chatting && !l.chat) l.send({ t: 'chat', on: true });
             if (chatting) l.chat = true;
             /* SENTENCE BY SENTENCE: the first is said while the next ones are made -- the answer starts sooner
                (31-10: a few seconds of silence before each answer). The box queues them, one after the other. */
@@ -664,7 +665,7 @@ export class Boxes {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
                 sentence = null;
                 if (this.#tested(link, 'nothing')) { link.send({ t: 'cue', name: 'done' }); return; }
-                if (link.chat) this.#log(`voice box ${box.name}: conversation ended, nobody answered`);
+                if (link.chat) { this.#log(`voice box ${box.name}: conversation ended, nobody answered`); link.send({ t: 'chat', on: false }); }
                 link.chat = false; link.recent = [];
                 link.send({ t: 'cue', name: 'done' });
                 return;
@@ -782,8 +783,8 @@ export class Boxes {
         link.recent = [...(link.recent ?? []), link.heardAt];
         /* CONVERSATION MODE (03-11, as he set it): in by « on discute » (or « mode conversation »), out by « merci,
            c'est tout » (or « fin de la conversation »), or by nobody speaking after an answer. */
-        if (CHAT_IN.test(text)) link.chat = true;
-        if (CHAT_OUT.test(text)) { link.chat = false; link.recent = []; }
+        if (CHAT_IN.test(text) && !link.chat) { link.chat = true; link.send({ t: 'chat', on: true }); }   /* its ring, its chime (0.1.46) */
+        if (CHAT_OUT.test(text) && link.chat) { link.chat = false; link.recent = []; link.send({ t: 'chat', on: false }); }
         link.doingSaid = false;
     }
 
