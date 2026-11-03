@@ -2273,3 +2273,7 @@ button.salon-switch::after { content: ""; position: absolute; top: 2px; left: 2p
 button.salon-switch[aria-checked="true"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
 button.salon-switch[aria-checked="true"]::after { left: 18px; background: var(--ok); }
 @media (max-width: 700px) { button.salon-switch { min-height: 0; } }
+.nc-card > .salon-host-box, .nc-card > .salon-member-list { margin: 4px 16px 12px; }
+.nc-card > .salon-host-box { padding: 8px 12px; }
+.nc-card > .salon-members-tools { padding-bottom: 4px; }
+.nc-card > .salon-host-box + *, .nc-card > .salon-member-list + * { border-top: 0; }
