@@ -112,7 +112,8 @@ export class Rooms {
         const who = by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
         if (!who) throw new Refusal(400, 'Not a member of this room.');
         const t = this.#thread(room.id);
-        const now = t.say(text, undefined, [], { by: { id: who.id, name: who.name, kind: who.kind } });
+        /* The owner is the room's own side (no name over their words, as in any chat); anyone else is named. */
+        const now = t.say(text, undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind } });
         const said = now.messages.at(-1);
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
