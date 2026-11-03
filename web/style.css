@@ -439,7 +439,7 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 /* The conversation with the tool is drawn by Parley; here, only where it sits and this page's colours. */
 /* The chat takes the whole screen: its box stays at the bottom, the messages scroll above it. */
 /* On a light screen, brass text is too pale to read: the words in that colour are darker; the buttons keep it. */
-:root[data-theme="light"] #simple-thread { --parley-ask: var(--brass-ink); }
+:root[data-theme="light"] :is(#simple-thread, #salon-thread) { --parley-ask: var(--brass-ink); }
 #chat-turn { margin: auto; max-width: 40ch; text-align: center; padding: 32px 8px; }
 #chat-turn p { margin: 0 0 12px; font-size: 1rem; }
 #chat-turn p + p { color: var(--ink2); }
@@ -1107,8 +1107,8 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 @media (max-width: 700px) { html:not([data-door="device"]) #room > header #menu { display: none; } }
 
 /* The chat's display settings: an eye, not sliders (Parley draws its own sign; it is masked here). */
-#simple-thread .parley-prefs-open svg { display: none; }
-#simple-thread .parley-prefs-open::before { content: ""; display: inline-block; width: 20px; height: 20px; background: currentColor; vertical-align: middle;
+#simple-thread .parley-prefs-open svg, #salon-thread .parley-prefs-open svg { display: none; }
+#simple-thread .parley-prefs-open::before, #salon-thread .parley-prefs-open::before { content: ""; display: inline-block; width: 20px; height: 20px; background: currentColor; vertical-align: middle;
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E") center / contain no-repeat;
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E") center / contain no-repeat; }
 
@@ -1888,15 +1888,15 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 /* ---------- A NEW CONVERSATION: a page of its own, as Settings ----------
    The pieces of "one look" (set-row, sub-head, more, chapter, action-row);
    a choice of a few is a card each; Create stays in sight at the bottom. */
-#newconv { gap: 12px; padding: 14px 20px 0; }
-#newconv > .panel-top b { font-size: 1.125rem; }
-#newconv > .nc-body { display: flex; flex-direction: column; gap: 12px; max-width: 720px; width: 100%; }
-#newconv :is(input:not([type=checkbox]):not([type=radio]), select) { font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-height: 40px; max-width: 100%; box-sizing: border-box; }
+#salon-new, #newconv { gap: 12px; padding: 14px 20px 0; }
+:is(#newconv, #salon-new) > .panel-top b { font-size: 1.125rem; }
+:is(#newconv, #salon-new) > .nc-body { display: flex; flex-direction: column; gap: 12px; max-width: 720px; width: 100%; }
+:is(#newconv, #salon-new) :is(input:not([type=checkbox]):not([type=radio]), select) { font: .875rem var(--sans); color: var(--ink); background-color: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-height: 40px; max-width: 100%; box-sizing: border-box; }
 #newconv select { appearance: none; padding-right: 30px; background-image: linear-gradient(45deg, transparent 50%, var(--ink2) 50%), linear-gradient(135deg, var(--ink2) 50%, transparent 50%); background-position: calc(100% - 15px) 52%, calc(100% - 10px) 52%; background-size: 5px 5px; background-repeat: no-repeat; }
-#newconv :is(input, select):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
+:is(#newconv, #salon-new) :is(input, select):focus-visible { outline: 2px solid var(--brass); outline-offset: 1px; }
 @media (pointer: coarse) { #newconv :is(input:not([type=checkbox]):not([type=radio]), select) { min-height: 44px; } }
 #newconv .set-control > :is(input, select)[aria-invalid=true]:not([type=checkbox]):not([type=radio]) { border-color: var(--danger); }
-#newconv .set-row > .set-control > :is(input, select) { width: 18rem; }
+:is(#newconv, #salon-new) .set-row > .set-control > :is(input, select) { width: 18rem; }
 #newconv .set-what > .err { font-size: .75rem; color: var(--danger); }
 /* A card of rows, as an open chapter without its fold. */
 .nc-card, #newconv details.chapter { flex-shrink: 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bar); }
@@ -2001,8 +2001,8 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 }
 /* Batches beside the chat, on a touch screen: each box to tick and each title take a fingertip, their look unchanged. */
 @media (pointer: coarse) {
-  #simple-thread :is(.parley-panel-tick, .parley-panel-title) { position: relative; }
-  #simple-thread :is(.parley-panel-tick, .parley-panel-title)::after { content: ""; position: absolute; inset: -6px; }
+  :is(#simple-thread, #salon-thread) :is(.parley-panel-tick, .parley-panel-title) { position: relative; }
+  :is(#simple-thread, #salon-thread) :is(.parley-panel-tick, .parley-panel-title)::after { content: ""; position: absolute; inset: -6px; }
 }
 /* The review on a light screen: line numbers and the "changed" tag readable (diff2html's own greys are too pale). */
 :root[data-theme="light"] .rv-diff { --d2h-dim-color: #5d6b7a; --d2h-change-label-color: var(--brass-ink); }
@@ -2234,8 +2234,19 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-members-row > .hint { width: 4.5rem; }
 .salon-member { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; }
 .salon-host { font-size: .6875rem; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
-.salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
-.salon-new-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 24px; max-width: 32rem; }
-.salon-field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: .8125rem; }
-.salon-pick { display: flex; flex-direction: column; gap: 4px; }
-.salon-new-acts { display: flex; justify-content: flex-end; }
+#salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
+
+.salon-unread { font-size: .6875rem; font-weight: 600; min-width: 1.5em; text-align: center; padding: 0 5px; border-radius: 999px; background: var(--wait); color: var(--bg); }
+.salon-thinking { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 14px 8px; font-size: .75rem; color: var(--ink2); order: 2; }
+#salon-new { display: flex; flex-direction: column; }
+#salon-new[hidden] { display: none; }
+#salon-new .nc-card > .hint { display: block; padding-top: 0; border-top: 0; }
+#salon-new .pick .salon-welcome { color: var(--brass-ink); }
+
+/* THE PLACES OF THE WHOLE (03-11): settings, access, assets, the deck, rooms, a new conversation are not a
+   conversation's -- in a part of the page of their own, over the conversation (which stays as it was, its
+   terminal included), never under its bar. */
+#places { grid-column: 2; grid-row: 1 / span 2; position: relative; z-index: 4; min-width: 0; min-height: 0; background: var(--panel); }
+#places[hidden] { display: none; }
+@media (max-width: 700px) { #places { grid-column: 1; grid-row: 1; } }
+#app:has(> #list[hidden]) #places { grid-column: 1 / -1; }

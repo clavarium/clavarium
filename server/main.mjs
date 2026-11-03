@@ -595,7 +595,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const text = `Its tool was stopped: the machine ran out of memory${size}. Give it more in Settings → Machine → Memory, or start it fresh.`;
         events.add({ kind: 'machine', text: `Machine of ${name}: its tool was stopped for lack of memory${size}`, conversation: name });
         void alerts.tell({ title: `${name}: its tool ran out of memory`, body: text, url: `/?c=${encodeURIComponent(name)}&open=settings` });
-        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ }
+        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Out of memory', actions: ['memory', 'restart', 'terminal'] }); } catch { /* its chat may be off */ }
     };
     const stopWatch = capacity.start();
     /* The curves of the resources (history.mjs): one look a minute, from what the server knows already. */
@@ -630,22 +630,25 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* The voice by default: Kyutai's Pocket TTS, run here (pocket.mjs); CLAVARIUM_POCKET=0 to leave it out. */
         pocket: process.env.CLAVARIUM_POCKET === '0' ? null : new Pocket({ dir: `${dataDir}/voices`, log: speechLog }) });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
-        exists: (name) => all.list().some((c) => c.name === name),
+        /* A box speaks in a conversation, or in a room ('room:<id>', #281). */
+        exists: (name) => all.list().some((c) => c.name === name) || (/^room:/.test(name) && Boolean(rooms?.has(name.slice(5)))),
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
         react: (said) => voice.reaction(said),
         recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
         hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
         /* Said as the person's own message, the room named (one speaker for now). */
-        say: (name, text, by) => talk.say(name, text, undefined, undefined, 'voice', { by }),
+        say: (name, text, by) => (/^room:/.test(name) ? rooms.say(name.slice(5), text, { box: by?.id }) : talk.say(name, text, undefined, undefined, 'voice', { by })),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
         origin: () => publicOrigin ?? null,
-        changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
+        changed: () => { try { rooms?.boxesBound(boxes.all()); } catch (error) { console.error(`voice boxes in rooms: ${error.message}`); } for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });
     /* Rooms (#268): a thread shared by several AIs, the person and boxes (rooms.mjs). */
     rooms = new Rooms({ file: new JsonFile(`${dataDir}/rooms.json`, []), dir: `${dataDir}/rooms`,
         say: (name, text, extra) => talk.say(name, text, undefined, undefined, undefined, extra),
-        rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all() });
+        rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
+        speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); } });
+    rooms.boxesBound(boxes.all());
     rooms.refresh();
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });

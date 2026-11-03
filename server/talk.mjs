@@ -293,7 +293,7 @@ export class Talk {
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
                 /* Answered in a room it is in (#268): the room takes it, signed by where it came from (rooms.mjs). */
-                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : 'say'); } catch { /* the room's */ } return; }
+                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : event.type === 'agent-asked' ? 'ask' : 'say'); } catch { /* the room's */ } return; }
                 if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
                 /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
                 if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });
@@ -604,7 +604,7 @@ export class Talk {
         const gone = record.state === 'Running' ? [...before].filter((k) => !keys.includes(k)) : [];
         if (gone.length) {
             const said = [...new Set(gone.map((k) => (/^disk:/.test(k) ? 'Its disk has room again.' : k === 'memory-low' ? 'Its memory is no longer short.' : /^oom:/.test(k) ? '' : 'What was wrong with its machine is gone.')).filter(Boolean))];
-            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine' });
+            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine', brief: 'Fixed' });
         }
         if (fresh.length === 0) return;
         this.event(name, {
@@ -612,6 +612,8 @@ export class Talk {
             text: fresh.map((p) => p.text).join(' '),
             tone: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
             topic: 'Machine',
+            /* Its name on the one line a problem is in the simple view (Parley, 03-11). */
+            brief: fresh.some((p) => p.kind === 'memory' || /^oom:|^memory/.test(p.key ?? '')) ? 'Out of memory' : fresh.every((p) => p.kind === 'disk') ? 'Disk almost full' : 'Machine problem',
             /* What can be done: a disk short of room is looked at (what takes it) or made larger --
                a restart frees nothing; otherwise more memory where memory is short, a restart, its terminal. */
             actions: [...(fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],

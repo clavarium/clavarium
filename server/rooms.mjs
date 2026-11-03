@@ -24,15 +24,18 @@ export const ROOMS_MAX = 20;
 export const MEMBERS_MAX = 40;
 /* Hand-overs between AIs after the person (or a box) last spoke in a room: a few, never a loop. */
 export const HOPS_MAX = 8;
+/* How long an AI given a message is said to be thinking, at most (it may never answer). */
+export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
 
 export class Rooms {
-    #file; #dir; #say; #rooms; #conversations; #boxes; #now; #hops = new Map();
+    #file; #dir; #say; #rooms; #conversations; #boxes; #now; #speak; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
        conversation's own chat (talk.say); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
        conversations(): the conversations there are; boxes(): the voice boxes there are. */
-    constructor({ file, dir, say, rooms = () => {}, conversations = () => [], boxes = () => [], now = () => new Date() }) {
+    constructor({ file, dir, say, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date() }) {
+        this.#speak = speak;
         this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
@@ -48,7 +51,13 @@ export class Rooms {
         return room.members.filter((m) => (m.kind === 'ai' ? convs.has(m.ref) : m.kind === 'box' ? boxes.has(m.ref) : true))
             .map((m) => ({ id: m.id, kind: m.kind, name: m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name, ref: m.ref, ...(m.id === room.host ? { host: true } : {}) }));
     }
-    list() { return this.#all().map((r) => ({ id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at })); }
+    #think(room, member, on) { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, Date.now()); else m.delete(member); this.#thinking.set(room, m); }
+    has(id) { return this.#all().some((r) => r.id === id); }
+    /* What came since the owner last looked (#282): the AIs' and the boxes' messages after it. */
+    #unread(r) { try { const seen = Date.parse(r.seen ?? '') || 0; return this.#thread(r.id).read({ last: 200 }).messages.filter((m) => (m.from === 'agent' || m.by) && (Date.parse(m.at) || 0) > seen).length; } catch { return 0; } }
+    /* Its last message, for the list: when, and its first words. */
+    #last(r) { try { const m = this.#thread(r.id).read({ last: 1 }).messages.at(-1); return m ? { at: m.at, text: String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(m.by?.name ? { by: m.by.name } : {}) } : null; } catch { return null; } }
+    list() { return this.#all().map((r) => ({ id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at, unread: this.#unread(r), last: this.#last(r) })); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
 
     /* A new room: its name, its AIs (conversation names), its boxes (ids), and which AI is the host (the first by default). */
@@ -111,14 +120,18 @@ export class Rooms {
         const read = t.read(options);
         /* A member named in a text (@{id}): its name of the moment, on the screen. */
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
-        return { room: this.get(id), ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
+        if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
+        /* Who has a message of the room and has not answered yet (#282): "Hugo réfléchit…" on the screen. */
+        const thinking = [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, at]) => Date.now() - at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean);
+        return { room: this.get(id), thinking, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
     }
 
     /* SOMEONE OF THE PERSON'S SIDE SPEAKS (the person here, a box): kept in the room, given to the host -- or to the
        AIs named (to: their member ids). */
-    async say(id, text, { by, to } = {}) {
+    async say(id, text, { by, box, to } = {}) {
         const room = this.#find(id); const members = this.#shown(room);
-        const who = by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
+        /* A box bound to this room speaks in it in its own name (#281): found by its box id. */
+        const who = box ? members.find((m) => m.kind === 'box' && m.ref === box) : by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
         if (!who) throw new Refusal(400, 'Not a member of this room.');
         const t = this.#thread(room.id);
         this.#hops.set(room.id, 0);
@@ -128,6 +141,7 @@ export class Rooms {
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
         for (const ai of named.length ? named : host ? [host] : []) {
+            this.#think(room.id, ai.id, true);
             await this.#say(ai.ref, said.text, { by: { id: who.id, name: who.name, kind: who.kind }, room: { id: room.id, name: room.name, message: said.id } });
         }
         return this.read(id);
@@ -145,6 +159,7 @@ export class Rooms {
         const all = () => t.read({ all: true }).messages;
         const find = (id) => (typeof id === 'string' && id.length >= 8 ? all().find((m) => m.id.startsWith(id)) : undefined);
         const re = find(entry.re)?.id;
+        if (kind !== 'doing') this.#think(room.id, me.id, false);
         const ids = new Set(members.map((m) => m.id));
         const to = Array.isArray(entry.to) ? entry.to.filter((x) => ids.has(x) && x !== me.id) : [];
         /* The other AIs it is sent to (#280): they get it in their own chat, as said in the room -- never beyond a few
@@ -154,6 +169,7 @@ export class Rooms {
             const n = (this.#hops.get(room.id) ?? 0) + 1;
             if (n > HOPS_MAX) return false;
             this.#hops.set(room.id, n);
+            this.#think(room.id, ai.id, true);
             void this.#say(ai.ref, text, { by: from, room: { id: room.id, name: room.name, message } }).catch(() => {});
             return true;
         };
@@ -168,6 +184,9 @@ export class Rooms {
         /* @Name of a member, exactly: kept as its id (the screen says its name of the moment). */
         const text = String(entry.text).replace(/@([^\s@{][^@\n]{0,40}?)(?=[\s,.;:!?)]|$)/g, (whole, name) => { const m = members.find((x) => x.name.toLowerCase() === name.toLowerCase()); return m ? `@{${m.id}}` : whole; });
         const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai' }, to, re, kind: kind === 'doing' ? 'doing' : 'say' });
+        /* The boxes it is sent to say it aloud (#281): its words, a member named by its name, never an id. */
+        const boxes = to.map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
+        if (boxes.length) { const aloud = text.replace(/@\{([0-9a-f-]{36})\}/g, (w, mid) => members.find((x) => x.id === mid)?.name ?? ''); try { this.#speak(`room:${room.id}`, aloud, boxes, { doing: kind === 'doing', asked: kind === 'ask' }); } catch { /* the boxes' */ } }
         if (!forwarded && kind !== 'doing') for (const ai of ais) handOver(ai, text, { id: me.id, name: me.name, kind: 'ai' }, id);
         return id;
     }
@@ -182,6 +201,16 @@ export class Rooms {
         }
     }
     refresh() { this.#tellConversations(this.#all()); }
+    /* The boxes bound to a room (their conversation 'room:<id>') are members of it, by themselves (#281). */
+    boxesBound(boxes) {
+        const list = this.#all(); let changed = false;
+        for (const b of Array.isArray(boxes) ? boxes : []) {
+            const m = /^room:([0-9a-f-]{36})$/.exec(String(b.conversation ?? '')); if (!m) continue;
+            const room = list.find((r) => r.id === m[1]);
+            if (room && !room.members.some((x) => x.kind === 'box' && x.ref === b.id)) { room.members.push({ id: randomUUID(), kind: 'box', ref: b.id, name: b.name }); changed = true; }
+        }
+        if (changed) this.#save(list);
+    }
     /* A conversation renamed: its member follows it. */
     conversationRenamed(from, to) { const list = this.#all(); let moved = false; for (const r of list) for (const m of r.members) if (m.kind === 'ai' && m.ref === from) { m.ref = to; m.name = to; moved = true; } if (moved) this.#save(list); }
 }
