@@ -653,13 +653,13 @@
       <!-- A room (#268): one thread for several AIs, the person and voice boxes. -->
       <div id="salon" class="sheet as-place" hidden>
         <div class="panel-top"><b id="salon-title">Room</b><button type="button" id="salon-close" class="as-link place-back">&lsaquo; Back</button></div>
-        <button type="button" id="salon-who" class="salon-who" aria-expanded="false"></button>
+        <div class="salon-bar"><button type="button" id="salon-who" class="salon-who" aria-expanded="false"></button><button type="button" id="salon-settings" class="icon-btn" aria-label="Room settings" title="Room settings"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button></div>
         <div id="salon-members" class="salon-members" hidden></div>
         <div id="salon-thread" class="salon-thread"></div>
         <p id="salon-thinking" class="salon-thinking" hidden></p>
       </div>
       <div id="salon-new" class="sheet as-place" hidden>
-        <div class="panel-top"><b>New room</b><button type="button" id="salon-new-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <div class="panel-top"><b id="salon-new-title">New room</b><button type="button" id="salon-new-close" class="as-link place-back">&lsaquo; Back</button></div>
         <div class="nc-body">
           <div class="nc-card">
             <div class="set-row"><div class="set-what"><label for="salon-new-name">Name</label><small>Shown on its card. Can be changed</small></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off"></div></div>
@@ -672,6 +672,9 @@
           <div class="nc-card" id="salon-new-boxes-card">
             <span class="sub-head">Voice boxes</span>
             <div id="salon-new-boxes" class="pick" role="group" aria-label="Voice boxes"></div>
+          </div>
+          <div class="nc-card" id="salon-new-remove-card" hidden>
+            <div class="set-row"><div class="set-what"><label>Remove the room</label><small>Its thread goes. Its AIs and boxes stay, each with its own chat</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger">Remove…</button></div></div>
           </div>
           <span id="salon-new-error" class="err" role="alert" hidden></span>
         </div>
