@@ -82,6 +82,8 @@ const PHANTOMS = [
     /^\s*[Ss]ous[- ]titr(?:age|es?)(?:\s+réalisés?)?\s+par\s+(?:\p{Lu}[\p{L}'-]*\s*){1,3}[.!]?\s*$/gu,
     /* YouTube endings, heard on a button press with nothing said (01-11: "Thank you for watching and see
        you in the next video!"): only when they are all of it. */
+    /* « There you go. » alone, on a near silence (03-11, 5 a.m., nobody spoke): only when it is all of it. */
+    /^\s*there you go[.!]?\s*$/giu,
     /^\s*(?:thank(?:s| you) (?:so much )?for watching[.!,]?\s*(?:(?:and )?see you (?:in the |on the )?next (?:video|time)[.!]?)?|see you (?:in the )?next (?:video|time)[.!]?|merci d'avoir regardé(?: cette vidéo)?\s*[.!]?(?:\s*[àa] bient[ôo]t[.!]?)?)\s*$/giu,
     /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
 ];

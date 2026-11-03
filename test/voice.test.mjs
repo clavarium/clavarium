@@ -158,6 +158,8 @@ test('the credits an engine writes on silence (learned from subtitles) are remov
     assert.equal(withoutPhantoms('Sous la table.'), 'Sous la table.');
     assert.equal(withoutPhantoms("Sous-titres réalisés par la communauté d'Amara.org"), '');
     assert.equal(withoutPhantoms('Thank you for watching and see you in the next video!'), '');
+    assert.equal(withoutPhantoms('There you go.'), '', '03-11: alone, on a near silence');
+    assert.equal(withoutPhantoms('There you go, the door is open.'), 'There you go, the door is open.', 'part of a sentence: kept');
     assert.equal(withoutPhantoms("Merci d'avoir regardé cette vidéo !"), '');
     assert.equal(withoutPhantoms('Thank you for watching the weather'), 'Thank you for watching the weather', 'only when it is all of it');
     assert.equal(withoutPhantoms("Lance les tests. Sous-titrage ST' 501"), 'Lance les tests.');
