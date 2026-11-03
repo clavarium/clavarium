@@ -2234,7 +2234,7 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-members-row > .hint { width: 4.5rem; }
 .salon-member { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; }
 .salon-host { font-size: .6875rem; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
-.salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
+#salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
 
 .salon-unread { font-size: .6875rem; font-weight: 600; min-width: 1.5em; text-align: center; padding: 0 5px; border-radius: 999px; background: var(--wait); color: var(--bg); }
 .salon-thinking { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 14px 8px; font-size: .75rem; color: var(--ink2); order: 2; }
