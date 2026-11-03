@@ -1258,11 +1258,19 @@
     const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
     function roomItem(r) {
+        /* The same row as a conversation's (03-11: « de même nature ») -- its name, when, its last words on one line,
+           its state's dot -- told apart by a small room sign before its name. */
         const b = document.createElement('button'); b.type = 'button'; b.className = 'item room-item'; b.dataset.room = r.id;
-        const head = document.createElement('b'); head.textContent = r.name;
-        const last = document.createElement('small'); last.textContent = r.last ? `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}` : `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`;
-        b.append(head, last);
-        if (r.unread > 0) { const n = document.createElement('span'); n.className = 'salon-unread room-item-unread'; n.textContent = String(r.unread); b.append(n); }
+        const title = document.createElement('b');
+        const sign = document.createElement('span'); sign.className = 'room-sign'; sign.setAttribute('aria-hidden', 'true');
+        title.append(sign, r.name);
+        b.append(title);
+        if (r.last) {
+            const last = document.createElement('small'); last.className = 'last'; last.textContent = `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
+            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true';
+        } else { const sub = document.createElement('small'); sub.textContent = `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`; b.append(sub); }
+        /* Its dot: new words in it waiting (the colour of what waits for you), else ready. */
+        const point = statePoint(r.unread > 0 ? 'wait' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : 'Room'; b.append(point);
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
         b.addEventListener('click', () => { void openSalon(r.id); });
         return b;

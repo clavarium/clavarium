@@ -2291,3 +2291,7 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
 #newconv > header.topbar { margin: -14px -20px 4px; }
 #salon-new > header.topbar { margin: -14px -20px 4px; }
 @media (max-width: 700px) { #newconv > header.topbar { margin: -12px -16px 4px; } }
+/* A room's row in the list (03-11): a conversation's row, with a small sign of a room before its name (Lucide « users »). */
+.room-sign { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; background: var(--ink2);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / contain no-repeat; }
