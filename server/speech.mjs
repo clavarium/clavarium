@@ -43,6 +43,8 @@ export const ELEVEN_VOICE = 'onwK4e9ZLuTAKqWW03F9';   /* "Daniel" */
 export const ELEVEN_MODEL = 'eleven_multilingual_v2';
 export const SPEED = 1.1;   /* a little quicker than the voices' own pace: found slow on the real box (31-10) */
 
+/* A moment before the main voice is asked again (a sentence it missed). */
+export const AGAIN_MS = 700;
 export class Speech {
     #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret; #pocket; #pocketDown = 0;
 
@@ -104,9 +106,14 @@ export class Speech {
     /* Text -> PCM 16 kHz. */
     async speak(text) {
         /* Pocket first; failed, it rests five minutes and the next voice answers meanwhile. */
+        /* One voice from the start of an answer to its end (03-11: "tu as bougé de voix au milieu"): a sentence it
+           misses is asked of it once more, a moment later, before another voice says it. */
         if (this.#pocket && Date.now() - this.#pocketDown > 5 * 60_000) {
-            try { const pcm = await this.#pocket.speak(text); if (pcm.length) return pcm; } catch (error) {
-                if (!/getting ready/.test(error.message)) { this.#pocketDown = Date.now(); this.#log(`speech: Pocket TTS failed (${error.message}), another voice meanwhile`); }
+            for (let attempt = 0; attempt < 2; attempt++) {
+                try { const pcm = await this.#pocket.speak(text); if (pcm.length) return pcm; } catch (error) {
+                    if (attempt === 1 && !/getting ready/.test(error.message)) { this.#pocketDown = Date.now(); this.#log(`speech: Pocket TTS failed (${error.message}), another voice meanwhile`); }
+                }
+                if (attempt === 0) await new Promise((r) => setTimeout(r, AGAIN_MS));
             }
         }
         const online = await this.#eleven(text);

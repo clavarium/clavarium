@@ -82,6 +82,8 @@ const PHANTOMS = [
     /^\s*[Ss]ous[- ]titr(?:age|es?)(?:\s+réalisés?)?\s+par\s+(?:\p{Lu}[\p{L}'-]*\s*){1,3}[.!]?\s*$/gu,
     /* YouTube endings, heard on a button press with nothing said (01-11: "Thank you for watching and see
        you in the next video!"): only when they are all of it. */
+    /* « There you go. » alone, on a near silence (03-11, 5 a.m., nobody spoke): only when it is all of it. */
+    /^\s*there you go[.!]?\s*$/giu,
     /^\s*(?:thank(?:s| you) (?:so much )?for watching[.!,]?\s*(?:(?:and )?see you (?:in the |on the )?next (?:video|time)[.!]?)?|see you (?:in the )?next (?:video|time)[.!]?|merci d'avoir regardé(?: cette vidéo)?\s*[.!]?(?:\s*[àa] bient[ôo]t[.!]?)?)\s*$/giu,
     /untertitel(?:ung)?\s+(?:im\s+auftrag\s+)?des\s+zdf(?:\s+für\s+funk)?,?\s*\d{0,4}[.!]?/giu,
 ];
@@ -227,8 +229,10 @@ export async function quickReaction(config, said, fetcher = fetch) {
     try {
         const r = await fetcher(`${base}/chat/completions`, {
             method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(3000),
-            body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.8, max_tokens: 24, messages: [
-                { role: 'system', content: 'Someone just spoke to a voice assistant, which needs a few seconds to answer. Write ONE very short spoken reaction (2 to 7 words) in the SAME language as what they said, natural and warm, that acknowledges it without answering it and without promising anything: e.g. "Bonne question, voyons…", "Ah, intéressant, je regarde.", "Hmm, let me see…". No quotes, no emoji. Answer with the reaction only.' },
+            body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.8, max_tokens: 40, messages: [
+                /* 03-11: what it is going to do, in context, with a little life ("je fouille dans tes mails, je reviens vers
+                   toi"), never the same stock phrase. */
+                { role: 'system', content: 'Someone just spoke to a voice assistant, which needs some time to answer. Write ONE short spoken sentence (4 to 14 words) in the SAME language as what they said, saying what the assistant is now going to do for THIS request, warm and a little playful, never the same wording twice: e.g. "Je fouille dans tes mails, je reviens vers toi.", "Je jette un œil à ton agenda de demain.", "Let me dig through your files for that.". Never answer the question itself, never invent a result, never promise a time. No quotes, no emoji. Answer with the sentence only.' },
                 { role: 'user', content: String(said).slice(0, 600) }] }),
         });
         if (!r.ok) return null;
