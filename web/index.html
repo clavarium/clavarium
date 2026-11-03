@@ -665,13 +665,18 @@
             <div class="set-row"><div class="set-what"><label for="salon-new-name">Name</label><small>Shown on its card. Can be changed</small></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off"></div></div>
           </div>
           <div class="nc-card">
-            <span class="sub-head">AIs</span>
-            <div id="salon-new-ais" class="pick" role="group" aria-label="AIs"></div>
-            <small class="hint">The first one picked welcomes the room: it answers, or hands the message on.</small>
+            <span class="sub-head">Welcomes the room</span>
+            <div id="salon-new-host" class="salon-host-box" aria-live="polite"></div>
+          </div>
+          <div class="nc-card">
+            <span class="sub-head">Its AIs <span id="salon-new-count" class="hint"></span></span>
+            <div class="salon-members-tools"><input id="salon-new-search" type="search" placeholder="Find a conversation" aria-label="Find a conversation" autocomplete="off"></div>
+            <div id="salon-new-ais" class="salon-member-list" role="list" aria-label="AIs"></div>
+            <small class="hint">The switch puts it in the room or takes it out; « Welcomes » makes it the one that answers, or hands the message on. On a computer, a row can also be dragged into the box above.</small>
           </div>
           <div class="nc-card" id="salon-new-boxes-card">
             <span class="sub-head">Voice boxes</span>
-            <div id="salon-new-boxes" class="pick" role="group" aria-label="Voice boxes"></div>
+            <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
           </div>
           <div class="nc-card" id="salon-new-remove-card" hidden>
             <div class="set-row"><div class="set-what"><label>Remove the room</label><small>Its thread goes. Its AIs and boxes stay, each with its own chat</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger">Remove…</button></div></div>

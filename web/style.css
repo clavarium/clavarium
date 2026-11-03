@@ -2253,3 +2253,23 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-bar { display: flex; align-items: center; gap: 8px; padding: 0 8px 0 0; }
 .salon-bar .salon-who { flex: 1; }
 #salon-new-remove-card .confirm { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+
+/* A ROOM'S MEMBERS (03-11): the one that welcomes in a box of its own; every conversation on a row, its switch. */
+.salon-host-box { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 10%, var(--panel)); transition: background .15s; }
+.salon-host-box.over { background: color-mix(in srgb, var(--brass) 22%, var(--panel)); }
+.salon-host-what, .salon-member-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.salon-host-what b, .salon-member-what b { font-weight: 600; font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.salon-host-what small, .salon-member-what small { color: var(--ink2); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.salon-av { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; flex: none; color: #fff; font: 600 .8125rem/1 var(--sans); background: hsl(var(--h, 210) 40% 38%); }
+.salon-members-tools input { width: 100%; }
+.salon-member-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 0 !important; }
+.salon-member-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; min-height: 48px; border-top: 1px solid var(--line); }
+.salon-member-row:first-child { border-top: 0; }
+.salon-member-row[draggable="true"] { cursor: grab; }
+button.salon-welcome-btn { border-radius: 999px; padding: 4px 10px; font-size: .75rem; min-height: 32px; background: transparent; color: var(--ink2); }
+button.salon-welcome-btn[aria-pressed="true"] { color: var(--brass-ink); border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); }
+button.salon-switch { position: relative; width: 40px; height: 24px; min-height: 0; flex: none; padding: 0; border-radius: 999px; background: var(--bg); }
+button.salon-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink2); transition: left .15s, background .15s; }
+button.salon-switch[aria-checked="true"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
+button.salon-switch[aria-checked="true"]::after { left: 18px; background: var(--ok); }
+@media (max-width: 700px) { button.salon-switch { min-height: 0; } }
