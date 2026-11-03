@@ -1293,7 +1293,7 @@
             /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
             const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
             if (needs.length && section(NEEDS, 'Needs you', needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
-            /* RECENT: by when it was last used; the last four, then all. Never a hidden one. Only once there
+            /* RECENT: by when it was last used; up to seven awake, then all. Never a hidden one. Only once there
                are groups: before, the one list below says the same, in the order chosen by hand. */
             /* One in Needs you just above is not said twice. */
             /* The last day only: what is older is found in its group. */
@@ -1301,9 +1301,14 @@
             /* Asleep ones go to the bottom of Recent: they are frozen, not what you came back to. */
             const recent = conversations.filter((c) => (c.hidden !== true || c.name === current) && !needsYou(c) && activityOf(c) >= dayAgo)
                 .sort((a, b) => (Number(a.asleep === true) - Number(b.asleep === true)) || (activityOf(b) - activityOf(a)));
-            const few = 4;
+            /* In sight (03-11, his rule): up to seven awake ones, and the one open even asleep (it never vanishes
+               under the eyes); the rest -- asleep, or past seven -- under the arrow. */
+            const inSight = recent.filter((c) => c.asleep !== true).slice(0, 7);
+            const openOne = recent.find((c) => c.name === current);
+            if (openOne && !inSight.includes(openOne)) inSight.push(openOne);
+            const few = inSight.length;
             if (recent.length && groups.length && section(RECENT, 'Recent', recent)) {
-                top.append(...unfolding(RECENT, recent.slice(0, showAllRecent ? recent.length : few).map((c) => itemButton(c, true))));
+                top.append(...unfolding(RECENT, (showAllRecent ? recent : recent.filter((c) => inSight.includes(c))).map((c) => itemButton(c, true))));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
                     /* A chevron, centred: the words for the pointer and for a screen reader. */
