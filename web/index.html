@@ -485,6 +485,24 @@
         <div id="deck-cards" class="deck"></div>
         <div id="deck-empty" class="deck-empty" hidden><p>No conversation yet.</p><div class="deck-empty-acts"><button type="button" id="deck-empty-new" class="primary">+ Create a conversation</button><button type="button" id="deck-empty-import">Import a configuration</button></div></div>
       </div>
+      <!-- A room (#268): one thread for several AIs, the person and voice boxes. -->
+      <div id="salon" class="sheet as-place" hidden>
+        <div class="panel-top"><b id="salon-title">Room</b><button type="button" id="salon-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <button type="button" id="salon-who" class="salon-who" aria-expanded="false"></button>
+        <div id="salon-members" class="salon-members" hidden></div>
+        <div id="salon-thread" class="salon-thread"></div>
+      </div>
+      <div id="salon-new" class="sheet as-place" hidden>
+        <div class="panel-top"><b>New room</b><button type="button" id="salon-new-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <div class="salon-new-body">
+          <label class="salon-field">Name<input id="salon-new-name" maxlength="60" placeholder="Home" autocomplete="off"></label>
+          <h3 class="list-head">AIs</h3><div id="salon-new-ais" class="salon-pick"></div>
+          <h3 class="list-head">Voice boxes</h3><div id="salon-new-boxes" class="salon-pick"></div>
+          <p class="hint">The first AI ticked welcomes the room: it answers, or hands the message on.</p>
+          <p id="salon-new-error" class="error" hidden></p>
+          <div class="salon-new-acts"><button type="button" id="salon-new-create" class="primary">Create</button></div>
+        </div>
+      </div>
       <div id="assets" class="sheet as-place" hidden>
         <div class="panel-top"><b>Assets</b><button type="button" id="assets-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <p id="assets-error" class="error" role="alert" hidden></p>

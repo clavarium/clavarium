@@ -5058,16 +5058,88 @@
         return card;
     }
     const cardAgo = (at) => { const s = Math.max(0, (Date.now() - Date.parse(at)) / 1000); return s < 90 ? 'Just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
-    function paintDeck() {
+    /* ---------- ROOMS (#268): one thread for several AIs, the person and boxes ---------- */
+    let rooms = [];
+    const loadRooms = async () => { try { const r = await fetch(`${API}/rooms`); rooms = r.ok ? await r.json() : []; } catch { rooms = []; } return rooms; };
+    const huePick = (text) => { let h = 0; for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h % 360; };
+    /* Its members as small chips, each by its shape: a person round, an AI a rounded square, a box an outline. */
+    const memberChips = (members, max = 7) => {
+        const stack = el('span', 'salon-stack');
+        for (const m of members.slice(0, max)) { const i = el('i', `salon-chip salon-chip-${m.kind}`, m.kind === 'box' ? '' : (m.name.trim()[0] ?? '?').toUpperCase()); if (m.kind !== 'box') i.style.setProperty('--h', String(huePick(m.name))); i.title = m.name; stack.append(i); }
+        return stack;
+    };
+    const countOf = (members) => { const n = (k) => members.filter((m) => m.kind === k).length; const say = (k, one, many) => (n(k) ? `${n(k)} ${n(k) > 1 ? many : one}` : ''); return [say('person', 'person', 'people'), say('ai', 'AI', 'AIs'), say('box', 'box', 'boxes')].filter(Boolean).join(' \u00b7 '); };
+    /* A ROOM AS A CARD: like a conversation's, a little thicker (a card behind it), its members' chips on its picture. */
+    function roomCard(r) {
+        const card = el('button', 'conv-card conv-card-room'); card.type = 'button'; card.dataset.room = r.id;
+        const plate = el('span', 'conv-card-plate'); const dot = el('span', 'conv-card-dot'); dot.dataset.state = 'ready';
+        plate.append(dot, el('b', '', r.name));
+        const art = el('span', 'conv-card-art'); art.style.setProperty('--h', String(huePick(r.name)));
+        art.append(el('span', 'conv-card-initial', '\u2302'), memberChips(r.members));
+        card.append(plate, art, el('span', 'conv-card-type', `Room \u00b7 ${countOf(r.members)}`), el('span', 'conv-card-text'));
+        card.setAttribute('aria-label', `${r.name}, room`);
+        card.addEventListener('click', () => { void openSalon(r.id); });
+        return card;
+    }
+    let salonThread = null; let salonId = ''; let salonTimer = null;
+    function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
+    async function openSalon(id, push = true) {
+        if (DEVICE) return;
+        await loadRooms();
+        const r = rooms.find((x) => x.id === id); if (!r) return;
+        enterPlace('salon', push);
+        salonLeft(); salonId = id;
+        $('salon-title').textContent = r.name;
+        $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
+        $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
+        const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? 'People' : k === 'ai' ? 'AIs' : 'Boxes'), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', 'host')); return x; })); return row; }).filter(Boolean);
+        $('salon-members').replaceChildren(...rows);
+        const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL('/', location.href)).href), readWords()]);
+        if (salonId !== id) return;
+        salonThread = mount($('salon-thread'), {
+            words, markdown: true, agentName: '',
+            load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()),
+            send: (text) => post(`${API}/rooms/${id}/talk`, { text }),
+            diagram: drawDiagram, highlight: colourCode, touch: touchScreen,
+        });
+        salonTimer = setInterval(() => { if (salonThread && salonId === id) void salonThread.refresh(); }, 3000);
+    }
+    $('salon-close').addEventListener('click', () => leavePlace());
+    $('salon-who').addEventListener('click', () => { const open = $('salon-members').hidden; $('salon-members').hidden = !open; $('salon-who').setAttribute('aria-expanded', String(open)); });
+    /* A NEW ROOM: its name, its AIs (the first ticked is its host), its boxes. */
+    async function openSalonNew(push = true) {
+        if (DEVICE) return;
+        enterPlace('salon-new', push);
+        $('salon-new-error').hidden = true; $('salon-new-name').value = '';
+        const tick = (value, label) => { const l = el('label', 'check'); const i = document.createElement('input'); i.type = 'checkbox'; i.value = value; l.append(i, document.createTextNode(label)); return l; };
+        $('salon-new-ais').replaceChildren(...conversations.map((c) => tick(c.name, shownName(c))));
+        let boxes = []; try { const x = await fetch(`${API}/boxes`); boxes = x.ok ? await x.json() : []; } catch { boxes = []; }
+        $('salon-new-boxes').replaceChildren(...(boxes.length ? boxes.map((b) => tick(b.id, b.name)) : [el('span', 'hint', 'None')]));
+        $('salon-new-name').focus();
+    }
+    $('salon-new-close').addEventListener('click', () => leavePlace());
+    $('salon-new-create').addEventListener('click', async () => {
+        const picked = (box) => [...$(box).querySelectorAll('input:checked')].map((i) => i.value);
+        try {
+            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: picked('salon-new-ais'), boxes: picked('salon-new-boxes') });
+            await openSalon(made.id, false);
+        } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+    });
+    async function paintDeck() {
         $('deck-title').textContent = appName;
         const list = [...conversations];
         const add = el('button', 'conv-card conv-card-new'); add.type = 'button';
         add.append(el('span', 'conv-card-plus', '+'), el('small', '', 'New conversation'));
         add.addEventListener('click', () => { void openNew(); });
-        $('deck-cards').replaceChildren(...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add);
+        const addRoom = el('button', 'conv-card conv-card-new conv-card-new-room'); addRoom.type = 'button';
+        addRoom.append(el('span', 'conv-card-plus', '+'), el('small', '', 'New room'));
+        addRoom.addEventListener('click', () => { void openSalonNew(); });
+        const paint = () => $('deck-cards').replaceChildren(...rooms.map((r) => roomCard(r)), ...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add, ...(list.length ? [addRoom] : []));
+        paint();
         $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
+        await loadRooms(); paint();
     }
-    function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); paintDeck(); }
+    function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); void paintDeck(); }
     $('deck-close').addEventListener('click', () => leavePlace());
     $('deck-empty-new').addEventListener('click', () => { void openNew(); });
     /* Import a configuration: the import of the map (Access, Flows), a file chosen at once. */
@@ -5247,6 +5319,8 @@
         $('settings').hidden = which !== 'settings';
         $('assets').hidden = which !== 'assets';
         $('deck').hidden = which !== 'deck';
+        $('salon').hidden = which !== 'salon'; $('salon-new').hidden = which !== 'salon-new';
+        if (which !== 'salon') { try { salonLeft(); } catch { /* not yet set up */ } }
         $('newconv').hidden = which !== 'new';
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */

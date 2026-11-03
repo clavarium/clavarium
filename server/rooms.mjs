@@ -41,9 +41,10 @@ export class Rooms {
     /* Its members as they are now: names of the moment (a conversation renamed, a box renamed). */
     #shown(room) {
         const boxes = new Map(this.#boxes().map((b) => [b.id, b]));
-        const convs = new Set(this.#conversations().map((c) => c.name));
+        /* An AI is named as its chat names it (the name the owner gave it in its chat settings), else its title, else its name. */
+        const convs = new Map(this.#conversations().map((c) => [c.name, c.chatName || c.title || c.name]));
         return room.members.filter((m) => (m.kind === 'ai' ? convs.has(m.ref) : m.kind === 'box' ? boxes.has(m.ref) : true))
-            .map((m) => ({ id: m.id, kind: m.kind, name: m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? m.ref : m.name, ref: m.ref, ...(m.id === room.host ? { host: true } : {}) }));
+            .map((m) => ({ id: m.id, kind: m.kind, name: m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name, ref: m.ref, ...(m.id === room.host ? { host: true } : {}) }));
     }
     list() { return this.#all().map((r) => ({ id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at })); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }

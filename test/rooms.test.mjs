@@ -12,7 +12,7 @@ const setup = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const said = []; const told = new Map();
-    const convs = [{ name: 'hugo' }, { name: 'compta' }, { name: 'jardin' }];
+    const convs = [{ name: 'hugo', chatName: 'Hugo' }, { name: 'compta', title: 'Compta' }, { name: 'jardin' }];
     const boxes = [{ id: 'box-1', name: 'Cuisine' }, { id: 'box-2', name: 'Jardin' }];
     const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra) => { said.push({ name, text, extra }); }, rooms: (name, list) => told.set(name, list), conversations: () => convs, boxes: () => boxes });
     return { rooms, said, told };
@@ -57,7 +57,7 @@ test('an AI answers in a room: signed by where it came from, linked to the messa
     assert.ok(rooms.answered('compta', { room: r.id, text: 'Oui, le 28.', re: asked.id.slice(0, 8), to: [box.id, 'nobody'] }));
     const answer = rooms.read(r.id).messages.at(-1);
     assert.equal(answer.from, 'agent');
-    assert.equal(answer.by.name, 'compta'); assert.equal(answer.by.kind, 'ai');
+    assert.equal(answer.by.name, 'Compta', 'named as its chat names it'); assert.equal(answer.by.kind, 'ai');
     assert.equal(answer.re, asked.id, 'its first characters: the whole id');
     assert.deepEqual(answer.to, [box.id], 'only members');
     assert.equal(rooms.answered('jardin', { room: r.id, text: 'Moi aussi.' }), null, 'not a member: nothing');
