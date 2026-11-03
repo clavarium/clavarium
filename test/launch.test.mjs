@@ -157,7 +157,7 @@ test('json-set merges inside objects: the other keys and projects kept (02-11)',
 
 test('screen-watch: the rules a launcher gives, acted on once, on the bottom of the screen only (02-11)', async () => {
     const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
-    const rules = rulesOf(['link:https://claude\\.ai/[^ ]*oauth[^ ]*', 'notice:(update|installed)[^\\n]{0,80}restart=Restart when it suits you.', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
+    const rules = rulesOf(['link:https://claude\\.ai/\\S*oauth\\S*', 'notice:(update|installed)[^\\n]{0,80}restart=Restart when it suits you.', 'keys:trust this folder\\?=Enter', 'keys:rm -rf=rm', 'nope:x']);
     assert.deepEqual(rules.map((r) => r.kind), ['link', 'notice', 'keys'], 'a key not in the closed list, or an unknown kind: no rule');
     const seen = new Set();
     const screen = (bottom) => `${'work line\n'.repeat(40)}${bottom}`;
@@ -192,4 +192,16 @@ test('toml-block keeps its own block, every other line as it was; codex.sh and v
         assert.doesNotMatch(text, /parley-mcp/, `${launcher}: no chat, no Parley`);
     }
     assert.match(readFileSync(join(dir, '.codex', 'config.toml'), 'utf8'), /\[projects\."\/work"\]\ntrust_level = "trusted"/);
+});
+
+test('screen-watch: a long link broken over full lines is put back in one; type and code rules (02-11)', async () => {
+    const { rulesOf, actionsOn } = await import('../config/launch/screen-watch.mjs');
+    const rules = rulesOf(['type:Not logged in · Run /login=/login', 'keys:Select login method:=Enter', 'link:https://claude\\.com/\\S*oauth\\S*', 'code:Paste code here', 'type:x=']);
+    assert.deepEqual(rules.map((r) => r.kind), ['type', 'keys', 'link', 'code'], 'a type rule with nothing to type: none');
+    const w = 40; const url = `https://claude.com/cai/oauth/authorize?code=true&${'x'.repeat(70)}`;
+    const screen = ['  Login', '  Browser did not open? Use the url below', url.slice(0, w), url.slice(w, 2 * w), url.slice(2 * w), '  Paste code here if prompted >', `${'-'.repeat(w)}`].join('\n');
+    const got = actionsOn(screen, rules, new Set());
+    assert.deepEqual(got.map((a) => a.kind), ['link', 'code']);
+    assert.equal(got[0].match, url, 'the whole link');
+    assert.deepEqual(actionsOn('… Not logged in · Run /login', rules, new Set()).map((a) => [a.kind, a.value]), [['type', '/login']]);
 });

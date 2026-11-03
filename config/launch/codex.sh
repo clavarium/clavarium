@@ -29,8 +29,8 @@ node "$here/toml-block.mjs" .codex/config.toml tools "$block" \
 # WHAT ITS SCREEN ASKS, read by the generic screen-watch -- Codex's own words: its sign-in link (and the
 # code beside it) sent to the person's chat; an update told to the agent, which restarts when it suits it.
 node "$here/screen-watch.mjs" \
-    'link:https://auth\.openai\.com/[^ ]+' \
-    'link:https://chatgpt\.com/[^ ]*auth[^ ]*' \
+    'link:https://auth\.openai\.com/\S+' \
+    'link:https://chatgpt\.com/\S*auth\S*' \
     'notice:update available[^\n]{0,120}=Your tool has an update: when nothing runs, touch /work/.parley/restart-asked to take it up.' \
     </dev/null >/dev/null 2>&1 &
 exec "$@"
