@@ -406,11 +406,20 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
+    /* The same button on every page of its own (03-11: settings, access, assets, the deck, rooms...): each shows or
+       hides the list as the conversation's does -- one state, one place it is kept. */
+    for (const top of document.querySelectorAll('#places .sheet > .panel-top')) {
+        const f = document.createElement('button'); f.type = 'button'; f.className = 'fold-here'; f.title = 'Hide or show the list of conversations';
+        f.addEventListener('click', () => $('fold').click());
+        top.prepend(f);
+    }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
-        $('fold').textContent = folded ? '\u00bb' : '\u00ab';
-        $('fold').setAttribute('aria-pressed', String(folded));
-        $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
+            f.textContent = folded ? '\u00bb' : '\u00ab';
+            f.setAttribute('aria-pressed', String(folded));
+            f.setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        }
     };
     /* Folded by default: the list takes room few need all the time; the fold is remembered, so opening it
        keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */
@@ -5157,22 +5166,46 @@
     }
     $('salon-close').addEventListener('click', () => leavePlace());
     $('salon-who').addEventListener('click', () => { const open = $('salon-members').hidden; $('salon-members').hidden = !open; $('salon-who').setAttribute('aria-expanded', String(open)); });
-    /* A NEW ROOM (03-11, in the look of a new conversation): its name, its AIs as tiles to pick (the first one
-       picked welcomes the room), its boxes the same. */
-    let salonPicked = [];
-    const salonTile = (value, name, about, box) => {
-        const b = el('button'); b.type = 'button'; b.setAttribute('role', 'checkbox'); b.setAttribute('aria-checked', 'false'); b.dataset.value = value;
-        b.append(el('b', '', name), el('small', '', about));
-        b.addEventListener('click', () => {
-            const on = b.getAttribute('aria-checked') !== 'true'; b.setAttribute('aria-checked', String(on));
-            if (!box) { salonPicked = on ? [...salonPicked, value] : salonPicked.filter((x) => x !== value); paintWelcome(); }
-        });
-        return b;
-    };
-    const paintWelcome = () => { for (const b of $('salon-new-ais').children) { const small = b.querySelector('small'); const host = salonPicked[0] === b.dataset.value; small.replaceChildren(host ? el('span', 'salon-welcome', 'Welcomes the room') : document.createTextNode(small.dataset.about ?? '')); } };
-    /* The same page sets a room up again (03-11, as a conversation's settings): its name, its AIs and the one that
-       welcomes, its boxes; and removes it. `editing`: the room, or null for a new one. */
-    let salonEditing = null;
+    /* A NEW ROOM, or a room set up again (03-11): the one that welcomes in a box of its own at the top; below, every
+       conversation on one row -- its name, the name its assistant has in its chat, its tool -- with a switch (in the
+       room or not) and « Welcomes »; a search; a row dragged into the box above welcomes too. Boxes: the same rows,
+       with a switch only. `editing`: the room, or null for a new one. */
+    let salonIn = new Set(); let salonHost = ''; let salonBoxes = new Set(); let salonEditing = null; let salonBoxList = [];
+    const salonAv = (name) => { const i = el('span', 'salon-av', (name.trim()[0] ?? '?').toUpperCase()); i.style.setProperty('--h', String(huePick(name))); return i; };
+    const salonWho = (c) => [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ') || 'AI';
+    function paintSalonMembers() {
+        const hostC = conversations.find((c) => c.name === salonHost);
+        const box = $('salon-new-host'); box.replaceChildren();
+        if (hostC) { const what = el('span', 'salon-host-what'); what.append(el('b', '', shownName(hostC)), el('small', '', `${salonWho(hostC)} \u00b7 answers, or hands the message on`)); box.append(salonAv(shownName(hostC)), what); }
+        else box.append(el('small', 'hint', 'Pick one below: « Welcomes »'));
+        const q = $('salon-new-search').value.trim().toLowerCase();
+        const rows = conversations.filter((c) => !q || `${shownName(c)} ${c.chatName ?? ''}`.toLowerCase().includes(q)).sort((a, b) => Number(salonIn.has(b.name)) - Number(salonIn.has(a.name)));
+        $('salon-new-ais').replaceChildren(...rows.map((c) => {
+            const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem'); row.draggable = true; row.dataset.name = c.name;
+            const what = el('span', 'salon-member-what'); what.append(el('b', '', shownName(c)), el('small', '', salonWho(c)));
+            const welcome = el('button', 'salon-welcome-btn', 'Welcomes'); welcome.type = 'button'; welcome.setAttribute('aria-pressed', String(c.name === salonHost)); welcome.setAttribute('aria-label', `${shownName(c)} welcomes the room`);
+            welcome.addEventListener('click', () => { salonIn.add(c.name); salonHost = c.name; paintSalonMembers(); });
+            const sw = el('button', 'salon-switch'); sw.type = 'button'; sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', String(salonIn.has(c.name))); sw.setAttribute('aria-label', `${shownName(c)} in the room`);
+            sw.addEventListener('click', () => { if (salonIn.has(c.name)) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; } paintSalonMembers(); });
+            row.append(salonAv(shownName(c)), what, welcome, sw);
+            return row;
+        }));
+        $('salon-new-count').textContent = `\u00b7 ${salonIn.size} in the room`;
+        $('salon-new-boxes').replaceChildren(...salonBoxList.map((b) => {
+            const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem');
+            const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || 'Voice box'));
+            const sw = el('button', 'salon-switch'); sw.type = 'button'; sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', String(salonBoxes.has(b.id))); sw.setAttribute('aria-label', `${b.name} in the room`);
+            sw.addEventListener('click', () => { if (salonBoxes.has(b.id)) salonBoxes.delete(b.id); else salonBoxes.add(b.id); paintSalonMembers(); });
+            row.append(what, sw);
+            return row;
+        }));
+    }
+    $('salon-new-search').addEventListener('input', paintSalonMembers);
+    let salonDragged = '';
+    $('salon-new-ais').addEventListener('dragstart', (e) => { salonDragged = e.target.closest?.('.salon-member-row')?.dataset.name ?? ''; });
+    $('salon-new-host').addEventListener('dragover', (e) => { e.preventDefault(); $('salon-new-host').classList.add('over'); });
+    $('salon-new-host').addEventListener('dragleave', () => $('salon-new-host').classList.remove('over'));
+    $('salon-new-host').addEventListener('drop', (e) => { e.preventDefault(); $('salon-new-host').classList.remove('over'); if (salonDragged) { salonIn.add(salonDragged); salonHost = salonDragged; paintSalonMembers(); } });
     async function openSalonNew(push = true, editing = null) {
         if (DEVICE) return;
         salonEditing = editing;
@@ -5181,19 +5214,13 @@
         $('salon-new-create').textContent = editing ? 'Save' : 'Create';
         $('salon-new-remove-card').hidden = !editing;
         $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
-        $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? '';
-        const host = editing?.members.find((m) => m.host)?.ref;
-        salonPicked = editing ? [host, ...editing.members.filter((m) => m.kind === 'ai' && m.ref !== host).map((m) => m.ref)].filter(Boolean) : [];
-        $('salon-new-ais').replaceChildren(...conversations.map((c) => { const t = salonTile(c.name, shownName(c), [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ') || 'AI'); t.querySelector('small').dataset.about = t.querySelector('small').textContent; return t; }));
-        let boxes = []; try { const x = await fetch(`${API}/boxes`); boxes = x.ok ? await x.json() : []; } catch { boxes = []; }
-        $('salon-new-boxes-card').hidden = boxes.length === 0;
-        $('salon-new-boxes').replaceChildren(...boxes.map((b) => salonTile(b.id, b.name, b.place || 'Voice box', true)));
-        if (editing) {
-            for (const t of $('salon-new-ais').children) if (salonPicked.includes(t.dataset.value)) t.setAttribute('aria-checked', 'true');
-            const mine = editing.members.filter((m) => m.kind === 'box').map((m) => m.ref);
-            for (const t of $('salon-new-boxes').children) if (mine.includes(t.dataset.value)) t.setAttribute('aria-checked', 'true');
-            paintWelcome();
-        }
+        $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
+        salonIn = new Set(editing ? editing.members.filter((m) => m.kind === 'ai').map((m) => m.ref) : []);
+        salonHost = editing?.members.find((m) => m.host)?.ref ?? '';
+        salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
+        try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
+        $('salon-new-boxes-card').hidden = salonBoxList.length === 0;
+        paintSalonMembers();
         $('salon-new-name').focus();
     }
     $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
@@ -5211,20 +5238,21 @@
     $('salon-new-close').addEventListener('click', salonNewBack);
     $('salon-new-cancel').addEventListener('click', salonNewBack);
     $('salon-new-create').addEventListener('click', async () => {
-        const boxes = [...$('salon-new-boxes').querySelectorAll('[aria-checked="true"]')].map((b) => b.dataset.value);
+        const picked = [salonHost, ...[...salonIn].filter((c) => c !== salonHost)].filter(Boolean);
+        const boxes = [...salonBoxes];
         try {
-            /* Set up again: what is ticked now -- members added, those unticked taken out, the first one picked welcomes. */
+            /* Set up again: what is switched on now -- members added, those switched off taken out, the one that welcomes. */
             if (salonEditing) {
                 const r = salonEditing;
                 const ais = r.members.filter((m) => m.kind === 'ai'); const had = r.members.filter((m) => m.kind === 'box');
-                const add = { conversations: salonPicked.filter((c) => !ais.some((m) => m.ref === c)), boxes: boxes.filter((b) => !had.some((m) => m.ref === b)) };
-                const remove = [...ais.filter((m) => !salonPicked.includes(m.ref)), ...had.filter((m) => !boxes.includes(m.ref))].map((m) => m.id);
+                const add = { conversations: picked.filter((c) => !ais.some((m) => m.ref === c)), boxes: boxes.filter((b) => !had.some((m) => m.ref === b)) };
+                const remove = [...ais.filter((m) => !salonIn.has(m.ref)), ...had.filter((m) => !salonBoxes.has(m.ref))].map((m) => m.id);
                 let now = await post(`${API}/rooms/${r.id}`, { name: $('salon-new-name').value, add, remove });
-                const host = now.members.find((m) => m.kind === 'ai' && m.ref === salonPicked[0]);
+                const host = now.members.find((m) => m.kind === 'ai' && m.ref === salonHost);
                 if (host && !host.host) now = await post(`${API}/rooms/${r.id}`, { host: host.id });
                 salonEditing = null; await openSalon(r.id, false); return;
             }
-            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: salonPicked, boxes, host: salonPicked[0] });
+            const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: picked, boxes, host: salonHost });
             await openSalon(made.id, false);
         } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
     });
