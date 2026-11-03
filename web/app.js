@@ -145,6 +145,18 @@
         const was = m.dataset.pose ?? '';
         /* Trying to wake (03-11): it lifts its head, and lies back, again, until it is up (a restart, a build). */
         if (pose === 'trying') { m.classList.remove('waking', 'stirring', 'asleep'); m.classList.add('trying'); m.dataset.pose = 'trying'; return; }
+        /* From trying to waking (03-11, no jolt): wait till its head lies down again -- the end of a try, the
+           very pose it wakes from -- then rise. At most one try's length (with less motion: no try, no wait). */
+        if (pose === 'waking' && was === 'trying') {
+            if (m.dataset.rising) return;
+            m.dataset.rising = 'yes';
+            /* Where it is in its try (2.6 s: lying until 15 %, lying again from 80 %), read from the animation itself. */
+            const tryNow = m.querySelector('.m-head')?.getAnimations?.().find((x) => x.animationName === 'm-try');
+            const at = Number(tryNow?.currentTime ?? 0) % 2600;
+            const rise = () => { delete m.dataset.rising; m.dataset.pose = 'tried'; mascot('waking'); };
+            if (at <= 390 || at >= 2080) rise(); else setTimeout(rise, 2080 - at);
+            return;
+        }
         m.classList.remove('trying');
         if (pose === 'waking') {
             if (was === 'waking') return;
@@ -261,8 +273,9 @@
         const s = Math.max(0, Math.floor((Date.now() - (Date.parse(p.since ?? '') || Date.now())) / 1000));
         $('notice-title').textContent = PROGRESS_TITLES[p.kind] ?? 'Starting';
         /* 03-11, less is more: the sheep trying to wake (a wake, a restart, a build), the step under way in one
-           line; the list of the steps stays one tap away, and the usual time is said only when it is passed. */
-        mascot(p.kind === 'wake' ? 'waking' : 'trying');
+           line; the list of the steps stays one tap away, and the usual time is said only when it is passed.
+           It wakes for real at the last step only (03-11, his idea): until then, it tries. */
+        mascot(at >= p.steps.length - 1 ? 'waking' : 'trying');
         $('notice-steps').hidden = !panel.open; $('notice-spin').hidden = true;
         $('notice-count').textContent = `${at + 1} / ${p.steps.length} \u00b7 ${clockOf(s)}`;
         $('notice-text').textContent = `${stepNow(p, tool)}${s >= 180 ? ` \u2014 ${usualFor(p.kind, s)}` : ''}`;
