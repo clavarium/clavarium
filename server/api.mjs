@@ -133,6 +133,8 @@
  * A request that changes something must come from this site's own pages: the
  * Origin header is compared, and the body must be JSON, which a form on
  * another site cannot send. */
+import { openCodeConfig } from './catalog.mjs';
+import { writeFileSync } from 'node:fs';
 import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
@@ -163,7 +165,7 @@ function readBody(request, max = BODY_MAX) {
 /* This run of the server: a page's count of binder changes is of one run, and starts again with the next. */
 const BOOT = Math.random().toString(36).slice(2, 10);
 
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -257,6 +259,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/resources' && resources) return send(200, resources.list()), true;
             if (pathname === '/api/shortcuts' && shortcuts) return send(200, shortcuts.list()), true;
             if (pathname === '/api/secrets' && secrets) return send(200, secrets.list()), true;
+            /* The providers and models OpenCode knows (models.dev), for a conversation made with it (03-11). */
+            if (pathname === '/api/catalog/models' && catalogue) return send(200, { providers: await catalogue.providers() }), true;
             /* The owner's asset groups (groups.mjs): a label and the asset ids each
                holds. Distinct from /api/groups/* above, which are the conversation
                list's folders. */
@@ -403,6 +407,20 @@ export async function handleApi(request, response, conversations, headers, resou
             const made = conversations.create(body);
             /* Its chat on from the start (02-11), unless asked otherwise ("More": Chat off); a work folder on the
                machine's disk has no place for it. */
+            /* Made with OpenCode and its settings (03-11): its key given to it, and its model written where OpenCode
+               reads it (its work folder's opencode.json), once its machine is built. */
+            const oc = made.tool === 'opencode' && body?.opencode ? openCodeConfig(body.opencode) : null;
+            if (oc) {
+                const name = made.name; const until = Date.now() + 30 * 60_000;
+                const setUp = async () => {
+                    const c = conversations.list().find((x) => x.name === name);
+                    if (!c || Date.now() > until) return;
+                    if (c.phase !== 'ready') { setTimeout(() => { void setUp(); }, 2000).unref?.(); return; }
+                    try { secrets?.attach(name, String(body.opencode.secret), true); await secrets?.deliver(name).catch(() => {}); } catch { /* given from its settings */ }
+                    try { const dir = resources.workFolder(name); writeFileSync(`${dir}/opencode.json`, `${JSON.stringify(oc, null, 2)}\n`, { flag: 'wx', mode: 0o644 }); } catch { /* one there already is kept */ }
+                };
+                void setUp();
+            }
             if (body?.chat !== false && talk) {
                 /* Its work folder exists once it is built: the chat is put in then (a few minutes at most). */
                 const name = made.name; const until = Date.now() + 30 * 60_000;

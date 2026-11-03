@@ -2193,3 +2193,11 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .deck-empty { text-align: center; padding: 48px 16px; color: var(--ink2); }
 .deck-empty-acts { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin-top: 12px; }
 @media (max-width: 520px) { .deck { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; } }
+
+/* OpenCode set up from the new conversation (03-11). */
+#newconv-oc .seg { display: flex; flex-wrap: wrap; gap: 6px; }
+#newconv-oc .seg button[aria-checked="true"] { border-color: var(--brass); color: var(--brass-ink); }
+.oc-set { display: grid; gap: 10px; margin-top: 10px; }
+.oc-set label { display: grid; gap: 4px; font-weight: 600; font-size: .8125rem; }
+.oc-set select, .oc-new input { width: 100%; }
+.oc-new { display: grid; gap: 4px; }

@@ -180,6 +180,8 @@ export function soundOf(pcm) {
 }
 
 export const DOING_WITHIN_MS = 120_000;
+export const CHAT_IN = /\b(?:mode conversation|on discute|discutons|let'?s (?:talk|chat))\b/i;
+export const CHAT_OUT = /\b(?:merci,? c'est tout|c'est tout pour (?:moi|l'instant)|(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)|that'?s all)\b/i;
 export const TEST_SOUND = 'Test du son. Un, deux, trois. Si tu m\'entends, le son marche.';
 export const TEST_MIC = 'Test du micro. Parle-moi, je t\'écoute.';
 export const TEST_MIC_MS = 45_000;
@@ -566,10 +568,11 @@ export class Boxes {
             const answering = l.heardAt && this.#now() - l.heardAt < ANSWER_WITHIN_MS;
             const chatting = !doing && answering && this.#chatting(l);
             const opening = chatting && !l.chat;
+            if (chatting && !l.chat) l.send({ t: 'chat', on: true });
             if (chatting) l.chat = true;
             /* SENTENCE BY SENTENCE: the first is said while the next ones are made -- the answer starts sooner
                (31-10: a few seconds of silence before each answer). The box queues them, one after the other. */
-            const parts = sentencesOf(opening ? `Je passe en mode conversation : je reste à l'écoute. ${words}` : words);
+            const parts = sentencesOf(opening ? `On discute. ${words}` : words);
             let next = this.#speak(parts[0]);
             for (const [i, part] of parts.entries()) {
                 let pcm;
@@ -662,7 +665,7 @@ export class Boxes {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
                 sentence = null;
                 if (this.#tested(link, 'nothing')) { link.send({ t: 'cue', name: 'done' }); return; }
-                if (link.chat) this.#log(`voice box ${box.name}: conversation ended, nobody answered`);
+                if (link.chat) { this.#log(`voice box ${box.name}: conversation ended, nobody answered`); link.send({ t: 'chat', on: false }); }
                 link.chat = false; link.recent = [];
                 link.send({ t: 'cue', name: 'done' });
                 return;
@@ -773,13 +776,15 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${(link.chat || CHAT_IN.test(text)) && !CHAT_OUT.test(text) ? 'en conversation : réponse courte, parlée · ' : ''}${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         if (WAITING_WORDS) this.#waitFor(link, text);
         link.recent = [...(link.recent ?? []), link.heardAt];
-        if (/\bmode conversation\b/i.test(text)) link.chat = true;
-        if (/\b(?:fin|arr[eê]te|stop)\w*\b.{0,20}\b(?:conversation|[ée]couter)\b/i.test(text)) { link.chat = false; link.recent = []; }
+        /* CONVERSATION MODE (03-11, as he set it): in by « on discute » (or « mode conversation »), out by « merci,
+           c'est tout » (or « fin de la conversation »), or by nobody speaking after an answer. */
+        if (CHAT_IN.test(text) && !link.chat) { link.chat = true; link.send({ t: 'chat', on: true }); }   /* its ring, its chime (0.1.46) */
+        if (CHAT_OUT.test(text) && link.chat) { link.chat = false; link.recent = []; link.send({ t: 'chat', on: false }); }
         link.doingSaid = false;
     }
 

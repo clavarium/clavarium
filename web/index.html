@@ -1015,6 +1015,16 @@
             <span class="sub-head">Tool</span>
             <div id="newconv-tools" class="pick" role="radiogroup" aria-label="Tool"></div>
           </div>
+          <div class="nc-card" id="newconv-oc" hidden>
+            <div class="seg" id="newconv-oc-mode" role="radiogroup" aria-label="OpenCode"><button type="button" role="radio" aria-checked="true" data-m="set">Install and set up</button><button type="button" role="radio" aria-checked="false" data-m="raw">Install only</button></div>
+            <div id="newconv-oc-set" class="oc-set">
+              <label>Provider<select id="newconv-oc-provider"></select></label>
+              <label>Model<select id="newconv-oc-model"></select></label>
+              <label>API key<select id="newconv-oc-key"></select></label>
+              <div id="newconv-oc-new" class="oc-new" hidden><input id="newconv-oc-value" type="password" autocomplete="off" placeholder="Paste the key"><small class="hint">Kept in your secrets, given to this conversation only.</small></div>
+            </div>
+            <small id="newconv-oc-raw" class="hint" hidden>Set it up yourself in its terminal.</small>
+          </div>
           <div class="nc-card">
             <span class="sub-head">Its files</span>
             <div id="newconv-work" class="pick two" role="radiogroup" aria-label="Its files">
