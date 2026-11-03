@@ -651,3 +651,19 @@ test('conversation mode, as he set it: in by « on discute », out by « merci, 
     assert.ok(!CHAT_IN.test('on discutera demain du devis'), 'a future tense is not it');
     assert.ok(!CHAT_OUT.test("merci pour tout"), 'a thank-you is not the end');
 });
+
+test('in a conversation, a sentence cut by its length (a radio, a TV) is not sent: « Tu me parles ? » once, then the conversation ends (03-11)', async () => {
+    const spoken = [];
+    const { boxes, said } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); }, hear: async () => 'Mésange, on discute' });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    const sentence = async (reason) => { s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 9), true); s.box({ t: 'listen.end', reason }); for (let k = 0; k < 8; k++) await tick(); };
+    await sentence('silence');
+    assert.equal(said.length, 1); assert.ok(s.sent.some((m) => m.t === 'chat' && m.on === true), 'in: told to the box');
+    await sentence('timeout');
+    assert.equal(said.length, 1, 'not sent'); assert.equal(spoken.at(-1), 'Tu me parles ?');
+    await sentence('timeout');
+    assert.equal(said.length, 1, 'not sent either');
+    assert.ok(s.sent.some((m) => m.t === 'chat' && m.on === false), 'out: told to the box');
+});
