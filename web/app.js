@@ -406,11 +406,20 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
+    /* The same button on every page of its own (03-11: settings, access, assets, the deck, rooms...): each shows or
+       hides the list as the conversation's does -- one state, one place it is kept. */
+    for (const top of document.querySelectorAll('#places .sheet > .panel-top')) {
+        const f = document.createElement('button'); f.type = 'button'; f.className = 'fold-here'; f.title = 'Hide or show the list of conversations';
+        f.addEventListener('click', () => $('fold').click());
+        top.prepend(f);
+    }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
-        $('fold').textContent = folded ? '\u00bb' : '\u00ab';
-        $('fold').setAttribute('aria-pressed', String(folded));
-        $('fold').setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
+            f.textContent = folded ? '\u00bb' : '\u00ab';
+            f.setAttribute('aria-pressed', String(folded));
+            f.setAttribute('aria-label', folded ? 'Show the list of conversations' : 'Hide the list of conversations');
+        }
     };
     /* Folded by default: the list takes room few need all the time; the fold is remembered, so opening it
        keeps it open (a person who wants it open sets it once). Open only when that choice was remembered. */

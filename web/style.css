@@ -2277,3 +2277,7 @@ button.salon-switch[aria-checked="true"]::after { left: 18px; background: var(--
 .nc-card > .salon-host-box { padding: 8px 12px; }
 .nc-card > .salon-members-tools { padding-bottom: 4px; }
 .nc-card > .salon-host-box + *, .nc-card > .salon-member-list + * { border-top: 0; }
+/* The list's button on each page of its own (03-11), as the conversation's. */
+.panel-top > .fold-here { font-size: 1rem; line-height: 1; padding: 4px 9px; margin-right: 8px; flex: none; }
+@media (max-width: 700px) { .panel-top > .fold-here { display: none; } }
+.panel-top > .fold-here + * { margin-right: auto; }
