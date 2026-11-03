@@ -406,13 +406,26 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
-    /* The same button on every page of its own (03-11: settings, access, assets, the deck, rooms...): each shows or
-       hides the list as the conversation's does -- one state, one place it is kept. */
-    for (const top of document.querySelectorAll('#places .sheet > .panel-top')) {
-        const f = document.createElement('button'); f.type = 'button'; f.className = 'fold-here'; f.title = 'Hide or show the list of conversations';
-        f.addEventListener('click', () => $('fold').click());
-        top.prepend(f);
+    /* THE TOP BAR, ONE COMPONENT (03-11): every page has the conversation's bar -- the button that shows or hides the
+       list on its left, a state's dot when there is one, its title, and on its right what that page offers (a
+       conversation: Chat, Terminal, Assets, Binders, its settings; a room: its settings; the others: their own
+       controls). Built once here from each page's top line: the same element, the same looks, the same place. */
+    function topBar(top, { state = null } = {}) {
+        const bar = document.createElement('header'); bar.className = 'topbar';
+        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold-here'; fold.title = 'Hide or show the list of conversations';
+        fold.addEventListener('click', () => $('fold').click());
+        bar.append(fold);
+        if (state) { const dot = document.createElement('span'); dot.className = 'bar-state'; dot.id = state; dot.setAttribute('aria-hidden', 'true'); bar.append(dot); }
+        const title = top.querySelector(':scope > b'); if (title) bar.append(title);
+        const right = document.createElement('div'); right.className = 'bar-right';
+        right.append(...[...top.childNodes].filter((n) => n.nodeType === 1));
+        bar.append(right);
+        top.replaceWith(bar);
+        return bar;
     }
+    for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
+    { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right').prepend(views); }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
         for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
