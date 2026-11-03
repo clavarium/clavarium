@@ -2379,13 +2379,17 @@
         /* Nothing over the screen to say it under: a long wait still says so. */
         /* The neutral word of a load is not a place to list troubles either, until the wait is long. */
         const quiet = notice.hidden || Boolean(notice.dataset.loading);
+        /* The chat (or any tab but the terminal) in front: a terminal slow to come back -- often only this page
+           reconnecting after an update -- is not put over it (03-11); it comes back by itself, behind. */
+        if (tabNow() !== 'terminal' && !['warn', 'bad'].includes(record?.level)) { if (notice.dataset.loading || /terminal/i.test($('notice-text').textContent)) notice.hidden = true; return; }
         if (quiet && !long) return;
-        if (quiet) show('Its terminal still does not come.');
+        if (quiet) show(record && record.level !== 'bad' && record.level !== 'warn' ? 'Reconnecting to its terminal\u2026' : 'Its terminal still does not come.');
         /* Waking it is what the page is doing: "it is asleep" would say the opposite. */
         const said = waiting && record ? { ...record, problems: (record.problems ?? []).filter((p) => p.kind !== 'state') } : record;
         const shown = healthLines($('notice-health'), said, { all: true, brief: true });
         $('notice-health').hidden = $('notice-health').childElementCount === 0;
-        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn' || long));
+        /* A restart is offered only when its machine is not well: a machine that runs and looks well is not restarted for a slow page (03-11). */
+        $('notice-restart').hidden = !(record && (record.level === 'bad' || record.level === 'warn'));
         $('notice-restart').onclick = () => restartMachine(false);
         const text = $('notice-text').textContent.replace(/ This takes much longer than a start usually does\.$/, '');
         if (long) $('notice-text').textContent = `${text} This takes much longer than a start usually does.`;
