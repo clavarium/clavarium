@@ -5166,21 +5166,60 @@
         return b;
     };
     const paintWelcome = () => { for (const b of $('salon-new-ais').children) { const small = b.querySelector('small'); const host = salonPicked[0] === b.dataset.value; small.replaceChildren(host ? el('span', 'salon-welcome', 'Welcomes the room') : document.createTextNode(small.dataset.about ?? '')); } };
-    async function openSalonNew(push = true) {
+    /* The same page sets a room up again (03-11, as a conversation's settings): its name, its AIs and the one that
+       welcomes, its boxes; and removes it. `editing`: the room, or null for a new one. */
+    let salonEditing = null;
+    async function openSalonNew(push = true, editing = null) {
         if (DEVICE) return;
+        salonEditing = editing;
         enterPlace('salon-new', push);
-        $('salon-new-error').hidden = true; $('salon-new-name').value = ''; salonPicked = [];
+        $('salon-new-title').textContent = editing ? editing.name : 'New room';
+        $('salon-new-create').textContent = editing ? 'Save' : 'Create';
+        $('salon-new-remove-card').hidden = !editing;
+        $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
+        $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? '';
+        const host = editing?.members.find((m) => m.host)?.ref;
+        salonPicked = editing ? [host, ...editing.members.filter((m) => m.kind === 'ai' && m.ref !== host).map((m) => m.ref)].filter(Boolean) : [];
         $('salon-new-ais').replaceChildren(...conversations.map((c) => { const t = salonTile(c.name, shownName(c), [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ') || 'AI'); t.querySelector('small').dataset.about = t.querySelector('small').textContent; return t; }));
         let boxes = []; try { const x = await fetch(`${API}/boxes`); boxes = x.ok ? await x.json() : []; } catch { boxes = []; }
         $('salon-new-boxes-card').hidden = boxes.length === 0;
         $('salon-new-boxes').replaceChildren(...boxes.map((b) => salonTile(b.id, b.name, b.place || 'Voice box', true)));
+        if (editing) {
+            for (const t of $('salon-new-ais').children) if (salonPicked.includes(t.dataset.value)) t.setAttribute('aria-checked', 'true');
+            const mine = editing.members.filter((m) => m.kind === 'box').map((m) => m.ref);
+            for (const t of $('salon-new-boxes').children) if (mine.includes(t.dataset.value)) t.setAttribute('aria-checked', 'true');
+            paintWelcome();
+        }
         $('salon-new-name').focus();
     }
-    $('salon-new-close').addEventListener('click', () => leavePlace());
-    $('salon-new-cancel').addEventListener('click', () => leavePlace());
+    $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
+    $('salon-new-remove').addEventListener('click', () => {
+        const r = salonEditing; if (!r) return;
+        const keep = el('button', '', 'Keep'); keep.type = 'button';
+        const sure = el('button', 'danger', `Remove ${r.name}`); sure.type = 'button';
+        const ask = el('span', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
+        keep.addEventListener('click', () => { ask.remove(); $('salon-new-remove').hidden = false; });
+        sure.addEventListener('click', async () => { try { await post(`${API}/rooms/${r.id}/remove`, {}); salonEditing = null; await loadRooms(); paint(); openDeck(false); } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; } });
+        $('salon-new-remove').hidden = true; $('salon-new-remove').after(ask); sure.focus();
+    });
+    /* Back from a room's settings: to the room; from a new one: where it was opened from. */
+    const salonNewBack = () => { const r = salonEditing; salonEditing = null; if (r) void openSalon(r.id, false); else leavePlace(); };
+    $('salon-new-close').addEventListener('click', salonNewBack);
+    $('salon-new-cancel').addEventListener('click', salonNewBack);
     $('salon-new-create').addEventListener('click', async () => {
         const boxes = [...$('salon-new-boxes').querySelectorAll('[aria-checked="true"]')].map((b) => b.dataset.value);
         try {
+            /* Set up again: what is ticked now -- members added, those unticked taken out, the first one picked welcomes. */
+            if (salonEditing) {
+                const r = salonEditing;
+                const ais = r.members.filter((m) => m.kind === 'ai'); const had = r.members.filter((m) => m.kind === 'box');
+                const add = { conversations: salonPicked.filter((c) => !ais.some((m) => m.ref === c)), boxes: boxes.filter((b) => !had.some((m) => m.ref === b)) };
+                const remove = [...ais.filter((m) => !salonPicked.includes(m.ref)), ...had.filter((m) => !boxes.includes(m.ref))].map((m) => m.id);
+                let now = await post(`${API}/rooms/${r.id}`, { name: $('salon-new-name').value, add, remove });
+                const host = now.members.find((m) => m.kind === 'ai' && m.ref === salonPicked[0]);
+                if (host && !host.host) now = await post(`${API}/rooms/${r.id}`, { host: host.id });
+                salonEditing = null; await openSalon(r.id, false); return;
+            }
             const made = await post(`${API}/rooms`, { name: $('salon-new-name').value, conversations: salonPicked, boxes, host: salonPicked[0] });
             await openSalon(made.id, false);
         } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
