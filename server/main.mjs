@@ -595,7 +595,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         const text = `Its tool was stopped: the machine ran out of memory${size}. Give it more in Settings → Machine → Memory, or start it fresh.`;
         events.add({ kind: 'machine', text: `Machine of ${name}: its tool was stopped for lack of memory${size}`, conversation: name });
         void alerts.tell({ title: `${name}: its tool ran out of memory`, body: text, url: `/?c=${encodeURIComponent(name)}&open=settings` });
-        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine' }); } catch { /* its chat may be off */ }
+        try { talk.event(name, { kind: 'machine-problem', text, tone: 'warn', topic: 'Machine', brief: 'Out of memory', actions: ['memory', 'restart', 'terminal'] }); } catch { /* its chat may be off */ }
     };
     const stopWatch = capacity.start();
     /* The curves of the resources (history.mjs): one look a minute, from what the server knows already. */

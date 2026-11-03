@@ -604,7 +604,7 @@ export class Talk {
         const gone = record.state === 'Running' ? [...before].filter((k) => !keys.includes(k)) : [];
         if (gone.length) {
             const said = [...new Set(gone.map((k) => (/^disk:/.test(k) ? 'Its disk has room again.' : k === 'memory-low' ? 'Its memory is no longer short.' : /^oom:/.test(k) ? '' : 'What was wrong with its machine is gone.')).filter(Boolean))];
-            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine' });
+            if (said.length) this.event(name, { kind: 'machine-ok', text: said.join(' '), topic: 'Machine', brief: 'Fixed' });
         }
         if (fresh.length === 0) return;
         this.event(name, {
@@ -612,6 +612,8 @@ export class Talk {
             text: fresh.map((p) => p.text).join(' '),
             tone: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
             topic: 'Machine',
+            /* Its name on the one line a problem is in the simple view (Parley, 03-11). */
+            brief: fresh.some((p) => p.kind === 'memory' || /^oom:|^memory/.test(p.key ?? '')) ? 'Out of memory' : fresh.every((p) => p.kind === 'disk') ? 'Disk almost full' : 'Machine problem',
             /* What can be done: a disk short of room is looked at (what takes it) or made larger --
                a restart frees nothing; otherwise more memory where memory is short, a restart, its terminal. */
             actions: [...(fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
