@@ -89,6 +89,12 @@
  *   POST /api/asset-groups/place            {asset, group}: put an asset in a group (group null to take it out)
  *   POST /api/asset-groups/<id>/rename      {label}
  *   POST /api/asset-groups/<id>/remove
+ *   GET  /api/rooms                         the rooms (#268): [{id, name, host, members: [{id, kind, name, ref, host?}]}]
+ *   POST /api/rooms                         {name, conversations: [names], boxes: [ids], host?}: a new room
+ *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids]}
+ *   POST /api/rooms/<id>/remove             the room and its thread
+ *   GET  /api/rooms/<id>/talk?last=         its thread, with the room: {room, messages, ...}
+ *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids]}: said in it; to its host, or to the AIs named
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
@@ -165,7 +171,7 @@ function readBody(request, max = BODY_MAX) {
 /* This run of the server: a page's count of binder changes is of one run, and starts again with the next. */
 const BOOT = Math.random().toString(36).slice(2, 10);
 
-export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue) {
+export async function handleApi(request, response, conversations, headers, resources, originOk = sameOrigin, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     if (!pathname.startsWith('/api/')) return false;
     let send = (status, body) => {
@@ -265,6 +271,10 @@ export async function handleApi(request, response, conversations, headers, resou
                holds. Distinct from /api/groups/* above, which are the conversation
                list's folders. */
             if (pathname === '/api/asset-groups' && groups) return send(200, groups.list()), true;
+            /* Rooms (#268, rooms.mjs): a thread shared by several AIs, the person and boxes. */
+            if (pathname === '/api/rooms' && rooms) return send(200, rooms.list()), true;
+            const roomTalk = /^\/api\/rooms\/([0-9a-f-]{36})\/talk$/.exec(pathname);
+            if (roomTalk && rooms) { const last = Number(query.get('last')); return send(200, rooms.read(roomTalk[1], Number.isInteger(last) && last > 0 ? { last } : undefined)), true; }
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Which providers and kinds an account can be connected for here. */
             if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
@@ -402,6 +412,13 @@ export async function handleApi(request, response, conversations, headers, resou
         const body = await readBody(request, pathname === '/api/setup/preview' || pathname === '/api/setup/import' ? SETUP_BODY_MAX : BODY_MAX);
         /* What was done, once it was done: said in What happened (events.mjs), for those worth saying. */
         if (events) { const answer = send; send = (status, out) => { if (status < 300) { try { events.fromRequest(pathname, body, identity, out); } catch { /* never in the way */ } } answer(status, out); }; }
+        if (rooms && pathname.startsWith('/api/rooms')) {
+            if (pathname === '/api/rooms') return send(201, rooms.create(body ?? {})), true;
+            const r = /^\/api\/rooms\/([0-9a-f-]{36})(\/remove|\/talk)?$/.exec(pathname);
+            if (r && !r[2]) return send(200, rooms.change(r[1], body ?? {})), true;
+            if (r && r[2] === '/remove') { rooms.remove(r[1]); return send(200, { removed: r[1] }), true; }
+            if (r && r[2] === '/talk') return send(201, await rooms.say(r[1], body?.text, { to: body?.to })), true;
+        }
         if (pathname === '/api/conversations') {
             await conversations.admit?.(body);
             const made = conversations.create(body);
