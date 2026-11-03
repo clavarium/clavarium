@@ -5,6 +5,7 @@
   --brass: #d2a94e; --on-brass: #1b1405; --ok: #5fc39d; --warn: #e39a5c; --danger: #ee7f79; --wait: #5aa9f0;
   /* Brass as the colour of text or of a small sign: darker on a light screen, to be read. */
   --brass-ink: #d2a94e;
+  --button: #222c38;   /* declared in both themes (02-11, the charter): no fallback scattered in the rules */
   --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
 }
 /* A light screen, for whoever reads better dark on light. The terminal gets
@@ -21,7 +22,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 body { font: .875rem var(--sans); }
 body { height: 100dvh; padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 0); }
 [hidden] { display: none !important; }
-button { font: 600 .8125rem var(--sans); color: var(--ink); background: var(--button, #222c38); border: 1px solid var(--line); border-radius: 7px; padding: 7px 11px; cursor: pointer; }
+button { font: 600 .8125rem var(--sans); color: var(--ink); background: var(--button); border: 1px solid var(--line); border-radius: 8px; padding: 7px 11px; cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }   /* one look for a button that cannot be pressed (the charter) */
 /* The main button (02-11): its words and outline in brass, no fill -- quieter, like a suggestion. */
 button.primary { background: transparent; border-color: var(--brass); color: var(--brass-ink); }
 button.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--brass) 12%, transparent); }
@@ -194,7 +196,7 @@ html[data-door="device"] #room { height: 100%; }
 .chip[data-access="offline"] { color: var(--warn); border-color: var(--warn); }
 #signin-strip { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 12px; background: rgba(210, 169, 78, .14); border-bottom: 1px solid var(--brass); font-size: .8125rem; }
 #signin-text { flex: 1; min-width: 160px; }
-a.button { font: 600 .8125rem var(--sans); text-decoration: none; border-radius: 7px; padding: 7px 11px; background: transparent; border: 1px solid var(--brass); color: var(--brass-ink); }
+a.button { font: 600 .8125rem var(--sans); text-decoration: none; border-radius: 8px; padding: 7px 11px; background: transparent; border: 1px solid var(--brass); color: var(--brass-ink); }
 #signin-form input { flex: 1; min-width: 130px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; }
 /* On a narrow screen the key row wraps instead of hiding its end, and
    dictation comes first: by voice is how a phone is used. */
@@ -2173,7 +2175,7 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 /* THE CONVERSATIONS AS CARDS (02-11): playing cards, one per conversation, and one to add. */
 #list-title { cursor: pointer; }
 #deck { overflow-y: auto; }
-.deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 14px; padding: 14px 2px 24px; }
+.deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 14px; padding: 14px 16px 24px; }
 .conv-card { position: relative; aspect-ratio: 63 / 88; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(160deg, var(--bar), var(--panel)); color: var(--ink); text-align: left; font: inherit; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); cursor: pointer; transition: transform .15s, border-color .15s; min-height: 0; }
 .conv-card:hover, .conv-card:focus-visible { transform: translateY(-3px); border-color: var(--brass); }
 .conv-card-plate { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); min-width: 0; }
