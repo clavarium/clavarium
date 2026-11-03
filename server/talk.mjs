@@ -294,7 +294,7 @@ export class Talk {
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
                 if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
                 /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
-                if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', null, { doing: true });
+                if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });
                 const words = texts(this.#lastLang, this.settings().own);
                 if (event.type === 'agent-asked') this.#alert({ title: fill(words['alert-asks'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });
                 if (event.type === 'agent-status' && event.message.state === 'waiting') this.#alert({ title: fill(words['alert-waits'], { name }), body: event.message.text ?? '', url: `/?c=${name}` });

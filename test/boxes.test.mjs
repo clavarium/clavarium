@@ -566,17 +566,22 @@ test('a sentence while this side still records: the recording is closed, the sen
     assert.ok(said.some((x) => x.text === 'allume la lumière'), JSON.stringify(said));
 });
 
-test('waiting words are off: nothing is said before the answer (01-11)', async () => {
+test('while the agent is silent: only the sentence made for this request, never a stock one; nothing once it has spoken (03-11)', async () => {
     const mod = await import('../server/boxes.mjs');
-    assert.equal(mod.WAITING_WORDS, false);
-    const spoken = [];
-    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); } });
-    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
-    const s = new FakeSocket();
-    boxes.accept(s, boxes.byKey(box.key));
-    s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 9), true); s.box({ t: 'listen.end', reason: 'silence' });
-    await new Promise((r) => setTimeout(r, mod.THINKING_AFTER_MS + 300));
-    assert.deepEqual(spoken, []);
+    const run = async (react, answerFirst) => {
+        const spoken = [];
+        const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(640, 1); }, react });
+        const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+        const s = new FakeSocket();
+        boxes.accept(s, boxes.byKey(box.key));
+        s.box({ t: 'listen.start', reason: 'wake' }); for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640, 9), true); s.box({ t: 'listen.end', reason: 'silence' });
+        if (answerFirst) { await tick(); await tick(); await boxes.agentSaid('kitchen-help', 'Voilà.', [box.id]); }
+        await new Promise((r) => setTimeout(r, mod.THINKING_AFTER_MS + 300));
+        return spoken;
+    };
+    assert.deepEqual(await run(async () => 'Je fouille dans tes mails, je reviens vers toi.', false), ['Je fouille dans tes mails, je reviens vers toi.']);
+    assert.deepEqual(await run(async () => null, false), [], 'no sentence made: nothing, never a stock word');
+    assert.deepEqual(await run(async () => 'Je regarde ton agenda.', true), ['Voilà.'], 'answered already: nothing more');
 });
 
 test('what the box measured, its sentence ended, goes beside the message', async () => {
@@ -627,4 +632,14 @@ test('a box sentence keeps its sound beside its conversation, for its assistant 
     assert.equal(kept.length, 1);
     assert.equal(kept[0].c, 'kitchen-help'); assert.equal(kept[0].file, 'phrase-boitier.wav');
     assert.equal(kept[0].data.toString('ascii', 0, 4), 'RIFF'); assert.equal(kept[0].data.length, 44 + 40 * 640);
+});
+
+test('what it is about to do, sent to a box on purpose, is said there at once, as written (03-11)', async () => {
+    const spoken = [];
+    const { boxes } = make({ speak: async (t) => { spoken.push(t); return Buffer.alloc(1600, 1); } });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    await boxes.agentSaid('kitchen-help', 'Je regarde ton agenda de demain, un instant.', [box.id], { doing: true });
+    assert.equal(spoken.at(-1), 'Je regarde ton agenda de demain, un instant.', 'no sentence heard before: said all the same, it was sent there');
 });

@@ -134,7 +134,9 @@ export function sentencesOf(text) {
 
 /* The words said while an answer is awaited (« Hmm… », « ça prend plus de temps ») -- off (01-11: heard all
    the time while the box misheard, they made it worse; back once the sound path is sound). */
-export const WAITING_WORDS = false;
+/* 03-11: on again, but only the sentence made for THIS request (never a stock phrase), and only when the agent has
+   said nothing within THINKING_AFTER_MS. */
+export const WAITING_WORDS = true;
 /* WHAT THE BOX MEASURED, its sentence ended (firmware 0.1.38): how long, when a voice was heard, the bar it
    used -- beside the message, with what reached this side. */
 export function endOf(ep, reason = '') {
@@ -151,7 +153,7 @@ export function endOf(ep, reason = '') {
     return parts.join(' · ');
 }
 /* 02-11: the light turning says it is at work; a word only when it really takes long. */
-export const THINKING_AFTER_MS = 15_000;
+export const THINKING_AFTER_MS = 5_000;
 export const LONGER_AFTER_MS = 12_000;
 export const THINKING = ['Hmm…', 'Voyons…', 'Hmm, voyons voir…'];
 /* WHY A BOX LISTENED, in a few words beside the message (01-11): what woke it (and the wake word's score), and
@@ -524,7 +526,7 @@ export class Boxes {
         /* Made at once, used if the answer is still not there: a reaction to THIS sentence, in its language. */
         let made = null;
         this.#react(text).then((t) => { made = t; }).catch(() => {});
-        link.thinkingA = setTimeout(() => { void say(made || THINKING[Math.floor(Math.random() * THINKING.length)]); }, THINKING_AFTER_MS);
+        link.thinkingA = setTimeout(() => { if (made) void say(made); }, THINKING_AFTER_MS);
         /* One word of waiting, not two (02-11: « je regarde, un instant » again and again). */
         link.thinkingA.unref?.();
     }
@@ -535,10 +537,13 @@ export class Boxes {
         const plain = forSpeech(text);
         /* 02-11: not even « Je regarde, un instant » in its place -- said each time the agent wrote what it does, it
            came back again and again. A long or technical one is not said at all. */
-        const words = doing && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? '' : plain;
+        /* Sent to a box on purpose (03-11: "dis au plus tôt ce que tu vas faire"): said as it is written. */
+        const aimed = doing && Array.isArray(to) && to.length > 0;
+        const words = doing && !aimed && (plain.length > 70 || /[\d:;/()[\]→=_]/.test(plain)) ? '' : plain;
         if (!words) return;
         let boxes;
-        if (doing) {
+        if (aimed) boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && to.includes(l.box().id));
+        else if (doing) {
             /* "I'm looking in the calendar": once per sentence heard, on the box that heard it, within two minutes. */
             /* 02-11: what it really does, in its words (« je regarde dans ton agenda »); never a stock phrase. */
             boxes = [...this.#links.values()].filter((l) => l.box().conversation === conversation && l.heardAt && !l.doingSaid && this.#now() - l.heardAt < DOING_WITHIN_MS);
@@ -570,7 +575,9 @@ export class Boxes {
                 let pcm;
                 try { pcm = await next; } catch (error) { this.#log(`voice box: no voice for the answer (${error.message})`); l.send({ t: 'cue', name: 'error' }); break; }
                 if (i + 1 < parts.length) { next = this.#speak(parts[i + 1]); next.catch(() => {}); }
-                l.play(pcm, i + 1 === parts.length && (question || chatting) ? 'listen' : null);   /* a question is always listened after: an answer is expected */
+                /* Listened after only when what it says calls for an answer (03-11: "en fonction de la réponse"): the
+                   agent says so by asking (parley ask), not the box by guessing. */
+                l.play(pcm, i + 1 === parts.length && (question || chatting) ? 'listen' : null);
             }
         }
     }

@@ -229,8 +229,10 @@ export async function quickReaction(config, said, fetcher = fetch) {
     try {
         const r = await fetcher(`${base}/chat/completions`, {
             method: 'POST', redirect: 'error', headers: { 'content-type': 'application/json', authorization: `Bearer ${config.key}` }, signal: AbortSignal.timeout(3000),
-            body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.8, max_tokens: 24, messages: [
-                { role: 'system', content: 'Someone just spoke to a voice assistant, which needs a few seconds to answer. Write ONE very short spoken reaction (2 to 7 words) in the SAME language as what they said, natural and warm, that acknowledges it without answering it and without promising anything: e.g. "Bonne question, voyons…", "Ah, intéressant, je regarde.", "Hmm, let me see…". No quotes, no emoji. Answer with the reaction only.' },
+            body: JSON.stringify({ model: REACTION_MODEL, temperature: 0.8, max_tokens: 40, messages: [
+                /* 03-11: what it is going to do, in context, with a little life ("je fouille dans tes mails, je reviens vers
+                   toi"), never the same stock phrase. */
+                { role: 'system', content: 'Someone just spoke to a voice assistant, which needs some time to answer. Write ONE short spoken sentence (4 to 14 words) in the SAME language as what they said, saying what the assistant is now going to do for THIS request, warm and a little playful, never the same wording twice: e.g. "Je fouille dans tes mails, je reviens vers toi.", "Je jette un œil à ton agenda de demain.", "Let me dig through your files for that.". Never answer the question itself, never invent a result, never promise a time. No quotes, no emoji. Answer with the sentence only.' },
                 { role: 'user', content: String(said).slice(0, 600) }] }),
         });
         if (!r.ok) return null;
