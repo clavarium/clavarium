@@ -27,6 +27,11 @@ export const LINK_PATH = '/c/api/box/ws';
 /* A firmware a box downloads to update itself: a one-use address, kept a few minutes. */
 export const FIRMWARE_PATH = '/c/api/box/firmware/';
 export const FIRMWARE_MINUTES = 10;
+/* THE WAKE WORD HEARD AGAIN (03-11): « Mésange » and what a dictation makes of it (mes anges, mais sange...). */
+export const CLIP_MAX_BYTES = 16_000 * 2 * 3;
+export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\bmes anges?\b|\bmesange|\bmaisange|\bmessage?s?\b/;
+export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
+const plainWords = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
 export const NAME_MAX = 40;
@@ -620,6 +625,8 @@ export class Boxes {
                     r.out.write(data); r.bytes += data.length;
                     return;
                 }
+                /* The wake word's own 1.6 s (wake.clip): kept apart, heard again before the word is trusted. */
+                if (link.clip) { if (link.clip.bytes < CLIP_MAX_BYTES) { link.clip.parts.push(Buffer.from(data)); link.clip.bytes += data.length; } return; }
                 if (!sentence || link.muted) return;
                 size += data.length;
                 if (size <= SENTENCE_MAX) sentence.push(Buffer.from(data));
@@ -650,6 +657,8 @@ export class Boxes {
                 r.out.end(() => { void this.#recorded(link, r); });
                 return;
             }
+            if (m.t === 'wake.clip' && m.edge === 'start') { link.clip = { parts: [], bytes: 0 }; return; }
+            if (m.t === 'wake.clip' && m.edge === 'end' && link.clip) { const pcm = Buffer.concat(link.clip.parts); link.clip = null; link.wakeCheck = this.#checkWake(link, pcm); return; }
             if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
             if (m.t === 'event' && m.name === 'noise.dropped') { this.#log(`voice box ${box.name}: a sound near full scale was cut by its noise guard`); return; }
             /* The box listens for a sentence while this side still records: the two disagree (a reconnection, a
@@ -659,7 +668,7 @@ export class Boxes {
                 this.#log(`voice box ${box.name}: a sentence while recording here, the recording closed`);
                 r.out.end(() => { void this.#recorded(link, r); });
             }
-            if (m.t === 'listen.start') link.why = whyOf(m);
+            if (m.t === 'listen.start') { link.why = whyOf(m); if (m.reason !== 'wake') link.wakeCheck = null; }
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -732,6 +741,12 @@ export class Boxes {
     }
 
     /* Each step said in the server's log, never what was said: its length only. */
+    /* The 1.6 s before the sentence, heard again: is the wake word in it? Its words, and whether it reads as the word. */
+    async #checkWake(link, pcm) {
+        if (pcm.length < 8_000) return null;
+        const heard = String(await this.#hear(wavOf(pcm), link.box().lang) ?? '').trim();
+        return { heard, ok: WAKE_HEARD.test(plainWords(heard)) };
+    }
     async #heard(link, pcm) {
         const box0 = link.box();
         const seconds = (pcm.length / 32_000).toFixed(1);
@@ -773,6 +788,14 @@ export class Boxes {
         }
         if (!text) { this.#log(`voice box ${box0.name}: ${seconds} s heard, nothing recognised (${soundOf(pcm)})`); await lost("Pardon, je n'ai rien compris. Tu peux répéter ?"); return; }
         const box = link.box();
+        /* The wake word heard again (wake.clip): said beside the message; dropped in silence only once that is
+           turned on (WAKE_DROP), after its results were looked at -- a real call must never be lost to it. */
+        const check = link.wakeCheck ? await link.wakeCheck.catch(() => null) : null; link.wakeCheck = null;
+        if (check) {
+            link.why = `${link.why ? `${link.why} · ` : ''}mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »`;
+            this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
+            if (!check.ok && WAKE_DROP) { link.send({ t: 'cue', name: 'done' }); return; }
+        }
         /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
            mentions recording does not (01-11). */
         if (RECORD_BY_VOICE && RECORD_ASKED.test(text) && text.split(/\s+/).length <= 10 && this.#recordDir && this.#parts) {
@@ -785,7 +808,7 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${(link.chat || CHAT_IN.test(text)) && !CHAT_OUT.test(text) ? 'en conversation : réponse courte, parlée · ' : ''}${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, kind: 'box', ...(box.place ? { place: box.place } : {}), why: `${(link.chat || CHAT_IN.test(text)) && !CHAT_OUT.test(text) ? 'en conversation : réponse courte, parlée · ' : ''}${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         if (WAITING_WORDS) this.#waitFor(link, text);

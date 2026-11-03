@@ -406,13 +406,26 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
-    /* The same button on every page of its own (03-11: settings, access, assets, the deck, rooms...): each shows or
-       hides the list as the conversation's does -- one state, one place it is kept. */
-    for (const top of document.querySelectorAll('#places .sheet > .panel-top')) {
-        const f = document.createElement('button'); f.type = 'button'; f.className = 'fold-here'; f.title = 'Hide or show the list of conversations';
-        f.addEventListener('click', () => $('fold').click());
-        top.prepend(f);
+    /* THE TOP BAR, ONE COMPONENT (03-11): every page has the conversation's bar -- the button that shows or hides the
+       list on its left, a state's dot when there is one, its title, and on its right what that page offers (a
+       conversation: Chat, Terminal, Assets, Binders, its settings; a room: its settings; the others: their own
+       controls). Built once here from each page's top line: the same element, the same looks, the same place. */
+    function topBar(top, { state = null } = {}) {
+        const bar = document.createElement('header'); bar.className = ['topbar', ...[...top.classList].filter((c) => c !== 'panel-top')].join(' ');
+        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold-here'; fold.title = 'Hide or show the list of conversations';
+        fold.addEventListener('click', () => $('fold').click());
+        bar.append(fold);
+        if (state) { const dot = document.createElement('span'); dot.className = 'bar-state'; dot.id = state; dot.setAttribute('aria-hidden', 'true'); bar.append(dot); }
+        const title = top.querySelector(':scope > b'); if (title) bar.append(title);
+        const right = document.createElement('div'); right.className = 'bar-right';
+        right.append(...[...top.childNodes].filter((n) => n.nodeType === 1));
+        bar.append(right);
+        top.replaceWith(bar);
+        return bar;
     }
+    for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
+    { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right').prepend(views); }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
         for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
@@ -1245,11 +1258,19 @@
     const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
     function roomItem(r) {
+        /* The same row as a conversation's (03-11: « de même nature ») -- its name, when, its last words on one line,
+           its state's dot -- told apart by a small room sign before its name. */
         const b = document.createElement('button'); b.type = 'button'; b.className = 'item room-item'; b.dataset.room = r.id;
-        const head = document.createElement('b'); head.textContent = r.name;
-        const last = document.createElement('small'); last.textContent = r.last ? `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}` : `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`;
-        b.append(head, last);
-        if (r.unread > 0) { const n = document.createElement('span'); n.className = 'salon-unread room-item-unread'; n.textContent = String(r.unread); b.append(n); }
+        const title = document.createElement('b');
+        const sign = document.createElement('span'); sign.className = 'room-sign'; sign.setAttribute('aria-hidden', 'true');
+        title.append(sign, r.name);
+        b.append(title);
+        if (r.last) {
+            const last = document.createElement('small'); last.className = 'last'; last.textContent = `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
+            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true';
+        } else { const sub = document.createElement('small'); sub.textContent = `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`; b.append(sub); }
+        /* Its dot: new words in it waiting (the colour of what waits for you), else ready. */
+        const point = statePoint(r.unread > 0 ? 'wait' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : 'Room'; b.append(point);
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
         b.addEventListener('click', () => { void openSalon(r.id); });
         return b;
@@ -2847,7 +2868,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */

@@ -368,7 +368,8 @@ export class Talk {
             /* Its last message, either way: the list says when it last spoke, and what (app.js, Recent). */
             /* What the person or the tool said -- never a line of this server (a restart, a machine put to sleep):
                those are no one using it, and would lift it in Recent. */
-            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing' && (m.from === 'person' || m.from === 'agent')).at(-1);
+            /* Nor what was said in a room (03-11): the room moves up in Recent, not each conversation in it. */
+            const last = (now.messages ?? []).filter((m) => m.kind !== 'doing' && !m.room && (m.from === 'person' || m.from === 'agent')).at(-1);
             /* IT NEEDS ITS OWNER while a question of it is open (neither answered nor closed) and the owner wrote
                nothing since -- but the answer to ANOTHER question, which says nothing of this one (two asked, one
                answered: the other still waits, seen 22-10); or while it said it waits, and the owner wrote nothing since. */
@@ -380,7 +381,7 @@ export class Talk {
             const asks = open.some((q) => !person.some((p) => p.at >= q.at && !(p.answers && p.answers !== q.id)));
             const needs = asks || (now.status?.state === 'waiting' && String(now.status.at ?? '') > personAt);
             /* What it said it does (status, doing): it is at work, even without a message. */
-            const stepAt = (now.steps ?? []).map((m) => m.at).sort().at(-1) ?? null;
+            const stepAt = (now.steps ?? []).filter((m) => !m.room).map((m) => m.at).sort().at(-1) ?? null;
             return { waiting: now.waiting, state: now.status?.state ?? null, needs, ...(stepAt ? { stepAt } : {}), ...(last ? { lastAt: last.at, lastFrom: last.from === 'person' ? 'person' : 'agent', lastText: String(last.short || last.text || '').replace(/\s+/g, ' ').trim().slice(0, 90) } : {}) };
         } catch { return { waiting: 0, state: null }; }
     }
