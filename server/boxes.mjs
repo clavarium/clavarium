@@ -808,7 +808,7 @@ export class Boxes {
             link.relay = 0;
             text = `(réponse entendue de l'appareil, pas de la personne) ${text}`;
         }
-        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, ...(box.place ? { place: box.place } : {}), why: `${(link.chat || CHAT_IN.test(text)) && !CHAT_OUT.test(text) ? 'en conversation : réponse courte, parlée · ' : ''}${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
+        try { await this.#say(box.conversation, text, { id: box.id, name: box.name, kind: 'box', ...(box.place ? { place: box.place } : {}), why: `${(link.chat || CHAT_IN.test(text)) && !CHAT_OUT.test(text) ? 'en conversation : réponse courte, parlée · ' : ''}${link.why ? `${link.why} · ` : ''}${soundOf(pcm)}` }); } catch (error) { this.#log(`voice box ${box.name}: ${seconds} s heard and dictated, but not said in ${box.conversation} (${error.message})`); await lost("Pardon, je n'ai pas pu transmettre ta phrase. Tu peux répéter ?"); return; }
         this.#log(`voice box ${box.name}: ${seconds} s heard, said in ${box.conversation}`);
         link.heardAt = this.#now();
         if (WAITING_WORDS) this.#waitFor(link, text);
