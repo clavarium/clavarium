@@ -643,3 +643,11 @@ test('what it is about to do, sent to a box on purpose, is said there at once, a
     await boxes.agentSaid('kitchen-help', 'Je regarde ton agenda de demain, un instant.', [box.id], { doing: true });
     assert.equal(spoken.at(-1), 'Je regarde ton agenda de demain, un instant.', 'no sentence heard before: said all the same, it was sent there');
 });
+
+test('conversation mode, as he set it: in by « on discute », out by « merci, c\'est tout » (03-11)', async () => {
+    const { CHAT_IN, CHAT_OUT } = await import('../server/boxes.mjs');
+    for (const t of ['Mésange, on discute', 'mode conversation', "let's talk"]) assert.ok(CHAT_IN.test(t), t);
+    for (const t of ["merci, c'est tout", "c'est tout pour moi", 'fin de la conversation', "that's all"]) assert.ok(CHAT_OUT.test(t), t);
+    assert.ok(!CHAT_IN.test('on discutera demain du devis'), 'a future tense is not it');
+    assert.ok(!CHAT_OUT.test("merci pour tout"), 'a thank-you is not the end');
+});
