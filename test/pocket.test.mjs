@@ -26,3 +26,13 @@ test('Pocket is never waited for: not ready, it says so at once and gets ready b
     await assert.rejects(p.speak('Bonjour.'), /getting ready/);
     assert.ok(Date.now() - t < 40, 'at once');
 });
+
+test('one voice for a whole answer: a sentence the main voice misses is asked of it again before another says it (03-11)', async () => {
+    const { Speech } = await import('../server/speech.mjs');
+    let asked = 0;
+    const pocket = { speak: async () => { asked++; if (asked === 1) throw new Error('timed out'); return Buffer.alloc(320, 1); } };
+    const s = new Speech({ dir: '/nonexistent', pocket, secret: () => undefined });
+    const pcm = await s.speak('Deux.');
+    assert.equal(asked, 2, 'asked again');
+    assert.equal(pcm.length, 320, 'its voice, not another');
+});
