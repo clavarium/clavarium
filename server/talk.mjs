@@ -191,7 +191,7 @@ export const windowOf = (choice) => { const [kind, n] = String(choice).split(':'
 /* What the page may ask for: a part of the thread (Parley's read(options)), its own cursor for "since". */
 const PART = /^[A-Za-z0-9._~-]{1,200}$/;
 export class Talk {
-    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #listening = new Map(); #every; #now;
+    #store; #words; #vms; #conversations; #resources; #toolbox; #warm; #alert; #spoke; #inRoom; #listening = new Map(); #every; #now;
     #typedAt = new Map(); #nextTry = new Map(); #trying = new Map(); #timer; #lastLang = 'en'; #rereadAfter;
     #terminal; #health; #ranAt = new Map(); #kept; #screen; #dropSecret;
 
@@ -203,9 +203,9 @@ export class Talk {
     /* `keptDir`: where each conversation's thread is kept (its own folder),
        in this server's data -- never in the work folder, which its machine
        writes. Without it, the bridge folder is all there is. */
-    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
+    constructor({ store, words, vms, conversations, resources, toolbox = null, warm = async () => {}, alert = () => {}, spoke = () => {}, inRoom = () => {}, listenEveryMs = 2000, now = () => Date.now(), rereadAfterMs = REREAD_AFTER_MS, terminal = null, health = null, keptDir = null, screen = null, dropSecret = null }) {
         this.#terminal = terminal; this.#health = health; this.#kept = keptDir; this.#screen = screen; this.#dropSecret = dropSecret;
-        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
+        this.#store = store; this.#words = words; this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#toolbox = toolbox; this.#warm = warm; this.#alert = alert; this.#spoke = spoke; this.#inRoom = inRoom; this.#every = listenEveryMs; this.#now = now; this.#rereadAfter = rereadAfterMs;
         for (const s of store.all()) if (s.on === true) this.#listen(s.name);
         this.#timer = setInterval(() => { void this.#tick(); }, Math.min(listenEveryMs, 1000));
         this.#timer.unref?.();
@@ -292,6 +292,8 @@ export class Talk {
                 if (event.type === 'person-reacted') { reacted(event); return; }
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
+                /* Answered in a room it is in (#268): the room takes it, signed by where it came from (rooms.mjs). */
+                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : 'say'); } catch { /* the room's */ } return; }
                 if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
                 /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
                 if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });
@@ -458,6 +460,8 @@ export class Talk {
 
     /* The voice boxes of a conversation, as Parley names them to its agent and its screen (#215). */
     speakers(name, list) { try { this.#parley(name).setSpeakers(list); } catch { /* its folder is not there yet */ } }
+    /* The rooms it is in, and who is there (#268): told to its agent, which answers there by their ids. */
+    rooms(name, list) { try { this.#parley(name).setRooms(list); } catch { /* its folder is not there yet */ } }
 
     async say(name, text, answers, files, via, extra) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
@@ -480,7 +484,7 @@ export class Talk {
            never lose a message: on any trouble the text is sent as it came. */
         let said = text ?? '';
         if (this.#screen && said) { try { said = await this.#screen(name, said); } catch { said = text ?? ''; } }
-        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about, by: extra.by } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
+        try { this.#parley(name).say(said, answers, attached, { via: via === 'voice' ? 'voice' : undefined, ...(extra && typeof extra === 'object' ? { picked: extra.picked, replies: extra.replies, about: extra.about, by: extra.by, room: extra.room } : {}) }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const told = await this.#wake(name);
         return { ...this.of(name), told };
     }

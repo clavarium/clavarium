@@ -2214,3 +2214,28 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 @keyframes m-try-shut { 0% { opacity: 1; } 35% { opacity: 0; } 70% { opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { .mascot.trying .m-head, .mascot.trying .m-ear, .mascot.trying .m-eye, .mascot.trying .m-shut { animation: none; } }
 #notice-count { cursor: pointer; }
+
+/* ROOMS (#268): a room's card is a conversation's, a little thicker (a card behind it), its members' chips on its picture. */
+.conv-card-room { box-shadow: 6px 6px 0 -1px var(--panel), 6px 6px 0 0 var(--line), 0 6px 18px rgba(0, 0, 0, .18); }
+.conv-card-room .conv-card-art { position: relative; }
+.conv-card-room .salon-stack { position: absolute; left: 6px; bottom: 6px; }
+.salon-stack { display: inline-flex; }
+.salon-chip { width: 20px; height: 20px; margin-left: -6px; display: grid; place-items: center; border: 2px solid var(--panel); font: 600 .6875rem/1 var(--sans); font-style: normal; color: #fff; background: hsl(var(--h, 210) 40% 38%); }
+.salon-chip:first-child { margin-left: 0; }
+.salon-chip-person { border-radius: 50%; }
+.salon-chip-ai { border-radius: 5px; }
+.salon-chip-box { border-radius: 50%; background: var(--panel); border-color: var(--line); color: var(--ink2); }
+.salon-chip-box::before { content: ""; width: 9px; height: 9px; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 5 6 9H3v6h3l5 4z'/%3E%3Cpath d='M15.5 8.5a5 5 0 0 1 0 7'/%3E%3C/svg%3E") center / contain no-repeat; }
+#salon { display: flex; flex-direction: column; min-height: 0; }
+#salon[hidden] { display: none; }
+.salon-who { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; border: 0; background: transparent; padding: 4px 14px; min-height: 44px; }
+.salon-members { display: flex; flex-direction: column; gap: 8px; padding: 0 14px 10px; border-bottom: 1px solid var(--line); }
+.salon-members-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.salon-members-row > .hint { width: 4.5rem; }
+.salon-member { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; }
+.salon-host { font-size: .6875rem; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
+.salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
+.salon-new-body { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 24px; max-width: 32rem; }
+.salon-field { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: .8125rem; }
+.salon-pick { display: flex; flex-direction: column; gap: 4px; }
+.salon-new-acts { display: flex; justify-content: flex-end; }
