@@ -293,7 +293,7 @@ export class Talk {
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
                 /* Answered in a room it is in (#268): the room takes it, signed by where it came from (rooms.mjs). */
-                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : 'say'); } catch { /* the room's */ } return; }
+                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : event.type === 'agent-asked' ? 'ask' : 'say'); } catch { /* the room's */ } return; }
                 if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
                 /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
                 if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });

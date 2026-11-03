@@ -11,11 +11,11 @@ import { JsonFile } from '../server/store.mjs';
 const setup = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
-    const said = []; const told = new Map();
+    const said = []; const told = new Map(); const spoken = [];
     const convs = [{ name: 'hugo', chatName: 'Hugo' }, { name: 'compta', title: 'Compta' }, { name: 'jardin' }];
     const boxes = [{ id: 'box-1', name: 'Cuisine' }, { id: 'box-2', name: 'Jardin' }];
-    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra) => { said.push({ name, text, extra }); }, rooms: (name, list) => told.set(name, list), conversations: () => convs, boxes: () => boxes });
-    return { rooms, said, told };
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra) => { said.push({ name, text, extra }); }, rooms: (name, list) => told.set(name, list), conversations: () => convs, boxes: () => boxes, speak: (where, text, ids, how) => spoken.push({ where, text, ids, how }) });
+    return { rooms, said, told, spoken };
 };
 
 test('a room: its members each with an id of their own, its host the first AI by default, one name one member', (t) => {
@@ -108,4 +108,35 @@ test('#280: an AI sent a message hands it on (forward: as it is, by who said it)
     await rooms.say(r.id, 'Merci.');
     said.length = 0; rooms.answered('hugo', { room: r.id, text: 'Compta, note-le.', to: [compta.id] }); await new Promise((x) => setImmediate(x));
     assert.equal(said.length, 1, 'the person spoke: hand-overs again');
+});
+
+test('#281: a box bound to a room is a member by itself, speaks there, and says aloud only what is sent to it (names, never ids)', async (t) => {
+    const { rooms, said, spoken } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    rooms.boxesBound([{ id: 'box-1', name: 'Cuisine', conversation: `room:${r.id}` }, { id: 'box-2', name: 'Jardin', conversation: 'jardin' }]);
+    const box = rooms.get(r.id).members.find((m) => m.kind === 'box');
+    assert.equal(box.ref, 'box-1'); assert.equal(rooms.get(r.id).members.filter((m) => m.kind === 'box').length, 1, 'only the one bound here');
+    await rooms.say(r.id, 'Il reste du pain ?', { box: 'box-1' });
+    assert.deepEqual(said.at(-1).extra.by, { id: box.id, name: 'Cuisine', kind: 'box' });
+    const asked = rooms.read(r.id).messages.at(-1);
+    const compta = rooms.get(r.id).members.find((m) => m.ref === 'compta');
+    rooms.answered('hugo', { room: r.id, text: 'Oui, demande à @Compta pour la facture.', to: [box.id], re: asked.id }, 'ask');
+    assert.equal(spoken.length, 1);
+    assert.deepEqual(spoken[0], { where: `room:${r.id}`, text: 'Oui, demande à Compta pour la facture.', ids: ['box-1'], how: { doing: false, asked: true } });
+    rooms.answered('hugo', { room: r.id, text: 'Pour toi seulement.', to: [compta.id] });
+    assert.equal(spoken.length, 1, 'not sent to the box: not said');
+    assert.ok(rooms.has(r.id)); assert.equal(rooms.has('nope'), false);
+});
+
+test('#282: what came since the owner last looked is counted on its card; an AI given a message is « thinking » till it answers', async (t) => {
+    const { rooms } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo'] });
+    await rooms.say(r.id, 'Bonjour ?');
+    assert.deepEqual(rooms.read(r.id, { seen: false }).thinking, ['Hugo'], 'the host has it, no answer yet');
+    await new Promise((x) => setTimeout(x, 5));
+    rooms.answered('hugo', { room: r.id, text: 'Bonjour !' });
+    assert.deepEqual(rooms.read(r.id, { seen: false }).thinking, []);
+    assert.equal(rooms.list()[0].unread, 1, 'its answer, not yet seen');
+    rooms.read(r.id);
+    assert.equal(rooms.list()[0].unread, 0, 'opened: seen');
 });
