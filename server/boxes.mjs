@@ -678,6 +678,15 @@ export class Boxes {
             if (m.t === 'listen.end' && sentence) {
                 const pcm = Buffer.concat(sentence);
                 sentence = null;
+                /* RADIO OR TV IN A CONVERSATION (03-11): a "sentence" that never stopped (cut by its length) is not
+                   talk to it -- asked once « Tu me parles ? »; a second one ends the conversation. Nothing sent. */
+                if (link.chat && m.reason === 'timeout') {
+                    if (link.chatDoubt) { link.chat = false; link.chatDoubt = false; link.recent = []; link.send({ t: 'chat', on: false }); this.#log(`voice box ${box.name}: conversation ended, the room talks`); link.send({ t: 'cue', name: 'done' }); return; }
+                    link.chatDoubt = true;
+                    void (async () => { try { link.play(await this.#speak('Tu me parles ?'), 'listen'); } catch { link.send({ t: 'cue', name: 'done' }); } })();
+                    return;
+                }
+                link.chatDoubt = false;
                 void this.#heard(link, pcm);
                 return;
             }
