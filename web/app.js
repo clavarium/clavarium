@@ -1595,11 +1595,61 @@
             b.addEventListener('click', () => {
                 chosenTool = t.id;
                 for (const other of box.children) other.setAttribute('aria-checked', String(other === b));
-                paintNewMemory();
+                paintNewMemory(); void paintOpenCode();
             });
             return b;
         }));
-        paintNewMemory();
+        paintNewMemory(); void paintOpenCode();
+    }
+    /* OPENCODE SET UP HERE (03-11): a provider and one of its models from OpenCode's own catalogue (models.dev),
+       its key one of the secrets (the one named as the provider reads it, when there is one) or a new one. */
+    let ocProviders = null; let ocMode = 'set';
+    const ocNew = '+';
+    async function paintOpenCode() {
+        const on = chosenTool === 'opencode';
+        $('newconv-oc').hidden = !on;
+        if (!on) return;
+        if (!ocProviders) { try { ocProviders = (await (await fetch(`${API}/catalog/models`)).json()).providers ?? []; } catch { ocProviders = []; } }
+        try { markSecrets(await (await fetch(`${API}/secrets`)).json()); } catch { /* the ones known */ }
+        const prov = $('newconv-oc-provider');
+        if (!prov.options.length) {
+            prov.replaceChildren(...ocProviders.map((p) => { const o = el('option', '', p.name); o.value = p.id; return o; }));
+            if (ocProviders.some((p) => p.id === 'mistral')) prov.value = 'mistral';
+        }
+        ocProvider();
+    }
+    function ocProvider() {
+        const p = (ocProviders ?? []).find((x) => x.id === $('newconv-oc-provider').value);
+        $('newconv-oc-model').replaceChildren(...(p?.models ?? []).map((m) => { const o = el('option', '', m.name); o.value = m.id; return o; }));
+        const names = (secretsKnown ?? []).map((x) => x.name);
+        const want = p?.env?.[0] ?? '';
+        const key = $('newconv-oc-key');
+        key.replaceChildren(...names.map((n) => { const o = el('option', '', `Secret: ${n}`); o.value = n; return o; }), Object.assign(el('option', '', want ? `+ New secret: ${want}` : '+ New secret'), { value: ocNew }));
+        key.value = names.includes(want) ? want : ocNew;
+        $('newconv-oc-new').hidden = key.value !== ocNew;
+    }
+    $('newconv-oc-provider').addEventListener('change', ocProvider);
+    $('newconv-oc-key').addEventListener('change', () => { $('newconv-oc-new').hidden = $('newconv-oc-key').value !== ocNew; });
+    for (const b of $('newconv-oc-mode').querySelectorAll('[data-m]')) b.addEventListener('click', () => {
+        ocMode = b.dataset.m;
+        for (const x of $('newconv-oc-mode').querySelectorAll('[data-m]')) x.setAttribute('aria-checked', String(x === b));
+        $('newconv-oc-set').hidden = ocMode !== 'set'; $('newconv-oc-raw').hidden = ocMode === 'set';
+    });
+    /* -> { provider, model, secret } for the server, a new secret made first; null: nothing to set up. */
+    async function openCodeChoice() {
+        if (chosenTool !== 'opencode' || ocMode !== 'set') return null;
+        const provider = $('newconv-oc-provider').value; const model = $('newconv-oc-model').value;
+        if (!provider || !model) return null;
+        let secret = $('newconv-oc-key').value;
+        if (secret === ocNew) {
+            const value = $('newconv-oc-value').value.trim();
+            const p = (ocProviders ?? []).find((x) => x.id === provider);
+            if (!value) throw new Error('Paste the API key, or choose « Install only ».');
+            secret = p?.env?.[0] ?? `${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_API_KEY`;
+            await post(`${API}/secrets`, { name: secret, value });
+            $('newconv-oc-value').value = '';
+        }
+        return { provider, model, secret };
     }
     for (const b of $('newconv-work').querySelectorAll('[data-work]')) {
         b.addEventListener('click', () => { for (const other of $('newconv-work').querySelectorAll('[data-work]')) other.setAttribute('aria-checked', String(other === b)); });
@@ -1659,7 +1709,8 @@
         newError('', '');
         creating = true; $('newconv-create').disabled = true;
         try {
-            const made = await post(`${API}/conversations`, { title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
+            const opencode = await openCodeChoice();
+            const made = await post(`${API}/conversations`, { ...(opencode ? { opencode } : {}), title, ...(id ? { name: id } : {}), ...(group ? { group } : {}), tool: chosenTool, workOnDisk: newOnDisk(), ...(document.getElementById('newconv-chat')?.checked === false ? { chat: false } : {}), ...(memoryMb && memoryMb !== least ? { memoryMb } : {}), ...(cpus && cpus !== 1 ? { cpus } : {}), ...(diskGb && diskGb !== 8 ? { diskGb } : {}) });
             $('newconv-name').value = ''; $('newconv-id').value = ''; $('newconv-id').placeholder = 'website-redesign'; $('newconv-group').value = '';
             $('newconv-work').querySelector('[data-work="kept"]').click(); $('newconv-more').open = false; { const ch = document.getElementById('newconv-chat'); if (ch) ch.checked = true; }
             await refresh();

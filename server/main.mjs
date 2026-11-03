@@ -1,3 +1,4 @@
+import { Catalogue } from './catalog.mjs';
 /* The server. Loopback only: what faces the internet is the edge in front of it.
  *
  * Two ways to run it:
@@ -172,7 +173,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -233,7 +234,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             return;
         }
         if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS, (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))) return;
-        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups)) return;
+        if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
         const file = FILES[pathname];
         if (!file || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -286,6 +287,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const grants = new Grants(new Store(`${dataDir}/grants.json`));
     /* Folder-style boxes the owner drops assets into, to tidy the views and hand a whole box at once (groups.mjs). */
     const groups = new Groups({ store: new Store(`${dataDir}/groups.json`) });
+    /* The providers and models OpenCode knows (models.dev), for a conversation set up from here (03-11). */
+    const catalogue = new Catalogue({ file: `${dataDir}/models-catalogue.json` });
     /* What happened, in one dated list (events.mjs): the owner's actions, and what the server did by itself. */
     const events = new Events({ file: `${dataDir}/events.log` });
     const vault = new Vault(vaultKey ?? `${dataDir}/vault.key`);
@@ -638,7 +641,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         changed: () => { for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },
         speak: (text) => speech.speak(text),
         log: (line) => events.add({ kind: 'server', text: line }) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
