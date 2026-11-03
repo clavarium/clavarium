@@ -1748,7 +1748,7 @@ details.more[open] > summary { margin-bottom: 4px; }
 #settings .chapter-group { margin: 10px 4px 0; font-size: .6875rem; letter-spacing: .06em; }
 @media (min-width: 1000px) {
   #settings { display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto 1fr; align-content: start; column-gap: 20px; }
-  #settings > .panel-top { grid-column: 1 / -1; }
+  #settings > :is(.panel-top, header.topbar) { grid-column: 1 / -1; }
   .settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; }
   .settings-nav button { text-align: left; background: none; border: 0; color: var(--ink2); padding: 9px 10px; border-radius: 8px; font-size: .875rem; }
   .settings-nav button[aria-current="true"] { background: var(--button, #222c38); color: var(--ink); box-shadow: inset 3px 0 0 var(--brass); }

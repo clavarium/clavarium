@@ -411,7 +411,7 @@
        conversation: Chat, Terminal, Assets, Binders, its settings; a room: its settings; the others: their own
        controls). Built once here from each page's top line: the same element, the same looks, the same place. */
     function topBar(top, { state = null } = {}) {
-        const bar = document.createElement('header'); bar.className = 'topbar';
+        const bar = document.createElement('header'); bar.className = ['topbar', ...[...top.classList].filter((c) => c !== 'panel-top')].join(' ');
         const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold-here'; fold.title = 'Hide or show the list of conversations';
         fold.addEventListener('click', () => $('fold').click());
         bar.append(fold);
