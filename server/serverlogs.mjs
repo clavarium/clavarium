@@ -67,4 +67,10 @@ export class ServerLogs {
         if (r.code !== 0) throw new Refusal(502, `This server could not be started again: ${String(r.stderr ?? '').trim().split('\n').pop()?.slice(0, 200) || `exit ${r.code}`}`);
         return { restarting: true };
     }
+    /* THE WHOLE SERVER STARTED AGAIN (04-11): its machines stop with it and start again after. */
+    async reboot() {
+        const r = await this.#host(['server', 'reboot']);
+        if (r.code !== 0) throw new Refusal(502, `This server could not be restarted: ${String(r.stderr ?? '').trim().split('\n').pop()?.slice(0, 200) || `exit ${r.code}`}`);
+        return { rebooting: true };
+    }
 }

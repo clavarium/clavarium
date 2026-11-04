@@ -417,6 +417,10 @@ test('server logs / restart: a source and a span from fixed lists only', () => {
     assert.equal(say('server', 'logs', 'clavarium').status, 64);
     assert.match(say('server', 'restart').stdout, /systemctl restart clavarium\.service/);
     assert.equal(say('server', 'restart', 'now').status, 64);
+    assert.match(say('server', 'reboot').stdout, /systemctl reboot/);
+    assert.equal(say('server', 'reboot', 'now').status, 64);
+    assert.match(say('server', 'protect').stdout, /OOMScoreAdjust=-900 for clavarium caddy dex oauth2-proxy ssh/);
+    assert.equal(say('server', 'protect', 'x').status, 64);
 });
 
 test('disks room / grow: read-only, and grown only at the system or under /mnt, /media, /home', () => {

@@ -71,6 +71,8 @@ export function escaped(text) {
 
 export class GitReview {
     #store; #vault; #resources; #local; #access; #runner; #now; #listeners = []; #waivers = () => ({});
+    /* The refresh of each repository on its way: { run, waitMs }, by name. */
+    #refreshing = new Map();
 
     /* `localRemotes`: lets a remote be a directory of this machine. For tests only.
        `runner`: the git runner (gitrunner.mjs); its reads go through the host program. */
@@ -204,8 +206,22 @@ export class GitReview {
        The only writer of the reference. */
     async refresh(name, { waitMs = SEND_WAIT_MS } = {}) {
         const r = this.#repository(name);
-        const release = await this.#runner.lock(this.#reference(r.name), waitMs);
-        try { return await this.#refreshLocked(r); } finally { release(); }
+        /* One on its way already, that waits at least as long as this one
+           would: its fetch is shared, not made again behind it. A page that
+           reviews several branches of a repository at once (To send) would
+           otherwise line up one fetch per branch behind the reference's lock,
+           and the last ones be refused as busy -- and drop out of the list. */
+        const going = this.#refreshing.get(r.name);
+        if (going && going.waitMs >= waitMs) return going.run;
+        const run = (async () => {
+            const release = await this.#runner.lock(this.#reference(r.name), waitMs);
+            try { return await this.#refreshLocked(r); } finally { release(); }
+        })();
+        const entry = { run, waitMs };
+        this.#refreshing.set(r.name, entry);
+        const done = () => { if (this.#refreshing.get(r.name) === entry) this.#refreshing.delete(r.name); };
+        run.then(done, done);
+        return run;
     }
     /* `ours`: { branch, head } just pushed from here: what it brings back is not news from the remote. */
     async #refreshLocked(r, ours = null) {

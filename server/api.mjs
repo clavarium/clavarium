@@ -109,7 +109,7 @@
  *   GET  /api/history?of=server|<name>&span=1h|24h|7d   the curves of memory, CPU and disk (and the reserve, for the server)
  *   GET  /api/history/all?span=1h|24h|7d    Settings, Usage: the server and every machine (asleep too) on one time axis,
  *                                           in GB and cores: {t, capacity, server, itself, machines: [{name, alloc, asleep, ...}]}
- *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart
+ *   GET  /api/server/logs?source=&span=    what the server's programs said   POST /api/server/restart   POST /api/server/reboot (the whole server)
  *   GET  /api/operators                     who may sign in   POST /api/operators {email} -> {email, password}: shown once
  *   POST /api/operators/<email>/password -> {email, password}   POST /api/operators/<email>/disable|enable|remove
  *   POST /api/conversations/<name>/secrets  {secret, attached}
@@ -552,6 +552,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (reactSet && reacting) { const n = decodeURIComponent(reactSet[1]); if (!conversations.list().some((c) => c.name === n)) throw new Refusal(404, 'No such conversation.'); return send(200, reacting.set(n, body)), true; }
         if (pathname === '/api/machines/move' && machinesMove) return send(202, await machinesMove.move(String(body.to ?? ''))), true;
         if (pathname === '/api/server/restart' && serverLogs) return send(202, await serverLogs.restart()), true;
+        if (pathname === '/api/server/reboot' && serverLogs) return send(202, await serverLogs.reboot()), true;
         if (pathname === '/api/machines/grow' && machinesMove) return send(200, await machinesMove.grow(String(body.mount ?? ''))), true;
         if (pathname === '/api/machines/mount' && machinesMove) return send(200, await machinesMove.mount(String(body.path ?? ''))), true;
         if (pathname === '/api/machines/prepare' && machinesMove) return send(200, await machinesMove.prepare(String(body.path ?? ''), body.typed)), true;

@@ -51,6 +51,7 @@ const SAID = [
     [/^\/api\/updates\/back$/, 'update', (m, b) => `Going back to ${clip(b.version, 30)} asked`],
     [/^\/api\/updates\/settings$/, 'update', (m, b) => `Updates set: ${['mode', 'channel', 'window'].filter((k) => b[k]).map((k) => `${k} ${clip(b[k], 20)}`).join(', ')}`],
     [/^\/api\/server\/restart$/, 'server', () => 'This server restarted'],
+    [/^\/api\/server\/reboot$/, 'server', () => 'The whole server restarted'],
     [/^\/api\/server\/reserve$/, 'server', (m, b) => `Reserve set${b.diskMb !== undefined ? `: disk ${b.diskMb} MB` : ''}${b.memoryMb !== undefined ? `, memory ${b.memoryMb} MB` : ''}`],
     [/^\/api\/machines\/move$/, 'server', (m, b) => `All the machines moved to ${clip(b.to, 60)}`],
     [/^\/api\/machines\/prepare$/, 'server', (m, b) => `Disk ${clip(b.path, 40)} erased and prepared for the machines`],

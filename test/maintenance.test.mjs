@@ -73,6 +73,9 @@ test('the page: back as soon as the server answers and announces nothing; a rest
     assert.equal(page.next(restart), 'wait', 'the server answers a moment more before it stops');
     assert.equal(page.next({ ...restart, seenDown: true }), 'back');
     assert.equal(page.next({ ...restart, now: page.RESTART_GRACE_MS + 1 }), 'back', 'a restart too quick to be seen');
+    const reboot = { ...restart, kind: 'reboot' };
+    assert.equal(page.next({ ...reboot, now: page.RESTART_GRACE_MS + 1 }), 'wait', 'the whole server: a longer grace');
+    assert.equal(page.next({ ...reboot, seenDown: true }), 'back');
     assert.equal(page.next({ ...base, now: page.STUCK_MS + 1, answer: null }), 'stuck');
     assert.equal(page.next({ ...base, now: page.STUCK_MS + 1, answer: { status: 200, down: false, update: '' } }), 'back', 'stuck, it still comes back by itself');
     assert.ok(page.EVERY_MS >= 2000 && page.EVERY_MS <= 3000);
@@ -83,6 +86,7 @@ test('the page says what happens, and goes back only to this site', () => {
     assert.equal(page.title('back', '0.9.0-next.2'), 'Going back to Clavarium 0.9.0-next.2...');
     assert.equal(page.title('update', '<b>x</b>'), 'Updating Clavarium...', 'only a version is said');
     assert.equal(page.title('restart', ''), 'Restarting Clavarium...');
+    assert.match(page.title('reboot', ''), /^Restarting the server/);
     assert.equal(page.title(null, null), 'Clavarium is being updated or restarted...', 'served by the front at any address');
     assert.equal(page.backTo('/?c=demo', '/maintenance.html', ''), '/?c=demo');
     assert.equal(page.backTo('//evil.example/', '/maintenance.html', ''), '/');

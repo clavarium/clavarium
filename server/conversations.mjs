@@ -778,6 +778,20 @@ export class Conversations {
         return { session: 'renewed' };
     }
 
+    /* RESTARTS ONLY ITS TOOL (04-11), for a tool that asks to be restarted (to take up new tools): its
+       machine is not touched -- a whole-machine restart may not start again, and a tool has no need of
+       it. Its tmux is ended and the tool started again in its terminal (`ready`), taking up its last
+       session, as after any start. A machine that does not run is left as it is: its next opening starts
+       the tool anyway. Resolves with whether the tool was restarted. */
+    async restartTool(name) {
+        this.#busyCheck(name);
+        if ((await this.#vms.state(name).catch(() => undefined)) !== 'Running') return false;
+        this.drop(name);
+        await this.#vms.exec(name, ['tmux', '-L', SOCKET, 'kill-server'], { timeoutMs: 10_000 }).catch(() => {});
+        this.ready(name);
+        return true;
+    }
+
     async #fixup(name, tool) {
         for (const step of tool.fixups) {
             const r = await this.#vms.exec(name, step.argv, { timeoutMs: 120_000 }).catch(() => ({ code: 1 }));
