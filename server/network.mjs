@@ -26,6 +26,10 @@ const TAP = /^tap-[0-9a-f]{1,12}$/;
 /* The taps of the running conversation VMs, read from the process list:
    { conversation: tap }. Anything that does not look exactly as expected is
    left out: a rule is never built from a string that was not checked. */
+/* How often what runs is looked at, for the rules (see watch). */
+export const WATCH_MS = 20_000;
+export const RELOAD_MS = 10 * 60_000;
+
 export function readTaps(processList) {
     const taps = {};
     for (const line of String(processList ?? '').split('\n')) {
@@ -62,6 +66,8 @@ export function ruleset(taps, offline, bridgeAddress) {
 
 export class Network {
     #host; #offline;
+    /* The table last loaded, and whether it was: the same table is not loaded again. */
+    #last = null;
 
     /* `host(argv)` reaches the host program;
        `offline()` returns the names of the conversations switched offline. */
@@ -79,7 +85,21 @@ export class Network {
            a pipe as its input file (measured), and nothing in the rules is
            secret. Every name in them was checked by readTaps, and the host
            program checks every line again before loading it. */
-        const r = await this.#host(['net', 'apply', ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0')]);
-        return r.code === 0 && (bridge !== undefined || wanted.length === 0);
+        const text = ruleset(taps, bridge ? wanted : [], bridge ?? '0.0.0.0');
+        const ok = bridge !== undefined || wanted.length === 0;
+        /* Loaded again anyway now and then: a table taken off by someone else comes back. */
+        if (this.#last?.text === text && this.#last.loaded && Date.now() - this.#last.at < RELOAD_MS) return ok;
+        const r = await this.#host(['net', 'apply', text]);
+        this.#last = { text, loaded: r.code === 0, at: Date.now() };
+        return r.code === 0 && ok;
+    }
+
+    /* KEPT UP TO DATE (04-11): a machine started by the VM manager itself -- after the server
+       restarted -- has a new tap that no opening told: looked at every `everyMs`, the table loaded
+       again only when what runs changed. Returns the stop. */
+    watch(everyMs = WATCH_MS) {
+        const timer = setInterval(() => { void this.apply().catch(() => {}); }, everyMs);
+        timer.unref?.();
+        return () => clearInterval(timer);
     }
 }

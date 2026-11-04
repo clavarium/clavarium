@@ -52,3 +52,24 @@ test('a firewall that refuses, or a host address that cannot be read, is reporte
     const nothingAsked = new Network({ offline: () => [], host: async (argv) => ({ code: 0, stdout: argv[1] === 'taps' ? PROCESSES : '', stderr: '' }) });
     assert.equal(await nothingAsked.apply(), true);
 });
+
+test('kept up to date: a machine started by itself gets its silo at the next look; the same table is not loaded again', async (t) => {
+    let processes = PROCESSES.split('\n')[0]; const applied = [];
+    const host = async (argv) => {
+        if (argv[1] === 'taps') return { code: 0, stdout: processes, stderr: '' };
+        if (argv[1] === 'bridge') return { code: 0, stdout: '3: mpqemubrzone1    inet 127.0.0.1/24 brd', stderr: '' };
+        applied.push(argv[2]); return { code: 0, stdout: '', stderr: '' };
+    };
+    const network = new Network({ host, offline: () => [] });
+    assert.equal(await network.apply(), true);
+    assert.equal(await network.apply(), true);
+    assert.equal(applied.length, 1, 'nothing changed: not loaded again');
+    processes = PROCESSES;
+    t.mock.timers.enable({ apis: ['setInterval'] });
+    const stop = network.watch(1000);
+    t.mock.timers.tick(1000);
+    await new Promise((ok) => setImmediate(ok)); await new Promise((ok) => setImmediate(ok));
+    stop();
+    assert.equal(applied.length, 2, 'a new machine: loaded again');
+    assert.ok(applied[1].includes('iifname "tap-918e9b07222" drop'), 'its silo');
+});
