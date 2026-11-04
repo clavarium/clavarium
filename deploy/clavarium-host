@@ -1390,8 +1390,20 @@ OOMScoreAdjust=-900'
         [ $# -eq 0 ] || usage
         run pgrep -a qemu-system ;;
     "net bridge")
+        # The bridge the machines' taps are on: multipass 1.17 names it per zone
+        # (mpqemubrzone1, ...), older ones mpqemubr0 (04-11: the offline rules
+        # were never written, their bridge not found). The first tap's says.
         [ $# -eq 0 ] || usage
-        run ip -4 -o addr show "$BRIDGE" ;;
+        if [ "$SAY" = "yes" ]; then echo "ip -4 -o addr show <the bridge of the taps, else $BRIDGE>"; exit 0; fi
+        bridge="$BRIDGE"
+        for t in /sys/class/net/tap-*; do
+            [ -e "$t/master" ] || continue
+            m=$(basename "$(readlink "$t/master")"); [[ "$m" =~ ^mpqemubr[a-z0-9]{1,12}$ ]] && { bridge="$m"; break; }
+        done
+        if [ "$bridge" = "$BRIDGE" ] && ! [ -e "/sys/class/net/$BRIDGE" ]; then
+            for b in /sys/class/net/mpqemubr*; do [ -e "$b" ] && { bridge=$(basename "$b"); break; }; done
+        fi
+        run ip -4 -o addr show "$bridge" ;;
     "net apply")
         # <ruleset>: the whole table, as text. Each line must be one of the
         # shapes the server writes; one unknown line refuses the whole.

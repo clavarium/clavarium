@@ -361,6 +361,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     /* Each opening: the runner and the attached secrets are put in the VM,
        and the tool is started through the runner. */
     const network = new Network({ host: asHost, offline: () => all.offline() });
+    /* A machine the VM manager started by itself (after a reboot) is put in its silo too (04-11). */
+    const stopNetworkWatch = network.watch();
     /* The rules follow what runs: applied now, and again each time a
        conversation is opened, since a VM that just started has a new tap. */
     const hostReady = (async () => { await hostSteps; await network.apply().catch((error) => console.error(`network rules: ${error.message}`)); })();
@@ -656,7 +658,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     rooms.boxesBound(boxes.all());
     rooms.refresh();
     const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
-    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
+    server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
     for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));
