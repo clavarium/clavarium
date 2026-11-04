@@ -78,6 +78,7 @@ import { Events } from './events.mjs';
 import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
+import { WakeLearn } from './wakelearn.mjs';
 import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
 import { Pocket } from './pocket.mjs';
 import { Speech } from './speech.mjs';
@@ -643,6 +644,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         exists: (name) => all.list().some((c) => c.name === name) || (/^room:/.test(name) && Boolean(rooms?.has(name.slice(5)))),
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
         react: (said) => voice.reaction(said),
+        /* The wake word that learns: each box's wake clips, when it is set so (wakelearn.mjs). */
+        learn: new WakeLearn({ dir: `${dataDir}/wake-learn` }),
         recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
         hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
         /* Said as the person's own message, the room named (one speaker for now). */

@@ -9623,6 +9623,48 @@
         return card;
     }
     /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
+    /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): normal, or each wake clip kept with its label to train a better one. */
+    function boxWake(b) {
+        const part = el('div', 'box-wake');
+        const choice = el('div', 'levels'); choice.setAttribute('role', 'group'); choice.setAttribute('aria-label', uiSaid('box-wake', 'Wake word'));
+        const modes = [['normal', uiSaid('box-wake-normal', 'Normal')], ['learn', uiSaid('box-wake-learn', 'Learns from home')]].map(([mode, word]) => { const x = el('button', '', word); x.type = 'button'; x.dataset.mode = mode; choice.append(x); return x; });
+        const lines = el('div', 'box-wake-lines');
+        const row = el('div', 'action-row box-wake-row'); row.append(el('span', '', uiSaid('box-wake', 'Wake word')), choice);
+        part.append(row, lines);
+        const day = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        const paint = (w) => {
+            for (const x of modes) x.setAttribute('aria-pressed', String(x.dataset.mode === w.mode));
+            lines.replaceChildren();
+            if (w.mode !== 'learn' && !w.kept) return;
+            lines.append(el('small', 'hint', uiSaid('box-wake-kept', '{kept} kept \u00b7 {real} real \u00b7 {false} false', { kept: w.kept, real: w.real, false: w.false })));
+            lines.append(el('small', 'hint', w.model
+                ? uiSaid('box-wake-rate-model', 'False wakes: {before} a day \u2192 {after} a day since the model of {date}', { before: w.model.falsePerDayBefore, after: w.model.falsePerDayAfter, date: day(w.model.installedAt) })
+                : uiSaid('box-wake-rate', 'False wakes: {n} a day', { n: w.falsePerDay })));
+            lines.append(el('small', 'hint', uiSaid('box-wake-private', 'Only the wake word\u2019s 1.6 s, on this server: nothing is sent elsewhere.')));
+            const acts = el('div', 'action-row');
+            if (w.mode === 'learn') {
+                const now = el('button', '', w.improveAsked ? uiSaid('box-wake-asked', 'Asked') : uiSaid('box-wake-improve', 'Improve now')); now.type = 'button'; now.disabled = Boolean(w.improveAsked);
+                now.addEventListener('click', async () => { now.disabled = true; try { await post(`${API}/boxes/${b.id}/wake-improve`, {}); now.textContent = uiSaid('box-wake-asked', 'Asked'); } catch (error) { now.textContent = error.message; now.disabled = false; } });
+                acts.append(now);
+            }
+            if (w.kept) {
+                const erase = el('button', '', uiSaid('box-wake-erase', 'Erase all\u2026')); erase.type = 'button';
+                const sure = el('span', 'box-wake-sure'); sure.hidden = true;
+                const yes = el('button', 'danger', uiSaid('box-wake-erase-yes', 'Yes, erase')); yes.type = 'button';
+                sure.append(el('span', '', uiSaid('box-wake-erase-ask', 'Erase the {n} clips?', { n: w.kept })), ' ', yes);
+                erase.addEventListener('click', () => { sure.hidden = !sure.hidden; });
+                yes.addEventListener('click', async () => { yes.disabled = true; try { paint(await post(`${API}/boxes/${b.id}/wake-erase`, {})); } catch (error) { yes.textContent = error.message; yes.disabled = false; } });
+                acts.append(erase, sure);
+            }
+            if (acts.childElementCount) lines.append(acts);
+        };
+        for (const x of modes) x.addEventListener('click', async () => {
+            try { paint(await post(`${API}/boxes/${b.id}/wake-mode`, { mode: x.dataset.mode })); } catch (error) { lines.replaceChildren(el('small', 'warn', error.message)); }
+        });
+        paint({ mode: b.wake ?? 'normal', kept: 0 });
+        void getJson(`/boxes/${b.id}/wake`, null).then((w) => { if (w) paint(w); });
+        return part;
+    }
     async function paintBoxes() {
         const list = await getJson('/boxes', []); await loadRooms();
         const rows = $('box-list'); rows.replaceChildren();
@@ -9667,6 +9709,7 @@
             const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
             const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
+            card.append(boxWake(b));
             /* TESTED FROM HERE (01-11): its sound -- it says a test sentence -- and its microphone -- it listens
                once, and what it heard shows here, not in the conversation. */
             if (b.online) {

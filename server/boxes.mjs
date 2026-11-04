@@ -14,7 +14,8 @@
  *             key gets 401 and the box goes back to its setup
  *
  * Both are under /c/: the edge lets them through without sign-on, as the
- * device door. Nothing is kept of the audio, here or on the box.
+ * device door. Nothing is kept of the audio, here or on the box -- but the wake word's own
+ * 1.6 s of a box set to learn it (wakelearn.mjs).
  */
 import { spawn as spawnProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -260,12 +261,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react;
+    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null }) {
-        this.#react = react;
+    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null }) {
+        this.#react = react; this.#learn = learn;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
     }
@@ -492,6 +493,33 @@ export class Boxes {
         if (!list.some((b) => b.id === id)) throw new Refusal(404, 'No such voice box.');
         this.#save(list.filter((b) => b.id !== id));
         this.#links.get(id)?.socket.close(4001, 'withdrawn');
+        try { this.#learn?.forget(id); } catch { /* nothing kept */ }
+    }
+
+    /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): "normal" keeps nothing, "learn" keeps each wake clip with
+       its label. Its counts are made either way. */
+    #box(id) { const b = this.#all().find((x) => x.id === id); if (!b) throw new Refusal(404, 'No such voice box.'); return b; }
+    #learning() { if (!this.#learn) throw new Refusal(501, 'This server keeps no wake clips.'); return this.#learn; }
+    wakeMode(id, mode) {
+        if (!['normal', 'learn'].includes(mode)) throw new Refusal(400, 'A mode: normal or learn.');
+        this.#change(id, { wake: mode });
+        return this.wakeStats(id);
+    }
+    wakeStats(id) { const b = this.#box(id); return this.#learning().stats(id, b.wake ?? 'normal'); }
+    wakeErase(id) { const b = this.#box(id); const n = this.#learning().erase(id); this.#log(`voice box ${b.name}: ${n} wake clip(s) erased`); return this.wakeStats(id); }
+    wakeImprove(id) { const b = this.#box(id); const at = this.#learning().improve(id); this.#log(`voice box ${b.name}: a better wake word asked`); return { queued: true, at }; }
+    /* Phase 2's trainer put a better model on the box: kept, and said in its conversation in its name. */
+    async modelInstalled(id, { before, after }) {
+        const b = this.#box(id);
+        const m = this.#learning().installed(id, { before, after });
+        const { kept } = this.#learn.stats(id, b.wake);
+        const n = (v) => String(Math.round(Number(v) * 10) / 10).replace('.', /^fr/.test(b.lang ?? '') ? ',' : '.');
+        const text = /^fr/.test(b.lang ?? '')
+            ? `Nouveau mot d'éveil installé (faux réveils ${n(before)} \u2192 ${n(after)} par jour sur tes ${kept} extraits).`
+            : `New wake word installed (false wakes ${n(before)} \u2192 ${n(after)} a day on your ${kept} clips).`;
+        this.#log(`voice box ${b.name}: new wake word installed`);
+        try { await this.#say(b.conversation, text, { id: b.id, name: b.name, ...(b.place ? { place: b.place } : {}) }); } catch (error) { this.#log(`voice box ${b.name}: the new wake word not said (${error.message})`); }
+        return { ...m, text };
     }
 
     /* A conversation removed or renamed: its boxes follow, or are left without one. */
@@ -745,7 +773,11 @@ export class Boxes {
     async #checkWake(link, pcm) {
         if (pcm.length < 8_000) return null;
         const heard = String(await this.#hear(wavOf(pcm), link.box().lang) ?? '').trim();
-        return { heard, ok: WAKE_HEARD.test(plainWords(heard)) };
+        const ok = WAKE_HEARD.test(plainWords(heard));
+        /* Counted, and kept when the box learns (the clip only: never the sentence). */
+        const box = link.box();
+        try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
+        return { heard, ok };
     }
     async #heard(link, pcm) {
         const box0 = link.box();
@@ -855,12 +887,19 @@ export class Boxes {
  *   POST /api/boxes/<id>/wifi-forget      {ssid}: not the one it uses now
  *   POST /api/boxes/<id>/alert            {text?}
  *   POST /api/boxes/<id>/reboot
+ *   GET  /api/boxes/<id>/wake            -> {mode, kept, real, false, oldest, falsePerDay, model: {installedAt,
+ *                                          falsePerDayBefore, falsePerDayAfter} | null, improveAsked}
+ *   POST /api/boxes/<id>/wake-mode       {mode: normal|learn} -> the same
+ *   POST /api/boxes/<id>/wake-erase      every clip of the box deleted -> the same
+ *   POST /api/boxes/<id>/wake-improve    -> 202 {queued: true, at}: asked of the trainer
  */
 export async function handleBoxes(request, response, boxes, originOk, headers = {}, qr = null) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
     const send = (status, body) => { response.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8' }).end(JSON.stringify(body)); return true; };
     try {
         if (request.method === 'GET' && pathname === '/api/boxes') return send(200, boxes.all());
+        const asked = request.method === 'GET' && /^\/api\/boxes\/([0-9a-f-]{36})\/wake$/.exec(pathname);
+        if (asked) return send(200, boxes.wakeStats(asked[1]));
         if (request.method !== 'POST') return false;
         if (!originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' });
         let text = '';
@@ -895,6 +934,9 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'test-mic': return send(200, await boxes.testMic(id));
         case 'test-result': return send(200, boxes.testResult(id));
         case 'reboot': return answered(await boxes.command(id, { t: 'reboot' }));
+        case 'wake-mode': return send(200, boxes.wakeMode(id, String(body.mode ?? '')));
+        case 'wake-erase': return send(200, boxes.wakeErase(id));
+        case 'wake-improve': return send(202, boxes.wakeImprove(id));
         default: return false;
         }
     } catch (error) {

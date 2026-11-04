@@ -2117,6 +2117,11 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .box-wifi-known { display: flex; flex-wrap: wrap; gap: 6px; }
 .box-wifi-net { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.85em; }
 .box-wifi-add { width: 100%; }
+.box-wake { margin-top: 8px; }
+.box-wake-row { align-items: center; }
+.box-wake-lines { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.box-wake-sure { display: inline-flex; align-items: center; gap: 6px; }
+.box-wake-sure[hidden] { display: none; }
 
 /* A group field: typed, or chosen from the list (▾). */
 .chooser { position: relative; display: inline-flex; align-items: stretch; min-width: 0; flex: 1 1 auto; }
