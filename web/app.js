@@ -9543,7 +9543,7 @@
             const card = el('div', 'device card box-card'); card.dataset.box = b.id;
             const head = el('div', 'device-head');
             const conv = conversations.find((c) => c.name === b.conversation);
-            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
+            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : String(b.conversation ?? '').startsWith('room:') ? `room ${rooms.find((r) => `room:${r.id}` === b.conversation)?.name ?? '?'}` : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
             const rename = el('button', '', 'Rename'); rename.type = 'button';
             rename.addEventListener('click', () => {
                 const field = el('input'); field.value = b.name; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this voice box');
