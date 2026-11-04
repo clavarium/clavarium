@@ -3554,7 +3554,8 @@
                 const r = await fetch(`${API}${path}`);
                 const j = await r.json().catch(() => ({}));
                 if (r.ok) return j;
-                if (!(r.status === 503 && j.down === true)) return { state: 'error', message: j.error || 'It could not be read.' };
+                /* Down for a moment, or its repository busy (another read holds it): asked again. */
+                if (!(r.status === 503 && (j.down === true || j.kind === 'busy'))) return { state: 'error', message: j.error || 'It could not be read.' };
             } catch { return { state: 'error', message: 'It could not be read.' }; }
             await new Promise((ok) => setTimeout(ok, 1500 * (i + 1)));
         }
@@ -3974,6 +3975,8 @@
     const BRANCHES_MORE = 7;
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
+    /* A branch that could not be read is not "nothing to send": it stays listed, under every filter, with why. */
+    const unread = (out) => out?.state === 'error' || out?.state === 'unreachable';
     const TS_FILTERS = [['update', 'To update'], ['new', 'New branches'], ['all', 'All']];
     /* Three steps: every branch read (said as it goes, nothing checked yet); filtered and ticked; the checks of what is
        ticked, on a click; then Send. */
@@ -3995,7 +3998,7 @@
         let sending = false; let checking = false;
         let sure = '';
         let reposDone = 0; let reading = true;
-        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter;
+        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out);
         const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
         const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function look(r) {
@@ -4040,7 +4043,12 @@
             meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
             progress.toggleAttribute('data-busy', reading);
             if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the repositories: ${reposDone} of ${names.length}${rows.length ? ` · ${rows.length} branch${rows.length === 1 ? '' : 'es'} found` : ''}`; }
-            else { progress.dataset.tone = count('update') + count('new') ? 'ok' : ''; progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new · all read` : 'Nothing to send · all read'; }
+            else {
+                const failed = rows.filter((r) => unread(r.out)).length;
+                const tail = failed ? ` · ${failed} not read` : ' · all read';
+                progress.dataset.tone = failed ? 'warn' : count('update') + count('new') ? 'ok' : '';
+                progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new${tail}` : `Nothing to send${tail}`;
+            }
             filters.replaceChildren(...TS_FILTERS.map(([key, word]) => {
                 const n = key === 'all' ? rows.length : count(key);
                 const b = el('button', '', `${word} ${n}`); b.type = 'button'; b.dataset.filter = key; b.setAttribute('aria-pressed', String(filter === key));
@@ -4083,8 +4091,10 @@
                 tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
                 const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
                 const way = el('div', 'ts-way');
-                if (out?.branch) {
-                    const code = el('code', 'ts-branch', out.branch); code.title = out.branch; way.append(code);
+                /* Its own name even when it could not be read: which branch is missing is said. */
+                const named = out?.branch ?? (unread(out) ? r.branch : '');
+                if (named) {
+                    const code = el('code', 'ts-branch', named); code.title = named; way.append(code);
                     if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
@@ -4300,7 +4310,7 @@
                 const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
                 await look(r);
                 /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
-                if (r.out?.state === 'ahead') { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
+                if (r.out?.state === 'ahead' || unread(r.out)) { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
                 paint();
             }));
             reposDone++; paint();

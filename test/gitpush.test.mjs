@@ -582,3 +582,29 @@ test('a hook that says a lot: the summary for the line, all of it for a file the
         return true;
     });
 });
+
+test('several branches of a repository reviewed at once (To send) share one fetch: none is refused as busy and drops out of the list', async (t) => {
+    /* A remote that takes a while to answer, as over a real network. */
+    let slow = false; let fetches = 0;
+    const b = bench(t, { wrap: async (argv, options, real) => {
+        if (argv.includes('fetch') && slow) { fetches += 1; await new Promise((ok) => setTimeout(ok, 1_800)); }
+        return real(argv, options);
+    } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    const names = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7'];
+    for (const n of names) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    /* As the page does: the branch that moved last first, then every other one at once. */
+    const first = await b.review.outgoing('site');
+    assert.equal(first.agentBranches.length, 8);
+    slow = true;
+    const others = first.agentBranches.filter((x) => x.name !== first.branch).map((x) => x.name);
+    const settled = await Promise.allSettled(others.map((branch) => b.review.outgoing('site', { branch })));
+    const refused = settled.filter((s) => s.status === 'rejected').map((s) => s.reason?.kind ?? s.reason?.message);
+    assert.deepEqual(refused, [], 'no review refused');
+    assert.deepEqual(settled.map((s) => s.value.state), others.map(() => 'ahead'), 'every branch is listed as something to send');
+    assert.equal(fetches, 1, 'one fetch for them all');
+    /* A refresh asked after the shared one ended fetches again: nothing kept stale. */
+    assert.equal((await b.review.refresh('site')).ok, true);
+    assert.equal(fetches, 2);
+});
