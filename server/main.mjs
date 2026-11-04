@@ -528,7 +528,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             try { if (talk.event(name, { kind: 'tools-updated', text: 'Tools updated: restart it to use them all. Its work picks up where it was.', topic: 'Tools', actions: ['restart'] })) toolbox.told(name); } catch { /* its chat is off */ }
         }
     });
-    /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): restarted by this server
+    /* A TOOL THAT ASKS TO BE RESTARTED (02-11: to take up its tools, after an update): its tool restarted by this server
        once its turn has ended (its pulse no longer busy), said in its chat; once per ten minutes at most. */
     const restartedAt = new Map();
     const restartTimer = setInterval(() => {
@@ -538,8 +538,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             talk.restartTaken(name);
             if (Date.now() - (restartedAt.get(name) ?? 0) < 10 * 60_000) continue;
             restartedAt.set(name, Date.now());
-            try { talk.event(name, { kind: 'restarted', text: 'Restarted as it asked: its work picks up where it was.', topic: 'Restarted' }); } catch { /* its chat is off */ }
-            void all.restart(name).catch(() => {});
+            /* Its tool only, never its machine (04-11: a machine restarted so did not start again). */
+            void all.restartTool(name).then((done) => {
+                if (done) try { talk.event(name, { kind: 'restarted', text: 'Its tool was restarted as it asked: its work picks up where it was.', topic: 'Restarted' }); } catch { /* its chat is off */ }
+            }).catch(() => {});
         }
     }, 15_000); restartTimer.unref?.();
     /* The health of each machine, and folders that came loose put back: see health.mjs. */

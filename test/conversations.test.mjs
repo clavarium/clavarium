@@ -586,6 +586,25 @@ test('a terminal that does not come is repaired: its channel closed, its tmux ke
     await assert.rejects(all.repairTerminal('nobody'), /No such conversation/);
 });
 
+test('a tool that asks to be restarted: only its tool, its machine never stopped; a machine that does not run is left as it is', async (t) => {
+    const b = bench(t);
+    const all = b.make();
+    const dropped = []; const readied = [];
+    all.drop = (name) => dropped.push(name);
+    all.ready = (name) => readied.push(name);
+    all.create({ name: 'demo', tool: 'tool' });
+    await all.built;
+    readied.length = 0; b.calls.length = 0;
+    assert.equal(await all.restartTool('demo'), true);
+    assert.ok(b.calls.includes('exec clv-demo -- tmux -L clavarium kill-server'), 'its tmux ended');
+    assert.equal(b.calls.some((c) => /^(stop|start|kill) /.test(c)), false, 'its machine not stopped nor started');
+    assert.deepEqual(dropped, ['demo']); assert.deepEqual(readied, ['demo'], 'the tool started again');
+    b.states.set(vmName('demo'), 'Stopped'); b.calls.length = 0;
+    assert.equal(await all.restartTool('demo'), false);
+    assert.equal(b.calls.some((c) => c.includes('kill-server') || c.startsWith('start ')), false);
+    await assert.rejects(all.restartTool('nobody'), /No such conversation/);
+});
+
 test('a restart, a new size or a machine built again is told, in words for its chat, with whether the tool runs again', async (t) => {
     const b = bench(t);
     const all = b.make();
