@@ -2311,7 +2311,7 @@
     /* All folded when the app is opened: what the person opens stays open while this tab lives (a reload
        included), never from one day to the next -- a page that opens half-unfolded says nothing. What asks
        for them is said on the folded chapter instead (markAttention). */
-    const OPEN_AT_FIRST = {};
+    const OPEN_AT_FIRST = { 's-features': true };
     let chapters = {};
     try { chapters = JSON.parse(sessionStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
     try { localStorage.removeItem('clavarium-chapters'); } catch { /* as above */ }
@@ -3376,7 +3376,8 @@
         $('alerts-on').hidden = Boolean(mine); $('alerts-off').hidden = $('alerts-test').hidden = !mine;
         state.textContent = said ?? (mine ? `On · ${about.devices.length} device${about.devices.length === 1 ? '' : 's'} in all` : `Off${about.devices.length > 0 ? ` · ${about.devices.length} other device${about.devices.length === 1 ? '' : 's'} on` : ''}`);
     }
-    $('alerts-on').addEventListener('click', async () => {
+    /* Turned on for this device: asked by its button, and by the next step of Features (features.js). */
+    async function alertsOn() {
         try {
             if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Refused in this browser\'s settings'); return; }
             const { key } = await fetch(`${API}/alerts`).then((r) => r.json());
@@ -3385,7 +3386,8 @@
             await post(`${API}/alerts`, { subscription: subscription.toJSON(), label: /Android/.test(navigator.userAgent) ? 'Android' : /iPad|iPhone/.test(navigator.userAgent) ? 'iPhone or iPad' : 'Computer' });
             await paintAlerts();
         } catch (error) { await paintAlerts(`Could not be set up: ${error.message}`); }
-    });
+    }
+    $('alerts-on').addEventListener('click', () => { void alertsOn(); });
     $('alerts-off').addEventListener('click', async () => {
         const registration = await navigator.serviceWorker.ready;
         const mine = await registration.pushManager.getSubscription();
@@ -5342,6 +5344,43 @@
             await openSalon(made.id, false);
         } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
     });
+    /* ---------- FEATURES (features.js): what this Clavarium can do, and its next step ---------- */
+    /* Each gesture is done where it is done already: its own request, or its own place open on it. */
+    async function openFeature(what, s = {}) {
+        const chapter = String(s.chapter ?? '');
+        if (what === 'new' || (chapter === 'new' && what === 'settings')) { await openNew(); return; }
+        if (what === 'boxes' || chapter === 'boxes') { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); return; }
+        if (what === 'mail' || chapter === 'access') { await openAssetsPlace(); return; }
+        if (what === 'import') { await openAccessPage('map', { mode: 'flows' }); document.getElementById('flows-import')?.click(); return; }
+        if (what === 'opencode') {
+            await openNew();
+            $('newconv-tools').querySelector('[data-tool="opencode"]')?.click();
+            await paintOpenCode();
+            const prov = $('newconv-oc-provider');
+            if (s.provider && [...prov.options].some((o) => o.value === s.provider)) { prov.value = s.provider; ocProvider(); }
+            const model = $('newconv-oc-model'); if (s.model && [...model.options].some((o) => o.value === s.model)) model.value = s.model;
+            const key = $('newconv-oc-key'); if (s.secret && [...key.options].some((o) => o.value === s.secret)) { key.value = s.secret; $('newconv-oc-new').hidden = true; }
+            return;
+        }
+        await openSettings();
+        if (/^s-[a-z-]{1,30}$/.test(chapter)) openChapter(chapter)?.scrollIntoView({ block: 'start' });
+    }
+    const features = DEVICE ? undefined : window.clavariumFeatures?.({
+        API, post, word: (key, en, vars) => uiSaid(key, en, vars), loadWords: () => readWords(),
+        lang: () => { try { return chatWords?.lang ?? 'en'; } catch { return 'en'; } },
+        mascot: () => `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span>`,
+        alerts: () => alertsOn(),
+        /* The export of Settings, Backup (links.js): the server keeps its day as the backup's. */
+        backup: async () => { $('flows-export').click(); },
+        open: (what, s) => openFeature(what, s),
+        welcomed: () => { if (place === 'deck') void paintDeckFeatures(conversations.length); },
+    });
+    async function paintSettingsFeatures() {
+        if (!features) return;
+        const data = await features.mount($('settings-features'), 'settings');
+        $('features-title').textContent = uiSaid('features-title', 'Features');
+        $('features-about').textContent = data ? uiSaid('features-lit-of', '{n} of {t} rooms lit', { n: data.counts.ready, t: data.counts.total }) : '';
+    }
     async function paintDeck() {
         $('deck-title').textContent = appName;
         const list = [...conversations];
@@ -5354,7 +5393,19 @@
         const paint = () => $('deck-cards').replaceChildren(...rooms.map((r) => roomCard(r)), ...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add, ...(list.length ? [addRoom] : []));
         paint();
         $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
+        void paintDeckFeatures(list.length);
         await loadRooms(); paint();
+    }
+    /* FEATURES (features.js): the welcome in place of "No conversation yet" until it is passed; then the
+       next step over the cards. */
+    async function paintDeckFeatures(count) {
+        if (!features) return;
+        const data = await features.refresh();
+        const welcoming = count === 0 && data?.welcome === true;
+        $('deck-empty').hidden = count > 0 || welcoming;
+        const [on, off] = welcoming ? ['deck-welcome', 'deck-features'] : ['deck-features', 'deck-welcome'];
+        features.unmount($(off)); $(off).hidden = true;
+        features.show($(on), welcoming ? 'welcome' : 'home');
     }
     function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); void paintDeck(); }
     $('deck-close').addEventListener('click', () => leavePlace());
@@ -5941,6 +5992,7 @@
     markGroup('device');
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
+        void paintSettingsFeatures().catch(() => {});
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
         void paintThreadLevels().catch(() => {});
@@ -10184,6 +10236,12 @@
         }
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();
+        /* THE FIRST START (Features, features.js): nothing made yet, the welcome not passed -- the home
+           page opens on it, once; passed ("Skip", or a conversation made), it never comes back by itself. */
+        else if (home && !DEVICE && !current && conversations.length === 0) {
+            const d = await features?.refresh().catch(() => null);
+            if (d?.welcome && place === 'conversations' && !conversations.length) openDeck(false);
+        }
     }
     void start();
 })();

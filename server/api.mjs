@@ -116,6 +116,8 @@
  *   GET  /api/shortcuts
  *   POST /api/shortcuts                     {label, text, enter}
  *   POST /api/shortcuts/<id>/remove
+ *   GET  /api/features   POST /api/features/dismiss|goals|sharing|welcome   what this Clavarium can do, and its next step
+ *                                           (features.mjs, answered before this: main.mjs)
  *   GET  /api/voice                         is dictation available?
  *   POST /api/voice?lang=                   the body IS a WAV recording -> {text}; lang: the device's language
  *   GET  /api/dictation                     the engine chosen in Settings (never a key: a secret's name)

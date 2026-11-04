@@ -649,6 +649,9 @@
       </div>
       <div id="deck" class="sheet as-place" hidden>
         <div class="panel-top"><b id="deck-title">Conversations</b><button type="button" id="deck-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <!-- FEATURES (features.js): the next step over the cards; the welcome in place of "No conversation yet". -->
+        <div id="deck-features" hidden></div>
+        <div id="deck-welcome" hidden></div>
         <div id="deck-cards" class="deck"></div>
         <div id="deck-empty" class="deck-empty" hidden><p>No conversation yet.</p><div class="deck-empty-acts"><button type="button" id="deck-empty-new" class="primary">+ Create a conversation</button><button type="button" id="deck-empty-import">Import a configuration</button></div></div>
       </div>
@@ -848,6 +851,11 @@
           <button type="button" data-group="diagnostics">Diagnostics</button>
         </nav>
         <div id="settings-groups" class="settings-groups">
+        <!-- FEATURES (features.js): what this Clavarium can do, and its next step. -->
+        <details class="chapter" id="settings-ch-features" data-chapter="s-features">
+          <summary><span class="chapter-title" id="features-title">Features</span><span class="chapter-about" id="features-about"></span></summary>
+          <div class="chapter-body" id="settings-features"></div>
+        </details>
         <section class="settings-group" id="settings-group-device" data-group="device">
         <h3 class="chapter-group">This device</h3>
         <details class="chapter" id="settings-ch-screen" data-chapter="s-screen">
@@ -1272,6 +1280,7 @@
 <script src="/vendor/diff2html.js"></script>
 <script src="/gitgraph.js"></script>
 <script src="/links.js"></script>
+<script src="/features.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>
 <script type="module" src="/icons.js"></script>
