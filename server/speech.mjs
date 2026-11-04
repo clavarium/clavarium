@@ -43,10 +43,24 @@ export const ELEVEN_VOICE = 'onwK4e9ZLuTAKqWW03F9';   /* "Daniel" */
 export const ELEVEN_MODEL = 'eleven_multilingual_v2';
 export const SPEED = 1.1;   /* a little quicker than the voices' own pace: found slow on the real box (31-10) */
 
+/* WHY ELEVENLABS SAID NO, from its answer's body ({detail: {status|code, message}}): credits used up and a key
+   refused are not fixed the same way (04-11: a 401 every sentence, the quota spent). */
+export function elevenRefusal(status, body) {
+    const d = body?.detail ?? {};
+    const what = `${d.status ?? ''} ${d.code ?? ''} ${d.message ?? ''}`.toLowerCase();
+    if (/quota|credit|character_limit/.test(what)) return 'credits used up';
+    if (/missing_permission/.test(what)) return 'key lacks the text-to-speech permission';
+    if (status === 401 || /invalid_api_key|unauthori/.test(what)) return 'key refused';
+    if (status === 429) return 'too many requests';
+    return `answered ${status}`;
+}
+/* After a refusal, ElevenLabs is left alone this long (the same key), then asked again: said once, not each sentence. */
+export const ELEVEN_REST_MS = 60 * 60_000;
+
 /* A moment before the main voice is asked again (a sentence it missed). */
 export const AGAIN_MS = 700;
 export class Speech {
-    #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret; #pocket; #pocketDown = 0;
+    #dir; #lang; #engine = null; #loading = null; #fetch; #log; #secret; #pocket; #pocketDown = 0; #elevenOff = null;
 
     /* `pocket`: the default voice (pocket.mjs), else null. Then ElevenLabs when its key is set, then Piper. */
     constructor({ dir, lang = 'fr', fetcher = fetch, log = () => {}, secret = () => undefined, pocket = null }) {
@@ -56,12 +70,24 @@ export class Speech {
     async #eleven(text) {
         const key = this.#secret(ELEVEN_SECRET);
         if (!key) return null;
+        /* Refused for this very key not long ago: not asked, not said again. A new key is tried at once. */
+        if (this.#elevenOff?.key === key && Date.now() < this.#elevenOff.until) return null;
         try {
             const r = await this.#fetch(`https://api.elevenlabs.io/v1/text-to-speech/${ELEVEN_VOICE}?output_format=pcm_16000`, {
                 method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' },
                 body: JSON.stringify({ text, model_id: ELEVEN_MODEL, voice_settings: { stability: 0.5, similarity_boost: 0.75, speed: SPEED } }), signal: AbortSignal.timeout(20_000),
             });
-            if (!r.ok) { this.#log(`speech: ElevenLabs answered ${r.status}, this server's voice instead`); return null; }
+            if (!r.ok) {
+                const why = elevenRefusal(r.status, await r.json().catch(() => undefined));
+                if (r.status === 401 || r.status === 402 || r.status === 429) {
+                    const again = this.#elevenOff?.key === key && this.#elevenOff.why === why;
+                    this.#elevenOff = { key, why, until: Date.now() + ELEVEN_REST_MS };
+                    if (again) return null;
+                }
+                this.#log(`speech: ElevenLabs: ${why}, this server's voice instead`);
+                return null;
+            }
+            this.#elevenOff = null;
             return Buffer.from(await r.arrayBuffer());
         } catch (error) { this.#log(`speech: ElevenLabs unreachable (${error.message}), this server's voice instead`); return null; }
     }
