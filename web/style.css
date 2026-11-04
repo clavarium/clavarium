@@ -85,7 +85,10 @@ header button { padding: 5px 9px; white-space: nowrap; }
 #state[data-state="live"][data-health="warn"]::before { background: var(--warn); }
 #state[data-state="live"][data-health="bad"]::before { background: var(--danger); }
 main { position: relative; flex: 1; min-height: 0; }
-#terminal { position: absolute; inset: 0; padding: 4px; }
+/* content-box: xterm's fit reads this box's computed height as the room for its rows; with
+   border-box that height counted the padding, so the rows ran up to 8px under the page's bottom
+   (the whole page scrolled a few pixels). */
+#terminal { position: absolute; inset: 0; padding: 4px; box-sizing: content-box; }
 /* Over the chat screen (a question asked must be seen), under a sheet the person opened (which is shut before any question is asked). */
 #notice { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: color-mix(in srgb, var(--bg) 92%, transparent); }
 /* On a light screen the veil is light too: dark text on the dark veil could not be read (seen on the welcome of a device). */
