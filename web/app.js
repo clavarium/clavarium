@@ -2812,6 +2812,10 @@
     /* "Send when I stop", for dictation in the chat: kept by this device. */
     let chatAuto = false;
     try { chatAuto = localStorage.getItem('clavarium-chat-auto') === '1'; } catch { /* as above */ }
+    /* The silence before it sends by itself, chosen on this device (Parley's menu, under the switch). */
+    let chatAutoMs;
+    try { chatAutoMs = Number(localStorage.getItem('clavarium-chat-auto-ms')) || undefined; } catch { /* as above */ }
+    const keepAutoMs = (ms) => { chatAutoMs = ms; try { localStorage.setItem('clavarium-chat-auto-ms', String(ms)); } catch { /* as above */ } };
     const deviceLang = () => (navigator.language || 'en');
     let chatWords = null;
     async function readWords() {
@@ -2930,7 +2934,7 @@
             forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
             remind: () => post(talkPath(name, '/remind'), {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
-            voice: chatVoice(), autoSend: chatAuto,
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs,
             onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             touch: touchScreen,
         });
@@ -5241,7 +5245,7 @@
             view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
             diagram: drawDiagram, highlight: colourCode, touch: touchScreen,
-            voice: chatVoice(), autoSend: chatAuto, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             draft: `room:${id}`,
         });
         salonTimer = setInterval(() => { if (salonThread && salonId === id) void salonThread.refresh(); }, 3000);
