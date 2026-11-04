@@ -994,6 +994,36 @@ case "$AREA $VERB" in
         if [ "$SAY" = "yes" ]; then echo "systemd-run --on-active=2 systemctl restart clavarium.service"; exit 0; fi
         systemd-run --quiet --collect --unit="clavarium-restart-$(date +%s)" --on-active=2 /usr/bin/systemctl restart clavarium.service
         exit 0 ;;
+    "server reboot")
+        # THE WHOLE SERVER STARTED AGAIN, asked from the page (Settings, This server), after a
+        # confirmation there: in five seconds, by systemd, so that the page is answered first.
+        # Every machine stops with it (cleanly, by the VM manager) and starts again after.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "systemd-run --on-active=5 systemctl reboot"; exit 0; fi
+        systemd-run --quiet --collect --unit="clavarium-reboot-$(date +%s)" --on-active=5 /usr/bin/systemctl reboot
+        exit 0 ;;
+    "server protect")
+        # WHAT KEEPS THE SERVER IN HAND (04-11), at each start of the server: should memory run out,
+        # the kernel stops a machine first, never this server, its front or ssh. Made so for the next
+        # start of each (a drop-in) and at once for what runs (choom). No argument; done again is the same.
+        [ $# -eq 0 ] || usage
+        if [ "$SAY" = "yes" ]; then echo "OOMScoreAdjust=-900 for clavarium caddy dex oauth2-proxy ssh"; exit 0; fi
+        changed=no
+        for unit in clavarium caddy dex oauth2-proxy ssh; do
+            systemctl cat "$unit.service" >/dev/null 2>&1 || continue
+            dir="/etc/systemd/system/$unit.service.d"; file="$dir/clavarium-oom.conf"
+            want='# Written by clavarium-host (server protect): stopped last should memory run out.
+[Service]
+OOMScoreAdjust=-900'
+            if [ "$(cat "$file" 2>/dev/null)" != "$want" ]; then
+                mkdir -p "$dir" && printf '%s\n' "$want" > "$file" && changed=yes
+            fi
+            pid=$(systemctl show -p MainPID --value "$unit.service" 2>/dev/null)
+            [ -n "$pid" ] && [ "$pid" != 0 ] && choom -n -900 -p "$pid" >/dev/null 2>&1 || true
+        done
+        [ "$changed" = no ] || systemctl daemon-reload
+        echo "protected"
+        exit 0 ;;
     "server room")
         # WHAT THE SERVER HAS LEFT, for Settings (This server) and for the
         # reserve that creating, starting, waking or growing a machine must

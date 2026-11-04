@@ -6630,17 +6630,20 @@
         document.body.append(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(a.href), 60_000);
     });
-    /* THIS SERVER STARTED AGAIN: asked twice (the second says what it does). */
-    $('server-restart').addEventListener('click', () => {
-        const go = $('server-restart');
-        if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = 'Yes: restart this server now'; return; }
-        go.disabled = true;
-        void post(`${API}/server/restart`, {}).then(() => {
-            $('server-restart-said').textContent = 'Restarting: this page comes back by itself.';
-            /* The maintenance page waits for it (it answers a moment more before it stops), then comes back here. */
-            location.replace(`/maintenance.html?${new URLSearchParams({ kind: 'restart', back: location.pathname + location.search })}`);
-        }).catch((error) => { $('server-restart-said').textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = 'Restart this server...'; });
-    });
+    /* CLAVARIUM, OR THE WHOLE SERVER, STARTED AGAIN: asked twice (the second says what it does).
+       Clavarium: its program only, machines go on. The server (04-11): every machine stops with it. */
+    for (const [id, path, kind, sure, label] of [['server-restart', 'restart', 'restart', 'Yes: restart Clavarium now', 'Restart Clavarium...'], ['server-reboot', 'reboot', 'reboot', 'Yes: stop every machine and restart the server', 'Restart the server...']]) {
+        $(id).addEventListener('click', () => {
+            const go = $(id);
+            if (go.dataset.sure !== 'yes') { go.dataset.sure = 'yes'; go.textContent = sure; return; }
+            go.disabled = true;
+            void post(`${API}/server/${path}`, {}).then(() => {
+                $(`${id}-said`).textContent = 'Restarting: this page comes back by itself.';
+                /* The maintenance page waits for it (it answers a moment more before it stops), then comes back here. */
+                location.replace(`/maintenance.html?${new URLSearchParams({ kind, back: location.pathname + location.search })}`);
+            }).catch((error) => { $(`${id}-said`).textContent = error.message; go.disabled = false; delete go.dataset.sure; go.textContent = label; });
+        });
+    }
     /* THE CURVES (server/history.mjs): memory, CPU and disk over time, one small chart each, one
        line each on one scale (0 to 100 %); the reserve as a dotted level; a dot where a program
        was stopped for lack of memory. Hovered or touched: the value and the time under it. */

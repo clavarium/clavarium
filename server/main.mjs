@@ -325,6 +325,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* Not in place is said, not fatal: no machine is then given /tools. */
         await toolbox.prepare().catch((error) => console.error(error.message));
         await Promise.resolve(all.ensureWork?.()).catch((error) => console.error(`work folders: ${error.message}`));
+        /* Should memory run out, a machine is stopped first, never this server, its front or ssh (04-11). */
+        const kept = await asHost(['server', 'protect'], { timeoutMs: 30_000 }).catch(() => ({ code: 1, stderr: 'not run' }));
+        if (kept.code) console.error(`protect: ${String(kept.stderr ?? '').trim() || `exit ${kept.code}`}`);
     })();
     const bounded = (promise, ms, what) => {
         let timer;
