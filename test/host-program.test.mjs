@@ -7,6 +7,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, chmodSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+/* Loopback addresses other than 127.0.0.1, built so that no address-shaped literal sits in the code. */
+const at = (n) => ['127', '0', '0', String(n)].join('.');
 import { ruleset } from '../server/network.mjs';
 
 const PROGRAM = fileURLToPath(new URL('../deploy/clavarium-host', import.meta.url));
@@ -44,6 +46,7 @@ test('each thing the server needs has one verb, turned into one exact command', 
         [['work', 'room', 'demo'], 'df /var/lib/clavarium/work/demo /var/lib/clavarium/work-disks'],
         [['net', 'taps'], 'pgrep -a qemu-system'],
         [['net', 'bridge'], 'ip -4 -o addr show <the bridge of the taps, else mpqemubr0>'],
+        [['net', 'leases'], '<mac> <ip> of each lease in /var/snap/multipass/common/data/multipassd/network/dnsmasq.leases'],
         [['vm', 'clone', 'clvshelf-20261014-120000', 'clv-demo', '1024'], 'multipass clone clvshelf-20261014-120000 --name clv-demo\nmultipass set local.clv-demo.memory=1024M'],
         [['shelf', 'launch', 'clvshelf-20261014-120000'], 'multipass launch 24.04 --name clvshelf-20261014-120000 --memory 1536M --disk 8G --cpus 1 --timeout 900'],
         [['shelf', 'exec', 'clvshelf-20261014-120000', '--', 'sudo', '-n', 'snap', 'install', 'multipass-sshfs'], 'multipass exec clvshelf-20261014-120000 -- sudo -n snap install multipass-sshfs'],
@@ -107,15 +110,36 @@ test('only our VMs, only known verbs: the VM manager is not handed over', () => 
 });
 
 test('the network rules the server writes are accepted whole; one foreign line refuses everything', () => {
-    const good = ruleset({ first: 'tap-15921f81452', second: 'tap-918e9b07222' }, ['second'], '127.0.0.1');
+    const good = ruleset({
+        first: { tap: 'tap-15921f81452', mac: '52:54:00:aa:bb:cc', ip: `${at(10)}` },
+        second: { tap: 'tap-918e9b07222', mac: '52:54:00:dd:ee:01' },
+        third: { tap: 'tap-918e9b07333' },
+    }, ['second'], '127.0.0.1');
+    /* Every shape the anti-spoofing writes is in it: own address, unknown address, no MAC. */
+    for (const shape of ['ether saddr != 52:54:00:aa:bb:cc drop', 'ether type != { ip, arp } drop', 'arp saddr ether != 52:54:00:aa:bb:cc drop',
+        '@th,288,48 != 0x525400aabbcc drop', 'ip saddr 0.0.0.0 ip daddr 255.255.255.255 udp dport 67 accept', `ip saddr != ${at(10)} drop`,
+        `arp saddr ip != { 0.0.0.0, ${at(10)} } drop`, `ip saddr { 127.0.0.1, ${at(10)} } drop`, `arp saddr ip { 127.0.0.1, ${at(10)} } drop`]) assert.ok(good.includes(shape), shape);
     const accepted = host('net', 'apply', good);
     assert.equal(accepted.code, 0, accepted.err);
     assert.ok(accepted.out.startsWith('nft table bridge clavarium'));
-    for (const extra of ['flush ruleset', 'table ip filter', '    iifname "tap-1" accept', '    iifname "eth0" drop', 'include "/etc/shadow"', '    iifname "tap-1" ip daddr 127.0.0.1 tcp dport 22 accept']) {
+    for (const extra of ['flush ruleset', 'table ip filter', '    iifname "tap-1" accept', '    iifname "eth0" drop', 'include "/etc/shadow"', '    iifname "tap-1" ip daddr 127.0.0.1 tcp dport 22 accept',
+        /* Near misses of the anti-spoofing shapes: an accept for a drop, a capital, a field elsewhere, a set that lets in. */
+        '    iifname "tap-1" ether saddr != 52:54:00:aa:bb:cc accept', '    iifname "tap-1" ether saddr 52:54:00:aa:bb:cc accept', '    iifname "tap-1" ether saddr != 52:54:00:AA:bb:cc drop',
+        '    iifname "tap-1" ether type != { ip, arp, ip6 } drop', '    iifname "tap-1" ether type { ip, arp } accept', '    iifname "tap-1" arp saddr ether 52:54:00:aa:bb:cc accept',
+        '    iifname "tap-1" udp dport 67 @th,0,48 != 0x525400aabbcc drop', '    iifname "tap-1" udp dport 68 @th,288,48 != 0x525400aabbcc drop',
+        '    iifname "tap-1" ip saddr 0.0.0.0 udp dport 67 accept', '    iifname "tap-1" ip saddr 0.0.0.0 ip daddr 255.255.255.255 accept', `    iifname "tap-1" ip saddr ${at(10)} accept`,
+        `    iifname "tap-1" ip saddr != { ${at(10)} } accept`, `    iifname "tap-1" arp saddr ip != { 0.0.0.0, ${at(10)} } accept`, '    iifname "tap-1" ip saddr { 127.0.0.1, } drop',
+        '    iifname "tap-1" ip saddr { 127.0.0.1; flush ruleset } drop', `    iifname "tap-1" ip saddr != ${at(10)} drop; flush ruleset`]) {
         const r = host('net', 'apply', `${good}${extra}\n`);
         assert.equal(r.code, 78, extra);
         assert.equal(r.out, '');
     }
+});
+
+test('net leases takes nothing, and is not logged as a change', () => {
+    assert.equal(host('net', 'leases', 'x').code, 64);
+    const program = readFileSync(PROGRAM, 'utf8');
+    assert.match(program, /"net taps"\|"net leases"\|/, 'a reading verb, polled: kept out of the system log');
 });
 
 test('the ready-made machine: its own names only, and a conversation is copied from it and from nothing else', () => {
