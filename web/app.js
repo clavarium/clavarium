@@ -9636,15 +9636,24 @@
             for (const x of modes) x.setAttribute('aria-pressed', String(x.dataset.mode === w.mode));
             lines.replaceChildren();
             if (w.mode !== 'learn' && !w.kept) return;
-            lines.append(el('small', 'hint', uiSaid('box-wake-kept', '{kept} kept \u00b7 {real} real \u00b7 {false} false', { kept: w.kept, real: w.real, false: w.false })));
+            lines.append(el('small', 'hint', uiSaid('box-wake-kept', '{kept} kept \u00b7 {real} real \u00b7 {false} false \u00b7 {near} near', { kept: w.kept, real: w.real, false: w.false, near: w.near ?? 0 })));
             lines.append(el('small', 'hint', w.model
                 ? uiSaid('box-wake-rate-model', 'False wakes: {before} a day \u2192 {after} a day since the model of {date}', { before: w.model.falsePerDayBefore, after: w.model.falsePerDayAfter, date: day(w.model.installedAt) })
                 : uiSaid('box-wake-rate', 'False wakes: {n} a day', { n: w.falsePerDay })));
+            const cut = (v) => Number(v).toFixed(2);
+            lines.append(el('small', 'hint', uiSaid('box-wake-missed', 'Missed calls: {n} a day \u00b7 threshold {cutoff}', { n: w.missedPerDay ?? 0, cutoff: cut(w.cutoff ?? 0.94) })));
+            const t = w.tuning;
+            if (t) lines.append(el('small', 'hint', t.better
+                ? (t.state === 'applied' ? uiSaid('box-wake-tuned', 'Tuned {date}: {from} \u2192 {to}', { date: day(t.appliedAt ?? t.at), from: cut(t.from), to: cut(t.to) })
+                    : t.state === 'refused' ? uiSaid('box-wake-tune-refused', 'Threshold {to} refused by the box', { to: cut(t.to) })
+                        : uiSaid('box-wake-tune-sent', 'Threshold {from} \u2192 {to}: waiting for the box', { from: cut(t.from), to: cut(t.to) }))
+                : t.reason === 'not-enough' ? uiSaid('box-wake-tune-few', 'Tuning: not enough clips yet')
+                    : uiSaid('box-wake-tune-kept', 'Tuned {date}: threshold {from} kept', { date: day(t.at), from: cut(t.from) })));
             lines.append(el('small', 'hint', uiSaid('box-wake-private', 'Only the wake word\u2019s 1.6 s, on this server: nothing is sent elsewhere.')));
             const acts = el('div', 'action-row');
             if (w.mode === 'learn') {
-                const now = el('button', '', w.improveAsked ? uiSaid('box-wake-asked', 'Asked') : uiSaid('box-wake-improve', 'Improve now')); now.type = 'button'; now.disabled = Boolean(w.improveAsked);
-                now.addEventListener('click', async () => { now.disabled = true; try { await post(`${API}/boxes/${b.id}/wake-improve`, {}); now.textContent = uiSaid('box-wake-asked', 'Asked'); } catch (error) { now.textContent = error.message; now.disabled = false; } });
+                const now = el('button', '', uiSaid('box-wake-improve', 'Improve now')); now.type = 'button';
+                now.addEventListener('click', async () => { now.disabled = true; try { await post(`${API}/boxes/${b.id}/wake-improve`, {}); const fresh = await getJson(`/boxes/${b.id}/wake`, null); if (fresh) paint(fresh); else now.disabled = false; } catch (error) { now.textContent = error.message; now.disabled = false; } });
                 acts.append(now);
             }
             if (w.kept) {

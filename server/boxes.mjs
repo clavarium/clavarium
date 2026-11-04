@@ -21,6 +21,7 @@ import { spawn as spawnProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
+import { WIRE, cutoffOf, scoreOf } from './wakelearn.mjs';
 
 export const CODE_MINUTES = 10;
 export const PAIR_PATH = '/c/api/box/pair';
@@ -505,9 +506,65 @@ export class Boxes {
         this.#change(id, { wake: mode });
         return this.wakeStats(id);
     }
-    wakeStats(id) { const b = this.#box(id); return this.#learning().stats(id, b.wake ?? 'normal'); }
+    wakeStats(id) { const b = this.#box(id); return { ...this.#learning().stats(id, b.wake ?? 'normal'), cutoff: this.#cutoff(b), wakeModel: b.model ?? null, modelProblem: b.modelProblem ?? null }; }
+    #cutoff(b) { return cutoffOf(b.cutoff) ?? WIRE.firmwareCutoff; }
     wakeErase(id) { const b = this.#box(id); const n = this.#learning().erase(id); this.#log(`voice box ${b.name}: ${n} wake clip(s) erased`); return this.wakeStats(id); }
-    wakeImprove(id) { const b = this.#box(id); const at = this.#learning().improve(id); this.#log(`voice box ${b.name}: a better wake word asked`); return { queued: true, at }; }
+    /* "Improve now": the threshold tuned at once; nothing better, the trainer (phase 2) is asked. */
+    wakeImprove(id) {
+        const b = this.#box(id);
+        const tuning = this.wakeTune(id, 'asked');
+        if (tuning.better) return { queued: false, at: tuning.at, tuning };
+        const at = this.#learning().improve(id); this.#log(`voice box ${b.name}: a better wake word asked`);
+        return { queued: true, at, tuning };
+    }
+    /* THRESHOLD TUNING (wakelearn.mjs, tuneCutoff): a better cutoff found is sent to the box (wake.cutoff);
+       once it confirms (its ack, or its hello showing it), said in its conversation. Not connected: sent at
+       its next hello. */
+    wakeTune(id, why = 'asked') {
+        const b = this.#box(id);
+        const r = this.#learning().tune(id, this.#cutoff(b));
+        const t = this.#learn.tuned(id, { ...r, why, state: r.better ? 'sent' : 'none' });
+        this.#log(`voice box ${b.name}: wake threshold tuning (${why}): ${r.better ? `${r.from} -> ${r.to}` : r.reason}`);
+        if (r.better) this.#sendCutoff(id, r.to);
+        return t;
+    }
+    #sendCutoff(id, value) {
+        if (!this.#links.get(id)?.tunable) return;   /* not connected, or a firmware without wake.cutoff (its hello says none) */
+        this.command(id, { t: WIRE.cutoff, value }).then(
+            (a) => { if (a?.ok === false) this.#tuneState(id, 'refused'); else void this.#cutoffSet(id, value); },
+            () => { /* no answer: sent again at its next hello */ });
+    }
+    #tuneState(id, state) { const t = this.#learn?.tuning(id); if (t) this.#learn.tuned(id, { ...t, state }); }
+    /* The box holds `value` (its ack, or its hello): kept; a tuning sent for it is said, once. */
+    async #cutoffSet(id, value) {
+        let b; try { b = this.#box(id); } catch { return null; }
+        if (b.cutoff !== value) this.#change(id, { cutoff: value });
+        const t = this.#learn?.tuning(id);
+        if (!t || t.state !== 'sent' || t.to !== value) return null;
+        this.#learn.tuned(id, { ...t, state: 'applied', appliedAt: new Date(this.#now()).toISOString() });
+        const fr = /^fr/.test(b.lang ?? '');
+        const n = (v, d = 1) => String(Math.round(Number(v) * 10 ** d) / 10 ** d).replace('.', fr ? ',' : '.');
+        const c = (v) => Number(v).toFixed(2).replace('.', fr ? ',' : '.');
+        const text = fr
+            ? `Mot d'éveil réglé : seuil ${c(t.from)} → ${c(t.to)} (faux réveils ${n(t.falsePerDayBefore)} → ${n(t.falsePerDayAfter)} par jour sur tes ${t.clips} extraits ; appels manqués ${t.missedBefore} → ${t.missedAfter}).`
+            : `Wake word tuned: threshold ${c(t.from)} → ${c(t.to)} (false wakes ${n(t.falsePerDayBefore)} → ${n(t.falsePerDayAfter)} a day on your ${t.clips} clips; missed calls ${t.missedBefore} → ${t.missedAfter}).`;
+        this.#log(`voice box ${b.name}: wake threshold now ${value}`);
+        try { await this.#say(b.conversation, text, { id: b.id, name: b.name, ...(b.place ? { place: b.place } : {}) }); } catch (error) { this.#log(`voice box ${b.name}: the tuning not said (${error.message})`); }
+        return text;
+    }
+    /* WEEKLY (Sunday from 03:00, the box's own time): each learning box tuned once a week. Called often. */
+    wakeWeekly() {
+        const now = this.#now(); const ran = [];
+        for (const b of this.#all()) {
+            if (b.wake !== 'learn' || !this.#learn) continue;
+            const local = new Date(now + offsetOf(b.zone, now) * 60_000);
+            if (local.getUTCDay() !== 0 || local.getUTCHours() < 3) continue;
+            if (now - (Date.parse(b.wakeWeeklyAt ?? '') || 0) < 6 * 86_400_000) continue;
+            this.#change(b.id, { wakeWeeklyAt: new Date(now).toISOString() });
+            try { ran.push(this.wakeTune(b.id, 'weekly')); } catch (error) { this.#log(`voice box ${b.name}: weekly tuning failed (${error.message})`); }
+        }
+        return ran;
+    }
     /* Phase 2's trainer put a better model on the box: kept, and said in its conversation in its name. */
     async modelInstalled(id, { before, after }) {
         const b = this.#box(id);
@@ -655,6 +712,7 @@ export class Boxes {
                 }
                 /* The wake word's own 1.6 s (wake.clip): kept apart, heard again before the word is trusted. */
                 if (link.clip) { if (link.clip.bytes < CLIP_MAX_BYTES) { link.clip.parts.push(Buffer.from(data)); link.clip.bytes += data.length; } return; }
+                if (link.near) { if (link.near.bytes < CLIP_MAX_BYTES) { link.near.parts.push(Buffer.from(data)); link.near.bytes += data.length; } return; }
                 if (!sentence || link.muted) return;
                 size += data.length;
                 if (size <= SENTENCE_MAX) sentence.push(Buffer.from(data));
@@ -672,6 +730,19 @@ export class Boxes {
             }
             if (m.t === 'hello') send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) });
             if (m.t === 'ping' && this.#now() - (link.clockAt ?? 0) > 3_600_000) { link.clockAt = this.#now(); send({ t: 'clock', offset: offsetOf(link.box().zone, this.#now()) }); }
+            if (m.t === 'hello') {
+                /* Its threshold and model (0.1.49): a tuning it holds is confirmed; one it missed, sent again. */
+                const cut = cutoffOf(m.cutoff); link.tunable = cut !== null;
+                const model = typeof m.model === 'string' ? m.model.slice(0, 40) : null;
+                const modelProblem = typeof m.model_problem === 'string' && m.model_problem ? m.model_problem.slice(0, 160) : null;
+                const was = link.box();
+                if (model !== (was.model ?? null) || modelProblem !== (was.modelProblem ?? null)) this.#change(box.id, { model, modelProblem });
+                if (modelProblem) this.#log(`voice box ${box.name}: its wake model: ${modelProblem}`);
+                const t = this.#learn?.tuning(box.id);
+                if (cut !== null) void this.#cutoffSet(box.id, cut);
+                else if (was.cutoff != null) this.#change(box.id, { cutoff: null });   /* an older firmware: 0.94, built in */
+                if (t?.state === 'sent' && t.to !== cut) this.#sendCutoff(box.id, t.to);
+            }
             if (m.t === 'hello') { link.muted = m.muted === true; link.volume = Number.isFinite(m.volume) ? m.volume : null; this.#change(box.id, { firmware: String(m.firmware ?? '').slice(0, 20) }); seen(); return; }
             if (m.t === 'record.start' && this.#recordDir) {
                 mkdirSync(this.#recordDir, { recursive: true });
@@ -685,8 +756,10 @@ export class Boxes {
                 r.out.end(() => { void this.#recorded(link, r); });
                 return;
             }
-            if (m.t === 'wake.clip' && m.edge === 'start') { link.clip = { parts: [], bytes: 0 }; return; }
-            if (m.t === 'wake.clip' && m.edge === 'end' && link.clip) { const pcm = Buffer.concat(link.clip.parts); link.clip = null; link.wakeCheck = this.#checkWake(link, pcm); return; }
+            if (m.t === WIRE.clip && m.edge === 'start') { link.clip = { parts: [], bytes: 0, score: scoreOf(m.score) };   /* none (before 0.1.49): unknown, left out of tuning */ return; }
+            if (m.t === WIRE.clip && m.edge === 'end' && link.clip) { const { parts, score } = link.clip; link.clip = null; link.wakeCheck = this.#checkWake(link, Buffer.concat(parts), { score }); return; }
+            if (m.t === WIRE.near && m.edge === 'start') { link.near = { parts: [], bytes: 0, score: scoreOf(m.score) }; return; }
+            if (m.t === WIRE.near && m.edge === 'end' && link.near) { const { parts, score } = link.near; link.near = null; void this.#checkNear(link, Buffer.concat(parts), score); return; }
             if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
             if (m.t === 'event' && m.name === 'noise.dropped') { this.#log(`voice box ${box.name}: a sound near full scale was cut by its noise guard`); return; }
             /* The box listens for a sentence while this side still records: the two disagree (a reconnection, a
@@ -770,14 +843,20 @@ export class Boxes {
 
     /* Each step said in the server's log, never what was said: its length only. */
     /* The 1.6 s before the sentence, heard again: is the wake word in it? Its words, and whether it reads as the word. */
-    async #checkWake(link, pcm) {
+    async #checkWake(link, pcm, { score = null, near = false } = {}) {
         if (pcm.length < 8_000) return null;
         const heard = String(await this.#hear(wavOf(pcm), link.box().lang) ?? '').trim();
         const ok = WAKE_HEARD.test(plainWords(heard));
-        /* Counted, and kept when the box learns (the clip only: never the sentence). */
+        /* Counted, and kept when the box learns (the clip only: never the sentence), with the box's score. */
         const box = link.box();
-        try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
+        try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard, score, near }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
         return { heard, ok };
+    }
+    /* A NEAR MISS (wake.near): checked the same way, only when the box learns; one at a time; nothing said. */
+    async #checkNear(link, pcm, score) {
+        if (link.box().wake !== 'learn' || link.nearBusy) return;
+        link.nearBusy = true;
+        try { await this.#checkWake(link, pcm, { score, near: true }); } catch { /* not heard: not kept */ } finally { link.nearBusy = false; }
     }
     async #heard(link, pcm) {
         const box0 = link.box();
@@ -887,11 +966,14 @@ export class Boxes {
  *   POST /api/boxes/<id>/wifi-forget      {ssid}: not the one it uses now
  *   POST /api/boxes/<id>/alert            {text?}
  *   POST /api/boxes/<id>/reboot
- *   GET  /api/boxes/<id>/wake            -> {mode, kept, real, false, oldest, falsePerDay, model: {installedAt,
- *                                          falsePerDayBefore, falsePerDayAfter} | null, improveAsked}
+ *   GET  /api/boxes/<id>/wake            -> {mode, kept, real, false, near, missed, oldest, falsePerDay, missedPerDay,
+ *                                          cutoff, wakeModel, tuning: {at, why, state, better, reason, from, to, clips,
+ *                                          falsePerDayBefore, falsePerDayAfter, missedBefore, missedAfter} | null,
+ *                                          model: {installedAt, falsePerDayBefore, falsePerDayAfter} | null, improveAsked}
  *   POST /api/boxes/<id>/wake-mode       {mode: normal|learn} -> the same
  *   POST /api/boxes/<id>/wake-erase      every clip of the box deleted -> the same
- *   POST /api/boxes/<id>/wake-improve    -> 202 {queued: true, at}: asked of the trainer
+ *   POST /api/boxes/<id>/wake-improve    -> 202 {queued, at, tuning}: the threshold tuned now; nothing better, the
+ *                                          trainer asked (queued)
  */
 export async function handleBoxes(request, response, boxes, originOk, headers = {}, qr = null) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
