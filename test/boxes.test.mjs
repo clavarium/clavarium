@@ -667,3 +667,104 @@ test('in a conversation, a sentence cut by its length (a radio, a TV) is not sen
     assert.equal(said.length, 1, 'not sent either');
     assert.ok(s.sent.some((m) => m.t === 'chat' && m.on === false), 'out: told to the box');
 });
+
+/* THE WAKE WORD HEARD AGAIN (wake.clip, box 0.1.47): the box sends listen.start, then its last 1.6 s framed by
+   wake.clip start/end, then the sentence. The clip is dictated on its own (here: the shorter sound). */
+const SENTENCE_BYTES = 40 * 640;
+const wakeRig = (Kind, { clip = 'Mésange', sentence = 'allume la lumière' } = {}) => {
+    const whys = []; const clips = []; const sentences = [];
+    const hear = async (wav) => {
+        const pcm = wav.length - 44;
+        if (pcm === SENTENCE_BYTES) { sentences.push(pcm); return sentence; }
+        clips.push(pcm); return clip;
+    };
+    const boxes = new Kind({
+        file: new MemoryFile([]), exists: (c) => c === 'kitchen-help', hear,
+        say: async (c, text, by) => { whys.push(by.why); }, speak: async () => Buffer.alloc(1600, 1),
+    });
+    const box = boxes.pair({ code: boxes.code('kitchen-help').code });
+    const s = new FakeSocket();
+    boxes.accept(s, boxes.byKey(box.key));
+    const settle = async () => { for (let k = 0; k < 8; k++) await tick(); };
+    const say = async ({ reason = 'wake', clipBytes = 0, end = 'silence' } = {}) => {
+        s.box({ t: 'listen.start', reason, ...(reason === 'wake' ? { score: 0.93 } : {}) });
+        if (clipBytes) {
+            s.box({ t: 'wake.clip', edge: 'start' });
+            for (let sent = 0; sent < clipBytes; sent += 640) s.emit('message', Buffer.alloc(Math.min(640, clipBytes - sent), 5), true);
+            s.box({ t: 'wake.clip', edge: 'end' });
+        }
+        for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true);
+        s.box({ t: 'listen.end', reason: end });
+        await settle();
+    };
+    return { boxes, s, whys, clips, sentences, say };
+};
+
+test('the wake word heard again: its clip is dictated apart from the sentence, and its mark leads why (wake.clip)', async () => {
+    const yes = wakeRig(Boxes, { clip: 'Mésange.' });
+    await yes.say({ clipBytes: 51_200 });
+    assert.deepEqual(yes.clips, [51_200], 'the clip, whole, dictated once');
+    assert.deepEqual(yes.sentences, [SENTENCE_BYTES], 'none of the clip went into the sentence');
+    assert.equal(yes.whys[0], 'mot ✓ « Mésange. » · éveil 93 % · reçu 0,8 s niv 0 (silence)');
+
+    const no = wakeRig(Boxes, { clip: 'Bonjour à tous' });
+    await no.say({ clipBytes: 51_200 });
+    assert.equal(no.whys.length, 1, 'still said: dropping is off by default');
+    assert.ok(no.whys[0].startsWith('mot ✗ « Bonjour à tous » · éveil 93 %'), no.whys[0]);
+});
+
+test('the wake mark stays within the first characters of a long why (Parley keeps 120)', async () => {
+    const r = wakeRig(Boxes);
+    r.s.box({ t: 'listen.start', reason: 'wake', score: 0.93 });
+    r.s.box({ t: 'wake.clip', edge: 'start' }); for (let i = 0; i < 80; i++) r.s.emit('message', Buffer.alloc(640, 5), true); r.s.box({ t: 'wake.clip', edge: 'end' });
+    for (let i = 0; i < 40; i++) r.s.emit('message', Buffer.alloc(640), true);
+    r.s.box({ t: 'listen.end', reason: 'silence', ep: { s: 3.1, heard_at: 0.4, room: 70, voice: 800, bar: 240, mean: 300 } });
+    for (let k = 0; k < 8; k++) await tick();
+    assert.ok(r.whys[0].length > 120, 'a why long enough to be cut');
+    assert.ok(r.whys[0].slice(0, 120).startsWith('mot ✓ « Mésange »'), r.whys[0]);
+});
+
+test('a wake check never carries over to a later sentence', async () => {
+    const r = wakeRig(Boxes);
+    await r.say({ clipBytes: 51_200, end: 'nobody' });   /* its check made, the sentence never heard */
+    assert.equal(r.clips.length, 1); assert.equal(r.whys.length, 0);
+    await r.say({ reason: 'wake' });                     /* no clip this time (a box without the memory for it) */
+    assert.equal(r.whys[0], 'éveil 93 % · reçu 0,8 s niv 0 (silence)');
+    await r.say({ clipBytes: 51_200, end: 'nobody' });
+    await r.say({ reason: 'button' });
+    assert.equal(r.whys[1], 'bouton · reçu 0,8 s niv 0 (silence)');
+});
+
+test('a wake clip too short is not dictated; one too long is cut at CLIP_MAX_BYTES', async () => {
+    const { CLIP_MAX_BYTES } = await import('../server/boxes.mjs');
+    const short = wakeRig(Boxes);
+    await short.say({ clipBytes: 7_680 });
+    assert.deepEqual(short.clips, [], 'under 8000 bytes: not heard again');
+    assert.equal(short.whys[0], 'éveil 93 % · reçu 0,8 s niv 0 (silence)');
+    const long = wakeRig(Boxes);
+    await long.say({ clipBytes: CLIP_MAX_BYTES + 32_000 });
+    assert.deepEqual(long.clips, [CLIP_MAX_BYTES]);
+    assert.deepEqual(long.sentences, [SENTENCE_BYTES], 'what passed the cap went nowhere else');
+    assert.ok(long.whys[0].startsWith('mot ✓'), long.whys[0]);
+});
+
+test('what Whisper makes of the wake word reads as it, « messenges » too; other words do not', async () => {
+    const { WAKE_HEARD } = await import('../server/boxes.mjs');
+    for (const t of ['mesange', 'mes anges', 'maisange', 'messages', 'messenge', 'messenges', 'bonjour messenges']) assert.ok(WAKE_HEARD.test(t), t);
+    for (const t of ['bonjour', 'messe', 'mensonge']) assert.equal(WAKE_HEARD.test(t), false, t);
+});
+
+test('with CLAVARIUM_WAKE_DROP=1, a sentence whose wake word is not heard again is dropped in silence; a heard one goes', async () => {
+    const before = process.env.CLAVARIUM_WAKE_DROP;
+    process.env.CLAVARIUM_WAKE_DROP = '1';
+    let Dropping;
+    try { ({ Boxes: Dropping } = await import('../server/boxes.mjs?wake-drop')); } finally { if (before === undefined) delete process.env.CLAVARIUM_WAKE_DROP; else process.env.CLAVARIUM_WAKE_DROP = before; }
+    const no = wakeRig(Dropping, { clip: 'Bonjour à tous' });
+    await no.say({ clipBytes: 51_200 });
+    assert.equal(no.whys.length, 0, 'not said');
+    assert.deepEqual(no.s.sent.at(-1), { t: 'cue', name: 'done' });
+    const yes = wakeRig(Dropping, { clip: 'Messenges' });
+    await yes.say({ clipBytes: 51_200 });
+    assert.equal(yes.whys.length, 1);
+    assert.ok(yes.whys[0].startsWith('mot ✓ « Messenges »'), yes.whys[0]);
+});

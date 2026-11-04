@@ -29,7 +29,7 @@ export const FIRMWARE_PATH = '/c/api/box/firmware/';
 export const FIRMWARE_MINUTES = 10;
 /* THE WAKE WORD HEARD AGAIN (03-11): « Mésange » and what a dictation makes of it (mes anges, mais sange...). */
 export const CLIP_MAX_BYTES = 16_000 * 2 * 3;
-export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\bmes anges?\b|\bmesange|\bmaisange|\bmessage?s?\b/;
+export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\bmes anges?\b|\bmesange|\bmaisange|\bmessage?s?\b|\bmessenge?s?\b/;   /* « Messenges »: Whisper's reading of the server's own voice saying it */
 export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
 const plainWords = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
@@ -668,7 +668,7 @@ export class Boxes {
                 this.#log(`voice box ${box.name}: a sentence while recording here, the recording closed`);
                 r.out.end(() => { void this.#recorded(link, r); });
             }
-            if (m.t === 'listen.start') { link.why = whyOf(m); if (m.reason !== 'wake') link.wakeCheck = null; }
+            if (m.t === 'listen.start') { link.why = whyOf(m); link.wakeCheck = null; }   /* its clip, if any, comes after listen.start: an older check never carries over */
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -792,7 +792,8 @@ export class Boxes {
            turned on (WAKE_DROP), after its results were looked at -- a real call must never be lost to it. */
         const check = link.wakeCheck ? await link.wakeCheck.catch(() => null) : null; link.wakeCheck = null;
         if (check) {
-            link.why = `${link.why ? `${link.why} · ` : ''}mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »`;
+            /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
+            link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;
             this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
             if (!check.ok && WAKE_DROP) { link.send({ t: 'cue', name: 'done' }); return; }
         }
