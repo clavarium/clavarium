@@ -1735,6 +1735,15 @@ button.inline.more-recent { text-decoration: none; }
 @media (max-width: 560px) { .set-row { grid-template-columns: minmax(0, 1fr); } .set-row > .set-control { justify-content: flex-start; } .set-row > .set-control > :is(input, select) { width: 100%; } }
 .action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .action-row > [role=status] { margin-right: auto; }
+/* Settings > Dictation: two engines, main and backup, each its card. */
+.dict-form { display: flex; flex-direction: column; gap: 12px; }
+.dict-form > .set-rows { display: flex; flex-direction: column; }
+.dict-head { display: flex; align-items: baseline; gap: 8px; }
+.dict-head > b { font-size: .9375rem; font-weight: 600; color: var(--ink); }
+.dict-head > small { font-size: .75rem; color: var(--ink2); }
+.dict-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: 0 0 auto; align-self: center; }
+.dict-dot[data-off] { background: var(--line); }
+.dict-dot[data-down] { background: var(--warn); }
 .status-line { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
 .status-line > * { min-width: 0; }
 .status-line::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--ink2); flex: 0 0 auto; }

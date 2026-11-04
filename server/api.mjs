@@ -119,7 +119,10 @@
  *   GET  /api/voice                         is dictation available?
  *   POST /api/voice?lang=                   the body IS a WAV recording -> {text}; lang: the device's language
  *   GET  /api/dictation                     the engine chosen in Settings (never a key: a secret's name)
- *   POST /api/dictation                     {provider, url, model, secret, language}: chosen, at once
+ *   POST /api/dictation                     {language, main: {provider, url, model, secret}, backup: {...} | {provider: 'none'}}: chosen, at once
+ *                                           (a body of before, {provider, url, model, secret, language}, sets the main one)
+ *   GET  /api/dictation/models?provider=&secret=   that provider's speech-to-text models [{id, label}] (read with the key, kept 24 h)
+ *   GET  /api/dictation/suggestions         {providers: [{id, label, models, keys}], suggestions: [{slot, provider, model, secret}]}
  *   POST /api/dictation/off                 the environment's engine, if any, again
  *   POST /api/dictation/try?provider=&url=&model=&secret=&language=&lang=   a WAV -> {text}, nothing saved
  *   GET  /api/files?c=<conversation>&r=<resource>&p=<path>          a listing
@@ -205,6 +208,8 @@ export async function handleApi(request, response, conversations, headers, resou
     try {
         if (request.method === 'GET' && pathname === '/api/voice') return send(200, { available: voice?.current() !== undefined, engine: voice?.model ?? null }), true;
         if (request.method === 'GET' && pathname === '/api/dictation' && voice) return send(200, voice.about()), true;
+        if (request.method === 'GET' && pathname === '/api/dictation/models' && voice) return send(200, await voice.models(query.get('provider') ?? '', query.get('secret') ?? '')), true;
+        if (request.method === 'GET' && pathname === '/api/dictation/suggestions' && voice) return send(200, await voice.suggestions()), true;
         if (request.method === 'POST' && (pathname === '/api/voice' || (pathname === '/api/dictation/try' && voice))) {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'audio/wav') {
                 return send(403, { error: 'This request does not come from this site.' }), true;

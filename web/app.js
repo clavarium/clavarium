@@ -5973,13 +5973,15 @@
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
 
-    /* ---------- Dictation, in Settings: the engine, chosen here (server/voice.mjs) ---------- */
+    /* ---------- Dictation, in Settings: two engines, main and backup (server/voice.mjs, dictation-engines.mjs) ---------- */
     let dictationProviders = [];
-    const dictationChoice = () => {
-        const lang = $('dictation-language').value;
-        return { provider: $('dictation-provider').value, url: $('dictation-url').value.trim(), model: $('dictation-model').value.trim(), secret: $('dictation-secret').value,
-            language: lang === 'other' ? $('dictation-language-code').value.trim() : lang };
-    };
+    const DICT_SLOTS = { main: 'dictation', backup: 'dictation-backup' };
+    const NEW_KEY = '__new';
+    const dq = (slot, what) => $(`${DICT_SLOTS[slot]}-${what}`);
+    const engineChoice = (slot) => ({ provider: dq(slot, 'provider').value, url: dq(slot, 'url').value.trim(), model: dq(slot, 'model').value.trim(),
+        secret: dq(slot, 'secret').value === NEW_KEY ? '' : dq(slot, 'secret').value });
+    const dictationLanguage = () => { const lang = $('dictation-language').value; return lang === 'other' ? $('dictation-language-code').value.trim() : lang; };
+    const dictationChoice = () => ({ language: dictationLanguage(), main: engineChoice('main'), backup: engineChoice('backup') });
     const dictationSay = (error, saved = '') => {
         $('dictation-error').textContent = error ?? ''; $('dictation-error').hidden = !error;
         $('dictation-saved').textContent = saved;
@@ -5990,36 +5992,122 @@
         $('dictation-language-code').value = known ? '' : code;
         $('dictation-language-code').hidden = known;
     };
+    /* The name offered for a new key (dictation-engines.mjs, newKeyName). */
+    const newKeyName = (provider, names) => {
+        const base = `${provider === 'ovh' ? 'OVH_AI_ENDPOINTS' : String(provider).toUpperCase()}_DICTATION_KEY`;
+        if (!names.includes(base)) return base;
+        for (let i = 2; ; i++) if (!names.includes(`${base}_${i}`)) return `${base}_${i}`;
+    };
+    const fillSecrets = (slot, names, keep) => {
+        const select = dq(slot, 'secret');
+        const options = [['', 'No key'], ...names.map((n) => [n, n]), [NEW_KEY, '+ New key...']];
+        select.replaceChildren(...options.map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
+        select.value = names.includes(keep) ? keep : '';
+    };
+    /* Its models: the provider's own list, read with the key chosen (kept a day on the server), else the known ones. */
+    const modelAsked = { main: 0, backup: 0 };
+    async function paintModels(slot, wanted = dq(slot, 'model').value) {
+        const provider = dq(slot, 'provider').value;
+        const pick = dq(slot, 'model-pick'); const typed = dq(slot, 'model');
+        const free = provider === 'other';
+        pick.hidden = free; typed.hidden = !free;
+        if (free || provider === 'none') return;
+        const asked = ++modelAsked[slot];
+        const secret = engineChoice(slot).secret;
+        const models = await getJson(`/dictation/models?${new URLSearchParams({ provider, secret })}`, null)
+            ?? dictationProviders.find((p) => p.id === provider)?.models ?? [];
+        if (asked !== modelAsked[slot]) return;
+        const list = wanted && !models.some((m) => m.id === wanted) ? [{ id: wanted, label: '' }, ...models] : models;
+        pick.replaceChildren(...list.map((m) => Object.assign(document.createElement('option'), { value: m.id, textContent: m.label ? `${m.id} · ${m.label}` : m.id })));
+        pick.value = list.some((m) => m.id === wanted) ? wanted : list[0]?.id ?? '';
+        typed.value = pick.value;
+    }
+    /* What a provider shows: the address only for "Other"; nothing but "None" for no backup. */
+    const showProvider = (slot) => {
+        const provider = dq(slot, 'provider').value;
+        const none = provider === 'none';
+        dq(slot, 'url-row').hidden = provider !== 'other';
+        dq(slot, 'other-hint').hidden = provider !== 'other';
+        for (const what of ['model-row', 'secret-row', 'try']) dq(slot, what).hidden = none;
+        if (none) { dq(slot, 'newkey').hidden = true; dq(slot, 'heard').hidden = true; }
+        if (none) dq(slot, 'dot').dataset.off = ''; else delete dq(slot, 'dot').dataset.off;
+    };
     async function paintDictation() {
         const [about, secrets] = await Promise.all([getJson('/dictation', null), getJson('/secrets', [])]);
         if (!about) { $('settings-dictation').textContent = 'Not set from here'; $('dictation-form').hidden = true; return; }
-        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here`
+        const main = about.main; const backup = about.backup;
+        const short = (id) => about.providers.find((p) => p.id === id)?.short || about.providers.find((p) => p.id === id)?.label || id;
+        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here${backup ? ` · backup: ${short(backup.provider)}` : ''}`
             : about.source === 'env' ? `On · "${about.env.model}" · set on the server` : 'Off · choose a provider';
         $('settings-dictation').dataset.tone = about.source ? 'ok' : '';
+        if (about.source === 'settings' && about.down) { $('settings-dictation').textContent = `${about.down} down · backup in use`; $('settings-dictation').dataset.tone = 'warn'; }
         /* Its key past its expiry day: not used (voice.mjs); said in red, a dot on the chapter. */
         if (about.source === 'settings' && about.secretExpired) { $('settings-dictation').textContent = 'Key expired: replace it in Assets > Secrets'; $('settings-dictation').dataset.tone = 'bad'; }
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
+        else if (backup?.secretMissing) dictationSay(`Backup: the secret "${backup.secret}" is gone: choose another key.`);
+        if (about.down) dq('main', 'dot').dataset.down = ''; else delete dq('main', 'dot').dataset.down;
         dictationProviders = about.providers;
-        const provider = $('dictation-provider');
-        if (provider.options.length === 0) for (const p of about.providers) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; provider.append(o); }
-        const secret = $('dictation-secret');
-        secret.replaceChildren(secret.options[0] ?? Object.assign(document.createElement('option'), { value: '', textContent: 'No key' }));
-        for (const s2 of secrets) { const o = document.createElement('option'); o.value = s2.name; o.textContent = s2.name; secret.append(o); }
-        if ($('dictation-form').contains(document.activeElement)) return;
-        provider.value = about.provider ?? 'ovh';
-        const first = dictationProviders.find((p) => p.id === provider.value);
-        $('dictation-url').value = about.provider ? about.url : first?.url ?? '';
-        $('dictation-model').value = about.provider ? about.model : first?.model ?? '';
-        secret.value = [...secret.options].some((o) => o.value === about.secret) ? about.secret : '';
+        const names = secrets.map((s2) => s2.name);
+        for (const slot of ['main', 'backup']) {
+            const provider = dq(slot, 'provider');
+            if (provider.options.length === 0) {
+                for (const p of about.providers) provider.append(Object.assign(document.createElement('option'), { value: p.id, textContent: p.label }));
+                if (slot === 'backup') provider.append(Object.assign(document.createElement('option'), { value: 'none', textContent: 'None' }));
+            }
+        }
+        if ($('dictation-form').contains(document.activeElement)) { for (const slot of ['main', 'backup']) fillSecrets(slot, names, dq(slot, 'secret').value); return; }
+        for (const [slot, saved] of [['main', main], ['backup', backup]]) {
+            const first = dictationProviders.find((p) => p.id === (saved?.provider ?? 'ovh'));
+            dq(slot, 'provider').value = saved?.provider ?? (slot === 'main' ? 'ovh' : 'none');
+            dq(slot, 'url').value = saved ? saved.url : first?.url ?? '';
+            dq(slot, 'model').value = saved ? saved.model : first?.model ?? '';
+            fillSecrets(slot, names, saved?.secret ?? '');
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, dq(slot, 'model').value);
+        }
         showLanguage(about.language ?? '');
-        $('dictation-other-hint').hidden = provider.value !== 'other';
         $('dictation-off').hidden = about.source !== 'settings';
     }
-    $('dictation-provider').addEventListener('change', () => {
-        const p = dictationProviders.find((x) => x.id === $('dictation-provider').value);
-        if (p) { $('dictation-url').value = p.url; $('dictation-model').value = p.model; }
-        $('dictation-other-hint').hidden = $('dictation-provider').value !== 'other';
-    });
+    for (const slot of ['main', 'backup']) {
+        dq(slot, 'provider').addEventListener('change', () => {
+            const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+            if (p) { dq(slot, 'url').value = p.url; dq(slot, 'model').value = p.model; }
+            /* A key whose name reads as this provider's, when the one chosen does not. */
+            const keys = [...dq(slot, 'secret').options].map((o) => o.value).filter((v) => v && v !== NEW_KEY);
+            const looks = { ovh: /^OVH_AI_ENDPOINTS/, mistral: /^MISTRAL/, groq: /^GROQ/, openai: /^OPENAI/ }[p?.id];
+            if (looks && !looks.test(dq(slot, 'secret').value)) { const k = keys.find((n) => looks.test(n)); if (k) dq(slot, 'secret').value = k; }
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, p?.model ?? '');
+        });
+        dq(slot, 'model-pick').addEventListener('change', () => { dq(slot, 'model').value = dq(slot, 'model-pick').value; });
+        dq(slot, 'secret').addEventListener('change', () => {
+            const adding = dq(slot, 'secret').value === NEW_KEY;
+            dq(slot, 'newkey').hidden = !adding;
+            if (adding) {
+                const names = [...dq(slot, 'secret').options].map((o) => o.value);
+                const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+                dq(slot, 'newkey-name').textContent = `Kept as ${newKeyName(p?.id ?? 'other', names)}`;
+                dq(slot, 'newkey-value').placeholder = `Paste the ${p?.short || p?.label || ''} key`.replace('  ', ' ');
+                dq(slot, 'newkey-value').focus();
+            } else void paintModels(slot);
+        });
+        /* "+ New key": kept in the secrets, never shown again, then chosen. */
+        dq(slot, 'newkey-keep').addEventListener('click', async () => {
+            const value = dq(slot, 'newkey-value').value.trim();
+            if (!value) { dictationSay('Paste the key first.'); return; }
+            const names = [...dq(slot, 'secret').options].map((o) => o.value);
+            const name = newKeyName(dq(slot, 'provider').value, names);
+            try {
+                await post(`${API}/secrets`, { name, value });
+                dq(slot, 'newkey-value').value = ''; dq(slot, 'newkey').hidden = true; dictationSay(null, `Key kept: ${name}.`);
+                const secrets = await getJson('/secrets', []);
+                for (const s2 of ['main', 'backup']) fillSecrets(s2, secrets.map((x) => x.name), s2 === slot ? name : dq(s2, 'secret').value);
+                void paintModels(slot);
+            } catch (error) { dictationSay(error.message); }
+        });
+    }
     $('dictation-language').addEventListener('change', () => { $('dictation-language-code').hidden = $('dictation-language').value !== 'other'; });
     $('dictation-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -6029,24 +6117,27 @@
     $('dictation-off').addEventListener('click', async () => {
         try { await post(`${API}/dictation/off`); dictationSay(null, 'Turned off.'); void paintDictation(); } catch (error) { dictationSay(error.message); }
     });
-    /* "Try it": a few seconds from this microphone, sent to the engine in the form (nothing saved), its text shown. */
+    /* "Try it", per engine: a few seconds from this microphone, sent to the engine in its card (nothing saved). */
     let stopTrying = null;
-    const endTry = () => { stopTrying?.(); stopTrying = null; $('dictation-try').textContent = 'Try it'; };
-    $('dictation-try').addEventListener('click', async () => {
+    const endTry = () => { stopTrying?.(); stopTrying = null; for (const slot of ['main', 'backup']) dq(slot, 'try').textContent = 'Try it'; };
+    for (const slot of ['main', 'backup']) dq(slot, 'try').addEventListener('click', async () => {
         if (stopTrying) { endTry(); return; }
         dictationSay(null);
-        const heard = $('dictation-heard');
+        const heard = dq(slot, 'heard');
+        for (const other of ['main', 'backup']) if (other !== slot) dq(other, 'heard').hidden = true;
         if (!window.clavariumVoice) { dictationSay('The microphone cannot be used on this page.'); return; }
-        const to = `${API}/dictation/try?${new URLSearchParams(dictationChoice())}`;
+        const to = `${API}/dictation/try?${new URLSearchParams({ ...engineChoice(slot), language: dictationLanguage() })}`;
         const words = { calibrating: 'Listening to the room...', listening: 'Speak now: a short sentence.', hearing: 'Hearing...', transcribing: 'Writing...' };
+        const began = Date.now();
         try {
-            heard.hidden = false; heard.textContent = 'Opening the microphone...';
+            heard.hidden = false; heard.dataset.tone = ''; heard.textContent = 'Opening the microphone...';
+            let spoke = began;
             const stop = await window.clavariumVoice.listen({
-                state: (w) => { if (stopTrying) heard.textContent = words[w] ?? w; },
-                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; },
+                state: (w) => { if (w === 'transcribing') spoke = Date.now(); if (stopTrying) heard.textContent = words[w] ?? w; },
+                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; heard.title = `${((Date.now() - spoke) / 1000).toFixed(1)} s`; },
                 error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
             }, { to });
-            stopTrying = stop; $('dictation-try').textContent = 'Stop';
+            stopTrying = stop; dq(slot, 'try').textContent = 'Stop';
             setTimeout(() => { if (stopTrying === stop) { endTry(); if (!heard.textContent.startsWith('Heard')) heard.textContent = 'Nothing was heard.'; } }, 15_000);
         } catch { heard.hidden = true; dictationSay('The microphone could not be opened.'); }
     });

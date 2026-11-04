@@ -15,6 +15,9 @@ import { isIP } from 'node:net';
 import { Refusal } from './conversations.mjs';
 import { JsonFile } from './store.mjs';
 import { isSecretName } from './secrets.mjs';
+import { PROVIDERS, Engines } from './dictation-engines.mjs';
+
+export { PROVIDERS };
 
 export const AUDIO_MAX = 512 * 1024;
 export const TEXT_MAX = 2000;
@@ -23,16 +26,21 @@ export const DEFAULT_MODEL = 'whisper-large-v3-turbo';
 
 /* The engine's settings come from the environment, never from arguments: the
    key must not show in a process list. */
-export function voiceConfig(env = process.env) {
-    const url = (env.CLAVARIUM_TRANSCRIPTION_URL ?? '').trim();
+/* `prefix`: CLAVARIUM_TRANSCRIPTION_FALLBACK_ names a backup engine, asked when the main one is down. */
+export function voiceConfig(env = process.env, prefix = 'CLAVARIUM_TRANSCRIPTION_') {
+    const url = (env[`${prefix}URL`] ?? '').trim();
     if (url === '') return undefined;
     return {
         url,
-        key: (env.CLAVARIUM_TRANSCRIPTION_KEY ?? '').trim() || undefined,
-        model: (env.CLAVARIUM_TRANSCRIPTION_MODEL ?? '').trim() || DEFAULT_MODEL,
-        language: (env.CLAVARIUM_TRANSCRIPTION_LANGUAGE ?? '').trim() || undefined,
+        key: (env[`${prefix}KEY`] ?? '').trim() || undefined,
+        model: (env[`${prefix}MODEL`] ?? '').trim() || DEFAULT_MODEL,
+        language: (env[`${prefix}LANGUAGE`] ?? '').trim() || undefined,
     };
 }
+/* THE ENGINE IS DOWN, not the audio wrong: unreachable or too slow (0), key refused or credits used up
+   (401, 402), busy (429), failing (5xx). A 400 is the audio's: no backup for it. */
+export const engineDown = (error) => [0, 401, 402, 429].includes(error?.engine) || error?.engine >= 500;
+const engineError = (message, engine) => Object.assign(new Refusal(502, message), { engine });
 
 // eslint-disable-next-line no-control-regex
 const NOT_TYPED = /[\u0000-\u001F\u007F-\u009F​-‏‪-‮⁠-⁤⁦-⁩﻿]/gu;
@@ -169,9 +177,9 @@ export async function transcribe(config, audio, fetcher = fetch, { oneVoice = fa
     } catch {
         /* The error of a failed request repeats the address it was sent to:
            it is not passed on. */
-        throw new Refusal(502, 'The speech-to-text engine cannot be reached.');
+        throw engineError('The speech-to-text engine cannot be reached.', 0);
     }
-    if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
+    if (!response.ok) throw engineError(`The speech-to-text engine answered ${response.status}.`, response.status);
     const body = await response.json().catch(() => undefined);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
     const text = cleanDictation((oneVoice && firstVoice(body)) || body.text, wavSeconds(audio));
@@ -210,8 +218,8 @@ export async function transcribeParts(config, audio, fetcher = fetch) {
     if (diarize) form.append('diarize', 'true');
     let response;
     try { response = await fetcher(config.url, { method: 'POST', redirect: 'error', headers: config.key ? { authorization: `Bearer ${config.key}` } : {}, body: form, signal: AbortSignal.timeout(10 * 60_000) }); }
-    catch { throw new Refusal(502, 'The speech-to-text engine cannot be reached.'); }
-    if (!response.ok) throw new Refusal(502, `The speech-to-text engine answered ${response.status}.`);
+    catch { throw engineError('The speech-to-text engine cannot be reached.', 0); }
+    if (!response.ok) throw engineError(`The speech-to-text engine answered ${response.status}.`, response.status);
     const body = await response.json().catch(() => undefined);
     if (Array.isArray(body?.diarization) && body.diarization.length) return body.diarization.map((p) => ({ speaker: Number(p.speaker) || 0, start: Number(p.start) || 0, text: withoutPhantoms(String(p.text ?? '')) })).filter((p) => p.text);
     if (typeof body?.text !== 'string') throw new Refusal(502, 'The speech-to-text engine gave no text.');
@@ -267,13 +275,7 @@ export async function quickChat(config, system, user, fetcher = fetch, { maxToke
  * the name resolves to at each use; except with "Other (compatible)", made
  * for an engine of one's own, where a local or private address is allowed,
  * plain HTTP included. */
-export const PROVIDERS = {
-    ovh: { label: 'OVH AI Endpoints', url: 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1/audio/transcriptions', model: 'whisper-large-v3-turbo' },
-    openai: { label: 'OpenAI', url: 'https://api.openai.com/v1/audio/transcriptions', model: 'whisper-1' },
-    groq: { label: 'Groq', url: 'https://api.groq.com/openai/v1/audio/transcriptions', model: 'whisper-large-v3-turbo' },
-    mistral: { label: 'Mistral', url: 'https://api.mistral.ai/v1/audio/transcriptions', model: 'voxtral-mini-latest' },
-    other: { label: 'Other (compatible)', url: '', model: '' },
-};
+/* PROVIDERS: dictation-engines.mjs. */
 const LANGUAGE = /^[a-z]{2,3}(-[A-Za-z]{2,4})?$/;
 export const AUTOMATIC = 'auto';
 
@@ -329,58 +331,110 @@ export function dictationProblem(c) {
 
 export const KEY_EXPIRED = 'Dictation key expired: replace it in Assets > Secrets.';
 
+/* THE SETTINGS, kept in dictation.json: {on, language, main, backup}, each engine {provider, url, model, secret}.
+   A file of before (one engine, its fields at the top) is read as the main one: nothing changes for it. */
+const engineOf = (e) => (e && typeof e === 'object' && e.provider && e.provider !== 'none'
+    ? { provider: e.provider, url: e.url ?? '', model: e.model ?? '', secret: e.secret ?? '' } : null);
+export function migrated(kept) {
+    const k = kept && typeof kept === 'object' ? kept : {};
+    const shaped = 'main' in k || 'backup' in k;
+    return { on: k.on === true, language: k.language ?? '', main: engineOf(shaped ? k.main : k), backup: shaped ? engineOf(k.backup) : null };
+}
+/* A main engine that fails is skipped this long, the backup asked at once, before being tried again. */
+export const MAIN_RETRY_MS = 60_000;
+const shortName = (c) => PROVIDERS[c?.provider]?.short || (() => { try { return new URL(c.url).hostname; } catch { return 'the engine'; } })();
+
 export class Dictation {
-    #file; #env; #secret; #expired; #lookup; #fetcher;
+    #file; #env; #secret; #expired; #lookup; #fetcher; #names; #notice; #now; #engines;
+    /* The main engine down since: {name, last}; said once when it starts, once when it ends. */
+    #down = null;
     /* `secret(name)`: the value of a secret, or undefined. `expired(name)`: past its expiry
-       day (secrets.mjs): then not used. `lookup(host)`: the addresses a name resolves to. */
-    constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, expired = () => false, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch } = {}) {
+       day (secrets.mjs): then not used. `lookup(host)`: the addresses a name resolves to.
+       `names()`: the secrets' names (suggestions). `notice(text)`: a line for What happened. */
+    constructor({ file = new JsonFile(undefined, {}), env = process.env, secret = () => undefined, expired = () => false, lookup = (host) => dnsLookup(host, { all: true }), fetcher = fetch, names = () => [], notice = () => {}, now = Date.now } = {}) {
         this.#file = file; this.#env = env; this.#secret = secret; this.#expired = expired; this.#lookup = lookup; this.#fetcher = fetcher;
+        this.#names = names; this.#notice = notice; this.#now = now; this.#engines = new Engines({ fetcher, now });
     }
-    /* A secret renamed: the key of dictation follows it. */
+    #kept() { return migrated(this.#file.get()); }
+    /* A secret renamed: the keys of dictation follow it. */
     secretRenamed(from, to) {
-        const kept = this.#file.get();
-        if (kept?.secret === from) this.#file.set({ ...kept, secret: to });
+        const k = this.#kept();
+        let changed = false;
+        for (const e of [k.main, k.backup]) if (e?.secret === from) { e.secret = to; changed = true; }
+        if (changed) this.#file.set(k);
     }
-    #saved() { const kept = this.#file.get(); return kept?.on === true && !dictationProblem(kept) ? kept : undefined; }
-    #configOf(c) {
-        return { url: c.url, model: c.model, language: c.language || undefined, key: c.secret ? this.#secret(c.secret) : undefined, provider: c.provider };
+    #valid(e, language) { return e && !dictationProblem({ ...e, language }) ? e : undefined; }
+    #saved() { const k = this.#kept(); return k.on ? this.#valid(k.main, k.language) && { ...k.main, language: k.language } : undefined; }
+    #configOf(c, language = c.language) {
+        return { url: c.url, model: c.model, language: language || undefined, key: c.secret ? this.#secret(c.secret) : undefined, provider: c.provider, secret: c.secret || undefined };
     }
     /* What transcribes now: the one set in Settings, else the environment's. */
     current() {
         const saved = this.#saved();
         return saved ? this.#configOf(saved) : voiceConfig(this.#env);
     }
+    /* The backup: the one set in Settings (with a main one set there), else CLAVARIUM_TRANSCRIPTION_FALLBACK_*. */
+    backup() {
+        const k = this.#kept();
+        const b = this.#saved() && this.#valid(k.backup, k.language);
+        if (b) return this.#configOf(b, k.language);
+        const env = voiceConfig(this.#env, 'CLAVARIUM_TRANSCRIPTION_FALLBACK_');
+        const main = this.current();
+        return env && !(main && env.url === main.url && env.model === main.model) ? env : undefined;
+    }
     get model() { return this.current()?.model; }
-    /* For the page: never a key, nor the environment's address (it may carry one). */
+    #aboutEngine(e) {
+        if (!e) return null;
+        return { ...e, secretMissing: Boolean(e.secret) && this.#secret(e.secret) === undefined, secretExpired: Boolean(e.secret) && this.#expired(e.secret) };
+    }
+    /* For the page: never a key, nor the environment's address (it may carry one). The main engine's fields
+       are also at the top, as before. */
     about() {
-        const saved = this.#file.get() ?? {};
+        const k = this.#kept();
         const env = voiceConfig(this.#env);
+        const main = this.#aboutEngine(k.main);
         return {
             on: this.#saved() !== undefined,
-            provider: saved.provider ?? null, url: saved.url ?? '', model: saved.model ?? '', secret: saved.secret ?? '', language: saved.language ?? '',
-            secretMissing: Boolean(saved.secret) && this.#secret(saved.secret) === undefined,
-            secretExpired: Boolean(saved.secret) && this.#expired(saved.secret),
+            provider: main?.provider ?? null, url: main?.url ?? '', model: main?.model ?? '', secret: main?.secret ?? '', language: k.language,
+            secretMissing: main?.secretMissing ?? false, secretExpired: main?.secretExpired ?? false,
+            main, backup: this.#aboutEngine(k.backup),
+            down: this.#down ? this.#down.name : null,
             env: env ? { model: env.model } : null,
             source: this.#saved() ? 'settings' : env ? 'env' : null,
             providers: Object.entries(PROVIDERS).map(([id, p]) => ({ id, ...p })),
         };
     }
-    #checked(body) {
-        const c = { provider: body?.provider, url: String(body?.url ?? '').trim(), model: String(body?.model ?? '').trim(), secret: String(body?.secret ?? '').trim(), language: String(body?.language ?? '').trim() };
-        const problem = dictationProblem(c);
+    #checked(body, language) {
+        const c = { provider: body?.provider, url: String(body?.url ?? '').trim(), model: String(body?.model ?? '').trim(), secret: String(body?.secret ?? '').trim() };
+        const problem = dictationProblem({ ...c, language });
         if (problem) throw new Refusal(400, problem);
         if (c.secret && this.#secret(c.secret) === undefined) throw new Refusal(400, 'No secret has this name: add it in Assets, Secrets.');
         return c;
     }
-    set(body) { this.#file.set({ ...this.#checked(body), on: true }); return this.about(); }
+    /* {language, main, backup}: backup absent, or its provider "none", means no backup. A body of before
+       ({provider, url, model, secret, language}) sets the main one and keeps the backup. */
+    set(body) {
+        const language = String(body?.language ?? '').trim();
+        const shaped = body && typeof body === 'object' && 'main' in body;
+        const main = this.#checked(shaped ? body.main : body, language);
+        let backup;
+        if (!shaped) backup = this.#kept().backup;
+        else if (!body.backup || !body.backup.provider || body.backup.provider === 'none') backup = null;
+        else {
+            try { backup = this.#checked(body.backup, ''); } catch (error) { throw new Refusal(error.status ?? 400, `Backup: ${error.message}`); }
+        }
+        this.#file.set({ on: true, language, main, backup });
+        this.#down = null;
+        return this.about();
+    }
     /* Turned off: the environment's engine, if any, takes over again. The choice is kept, to be turned on again. */
-    off() { const kept = this.#file.get() ?? {}; this.#file.set({ ...kept, on: false }); return this.about(); }
+    off() { this.#file.set({ ...this.#kept(), on: false }); this.#down = null; return this.about(); }
     /* A name resolving to this server's own network is refused unless "Other" was chosen. */
     async #guard(config) {
         if (!config.provider || config.provider === 'other') return;
         const host = new URL(config.url).hostname;
         let addresses;
-        try { addresses = isIP(host.replace(/^\[|\]$/g, '')) ? [{ address: host }] : await this.#lookup(host); } catch { throw new Refusal(502, 'The speech-to-text engine cannot be reached.'); }
+        try { addresses = isIP(host.replace(/^\[|\]$/g, '')) ? [{ address: host }] : await this.#lookup(host); } catch { throw Object.assign(new Refusal(502, 'The speech-to-text engine cannot be reached.'), { engine: 0 }); }
         if (addresses.some((a) => isPrivateHost(a.address))) throw new Refusal(400, 'This address leads into this server\'s own network: only "Other (compatible)" may.');
     }
     /* An expired key is never sent: said in one line instead (still offered, so the line is seen). */
@@ -396,24 +450,62 @@ export class Dictation {
         if (!config?.key || !DIARIZES.test(String(config.url))) return null;
         return (system, user) => quickChat(config, system, user, this.#fetcher);
     }
+    /* THE MAIN ENGINE, ELSE THE BACKUP: the main one down (engineDown, or its key expired), the same audio goes
+       at once to the backup; for MAIN_RETRY_MS after, straight to it. Said once when it starts, once when the
+       main one answers again -- not at every sentence. */
+    async #run(hear) {
+        const main = this.current();
+        const second = this.backup();
+        const skip = second && this.#down && this.#now() - this.#down.last < MAIN_RETRY_MS;
+        if (!skip) {
+            try {
+                this.#fresh(this.#saved());
+                if (main) await this.#guard(main);
+                const out = await hear(main);
+                if (this.#down) { this.#notice(`Dictation: ${this.#down.name} back`); this.#down = null; }
+                return out;
+            } catch (error) {
+                if (!second || !(engineDown(error) || error?.message === KEY_EXPIRED)) throw error;
+                if (this.#down) this.#down.last = this.#now();
+                else {
+                    this.#down = { name: shortName(main), last: this.#now() };
+                    this.#notice(`Dictation: ${this.#down.name} down, ${shortName(second)} took over`);
+                }
+            }
+        }
+        this.#fresh(second);
+        await this.#guard(second);
+        return hear(second);
+    }
     async transcribeParts(audio) {
-        this.#fresh(this.#saved());
-        const config = this.current();
-        if (config) await this.#guard(config);
-        return transcribeParts(config && { ...config, language: languageOf(config.language, undefined) }, audio, this.#fetcher);
+        return this.#run((c) => transcribeParts(c && { ...c, language: languageOf(c.language, undefined) }, audio, this.#fetcher));
     }
     async transcribe(audio, device, how = {}) {
-        this.#fresh(this.#saved());
-        const config = this.current();
-        if (config) await this.#guard(config);
-        return transcribe(config && { ...config, language: languageOf(config.language, device) }, audio, this.#fetcher, how);
+        return this.#run((c) => transcribe(c && { ...c, language: languageOf(c.language, device) }, audio, this.#fetcher, how));
     }
-    /* "Try it": what is in the form, not saved, on one short recording. */
+    /* "Try it": what is in the form, not saved, on one short recording (either engine). */
     async try(body, audio, device) {
-        const checked = this.#checked(body);
+        const language = String(body?.language ?? '').trim();
+        const checked = this.#checked(body, language);
         this.#fresh(checked);
-        const config = this.#configOf(checked);
+        const config = this.#configOf(checked, language);
         await this.#guard(config);
         return transcribe({ ...config, language: languageOf(config.language, device) }, audio, this.#fetcher);
+    }
+    /* A provider's speech-to-text models, read with the key named (when there is one), else its base list. */
+    async models(provider, secret) {
+        if (!Object.hasOwn(PROVIDERS, provider)) throw new Refusal(400, 'Choose a provider among those offered.');
+        const name = isSecretName(secret) && !this.#expired(secret) ? secret : '';
+        return this.#engines.models(provider, name ? this.#secret(name) : undefined, `${provider} ${name}`);
+    }
+    /* For whatever sets dictation up: every provider with its models and the secrets that look like its keys,
+       and a choice for each slot not set yet. Names only, never a value. */
+    async suggestions() {
+        const names = (this.#names() ?? []).filter((n) => isSecretName(n) && !this.#expired(n));
+        const k = this.#kept();
+        const reveal = (n) => this.#secret(n);
+        const providers = await this.#engines.catalogue(names, reveal);
+        const slots = { main: this.#saved() ? k.main : (voiceConfig(this.#env) ? { provider: null } : null), backup: this.#saved() ? k.backup : null };
+        return { providers, suggestions: await this.#engines.suggestions(slots, names, reveal) };
     }
 }

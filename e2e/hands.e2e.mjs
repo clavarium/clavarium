@@ -253,10 +253,9 @@ test('Settings, Dictation: a provider fills in its address and model; saved, it 
     assert.equal(await me.page.inputValue('#dictation-model'), 'voxtral-mini-latest');
     await me.page.selectOption('#dictation-provider', 'groq');
     assert.equal(await me.page.inputValue('#dictation-model'), 'whisper-large-v3-turbo');
-    /* An address of this server's own network with a named provider: refused, and why. */
-    await me.page.fill('#dictation-url', b.engineUrl);
-    await me.page.locator('#dictation-save').click();
-    await me.until('refused', async () => /only with "Other/.test(await me.page.locator('#dictation-error').innerText()));
+    /* A named provider: its address is not shown (an address of this server's own network: test/voice.test.mjs). */
+    assert.equal(await me.page.locator('#dictation-url').isVisible(), false);
+    assert.equal(await me.page.locator('#dictation-backup-provider').inputValue(), 'none', 'no backup unless chosen');
     /* "Other (compatible)": an engine of one's own, here the bench's. */
     await me.page.selectOption('#dictation-provider', 'other');
     assert.equal(await me.page.inputValue('#dictation-url'), '');
