@@ -424,6 +424,8 @@
         return bar;
     }
     for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A room's title: its name, and under it who speaks now (salonLive). */
+    { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
     /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
     { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right').prepend(views); }
     const applyFold = (folded) => {
@@ -1257,6 +1259,17 @@
     /* The rooms known, even before their part of this page has run (a list painted early). */
     const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
+    /* Words of the screen's language (Parley's texts, /api/talk/words) once read; English till then. */
+    const uiSaid = (key, fallback, vars = {}) => {
+        let words = null; try { words = chatWords; } catch { /* not read yet */ }
+        return (typeof words?.[key] === 'string' ? words[key] : fallback).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all));
+    };
+    /* Who of a room speaks now (#282, an AI given a message and not done): « Cuisine parle… ». */
+    const speaking = (who) => (who.length > 1 ? uiSaid('room-speaking-many', '{names} are speaking\u2026', { names: who.join(', ') }) : uiSaid('room-speaking', '{name} is speaking\u2026', { name: who[0] }));
+    const thinkingOf = (r) => (Array.isArray(r?.thinking) ? r.thinking.filter((x) => typeof x === 'string' && x) : []);
+    /* ROOMS ONLY (a filter of the list): kept on this device. */
+    let roomsOnly = false;
+    try { roomsOnly = localStorage.getItem('clavarium-list-show') === 'rooms'; } catch { /* a private window */ }
     function roomItem(r) {
         /* The same row as a conversation's (03-11: « de même nature ») -- its name, when, its last words on one line,
            its state's dot -- told apart by a small room sign before its name. */
@@ -1265,12 +1278,15 @@
         const sign = document.createElement('span'); sign.className = 'room-sign'; sign.setAttribute('aria-hidden', 'true');
         title.append(sign, r.name);
         b.append(title);
-        if (r.last) {
-            const last = document.createElement('small'); last.className = 'last'; last.textContent = `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
-            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true';
+        /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
+        const who = thinkingOf(r);
+        if (who.length) b.dataset.live = 'true';
+        if (r.last || who.length) {
+            const last = document.createElement('small'); last.className = 'last'; last.textContent = who.length ? speaking(who) : `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
+            if (r.last) { const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true'; }
         } else { const sub = document.createElement('small'); sub.textContent = `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`; b.append(sub); }
-        /* Its dot: new words in it waiting (the colour of what waits for you), else ready. */
-        const point = statePoint(r.unread > 0 ? 'wait' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : 'Room'; b.append(point);
+        /* Its dot: new words in it waiting (the colour of what waits for you), else at work while one speaks, else ready. */
+        const point = statePoint(r.unread > 0 ? 'wait' : who.length ? 'work' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : who.length ? speaking(who) : 'Room'; b.append(point);
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
         b.addEventListener('click', () => { void openSalon(r.id); });
         return b;
@@ -1307,6 +1323,26 @@
         if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); unfolding(g, [body]); box.append(body); }
         return box;
     }
+    /* THE LIST'S FILTER (All | Rooms only): the same pressed buttons as the other views' (Files: List | Icons). */
+    let wordsAsked = false;
+    function paintListShow() {
+        const box = $('list-show'); if (!box) return;
+        box.hidden = DEVICE || roomsNow().length === 0;
+        /* Its words (and a room's « … parle… ») in the screen's language: read once, then painted again. */
+        if (!box.hidden && !wordsAsked) { wordsAsked = true; void readWords().then(() => paint(), () => { wordsAsked = false; }); }
+        for (const b of box.querySelectorAll('button')) {
+            b.textContent = b.dataset.show === 'rooms' ? uiSaid('list-rooms-only', 'Rooms only') : uiSaid('list-all', 'All');
+            b.setAttribute('aria-pressed', String((b.dataset.show === 'rooms') === roomsOnly));
+        }
+        box.setAttribute('aria-label', uiSaid('list-show', 'Show'));
+    }
+    for (const b of $('list-show')?.querySelectorAll('button') ?? []) {
+        b.addEventListener('click', () => {
+            roomsOnly = b.dataset.show === 'rooms';
+            try { localStorage.setItem('clavarium-list-show', roomsOnly ? 'rooms' : 'all'); } catch { /* a private window */ }
+            paint();
+        });
+    }
     function paint() {
         if (listHeld) { paintLater = true; return; }
         /* The groups, folded as a whole or not (a search shows them all). */
@@ -1319,7 +1355,11 @@
         const shown = conversations.filter((c) => (query ? matches(c) : c.hidden !== true || showHidden || c.name === current)).sort(byRank);
         const heading = (text) => { const h = document.createElement('h3'); h.className = 'list-head'; h.textContent = text; return h; };
         const groups = groupsInOrder();
-        if (query || DEVICE) {
+        /* ROOMS ONLY: the rooms alone (a search among them); offered once there is one. */
+        const onlyRooms = roomsOnly && !DEVICE && roomsNow().length > 0;
+        paintListShow();
+        if (onlyRooms) groupsOpen = false;
+        else if (query || DEVICE) {
             /* A search: everything found, in its place. */
             items.append(...shown.filter((c) => !c.group).map((c) => itemButton(c)));
         } else {
@@ -1391,15 +1431,15 @@
             if (inside.length === 0) continue;
             items.append(groupBox(g, inside, conversations.filter((c) => c.group === g).sort(byRank), Boolean(query) || !folded.has(g)));
         }
-        if (groupsOpen) unfolding(GROUPS, [...items.children]);
+        if (groupsOpen && !onlyRooms) unfolding(GROUPS, [...items.children]);
         /* ROOMS (03-11): their own list, after the groups of conversations; a search finds them by name. */
         const roomsShown = roomsNow().filter((r) => !query || r.name.toLowerCase().includes(String(query).toLowerCase()));
         if (!DEVICE && roomsShown.length) {
             const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = 'rooms';
-            const open = !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
+            const open = onlyRooms || !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
             const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
             b.append(chevron, document.createTextNode('Rooms'));
-            b.addEventListener('click', () => { if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
+            b.addEventListener('click', () => { if (onlyRooms) return; if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
             items.append(b);
             if (open) items.append(...roomsShown.map((r) => roomItem(r)));
         }
@@ -1410,7 +1450,7 @@
         if (query) hits.forEach((h, i) => { h.toggleAttribute('data-chosen', i === chosenHit); if (i === chosenHit) h.scrollIntoView?.({ block: 'nearest' }); });
         $('search-none').hidden = !query || hits.length > 0;
         const toggle = $('hidden-toggle');
-        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query);
+        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query) || onlyRooms;
         toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
         toggle.setAttribute('aria-expanded', String(showHidden));
         const calling = hidden.some(needsYou);
@@ -5160,6 +5200,12 @@
         return card;
     }
     let salonThread = null; let salonId = ''; let salonTimer = null;
+    /* A room's bar while one of its AIs speaks: its dot at work (gold, breathing), the words under its name. */
+    function salonLive(who) {
+        const dot = $('salon-state'); const line = $('salon-live');
+        if (dot) { dot.dataset.state = who.length ? 'work' : 'ok'; dot.title = who.length ? speaking(who) : ''; }
+        if (line) { line.hidden = who.length === 0; line.textContent = who.length ? speaking(who) : ''; }
+    }
     function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
     async function openSalon(id, push = true) {
         if (DEVICE) return;
@@ -5167,7 +5213,8 @@
         const r = rooms.find((x) => x.id === id); if (!r) return;
         enterPlace('salon', push);
         salonLeft(); salonId = id;
-        $('salon-title').textContent = r.name;
+        $('salon-name').textContent = r.name;
+        salonLive(thinkingOf(r));
         $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
         $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
         const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? 'People' : k === 'ai' ? 'AIs' : 'Boxes'), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', 'host')); return x; })); return row; }).filter(Boolean);
@@ -5179,10 +5226,14 @@
             words, markdown: true, agentName: '',
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
-                const who = Array.isArray(d?.thinking) ? d.thinking : [];
+                const who = thinkingOf(d);
                 $('salon-thinking').hidden = who.length === 0;
-                $('salon-thinking').replaceChildren(el('span', 'state-dot'), document.createTextNode(`${who.join(', ')} ${who.length > 1 ? 'are' : 'is'} thinking\u2026`));
+                $('salon-thinking').replaceChildren(el('span', 'state-dot'), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
                 $('salon-thinking').firstChild.dataset.state = 'work';
+                /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
+                salonLive(who);
+                const known = rooms.find((x) => x.id === id);
+                if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
                 return d;
             }),
             send: (text) => post(`${API}/rooms/${id}/talk`, { text }),

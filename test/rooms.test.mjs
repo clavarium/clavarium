@@ -140,3 +140,21 @@ test('#282: what came since the owner last looked is counted on its card; an AI 
     rooms.read(r.id);
     assert.equal(rooms.list()[0].unread, 0, 'opened: seen');
 });
+
+test('the list says who of a room is speaking now (its row: « Hugo parle… »), back to its last message once answered', async (t) => {
+    const { rooms } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    assert.deepEqual(rooms.list()[0].thinking, [], 'nobody yet');
+    await rooms.say(r.id, 'Bonjour, qui est là ?');
+    const row = rooms.list()[0];
+    assert.deepEqual(row.thinking, ['Hugo'], 'the host has it');
+    assert.equal(row.last.text, 'Bonjour, qui est là ?', 'its last message still told');
+    const compta = r.members.find((m) => m.ref === 'compta');
+    rooms.answered('hugo', { room: r.id, text: 'Moi. @Compta ?', to: [compta.id] });
+    assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'handed on: the other one speaks now');
+    rooms.answered('compta', { room: r.id, text: 'Je regarde.' }, 'doing');
+    assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'still at it while it says what it does');
+    rooms.answered('compta', { room: r.id, text: 'Là aussi.' });
+    assert.deepEqual(rooms.list()[0].thinking, [], 'done: nobody');
+    assert.equal(rooms.list()[0].last.text, 'Là aussi.');
+});

@@ -89,7 +89,7 @@
  *   POST /api/asset-groups/place            {asset, group}: put an asset in a group (group null to take it out)
  *   POST /api/asset-groups/<id>/rename      {label}
  *   POST /api/asset-groups/<id>/remove
- *   GET  /api/rooms                         the rooms (#268): [{id, name, host, members: [{id, kind, name, ref, host?}]}]
+ *   GET  /api/rooms                         the rooms (#268): [{id, name, host, members: [{id, kind, name, ref, host?}], unread, last, thinking: [names]}]
  *   POST /api/rooms                         {name, conversations: [names], boxes: [ids], host?}: a new room
  *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids]}
  *   POST /api/rooms/<id>/remove             the room and its thread

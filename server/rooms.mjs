@@ -57,7 +57,10 @@ export class Rooms {
     #unread(r) { try { const seen = Date.parse(r.seen ?? '') || 0; return this.#thread(r.id).read({ last: 200 }).messages.filter((m) => (m.from === 'agent' || m.by) && (Date.parse(m.at) || 0) > seen).length; } catch { return 0; } }
     /* Its last message, for the list: when, and its first words. */
     #last(r) { try { const m = this.#thread(r.id).read({ last: 1 }).messages.at(-1); return m ? { at: m.at, text: String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(m.by?.name ? { by: m.by.name } : {}) } : null; } catch { return null; } }
-    list() { return this.#all().map((r) => ({ id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at, unread: this.#unread(r), last: this.#last(r) })); }
+    /* Who has a message of the room and has not answered yet (#282), by their names of the moment: « Hugo parle… »
+       in its row of the list and on its bar, « Hugo réfléchit… » in its thread. */
+    #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, at]) => Date.now() - at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
+    list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members) }; }); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
 
     /* A new room: its name, its AIs (conversation names), its boxes (ids), and which AI is the host (the first by default). */
@@ -121,8 +124,7 @@ export class Rooms {
         /* A member named in a text (@{id}): its name of the moment, on the screen. */
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
         if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
-        /* Who has a message of the room and has not answered yet (#282): "Hugo réfléchit…" on the screen. */
-        const thinking = [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, at]) => Date.now() - at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean);
+        const thinking = this.#thinkingOf(id, members);
         return { room: this.get(id), thinking, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
     }
 

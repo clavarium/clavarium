@@ -18,6 +18,8 @@
     <!-- SEARCH, discreet: opened by the magnifier, "/" or Ctrl+K; filters as it is typed. -->
     <div id="search" role="search" hidden><input id="search-field" type="search" placeholder="Search" aria-label="Search conversations: name, folder, identifier, tool" autocomplete="off" spellcheck="false" maxlength="60" aria-controls="items"></div>
     <!-- Needs you and Recent: copies of rows of the list below, by when they were last used (app.js, paint). -->
+    <!-- A FILTER of the list (once there is a room): everything, or the rooms only; kept on this device. -->
+    <div id="list-show" class="levels list-show" role="group" aria-label="Show" hidden><button type="button" data-show="all" aria-pressed="true">All</button><button type="button" data-show="rooms" aria-pressed="false">Rooms only</button></div>
     <div id="recent"></div>
     <div id="items"></div>
     <p id="search-none" class="hint" hidden>Nothing found.</p>
