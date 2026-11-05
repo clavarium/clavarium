@@ -2308,6 +2308,9 @@ button.salon-switch[aria-checked="true"]::after { left: 18px; background: var(--
 /* The list's button on each page of its own (03-11), as the conversation's. */
 /* THE TOP BAR of every page (03-11): the conversation's header, the same element and looks (header {...} above). */
 header.topbar { flex-shrink: 0; }
+/* A place's top bar stays at the top while its page scrolls (05-11), as a conversation's does: the sheet scrolls,
+   so the bar sticks to its top edge, over its padding. */
+.sheet > header.topbar { position: sticky; top: -14px; z-index: 5; margin-top: -14px; padding-top: 14px; background: var(--panel); }
 header.topbar > .fold-here { font-size: 1rem; line-height: 1; padding: 4px 9px; flex: none; }
 @media (max-width: 700px) { header.topbar > .fold-here { display: none; } }
 header.topbar > b { flex: 1 1 auto; font-size: 1rem; }
@@ -2580,3 +2583,8 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
   .ft *, .ft *::before, .ft *::after, .ft-toast { animation: none !important; transition: none !important; }
   .ft-house .ft-wire.lit, .ft-house .ft-link.lit { stroke-dashoffset: 0 !important; }
 }
+
+/* The search atop a settings page (05-11). */
+:is(header.topbar, .panel-top) .settings-search { margin-left: auto; width: min(240px, 42vw); min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .875rem; }
+.sheet[data-searching="on"] .settings-nav { opacity: .5; }
+.set-row.search-out { display: none; }

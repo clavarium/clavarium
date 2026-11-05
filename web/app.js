@@ -424,6 +424,39 @@
         return bar;
     }
     for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A SEARCH ATOP A SETTINGS PAGE (05-11): one field in its top bar; what is typed keeps only the chapters (or
+       blocks) whose title or rows say it, opened; the headings left with nothing are hidden. Emptied, all comes back
+       as it was. The server's Settings, a conversation's, and any sheet given the same shape. */
+    const settingsSearch = (sheet) => {
+        const bar = sheet?.querySelector(':scope > header.topbar .bar-right') ?? sheet?.querySelector(':scope > header.topbar') ?? sheet?.querySelector(':scope > .panel-top');
+        if (!bar || sheet.querySelector('.settings-search')) return;
+        const field = document.createElement('input'); field.type = 'search'; field.className = 'settings-search';
+        field.placeholder = 'Search'; field.setAttribute('aria-label', 'Search these settings'); field.autocomplete = 'off';
+        bar.prepend(field);
+        const items = () => {
+            const chapters = [...sheet.querySelectorAll('details.chapter')];
+            return chapters.length ? chapters : [...sheet.querySelectorAll(':scope > :not(header.topbar):not(.panel-top)')].filter((e) => e.querySelector(':scope > .panel-top'));
+        };
+        const wasOpen = new Map();
+        const norm = (t) => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+        field.addEventListener('input', () => {
+            const q = norm(field.value.trim());
+            sheet.dataset.searching = q ? 'on' : '';
+            for (const it of items()) {
+                if (!q) { it.hidden = false; for (const row of it.querySelectorAll('.search-out')) row.classList.remove('search-out'); if (it.tagName === 'DETAILS' && wasOpen.has(it)) { it.open = wasOpen.get(it); wasOpen.delete(it); } continue; }
+                const hit = norm(it.textContent).includes(q);
+                it.hidden = !hit;
+                /* Within a chapter whose title does not say it: only its rows that do. */
+                const head = it.querySelector(':scope > summary, :scope > .panel-top');
+                const whole = !head || norm(head.textContent).includes(q);
+                for (const row of it.querySelectorAll('.set-row')) row.classList.toggle('search-out', hit && !whole && !norm(row.textContent).includes(q));
+                if (hit && it.tagName === 'DETAILS') { if (!wasOpen.has(it)) wasOpen.set(it, it.open); it.open = true; }
+            }
+            for (const group of sheet.querySelectorAll('.settings-group')) group.hidden = Boolean(q) && ![...group.querySelectorAll('details.chapter')].some((d) => !d.hidden);
+        });
+        field.addEventListener('keydown', (e) => { if (e.key === 'Escape' && field.value) { e.stopPropagation(); field.value = ''; field.dispatchEvent(new Event('input')); } });
+    };
+    for (const id of ['settings', 'panel']) settingsSearch($(id));
     /* A room's title: its name, and under it who speaks now (salonLive). */
     /* The device page (/c/) has no rooms sheet (05-11: it stopped app.js there, the page stuck on connecting). */
     if ($('salon')) { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
