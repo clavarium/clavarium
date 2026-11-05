@@ -12,6 +12,7 @@ import { pipeline } from 'node:stream/promises';
 import { Readable } from 'node:stream';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { spokenFr } from './spoken.mjs';
 
 export const VOICES = Object.freeze({
     fr: 'vits-piper-fr_FR-upmc-medium',   /* chosen by ear on the real box (31-10), over Siwis, Tom, Gilles and Kokoro */
@@ -131,6 +132,8 @@ export class Speech {
 
     /* Text -> PCM 16 kHz. */
     async speak(text) {
+        /* Numbers, times and amounts in words, in French (05-11: digits were unintelligible aloud). */
+        if (this.#lang === 'fr') text = spokenFr(text);
         /* Pocket first; failed, it rests five minutes and the next voice answers meanwhile. */
         /* One voice from the start of an answer to its end (03-11: "tu as bougé de voix au milieu"): a sentence it
            misses is asked of it once more, a moment later, before another voice says it. */
