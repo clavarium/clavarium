@@ -608,3 +608,76 @@ test('several branches of a repository reviewed at once (To send) share one fetc
     assert.equal((await b.review.refresh('site')).ok, true);
     assert.equal(fetches, 2);
 });
+
+test('To send at once: what is known here is listed with no fetch and no read, and says when a branch moved since', async (t) => {
+    let fetches = 0; const reads = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    /* Never read: nothing known yet, said as such. */
+    assert.deepEqual(await b.review.known('site'), { remote: b.remote, readAt: null, fetchedAt: null, branches: [], rows: [], more: 0 });
+    for (const n of ['b1', 'b2']) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    const all = await b.review.outgoingAll('site');
+    assert.equal(all.state, 'read');
+    const f0 = fetches; const r0 = reads.length;
+    const k = await b.review.known('site');
+    assert.deepEqual([fetches - f0, reads.length - r0], [0, 0], 'no fetch, no read');
+    assert.ok(k.readAt && k.fetchedAt, 'as of the last read and the last fetch');
+    assert.deepEqual(k.rows.map((x) => [x.branch, x.state, x.count, x.targetExists]).sort(), [['b1', 'ahead', 2, false], ['b2', 'ahead', 2, false], ['main', 'ahead', 1, false]]);
+    /* main is sent: the reference alone says it is there. */
+    await b.review.push('site', { head: all.rows.find((x) => x.branch === 'main').head });
+    assert.equal((await b.review.known('site')).rows.find((x) => x.branch === 'main').state, 'up-to-date');
+    /* The agent commits again on b2; once a read saw it, its last review no longer stands. */
+    git(b.work, 'checkout', '--quiet', 'b2'); const moved = b.commit('c.txt', 'c\n', 'more');
+    await b.review.readTips('site');
+    const after = (await b.review.known('site')).rows;
+    assert.deepEqual([after[0].branch, after[0].head, after[0].state, after[0].count], ['b2', moved, 'unknown', null], 'the branch that moved: first, and unknown');
+    assert.equal(after.find((x) => x.branch === 'b1').state, 'ahead', 'the others keep their last review');
+    /* Nothing known may be sent: only what was reviewed. */
+    await assert.rejects(b.review.push('site', { head: moved }), (e) => e.kind === 'look');
+});
+
+test('To send in the background: a repository is fetched once and read once for all its branches', async (t) => {
+    let fetches = 0; const reads = [];
+    const b = bench(t, { reads, wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    const names = ['b1', 'b2', 'b3', 'b4', 'b5', 'b6', 'b7', 'b8', 'b9'];
+    for (const n of names) { git(b.work, 'checkout', '--quiet', '-b', n, 'main'); b.commit(`${n}.txt`, `${n}\n`, n); }
+    const all = await b.review.outgoingAll('site');
+    assert.deepEqual([fetches, reads.length], [1, 1], 'one fetch, one read');
+    assert.equal(all.agentBranches.length, 10);
+    assert.equal(all.rows.length, 8, 'the branch that moved last and 7 others');
+    assert.equal(all.more, 2, 'the others are counted, not hidden');
+    assert.ok(all.rows.every((x) => x.state === 'ahead' && x.diff && x.commits.length > 0), 'each row is a whole review');
+    assert.deepEqual(readdirSync(b.workRoot), [], 'the workspace is gone');
+    /* Each row reviewed is sendable as its own review was. */
+    const one = all.rows[0];
+    assert.equal((await b.review.push('site', { head: one.head, target: one.target })).ok, true);
+    /* A remote that does not answer: said for the repository, nothing read. */
+    b.review.setRemote('site', { url: join(b.dir, 'gone.git') });
+    const down = await b.review.outgoingAll('site');
+    assert.deepEqual([down.state, down.rows], ['unreachable', []]);
+    assert.match(down.message, /did not answer/);
+});
+
+test('the list known at once changes nothing of Send: it fetches afresh and refuses what moved since the review', async (t) => {
+    let fetches = 0;
+    const b = bench(t, { wrap: async (argv, options, real) => { if (argv.includes('fetch')) fetches += 1; return real(argv, options); } });
+    const first = b.commit('a.txt', 'a\n', 'one');
+    b.review.setRemote('site', { url: b.remote });
+    await b.review.outgoingAll('site');
+    await b.review.push('site', { head: first });
+    const mine = b.commit('b.txt', 'b\n', 'two');
+    const reviewed = (await b.review.outgoingAll('site')).rows[0];
+    assert.deepEqual([reviewed.state, reviewed.head], ['ahead', mine]);
+    /* Somebody else pushes after the review; the list known here still shows the old remote tip. */
+    const other = theirs(b, 'main', 'c.txt');
+    assert.equal((await b.review.known('site')).rows[0].state, 'ahead');
+    const before = fetches;
+    await assert.rejects(b.review.push('site', { head: mine }), (e) => e.kind === 'remote-moved');
+    assert.ok(fetches > before, 'Send fetched afresh');
+    assert.equal(git(b.remote, 'rev-parse', 'refs/heads/main'), other, 'nothing forced');
+    /* Now the reference knows: the known list says the branch must be looked at again. */
+    assert.equal((await b.review.known('site')).rows[0].state, 'unknown');
+});

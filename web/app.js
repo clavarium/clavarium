@@ -4050,9 +4050,13 @@
        of them all; one button sends them one after the other, each by the same route as its own review (the same commit,
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
-    const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
-    /* How many other branches of a repository are looked at. */
-    const BRANCHES_MORE = 7;
+    const STATE_SAID = { unknown: 'changed: reading…', 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
+    /* How many repositories are brought up to date with their remote at once, in the background. */
+    const TS_PARALLEL = 3;
+    /* `work(item)` for each, `n` at a time. */
+    const inTurns = async (items, n, work) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await work(items[i++]); })); };
+    /* When a known row was true: the time today, else the day. */
+    const asOfText = (at) => { const d = new Date(at); if (!at || Number.isNaN(d.getTime())) return 'not read yet'; return `as of ${d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()}`; };
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
     /* A branch that could not be read is not "nothing to send": it stays listed, under every filter, with why. */
@@ -4077,16 +4081,21 @@
         let filter = 'update';
         let sending = false; let checking = false;
         let sure = '';
-        let reposDone = 0; let reading = true;
-        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out);
-        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
+        let reposDone = 0; let reading = true; const notLookedBy = new Map();
+        /* Known rows not read yet, or whose branch moved since, stay in sight until their read says. */
+        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out) || (r.known && (!r.out || r.out.state === 'unknown'));
+        const picked = () => rows.filter((r) => r.picked && !r.known && r.out?.state === 'ahead' && shownRow(r));
         const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function look(r) {
             const query = new URLSearchParams();
             if (r.branch) query.set('branch', r.branch);
             if (r.target) query.set('target', r.target);
             const [out, keep] = await Promise.all([readOrSay(`/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
-            r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
+            apply(r, out, keep);
+        }
+        /* A row's fresh review: what the server knows of its checks comes with it. */
+        function apply(r, out, keep) {
+            r.out = out; r.keep = keep; r.known = false; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             /* What the server knows of this very commit and target: a check still running is followed again; the last
                one that ran is shown with its age (left and come back, even the next day: nothing run again for nothing). */
             if (out.state === 'ahead' && out.head) {
@@ -4122,10 +4131,11 @@
             /* By repositories: how many there are is known from the start, how many branches each has is not. */
             meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
             progress.toggleAttribute('data-busy', reading);
-            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the repositories: ${reposDone} of ${names.length}${rows.length ? ` · ${rows.length} branch${rows.length === 1 ? '' : 'es'} found` : ''}`; }
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Checking with the remotes: ${reposDone} of ${names.length}`; }
             else {
                 const failed = rows.filter((r) => unread(r.out)).length;
-                const tail = failed ? ` · ${failed} not read` : ' · all read';
+                const notLooked = [...notLookedBy.values()].reduce((n, x) => n + x, 0);
+                const tail = `${failed ? ` · ${failed} not read` : ' · all read'}${notLooked ? ` · ${notLooked} older branch${notLooked === 1 ? '' : 'es'} not looked at` : ''}`;
                 progress.dataset.tone = failed ? 'warn' : count('update') + count('new') ? 'ok' : '';
                 progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new${tail}` : `Nothing to send${tail}`;
             }
@@ -4167,15 +4177,17 @@
                 const out = r.out;
                 const ahead = out?.state === 'ahead';
                 row.classList.toggle('off', !ahead);
-                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
+                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || r.known || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
                 tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
-                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
+                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', `${out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''}${r.known ? ` · ${asOfText(r.asOf)}` : ''}`));
                 const way = el('div', 'ts-way');
                 /* Its own name even when it could not be read: which branch is missing is said. */
                 const named = out?.branch ?? (unread(out) ? r.branch : '');
                 if (named) {
                     const code = el('code', 'ts-branch', named); code.title = named; way.append(code);
-                    if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
+                    /* Known only: where it goes is said; it is chosen once the row is read. */
+                    if (r.known && out.target) way.append(el('span', 'ts-arrow', '→'), el('code', 'ts-branch', out.target));
+                    else if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
                         const names2 = [...(out.branches ?? [])]; if (!names2.includes(out.target)) names2.unshift(out.target);
@@ -4187,6 +4199,7 @@
                 }
                 const size = el('div', 'ts-size');
                 if (!out) size.append(el('span', 'hint busy', 'Reading...'));
+                else if (ahead && r.known) size.append(el('span', '', out.targetExists === false ? 'new branch' : out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`));
                 else if (ahead) {
                     const files = diffFiles(out.diff);
                     /* A branch the remote does not have: "new", not a count against a branch that is not there. */
@@ -4197,6 +4210,7 @@
                 if (r.sending) { const s2 = el('span', 'ts-running'); s2.append(el('span', 'warn', 'Sending…')); state.append(s2); }
                 else if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
                 else if (!out) state.append('');
+                else if (r.known && out.state !== 'unknown') state.append(el('span', 'hint busy', ahead ? 'checking…' : `${STATE_SAID[out.state] ?? out.state} · checking…`));
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
                 else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
                 else if (r.check.status === 'running') {
@@ -4369,32 +4383,61 @@
             said.className = `status-line ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.dataset.tone = ok === p.length ? 'ok' : 'bad'; said.hidden = false;
             if (reviewStep) nav.drop(reviewStep);
             /* What is left to send, read again; what became of each stays said. */
-            const kept = new Map(rows.map((r) => [r, r.sent]));
-            await Promise.all(rows.map((r) => look(r)));
+            await inTurns([...new Set(p.map((r) => r.name))], TS_PARALLEL, (name) => readRepo(name));
             /* What went is unticked: nothing is offered again for what is done. */
-            for (const r of rows) { r.sent = kept.get(r); if (r.sent?.ok) r.picked = false; }
+            for (const r of rows) if (r.sent?.ok) r.picked = false;
             paint();
             said.scrollIntoView({ block: 'nearest' });
         });
-        paint();
-        /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */
-        await Promise.all(names.map(async (name) => {
-            const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
-            rows.push(first);
-            await look(first);
-            first.movedAt = (first.out?.agentBranches ?? []).find((b) => b.name === first.branch)?.movedAt ?? null;
-            first.picked = kindOfRow(first.out) === 'update';
-            const others = (first.out?.agentBranches ?? []).filter((b) => b.name !== first.branch).slice(0, BRANCHES_MORE);
+        /* ONE REPOSITORY READ AFRESH (one fetch, one read, its branches that moved last reviewed): its rows replaced
+           where they were, each keeping what was said or ticked of the same commit. A branch with nothing to send is
+           listed only when it is the one that moved last (or what became of its sending is said); one that could not be
+           read always, with why. */
+        async function readRepo(name) {
+            const [all, keep] = await Promise.all([readOrSay(`/git/${name}/outgoing-all`), getJson(`/git/${name}/keep`, null)]);
+            const before = rows.filter((x) => x.name === name);
+            const at = rows.findIndex((x) => x.name === name);
+            let fresh;
+            if (Array.isArray(all.rows) && all.rows.length) {
+                fresh = all.rows.filter((out, i) => i === 0 || out.state === 'ahead' || unread(out) || before.some((x) => x.branch === out.branch && x.sent)).map((out) => {
+                    const was = before.find((x) => x.branch === out.branch);
+                    const r = { name, out: null, keep, branch: out.branch, target: '', picked: false, check: null, sent: was?.sent ?? null, movedAt: (all.agentBranches ?? []).find((b) => b.name === out.branch)?.movedAt ?? null };
+                    apply(r, out, keep);
+                    /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
+                    r.picked = was && !was.known && was.out?.head === out.head ? was.picked && out.state === 'ahead' : kindOfRow(out) === 'update';
+                    if (was?.check && was.out?.head === out.head && !r.check) r.check = was.check;
+                    return r;
+                });
+                notLookedBy.set(name, all.more ?? 0);
+            } else {
+                /* Not read (the remote did not answer, the read failed) or nothing in it: each known branch says so. */
+                const out = { state: all.state ?? 'error', message: all.message, remote: all.remote ?? before[0]?.out?.remote ?? null };
+                const known = before.filter((x) => x.branch);
+                fresh = (known.length && unread(out) ? known : [{ name, branch: '' }]).map((x) => ({ name, out: { ...out, branch: x.branch || null }, keep, branch: x.branch, target: '', picked: false, check: null, sent: x.sent ?? null, known: false }));
+            }
+            rows.splice(at < 0 ? rows.length : at, before.length, ...fresh);
             paint();
-            await Promise.all(others.map(async (b) => {
-                const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
-                await look(r);
-                /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
-                if (r.out?.state === 'ahead' || unread(r.out)) { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
-                paint();
-            }));
+        }
+        /* AT ONCE: what is known here (the agent's branches as last read, the remote's as last fetched, the last review
+           of each), no remote asked, no repository read; each row says as of when. Not sendable as it is. */
+        paint();
+        const known = await Promise.all(names.map(async (name) => [name, await getJson(`/git/${name}/known`, null)]));
+        for (const [name, k] of known) {
+            const list = k?.rows ?? [];
+            if (list.length === 0) rows.push({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null, known: true });
+            for (const x of list) {
+                const out = { state: x.state, branch: x.branch, target: x.target, targetExists: x.targetExists, count: x.count, head: x.head, remote: k.remote, branches: k.branches };
+                /* As the full read lists them: the one that moved last, then those with something to send. */
+                if (x !== list[0] && x.state !== 'ahead' && x.state !== 'unknown') continue;
+                rows.push({ name, out, keep: null, branch: x.branch, target: x.target, picked: false, check: null, sent: null, movedAt: x.movedAt, known: true, asOf: x.state === 'unknown' ? k.readAt : (k.fetchedAt ?? x.lookedAt) });
+            }
+        }
+        paint();
+        /* THEN, IN THE BACKGROUND: each repository brought up to date with its remote and read, a few at a time; its rows replaced as it comes. */
+        await inTurns(names, TS_PARALLEL, async (name) => {
+            try { await readRepo(name); } catch { /* said by its rows */ }
             reposDone++; paint();
-        }));
+        });
         reading = false;
         paint();
     }
