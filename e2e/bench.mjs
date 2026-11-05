@@ -262,6 +262,9 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         /* A chapter of "This conversation" is unfolded, if it is not already. */
         async function chapter(key) {
             const box = page.locator(`details.chapter[data-chapter="${key}"]`);
+            /* In a tab of its page not shown: that tab first. */
+            const [sheet, tab] = await box.evaluate((d) => [d.closest('.sheet')?.id ?? '', d.closest('.settings-group.tab-off')?.dataset.group ?? '']);
+            if (tab) await page.locator(`#${sheet} .settings-tabs button[data-group="${tab}"]`).click();
             if (!(await box.evaluate((d) => d.open))) await box.locator(':scope > summary').click();
         }
         /* A shared device's bar has a "..." menu; the owner's has none any more (everything of it is in sight). */

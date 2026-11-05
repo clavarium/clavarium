@@ -190,6 +190,7 @@ test('a machine not ready: its memory and disk are shown, greyed, and said avail
         else await me.api('/api/conversations', { name, tool: 'shell' });
         await me.page.goto(`${b.origin}/?c=${name}`);
         await me.page.locator('#folders').click();
+        await me.chapter('machine');
         await me.until('the machine chapter, while it is built', async () => (await me.page.locator('#machine-size').isVisible()) && me.page.locator('#machine-size-wait').isVisible());
         assert.equal(await me.page.locator('#machine-memory').isDisabled(), true);
         assert.equal(await me.page.locator('#machine-disk').isDisabled(), true);

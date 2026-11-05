@@ -190,6 +190,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     await me.type('cd ../resources/site && echo "<h1>hello</h1>" > index.html && git add index.html && git -c user.name=Tool -c user.email=tool@example.com commit -q -m "Add the home page" && echo committed; cd - >/dev/null');
     await me.sees('\ncommitted');
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
     /* No address yet: said, and the form is open. */
     await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));

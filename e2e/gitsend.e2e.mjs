@@ -40,6 +40,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     const mine = git(work, 'rev-parse', 'HEAD');
 
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
     await me.until('the commit is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
     /* Where the tool finds the origin, said plainly. */
@@ -104,6 +105,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     writeFileSync(hook, '#!/bin/sh\nexit 0\n');
     await me.page.locator('#gitview-close').click();
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     const line = me.page.locator('#panel-rows .folder[data-name="site"] .auto-send');
     await line.locator('summary').click();
     await me.page.fill('#panel-rows .auto-send [name=branches]', 'try/*');
@@ -121,6 +123,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
        again once the server has written it. */
     await me.until('the server logged it', async () => (await me.api('/api/git/site/keep')).body?.log?.some((e) => /Sent automatically/.test(e.what)));
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
     /* (Its box is still open from above.) */
     await me.until('the log says it', async () => /Sent automatically for coder: 2 commit\(s\) to try\/idea, checks passed/.test(await me.page.locator('#gitview-log').innerText()));
@@ -144,6 +147,7 @@ test('the review shows the agent\'s branches, what the changes alone hide, asks 
     git(work, 'rm', '--quiet', 'secret.bin'); git(work, 'commit', '--quiet', '-m', 'Tidy up\n\nNothing to see here.');
 
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
     await me.until('a review is shown', async () => /would be sent to/.test(await me.page.locator('#gitview-state').innerText()));
     assert.deepEqual(await me.page.locator('#gitview-branch option').allInnerTexts(), ['feature', 'main']);

@@ -1765,19 +1765,68 @@ details.more[open] > summary { margin-bottom: 4px; }
 /* The same "i" in a sheet whose other folds are buttons. */
 :is(#assets, #gitview, #panel) details.more > summary { padding: 0; border: 0; background: none; font-weight: 400; min-height: 0; display: inline-flex; align-self: auto; }
 :is(#assets, #gitview, #panel) details.more > summary::before { content: "i"; }
-/* The categories: beside them on a wide screen, headings one under the other otherwise. */
-.settings-nav { display: none; }
-.settings-groups { display: flex; flex-direction: column; gap: 12px; }
+/* THE TABS OF A SETTINGS PAGE (05-11): its groups, one shown at a time; a row that scrolls sideways on a phone.
+   While searching, every group is shown, the tabs dimmed (the search looks in all). */
+.settings-groups { display: flex; flex-direction: column; gap: 12px; max-width: 860px; width: 100%; }
 .settings-group { display: flex; flex-direction: column; gap: 8px; scroll-margin-top: 8px; }
-#settings .chapter-group { margin: 10px 4px 0; font-size: .6875rem; letter-spacing: .06em; }
-@media (min-width: 1000px) {
-  #settings { display: grid; grid-template-columns: 180px minmax(0, 1fr); grid-template-rows: auto 1fr; align-content: start; column-gap: 20px; }
-  #settings > :is(.panel-top, header.topbar) { grid-column: 1 / -1; }
-  .settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; align-self: start; }
-  .settings-nav button { text-align: left; background: none; border: 0; color: var(--ink2); padding: 9px 10px; border-radius: 8px; font-size: .875rem; }
-  .settings-nav button[aria-current="true"] { background: var(--button); color: var(--ink); box-shadow: inset 3px 0 0 var(--brass); }
-  .settings-groups { max-width: 760px; }
-}
+.settings-group.tab-off { display: none; }
+.sheet[data-searching="on"] .settings-group.tab-off:not([hidden]) { display: flex; }
+.settings-tabs { display: flex; gap: 2px; max-width: 860px; width: 100%; flex-shrink: 0; overflow-x: auto; scrollbar-width: none; border-bottom: 1px solid var(--line); }
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tabs button { flex: none; background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--ink2); padding: 8px 10px; min-height: 40px; font-size: .875rem; font-weight: 600; white-space: nowrap; margin-bottom: -1px; }
+.settings-tabs button:hover { color: var(--ink); background: none; }
+.settings-tabs button:not([aria-selected="true"]):hover { border-color: transparent; }
+.settings-tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--brass); }
+.settings-tabs button:focus-visible { outline: 2px solid var(--brass); outline-offset: -2px; }
+.sheet[data-searching="on"] .settings-tabs { opacity: .5; }
+.sheet[data-searching="on"] .settings-tabs button[aria-selected="true"] { border-bottom-color: transparent; }
+/* AT HAND (05-11): never folded, above the tabs -- three tiles, chips of state, the gestures done most. */
+.at-hand { display: flex; flex-direction: column; gap: 10px; max-width: 860px; width: 100%; flex-shrink: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--bar); padding: 12px; }
+.hand-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hand-tiles .tile { display: flex; flex-direction: column; gap: 4px; min-width: 0; text-align: left; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); font-weight: 400; cursor: pointer; min-height: 0; }
+.hand-tiles .tile:hover { border-color: var(--ink2); }
+.tile-k { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.tile-k b { font-size: .8125rem; }
+.tile-n { font-size: 1.125rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tile-bar { position: relative; display: block; height: 6px; border-radius: 3px; background: color-mix(in srgb, var(--ink2) 18%, transparent); overflow: hidden; }
+.tile-bar > i { position: absolute; inset: 0 auto 0 0; background: var(--ok); border-radius: 3px; }
+.tile[data-level="warn"] .tile-bar > i { background: var(--warn); }
+.tile[data-level="bad"] .tile-bar > i { background: var(--danger); }
+.tile[data-level="warn"] .tile-n { color: var(--warn); }
+.tile[data-level="bad"] .tile-n { color: var(--danger); }
+.tile-bar > u { position: absolute; top: 0; bottom: 0; right: 0; background: repeating-linear-gradient(135deg, var(--ink2) 0 2px, transparent 2px 4px); opacity: .55; }
+.tile-spark { display: block; width: 100%; height: 22px; }
+.tile-spark path { fill: none; stroke: var(--brass); stroke-width: 1.5; }
+.tile-sub { color: var(--ink2); font-size: .75rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hand-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.hand-chip { display: inline-flex; align-items: center; gap: 6px; font-size: .75rem; font-weight: 400; padding: 2px 9px; min-height: 24px; border-radius: 999px; border: 1px solid var(--line); background: none; color: var(--ink2); white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.hand-chip::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+.hand-chip[data-tone="warn"]::before { background: var(--warn); }
+.hand-chip[data-tone="bad"]::before { background: var(--danger); }
+.hand-chip[data-tone="off"]::before { background: transparent; border: 1.5px solid var(--ink2); }
+button.hand-chip { cursor: pointer; }
+button.hand-chip:hover { color: var(--ink); border-color: var(--ink2); }
+.hand-acts { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.hand-acts[hidden] { display: none; }
+.hand-switches { display: grid; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); gap: 0 16px; }
+.hand-switches .set-row { padding: 4px 0; border: 0; display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; justify-content: space-between; gap: 10px; }
+.hand-switches .set-row > .set-control { flex: none; width: auto; margin: 0; }
+.hand-switches > [hidden] { display: none; }
+.hand-switches > div:not(.set-row) > .set-row { padding: 4px 0; }
+#panel .hand-switches #talk-declare { grid-column: 1 / -1; margin: 0; }
+@media (max-width: 520px) { .hand-tiles { gap: 6px; } .hand-tiles .tile { padding: 7px 8px; } .tile-k { flex-direction: column; align-items: flex-start; gap: 0; } .tile-n { font-size: 1rem; } .tile-sub { white-space: normal; } .hand-acts > button:not([hidden]) { flex: 1 1 auto; } }
+/* A folded chapter says its state, on one line, on its right (05-11). */
+details.chapter > summary { flex-wrap: nowrap; align-items: center; }
+details.chapter > summary .chapter-title { flex: none; }
+details.chapter > summary .chapter-about { flex: 1 1 auto; min-width: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* "Why", behind an i: one click away, one sentence. */
+button.tip-btn { display: inline-grid; place-items: center; vertical-align: 1px; min-height: 0; min-width: 0; width: 20px; height: 20px; padding: 0; margin-left: 4px; border: 0; background: none; color: var(--ink2); font-size: .875rem; font-weight: 400; line-height: 1; cursor: pointer; }
+button.tip-btn:hover, button.tip-btn[aria-expanded="true"] { color: var(--brass-ink); }
+@media (pointer: coarse) { button.tip-btn { width: 32px; height: 32px; margin: -6px -6px -6px 0; } }
+.with-tip { display: inline-flex; align-items: center; }
+:is(#settings, #panel) .chapter-body > .tip-head { padding: 6px 12px 0; }
+:is(#settings, #panel) .chapter-body > .tip-head + .tip { border-top: 0; }
+.tip:not([hidden]) { display: block; margin-top: 4px; color: var(--ink2); font-size: .75rem; border-left: 2px solid var(--line); padding-left: 8px; }
 /* A form of several settings: each its row, one line between them. */
 :is(#settings, #panel) .chapter-body > .set-rows { display: flex; flex-direction: column; padding: 0; }
 .set-rows > * { margin: 0; padding: 12px 16px; }
@@ -1968,7 +2017,7 @@ span.callout.confirm { display: inline-flex; justify-content: flex-end; padding:
 .ts-tree-files { padding: 4px 4px 4px 12px; }
 
 /* Something asks for the person in this chapter (a callout, a warning): a dot on its title, and on its category. */
-details.chapter[data-attention] > summary .chapter-title::after, #settings-nav button[data-attention]::after, #nav-assets[data-attention] > span::after, #view-assets[data-attention] > span::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
+details.chapter[data-attention] > summary .chapter-title::after, .settings-tabs button[data-attention]::after, #nav-assets[data-attention] > span::after, #view-assets[data-attention] > span::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: 8px; border-radius: 50%; background: var(--warn); vertical-align: middle; }
 /* LISTS: Binder's screen, in this page's colours (above Binder's own dark ones, whatever the theme): a conversation's Lists tab, one list of Assets opened.
    Lists are made in Assets: Binder's own "+ New list" is not offered here. */
 .binder-holder { display: flex; flex-direction: column; min-height: 0; }
@@ -2590,5 +2639,7 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
 
 /* The search atop a settings page (05-11). */
 :is(header.topbar, .panel-top) .settings-search { margin-left: auto; width: min(240px, 42vw); min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .875rem; }
-.sheet[data-searching="on"] .settings-nav { opacity: .5; }
 .set-row.search-out { display: none; }
+/* A room's settings: the same group names as every settings page (05-11). */
+#salon-new .room-group { margin: 6px 4px -6px; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+#salon-new .room-group[hidden] { display: none; }
