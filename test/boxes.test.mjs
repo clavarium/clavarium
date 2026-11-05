@@ -768,3 +768,14 @@ test('with CLAVARIUM_WAKE_DROP=1, a sentence whose wake word is not heard again 
     assert.equal(yes.whys.length, 1);
     assert.ok(yes.whys[0].startsWith('mot ✓ « Messenges »'), yes.whys[0]);
 });
+
+test('the wake word by its sound (05-11): what Whisper writes for « Mésange » on a lone word is heard; the room talk is not; dropped only when not heard AND faint', async () => {
+    const { wakeHeard, dropsWake, WAKE_FAINT } = await import('../server/boxes.mjs');
+    for (const t of ['Mes anges.', 'Mésange.', 'les anges', 'Les ongles.', 'Mise en jeu.', 'Mise en oeuvre', 'Mise en route.', 'Mise en oche.', 'Mes doigts.', 'Les anges, est-ce que...']) assert.ok(wakeHeard(t), t);
+    for (const t of ["Oui, à l'ombre.", 'bonjour', 'merci', 'mes amis', 'les autres', 'mensonge']) assert.equal(wakeHeard(t), false, t);
+    assert.equal(dropsWake(false, 429), true, 'not heard, faint: the room from afar');
+    assert.equal(dropsWake(false, 812), false, 'not heard but a firm voice: kept, a real call may be');
+    assert.equal(dropsWake(false, NaN), false, 'no voice measured: kept');
+    assert.equal(dropsWake(true, 100), false, 'heard: kept');
+    assert.ok(WAKE_FAINT > 429 && WAKE_FAINT < 812);
+});

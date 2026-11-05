@@ -658,6 +658,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
         /* Said as the person's own message, the room named (one speaker for now). */
         say: (name, text, by) => (/^room:/.test(name) ? rooms.say(name.slice(5), text, { box: by?.id }) : talk.say(name, text, undefined, undefined, 'voice', { by })),
+        /* A discreet line in the thread, never a message to the agent: a wake ignored (05-11). A room: the log only. */
+        note: (name, event) => (/^room:/.test(name) ? null : talk.event(name, event)),
         /* Each conversation's thread knows its boxes: their names, and the ids its agent answers. */
         origin: () => publicOrigin ?? null,
         changed: () => { try { rooms?.boxesBound(boxes.all()); } catch (error) { console.error(`voice boxes in rooms: ${error.message}`); } for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name)); try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); } },

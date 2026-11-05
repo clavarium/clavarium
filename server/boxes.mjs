@@ -33,6 +33,18 @@ export const FIRMWARE_MINUTES = 10;
 export const CLIP_MAX_BYTES = 16_000 * 2 * 3;
 export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\b[ml][ae]s anges?\b|\bmesange|\bmaisange|\bmessage?s?\b|\bmessenge?s?\b/;   /* « Messenges »: Whisper's reading of the server's own voice saying it */
 export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
+/* THE WORD BY ITS SOUND (05-11): on a lone word, Whisper writes « Mise en jeu », « Les ongles », « Mes doigts »
+   for « Mésange » -- 14 of 21 real calls of 05-11 were marked ✗ by the spelling alone. Read by its sound: a first
+   word in m/l ending on an s/z sound, then a word in an/en/on (« mise en… », « les ongles », « mes anges »), or
+   « mes doigts ». Measured on the 22 real cases of 05-11: 19 of 21 calls heard (11 before), the one talk of
+   the room (« Oui, à l'ombre ») not. */
+const WAKE_SOUND = /^(?:\S+ )?[ml](?:a|e|i|ai|ei)(?:s|z|ss|se|ze|sse) (?:a|e|o)n|^m[ae]s doi/;
+export const wakeHeard = (text) => { const t = plainWords(text); return WAKE_HEARD.test(t) || WAKE_SOUND.test(t.replace(/^l /, '')); };
+/* DROPPED IN SILENCE (05-11, the owner's go): a wake whose word is not heard again AND whose voice was faint --
+   the room's talk from afar, not someone speaking to the box. Every real call of 05-11 that the word missed
+   had a firm voice or none measured; the false wake of 05-11, 429. Said by one discreet line in the thread. */
+export const WAKE_FAINT = 600;
+export const dropsWake = (ok, voice) => !ok && (WAKE_DROP || (Number.isFinite(voice) && voice > 0 && voice < WAKE_FAINT));
 const plainWords = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
@@ -262,14 +274,14 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn;
+    #exists; #hear; #say; #note; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn;
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null }) {
+    constructor({ file, exists = () => true, hear, say, note = null, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null }) {
         this.#react = react; this.#learn = learn;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
-        this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#speak = speak; this.#now = now; this.#log = log;
+        this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#note = note; this.#speak = speak; this.#now = now; this.#log = log;
     }
 
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
@@ -783,6 +795,7 @@ export class Boxes {
             if (m.t === 'listen.end' && m.ep) {
                 const end = endOf(m.ep, m.reason ?? '');
                 link.why = `${link.why ? `${link.why} · ` : ''}${end}`;
+                link.voice = Number(m.ep.voice);
                 this.#log(`voice box ${box.name}: ${end}`);
             }
             if (m.t === 'listen.end' && sentence) {
@@ -846,7 +859,7 @@ export class Boxes {
     async #checkWake(link, pcm, { score = null, near = false } = {}) {
         if (pcm.length < 8_000) return null;
         const heard = String(await this.#hear(wavOf(pcm), link.box().lang) ?? '').trim();
-        const ok = WAKE_HEARD.test(plainWords(heard));
+        const ok = wakeHeard(heard);
         /* Counted, and kept when the box learns (the clip only: never the sentence), with the box's score. */
         const box = link.box();
         try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard, score, near }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
@@ -906,7 +919,12 @@ export class Boxes {
             /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
             link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;
             this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
-            if (!check.ok && WAKE_DROP) { link.send({ t: 'cue', name: 'done' }); return; }
+            if (dropsWake(check.ok, link.voice)) {
+                link.send({ t: 'cue', name: 'done' });
+                this.#log(`voice box ${box.name}: wake ignored (word not heard again, faint voice ${Math.round(link.voice || 0)})`);
+                try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: « ${check.heard.slice(0, 40)} », faint voice`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
+                return;
+            }
         }
         /* Only a short order starts a recording ("lance l'enregistrement de la réunion"): a sentence that merely
            mentions recording does not (01-11). */
