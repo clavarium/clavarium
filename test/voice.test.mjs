@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { cleanDictation, withoutLoop, transcribe, voiceConfig, Dictation, PROVIDERS, dictationProblem, isPrivateHost, withoutCharLoop, withoutPhantoms, capToDuration, wavSeconds, languageOf, deviceLanguage } from '../server/voice.mjs';
-import { Detector, Segmenter, toWav, loudness, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
+import { Detector, Segmenter, toWav, loudness, levelOf, levelBars, LEVEL_BARS, LEVEL_DOT, BLOCK, BLOCK_MS, RATE, MAXIMUM_MS, SOFT_MAXIMUM_MS } from '../web/voice-core.js';
 
 const wav = Buffer.from(toWav([new Float32Array(BLOCK).fill(0.1)]));
 
@@ -345,4 +345,23 @@ test('a voice box: any language heard; one neither its own nor English heard aga
     assert.equal(await hearBox(dictation([{ text: 'Fertiliseringskontrollen', language: 'danish' }]), 'w', 'fr-FR'), 'Quelle heure est-il ?', 'Danish heard again in French');
     assert.deepEqual(calls, [[undefined, true], ['fr-FR', false]]);
     assert.equal(await hearBox(dictation([{ text: 'Hej', language: 'danish' }]), 'w', null), 'Hej', 'no language known: as heard');
+});
+
+test('how loud, to draw: a block\'s loudness becomes a level from 0 to 1, in decibels', () => {
+    assert.equal(levelOf(0), 0, 'silence');
+    assert.equal(levelOf(0.001), 0, 'a quiet room (-60 dB) is still 0');
+    assert.equal(levelOf(10 ** (-36 / 20)), 0.5, 'a voice at -36 dB: half');
+    assert.equal(levelOf(0.25), 1, 'a near shout: full');
+    assert.equal(levelOf(1), 1, 'never past the top');
+    for (const odd of [NaN, -1, undefined, Infinity, '0.5']) assert.equal(levelOf(odd), 0, `${String(odd)}: 0`);
+    assert.equal(levelOf(loudness(new Float32Array(BLOCK).fill(0.1))), 0.83, '-20 dB, from the same loudness the dictation measures');
+});
+
+test('the level as five bars: newest in the middle, lower at the sides, a dot when quiet', () => {
+    assert.equal(LEVEL_BARS, 5);
+    assert.deepEqual(levelBars(0), Array(5).fill(LEVEL_DOT));
+    assert.deepEqual(levelBars(1), [0.68, 0.84, 1, 0.84, 0.68]);
+    assert.deepEqual(levelBars([1, 0, 0]), [LEVEL_DOT, LEVEL_DOT, 1, LEVEL_DOT, LEVEL_DOT], 'a new sound starts in the middle');
+    assert.deepEqual(levelBars([0, 0, 1]), [0.68, LEVEL_DOT, LEVEL_DOT, LEVEL_DOT, 0.68], 'and moves outwards');
+    assert.deepEqual(levelBars(NaN), levelBars(0));
 });

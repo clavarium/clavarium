@@ -6205,7 +6205,24 @@
     });
     /* "Try it", per engine: a few seconds from this microphone, sent to the engine in its card (nothing saved). */
     let stopTrying = null;
-    const endTry = () => { stopTrying?.(); stopTrying = null; for (const slot of ['main', 'backup']) dq(slot, 'try').textContent = 'Try it'; };
+    /* How loud the microphone is, in five thin bars beside what it says (voice.js: on.level): drawn once a
+       frame; it rises at once and falls slowly. Decorative: the words say the state. */
+    let tryLevels = []; let tryFrame = null;
+    const tryLevel = (slot, n) => {
+        if (!stopTrying || !window.clavariumVoice?.levelBars) return;
+        tryLevels = [Math.max(n, (tryLevels[0] ?? 0) * 0.8), ...tryLevels].slice(0, 3);
+        dq(slot, 'level').hidden = false;
+        tryFrame ??= requestAnimationFrame(() => {
+            tryFrame = null;
+            if (!stopTrying) return;
+            const bars = dq(slot, 'level').children;
+            window.clavariumVoice.levelBars(tryLevels).forEach((h, i) => { if (bars[i]) bars[i].style.transform = `scaleY(${h})`; });
+        });
+    };
+    const endTry = () => {
+        stopTrying?.(); stopTrying = null; tryLevels = [];
+        for (const slot of ['main', 'backup']) { dq(slot, 'try').textContent = 'Try it'; dq(slot, 'level').hidden = true; for (const bar of dq(slot, 'level').children) bar.style.transform = ''; }
+    };
     for (const slot of ['main', 'backup']) dq(slot, 'try').addEventListener('click', async () => {
         if (stopTrying) { endTry(); return; }
         dictationSay(null);
@@ -6220,6 +6237,7 @@
             let spoke = began;
             const stop = await window.clavariumVoice.listen({
                 state: (w) => { if (w === 'transcribing') spoke = Date.now(); if (stopTrying) heard.textContent = words[w] ?? w; },
+                level: (n) => tryLevel(slot, n),
                 phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; heard.title = `${((Date.now() - spoke) / 1000).toFixed(1)} s`; },
                 error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
             }, { to });

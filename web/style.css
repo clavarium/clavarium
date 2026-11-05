@@ -1735,6 +1735,10 @@ button.inline.more-recent { text-decoration: none; }
 @media (max-width: 560px) { .set-row { grid-template-columns: minmax(0, 1fr); } .set-row > .set-control { justify-content: flex-start; } .set-row > .set-control > :is(input, select) { width: 100%; } }
 .action-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .action-row > [role=status] { margin-right: auto; }
+/* Dictation's "Try it": five thin bars that follow how loud the microphone is (app.js, tryLevel). */
+.voice-level { display: inline-flex; align-items: center; gap: 2px; height: 14px; color: var(--ok); }
+.voice-level i { display: block; width: 3px; height: 100%; border-radius: 2px; background: currentColor; transform: scaleY(.2); transition: transform 90ms linear; }
+@media (prefers-reduced-motion: reduce) { .voice-level i { transform: scaleY(.2) !important; transition: none; } }
 /* Settings > Dictation: two engines, main and backup, each its card. */
 .dict-form { display: flex; flex-direction: column; gap: 12px; }
 .dict-form > .set-rows { display: flex; flex-direction: column; }

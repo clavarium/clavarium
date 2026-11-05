@@ -1,7 +1,7 @@
 /* DICTATION IN THE PAGE: the microphone stays open, each spoken phrase is
    transcribed and handed to whoever listens. The page types it into the
    terminal. See voice-core.js for how a phrase is found. */
-import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, toWav } from './voice-core.js';
+import { RATE, BLOCK, BLOCK_MS, Detector, Segmenter, loudness, levelOf, levelBars, toWav } from './voice-core.js';
 
 /* The operator's pages ask /api; a paired device asks /c/api/<its pairing>,
    known once it has signed in (the page writes it on the document). */
@@ -16,7 +16,9 @@ const withLanguage = (to) => {
 
 /* Opens the microphone; resolves with a function that closes it.
    `on.phrase(text)`, `on.state(word)`: calibrating, listening, hearing,
-   transcribing; `on.error(message)`. `to`: where phrases go, if not the
+   transcribing; `on.error(message)`; `on.level(n)`, if given: how loud the
+   microphone is, 0 to 1, each block (about 30 times a second), measured on
+   the same stream (no second microphone) for a few bars to follow. `to`: where phrases go, if not the
    usual engine (Settings' "Try it" sends them to the one in its form). */
 async function listen(on, { to } = {}) {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
@@ -44,7 +46,9 @@ async function listen(on, { to } = {}) {
     node.onaudioprocess = (event) => {
         const samples = Float32Array.from(event.inputBuffer.getChannelData(0));
         const was = segmenter.speaking;
-        segmenter.feed(detector.hear(loudness(samples)), count++ * BLOCK_MS, samples);
+        const rms = loudness(samples);
+        segmenter.feed(detector.hear(rms), count++ * BLOCK_MS, samples);
+        if (!closed) { try { on.level?.(levelOf(rms)); } catch { /* a drawing never stops the dictation */ } }
         if (was !== segmenter.speaking || count === 33) tell();
     };
     source.connect(node); node.connect(context.destination);
@@ -60,5 +64,7 @@ async function listen(on, { to } = {}) {
 window.clavariumVoice = {
     available: async () => { try { const r = await fetch(`${api()}/voice`); return r.ok && (await r.json()).available === true; } catch { return false; } },
     listen,
+    /* The heights of the bars that show how loud it is (Settings' "Try it" draws them). */
+    levelBars,
 };
 window.dispatchEvent(new Event('clavarium-voice-ready'));
