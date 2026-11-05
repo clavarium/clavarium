@@ -148,7 +148,7 @@ test('one Attach in a conversation: what is there, or a new one made in the same
     await me.until('the box, on its kinds', async () => (await box.getAttribute('data-step').catch(() => '')) === 'kind');
     /* What is there already, to tick; or a new one, of every kind. */
     assert.equal(await box.locator('#attach-rows .folder[data-name="seeds"]').count(), 1);
-    assert.equal(await box.locator('.as-kinds button').count(), 7);
+    assert.equal(await box.locator('.as-kinds button').count(), 9, 'every kind, a voice box and a device too');
     assert.match(await box.locator('.kit-na-context').innerText(), /Will be attached to coder/);
     assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
     /* A folder, to read: made, then attached by itself. */

@@ -2155,6 +2155,13 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .box-setup { align-items: center; gap: 14px; flex-wrap: wrap; }
 .box-qr { width: 180px; max-width: 100%; background: #fff; border-radius: 8px; padding: 6px; }
 .box-qr svg { display: block; width: 100%; height: auto; }
+/* A new voice box, a kind of New asset (step 4): its steps one at a time, Back / Next at the end. */
+.box-flow .box-step { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.box-flow .box-step label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.box-flow .box-step select, .box-flow .box-step input { max-width: 100%; }
+.box-flow .box-key { overflow-wrap: anywhere; min-width: 0; }
+.box-flow-acts { justify-content: flex-end; gap: 8px; }
+#box-newasset, #salon-box-newasset { margin: 8px 0; }
 /* A link that looks like the main button (the charter): brass outline, no fill. */
 .button-link { display: inline-block; padding: 8px 12px; border-radius: 8px; background: transparent; border: 1px solid var(--brass); color: var(--brass-ink); font-weight: 600; text-decoration: none; }
 

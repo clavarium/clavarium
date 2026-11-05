@@ -13,7 +13,8 @@
  *   StepFlow       the steps of a gesture, the one at hand marked, "2 / 3"
  *   SecretPicker   a key to choose, or "+ New key…" made in place
  *   NewAsset       ONE BOX to make an asset (05-11, step 3): kinds, the kind's form, one ending;
- *                  opened with a context (a conversation it will be attached to).
+ *                  opened with a context (a conversation it will be attached to). A voice box and
+ *                  a device are two of its kinds too (step 4).
  *
  * No framework: each piece is a function that returns an element. Words: English here; the page
  * hands its own (`setWords`, app.js `uiSaid`) for the few the kit says by itself.
@@ -204,8 +205,9 @@
        Segmented's options) and the page attaches what is made at the end. `existing`: what is there
        already, offered above "or a new one". `made`: { said, note? } draws the ending.
          kinds  [{ kind, label, icon? }]     kind   '' : choose one       words  { title, there, orNew, steps[3], back, another, done }
-       `onBack`: a way back to the kinds from a form, where the frame has none of its own. */
-    function NewAsset({ kinds = [], kind = '', made = null, context = null, existing = null, form = () => null, words: w = {}, onKind = () => {}, onBack = null, onAnother = () => {}, onDone = () => {} } = {}) {
+       `onBack`: a way back to the kinds from a form, where the frame has none of its own.
+       `at`: the step at hand, for a kind of more steps than one (a voice box: where, plug it, pair it). */
+    function NewAsset({ kinds = [], kind = '', made = null, context = null, existing = null, form = () => null, words: w = {}, at = null, onKind = () => {}, onBack = null, onAnother = () => {}, onDone = () => {} } = {}) {
         const root = node('div', 'kit-newasset');
         root.dataset.step = made ? 'done' : kind ? 'form' : 'kind';
         const steps = w.steps ?? [say('kit-step-kind', 'Kind'), say('kit-step-set', 'Set up'), say('kit-step-made', 'Created')];
@@ -218,7 +220,7 @@
         const head = node('div', 'kit-na-head');
         const title = w.title ?? say('kit-new-asset', 'New asset');
         if (!kind && !made && title) head.append(node('h3', '', title));
-        head.append(StepFlow({ steps, at: made ? steps.length : kind ? 1 : 0 }));
+        head.append(StepFlow({ steps, at: made ? steps.length : kind ? (Number.isInteger(at) ? at : 1) : 0 }));
         root.append(head);
         if (made) {
             const end = node('div', 'kit-na-made');

@@ -666,18 +666,32 @@
           <!-- Voice boxes: a speaker in a room, bound to one conversation (boxes.mjs). -->
           <section id="boxes" aria-label="Voice boxes">
             <div class="row"><b>Voice boxes</b><span class="sp"></span><button type="button" id="box-new" class="primary">+ Voice box</button></div>
-            <div id="box-add" class="card" hidden>
-              <div class="row">
-                <label>Conversation <select id="box-conversation"></select></label>
+            <!-- "+ Voice box": the New asset box (kit.js NewAsset), its kind a voice box. -->
+            <div id="box-newasset" class="card" hidden></div>
+            <!-- THE VOICE BOX'S FORM, a kind of New asset (05-11, step 4): where it speaks, plug it, pair it. Moved
+                 into the box that asks for it (Assets, a conversation's Attach, here, a room); waits in #assets-forms. -->
+            <div id="box-add" class="as-form box-flow" hidden>
+              <div class="box-step" data-step="where">
+                <label>Speaks in <select id="box-conversation"></select></label>
                 <label>Room <input id="box-room" maxlength="40" placeholder="Living room"></label>
-                <button type="button" id="box-code" class="primary">Get a code</button>
               </div>
-              <div id="box-ready" hidden>
-                <p class="hint">Phone on the box's Wi-Fi « Gambeli-… »: open this link, or scan the code. Its page opens filled in; choose your Wi-Fi. <span id="box-code-minutes"></span></p>
-                <div class="row box-setup"><div id="box-qr" class="box-qr"></div><a id="box-link" class="primary button-link" href="#">Open the box's page</a></div>
-                <div class="row"><code id="box-key" class="box-key"></code><button type="button" id="box-key-copy">Copy the key</button></div>
-                <p class="hint">Pairing code alone: <b id="box-code-shown"></b></p>
+              <div class="box-step" data-step="plug" hidden>
+                <p class="hint" data-said="set-na-box-plug">Plug it into power.</p>
+                <p class="hint" data-said="set-na-box-flash">Not flashed yet: its conversation flashes it (Tether).</p>
+                <div id="box-jobs"></div>
               </div>
+              <div class="box-step" data-step="pair" hidden>
+                <div class="row"><button type="button" id="box-code" class="primary">Get a code</button></div>
+                <div id="box-ready" hidden>
+                  <p class="hint">Phone on the box's Wi-Fi « Gambeli-… »: open this link, or scan the code. Its page opens filled in; choose your Wi-Fi. <span id="box-code-minutes"></span></p>
+                  <div class="row box-setup"><div id="box-qr" class="box-qr"></div><a id="box-link" class="primary button-link" href="#">Open the box's page</a></div>
+                  <div class="row"><code id="box-key" class="box-key"></code><button type="button" id="box-key-copy">Copy the key</button></div>
+                  <p class="hint">Pairing code alone: <b id="box-code-shown"></b></p>
+                  <p id="box-waiting" class="hint" role="status"></p>
+                </div>
+              </div>
+              <p id="box-error" class="error" role="alert" hidden></p>
+              <div class="row box-flow-acts"><button type="button" id="box-back" data-said="set-na-back">Back</button><button type="button" id="box-next" class="primary" data-said="set-na-next">Next</button></div>
             </div>
             <div id="box-list"></div>
           </section>
@@ -721,7 +735,8 @@
           </div>
           <h3 class="room-group" id="salon-new-voice-head" data-said="set-tab-chat">Chat &amp; voice</h3>
           <div class="nc-card" id="salon-new-boxes-card">
-            <span class="sub-head">Voice boxes</span>
+            <div class="row"><span class="sub-head">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>
+            <div id="salon-box-newasset" hidden></div>
             <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
           </div>
           <h3 class="room-group" id="salon-new-advanced-head" data-said="set-tab-advanced" hidden>Advanced</h3>

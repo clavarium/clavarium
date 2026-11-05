@@ -3688,9 +3688,9 @@
         const made = justMade?.to === current ? justMade : null;
         const kind = made ? '' : attachNew.kind;
         /* At its ending, one Done: the box's own. */
-        $('attach-close').hidden = Boolean(made);
-        /* A secret is used or not: no level to choose. */
-        const level = kind && kind !== 'secret' ? { options: [{ value: 'read', label: uiSaid('set-na-read', 'Read') }, { value: 'write', label: uiSaid('set-na-write', 'Write') }], value: attachNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { attachNew.level = v; } } : null;
+        $('attach-close').hidden = Boolean(made) || (kind === 'box' && Boolean(boxFlow?.made));
+        /* A secret is used or not, a voice box speaks there: no level to choose. */
+        const level = kind && !['secret', 'box'].includes(kind) ? { options: [{ value: 'read', label: uiSaid('set-na-read', 'Read') }, { value: 'write', label: uiSaid('set-na-write', 'Write') }], value: attachNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { attachNew.level = v; } } : null;
         box.replaceChildren(newAssetBox({
             kind, existing: $('attach-there'), title: '',
             context: made ? null : { line: uiSaid('set-na-will', 'Will be attached to {name}', { name: who }), level },
@@ -3703,6 +3703,7 @@
             onBack: () => { attachNew.kind = ''; $('attach-error').hidden = true; paintAttach(); },
             onAnother: () => { attachNew.kind = made.kind; justMade = null; paintAttach(); focusFirst(box); },
             onDone: () => { closeAttach(); },
+            boxHost: { where: current, repaint: () => paintAttach(), close: () => closeAttach() },
         }));
     }
     $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; openAttach(); $('attach-picker').scrollIntoView({ block: 'nearest' }); });
@@ -3763,7 +3764,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -4923,7 +4924,7 @@
                 row.hidden = true;
                 const call = async (op, args) => { try { return { ok: true, data: await post(`${API}/tether/${op}`, args) }; } catch (error) { return { ok: false, text: error.message }; } };
                 /* A device that pairs (a voice box): a one-use code for the conversation that asked, made here. */
-                const pair = async (room) => { const r = await post(`${API}/boxes/code`, { conversation: String(job.agent).replace(/^conversation:/, ''), name: room, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }); return { url: location.origin, code: r.code }; };
+                const pair = async (room) => { const r = await pairCode({ conversation: String(job.agent).replace(/^conversation:/, ''), name: room }); return { url: location.origin, code: r.code }; };
                 try { const { runJob } = await import('/vendor/tether/jobs.js'); await runJob(job, { call, root: place, pair }); }
                 catch (error) { place.textContent = `It could not start: ${error.message}`; }
                 setTimeout(() => { jobPlaces.delete(job.id); after?.(); }, 4000);
@@ -4973,15 +4974,36 @@
        kind, the map's "+"), a conversation's Attach: the same kinds, the same forms (#assets-forms, moved in
        when asked for), one ending. The words, once each. */
     const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
-        ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)]]
+        ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
+        /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')]]
         .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
+    /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
+    const BOX_STEPS = ['where', 'plug', 'pair'];
+    let boxFlow = null;
+    /* `boxHost` { where, repaint, close }: the frame a voice box is added in -- where it speaks (preselected),
+       how that frame draws itself again, and closes. A device is the share sheet itself, opened on `where`. */
     function newAssetBox(opts) {
+        const host = opts.boxHost ?? { where: '', repaint: () => {}, close: () => {} };
+        const box = opts.kind === 'box' && !opts.made;
+        const boxMade = box && boxFlow?.made ? boxFlow.made : null;
+        const speaks = box && host.where ? { line: speaksLine(host.where) } : null;
         return KIT.NewAsset({
             kinds: newKinds(), ...opts,
+            ...(box ? { context: boxMade ? null : speaks, at: boxFlow ? 1 + BOX_STEPS.indexOf(boxFlow.step) : 1,
+                made: boxMade ? { said: uiSaid('set-na-box-made', '{name} answers in {where}', { name: boxMade.name, where: whereName(boxMade.where) }) } : null,
+                onAnother: () => { startBoxFlow(host); host.repaint(); }, onDone: () => { stopBoxWait(); boxFlow = null; host.close(); } } : {}),
+            onKind: (k) => {
+                if (k === 'device') { newDevice(host.where); return; }
+                if (k === 'box') startBoxFlow(host);
+                opts.onKind?.(k);
+            },
             words: { title: opts.title ?? uiSaid('set-na-new', 'New asset'), there: uiSaid('set-na-there', 'Already there'), orNew: uiSaid('set-na-or-new', 'or a new one'),
-                steps: [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-set', 'Set up'), uiSaid('set-na-step-made', 'Created')],
+                steps: box ? [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-where', 'Where'), uiSaid('set-na-step-plug', 'Plug it'), uiSaid('set-na-step-pair', 'Pair it'), uiSaid('set-na-step-answers', 'It answers')]
+                    : [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-set', 'Set up'), uiSaid('set-na-step-made', 'Created')],
                 back: uiSaid('set-na-back', 'Back'), another: uiSaid('set-na-another', 'Create another'), done: uiSaid('set-na-done', 'Done') },
             form: (kind) => {
+                if (kind === 'box') return paintBoxFlow();
                 const form = $(`${addForm(kind)}-box`); form.hidden = false;
                 if (kind === 'git') { fillKeyChoice(); showVia(); }
                 if (kind === 'list') void fillTemplates();
@@ -5090,7 +5112,7 @@
             const out = assetsFromMap || assetsAdding === 'choose' ? el('button', 'as-link', '‹ Access') : el('button', 'as-link as-back', '‹ Assets'); out.type = 'button';
             out.addEventListener('click', () => { if (!nav.close(assetsFromMap || assetsAdding === 'choose' ? 'compose' : 'asset')) back(); });
             const kind = assetsAdding === 'choose' ? '' : assetsAdding;
-            detail.append(out, newAssetBox({ kind, onKind: (k) => { assetsAdding = k; void paintAssets(); } }));
+            detail.append(out, newAssetBox({ kind, onKind: (k) => { assetsAdding = k; void paintAssets(); }, boxHost: { where: '', repaint: () => { void paintAssets(); }, close: back } }));
             if (kind) focusFirst(detail);
             return;
         }
@@ -5476,6 +5498,31 @@
         }));
     }
     $('salon-new-search').addEventListener('input', paintSalonMembers);
+    /* A ROOM'S "+ Voice box": the New asset box, its kind a voice box, speaking in this room; once it answers, it is
+       among the room's boxes, switched on (kept with Save). */
+    function paintSalonBoxNew() {
+        const holder = $('salon-box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeSalonBoxNew() { const holder = $('salon-box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    $('salon-new-box-add').addEventListener('click', () => {
+        if (!salonEditing) return;
+        if (!$('salon-box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeSalonBoxNew(); return; }
+        startBoxFlow({ where: `room:${salonEditing.id}`, close: closeSalonBoxNew, repaint: () => {
+            paintSalonBoxNew();
+            if (!boxFlow?.made) return;
+            void getJson('/boxes', null).then((list) => {
+                if (!Array.isArray(list)) return;
+                salonBoxList = list; boxesKnown = list;
+                if (list.some((b) => b.id === boxFlow?.made?.id)) salonBoxes.add(boxFlow.made.id);
+                paintSalonMembers();
+            });
+        } });
+        paintSalonBoxNew();
+        focusFirst($('salon-box-newasset'));
+    });
     let salonDragged = '';
     $('salon-new-ais').addEventListener('dragstart', (e) => { salonDragged = e.target.closest?.('.salon-member-row')?.dataset.name ?? ''; });
     $('salon-new-host').addEventListener('dragover', (e) => { e.preventDefault(); $('salon-new-host').classList.add('over'); });
@@ -5495,7 +5542,9 @@
         salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
         try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
         if (Array.isArray(salonBoxList)) boxesKnown = salonBoxList; else salonBoxList = [];
-        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0;
+        /* A room that is there already adds a voice box of its own: "+ Voice box". */
+        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0 && !editing;
+        $('salon-new-box-add').hidden = !editing; closeSalonBoxNew();
         paintSalonMembers();
         $('salon-new-name').focus();
     }
@@ -5537,7 +5586,13 @@
     async function openFeature(what, s = {}) {
         const chapter = String(s.chapter ?? '');
         if (what === 'new' || (chapter === 'new' && what === 'settings')) { await openNew(); return; }
-        if (what === 'boxes' || chapter === 'boxes') { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); return; }
+        if (what === 'boxes' || chapter === 'boxes') {
+            await openAccessPage('devices');
+            /* "Add a voice box": the New asset box, on its kind, where the boxes are. */
+            if (s.id === 'boxes:add') openBoxNew();
+            $('boxes')?.scrollIntoView({ block: 'start' });
+            return;
+        }
         if (what === 'mail' || chapter === 'access') { await openAssetsPlace(); return; }
         if (what === 'import') { await openAccessPage('map', { mode: 'flows' }); document.getElementById('flows-import')?.click(); return; }
         if (what === 'opencode') {
@@ -5740,7 +5795,7 @@
     /* What those sheets share with the rest of the page: the requests, the
        automatic sending form of Access, the share sheet for a device to pair. */
     const links = DEVICE ? undefined : window.clavariumLinks?.({
-        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => createFromMap(),
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => newDevice(''), newConversation: () => createFromMap(),
         newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
@@ -6122,7 +6177,7 @@
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
     $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
     $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
-    $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('map-new-device').addEventListener('click', () => newDevice(accessFor));
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
     /* Voice boxes are on the page of all devices: opened there, at them. */
@@ -10252,15 +10307,88 @@
             rows.append(card);
         }
     }
-    $('box-new').addEventListener('click', () => {
-        const add = $('box-add'); add.hidden = !add.hidden;
-        /* Which conversation it speaks in: chosen on purpose, never a silent default. */
+    /* A NEW VOICE BOX: a kind of New asset (05-11, step 4), the same flow wherever it is asked for -- Assets, a
+       conversation's Attach, "+ Voice box" here and in a room, Features. Where it speaks (preselected from where it
+       was asked), plug it (a flash its conversation asked for waits here), pair it (the code, link and QR of before),
+       it answers (it shows among the boxes). The box itself is paired as it always was: one pairCode() for all. */
+    $('assets-forms').append($('box-add'));
+    /* Where it speaks, said: a conversation's name, or "room <name>". */
+    function whereName(where) {
+        const w = String(where ?? '');
+        if (w.startsWith('room:')) return `${uiSaid('set-na-room', 'room')} ${rooms.find((r) => `room:${r.id}` === w)?.name ?? '?'}`;
+        return shownName(conversations.find((c) => c.name === w)) || w;
+    }
+    const speaksLine = (where) => uiSaid('set-na-speaks', 'Will speak in {name}', { name: whereName(where) });
+    function stopBoxWait() { if (boxFlow?.timer) { clearTimeout(boxFlow.timer); boxFlow.timer = null; } }
+    function startBoxFlow(host) {
+        stopBoxWait();
+        boxFlow = { host, where: host.where ?? '', step: 'where', made: null, known: null, timer: null, until: 0 };
+        $('box-room').value = ''; $('box-ready').hidden = true; $('box-error').hidden = true; $('box-waiting').textContent = '';
+        if (!rooms.length) void loadRooms().then(() => { if (boxFlow?.host === host && boxFlow.step === 'where') fillBoxWhere(); });
+    }
+    /* Which conversation it speaks in, or a room (#281): chosen on purpose, never a silent default. */
+    function fillBoxWhere() {
         const pick = $('box-conversation'); pick.replaceChildren();
         const none = el('option', '', 'Choose a conversation...'); none.value = ''; pick.append(none);
         for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; pick.append(o); }
-        pick.value = accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '';
-        $('box-ready').hidden = true;
+        if (rooms.length) { const g = document.createElement('optgroup'); g.label = 'Rooms'; for (const r of rooms) { const o = el('option', '', r.name); o.value = `room:${r.id}`; g.append(o); } pick.append(g); }
+        pick.value = [...pick.options].some((o) => o.value === boxFlow?.where) ? boxFlow.where : '';
+    }
+    /* The form at its step, for the box that shows it (newAssetBox). */
+    function paintBoxFlow() {
+        if (!boxFlow) startBoxFlow({ where: '', repaint: () => {}, close: () => {} });
+        const form = $('box-add'); form.hidden = false;
+        for (const part of form.querySelectorAll('.box-step')) part.hidden = part.dataset.step !== boxFlow.step;
+        if (boxFlow.step === 'where') fillBoxWhere();
+        if (boxFlow.step === 'plug') void paintBoxJobs();
+        $('box-back').hidden = boxFlow.step === 'where';
+        $('box-next').hidden = boxFlow.step === 'pair';
+        return form;
+    }
+    /* A flash its conversation asked for (Tether, device-flash): its card, as in the thread -- started here. */
+    async function paintBoxJobs() {
+        const tether = await getJson('/tether', {});
+        const jobs = Array.isArray(tether.jobs) ? tether.jobs : [];
+        if (boxFlow?.step !== 'plug') return;
+        $('box-jobs').replaceChildren(...jobs.map((j) => jobCard(j, () => { if (boxFlow?.step === 'plug') void paintBoxJobs(); })));
+    }
+    const boxGo = (step) => { if (!boxFlow) return; boxFlow.step = step; $('box-error').hidden = true; boxFlow.host.repaint(); };
+    $('box-next').addEventListener('click', () => {
+        if (!boxFlow) return;
+        if (boxFlow.step === 'where' && !$('box-conversation').value) { $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; $('box-conversation').focus(); return; }
+        boxGo(BOX_STEPS[BOX_STEPS.indexOf(boxFlow.step) + 1] ?? boxFlow.step);
     });
+    $('box-back').addEventListener('click', () => { if (boxFlow) { stopBoxWait(); boxGo(BOX_STEPS[Math.max(0, BOX_STEPS.indexOf(boxFlow.step) - 1)]); } });
+    $('box-conversation').addEventListener('change', () => {
+        if (!boxFlow) return;
+        boxFlow.where = $('box-conversation').value;
+        const line = $('box-add').closest('.kit-newasset')?.querySelector('.kit-na-context > span');
+        if (line && boxFlow.where) line.textContent = speaksLine(boxFlow.where);
+    });
+    /* ONE PAIRING CODE for a voice box (boxes.mjs), whoever asks: this flow, a flash run from the thread. With
+       `origin` (this page's address), the server adds the setup key, its link and QR code. */
+    function pairCode({ conversation, name, origin = '' }) {
+        return post(`${API}/boxes/code`, { conversation, name, ...(origin ? { origin } : {}), zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    }
+    /* It answers: paired, it shows among the boxes -- read again until it does, while the code holds. */
+    function waitBoxPaired() {
+        stopBoxWait();
+        const flow = boxFlow;
+        const look = async () => {
+            if (boxFlow !== flow || flow.made || $('assets-forms').contains($('box-add')) || Date.now() > flow.until) return;
+            const list = await getJson('/boxes', null);
+            const fresh = Array.isArray(list) && flow.known ? list.find((b) => !flow.known.has(b.id)) : null;
+            if (boxFlow !== flow) return;
+            if (fresh) {
+                flow.made = { id: fresh.id, name: fresh.name, where: fresh.conversation };
+                flow.host.repaint();
+                if (!$('boxes').closest('[hidden]')) void paintBoxes();
+                return;
+            }
+            flow.timer = setTimeout(() => { void look(); }, 3000);
+        };
+        flow.timer = setTimeout(() => { void look(); }, 3000);
+    }
     $('box-key-copy').addEventListener('click', async () => {
         const key = $('box-key').textContent;
         try { await navigator.clipboard.writeText(key); $('box-key-copy').textContent = 'Copied'; }
@@ -10268,16 +10396,36 @@
         setTimeout(() => { $('box-key-copy').textContent = 'Copy the key'; }, 2000);
     });
     $('box-code').addEventListener('click', async () => {
-        if (!$('box-conversation').value) { $('box-conversation').focus(); $('box-code-minutes').textContent = 'Choose the conversation it speaks in first.'; $('box-ready').hidden = false; return; }
+        if (!$('box-conversation').value) { boxGo('where'); $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; return; }
         try {
-            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin, zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+            const before = await getJson('/boxes', null);
+            const r = await pairCode({ conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
             $('box-key').textContent = r.key ?? '';
             $('box-link').href = r.link ?? '#';
             $('box-qr').innerHTML = r.qr ?? '';
             $('box-ready').hidden = false;
+            if (boxFlow && Array.isArray(before)) {
+                boxFlow.known = new Set(before.map((b) => b.id)); boxFlow.until = Date.now() + Number(r.minutes || 10) * 60_000;
+                $('box-waiting').textContent = uiSaid('set-na-box-waiting', 'Waiting for it to answer…');
+                waitBoxPaired();
+            }
         } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
     });
+    /* "+ Voice box" of Access › Boxes: the New asset box, right here, on its kind; on the conversation Access is for. */
+    function paintBoxNew() {
+        const holder = $('box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeBoxNew() { const holder = $('box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    function openBoxNew() {
+        startBoxFlow({ where: accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '', repaint: paintBoxNew, close: closeBoxNew });
+        paintBoxNew();
+        focusFirst($('box-newasset'));
+    }
+    $('box-new').addEventListener('click', () => { if (!$('box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeBoxNew(); } else openBoxNew(); });
     async function paintManage() {
         await readDevices();
         void paintBoxes();
@@ -10326,8 +10474,14 @@
     async function openManage() { await openAccessPage('devices'); }
     $('share-by-device').addEventListener('click', () => { manageBy = 'device'; void paintManage(); });
     $('share-by-thing').addEventListener('click', () => { manageBy = 'thing'; void paintManage(); });
+    /* A NEW DEVICE: a kind of New asset (05-11, step 4) -- the share sheet, the same for every way in (the Device
+       kind of the box, the map's "+", "+ New device" here and on the map). On a conversation (`of`), it is offered it. */
+    function newDevice(of = '') {
+        const c = String(of ?? '');
+        void openCompose(c && !c.startsWith('room:') ? [[`conversation:${c}`, partsFor(c)]] : []);
+    }
     /* Filtered on a conversation, a new device is offered that conversation. */
-    $('share-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('share-new-device').addEventListener('click', () => newDevice(accessFor));
     /* From a conversation: that conversation, and nothing else, is in the basket. */
     $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]]); });
     /* The Sharing chapter of a conversation: who has it, and which parts -- changed there, at once. */

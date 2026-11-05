@@ -208,6 +208,29 @@ test('new asset: one box -- its kinds, a form, one ending; its context on top', 
     assert.deepEqual(ends, ['another', 'done']);
 });
 
+test('new asset: a kind of several steps (a voice box) says the one at hand', () => {
+    const steps = ['Kind', 'Where', 'Plug it', 'Pair it', 'It answers'];
+    const box = KIT.NewAsset({ kinds: [{ kind: 'box', label: 'Voice box' }], kind: 'box', at: 3, form: () => new Node('div'), words: { steps } });
+    assert.equal(box.find('kit-steps-count').textContent, '4 / 5');
+    assert.equal(box.all((n) => n.getAttribute('aria-current') === 'step')[0].textContent, '4Pair it');
+    const answered = KIT.NewAsset({ kinds: [], kind: 'box', at: 3, made: { said: 'Kitchen answers in Homework' }, words: { steps } });
+    assert.equal(answered.dataset.step, 'done');
+    assert.equal(answered.find('kit-steps-count').textContent, '5 / 5');
+});
+
+test('a voice box and a device are kinds of the one box; every way in opens it, and the box is paired as before', () => {
+    const app = web('app.js'); const html = web('index.html');
+    assert.match(app, /\['box', uiSaid\('set-na-k-box', 'Voice box'\)\], \['device', uiSaid\('set-na-k-device', 'Device'\)\]/);
+    /* One pairing code for every caller, the same request as before. */
+    assert.equal((app.match(/\/boxes\/code/g) ?? []).length, 1, 'one place asks for a pairing code');
+    assert.match(app, /function pairCode\(/);
+    /* One new device, for every way in. */
+    assert.equal((app.match(/openCompose\(accessFor/g) ?? []).length, 0);
+    for (const id of ['map-new-device', 'share-new-device']) assert.match(app, new RegExp(`\\$\\('${id}'\\)\\.addEventListener\\('click', \\(\\) => newDevice\\(accessFor\\)\\)`), id);
+    /* Its form, steps one at a time, keeps the names the page knew. */
+    for (const id of ['box-new', 'box-newasset', 'box-add', 'box-conversation', 'box-room', 'box-code', 'box-ready', 'box-qr', 'box-link', 'box-key', 'box-code-shown', 'salon-new-box-add']) assert.match(html, new RegExp(`id="${id}"`), id);
+});
+
 test('the page makes every asset with the one box, and gives its git key with the SecretPicker', () => {
     const app = web('app.js'); const html = web('index.html');
     assert.equal((app.match(/KIT\.NewAsset\(/g) ?? []).length, 1, 'one place draws it');
