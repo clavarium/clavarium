@@ -3003,7 +3003,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (id.startsWith('allow:')) void decideTether(id.slice('allow:'.length), 'yes'); else if (id.startsWith('deny:')) void decideTether(id.slice('deny:'.length), 'no'); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (/^(allow|deny|always):/.test(id)) void decideTether(id.slice(id.indexOf(':') + 1), DECISION[id.slice(0, id.indexOf(':'))], () => thread?.refresh?.()); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -3140,7 +3140,8 @@
     const ACTIONS = { memory: 'More memory...', disk: 'Give it more disk...', room: 'See what takes room', restart: 'Restart...', terminal: 'See the terminal', review: 'Open the review', seen: '\u2713 Seen', allow: 'Accept', deny: 'Refuse', flash: 'Plug it in and start' };
     const COMMITS = /^commits:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})\.([0-9a-f]{7,40})\.(\d{1,4})$/;
     /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
-    const DEMANDE = /^(allow|deny|flash):[0-9a-f-]{36}$/;
+    const DEMANDE = /^(allow|deny|always|flash):[0-9a-f-]{36}$/;
+    const DECISION = { allow: 'yes', deny: 'no', always: 'always' };
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {
         if (DEVICE) return;
@@ -3168,10 +3169,20 @@
         const FIXED_GOES = new Set(['seen', 'room', 'disk', 'memory']);
         /* A Tether demande decided (here, from Assets, or by the agent) is marked done in the thread,
            carrying its id: Accept / Refuse are then offered no more on the line that asked. */
-        const settled = new Set(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => String(m.brief)));
+        const settled = new Map(data.messages.filter((m) => m.from === 'system' && m.event === 'tether-done' && m.brief).map((m) => [String(m.brief), m]));
+        /* Its card (Parley's request, demandes.mjs): decided, it folds to one line -- accepted, refused, or no longer
+           waiting (timed out, taken back by the agent, stopped); where this screen may not decide, no buttons. */
+        const requestOf = (m) => {
+            const r = m.request;
+            const id = /^allow:(.+)$/.exec(String(r.yes?.id ?? ''))?.[1] ?? '';
+            const done = id ? settled.get(id) : null;
+            if (done) { const o = String(done.outcome ?? ''); return { ...r, state: { decision: o === 'yes' || o === 'always' ? 'yes' : o === 'no' ? 'no' : 'ended', at: String(done.at ?? '') } }; }
+            if (!may(String(r.yes?.id ?? ''))) { const { yes: _y, no: _n, others: _o, ...shown } = r; return shown; }
+            return r;
+        };
         const actionsOf = (m) => (m.actions ?? []).filter(may).filter((id) => !(id === 'restart' && restartedAt && String(m.at ?? '') < restartedAt)).filter((id) => !(FIXED_GOES.has(id) && fixedAt && String(m.at ?? '') < fixedAt)).filter((id) => !(DEMANDE.test(id) && settled.has(id.slice(id.indexOf(':') + 1))))
             .map((id) => (id === 'seen' && seenAt && String(m.at ?? '') <= seenAt ? { id: 'seen-done', label: seenWords } : { id, label: label(id) }));
-        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m) } : m)) };
+        return { ...data, messages: data.messages.map((m) => (m.from === 'system' ? { ...m, actions: actionsOf(m), links: linksOf(m), ...(m.request && typeof m.request === 'object' ? { request: requestOf(m) } : {}) } : m)) };
     }
     /* ITS MACHINE, on the side of the detailed chat: as this page last knew it. */
     function withMachine(data, name) {
@@ -4758,140 +4769,6 @@
         catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
         if (after) await after(); else await paintAssets();
     }
-    /* ONE TETHER CALL WAITING FOR THE OWNER, AS A CARD (#190): what it does in plain words,
-       then who / when / where in short lines, what should make one think (someone outside,
-       a time already taken, administrator rights) in an amber band, the AI's reason in a grey
-       line, and one row of buttons -- the act's own verb, Refuse beside it, "Always…" behind
-       "⋯". The whole card opens its detail (the technical line too). An accept waits a few
-       seconds with "Undo" before it goes. Built from `q.card` (Tether); a call without one
-       keeps its line. `withWho`: name the conversation that asks. */
-    const UNDO_MS = 5000;
-    const dayChip = (when) => {
-        const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(when ?? ''));
-        if (!m) return null;
-        const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12));
-        const chip = el('div', 'dm-day');
-        chip.append(el('div', 'dm-day-w', d.toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' }).toUpperCase()), el('div', 'dm-day-n', String(+m[3])));
-        return chip;
-    };
-    const hhmm = (when) => /[T ](\d{2}:\d{2})/.exec(String(when ?? ''))?.[1] ?? '';
-    const dayWords = (when) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(when ?? '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short', timeZone: 'UTC' }) : String(when ?? ''); };
-    const span = (from, to) => [hhmm(from), hhmm(to)].filter(Boolean).join(' – ') || [from, to].filter(Boolean).join(' – ');
-    const nameOfAddr = (a) => { const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>/.exec(String(a ?? '')); return m && m[1] ? m[1] : String(a ?? '').split('@')[0]; };
-    const askedAgo = (at) => { const s = Math.round((Date.now() - Date.parse(at)) / 1000); if (!Number.isFinite(s)) return ''; return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
-    const KIND_ICON = { mail: '✉', calendar: '📅', contacts: '👤', terminal: '⌘', files: '🗎', browser: '🌐', screen: '🖥', other: '•' };
-    /* What a card says, from its facts: { title, day?, sub?, facts: [[icon, text|node]], quote?, risk: [], yes } */
-    function demandeWords(q) {
-        const c = q.card ?? {}; const about = c.about ?? {};
-        const own = String(c.self ?? '').split('@')[1] ?? '';
-        const outside = (list) => (own ? (list ?? []).filter((x) => !String(x).toLowerCase().endsWith(`@${own}`)) : []);
-        const chips = (list, ext = []) => { const box = el('span', 'dm-chips'); for (const x of list ?? []) box.append(el('span', `dm-chip${ext.includes(x) ? ' ext' : ''}`, ext.includes(x) ? `${x} · outside` : x)); return box; };
-        const w = { facts: [], risk: [], yes: 'Accept' };
-        const subj = (s) => (s ? `“${s}”` : 'a message');
-        const filesLine = (files) => (files?.length ? files.map((f) => `${f.name}${f.kb ? ` (${f.kb >= 1024 ? `${(f.kb / 1024).toFixed(1)} MB` : `${f.kb} KB`})` : ''}`).join(', ') : '');
-        if (c.kind === 'mail') {
-            const ext = outside([...(c.to ?? []), ...(c.cc ?? []), ...(c.bcc ?? [])]);
-            if (ext.length) w.risk.push(`Goes outside: ${ext.join(', ')}`);
-            const sendWord = c.draft ? 'Save draft' : c.at ? 'Schedule' : 'Send';
-            if (c.action === 'send') { w.title = `${c.draft ? 'Draft' : 'Send'} ${subj(c.subject)}`; w.yes = sendWord; }
-            else if (c.action === 'reply') { w.title = `${c.all ? 'Reply to all on' : 'Reply to'} ${about.from ? nameOfAddr(about.from) : 'a message'}`; if (about.subject) w.facts.push(['≡', `On “${about.subject}”`]); w.yes = sendWord; }
-            else if (c.action === 'forward') {
-                w.title = `Forward ${subj(about.subject)}`; w.yes = c.draft ? 'Save draft' : 'Forward';
-                const k = String(c.keep ?? 'all').toLowerCase();
-                const kept = /^(none|false|no)$/.test(k) ? 'without its files' : /^(all|true|yes|)$/.test(k) ? (about.files?.length ? `with ${filesLine(about.files)}` : 'with its files') : `keeping ${c.keep}`;
-                w.facts.push(['📎', kept]);
-            } else if (c.action === 'move') { w.title = `Move ${subj(about.subject)} to ${c.mailbox ?? 'a folder'}`; w.yes = 'Move'; }
-            else if (c.action === 'flag') { w.title = `Mark ${subj(about.subject)} ${c.flag ?? ''}`.trim(); w.yes = 'Mark'; }
-            else if (c.action === 'delete') { w.title = `Delete ${subj(about.subject)}`; w.yes = 'Delete'; }
-            else w.title = `${c.action ?? 'mail'} ${q.detail ?? ''}`;
-            if (about.from && c.action !== 'reply') w.facts.push(['👤', `From ${about.from}`]);
-            if (c.to?.length) w.facts.push(['→', chips(c.to, ext)]);
-            if (c.cc?.length) w.facts.push(['cc', chips(c.cc, ext)]);
-            if (c.bcc?.length) w.facts.push(['bcc', chips(c.bcc, ext)]);
-            if (c.at) w.facts.push(['⏰', `Leaves ${dayWords(c.at)}${hhmm(c.at) ? `, ${hhmm(c.at)}` : ''} — waits in Drafts until then`]);
-            if (c.files?.length) w.facts.push(['📎', `Joined: ${filesLine(c.files)}`]);
-            /* The body as it will read: the Markdown marks taken off. */
-            if (c.body) w.quote = c.body.replace(/\*\*(\S[^*\n]*?)\*\*/g, '$1').replace(/__(\S[^_\n]*?)__/g, '$1').replace(/(^|[^*\w])\*(\S[^*\n]*?)\*(?!\w)/g, '$1$2').replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '$1 ($2)').replace(/^#{1,6}\s+/gm, '');
-        } else if (c.kind === 'calendar') {
-            const ev = c.action === 'create' ? c : { ...about, ...Object.fromEntries(Object.entries(c).filter(([k]) => ['title', 'start', 'end', 'where'].includes(k))) };
-            const answer = { accept: 'Accept', yes: 'Accept', decline: 'Decline', no: 'Decline', refuse: 'Decline', tentative: 'Maybe', maybe: 'Maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
-            w.day = dayChip(ev.start);
-            w.title = c.action === 'respond' ? `${answer || 'Answer'}: ${about.title || 'an invitation'}` : c.action === 'create' ? (c.title ?? 'New event') : c.action === 'delete' ? `Delete “${about.title || 'an event'}”` : c.action === 'update' ? `Change “${about.title || c.title || 'an event'}”` : c.action === 'attach' ? `Attach ${filesLine(c.files)} to “${about.title || 'an event'}”` : `${c.action} ${q.detail ?? ''}`;
-            if (ev.start) w.sub = `${dayWords(ev.start)} · ${span(ev.start, ev.end)}${ev.where ? ` · ${ev.where}` : ''}`;
-            if (about.clashes?.length) w.risk.push(`Clashes with ${about.clashes.join(', ')}`);
-            if (about.organizer && c.action === 'respond') w.facts.push(['👤', `From ${about.organizer}${about.attendees?.length ? ` · with ${about.attendees.length} people` : ''}`]);
-            const guests = c.with ?? [];
-            const ext = outside(guests);
-            if (ext.length) w.risk.push(`Invites someone outside: ${ext.join(', ')}`);
-            if (guests.length) w.facts.push(['👥', chips(guests, ext)]);
-            if (c.online === 'teams' || (c.action === 'create' && guests.length && !c.online)) w.facts.push(['🎥', 'With a Teams meeting (Microsoft)']);
-            if (c.notes) w.quote = c.notes;
-            w.yes = c.action === 'respond' ? (answer || 'Answer') : c.action === 'create' ? (guests.length ? 'Create and invite' : 'Create') : c.action === 'delete' ? 'Delete' : c.action === 'update' ? 'Change' : 'Accept';
-        } else if (c.kind === 'contacts') {
-            w.title = c.action === 'create' ? `Add ${c.name || c.email || 'a contact'}` : c.action === 'update' ? `Update ${c.name || 'a contact'}` : c.action === 'delete' ? 'Delete a contact' : c.action === 'attach' ? 'Set a contact\'s photo' : `${c.action} ${q.detail ?? ''}`;
-            if (c.email) w.facts.push(['✉', c.email]); if (c.phone) w.facts.push(['☎', c.phone]);
-            w.yes = c.action === 'create' ? 'Add' : c.action === 'delete' ? 'Delete' : 'Update';
-        } else if (c.kind === 'terminal') {
-            w.title = c.action === 'run' ? `Run a command on ${q.target?.title ?? 'a machine'}` : c.action === 'type' ? `Type into a terminal on ${q.target?.title ?? 'a machine'}` : `Open a terminal on ${q.target?.title ?? 'a machine'}`;
-            if (/^\s*sudo\b/.test(c.command ?? '')) w.risk.push('As administrator');
-            if (c.command || c.text) { const code = el('code', '', c.command ?? c.text); w.facts.push(['›_', code]); }
-            w.yes = c.action === 'run' ? 'Run' : 'Accept';
-        } else if (c.kind === 'files') {
-            w.title = c.action === 'write' ? `Write ${c.path}` : c.action === 'delete' ? `Delete ${c.path}` : c.action === 'move' ? `Move ${c.from} → ${c.to}` : `${c.action} ${c.path ?? ''}`;
-            if (c.bytes !== undefined) w.facts.push(['≡', `${c.bytes >= 1024 ? `${Math.round(c.bytes / 1024)} KB` : `${c.bytes} bytes`}`]);
-            w.yes = c.action === 'delete' ? 'Delete' : c.action === 'move' ? 'Move' : 'Write';
-        } else if (c.kind === 'browser' && c.action === 'open') { w.title = `Open ${c.url}`; w.yes = 'Open'; }
-        else { w.title = `${q.verb ?? 'action'}${q.detail ? ` ${q.detail}` : ''}`; }
-        return w;
-    }
-    function demandeRow(q, { withWho = false, after } = {}) {
-        const kind = q.card?.kind ?? String(q.verb ?? '').split('.')[0];
-        const w = demandeWords(q);
-        const card = el('div', `given-row demande dm-card dm-${kind}`);
-        const top = el('div', 'dm-top');
-        top.append(el('span', 'dm-ico', KIND_ICON[kind] ?? '•'), el('span', '', [q.target?.title, withWho ? q.agent?.name : '', askedAgo(q.at)].filter(Boolean).join(' · ')), el('span', 'dm-chev', '›'));
-        const head = el('div', 'dm-head');
-        if (w.day) head.append(w.day);
-        const hw = el('div', 'dm-hw'); hw.append(el('b', 'dm-title', w.title)); if (w.sub) hw.append(el('div', 'dm-sub', w.sub)); head.append(hw);
-        card.append(top, head);
-        for (const r of w.risk) card.append(el('div', 'dm-risk', `⚠ ${r}`));
-        if (w.facts.length) { const f = el('div', 'dm-facts'); for (const [ic, v] of w.facts) { f.append(el('span', 'dm-k', ic)); const cell = el('span', 'dm-v'); if (typeof v === 'string') cell.textContent = v; else cell.append(v); f.append(cell); } card.append(f); }
-        if (w.quote) card.append(el('div', 'dm-quote', w.quote));
-        if (q.why) card.append(el('div', 'dm-why', `Why: ${q.why}`));
-        /* The detail: the whole card opens it -- the technical line, its level, its rule. */
-        const more = el('div', 'dm-more'); more.hidden = true;
-        more.append(el('div', '', `${q.verb ?? ''}${q.detail ? ` — ${q.detail}` : ''}`), el('div', 'hint', [q.target?.title, q.agent?.name, q.level ? `level ${q.level}` : ''].filter(Boolean).join(' · ')));
-        card.append(more);
-        card.addEventListener('click', (e) => { if (e.target.closest('button')) return; more.hidden = !more.hidden; card.classList.toggle('open', !more.hidden); });
-        const acts = el('div', 'dm-acts');
-        const yes = el('button', 'primary', w.yes); yes.type = 'button';
-        const no = el('button', '', 'Refuse'); no.type = 'button';
-        const buttons = [yes, no];
-        let always = null;
-        if (q.rule) {
-            const dots = el('button', 'dm-dots', '⋯'); dots.type = 'button'; dots.setAttribute('aria-label', 'More');
-            always = el('button', '', `Always allow ${q.rule.value ?? 'this'}`); always.type = 'button'; always.hidden = true;
-            dots.addEventListener('click', () => { always.hidden = !always.hidden; });
-            acts.append(dots); buttons.push(always);
-        }
-        acts.append(no, yes);
-        card.append(acts);
-        if (always) card.append(always);
-        const lock = (on) => { for (const b of buttons) b.disabled = on; };
-        /* Accept: a few seconds to take it back, then it goes. Refuse goes at once (nothing happens). */
-        const accept = (decision) => {
-            lock(true);
-            const undo = el('div', 'dm-undo'); const ub = el('button', '', 'Undo'); ub.type = 'button';
-            undo.append(el('span', '', decision === 'always' ? 'Allowed, and from now on' : `${w.yes} — accepted`), ub);
-            acts.replaceWith(undo);
-            const timer = setTimeout(() => { ub.disabled = true; void decideTether(q.id, decision, after); }, UNDO_MS);
-            ub.addEventListener('click', () => { clearTimeout(timer); undo.replaceWith(acts); lock(false); });
-        };
-        yes.addEventListener('click', () => accept('yes'));
-        always?.addEventListener('click', () => accept('always'));
-        no.addEventListener('click', () => { lock(true); void decideTether(q.id, 'no', after); });
-        return card;
-    }
     /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
     /* A JOB: a call the owner approved that only this browser can do -- a device to flash
        over USB. The browser lets only a click reach a USB device, so it waits for one; then
@@ -4935,9 +4812,23 @@
         }
         return jobPlaces.get(job.id);
     }
+    /* EVERY CALL WAITING FOR THE OWNER, AS CARDS: Parley's own request card (requestCard), the very one
+       the thread shows, from the same data (`q.view`, server/demandes.mjs) -- one gesture, one
+       implementation. Accept waits a few seconds with Undo (Parley holds it), then goes to Tether.
+       `withWho`: name the conversation that asks. `after` repaints the surface it sits in. */
+    let cardSteps = null;
     function demandesList(approvals, { withWho = false, after } = {}) {
-        const box = el('div', 'as-users demandes-box');
-        for (const q of approvals) box.append(demandeRow(q, { withWho, after }));
+        const box = el('div', 'demandes-box');
+        const act = (id) => { const m = /^(allow|deny|always):(.+)$/.exec(id); if (m) void decideTether(m[2], DECISION[m[1]], after); };
+        void Promise.all([import(new URL('vendor/parley-ui.js', new URL('/', location.href)).href), readWords()]).then(([P, words]) => {
+            if (typeof P.requestCard !== 'function') return;
+            cardSteps ??= P.stepper({ open: (name, close) => nav.over(`demande-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } });
+            for (const q of approvals) {
+                if (!q.view) continue;
+                const view = withWho && q.agent?.name ? { ...q.view, sub: [q.agent.name, q.view.sub].filter(Boolean).join(' · ') } : q.view;
+                box.append(P.requestCard(view, { act, words, steps: cardSteps, host: document.body }));
+            }
+        });
         return box;
     }
     /* While the owner is on Assets or a room, the calls waiting for them appear and update
@@ -9323,8 +9214,11 @@
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
-    async function preview(tab, inner, name, size, from) {
+    /* `opts.own`: a blob address of the page's own (an attachment of a mail), let go with the window; `opts.within`: the mail it came from;
+       `opts.bytes`: its bytes, already read. */
+    async function preview(tab, inner, name, size, from, opts = {}) {
         closePreview();
+        if (opts.own) mdUrls.add(opts.own);
         const address = from ?? `${API}/files/download?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
@@ -9356,7 +9250,7 @@
         $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
         $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
-        const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const origin = opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
         /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
         const cannot = (why) => {
@@ -9369,6 +9263,13 @@
             box.append(icon, el('b', 'preview-cannot-name', name), el('p', 'hint', why), get);
             $('preview-body').replaceChildren(box); note('');
         };
+        /* Its bytes: read from the server, or already here (an attachment of a mail: this page's rules fetch no blob:). */
+        const readIt = async () => {
+            if (opts.bytes) return opts.bytes.buffer.slice(opts.bytes.byteOffset, opts.bytes.byteOffset + opts.bytes.byteLength);
+            const r = await fetch(address);
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
+            return r.arrayBuffer();
+        };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         if (MEDIA[kind]) {
             const video = MEDIA[kind].startsWith('video/');
@@ -9379,11 +9280,7 @@
             if (size && size > MEDIA_MAX) { player.src = address; $('preview-body').replaceChildren(player); note(''); return; }
             note('Loading...');
             let got;
-            try {
-                const r = await fetch(address);
-                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
-                got = await r.arrayBuffer();
-            } catch (error) { cannot(error.message); return; }
+            try { got = await readIt(); } catch (error) { cannot(error.message); return; }
             if ($('viewer').hidden || $('preview-name').textContent !== name) return;
             shownUrl = URL.createObjectURL(new Blob([got], { type: MEDIA[kind] }));
             player.src = shownUrl; $('preview-body').replaceChildren(player); note('');
@@ -9391,14 +9288,10 @@
         }
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind) || SHEETS.includes(kind) || kind === 'docx';
         if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
-        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
+        if (size > (TEXTS.includes(kind) && kind !== 'eml' ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
-        try {
-            const r = await fetch(address);
-            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
-            bytes = await r.arrayBuffer();
-        } catch (error) { cannot(error.message); return; }
+        try { bytes = await readIt(); } catch (error) { cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -9464,6 +9357,8 @@
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { cannot('This PDF could not be shown here.'); }
+        } else if (kind === 'eml') {
+            showMail({ bytes, name, tab, inner, from, note });
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
@@ -9524,6 +9419,95 @@
                 note('');
             } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
+    }
+    /* A MAIL FILE (.eml), as a mail program shows it (05-11): subject, who, when, its words, its
+       attachments; its source one tap away (Copy, Download, Full screen: the file as it is). Read by
+       web/mail-view.js, here, in the page. Its HTML, which a stranger wrote, is drawn in a frame that
+       runs nothing (sandbox: no scripts, no same-origin; its own rules: nothing fetched), made harmless
+       first; remote pictures blocked till asked for -- then the server's page of it (files.mjs mailPage),
+       still no script. Nothing is fetched on opening. */
+    function showMail({ bytes, name, tab, inner, from, note }) {
+        const body = $('preview-body');
+        const M = window.clavariumMail;
+        /* Its source: the first megabyte of a large one (Download for all of it). */
+        const raw = new TextDecoder('utf-8', { fatal: false }).decode(bytes.byteLength > TEXT_MAX ? bytes.slice(0, TEXT_MAX) : bytes) + (bytes.byteLength > TEXT_MAX ? '\n…' : '');
+        const source = el('pre', 'source', raw);
+        offerCopy({ text: raw }, { select: () => { show('source'); return selectAll(source); } });
+        let mail = null;
+        try { mail = M.parse(new Uint8Array(bytes)); } catch { mail = null; }
+        if (!mail || (!mail.headers.length && mail.html === null && mail.text === null)) { body.append(source); note(''); return; }
+        const view = el('div', 'mail-view');
+        /* Who, to whom, when. */
+        const head = el('div', 'mail-head');
+        head.append(el('h2', 'mail-subject', mail.subject || uiSaid('set-mail-no-subject', '(no subject)')));
+        const who = (list) => { const span = el('span', 'mail-who'); list.forEach((a, i) => { if (i) span.append(', '); if (a.name) { span.append(el('b', '', a.name), ' '); span.append(el('span', 'hint mail-addr', `<${a.address}>`)); } else span.append(el('b', '', a.address)); }); return span; };
+        if (mail.from.length) { const line = el('div', 'mail-from'); line.append(who(mail.from)); head.append(line); }
+        const row = (label, value) => { const line = el('div', 'mail-line'); line.append(el('span', 'mail-label', label), value); head.append(line); };
+        if (mail.to.length) row(uiSaid('set-mail-to', 'To'), who(mail.to));
+        if (mail.cc.length) row(uiSaid('set-mail-cc', 'Cc'), who(mail.cc));
+        if (mail.date) row(uiSaid('set-mail-date', 'Date'), el('span', '', mail.date.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+        const details = el('button', 'quiet mail-details', uiSaid('set-mail-details', 'Show details')); details.type = 'button'; details.setAttribute('aria-expanded', 'false');
+        const all = el('pre', 'mail-headers', mail.head); all.hidden = true;
+        details.addEventListener('click', () => { all.hidden = !all.hidden; details.setAttribute('aria-expanded', String(!all.hidden)); details.textContent = all.hidden ? uiSaid('set-mail-details', 'Show details') : uiSaid('set-mail-hide-details', 'Hide details'); });
+        head.append(details, all);
+        view.append(head);
+        /* Its words: the HTML in a frame that runs nothing, or the plain words with their links. */
+        const offline = conversations.find((x) => x.name === current)?.offline === true;
+        const frameOf = () => { const f = document.createElement('iframe'); f.className = 'mail-frame'; f.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); f.setAttribute('referrerpolicy', 'no-referrer'); f.title = mail.subject || name; return f; };
+        if (mail.html !== null) {
+            const page = M.pageOf(mail);
+            let frame = frameOf(); frame.srcdoc = page.html;
+            if (page.blocked) {
+                const bar = el('div', 'mail-remote'); bar.setAttribute('role', 'status');
+                bar.append(el('span', '', uiSaid('set-mail-remote', 'Remote pictures blocked')));
+                /* Shown by the server's page of the same file: one of a folder kept here, a conversation not cut off. */
+                if (!from && !offline) {
+                    const go = el('button', 'quiet mail-remote-show', uiSaid('set-mail-show-remote', 'Show them')); go.type = 'button';
+                    go.addEventListener('click', () => { const f = frameOf(); f.src = `${API}/files/mail?${new URLSearchParams({ c: current, r: tab, p: inner })}`; frame.replaceWith(f); frame = f; bar.remove(); });
+                    bar.append(' · ', go);
+                }
+                view.append(bar);
+            }
+            view.append(frame);
+        } else if (mail.text !== null && mail.text.trim()) {
+            const words = el('div', 'mail-text');
+            for (const piece of M.linkify(mail.text)) {
+                if (!piece.href) { words.append(piece.text); continue; }
+                const a = el('a', '', piece.text); a.href = piece.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; words.append(a);
+            }
+            view.append(words);
+        } else view.append(el('p', 'hint mail-empty', uiSaid('set-mail-empty', 'This mail has no text.')));
+        /* Its attachments: each opens in this same window (or offers its download), as a file of a folder does. */
+        if (mail.attachments.length) {
+            const list = el('ul', 'mail-files');
+            list.setAttribute('aria-label', mail.attachments.length === 1 ? uiSaid('set-mail-file', '1 attachment') : uiSaid('set-mail-files', '{n} attachments', { n: mail.attachments.length }));
+            for (const a of mail.attachments) {
+                const li = el('li', 'mail-file');
+                const open = el('button', 'quiet mail-file-open'); open.type = 'button';
+                const ext = a.name.includes('.') ? a.name.split('.').pop().toUpperCase().slice(0, 4) : '';
+                open.append(el('span', 'kind', ext || '?'), el('b', '', a.name), el('small', '', `${sizeOf(a.size)} · ${a.type}`));
+                open.addEventListener('click', () => { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); void preview(tab, inner, a.name, a.size, url, { own: url, within: name, bytes: a.bytes }); });
+                const get = el('a', 'mail-file-get'); get.setAttribute('download', a.name); get.title = uiSaid('set-mail-download', 'Download'); get.setAttribute('aria-label', `${get.title} ${a.name}`);
+                get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+                /* Its address let go with the window. */
+                { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); mdUrls.add(url); get.href = url; }
+                li.append(open, get); list.append(li);
+            }
+            view.append(list);
+        }
+        /* Message, or its source. */
+        const switcher = el('div', 'md-switch'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', 'Show');
+        const choice = (label, what) => { const b = el('button', '', label); b.type = 'button'; b.dataset.show = what; b.addEventListener('click', () => show(what)); return b; };
+        const asMail = choice(uiSaid('set-mail-message', 'Message'), 'mail'); const asSource = choice(uiSaid('set-mail-source', 'Source'), 'source');
+        switcher.append(asMail, asSource);
+        function show(what) {
+            asMail.setAttribute('aria-pressed', String(what === 'mail')); asSource.setAttribute('aria-pressed', String(what === 'source'));
+            /* The frame is kept as it is (moved, not made again): hidden, not removed. */
+            if (!view.isConnected) body.replaceChildren(switcher, view, source);
+            view.hidden = what !== 'mail'; source.hidden = what !== 'source';
+        }
+        show('mail');
+        note('');
     }
     $('preview-close').addEventListener('click', () => leavePreview());
     /* Outside the window, or Escape: closed too -- unless what is edited is not saved. */

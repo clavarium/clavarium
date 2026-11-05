@@ -48,7 +48,7 @@
 import { Refusal } from './conversations.mjs';
 import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.mjs';
 import { WORK_TAB } from './resources.mjs';
-import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 
 const BODY_MAX = 16 * 1024;
@@ -155,7 +155,7 @@ export async function handleDoor(request, response, { devices, conversations, re
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
-        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave';
+        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/mail' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
         /* Shortcuts are typed into the terminal, or are the ready answers of the chat: one of the two must be its to write in. */
         if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
@@ -206,6 +206,13 @@ export async function handleDoor(request, response, { devices, conversations, re
             const file = await page(attached('read', 'open'), url.searchParams.get('p') ?? '');
             response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
             file.stream.pipe(response);
+            return true;
+        }
+        if (request.method === 'GET' && route === '/files/mail') {
+            if (mine?.offline === true) throw new Refusal(403, 'This conversation is offline: remote pictures stay blocked.');
+            const shown = mailPage(await mailFile(attached('read', 'open'), url.searchParams.get('p') ?? ''));
+            response.writeHead(200, shown.headers);
+            response.end(shown.body);
             return true;
         }
         if (request.method === 'GET' && route === '/files/download') {

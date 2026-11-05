@@ -152,10 +152,11 @@ import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
-import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
+import { demandeView } from './demandes.mjs';
 
 const BODY_MAX = 16 * 1024;
 /* A setup file travels inside the JSON of a request: room for it, escaped. */
@@ -242,6 +243,14 @@ export async function handleApi(request, response, conversations, headers, resou
             file.stream.pipe(response);
             return true;
         }
+        if (request.method === 'GET' && pathname === '/api/files/mail') {
+            /* A mail with its remote pictures (asked for, never on opening): as a page is, not for a conversation that is offline. */
+            if (conversations.list().find((x) => x.name === query.get('c'))?.offline === true) throw new Refusal(403, 'This conversation is offline: remote pictures stay blocked.');
+            const shown = mailPage(await mailFile(attached(), query.get('p') ?? ''));
+            response.writeHead(200, shown.headers);
+            response.end(shown.body);
+            return true;
+        }
         if (request.method === 'GET' && pathname === '/api/files/download') {
             const file = await download(attached(), query.get('p') ?? '');
             response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
@@ -289,7 +298,13 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
             /* Assets > Access: the targets, who was given each at which level, the
                calls waiting, and the recent journal -- all the page needs to read. */
-            if (pathname === '/api/tether' && tethers) { const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, ''); return send(200, { given: tethers.given(), changes: tethers.changes(), ...(r.data ?? {}) }), true; }
+            /* Each call waiting carries `view`: the card Parley draws for it (demandes.mjs), the same as in the thread. */
+            if (pathname === '/api/tether' && tethers) {
+                const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, '');
+                const data = r.data ?? {};
+                const approvals = Array.isArray(data.approvals) ? data.approvals.map((q) => { try { return { ...q, view: demandeView(q) }; } catch { return q; } }) : data.approvals;
+                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(approvals ? { approvals } : {}) }), true;
+            }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;
