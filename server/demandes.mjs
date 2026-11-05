@@ -104,8 +104,11 @@ export function demandeView(q) {
         if (c.action === 'delete') v.irreversible = true;
     } else if (c.kind === 'contacts') {
         const who = (x) => (x ? String(x) : w('req-a-contact'));
-        v.title = c.action === 'create' ? w('req-contact-add', { who: who(c.name || c.email) }) : c.action === 'update' ? w('req-contact-update', { who: who(c.name) }) : c.action === 'delete' ? w('req-contact-delete', { who: who(c.name) }) : c.action === 'attach' ? w('req-contact-photo', { who: who(c.name) }) : raw(c.action ?? 'contacts');
-        if (c.name && c.action !== 'create') v.facts.push(fact('name', String(c.name)));
+        v.title = c.action === 'create' ? w('req-contact-add', { who: who(c.name || c.email) }) : c.action === 'update' ? w('req-contact-update', { who: who(about.name || c.name) }) : c.action === 'delete' ? w('req-contact-delete', { who: who(about.name || c.name) }) : c.action === 'attach' ? w('req-contact-photo', { who: who(about.name || c.name) }) : raw(c.action ?? 'contacts');
+        /* Who it is now (Tether reads the contact before a change or a delete, 05-11), then what changes. */
+        if (about.name && c.action !== 'create') v.facts.push(fact('name', String(about.name)));
+        if (about.email && c.action !== 'create' && about.email !== c.email) v.facts.push(fact('email', String(about.email)));
+        if (c.name && c.action !== 'create' && c.name !== about.name) v.facts.push(fact('name', String(c.name)));
         if (c.email) v.facts.push(fact('email', String(c.email)));
         if (c.phone) v.facts.push(fact('phone', String(c.phone)));
         if (where) sub.push(where);

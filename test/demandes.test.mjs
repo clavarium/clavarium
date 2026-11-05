@@ -111,3 +111,12 @@ test('a call without a card keeps its technical words', () => {
     assert.equal(v.title, 'screen.type hello');
     assert.equal(v.kind, 'other');
 });
+
+test('a contact changed or deleted: the card names who it is now (Tether reads it first, 05-11), not an id', async () => {
+    const { demandeView } = await import('../server/demandes.mjs');
+    const del = demandeView({ id: 'r9', card: { kind: 'contacts', action: 'delete', id: 'abc123', about: { name: 'Alice Martin', email: 'alice@example.com' } } });
+    assert.match(JSON.stringify(del.title), /Alice Martin/);
+    assert.ok(JSON.stringify(del.facts).includes('alice@example.com'));
+    const up = demandeView({ id: 'r10', card: { kind: 'contacts', action: 'update', id: 'abc123', phone: '+33 6 00 00 00 00', about: { name: 'Alice Martin', email: 'alice@example.com' } } });
+    assert.match(JSON.stringify(up.title), /Alice Martin/);
+});

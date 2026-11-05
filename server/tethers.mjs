@@ -29,9 +29,11 @@ export const FOLDER = '.tether';
 export const PUMP_MS = 1000;
 const AGENT = 'conversation:';
 export const USB_DEVICE = 'usb-device';
+/* Accepted calls whose result is awaited, at most (an act that never ends is forgotten after these). */
+const ACTING_MAX = 200;
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered; #ended = new Map();
+    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered; #ended = new Map(); #acting = [];
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
@@ -50,6 +52,9 @@ export class Tethers {
             const end = what?.approvals;
             if (end?.op === 'end' && end.id) this.#ended.set(end.id, String(end.decision ?? ''));
             this.#changes++; this.#tellNew();
+            /* An accepted call is said again once it was done, with how it went: Tether journals each act
+               when it ends (ok, or its error). */
+            if (what?.journal) this.#tellResult(what.journal);
         });
         /* A device plugged into the owner's computer: one target, always there, flashed from the
            owner's browser (Tether's device connector). The owner gives it to a conversation as any other. */
@@ -73,7 +78,7 @@ export class Tethers {
             const who = r.agent?.id ?? '';
             if (!who.startsWith(AGENT)) continue;
             const name = who.slice(AGENT.length);
-            this.#seen.set(r.id, { name, verb: r.verb ?? 'action' });
+            this.#seen.set(r.id, { name, verb: r.verb ?? 'action', agent: who, target: r.target?.id ?? '' });
             const what = [r.verb ?? 'action', r.detail].filter(Boolean).join(' ');
             const text = [what, r.target?.title ? `(${r.target.title})` : '', r.why ? `-- ${r.why}` : ''].filter(Boolean).join(' ');
             /* `request`: the card Parley draws (demandes.mjs); the text and its buttons stay for an older screen. */
@@ -98,9 +103,29 @@ export class Tethers {
             this.#seen.delete(id);
             const outcome = this.#ended.get(id) ?? '';
             this.#ended.delete(id);
-            try { this.announce(info.name, { kind: 'tether-done', text: `Request handled: ${info.verb}${outcome ? ` (${outcome})` : ''}`, topic: 'Demande', brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
+            /* Accepted is not done (05-11: "Request handled (yes)" was said before the act, which could still
+               fail): said as being done, and its result said when Tether journals it (#tellResult). */
+            const accepted = outcome === 'yes' || outcome === 'always';
+            if (accepted) { this.#acting.push({ id, ...info }); if (this.#acting.length > ACTING_MAX) this.#acting.shift(); }
+            const text = accepted ? `Accepted: ${info.verb} — being done` : `Request handled: ${info.verb}${outcome ? ` (${outcome})` : ''}`;
+            try { this.announce(info.name, { kind: 'tether-done', text, topic: 'Demande', brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
         }
         for (const id of [...this.#ended.keys()]) if (!this.#seen.has(id)) this.#ended.delete(id);
+    }
+
+    /* AN ACCEPTED CALL, DONE OR FAILED: the journal line of the act (it carries ok, or its error). Matched by
+       the request's id where Tether writes it in the line (0.1.0-next.52 on), else by who, which target and
+       which verb -- the oldest accepted call of that kind still waiting for its result. Said in its thread:
+       done, a trace; failed, it needs the person, with the reason. */
+    #tellResult(l) {
+        if (!this.announce || !l || l.op || l.ok === undefined || !(l.decision === 'yes' || l.decision === 'always')) return;
+        const i = l.request ? this.#acting.findIndex((x) => x.id === l.request)
+            : this.#acting.findIndex((x) => x.agent === l.agent?.id && x.target === (l.target?.id ?? '') && x.verb === l.verb);
+        if (i < 0) return;
+        const [call] = this.#acting.splice(i, 1);
+        const failed = l.ok === false;
+        const text = failed ? `Failed: ${call.verb}${l.error ? ` — ${l.error}` : ''}` : `Done: ${call.verb}`;
+        try { this.announce(call.name, { kind: 'tether-done', text, topic: 'Demande', ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.
