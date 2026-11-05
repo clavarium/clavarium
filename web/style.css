@@ -43,26 +43,24 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 .item[aria-current="true"] { border-color: var(--brass); box-shadow: 0 0 0 1px var(--brass); }
 .item b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item small { color: var(--ink2); }
-/* ITS STATE, one point on the right of its row, its colour the worst that
+/* ITS STATE, one point (the kit's StatusDot, kit.js), its colour the worst that
    applies: a machine problem (red), the agent waits for you (blue), the agent
    at work (gold, pulsing), the machine busy (amber, pulsing), fine (green),
    asleep (a hollow ring). The same point, same colours, sums a folded group. */
-.item { position: relative; padding-right: 26px; }
+.item { position: relative; }
 .state-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; box-sizing: border-box; background: var(--ok); }
 .state-dot[data-state="problem"] { background: var(--danger); }
 .state-dot[data-state="wait"] { background: var(--wait); }
 .state-dot[data-state="work"] { background: var(--brass); }
 .state-dot[data-state="busy"] { background: var(--ink2); }
 .state-dot[data-state="sleep"] { background: transparent; border: 1.5px solid var(--ink2); }
-.item > .state-dot { position: absolute; right: 10px; top: 13px; }
-.item > .state-dot[data-state="work"], .item > .state-dot[data-state="busy"] { animation: breathe 1.7s ease-in-out infinite; }
 /* Folded: up to four points, how its conversations are. */
 .state-sum { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; flex-shrink: 0; }
 /* Unfolded: it comes in gently, once. */
 .unfolding { animation: unfold .18s ease-out; }
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
-@media (prefers-reduced-motion: reduce) { .item > .state-dot, header.topbar .bar-state, .unfolding { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .kit-conv > .state-dot, header.topbar .bar-state, .unfolding { animation: none !important; } }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choices button[aria-checked="true"] { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -325,7 +323,6 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 .given-row > span:first-child { flex: 1 1 160px; min-width: 0; }
 .thing { border-top: 1px solid var(--line); padding: 6px 0; }
 .thing > summary { cursor: pointer; font-weight: 600; min-height: 40px; display: flex; align-items: center; }
-.item .shared-mark { display: block; color: var(--brass-ink); }
 /* A sheet is open on a small screen: the keys of the terminal are not for it, and would take half the
    screen from it. On a wide screen they stay: taking them away would resize the terminal under the
    sheet each time, and the tool would redraw for nothing (a test caught the screen moving). */
@@ -1446,10 +1443,6 @@ select.pill { appearance: auto; }
 /* THE LIST: Needs you, Recent (copies, with what was said last and when), then the groups. */
 .list-head { margin: 10px 2px 2px; font-size: .75rem; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink2); }
 .list-head:first-child { margin-top: 2px; }
-.item[data-when] { position: relative; }
-.item[data-when] > b { padding-right: 5em; }
-.item .when { position: absolute; top: 9px; right: 26px; max-width: 5em; overflow: hidden; white-space: nowrap; font-weight: 400; color: var(--ink2); }
-.item .last { display: block; color: var(--ink); opacity: .85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .more-recent { align-self: center; display: inline-flex; align-items: center; gap: 4px; padding: 2px 14px; border-radius: 999px; text-decoration: none; color: var(--ink2); }
 .more-recent:hover { color: var(--ink); background: var(--bar); }
 .more-chevron { font-size: 1.125rem; line-height: 1; }
@@ -2257,18 +2250,8 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 #list-title { cursor: pointer; }
 #deck { overflow-y: auto; }
 .deck { display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); gap: 14px; padding: 14px 16px 24px; }
-.conv-card { position: relative; aspect-ratio: 63 / 88; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(160deg, var(--bar), var(--panel)); color: var(--ink); text-align: left; font: inherit; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); cursor: pointer; transition: transform .15s, border-color .15s; min-height: 0; }
+.conv-card { position: relative; min-height: 120px; display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; border: 1px solid var(--line); background: linear-gradient(160deg, var(--bar), var(--panel)); color: var(--ink); text-align: left; font: inherit; box-shadow: 0 6px 18px rgba(0, 0, 0, .18); cursor: pointer; transition: transform .15s, border-color .15s; }
 .conv-card:hover, .conv-card:focus-visible { transform: translateY(-3px); border-color: var(--brass); }
-.conv-card-plate { display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); min-width: 0; }
-.conv-card-plate b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .875rem; }
-.conv-card-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; background: var(--ink2); }
-.conv-card-dot[data-state="ready"] { background: var(--ok); } .conv-card-dot[data-state="waits"] { background: var(--wait); } .conv-card-dot[data-state="busy"] { background: var(--ink2); }
-.conv-card-dot[data-state="asleep"] { background: transparent; border: 1.5px solid var(--ink2); } .conv-card-dot[data-state="problem"] { background: var(--danger); }
-.conv-card-art { flex: 1.2; min-height: 0; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--line); background: linear-gradient(135deg, hsl(var(--h) 38% 30%), hsl(calc(var(--h) + 40) 42% 14%)); }
-.conv-card-initial { font: 600 2.4rem/1 var(--sans); color: rgba(255, 255, 255, .82); }
-.conv-card-type { font-size: .75rem; color: var(--ink2); padding: 2px 6px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conv-card-text { flex: .9; min-height: 0; display: flex; flex-direction: column; gap: 3px; padding: 2px 6px; font-size: .75rem; color: var(--ink2); overflow: hidden; }
-.conv-card-text i { font-style: normal; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .conv-card-new { align-items: center; justify-content: center; border-style: dashed; border-width: 1.5px; background: transparent; box-shadow: none; color: var(--ink2); }
 .conv-card-plus { font-size: 2.6rem; line-height: 1; color: var(--brass); }
 .deck-empty { text-align: center; padding: 48px 16px; color: var(--ink2); }
@@ -2298,8 +2281,6 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 
 /* ROOMS (#268): a room's card is a conversation's, a little thicker (a card behind it), its members' chips on its picture. */
 .conv-card-room { box-shadow: 6px 6px 0 -1px var(--panel), 6px 6px 0 0 var(--line), 0 6px 18px rgba(0, 0, 0, .18); }
-.conv-card-room .conv-card-art { position: relative; }
-.conv-card-room .salon-stack { position: absolute; left: 6px; bottom: 6px; }
 .salon-stack { display: inline-flex; }
 .salon-chip { width: 20px; height: 20px; margin-left: -6px; display: grid; place-items: center; border: 2px solid var(--panel); font: 600 .6875rem/1 var(--sans); font-style: normal; color: #fff; background: hsl(var(--h, 210) 40% 38%); }
 .salon-chip:first-child { margin-left: 0; }
@@ -2317,7 +2298,6 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-host { font-size: .6875rem; color: var(--ink2); border: 1px solid var(--line); border-radius: 999px; padding: 0 6px; }
 #salon-thread { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 14px 12px; --parley-bg: var(--bg); --parley-text: var(--ink); --parley-dim: var(--ink2); --parley-line: var(--line); --parley-agent: var(--panel); --parley-person: var(--bar); --parley-ask: var(--brass-ink); --parley-wait: var(--wait); --parley-ok: var(--ok); --parley-action: var(--brass-ink); --parley-on-action: var(--on-brass); --parley-live: var(--danger); }
 
-.salon-unread { font-size: .6875rem; font-weight: 600; min-width: 1.5em; text-align: center; padding: 0 5px; border-radius: 999px; background: var(--wait); color: var(--bg); }
 .salon-thinking { display: flex; align-items: center; gap: 6px; margin: 0; padding: 0 14px 8px; font-size: .75rem; color: var(--ink2); order: 2; }
 #salon-new { display: flex; flex-direction: column; }
 #salon-new[hidden] { display: none; }
@@ -2338,10 +2318,9 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 /* A ROOM'S MEMBERS (03-11): the one that welcomes in a box of its own; every conversation on a row, its switch. */
 .salon-host-box { display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 8px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 10%, var(--panel)); transition: background .15s; }
 .salon-host-box.over { background: color-mix(in srgb, var(--brass) 22%, var(--panel)); }
-.salon-host-what, .salon-member-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.salon-host-what b, .salon-member-what b { font-weight: 600; font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.salon-host-what small, .salon-member-what small { color: var(--ink2); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.salon-av { width: 28px; height: 28px; border-radius: 7px; display: grid; place-items: center; flex: none; color: #fff; font: 600 .8125rem/1 var(--sans); background: hsl(var(--h, 210) 40% 38%); }
+.salon-member-what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.salon-member-what b { font-weight: 600; font-size: .8125rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.salon-member-what small { color: var(--ink2); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-members-tools input { width: 100%; }
 .salon-member-list { display: flex; flex-direction: column; max-height: 22rem; overflow-y: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 0 !important; }
 .salon-member-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; min-height: 48px; border-top: 1px solid var(--line); }
@@ -2349,11 +2328,6 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .salon-member-row[draggable="true"] { cursor: grab; }
 button.salon-welcome-btn { border-radius: 999px; padding: 4px 10px; font-size: .75rem; min-height: 32px; background: transparent; color: var(--ink2); }
 button.salon-welcome-btn[aria-pressed="true"] { color: var(--brass-ink); border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); }
-button.salon-switch { position: relative; width: 40px; height: 24px; min-height: 0; flex: none; padding: 0; border-radius: 999px; background: var(--bg); }
-button.salon-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink2); transition: left .15s, background .15s; }
-button.salon-switch[aria-checked="true"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
-button.salon-switch[aria-checked="true"]::after { left: 18px; background: var(--ok); }
-@media (max-width: 700px) { button.salon-switch { min-height: 0; } }
 .nc-card > .salon-host-box, .nc-card > .salon-member-list { margin: 4px 16px 12px; }
 .nc-card > .salon-host-box { padding: 8px 12px; }
 .nc-card > .salon-members-tools { padding-bottom: 4px; }
@@ -2643,3 +2617,61 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
 /* A room's settings: the same group names as every settings page (05-11). */
 #salon-new .room-group { margin: 6px 4px -6px; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
 #salon-new .room-group[hidden] { display: none; }
+
+/* ======================================================================================================
+   KIT (05-11, web/kit.js): the pieces every screen shares, one style each. A screen places them; it
+   does not draw them again. Only the charter's tokens here.
+   ====================================================================================================== */
+/* AVATAR: an initial on the colour of its name. */
+.kit-av { width: var(--kc-av, 28px); height: var(--kc-av, 28px); border-radius: 7px; display: grid; place-items: center; flex: none; color: #fff; font: 600 calc(var(--kc-av, 28px) * .46)/1 var(--sans); background: hsl(var(--h, 210) 40% 38%); }
+.kit-av .room-sign { width: 58%; height: 58%; margin: 0; vertical-align: 0; background: #fff; }
+/* CHIPS: small pills -- what waits (count, need), a note, its room, its boxes. */
+.kit-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 3px; min-width: 0; }
+.kit-chip { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; font-size: .6875rem; font-weight: 400; line-height: 1.6; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kit-chip[data-tone="note"] { color: var(--brass-ink); }
+.kit-chip[data-tone="need"] { color: var(--brass-ink); border-color: var(--brass); font-weight: 600; }
+.kit-chip[data-tone="count"] { min-width: 1.6em; justify-content: center; font-weight: 600; border-color: var(--wait); background: var(--wait); color: var(--bg); }
+.kit-chip-ic { width: 11px; height: 11px; flex: none; background: currentColor; -webkit-mask: var(--kit-ic) center / contain no-repeat; mask: var(--kit-ic) center / contain no-repeat; }
+.kit-ic-room { --kit-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E"); }
+.kit-ic-box { --kit-ic: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='6' y='2.5' width='12' height='19' rx='3'/%3E%3Ccircle cx='12' cy='14.5' r='3.2'/%3E%3C/svg%3E"); }
+/* SWITCH: yes / no. */
+button.kit-switch { position: relative; width: 40px; height: 24px; min-height: 0 !important; flex: none; padding: 0; border-radius: 999px; background: var(--bg); }
+button.kit-switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink2); transition: left .15s, background .15s; }
+button.kit-switch[aria-checked="true"] { border-color: var(--ok); background: color-mix(in srgb, var(--ok) 25%, var(--bg)); }
+button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok); }
+/* SEGMENTED: one of a few, the chosen one pressed. */
+.kit-seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.kit-seg > button { border: 0; border-radius: 0; background: transparent; color: var(--ink2); }
+.kit-seg > button + button { border-left: 1px solid var(--line); }
+.kit-seg > button[aria-pressed="true"] { color: var(--brass-ink); background: color-mix(in srgb, var(--brass) 14%, transparent); }
+/* INLINE CONFIRM: in place of its button, Keep first. */
+.kit-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.kit-confirm-q { color: var(--ink); }
+/* THE CONVERSATION CARD: its avatar with its point on the corner, its name, what it does now, its chips;
+   the gestures of its place at its end. Sizes: row (the list), card (the deck), member (a room's). */
+.kit-conv { --kc-av: 28px; --kc-ring: var(--bar); position: relative; display: grid; grid-template-columns: var(--kc-av) minmax(0, 1fr) auto; column-gap: 10px; align-items: start; text-align: left; color: var(--ink); min-width: 0; }
+.kit-conv > .kit-av { grid-column: 1; grid-row: 1; }
+.kit-conv > .state-dot { grid-column: 1; grid-row: 1; justify-self: end; margin: calc(var(--kc-av) - 7px) -3px 0 0; box-shadow: 0 0 0 2px var(--kc-ring); }
+.kit-conv > .state-dot[data-state="sleep"] { background: var(--kc-ring); }
+.kit-conv > .state-dot[data-state="work"], .kit-conv > .state-dot[data-state="busy"] { animation: breathe 1.7s ease-in-out infinite; }
+.kit-conv-main { grid-column: 2; grid-row: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kit-conv-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.kit-conv-head > b { flex: 1; min-width: 0; display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-conv-head > .when { flex: none; max-width: 6em; overflow: hidden; white-space: nowrap; font-size: .75rem; font-weight: 400; color: var(--ink2); }
+.kit-conv-main > small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.kit-conv-main > .last { color: var(--ink); opacity: .85; }
+.kit-conv-acts { grid-column: 3; grid-row: 1; align-self: center; display: flex; align-items: center; gap: 8px; }
+.kit-conv-row { align-items: center; padding: 8px 10px; }
+.kit-conv-card { --kc-av: 36px; --kc-ring: var(--panel); display: grid; grid-template-columns: var(--kc-av) minmax(0, 1fr); align-content: start; row-gap: 6px; min-height: 120px; }
+.kit-conv-card .kit-conv-main { display: contents; }
+.kit-conv-card .kit-conv-head { grid-column: 2; grid-row: 1; align-self: center; flex-direction: column; align-items: stretch; gap: 0; }
+.kit-conv-card .kit-conv-main > :not(.kit-conv-head) { grid-column: 1 / -1; }
+.kit-conv-card .kit-conv-main > small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); font-size: .8125rem; }
+.kit-conv-card .kit-conv-main > .last { color: var(--ink); opacity: .9; }
+.kit-conv-card .kit-conv-main > .last { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.kit-conv-card .kit-conv-head > b { font-size: .9375rem; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; line-height: 1.25; }
+.kit-conv-member { --kc-ring: var(--panel); align-items: center; padding: 8px 12px; }
+.kit-conv-member .kit-conv-head > b { font-size: .8125rem; }
+.kit-conv-member .kit-conv-main > small { font-size: .75rem; }
+.salon-host-box > .kit-conv-member { flex: 1; padding: 0; --kc-ring: color-mix(in srgb, var(--brass) 10%, var(--panel)); }
+@media (max-width: 520px) { .kit-conv-card { --kc-av: 30px; column-gap: 8px; padding: 10px; } }
