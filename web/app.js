@@ -9323,8 +9323,11 @@
     }
     /* `tab`, `inner`: its place in a folder kept here. `from`: an address to
        read it at instead (a file of the machine's own disk). */
-    async function preview(tab, inner, name, size, from) {
+    /* `opts.own`: a blob address of the page's own (an attachment of a mail), let go with the window; `opts.within`: the mail it came from;
+       `opts.bytes`: its bytes, already read. */
+    async function preview(tab, inner, name, size, from, opts = {}) {
         closePreview();
+        if (opts.own) mdUrls.add(opts.own);
         const address = from ?? `${API}/files/download?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
@@ -9356,7 +9359,7 @@
         $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
         $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
-        const origin = from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const origin = opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
         /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
         const cannot = (why) => {
@@ -9369,6 +9372,13 @@
             box.append(icon, el('b', 'preview-cannot-name', name), el('p', 'hint', why), get);
             $('preview-body').replaceChildren(box); note('');
         };
+        /* Its bytes: read from the server, or already here (an attachment of a mail: this page's rules fetch no blob:). */
+        const readIt = async () => {
+            if (opts.bytes) return opts.bytes.buffer.slice(opts.bytes.byteOffset, opts.bytes.byteOffset + opts.bytes.byteLength);
+            const r = await fetch(address);
+            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
+            return r.arrayBuffer();
+        };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         if (MEDIA[kind]) {
             const video = MEDIA[kind].startsWith('video/');
@@ -9379,11 +9389,7 @@
             if (size && size > MEDIA_MAX) { player.src = address; $('preview-body').replaceChildren(player); note(''); return; }
             note('Loading...');
             let got;
-            try {
-                const r = await fetch(address);
-                if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
-                got = await r.arrayBuffer();
-            } catch (error) { cannot(error.message); return; }
+            try { got = await readIt(); } catch (error) { cannot(error.message); return; }
             if ($('viewer').hidden || $('preview-name').textContent !== name) return;
             shownUrl = URL.createObjectURL(new Blob([got], { type: MEDIA[kind] }));
             player.src = shownUrl; $('preview-body').replaceChildren(player); note('');
@@ -9391,14 +9397,10 @@
         }
         const known = PICTURES[kind] || kind === 'pdf' || TEXTS.includes(kind) || SHEETS.includes(kind) || kind === 'docx';
         if (!known) { cannot(`${size ? `${sizeOf(size)} · ` : ''}This kind of file cannot be shown here.`); return; }
-        if (size > (TEXTS.includes(kind) ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
+        if (size > (TEXTS.includes(kind) && kind !== 'eml' ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
-        try {
-            const r = await fetch(address);
-            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
-            bytes = await r.arrayBuffer();
-        } catch (error) { cannot(error.message); return; }
+        try { bytes = await readIt(); } catch (error) { cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -9464,6 +9466,8 @@
                 }
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { cannot('This PDF could not be shown here.'); }
+        } else if (kind === 'eml') {
+            showMail({ bytes, name, tab, inner, from, note });
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
@@ -9524,6 +9528,95 @@
                 note('');
             } else { body.append(source()); note(offline && (kind === 'html' || kind === 'htm') ? 'This conversation is offline: its page is shown as text, not run.' : ''); }
         }
+    }
+    /* A MAIL FILE (.eml), as a mail program shows it (05-11): subject, who, when, its words, its
+       attachments; its source one tap away (Copy, Download, Full screen: the file as it is). Read by
+       web/mail-view.js, here, in the page. Its HTML, which a stranger wrote, is drawn in a frame that
+       runs nothing (sandbox: no scripts, no same-origin; its own rules: nothing fetched), made harmless
+       first; remote pictures blocked till asked for -- then the server's page of it (files.mjs mailPage),
+       still no script. Nothing is fetched on opening. */
+    function showMail({ bytes, name, tab, inner, from, note }) {
+        const body = $('preview-body');
+        const M = window.clavariumMail;
+        /* Its source: the first megabyte of a large one (Download for all of it). */
+        const raw = new TextDecoder('utf-8', { fatal: false }).decode(bytes.byteLength > TEXT_MAX ? bytes.slice(0, TEXT_MAX) : bytes) + (bytes.byteLength > TEXT_MAX ? '\n…' : '');
+        const source = el('pre', 'source', raw);
+        offerCopy({ text: raw }, { select: () => { show('source'); return selectAll(source); } });
+        let mail = null;
+        try { mail = M.parse(new Uint8Array(bytes)); } catch { mail = null; }
+        if (!mail || (!mail.headers.length && mail.html === null && mail.text === null)) { body.append(source); note(''); return; }
+        const view = el('div', 'mail-view');
+        /* Who, to whom, when. */
+        const head = el('div', 'mail-head');
+        head.append(el('h2', 'mail-subject', mail.subject || uiSaid('set-mail-no-subject', '(no subject)')));
+        const who = (list) => { const span = el('span', 'mail-who'); list.forEach((a, i) => { if (i) span.append(', '); if (a.name) { span.append(el('b', '', a.name), ' '); span.append(el('span', 'hint mail-addr', `<${a.address}>`)); } else span.append(el('b', '', a.address)); }); return span; };
+        if (mail.from.length) { const line = el('div', 'mail-from'); line.append(who(mail.from)); head.append(line); }
+        const row = (label, value) => { const line = el('div', 'mail-line'); line.append(el('span', 'mail-label', label), value); head.append(line); };
+        if (mail.to.length) row(uiSaid('set-mail-to', 'To'), who(mail.to));
+        if (mail.cc.length) row(uiSaid('set-mail-cc', 'Cc'), who(mail.cc));
+        if (mail.date) row(uiSaid('set-mail-date', 'Date'), el('span', '', mail.date.toLocaleString(undefined, { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })));
+        const details = el('button', 'quiet mail-details', uiSaid('set-mail-details', 'Show details')); details.type = 'button'; details.setAttribute('aria-expanded', 'false');
+        const all = el('pre', 'mail-headers', mail.head); all.hidden = true;
+        details.addEventListener('click', () => { all.hidden = !all.hidden; details.setAttribute('aria-expanded', String(!all.hidden)); details.textContent = all.hidden ? uiSaid('set-mail-details', 'Show details') : uiSaid('set-mail-hide-details', 'Hide details'); });
+        head.append(details, all);
+        view.append(head);
+        /* Its words: the HTML in a frame that runs nothing, or the plain words with their links. */
+        const offline = conversations.find((x) => x.name === current)?.offline === true;
+        const frameOf = () => { const f = document.createElement('iframe'); f.className = 'mail-frame'; f.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); f.setAttribute('referrerpolicy', 'no-referrer'); f.title = mail.subject || name; return f; };
+        if (mail.html !== null) {
+            const page = M.pageOf(mail);
+            let frame = frameOf(); frame.srcdoc = page.html;
+            if (page.blocked) {
+                const bar = el('div', 'mail-remote'); bar.setAttribute('role', 'status');
+                bar.append(el('span', '', uiSaid('set-mail-remote', 'Remote pictures blocked')));
+                /* Shown by the server's page of the same file: one of a folder kept here, a conversation not cut off. */
+                if (!from && !offline) {
+                    const go = el('button', 'quiet mail-remote-show', uiSaid('set-mail-show-remote', 'Show them')); go.type = 'button';
+                    go.addEventListener('click', () => { const f = frameOf(); f.src = `${API}/files/mail?${new URLSearchParams({ c: current, r: tab, p: inner })}`; frame.replaceWith(f); frame = f; bar.remove(); });
+                    bar.append(' · ', go);
+                }
+                view.append(bar);
+            }
+            view.append(frame);
+        } else if (mail.text !== null && mail.text.trim()) {
+            const words = el('div', 'mail-text');
+            for (const piece of M.linkify(mail.text)) {
+                if (!piece.href) { words.append(piece.text); continue; }
+                const a = el('a', '', piece.text); a.href = piece.href; a.target = '_blank'; a.rel = 'noopener noreferrer'; words.append(a);
+            }
+            view.append(words);
+        } else view.append(el('p', 'hint mail-empty', uiSaid('set-mail-empty', 'This mail has no text.')));
+        /* Its attachments: each opens in this same window (or offers its download), as a file of a folder does. */
+        if (mail.attachments.length) {
+            const list = el('ul', 'mail-files');
+            list.setAttribute('aria-label', mail.attachments.length === 1 ? uiSaid('set-mail-file', '1 attachment') : uiSaid('set-mail-files', '{n} attachments', { n: mail.attachments.length }));
+            for (const a of mail.attachments) {
+                const li = el('li', 'mail-file');
+                const open = el('button', 'quiet mail-file-open'); open.type = 'button';
+                const ext = a.name.includes('.') ? a.name.split('.').pop().toUpperCase().slice(0, 4) : '';
+                open.append(el('span', 'kind', ext || '?'), el('b', '', a.name), el('small', '', `${sizeOf(a.size)} · ${a.type}`));
+                open.addEventListener('click', () => { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); void preview(tab, inner, a.name, a.size, url, { own: url, within: name, bytes: a.bytes }); });
+                const get = el('a', 'mail-file-get'); get.setAttribute('download', a.name); get.title = uiSaid('set-mail-download', 'Download'); get.setAttribute('aria-label', `${get.title} ${a.name}`);
+                get.innerHTML = '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11"/><path d="m7 11 5 5 5-5"/><path d="M5 20h14"/></svg>';
+                /* Its address let go with the window. */
+                { const url = URL.createObjectURL(new Blob([a.bytes], { type: a.type })); mdUrls.add(url); get.href = url; }
+                li.append(open, get); list.append(li);
+            }
+            view.append(list);
+        }
+        /* Message, or its source. */
+        const switcher = el('div', 'md-switch'); switcher.setAttribute('role', 'group'); switcher.setAttribute('aria-label', 'Show');
+        const choice = (label, what) => { const b = el('button', '', label); b.type = 'button'; b.dataset.show = what; b.addEventListener('click', () => show(what)); return b; };
+        const asMail = choice(uiSaid('set-mail-message', 'Message'), 'mail'); const asSource = choice(uiSaid('set-mail-source', 'Source'), 'source');
+        switcher.append(asMail, asSource);
+        function show(what) {
+            asMail.setAttribute('aria-pressed', String(what === 'mail')); asSource.setAttribute('aria-pressed', String(what === 'source'));
+            /* The frame is kept as it is (moved, not made again): hidden, not removed. */
+            if (!view.isConnected) body.replaceChildren(switcher, view, source);
+            view.hidden = what !== 'mail'; source.hidden = what !== 'source';
+        }
+        show('mail');
+        note('');
     }
     $('preview-close').addEventListener('click', () => leavePreview());
     /* Outside the window, or Escape: closed too -- unless what is edited is not saved. */

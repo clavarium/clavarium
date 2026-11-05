@@ -102,6 +102,8 @@ export const FILES = {
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
     '/features.js': ['web/features.js', 'text/javascript; charset=utf-8'],
     '/kit.js': ['web/kit.js', 'text/javascript; charset=utf-8'],
+    /* A mail file (.eml) read as a mail program shows it (the file viewer, app.js showMail). */
+    '/mail-view.js': ['web/mail-view.js', 'text/javascript; charset=utf-8'],
     '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
     /* The page shown while an update stops this server (app.js goes to it); the front serves the same file while it is down. */
     '/maintenance.html': [MAINTENANCE, 'text/html; charset=utf-8'],

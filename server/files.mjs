@@ -13,7 +13,7 @@
  *     saves it, it never opens it as a page of this site.
  */
 import { lstat, readdir, realpath, open, rename, unlink, mkdir, rm } from 'node:fs/promises';
-import { createReadStream, constants } from 'node:fs';
+import { createReadStream, constants, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { join, sep } from 'node:path';
 import { Refusal } from './conversations.mjs';
@@ -104,6 +104,41 @@ export async function page(root, relative) {
     if (!/\.html?$/i.test(file.name)) { file.stream.destroy(); throw new Refusal(400, 'Only an HTML file is shown as a page.'); }
     if (file.size > PAGE_MAX) { file.stream.destroy(); throw new Refusal(413, 'This page is too large to be shown here. Download it.'); }
     return file;
+}
+
+/* A MAIL FILE'S PAGE WITH ITS REMOTE PICTURES (05-11): only when the reader asks for them ("Show them").
+ * The page reads the mail itself (web/mail-view.js) and draws it in a frame whose rules are the page's
+ * own: nothing remote can load there. So this answer, the same mail made harmless by the same code,
+ * carries rules of its own -- pictures from anywhere, and still no script, no form, no same-origin
+ * (sandbox), shown only inside this site's window. Read whole: an .eml up to PREVIEW_MAX. */
+export const MAIL_MAX = 25 * 1024 * 1024;
+let mailCode = null;
+const mailReader = () => {
+    if (!mailCode) { const holder = {}; new Function('window', readFileSync(new URL('../web/mail-view.js', import.meta.url), 'utf8'))(holder); mailCode = holder.clavariumMail; }
+    return mailCode;
+};
+export const MAIL_HEADERS = Object.freeze({
+    'content-type': 'text/html; charset=utf-8',
+    'content-security-policy': "sandbox allow-popups allow-popups-to-escape-sandbox; default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'",
+    'x-content-type-options': 'nosniff',
+    'referrer-policy': 'no-referrer',
+    'cache-control': 'no-store',
+    'cross-origin-resource-policy': 'same-origin',
+});
+export function mailPage(bytes) {
+    const reader = mailReader();
+    const body = reader.pageOf(reader.parse(bytes), { remote: true }).html;
+    return { body, headers: { ...MAIL_HEADERS, 'content-length': Buffer.byteLength(body) } };
+}
+/* The bytes of a mail file of a folder, for mailPage. */
+export async function mailFile(root, relative) {
+    const file = await download(root, relative);
+    file.stream.on('error', () => {});
+    if (!/\.eml$/i.test(file.name)) { file.stream.destroy(); throw new Refusal(400, 'Only a mail file (.eml) is shown as a mail.'); }
+    if (file.size > MAIL_MAX) { file.stream.destroy(); throw new Refusal(413, 'This mail is too large to be shown here. Download it.'); }
+    const chunks = [];
+    for await (const chunk of file.stream) chunks.push(chunk);
+    return new Uint8Array(Buffer.concat(chunks));
 }
 
 /* Writes an imported file under `relative` (a folder). By default it never

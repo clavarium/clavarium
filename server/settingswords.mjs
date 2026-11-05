@@ -43,5 +43,10 @@ export const SETTINGS_WORDS_FR = {
     'set-na-speaks': 'Parlera dans {name}', 'set-na-room': 'salon', 'set-na-box-plug': 'Branchez-le sur le secteur.',
     'set-na-box-flash': 'Non flashé : sa conversation le flashe (Tether).', 'set-na-box-waiting': 'En attente de sa réponse…',
     'set-na-box-made': '{name} répond dans {where}',
+    /* A mail file (.eml) in the viewer (app.js showMail). */
+    'set-mail-message': 'Message', 'set-mail-source': 'Source', 'set-mail-to': 'À', 'set-mail-cc': 'Cc', 'set-mail-date': 'Date',
+    'set-mail-details': 'Afficher les détails', 'set-mail-hide-details': 'Masquer les détails', 'set-mail-no-subject': '(sans objet)',
+    'set-mail-remote': 'Images distantes bloquées', 'set-mail-show-remote': 'Les afficher', 'set-mail-empty': 'Ce mail n\'a pas de texte.',
+    'set-mail-file': '1 pièce jointe', 'set-mail-files': '{n} pièces jointes', 'set-mail-download': 'Télécharger', 'set-mail-of': 'Pièce jointe de {name}',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

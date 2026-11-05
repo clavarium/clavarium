@@ -152,7 +152,7 @@ import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
-import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS } from './files.mjs';
+import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
@@ -240,6 +240,14 @@ export async function handleApi(request, response, conversations, headers, resou
             const file = await page(attached(), query.get('p') ?? '');
             response.writeHead(200, { ...PAGE_HEADERS, 'content-length': file.size });
             file.stream.pipe(response);
+            return true;
+        }
+        if (request.method === 'GET' && pathname === '/api/files/mail') {
+            /* A mail with its remote pictures (asked for, never on opening): as a page is, not for a conversation that is offline. */
+            if (conversations.list().find((x) => x.name === query.get('c'))?.offline === true) throw new Refusal(403, 'This conversation is offline: remote pictures stay blocked.');
+            const shown = mailPage(await mailFile(attached(), query.get('p') ?? ''));
+            response.writeHead(200, shown.headers);
+            response.end(shown.body);
             return true;
         }
         if (request.method === 'GET' && pathname === '/api/files/download') {
