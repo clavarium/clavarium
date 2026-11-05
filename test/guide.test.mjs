@@ -100,7 +100,7 @@ test('the part of one conversation: read-only and read-write right, the chat on 
     assert.ok(!/--short|parley close|parley tell|parley status/.test(own), 'no Parley usage described here');
     assert.doesNotMatch(own, /npm install|\.tgz/);
     assert.match(own, /^- Internet: on\.$/m);
-    assert.match(own, /^- Secrets given, by name only: MODEL_KEY\.$/m);
+    assert.match(own, /^- Secrets given, by name only: MODEL_KEY\. Each value is the file \/run\/secrets\/NAME, always the current one/m);
     for (const never of ['sk-the-value-itself', 'example.com', 'ssh:', 'imap', '@']) assert.ok(!own.includes(never), `never: ${never}`);
     const other = b.guide.own('helper');
     assert.match(other, /^- Folders given: none\.$/m);

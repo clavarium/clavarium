@@ -91,5 +91,23 @@ test('a request in the chat: its card, unfolded, everything in a sheet; refused 
     const decidedYes = me.page.locator('#simple-thread .parley-request[data-state="yes"]');
     await me.until('the card says it was accepted', async () => (await decidedYes.count()) === 1, 15_000);
     assert.equal(await decidedYes.locator('.parley-request-done-text').innerText(), 'Accepted · Send “Minutes” to team@example.org');
+    /* A French device: the same lines, said in French -- the server sent words and values, each screen says them. */
+    ask('q3', { to: 'sales@example.com', subject: 'Devis', body: 'Bonjour,\nVoici le devis.' });
+    const fr = await b.person({ locale: 'fr-FR', at: '/?c=asker' });
+    await fr.page.locator('#view-chat').click();
+    const card3 = fr.page.locator('#simple-thread .parley-request:not([data-state])');
+    await fr.until('the third card, on the French screen', async () => (await card3.count()) === 1, 30_000);
+    assert.equal(await card3.locator('.parley-request-title').innerText(), 'Envoyer « Devis » à sales@example.com');
+    assert.match(await card3.locator('.parley-request-sub').innerText(), /^Work mailbox · 2 lignes$/);
+    assert.match(await card3.locator('.parley-request-risk').innerText(), /Part hors de votre domaine/);
+    assert.equal(await card3.locator('.parley-request-yes').innerText(), 'Envoyer');
+    assert.equal(await card3.locator('.parley-request-no').innerText(), 'Refuser');
+    assert.equal(await card3.locator('.parley-request-all').innerText(), 'Tout voir');
+    assert.match(await card3.locator('.parley-request-body').innerText(), /À\s*sales@example\.com · externe/);
+    const refusedFr = fr.page.locator('#simple-thread .parley-request[data-state="no"]');
+    assert.equal(await refusedFr.locator('.parley-request-done-text').innerText(), 'Refusée · Envoyer « Re: Kitchen quote » à sales@example.com', 'a line decided earlier, in French too');
+    /* The English screen still says it in English. */
+    await me.until('the third card, on the English screen', async () => (await me.page.locator('#simple-thread .parley-request:not([data-state]) .parley-request-title').innerText().catch(() => '')) === 'Send “Devis” to sales@example.com', 30_000);
+    assert.deepEqual(fr.errors, [], 'no page error (French)');
     assert.deepEqual(me.errors, [], 'no page error');
 });
