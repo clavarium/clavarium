@@ -95,7 +95,7 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     assert.match(await page.locator('#flows-trace .lk-steps').evaluate((e) => e.textContent), /client-a writes in site-a/);
     /* Exported, from Settings: the configuration, never a value. */
     await page.locator('#nav-settings').click();
-    await page.locator('#settings-ch-backup > summary').click();
+    await me.chapter('s-backup');
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#flows-export').click()]);
     const text = readFileSync(await download.path(), 'utf8');
     assert.ok(text.includes('"id": "secret:DEPLOY_A"') && !text.includes('not-a-real-value'));

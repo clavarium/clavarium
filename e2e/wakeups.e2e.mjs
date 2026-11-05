@@ -75,7 +75,7 @@ test('two tools work together: one leaves a request in a folder they share, the 
     /* Turned off: the next arrival wakes nobody. */
     await me.page.locator('#folders').click();
     await me.chapter('wakeups');
-    await me.until('its last time is said', async () => /Last, .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));
+    await me.until('its last time is said', async () => /Last: .*Typed: echo/.test(await me.page.locator('#wakeups-rows .wakeup-last').first().innerText()));
     await me.page.locator('#wakeups-rows .wakeup .levels button', { hasText: 'Off' }).first().click();
     await me.until('it is off', async () => (await me.api('/api/conversations')).body.find((c) => c.name === 'painter').wakeups.items[0].on === false);
     await me.page.goBack();

@@ -129,6 +129,7 @@ test('on a phone the terminal has the room: one line of bar, one line of keys, t
     /* Larger text, by its buttons (Settings, Screen) then by two fingers: laid out again, never sideways. */
     await me.page.locator('#back').tap();
     await me.page.locator('#nav-settings').tap();
+    await me.page.locator('#settings-nav button[data-group="device"]').tap();
     const screenChapter = me.page.locator('#settings-ch-screen');
     if (!(await screenChapter.evaluate((d) => d.open))) await screenChapter.locator(':scope > summary').tap();
     for (let i = 0; i < 3; i++) await me.page.locator('#settings-text button[data-text="larger"]').tap();
@@ -157,16 +158,16 @@ test('the settings of a conversation are chapters that fold, all folded at first
     await me.create('tidy');
     await me.page.locator('#folders').click();
     const open = () => me.page.evaluate(() => Object.fromEntries([...document.querySelectorAll('#panel details.chapter')].map((d) => [d.dataset.chapter, d.open])));
-    assert.deepEqual(await open(), { general: false, machine: false, access: false, wakeups: false, answerer: false, sharing: false, advanced: false });
+    assert.deepEqual(await open(), { general: false, machine: false, access: false, sharing: false, chat: false, wakeups: false, answerer: false, health: false, advanced: false });
     await me.chapter('general');
     await me.until('General says what it is', async () => /Identifier\s+tidy[\s\S]*Tool\s+Shell[\s\S]*768 MB of memory, 8 GB disk/.test(await me.page.locator('#general-facts').innerText()));
-    await me.page.locator('#chapter-wakeups > summary').click();
-    assert.equal(await me.page.locator('#sleep').isVisible(), false, 'folded away');
+    await me.chapter('wakeups');
+    assert.equal(await me.page.locator('#sleep').isVisible(), true, 'at hand, whatever is folded');
     await me.page.goBack();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();
-    assert.deepEqual(await open(), { general: true, machine: false, access: false, wakeups: true, answerer: false, sharing: false, advanced: false });
+    assert.deepEqual(await open(), { general: true, machine: false, access: false, sharing: false, chat: false, wakeups: true, answerer: false, health: false, advanced: false });
     await me.chapter('machine');
     assert.equal(await me.page.locator('#sleep').isVisible(), true);
     assert.equal(await me.page.locator('#restart').isVisible(), true);

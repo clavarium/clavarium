@@ -46,7 +46,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await page.locator('#assets-close').click();
     /* Export and Import: in Settings. */
     await page.locator('#nav-settings').click();
-    await page.locator('#settings-ch-backup > summary').click();
+    await me.chapter('s-backup');
     for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, id);
     await page.locator('#settings-close').click();
     /* From a conversation: its own Assets, and "+" to attach. */

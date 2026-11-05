@@ -32,6 +32,31 @@ export function loudness(samples) {
     return Number.isFinite(rms) ? rms : 0;
 }
 
+/* HOW LOUD, TO DRAW: the loudness of a block as a level from 0 to 1 that an eye reads as a voice reads to
+   an ear, in decibels: a quiet room (-60 dB and below) is 0, a near shout (-12 dB) is 1. */
+export const LEVEL_QUIET_DB = -60;
+export const LEVEL_LOUD_DB = -12;
+export function levelOf(rms) {
+    if (typeof rms !== 'number' || !Number.isFinite(rms) || rms <= 0) return 0;
+    const db = 20 * Math.log10(rms);
+    return Math.round(Math.min(1, Math.max(0, (db - LEVEL_QUIET_DB) / (LEVEL_LOUD_DB - LEVEL_QUIET_DB))) * 100) / 100;
+}
+
+/* The same level as the heights of a few thin bars (a share of their full height), as Parley draws it: the
+   newest level in the middle, the ones before towards the sides, lower there; a dot when quiet. */
+export const LEVEL_BARS = 5;
+export const LEVEL_DOT = 0.2;
+export function levelBars(recent, n = LEVEL_BARS) {
+    const levels = (Array.isArray(recent) ? recent : [recent]).map((v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 0));
+    const middle = (n - 1) / 2;
+    return Array.from({ length: n }, (_, i) => {
+        const away = Math.abs(i - middle);
+        const level = levels[Math.round(away)] ?? levels.at(-1) ?? 0;
+        const shape = middle > 0 ? 1 - 0.4 * (away / middle) : 1;
+        return Math.round((LEVEL_DOT + (1 - LEVEL_DOT) * level * shape) * 100) / 100;
+    });
+}
+
 /* THE THRESHOLD FOLLOWS THE ROOM. An absolute threshold measures the world;
    what matters is what rises above the noise HERE. The floor is a low
    quantile of the last thirty seconds; speech is three times the floor. */

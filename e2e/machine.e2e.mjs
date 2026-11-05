@@ -68,6 +68,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     assert.match(readFileSync(join(vmHome(b, 'silent'), 'npm-installs'), 'utf8'), /^\/tools\/clavarium-parley-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-docket-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n\/tools\/clavarium-binder-\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?\.tgz\n$/);
     report(b, 'silent', { silent: true });
     await me.page.locator('#folders').click();
+    await me.chapter('health');
     await me.page.locator('#health-check').click();
     await me.until('the Machine chapter says it', async () => /Its machine does not answer/.test(await me.page.locator('#machine-health').innerText()));
     /* Its tool can take up its last session when it starts: the default. */
@@ -166,6 +167,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await me.api('/api/conversations/roomy/talk', { on: true });
     report(b, 'roomy', { oom: 2, oomMachine: 2, availableMb: 20, diskLeftMb: 50 });
     await me.page.locator('#folders').click();
+    await me.chapter('health');
     await me.page.locator('#health-check').click();
     await me.until('it is said', async () => /whole machine ran out of memory 2 times/.test(await me.page.locator('#machine-health').innerText()));
     const said = await me.page.locator('#machine-health').innerText();
@@ -207,6 +209,7 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
     await me.page.locator('#folders').click();
+    await me.chapter('machine');
     await me.page.selectOption('#machine-memory', '2048');
     await me.page.selectOption('#machine-disk', '16');
     await me.page.locator('#machine-size-apply').click();

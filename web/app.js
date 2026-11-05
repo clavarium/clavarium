@@ -437,14 +437,15 @@
             const chapters = [...sheet.querySelectorAll('details.chapter')];
             return chapters.length ? chapters : [...sheet.querySelectorAll(':scope > :not(header.topbar):not(.panel-top)')].filter((e) => e.querySelector(':scope > .panel-top'));
         };
-        const wasOpen = new Map();
+        const wasOpen = new Map(); const wasHidden = new Map();
         const norm = (t) => String(t).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
         field.addEventListener('input', () => {
             const q = norm(field.value.trim());
             sheet.dataset.searching = q ? 'on' : '';
             for (const it of items()) {
-                if (!q) { it.hidden = false; for (const row of it.querySelectorAll('.search-out')) row.classList.remove('search-out'); if (it.tagName === 'DETAILS' && wasOpen.has(it)) { it.open = wasOpen.get(it); wasOpen.delete(it); } continue; }
-                const hit = norm(it.textContent).includes(q);
+                if (!q) { it.hidden = wasHidden.get(it) ?? it.hidden; wasHidden.delete(it); for (const row of it.querySelectorAll('.search-out')) row.classList.remove('search-out'); if (it.tagName === 'DETAILS' && wasOpen.has(it)) { it.open = wasOpen.get(it); wasOpen.delete(it); } continue; }
+                if (!wasHidden.has(it)) wasHidden.set(it, it.hidden);
+                const hit = !wasHidden.get(it) && norm(it.textContent).includes(q);
                 it.hidden = !hit;
                 /* Within a chapter whose title does not say it: only its rows that do. */
                 const head = it.querySelector(':scope > summary, :scope > .panel-top');
@@ -993,11 +994,10 @@
         if (noTerminal()) $('files-open').hidden = deviceShared.length === 0;
         $('sleep').hidden = !usable || c.asleep === true;
         $('restart').hidden = DEVICE || !usable;
-        /* The same gestures, surfaced at the top of the panel: wake when asleep, else restart and sleep. */
-        $('quick-sleep').hidden = !usable || c.asleep === true;
-        $('quick-restart').hidden = DEVICE || !usable;
+        /* At hand, on top of its settings: wake when asleep, else restart, sleep, its terminal. */
         $('quick-wake').hidden = !c || c.asleep !== true;
-        $('panel-actions').hidden = DEVICE || !c || !(usable || c.asleep === true);
+        $('hand-terminal').hidden = !usable || noTerminal();
+        $('panel-actions').hidden = DEVICE || !c;
         /* Its own sheet is there as soon as it exists: archiving one that failed is done from it. */
         $('folders').hidden = DEVICE || !c;
     }
@@ -2297,6 +2297,7 @@
             row.append(label, fixedUse(), off); handed.append(row);
         }
         $('access-secrets-empty').hidden = handed.children.length > 0;
+        paintConvStates(here);
         /* What can still be attached, for the picker. */
         const picker = $('attach-rows'); picker.replaceChildren();
         $('attach-title').textContent = `Attach to "${current}"`;
@@ -2319,11 +2320,13 @@
         /* Where the tool works, and the way to the other place. */
         const kept = here?.work === 'kept';
         $('work-box').hidden = DEVICE || !here;
-        $('work-now').textContent = kept
-            ? 'In a folder kept here: you see its files in Files, and they outlive the machine. It has a fixed size, and refuses symbolic links that point upwards or outside: a code project that installs packages belongs on the disk of its machine.'
-            : 'On the disk of its machine: faster for a large code project, but its files are not shown in Files and go with the machine.';
+        /* One short line; the why behind its ⓘ. */
+        $('work-now-text').textContent = kept ? 'Kept here · shown in Files' : 'On the disk of its machine';
+        $('work-now-why').textContent = kept
+            ? 'Its files outlive the machine. It has a fixed size, and refuses symbolic links that point upwards or outside: a code project that installs packages belongs on the disk of its machine.'
+            : 'Faster for a large code project, but its files are not shown in Files and go with the machine.';
         $('work-moved').textContent = here?.moved ?? ''; $('work-moved').hidden = !here?.moved;
-        $('work-move').textContent = kept ? 'Move its work to the disk of its machine...' : 'Keep its work here (shown in Files)...';
+        $('work-move').textContent = kept ? 'Move to its machine\'s disk...' : 'Keep it here...';
         $('work-move').onclick = () => {
             const to = kept ? 'disk' : 'kept';
             /* The question is asked over the terminal, not under this panel. */
@@ -2365,7 +2368,7 @@
     const markAttention = () => { clearTimeout(marking); marking = setTimeout(() => {
         for (const chapter of document.querySelectorAll('details.chapter')) chapter.toggleAttribute('data-attention', asksForYou(chapter));
         /* And on its category, in the side list of Settings. */
-        for (const b of document.querySelectorAll('#settings-nav button[data-group]')) b.toggleAttribute('data-attention', Boolean(document.querySelector(`#settings-group-${b.dataset.group} details.chapter[data-attention]`)));
+        for (const b of document.querySelectorAll('.settings-tabs button[data-group]')) b.toggleAttribute('data-attention', Boolean(b.closest('.sheet')?.querySelector(`.settings-group[data-group="${b.dataset.group}"] details.chapter[data-attention]`)));
     }, 150); };
     new MutationObserver(markAttention).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'data-tone', 'class'] });
     /* Reached by a link (or a button that leads to it): opened, and said for a moment. */
@@ -2373,6 +2376,9 @@
     const openChapter = (key, { show = true } = {}) => {
         const chapter = document.querySelector(`details.chapter[data-chapter="${key}"]`);
         if (!chapter) return chapter;
+        /* In a tab not shown: that tab first. */
+        const group = chapter.closest('.settings-group.tab-off');
+        if (group) group.closest('.sheet')?.showTab?.(group.dataset.group);
         chapter.open = true;
         if (show) {
             for (const other of document.querySelectorAll('details.chapter.reached')) other.classList.remove('reached');
@@ -2643,8 +2649,8 @@
         $('machine-size-wait').textContent = waiting; $('machine-size-wait').hidden = !waiting;
         /* Asleep: chosen now, applied as it wakes -- it is not woken for it. */
         $('machine-size-hint').textContent = here?.asleep === true
-            ? 'Asleep: kept and applied when it wakes. A disk only grows.'
-            : 'Restarts the machine; its work stays. A disk only grows.';
+            ? 'Asleep: applied when it wakes · a disk only grows'
+            : 'Restarts it · a disk only grows';
         $('machine-later-text').textContent = here?.sizeAtWake ? `Will be applied when it wakes: ${laterWords(here.sizeAtWake)}` : '';
         $('machine-later').hidden = !here?.sizeAtWake;
         $('machine-size-apply').textContent = here?.asleep === true ? 'Keep for its wake' : 'Apply...';
@@ -2654,6 +2660,49 @@
         /* Whether its tool asks before acting -- for a tool that can be given every right in its machine. */
         $('rights-box').hidden = DEVICE || !here?.rights;
         for (const b of $('ask-first').children) b.setAttribute('aria-pressed', String((b.dataset.on === 'true') === (here?.askFirst === true)));
+        void paintConvHand(here);
+        paintConvStates(here);
+    }
+    /* A CONVERSATION'S AT HAND: its machine's three tiles, from its health (memory, disk) and its last hour
+       (/api/history, read at most every 30 s). */
+    const convHandAt = { of: '', at: 0, h: null };
+    async function paintConvHand(here) {
+        const box = $('panel-tiles');
+        if (DEVICE || !here || here.asleep || here.phase !== 'ready') { box.hidden = true; return; }
+        if (convHandAt.of !== here.name || Date.now() - convHandAt.at > 30_000) { convHandAt.of = here.name; convHandAt.at = Date.now(); convHandAt.h = await handHistory(here.name); }
+        if (current !== here.name) return;
+        const h = convHandAt.h; const health = here.health;
+        const tiles = [];
+        const mem = health?.memory;
+        const memUsed = mem?.totalMb ? 100 - (mem.availableMb / mem.totalMb) * 100 : lastOf(h?.memory);
+        if (memUsed !== null && memUsed !== undefined) tiles.push(handTile(uiSaid('set-memory', 'Memory'), memUsed, mem ? uiSaid('set-free-of', '{free} free of {total}', { free: GB(mem.availableMb), total: GB(mem.totalMb) }) : '', h?.memory, levelAt(memUsed)));
+        const diskLeft = health?.disks?.['/']?.availableMb;
+        const diskUsed = lastOf(h?.disk) ?? (diskLeft !== undefined && here.diskGb ? 100 - (diskLeft / (here.diskGb * 1024)) * 100 : null);
+        if (diskUsed !== null) tiles.push(handTile(uiSaid('set-disk', 'Disk'), diskUsed, diskLeft !== undefined ? uiSaid('set-left-of', '{free} left of {total}', { free: GB(diskLeft), total: `${here.diskGb} GB` }) : `${here.diskGb} GB`, h?.disk, levelAt(diskUsed)));
+        const cpu = lastOf(h?.cpu);
+        if (h) tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), h.cpu, levelAt(cpu ?? 0)));
+        for (const t of tiles) t.addEventListener('click', () => { openChapter('machine')?.scrollIntoView({ block: 'start' }); });
+        box.replaceChildren(...tiles); box.hidden = tiles.length === 0;
+    }
+    /* What each folded chapter of a conversation says: its state now. */
+    function paintConvStates(here) {
+        if (DEVICE || !here) return;
+        const join = (...parts) => parts.filter(Boolean).join(' · ');
+        chapterNow('general', join(here.title || here.name, here.group, here.toolLabel ?? here.tool));
+        chapterNow('machine', join(sizeWords(here.memoryMb), uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), here.diskGb ? `${here.diskGb} GB` : ''));
+        const attached = (here.resources ?? []).length; const secrets = $('access-secrets').children.length;
+        chapterNow('access', join(uiSaid('set-attached', '{n} attached', { n: attached }), secrets ? uiSaid(secrets === 1 ? 'set-secret' : 'set-secrets', secrets === 1 ? '1 secret' : '{n} secrets', { n: secrets }) : '', here.offline ? uiSaid('set-offline', 'offline') : ''));
+        const shared = $('share-here').children.length;
+        chapterNow('sharing', shared ? uiSaid(shared === 1 ? 'set-device' : 'set-devices', shared === 1 ? '1 device' : '{n} devices', { n: shared }) : uiSaid('set-no-device', 'No device'));
+        const chatOn = levelsWord('talk-on');
+        chapterNow('chat', join(chatOn ? `${uiSaid('set-chat', 'Chat')} ${chatOn.toLowerCase()}` : '', here.chatName ? `“${here.chatName}”` : ''));
+        const w = here.wakeups?.items ?? [];
+        chapterNow('wakeups', w.length ? uiSaid('set-wakeups-on', '{on} of {n} on', { on: w.filter((x) => x.on).length, n: w.length }) : uiSaid('set-none', 'None'));
+        chapterNow('answerer', here.answerer ? (here.answerer.on ? uiSaid('set-on', 'On') : uiSaid('set-off', 'Off')) : '');
+        const hl = here.health;
+        const wrong = (hl?.problems ?? []).filter((p) => p.level === 'warn' || p.level === 'bad');
+        chapterNow('health', here.asleep ? uiSaid('set-asleep', 'Asleep') : !hl ? uiSaid('set-not-looked', 'Not looked at yet') : join(wrong.length ? wrong[0].text : hl.state === 'Running' ? uiSaid('set-running-well', 'Running · nothing wrong') : hl.state, hl.at ? agoSaid(hl.at) : ''));
+        chapterNow('advanced', uiSaid('set-conv-advanced', 'Archive · reset · delete'));
     }
     for (const b of $('ask-first').children) {
         b.addEventListener('click', async () => {
@@ -3171,7 +3220,7 @@
         if (talk.on) $('talk-declare').textContent = talk.tools
             ? `Then "Ask the tool to use it": it is told to talk to you here, in ${languageName(deviceLang())}.`
             : 'The tools folder (/tools) is not in place yet: the tool cannot be asked.';
-        if (!talk.on && talk.possible === false) $('talk-about').textContent = 'Needs its work folder kept here (it works on its machine\'s disk)';
+        if (!talk.on && talk.possible === false) { $('talk-about').textContent = 'Needs its work folder kept here (it works on its machine\'s disk)'; $('talk-about').hidden = false; }
     }
     for (const b of $('talk-on').children) {
         b.addEventListener('click', async () => {
@@ -3447,7 +3496,7 @@
             const row = document.createElement('div'); row.className = 'wakeup'; row.dataset.kind = w.kind;
             const what = document.createElement('b'); what.textContent = wakeupSays(w);
             const said = document.createElement('p'); said.className = 'hint'; said.textContent = `Typed: ${w.message}`;
-            const last = document.createElement('p'); last.className = 'hint wakeup-last'; last.textContent = w.last ? `Last, ${new Date(w.last.at).toLocaleString()}: ${w.last.what}` : 'Not yet.';
+            const last = document.createElement('p'); last.className = 'hint wakeup-last'; last.textContent = w.last ? `Last: ${agoSaid(w.last.at)} · ${w.last.what}` : 'Not yet.'; last.title = w.last ? new Date(w.last.at).toLocaleString() : '';
             const acts = document.createElement('div'); acts.className = 'row';
             acts.append(modes([['on', 'On'], ['off', 'Off']], w.on ? 'on' : 'off', async (value) => { await post(`${API}/conversations/${encodeURIComponent(current)}/wakeups/${w.id}`, { on: value === 'on' }); await refresh(); paintWakeups(); }, `This wake-up: ${wakeupSays(w)}`));
             const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = 'Remove';
@@ -3535,6 +3584,8 @@
         const about = platformSaid.answerer;
         const mine = conversations.find((x) => x.name === current)?.answerer;
         $('answerer-fields').hidden = !about || !mine;
+        /* None set on this installation: its chapter hidden (an empty section is hidden). */
+        $('chapter-answerer').hidden = !about;
         if (!about || !mine) { $('answerer-about').textContent = 'While you are away, several models can answer the simple questions of the tool. None is set on this installation (CLAVARIUM_ANSWERER_URL, CLAVARIUM_ANSWERER_MODELS).'; return; }
         $('answerer-about').textContent = `While you are away, ${about.models.length > 1 ? `${about.models.length} models answer the simple questions of the tool, when they ALL give the same answer` : 'one model answers the simple questions of the tool'}; otherwise you are asked. Turned on, THE SCREEN OF THIS CONVERSATION IS SENT to: ${about.models.join(', ')}.`;
         /* What is being written is not painted over by a refresh. */
@@ -3601,7 +3652,9 @@
         await refresh();
         await paintPanel();
         $('attach-picker').hidden = !picking;
-        if (picking) { openChapter('access'); $('attach-picker').scrollIntoView({ block: 'nearest' }); }
+        /* The folders button shows the folders: their chapter opened, in its tab. */
+        openChapter('access', { show: !picking });
+        if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
     $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
@@ -4050,9 +4103,13 @@
        of them all; one button sends them one after the other, each by the same route as its own review (the same commit,
        the same target, the same guards). One refused does not hold the
        others back: each says what became of it. */
-    const STATE_SAID = { 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
-    /* How many other branches of a repository are looked at. */
-    const BRANCHES_MORE = 7;
+    const STATE_SAID = { unknown: 'changed: reading…', 'up-to-date': 'up to date', diverged: 'behind: its agent must pull first', 'no-remote': 'no remote', unreachable: 'remote not answering', empty: 'empty' };
+    /* How many repositories are brought up to date with their remote at once, in the background. */
+    const TS_PARALLEL = 3;
+    /* `work(item)` for each, `n` at a time. */
+    const inTurns = async (items, n, work) => { let i = 0; await Promise.all(Array.from({ length: Math.min(n, items.length) }, async () => { while (i < items.length) await work(items[i++]); })); };
+    /* When a known row was true: the time today, else the day. */
+    const asOfText = (at) => { const d = new Date(at); if (!at || Number.isNaN(d.getTime())) return 'not read yet'; return `as of ${d.toDateString() === new Date().toDateString() ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : d.toLocaleDateString()}`; };
     /* What a row is, for the filter: a branch the remote has and that is ahead of it, a branch it does not have, nothing to send. */
     const kindOfRow = (out) => (out?.state !== 'ahead' ? 'none' : out.targetExists === false ? 'new' : 'update');
     /* A branch that could not be read is not "nothing to send": it stays listed, under every filter, with why. */
@@ -4077,16 +4134,21 @@
         let filter = 'update';
         let sending = false; let checking = false;
         let sure = '';
-        let reposDone = 0; let reading = true;
-        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out);
-        const picked = () => rows.filter((r) => r.picked && r.out?.state === 'ahead' && shownRow(r));
+        let reposDone = 0; let reading = true; const notLookedBy = new Map();
+        /* Known rows not read yet, or whose branch moved since, stay in sight until their read says. */
+        const shownRow = (r) => filter === 'all' || kindOfRow(r.out) === filter || unread(r.out) || (r.known && (!r.out || r.out.state === 'unknown'));
+        const picked = () => rows.filter((r) => r.picked && !r.known && r.out?.state === 'ahead' && shownRow(r));
         const label = (r) => (rows.filter((x) => x.name === r.name).length > 1 ? `${r.name} (${r.branch})` : r.name);
         async function look(r) {
             const query = new URLSearchParams();
             if (r.branch) query.set('branch', r.branch);
             if (r.target) query.set('target', r.target);
             const [out, keep] = await Promise.all([readOrSay(`/git/${r.name}/outgoing${query.size ? `?${query}` : ''}`), r.keep ? r.keep : getJson(`/git/${r.name}/keep`, null)]);
-            r.out = out; r.keep = keep; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
+            apply(r, out, keep);
+        }
+        /* A row's fresh review: what the server knows of its checks comes with it. */
+        function apply(r, out, keep) {
+            r.out = out; r.keep = keep; r.known = false; r.branch = out.branch ?? r.branch; r.target = out.target ?? r.target; r.check = null;
             /* What the server knows of this very commit and target: a check still running is followed again; the last
                one that ran is shown with its age (left and come back, even the next day: nothing run again for nothing). */
             if (out.state === 'ahead' && out.head) {
@@ -4122,10 +4184,11 @@
             /* By repositories: how many there are is known from the start, how many branches each has is not. */
             meter.hidden = !reading; meterFill.style.width = `${names.length ? Math.round((reposDone / names.length) * 100) : 100}%`;
             progress.toggleAttribute('data-busy', reading);
-            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Reading the repositories: ${reposDone} of ${names.length}${rows.length ? ` · ${rows.length} branch${rows.length === 1 ? '' : 'es'} found` : ''}`; }
+            if (reading) { progress.dataset.tone = 'warn'; progress.textContent = `Checking with the remotes: ${reposDone} of ${names.length}`; }
             else {
                 const failed = rows.filter((r) => unread(r.out)).length;
-                const tail = failed ? ` · ${failed} not read` : ' · all read';
+                const notLooked = [...notLookedBy.values()].reduce((n, x) => n + x, 0);
+                const tail = `${failed ? ` · ${failed} not read` : ' · all read'}${notLooked ? ` · ${notLooked} older branch${notLooked === 1 ? '' : 'es'} not looked at` : ''}`;
                 progress.dataset.tone = failed ? 'warn' : count('update') + count('new') ? 'ok' : '';
                 progress.textContent = count('update') + count('new') ? `${count('update')} to update · ${count('new')} new${tail}` : `Nothing to send${tail}`;
             }
@@ -4167,15 +4230,17 @@
                 const out = r.out;
                 const ahead = out?.state === 'ahead';
                 row.classList.toggle('off', !ahead);
-                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
+                const tick = el('input'); tick.type = 'checkbox'; tick.checked = r.picked; tick.disabled = !ahead || r.known || sending || checking; tick.setAttribute('aria-label', `Send ${label(r)}`);
                 tick.addEventListener('change', () => { r.picked = tick.checked; sure = ''; paint(); if (!review.hidden) paintReview(); });
-                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''));
+                const who = el('div', 'ts-who'); who.append(el('b', '', r.name), el('small', 'hint', `${out?.remote ? hostOf(out.remote) : out ? 'no remote' : ''}${r.known ? ` · ${asOfText(r.asOf)}` : ''}`));
                 const way = el('div', 'ts-way');
                 /* Its own name even when it could not be read: which branch is missing is said. */
                 const named = out?.branch ?? (unread(out) ? r.branch : '');
                 if (named) {
                     const code = el('code', 'ts-branch', named); code.title = named; way.append(code);
-                    if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
+                    /* Known only: where it goes is said; it is chosen once the row is read. */
+                    if (r.known && out.target) way.append(el('span', 'ts-arrow', '→'), el('code', 'ts-branch', out.target));
+                    else if (['ahead', 'up-to-date', 'diverged'].includes(out.state) && out.target) {
                         way.append(el('span', 'ts-arrow', '→'));
                         const to = el('select'); to.setAttribute('aria-label', `Where ${label(r)} goes`); to.disabled = sending || checking;
                         const names2 = [...(out.branches ?? [])]; if (!names2.includes(out.target)) names2.unshift(out.target);
@@ -4187,6 +4252,7 @@
                 }
                 const size = el('div', 'ts-size');
                 if (!out) size.append(el('span', 'hint busy', 'Reading...'));
+                else if (ahead && r.known) size.append(el('span', '', out.targetExists === false ? 'new branch' : out.count === null || out.count === undefined ? 'some commits' : `${out.count} commit${out.count === 1 ? '' : 's'}`));
                 else if (ahead) {
                     const files = diffFiles(out.diff);
                     /* A branch the remote does not have: "new", not a count against a branch that is not there. */
@@ -4197,6 +4263,7 @@
                 if (r.sending) { const s2 = el('span', 'ts-running'); s2.append(el('span', 'warn', 'Sending…')); state.append(s2); }
                 else if (r.sent) state.append(el('b', r.sent.ok ? 'ok' : 'bad', r.sent.ok ? r.sent.text : '✗ Not sent'));
                 else if (!out) state.append('');
+                else if (r.known && out.state !== 'unknown') state.append(el('span', 'hint busy', ahead ? 'checking…' : `${STATE_SAID[out.state] ?? out.state} · checking…`));
                 else if (!ahead) state.append(el('span', out.state === 'diverged' || out.state === 'unreachable' || out.state === 'error' ? 'bad' : 'hint', STATE_SAID[out.state] ?? out.message ?? out.state));
                 else if (!r.check) state.append(el('span', 'hint', r.picked ? 'to check' : ''));
                 else if (r.check.status === 'running') {
@@ -4369,32 +4436,61 @@
             said.className = `status-line ts-said ${ok === p.length ? 'ok' : 'bad'}`; said.dataset.tone = ok === p.length ? 'ok' : 'bad'; said.hidden = false;
             if (reviewStep) nav.drop(reviewStep);
             /* What is left to send, read again; what became of each stays said. */
-            const kept = new Map(rows.map((r) => [r, r.sent]));
-            await Promise.all(rows.map((r) => look(r)));
+            await inTurns([...new Set(p.map((r) => r.name))], TS_PARALLEL, (name) => readRepo(name));
             /* What went is unticked: nothing is offered again for what is done. */
-            for (const r of rows) { r.sent = kept.get(r); if (r.sent?.ok) r.picked = false; }
+            for (const r of rows) if (r.sent?.ok) r.picked = false;
             paint();
             said.scrollIntoView({ block: 'nearest' });
         });
-        paint();
-        /* Each repository's branch that moved last, then up to BRANCHES_MORE others of its agent: each row shown as soon as it is read. */
-        await Promise.all(names.map(async (name) => {
-            const first = { name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null };
-            rows.push(first);
-            await look(first);
-            first.movedAt = (first.out?.agentBranches ?? []).find((b) => b.name === first.branch)?.movedAt ?? null;
-            first.picked = kindOfRow(first.out) === 'update';
-            const others = (first.out?.agentBranches ?? []).filter((b) => b.name !== first.branch).slice(0, BRANCHES_MORE);
+        /* ONE REPOSITORY READ AFRESH (one fetch, one read, its branches that moved last reviewed): its rows replaced
+           where they were, each keeping what was said or ticked of the same commit. A branch with nothing to send is
+           listed only when it is the one that moved last (or what became of its sending is said); one that could not be
+           read always, with why. */
+        async function readRepo(name) {
+            const [all, keep] = await Promise.all([readOrSay(`/git/${name}/outgoing-all`), getJson(`/git/${name}/keep`, null)]);
+            const before = rows.filter((x) => x.name === name);
+            const at = rows.findIndex((x) => x.name === name);
+            let fresh;
+            if (Array.isArray(all.rows) && all.rows.length) {
+                fresh = all.rows.filter((out, i) => i === 0 || out.state === 'ahead' || unread(out) || before.some((x) => x.branch === out.branch && x.sent)).map((out) => {
+                    const was = before.find((x) => x.branch === out.branch);
+                    const r = { name, out: null, keep, branch: out.branch, target: '', picked: false, check: null, sent: was?.sent ?? null, movedAt: (all.agentBranches ?? []).find((b) => b.name === out.branch)?.movedAt ?? null };
+                    apply(r, out, keep);
+                    /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
+                    r.picked = was && !was.known && was.out?.head === out.head ? was.picked && out.state === 'ahead' : kindOfRow(out) === 'update';
+                    if (was?.check && was.out?.head === out.head && !r.check) r.check = was.check;
+                    return r;
+                });
+                notLookedBy.set(name, all.more ?? 0);
+            } else {
+                /* Not read (the remote did not answer, the read failed) or nothing in it: each known branch says so. */
+                const out = { state: all.state ?? 'error', message: all.message, remote: all.remote ?? before[0]?.out?.remote ?? null };
+                const known = before.filter((x) => x.branch);
+                fresh = (known.length && unread(out) ? known : [{ name, branch: '' }]).map((x) => ({ name, out: { ...out, branch: x.branch || null }, keep, branch: x.branch, target: '', picked: false, check: null, sent: x.sent ?? null, known: false }));
+            }
+            rows.splice(at < 0 ? rows.length : at, before.length, ...fresh);
             paint();
-            await Promise.all(others.map(async (b) => {
-                const r = { name, out: null, keep: first.keep, branch: b.name, target: '', picked: false, check: null, sent: null, movedAt: b.movedAt };
-                await look(r);
-                /* Ticked by one rule for every row: a branch of the remote to update is ticked; a new one is not. */
-                if (r.out?.state === 'ahead' || unread(r.out)) { r.picked = kindOfRow(r.out) === 'update'; rows.splice(rows.findLastIndex((x) => x.name === name) + 1, 0, r); }
-                paint();
-            }));
+        }
+        /* AT ONCE: what is known here (the agent's branches as last read, the remote's as last fetched, the last review
+           of each), no remote asked, no repository read; each row says as of when. Not sendable as it is. */
+        paint();
+        const known = await Promise.all(names.map(async (name) => [name, await getJson(`/git/${name}/known`, null)]));
+        for (const [name, k] of known) {
+            const list = k?.rows ?? [];
+            if (list.length === 0) rows.push({ name, out: null, keep: null, branch: '', target: '', picked: false, check: null, sent: null, known: true });
+            for (const x of list) {
+                const out = { state: x.state, branch: x.branch, target: x.target, targetExists: x.targetExists, count: x.count, head: x.head, remote: k.remote, branches: k.branches };
+                /* As the full read lists them: the one that moved last, then those with something to send. */
+                if (x !== list[0] && x.state !== 'ahead' && x.state !== 'unknown') continue;
+                rows.push({ name, out, keep: null, branch: x.branch, target: x.target, picked: false, check: null, sent: null, movedAt: x.movedAt, known: true, asOf: x.state === 'unknown' ? k.readAt : (k.fetchedAt ?? x.lookedAt) });
+            }
+        }
+        paint();
+        /* THEN, IN THE BACKGROUND: each repository brought up to date with its remote and read, a few at a time; its rows replaced as it comes. */
+        await inTurns(names, TS_PARALLEL, async (name) => {
+            try { await readRepo(name); } catch { /* said by its rows */ }
             reposDone++; paint();
-        }));
+        });
         reading = false;
         paint();
     }
@@ -5334,14 +5430,14 @@
         enterPlace('salon-new', push);
         $('salon-new-title').textContent = editing ? editing.name : 'New room';
         $('salon-new-create').textContent = editing ? 'Save' : 'Create';
-        $('salon-new-remove-card').hidden = !editing;
+        $('salon-new-remove-card').hidden = $('salon-new-advanced-head').hidden = !editing;
         $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
         $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
         salonIn = new Set(editing ? editing.members.filter((m) => m.kind === 'ai').map((m) => m.ref) : []);
         salonHost = editing?.members.find((m) => m.host)?.ref ?? '';
         salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
         try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
-        $('salon-new-boxes-card').hidden = salonBoxList.length === 0;
+        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0;
         paintSalonMembers();
         $('salon-new-name').focus();
     }
@@ -6013,17 +6109,189 @@
         catch (error) { $('operators-error').textContent = error.message; $('operators-error').hidden = false; }
         await paintOperators();
     });
-    /* THE CATEGORIES OF SETTINGS, beside them on a wide screen: one click brings its group into sight; the one in sight is marked. */
-    const settingsNav = [...document.querySelectorAll('#settings-nav button[data-group]')];
-    const markGroup = (key) => { for (const b of settingsNav) b.setAttribute('aria-current', String(b.dataset.group === key)); };
-    for (const b of settingsNav) b.addEventListener('click', () => { document.getElementById(`settings-group-${b.dataset.group}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }); markGroup(b.dataset.group); });
-    $('settings').addEventListener('scroll', () => {
-        const top = $('settings').getBoundingClientRect().top + 60;
-        const groups = [...document.querySelectorAll('#settings .settings-group')];
-        const seen = groups.filter((g) => g.getBoundingClientRect().top <= top).pop() ?? groups[0];
-        if (seen) markGroup(seen.dataset.group);
-    }, { passive: true });
-    markGroup('device');
+    /* THE TABS OF A SETTINGS PAGE (settings redesign, 05-11): its groups -- General, (This device,) Resources, Access,
+       Chat & voice, Automatic, Diagnostics, Advanced: the same names in the same order on every settings page -- one
+       shown at a time. The one last shown is kept on this device. A tab whose group has nothing to show is hidden,
+       the order of the others unchanged. While a search is typed, every group is searched and shown (CSS). */
+    function settingsTabs(sheet) {
+        const nav = sheet?.querySelector('.settings-tabs'); if (!nav) return;
+        const buttons = [...nav.querySelectorAll('button[data-group]')];
+        const groupOf = (key) => sheet.querySelector(`.settings-group[data-group="${key}"]`);
+        const kept = `clavarium-tab-${sheet.id}`;
+        const show = (key, { keep = true } = {}) => {
+            for (const b of buttons) { const on = b.dataset.group === key; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; }
+            for (const g of sheet.querySelectorAll('.settings-group[data-group]')) g.classList.toggle('tab-off', g.dataset.group !== key);
+            sheet.dataset.tab = key;
+            if (keep) try { localStorage.setItem(kept, key); } catch { /* a private window */ }
+            const b = buttons.find((x) => x.dataset.group === key);
+            if (b && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = Math.max(0, b.offsetLeft - (nav.clientWidth - b.offsetWidth) / 2);
+        };
+        /* Hidden: a tab whose chapters are all hidden (Usage, Administrators on this machine alone...). */
+        const refresh = () => {
+            if (sheet.dataset.searching === 'on') return;
+            for (const b of buttons) { const g = groupOf(b.dataset.group); b.hidden = !g || ![...g.querySelectorAll('details.chapter')].some((d) => !d.hidden); }
+            if (buttons.find((b) => b.dataset.group === sheet.dataset.tab)?.hidden) show(buttons.find((b) => !b.hidden)?.dataset.group ?? buttons[0].dataset.group, { keep: false });
+        };
+        for (const b of buttons) b.addEventListener('click', () => { show(b.dataset.group); b.focus(); });
+        nav.addEventListener('keydown', (event) => {
+            const shown = buttons.filter((b) => !b.hidden); const at = shown.findIndex((b) => b.dataset.group === sheet.dataset.tab);
+            const to = { ArrowRight: at + 1, ArrowLeft: at - 1, Home: 0, End: shown.length - 1 }[event.key];
+            if (to === undefined || !shown.length) return;
+            event.preventDefault(); const b = shown[(to + shown.length) % shown.length]; show(b.dataset.group); b.focus();
+        });
+        let first = buttons[0].dataset.group;
+        try { const k = localStorage.getItem(kept); if (buttons.some((b) => b.dataset.group === k)) first = k; } catch { /* as above */ }
+        show(first, { keep: false });
+        sheet.showTab = show; sheet.refreshTabs = refresh;
+        new MutationObserver(() => refresh()).observe(sheet, { subtree: true, attributes: true, attributeFilter: ['hidden'] });
+        refresh();
+    }
+    for (const id of ['settings', 'panel']) settingsTabs($(id));
+
+    /* THE WORDS OF THE SETTINGS PAGES in the screen's language (server/settingswords.mjs, served with the chat's,
+       uiSaid): an element marked data-said="key" keeps its English as the fallback. */
+    function saySettings() {
+        for (const e of document.querySelectorAll('[data-said]')) { e.dataset.en ??= e.textContent; e.textContent = uiSaid(e.dataset.said, e.dataset.en); }
+        for (const b of document.querySelectorAll('button.tip-btn')) b.setAttribute('aria-label', uiSaid('set-why', 'Why'));
+        const s = document.querySelector('#settings .settings-search'); if (s) s.placeholder = uiSaid('set-search', 'Search');
+        const p = document.querySelector('#panel .settings-search'); if (p) p.placeholder = uiSaid('set-search', 'Search');
+    }
+    void readWords().then(saySettings).catch(() => {});
+
+    /* "WHY", BEHIND AN ⓘ (settings redesign, step 3): a row says what it is in one short line; the why behind
+       the ⓘ beside its name, one click away. Any element .tip (hidden) gets its button. */
+    function wireTips(root = document) {
+        for (const tip of root.querySelectorAll('.tip')) {
+            if (tip.dataset.wired) continue; tip.dataset.wired = '1'; tip.hidden = true;
+            const b = document.createElement('button'); b.type = 'button'; b.className = 'tip-btn'; b.textContent = 'ⓘ';
+            b.setAttribute('aria-label', uiSaid('set-why', 'Why')); b.setAttribute('aria-expanded', 'false');
+            b.addEventListener('click', (event) => { event.preventDefault(); event.stopPropagation(); tip.hidden = !tip.hidden; b.setAttribute('aria-expanded', String(!tip.hidden)); });
+            /* Beside the row's name, on its line. */
+            const name = tip.closest('.set-what')?.querySelector(':scope > :is(b, span, label)');
+            if (name) { const line = document.createElement('span'); line.className = 'with-tip'; name.before(line); line.append(name, b); continue; }
+            /* A paragraph of its own: beside the heading or the line above it, else on a line of its own. */
+            let above = tip.previousElementSibling; while (above?.hidden) above = above.previousElementSibling;
+            if (above) { const head = above.querySelector(':scope > b'); if (head) head.after(b); else above.append(b); }
+            else { const line = document.createElement('div'); line.className = 'tip-head'; line.append(b); tip.before(line); }
+        }
+    }
+    wireTips();
+
+    /* WHAT A FOLDED CHAPTER SAYS (settings redesign, step 1): its state now, in a few words, where a description
+       was -- often enough not to open it. */
+    function chapterNow(key, text) {
+        const about = document.querySelector(`details.chapter[data-chapter="${key}"] > summary .chapter-about`);
+        if (about && text !== undefined && text !== null) about.textContent = text;
+    }
+    const agoSaid = (t) => { const m = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60_000)); return m < 1 ? uiSaid('set-just-now', 'just now') : m < 60 ? uiSaid('set-min-ago', '{n} min ago', { n: m }) : m < 48 * 60 ? uiSaid('set-h-ago', '{n} h ago', { n: Math.round(m / 60) }) : uiSaid('set-days-ago', '{n} days ago', { n: Math.round(m / 1440) }); };
+
+    /* AT HAND: three tiles -- memory, disk, CPU -- each its share now, a bar, the last hour in a small line, and
+       what is left in words; a click opens Resources. From what is read already (/api/server, a machine's health,
+       /api/history): no new call to the server. */
+    const levelAt = (p, high = false) => (p >= 95 ? 'bad' : p >= 85 || high ? 'warn' : 'ok');
+    function handTile(label, percent, sub, values, level, reservePercent) {
+        const t = el('button', 'tile'); t.type = 'button'; t.dataset.level = level;
+        const k = el('span', 'tile-k'); k.append(el('b', '', label), el('span', 'tile-n', percent === null ? '—' : `${Math.round(percent)} %`));
+        const bar = el('span', 'tile-bar'); const fill = el('i'); fill.style.width = `${Math.max(0, Math.min(100, percent ?? 0))}%`; bar.append(fill);
+        if (Number.isFinite(reservePercent) && reservePercent > 0 && reservePercent < 100) { const u = el('u'); u.style.width = `${reservePercent}%`; bar.append(u); }
+        t.append(k, bar);
+        const known = (values ?? []).map((v, i) => [i, v]).filter(([, v]) => v !== null && v !== undefined);
+        if (known.length > 1) {
+            const n = values.length - 1; let d = '';
+            for (const [i, v] of known) d += `${d ? 'L' : 'M'}${((i / n) * 100).toFixed(1)},${(22 - (v / 100) * 20).toFixed(1)}`;
+            const svg = svgEl('svg', { viewBox: '0 0 100 22', preserveAspectRatio: 'none', class: 'tile-spark', 'aria-hidden': 'true' });
+            svg.append(svgEl('path', { d, 'vector-effect': 'non-scaling-stroke' })); t.append(svg);
+        }
+        t.append(el('span', 'tile-sub', sub));
+        t.setAttribute('aria-label', `${label}: ${percent === null ? '—' : `${Math.round(percent)} %`}, ${sub}`);
+        return t;
+    }
+    const lastOf = (values) => { for (let i = (values?.length ?? 0) - 1; i >= 0; i -= 1) if (values[i] !== null && values[i] !== undefined) return values[i]; return null; };
+    const handHistory = async (of) => (of ? fetch(`${API}/history?of=${encodeURIComponent(of)}&span=1h`).then((x) => (x.ok ? x.json() : null)).catch(() => null) : null);
+    /* A chip: a dot of its state and a word -- only when it says something. */
+    const handChip = (tone, text, go) => { const c = el(go ? 'button' : 'span', 'hand-chip', text); c.dataset.tone = tone; if (go) { c.type = 'button'; c.addEventListener('click', go); } return c; };
+
+    /* The server's: under the top bar of Settings. */
+    let lastServer = null;
+    async function paintSettingsHand(r = lastServer) {
+        if (DEVICE) return;
+        lastServer = r;
+        $('settings-hand').hidden = false;
+        const h = await handHistory('server');
+        const tiles = [];
+        const go = () => { openChapter('s-resources')?.scrollIntoView({ block: 'start' }); };
+        if (r?.memory) { const m = r.memory; tiles.push(handTile(uiSaid('set-memory', 'Memory'), m.usedPercent, uiSaid('set-free-of', '{free} free of {total}', { free: GB(m.freeMb), total: GB(m.totalMb) }), h?.memory, levelAt(m.usedPercent, r.high?.memory), r.reserve?.memoryMb && m.totalMb ? (r.reserve.memoryMb / m.totalMb) * 100 : null)); }
+        const disk = r?.disk?.disks?.find((d) => d.holds?.includes('machines')) ?? r?.disk?.disks?.[0];
+        if (disk) tiles.push(handTile(uiSaid('set-disk', 'Disk'), disk.usedPercent, uiSaid('set-free-of', '{free} free of {total}', { free: GB(disk.freeMb), total: GB(disk.sizeMb) }), h?.disk, levelAt(disk.usedPercent, r.high?.disk), r.reserve?.diskMb && disk.sizeMb ? (r.reserve.diskMb / disk.sizeMb) * 100 : null));
+        const cpu = lastOf(h?.cpu);
+        if (h) { const most = Math.max(0, ...(h.cpu ?? []).filter((v) => v !== null)); tiles.push(handTile(uiSaid('set-cpu', 'CPU'), cpu, uiSaid('set-highest', 'highest {n} % in 1 h', { n: Math.round(most) }), h.cpu, levelAt(cpu ?? 0))); }
+        for (const t of tiles) t.addEventListener('click', go);
+        $('settings-tiles').replaceChildren(...tiles); $('settings-tiles').hidden = tiles.length === 0;
+        paintSettingsFacts();
+    }
+    /* Its chips: the version, a conversation that is not well, a voice box away. */
+    let handWifi = null;
+    function paintSettingsFacts() {
+        const chips = [];
+        const u = lastUpdates;
+        if (u?.installed) {
+            if (u.available) chips.push(handChip('warn', uiSaid('set-update-out', '{v} is out', { v: u.available.version ?? u.available }), () => { openChapter('s-updates')?.scrollIntoView({ block: 'start' }); }));
+            else if (u.version) chips.push(handChip('ok', uiSaid('set-up-to-date', 'Up to date · {v}', { v: u.version })));
+        }
+        if (handWifi?.using?.ssid) chips.push(handChip('ok', uiSaid('set-wifi-on', 'Wi-Fi · {name}', { name: handWifi.using.ssid })));
+        for (const c of conversations.filter((x) => (x.health?.problems ?? []).some((p) => p.level === 'warn' || p.level === 'bad'))) {
+            const bad = c.health.problems.some((p) => p.level === 'bad');
+            chips.push(handChip(bad ? 'bad' : 'warn', `${c.title || c.name} · ${uiSaid('set-not-well', 'not well')}`, () => select(c.name, { step: true })));
+        }
+        for (const b of (handBoxes ?? []).filter((x) => x.online === false)) chips.push(handChip('off', uiSaid('set-box-away', '{name} offline', { name: b.name })));
+        $('settings-facts').replaceChildren(...chips); $('settings-facts').hidden = chips.length === 0;
+    }
+    let handBoxes = null;
+    $('hand-check').addEventListener('click', () => { const sheet = $('settings'); sheet.showTab?.('automatic'); openChapter('s-updates'); $('updates-check').click(); $('settings-updates-top').scrollIntoView({ block: 'start' }); });
+    $('hand-activity').addEventListener('click', () => { openChapter('s-events')?.scrollIntoView({ block: 'start' }); });
+    $('hand-restart').addEventListener('click', () => { openChapter('s-advanced'); $('server-restarts').scrollIntoView({ block: 'center' }); });
+    /* THE STATE OF EACH FOLDED CHAPTER OF SETTINGS, read from what its own painting left (and three small looks:
+       network, remote screen, the last thing that happened). Painted again when a chapter is folded. */
+    const optionText = (id) => { const s = $(id); return s?.selectedOptions?.[0]?.textContent?.replace(/\s*\(.*\)$/, '') ?? ''; };
+    const levelsWord = (id) => [...($(id)?.children ?? [])].find((b) => b.getAttribute('aria-pressed') === 'true')?.textContent ?? '';
+    async function paintSettingsStates() {
+        if (DEVICE) return;
+        const join = (...parts) => parts.filter(Boolean).join(' · ');
+        chapterNow('s-screen', join(levelsWord('theme'), document.querySelector('#settings-text .text-now')?.textContent));
+        const alerts = $('alerts-state').textContent.trim();
+        chapterNow('s-alerts', alerts.length <= 30 ? alerts : alerts.split(/[.,:;]/)[0]);
+        chapterNow('s-words', join(optionText('words-lang') === 'The language of each device' ? uiSaid('set-lang-device', 'Each device\'s language') : optionText('words-lang'), optionText('chat-window')));
+        const levels = [...document.querySelectorAll('#thread-levels select')].filter((x) => [...x.options].some((o) => /\(default\)/.test(o.textContent)));
+        const changed = levels.filter((x) => !/\(default\)/.test(x.selectedOptions[0]?.textContent ?? '')).length;
+        chapterNow('s-thread', changed ? uiSaid('set-changed', '{n} changed', { n: changed }) : uiSaid('set-as-given', 'As given'));
+        const shortcuts = [...document.querySelectorAll('#settings-shortcuts .list-item b')].map((b) => b.textContent);
+        chapterNow('s-shortcuts', shortcuts.length ? shortcuts.slice(0, 3).join(' · ') + (shortcuts.length > 3 ? ` +${shortcuts.length - 3}` : '') : uiSaid('set-none', 'None'));
+        if ($('binders-agent-lists').value !== '') chapterNow('s-binders', uiSaid('set-binders-max', 'Agents make up to {n}', { n: $('binders-agent-lists').value }));
+        const admins = $('operators-rows').children.length;
+        chapterNow('s-operators', admins ? uiSaid(admins === 1 ? 'set-admin-1' : 'set-admins', admins === 1 ? '1 administrator' : '{n} administrators', { n: admins }) : '');
+        chapterNow('s-backup', uiSaid('set-backup-now', 'Export · import'));
+        const shelf = $('shelf-state').textContent.split(' · ')[0];
+        const keys = $('git-hosts').children.length;
+        chapterNow('s-advanced', join(shelf, uiSaid(keys === 1 ? 'set-git-key' : 'set-git-keys', keys === 1 ? '1 git key' : '{n} git keys', { n: keys }), uiSaid('set-restart', 'restart')));
+        chapterNow('s-about', $('settings-about').textContent);
+        chapterNow('s-logs', uiSaid('set-logs-now', 'Clavarium, machines, system'));
+        const u = lastUpdates;
+        if (u?.installed) chapterNow('s-updates', join(u.available ? uiSaid('set-update-out', '{v} is out', { v: u.available.version ?? u.available }) : uiSaid('set-up-to-date', 'Up to date · {v}', { v: u.version }), optionText('updates-channel').split(' ')[0], optionText('updates-mode').split(',')[0]));
+        else if (u) chapterNow('s-updates', u.version ? `Clavarium ${u.version}` : '');
+        const [wifi, mesh, events] = await Promise.all([
+            fetch(`${API}/wifi`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+            fetch(`${API}/meshcentral`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+            fetch(`${API}/events?limit=1`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        ]);
+        handWifi = wifi;
+        if (wifi) chapterNow('s-network', wifi.using?.ssid ? uiSaid('set-wifi-on', 'Wi-Fi · {name}', { name: wifi.using.ssid }) : (wifi.links ?? []).some((l) => l.kind === 'cable' && l.address) ? uiSaid('set-cable', 'Cable') : uiSaid('set-wifi-off', 'Wi-Fi not in use'));
+        if (mesh) chapterNow('s-remote-screen', mesh.running ? uiSaid('set-on', 'On') : uiSaid('set-off', 'Off'));
+        const last = Array.isArray(events) ? events[0] : null;
+        if (last) chapterNow('s-events', `${agoSaid(last.at)} · ${String(last.text).slice(0, 60)}`);
+        handBoxes = await fetch(`${API}/boxes`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        paintSettingsFacts();
+    }
+    for (const d of document.querySelectorAll('#settings details.chapter')) d.addEventListener('toggle', () => { if (!d.open) void paintSettingsStates(); });
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
         void paintSettingsFeatures().catch(() => {});
@@ -6057,6 +6325,7 @@
         if ($('settings-mesh-top').open) void paintScreen();
         if ($('settings-usage-top').open) void paintUsage();
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
+        await paintSettingsStates();
     }
 
     /* ---------- Dictation, in Settings: two engines, main and backup (server/voice.mjs, dictation-engines.mjs) ---------- */
@@ -6129,6 +6398,8 @@
         if (about.source === 'settings' && about.down) { $('settings-dictation').textContent = `${about.down} down · backup in use`; $('settings-dictation').dataset.tone = 'warn'; }
         /* Its key past its expiry day: not used (voice.mjs); said in red, a dot on the chapter. */
         if (about.source === 'settings' && about.secretExpired) { $('settings-dictation').textContent = 'Key expired: replace it in Assets > Secrets'; $('settings-dictation').dataset.tone = 'bad'; }
+        chapterNow('s-dictation', about.source === 'settings' ? (about.down ? uiSaid('set-dict-backup', 'Backup in use') : about.secretExpired ? uiSaid('set-dict-expired', 'Key expired') : `${uiSaid('set-on', 'On')}${main?.provider ? ` · ${short(main.provider)}` : ''}${backup ? ` · ${uiSaid('set-dict-with-backup', 'with backup')}` : ''}`)
+            : about.source === 'env' ? `${uiSaid('set-on', 'On')} · ${uiSaid('set-dict-server', 'set on the server')}` : uiSaid('set-off', 'Off'));
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
         else if (backup?.secretMissing) dictationSay(`Backup: the secret "${backup.secret}" is gone: choose another key.`);
         if (about.down) dq('main', 'dot').dataset.down = ''; else delete dq('main', 'dot').dataset.down;
@@ -6205,7 +6476,24 @@
     });
     /* "Try it", per engine: a few seconds from this microphone, sent to the engine in its card (nothing saved). */
     let stopTrying = null;
-    const endTry = () => { stopTrying?.(); stopTrying = null; for (const slot of ['main', 'backup']) dq(slot, 'try').textContent = 'Try it'; };
+    /* How loud the microphone is, in five thin bars beside what it says (voice.js: on.level): drawn once a
+       frame; it rises at once and falls slowly. Decorative: the words say the state. */
+    let tryLevels = []; let tryFrame = null;
+    const tryLevel = (slot, n) => {
+        if (!stopTrying || !window.clavariumVoice?.levelBars) return;
+        tryLevels = [Math.max(n, (tryLevels[0] ?? 0) * 0.8), ...tryLevels].slice(0, 3);
+        dq(slot, 'level').hidden = false;
+        tryFrame ??= requestAnimationFrame(() => {
+            tryFrame = null;
+            if (!stopTrying) return;
+            const bars = dq(slot, 'level').children;
+            window.clavariumVoice.levelBars(tryLevels).forEach((h, i) => { if (bars[i]) bars[i].style.transform = `scaleY(${h})`; });
+        });
+    };
+    const endTry = () => {
+        stopTrying?.(); stopTrying = null; tryLevels = [];
+        for (const slot of ['main', 'backup']) { dq(slot, 'try').textContent = 'Try it'; dq(slot, 'level').hidden = true; for (const bar of dq(slot, 'level').children) bar.style.transform = ''; }
+    };
     for (const slot of ['main', 'backup']) dq(slot, 'try').addEventListener('click', async () => {
         if (stopTrying) { endTry(); return; }
         dictationSay(null);
@@ -6220,6 +6508,7 @@
             let spoke = began;
             const stop = await window.clavariumVoice.listen({
                 state: (w) => { if (w === 'transcribing') spoke = Date.now(); if (stopTrying) heard.textContent = words[w] ?? w; },
+                level: (n) => tryLevel(slot, n),
                 phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; heard.title = `${((Date.now() - spoke) / 1000).toFixed(1)} s`; },
                 error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
             }, { to });
@@ -6234,6 +6523,7 @@
         if (!about) return;
         $('instance-name').placeholder = about.defaultName;
         if (document.activeElement !== $('instance-name')) $('instance-name').value = about.given ? about.name : '';
+        chapterNow('s-general', about.name);
     }
     $('instance-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -7195,7 +7485,9 @@
         clearTimeout(serverTimer);
         const r = await fetch(`${API}/server`).then((x) => (x.ok ? x.json() : null)).catch(() => null);
         $('settings-server-top').hidden = !r; $('settings-server').hidden = !r; $('settings-usage-top').hidden = !r || !USAGE_SHOWN;
+        void paintSettingsHand(r);
         if (!r) return;
+        if (r.memory) chapterNow('s-resources', uiSaid('set-res-now', 'Memory {m} % · disk {d} %', { m: Math.round(r.memory.usedPercent), d: Math.round((r.disk?.disks?.[0]?.usedPercent) ?? 0) }));
         void paintCurves($('server-curves'));
         /* The two settings of each: a fixed amount and a share; the larger is kept free. */
         const set = r.settings ?? { ...r.reserve, diskPercent: 0, memoryPercent: 0 };
@@ -10042,8 +10334,7 @@
     }
     $('sleep').addEventListener('click', () => void sleepMachine());
     /* The quick actions at the top of the panel do the same as the Machine chapter's. */
-    $('quick-sleep').addEventListener('click', () => void sleepMachine());
-    $('quick-restart').addEventListener('click', () => { leavePanel(); void restartMachine(false); });
+    $('hand-terminal').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     $('quick-wake').addEventListener('click', () => { leavePanel(); seeTerminal(); });
     async function rebuild() {
         const name = current;

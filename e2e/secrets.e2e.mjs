@@ -24,6 +24,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.page.locator('#assets-close').click();
     /* Handed to this conversation's tool from Access, in two taps. */
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#attach-open').click();
     await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
     await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
@@ -43,6 +44,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.sees('after=[sk-not-shown-again]');
 
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Detach' }).click();
     await me.until('it is no longer handed', async () => (await me.page.locator('#access-secrets .folder').count()) === 0);
     await me.page.goBack();
@@ -74,6 +76,7 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
     assert.equal(await me.page.locator('#secret-lines').isVisible(), false, 'back to one line for the next one');
     await me.page.locator('#assets-close').click();
     await me.page.locator('#folders').click();
+    await me.chapter('access');
     await me.page.locator('#attach-open').click();
     await me.page.locator('#attach-rows .folder[data-name="DEPLOY_KEY"]').locator('button', { hasText: 'Use' }).click();
     await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="DEPLOY_KEY"]').count()) === 1);

@@ -59,6 +59,8 @@
  *   POST /api/updates/apply                 { version }: update to the version that is out (in the background)
  *   POST /api/updates/back                  { version }: go back to a release that is kept (in the background)
  *   GET  /api/git/<name>/outgoing?target=<branch>&branch=<branch>   what would go from the agent's branch, to that branch of the remote
+ *   GET  /api/git/<name>/known              To send at once: what is known here, no remote asked, no repository read
+ *   GET  /api/git/<name>/outgoing-all       To send: one fetch, one read, the branches that moved last reviewed
  *   GET  /api/git/<name>/graph              the branch diagram: branches and their last commits
  *   GET  /api/git/<name>/commit?id=<sha>    one commit, as a review shows it (&base=<sha>: the commits from base to it)
  *   POST /api/git/<name>/push               {head, target?, sure?}: exactly that reviewed commit, to exactly that branch
@@ -381,10 +383,12 @@ export async function handleApi(request, response, conversations, headers, resou
             const answered = /^\/api\/conversations\/([^/]+)\/answerer\/log$/.exec(pathname);
             if (answered && answerer) return send(200, answerer.log(decodeURIComponent(answered[1]))), true;
             /* A repository: where its commits go, and what would go now. */
-            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/keep)?$/.exec(pathname);
+            const repo = /^\/api\/git\/([a-z0-9-]{1,32})(\/outgoing|\/outgoing-all|\/known|\/keep)?$/.exec(pathname);
             const drawn = /^\/api\/git\/([a-z0-9-]{1,32})\/(graph|commit)$/.exec(pathname);
             if (drawn && gitReview) return send(200, drawn[2] === 'graph' ? await gitReview.graph(drawn[1]) : await gitReview.commit(drawn[1], query.get('id'), query.get('base'))), true;
             if (repo && repo[2] === '/keep' && gitKeeper) return send(200, gitKeeper.about(repo[1])), true;
+            if (repo && repo[2] === '/known' && gitReview) return send(200, await gitReview.known(repo[1])), true;
+            if (repo && repo[2] === '/outgoing-all' && gitReview) return send(200, await gitReview.outgoingAll(repo[1])), true;
             if (repo && gitReview) return send(200, repo[2] ? await gitReview.outgoing(repo[1], { target: query.get('target') ?? undefined, branch: query.get('branch') ?? undefined }) : gitReview.settings(repo[1])), true;
             const watched = /^\/api\/conversations\/([^/]+)\/signin$/.exec(pathname);
             if (watched && signin) {

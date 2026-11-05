@@ -1,0 +1,33 @@
+/* THE WORDS OF THE SETTINGS PAGES in French (settings redesign, 05-11); English is in the page (web/index.html,
+   web/app.js, uiSaid). Served with the chat screen's words (/api/talk/words, talk.mjs), as Features' are, so the
+   owner's own words may replace any of them. French says « vous ». One short line each. */
+export const SETTINGS_WORDS_FR = {
+    'set-tab-general': 'Général', 'set-tab-device': 'Cet appareil', 'set-tab-resources': 'Ressources', 'set-tab-access': 'Accès',
+    'set-tab-chat': 'Chat et voix', 'set-tab-automatic': 'Automatique', 'set-tab-diagnostics': 'Diagnostics', 'set-tab-advanced': 'Avancé',
+    'set-ch-general': 'Général', 'set-ch-machine': 'Machine', 'set-ch-access': 'Accès', 'set-ch-sharing': 'Partage', 'set-ch-chat': 'Chat',
+    'set-ch-wakeups': 'Réveils', 'set-ch-answerer': 'Répondeur', 'set-ch-health': 'Santé', 'set-ch-advanced': 'Avancé',
+    'set-ch-s-general': 'Général', 'set-ch-s-about': 'À propos', 'set-ch-s-screen': 'Écran', 'set-ch-s-alerts': 'Alertes',
+    'set-ch-s-resources': 'Ressources', 'set-ch-s-operators': 'Administrateurs', 'set-ch-s-network': 'Réseau', 'set-ch-s-remote-screen': 'Écran à distance',
+    'set-ch-s-words': 'Écran du chat', 'set-ch-s-dictation': 'Dictée', 'set-ch-s-shortcuts': 'Raccourcis', 'set-ch-s-thread': 'Événements du chat',
+    'set-ch-s-updates': 'Mises à jour', 'set-ch-s-binders': 'Classeurs', 'set-ch-s-events': 'Activité', 'set-ch-s-logs': 'Journaux',
+    'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
+    'set-check-updates': 'Chercher une mise à jour', 'set-activity': 'Activité', 'set-restart-dots': 'Redémarrer…', 'set-terminal': 'Terminal',
+    'set-search': 'Chercher', 'set-why': 'Pourquoi',
+    'set-memory': 'Mémoire', 'set-disk': 'Disque', 'set-cpu': 'Processeur',
+    'set-free-of': '{free} libres sur {total}', 'set-left-of': '{free} restants sur {total}', 'set-highest': 'au plus {n} % en 1 h',
+    'set-core': '1 cœur', 'set-cores': '{n} cœurs',
+    'set-update-out': '{v} est sortie', 'set-up-to-date': 'À jour · {v}', 'set-wifi-on': 'Wi-Fi · {name}', 'set-wifi-off': 'Wi-Fi non utilisé', 'set-cable': 'Câble',
+    'set-not-well': 'ne va pas bien', 'set-box-away': '{name} hors ligne',
+    'set-just-now': 'à l\'instant', 'set-min-ago': 'il y a {n} min', 'set-h-ago': 'il y a {n} h', 'set-days-ago': 'il y a {n} jours',
+    'set-on': 'Activé', 'set-off': 'Désactivé', 'set-none': 'Aucun', 'set-changed': '{n} modifiés', 'set-as-given': 'Comme livrés',
+    'set-lang-device': 'La langue de chaque appareil', 'set-res-now': 'Mémoire {m} % · disque {d} %',
+    'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs',
+    'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
+    'set-logs-now': 'Clavarium, machines, système',
+    'set-dict-backup': 'Secours en service', 'set-dict-expired': 'Clé expirée', 'set-dict-with-backup': 'avec secours', 'set-dict-server': 'réglée sur le serveur',
+    'set-attached': '{n} joints', 'set-secret': '1 secret', 'set-secrets': '{n} secrets', 'set-offline': 'hors ligne',
+    'set-device': '1 appareil', 'set-devices': '{n} appareils', 'set-no-device': 'Aucun appareil', 'set-chat': 'Chat',
+    'set-wakeups-on': '{on} sur {n} actifs', 'set-asleep': 'Endormie', 'set-not-looked': 'Pas encore regardée',
+    'set-running-well': 'En marche · rien d\'anormal', 'set-conv-advanced': 'Archiver · remettre à neuf · supprimer',
+};
+export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});
