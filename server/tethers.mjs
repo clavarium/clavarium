@@ -31,19 +31,41 @@ const AGENT = 'conversation:';
 export const USB_DEVICE = 'usb-device';
 /* Accepted calls whose result is awaited, at most (an act that never ends is forgotten after these). */
 const ACTING_MAX = 200;
+/* Notices already said (their ids), at most: each said once, across restarts. */
+const NOTICES_MAX = 1000;
+
+/* SOMETHING THAT HAPPENED LATER to what an agent did (Tether's notices: a mail that came back, a scheduled
+   send that failed, an invitation declined). One short head per kind, said before Tether's own sentence;
+   a failure, a bounce, a decline is a warning (needs the person), a delay or a late send is news. */
+const NOTICE_HEADS = {
+    'mail.bounced': 'Mail came back',
+    'mail.delayed': 'Mail delayed',
+    'mail.send-failed': 'Mail not sent',
+    'mail.later-failed': 'Scheduled mail not sent',
+    'mail.later-unsure': 'Scheduled mail maybe sent',
+    'mail.later-late': 'Scheduled mail sent late',
+    'mail.sent-late': 'Mail sent late',
+    'mail.later-draft-kept': 'Scheduled mail sent, draft kept',
+    'calendar.declined': 'Invitation declined',
+};
+const NOTICE_INFO = /\.(delayed|later-late|sent-late)$/;
+export const noticeHead = (kind) => NOTICE_HEADS[kind] ?? 'Later news';
+export const noticeWarns = (kind) => !NOTICE_INFO.test(String(kind ?? ''));
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered; #ended = new Map(); #acting = [];
+    #keeper; #resources; #conversations; #secrets; #dockets; #timers = []; #changes = 0; #seen = new Map(); #offered; #noticed; #ended = new Map(); #acting = [];
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
 
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
-       `secrets`: the vault, read by name for a connector only (reveal). */
-    constructor({ dataDir, resources, conversations, secrets, connectors, now = () => Date.now() }) {
-        this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets;
+       `secrets`: the vault, read by name for a connector only (reveal). `dockets`: { on(name), post(name,
+       {kind, text, data}) } (dockets.mjs): what wakes an agent told of a notice. `make`: the keeper (tests). */
+    constructor({ dataDir, resources, conversations, secrets, connectors, dockets = null, now = () => Date.now(), make = keeper }) {
+        this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets; this.#dockets = dockets;
         this.#offered = new JsonFile(`${dataDir}/tether-offered.json`, []);
-        this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now, ...(connectors ? { connectors } : {}) });
+        this.#noticed = new JsonFile(`${dataDir}/tether-notices-seen.json`, []);
+        this.#keeper = make(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), notify: (n) => this.#notified(n), now, ...(connectors ? { connectors } : {}) });
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
@@ -126,6 +148,36 @@ export class Tethers {
         const failed = l.ok === false;
         const text = failed ? `Failed: ${call.verb}${l.error ? ` — ${l.error}` : ''}` : `Done: ${call.verb}`;
         try { this.announce(call.name, { kind: 'tether-done', text, topic: 'Demande', ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+    }
+
+    /* A NOTICE (Tether calls `notify`): said once in the thread of the conversation whose agent did it,
+       and that agent woken through its docket where its chat is on (elsewhere its next Tether call
+       tells it: Tether puts what is new first in its answer). Each notice id kept, so a notice handed
+       twice -- or again after a restart -- is said once. An agent that is no conversation of this server: nothing. */
+    #notified(n) {
+        const id = String(n?.id ?? '');
+        const who = String(n?.agent ?? '');
+        if (!id || !who.startsWith(AGENT)) return;
+        const name = who.slice(AGENT.length);
+        let names;
+        try { names = this.#conversations(); } catch { return; }
+        if (!name || !names.includes(name)) return;
+        const seen = this.#noticed.get();
+        if (!Array.isArray(seen) || seen.includes(id)) return;
+        try { this.#noticed.set([...seen, id].slice(-NOTICES_MAX)); } catch { /* said anyway, this once */ }
+        const kind = String(n.kind ?? '');
+        const head = noticeHead(kind);
+        const warns = noticeWarns(kind);
+        const said = String(n.text ?? '').trim();
+        const where = n.target?.title ? ` (${n.target.title})` : '';
+        const text = `${head}${where}${said ? `: ${said}` : ''}`;
+        try { this.announce?.(name, { kind: 'tether-notice', text, topic: 'Notice', ...(warns ? { tone: 'warn', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        try {
+            if (this.#dockets?.on(name)) {
+                this.#dockets.post(name, { kind: 'tether-notice', text: `${text}${/[.!?]$/.test(text) ? '' : '.'} See more: tether notices.`,
+                    data: { notice: id, kind, ...(n.ref ? { ref: String(n.ref) } : {}), ...(n.target?.id ? { target: String(n.target.id) } : {}) } });
+            }
+        } catch { /* its docket: its next Tether call tells it */ }
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.

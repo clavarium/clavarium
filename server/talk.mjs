@@ -166,6 +166,9 @@ export const EVENT_LEVELS = Object.freeze({
        Assets, or by the agent) is a trace that carries the call's id, so the buttons close with it. */
     'tether-demande': 'needs-you',
     'tether-done': 'trace',
+    /* Something that happened later to what its agent did (a mail that came back, an invitation declined):
+       news, raised to needs-you when it failed or was refused (tethers.mjs). */
+    'tether-notice': 'news',
 });
 const TONES = ['warn', 'bad'];
 /* Bounds of a line: its text, its group (topic), what the grouped line says of it (brief), its buttons. */

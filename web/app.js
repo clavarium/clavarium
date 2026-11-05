@@ -3387,6 +3387,7 @@
         ['docket-failed', 'Could not be handled', 'Said failed by the tool, with why'],
         ['docket-unhandled', 'Not handled', 'Told three times, never said done'],
         ['docket-reminder', 'Reminder set', 'A reminder the tool set itself'],
+        ['tether-notice', 'Later news', 'A mail came back, an invitation was declined'],
         ['machine-problem', 'Machine in trouble', 'Memory, disk, no answer, a failed restart'],
         ['machine-ok', 'Machine well again', 'What was wrong with it went away'],
         ['restarted', 'Machine restarted', 'Restarted or built again'],
