@@ -56,7 +56,7 @@ export const tmuxOf = (name) => `${process.env.FAKE_TMUX_PREFIX ?? 'e2e-'}clv-${
 /* Starts everything; `t.after` takes it all down, tmux servers included. */
 /* `tools`: other tools than the two plain shells (the pictures of the site are
    taken on this bench, with the names a reader knows). */
-export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs, historyEveryMs } = {}) {
+export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', microphone, mailReader, tools, answerFetcher, alertSend, serverRoomMs, historyEveryMs, tetherTargets } = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'clv-e2e-'));
     /* A speech-to-text engine that hears the same sentence whatever it is sent. */
     /* `engineKeys`: the authorization each request carried (Settings' key reaches the engine, and only it). */
@@ -91,6 +91,13 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
        skipped it does. */
     mkdirSync(join(dir, 'data'), { recursive: true });
     writeFileSync(join(dir, 'data', 'features.json'), JSON.stringify({ welcomeDone: true }));
+    /* `tetherTargets`: Tether targets there from the start (a mailbox that leads nowhere: what is checked is the
+       request and its decision, never a send). Tether's own store, as it writes it. */
+    if (tetherTargets) {
+        mkdirSync(join(dir, 'data', 'tether'), { recursive: true });
+        const targets = Object.fromEntries(tetherTargets.map((x) => [x.id, { secrets: {}, config: {}, grants: {}, created: new Date().toISOString(), ...x }]));
+        writeFileSync(join(dir, 'data', 'tether', 'state.json'), JSON.stringify({ v: 1, targets, stopped: {} }));
+    }
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true, gitSsh,
         /* A test machine may have little free disk: no reserve beyond the cap. */

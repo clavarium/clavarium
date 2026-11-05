@@ -22,6 +22,7 @@
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-tether/host';
 import { JsonFile } from './store.mjs';
+import { demandeView } from './demandes.mjs';
 
 export const FOLDER = '.tether';
 /* The keeper takes what the agents asked, this often. */
@@ -30,7 +31,7 @@ const AGENT = 'conversation:';
 export const USB_DEVICE = 'usb-device';
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered;
+    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered; #ended = new Map();
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
@@ -44,7 +45,12 @@ export class Tethers {
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
-        this.#keeper.onChange(() => { this.#changes++; this.#tellNew(); });
+        this.#keeper.onChange((what) => {
+            /* How a call ended (yes, always, no, timeout, withdrawn, stopped): said on the line that closes its card. */
+            const end = what?.approvals;
+            if (end?.op === 'end' && end.id) this.#ended.set(end.id, String(end.decision ?? ''));
+            this.#changes++; this.#tellNew();
+        });
         /* A device plugged into the owner's computer: one target, always there, flashed from the
            owner's browser (Tether's device connector). The owner gives it to a conversation as any other. */
         try {
@@ -70,7 +76,10 @@ export class Tethers {
             this.#seen.set(r.id, { name, verb: r.verb ?? 'action' });
             const what = [r.verb ?? 'action', r.detail].filter(Boolean).join(' ');
             const text = [what, r.target?.title ? `(${r.target.title})` : '', r.why ? `-- ${r.why}` : ''].filter(Boolean).join(' ');
-            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`] }); } catch { /* its chat is off */ }
+            /* `request`: the card Parley draws (demandes.mjs); the text and its buttons stay for an older screen. */
+            let request;
+            try { request = demandeView(r); } catch { request = undefined; }
+            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
         }
         /* An approved call only the owner's browser can do (a device to flash): said once, with where to do it. */
         let jobs = [];
@@ -87,8 +96,11 @@ export class Tethers {
         for (const [id, info] of [...this.#seen]) {
             if (live.has(id)) continue;
             this.#seen.delete(id);
-            try { this.announce(info.name, { kind: 'tether-done', text: `Request handled: ${info.verb}`, topic: 'Demande', brief: id }); } catch { /* its chat is off */ }
+            const outcome = this.#ended.get(id) ?? '';
+            this.#ended.delete(id);
+            try { this.announce(info.name, { kind: 'tether-done', text: `Request handled: ${info.verb}${outcome ? ` (${outcome})` : ''}`, topic: 'Demande', brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
         }
+        for (const id of [...this.#ended.keys()]) if (!this.#seen.has(id)) this.#ended.delete(id);
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.

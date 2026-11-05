@@ -156,6 +156,7 @@ import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEAD
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
+import { demandeView } from './demandes.mjs';
 
 const BODY_MAX = 16 * 1024;
 /* A setup file travels inside the JSON of a request: room for it, escaped. */
@@ -297,7 +298,13 @@ export async function handleApi(request, response, conversations, headers, resou
             if (pathname === '/api/accounts' && accounts) return send(200, { supported: accounts.supported() }), true;
             /* Assets > Access: the targets, who was given each at which level, the
                calls waiting, and the recent journal -- all the page needs to read. */
-            if (pathname === '/api/tether' && tethers) { const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, ''); return send(200, { given: tethers.given(), changes: tethers.changes(), ...(r.data ?? {}) }), true; }
+            /* Each call waiting carries `view`: the card Parley draws for it (demandes.mjs), the same as in the thread. */
+            if (pathname === '/api/tether' && tethers) {
+                const r = await tethers.act('state', { agent: query.get('agent') ?? undefined }, '');
+                const data = r.data ?? {};
+                const approvals = Array.isArray(data.approvals) ? data.approvals.map((q) => { try { return { ...q, view: demandeView(q) }; } catch { return q; } }) : data.approvals;
+                return send(200, { given: tethers.given(), changes: tethers.changes(), ...data, ...(approvals ? { approvals } : {}) }), true;
+            }
             /* Every device, each with all it was given. */
             if (pathname === '/api/devices' && sharing) return send(200, sharing.devices.all()), true;
             if (pathname === '/api/git-keys' && gitAccess) return send(200, gitAccess.keys()), true;

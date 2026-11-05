@@ -174,6 +174,8 @@ const TOPIC_MAX = 40;
 const BRIEF_MAX = 60;
 const ACTIONS_MAX = 4;
 const ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
+const REQUEST_MAX = 8000;
+const OUTCOMES = ['yes', 'always', 'no', 'timeout', 'withdrawn', 'stopped'];
 /* Where the person's files go, in the bridge folder; one folder per file, named by an id. */
 const FILES = 'files';
 const ATTACHED = new RegExp(`^/work/\\${FOLDER}/${FILES}/([0-9a-f-]{36})/([^/]+)$`);
@@ -574,7 +576,7 @@ export class Talk {
        Only where the chat is on; never counted as unread (the page counts
        the tool's messages only); at most SYSTEM_MAX kept. Resolves with the
        line kept, or null. `actions`: ids the page maps to buttons. */
-    event(name, { kind, text, level, tone, topic, brief, actions = [] } = {}) {
+    event(name, { kind, text, level, tone, topic, brief, actions = [], request, outcome } = {}) {
         if (!Object.hasOwn(EVENT_LEVELS, kind)) throw new RangeError(`No such kind of event: ${kind}`);
         const said = String(text ?? '').trim();
         if (!said) return null;
@@ -589,6 +591,10 @@ export class Talk {
             ...(topic ? { topic: String(topic).slice(0, TOPIC_MAX) } : {}),
             ...(brief ? { brief: String(brief).slice(0, BRIEF_MAX) } : {}),
             actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && ACTION.test(a)).slice(0, ACTIONS_MAX),
+            /* A request's card, as Parley draws it (demandes.mjs): plain data, bounded. */
+            ...(request && typeof request === 'object' && !Array.isArray(request) && JSON.stringify(request).length <= REQUEST_MAX ? { request } : {}),
+            /* How the call a line closes ended (tether-done): yes, always, no, timeout, withdrawn, stopped. */
+            ...(OUTCOMES.includes(outcome) ? { outcome } : {}),
         };
         return this.#line(name, line);
     }
