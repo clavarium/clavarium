@@ -4825,7 +4825,7 @@
             cardSteps ??= P.stepper({ open: (name, close) => nav.over(`demande-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } });
             for (const q of approvals) {
                 if (!q.view) continue;
-                const view = withWho && q.agent?.name ? { ...q.view, sub: [q.agent.name, q.view.sub].filter(Boolean).join(' · ') } : q.view;
+                const view = withWho && q.agent?.name ? { ...q.view, sub: [q.agent.name, ...(Array.isArray(q.view.sub) ? q.view.sub : [q.view.sub])].filter(Boolean) } : q.view;
                 box.append(P.requestCard(view, { act, words, steps: cardSteps, host: document.body }));
             }
         });

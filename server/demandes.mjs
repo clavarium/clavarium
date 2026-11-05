@@ -15,15 +15,17 @@
 export const HOLD_S = 5;
 const KINDS = new Set(['mail', 'calendar', 'contacts', 'files', 'terminal', 'browser', 'screen', 'device']);
 
-const hhmm = (when) => /[T ](\d{2}:\d{2})/.exec(String(when ?? ''))?.[1] ?? '';
-const dayWords = (when) => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(when ?? '')); return m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], 12)).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' }) : String(when ?? ''); };
-const span = (from, to) => [hhmm(from), hhmm(to)].filter(Boolean).join('–');
-const whenWords = (from, to) => [dayWords(from), span(from, to)].filter(Boolean).join(' · ');
+/* EACH TEXT A WORD AND ITS VALUES ({k, v}), said by each screen in its own language (Parley's
+ * dictionary, the req-* words): the interface language may be each device's, so none is chosen
+ * here. Data stays as it is (subjects, addresses, names, paths); a day and time is {at, end} (ISO),
+ * written by the screen the locale's way; a count picks its word, one or several. */
+const w = (k, v) => (v ? { k, v } : { k });
+const count = (n, key) => w(n === 1 ? `${key}-one` : key, { count: n });
+const when = (at, end) => (/^\d{4}-\d{2}-\d{2}/.test(String(at ?? '')) ? { at: String(at), ...(end ? { end: String(end) } : {}) } : String(at ?? ''));
 const nameOfAddr = (a) => { const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>/.exec(String(a ?? '')); return m && m[1] ? m[1] : String(a ?? '').split('@')[0]; };
-const subj = (s) => (s ? `“${s}”` : 'a message');
-const sizeOf = (kb) => (kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb} KB`);
-const filesLine = (files) => (files?.length ? files.map((f) => `${f.name}${f.kb ? ` (${sizeOf(f.kb)})` : ''}`).join(', ') : '');
-const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+const quoted = (s, none) => (s ? w('req-quoted', { text: String(s) }) : w(none));
+const sizeOf = (kb) => (kb >= 1024 ? w('req-size-mb', { n: Math.round((kb / 1024) * 10) / 10 }) : w('req-size-kb', { n: kb }));
+const filesLine = (files) => ({ list: (files ?? []).map((f) => (f.kb ? w('req-file-size', { name: String(f.name), size: sizeOf(f.kb) }) : String(f.name))) });
 /* Whom: the first, and how many more. */
 const whom = (list) => (list.length ? `${list[0]}${list.length > 1 ? ` +${list.length - 1}` : ''}` : '');
 /* The body as it will read: the Markdown marks taken off. */
@@ -36,95 +38,100 @@ export function demandeView(q) {
     const own = String(c.self ?? '').split('@')[1] ?? '';
     const outside = (list) => (own ? (list ?? []).filter((x) => !String(x).toLowerCase().endsWith(`@${own}`)) : []);
     const chips = (list, ext = []) => (list ?? []).map((x) => ({ text: String(x), ...(ext.includes(x) ? { ext: true } : {}) }));
+    const fact = (key, value) => [w(`req-fact-${key}`), value];
     const where = q?.target?.title ?? '';
-    const v = { kind, title: '', sub: '', risk: [], facts: [], irreversible: false, yes: 'Accept' };
+    const v = { kind, title: '', risk: [], facts: [], irreversible: false, yes: 'accept' };
     const sub = [];
+    const raw = (action) => `${action} ${q?.detail ?? ''}`.trim();
     if (c.kind === 'mail') {
         const recipients = [...(c.to ?? []), ...(c.cc ?? []), ...(c.bcc ?? [])];
         const ext = outside(recipients);
         const sending = ['send', 'reply', 'forward'].includes(c.action);
-        if (sending && ext.length) v.risk.push('Goes outside your domain');
-        const sendWord = c.draft ? 'Save draft' : c.at ? 'Schedule' : 'Send';
+        if (sending && ext.length) v.risk.push(w('req-risk-outside'));
+        const sendWord = c.draft ? 'save-draft' : c.at ? 'schedule' : 'send';
         const to = whom(c.to ?? []);
-        if (c.action === 'send') { v.title = c.draft ? `Draft ${subj(c.subject)}${to ? ` to ${to}` : ''}` : `${sendWord} ${subj(c.subject)}${to ? ` to ${to}` : ''}`; v.yes = sendWord; }
-        else if (c.action === 'reply') { v.title = `${c.all ? 'Reply to all on' : 'Reply to'} ${about.from ? nameOfAddr(about.from) : 'a message'}${about.subject ? ` on “${about.subject}”` : ''}`; v.yes = sendWord; }
+        const subject = quoted(c.subject, 'req-a-message');
+        const aboutSubject = quoted(about.subject, 'req-a-message');
+        if (c.action === 'send') { const verb = c.draft ? 'draft' : c.at ? 'schedule' : 'send'; v.title = w(`req-mail-${verb}${to ? '-to' : ''}`, { subject, ...(to ? { to } : {}) }); v.yes = sendWord; }
+        else if (c.action === 'reply') { v.title = w(`req-mail-reply${c.all ? '-all' : ''}${about.subject ? '-on' : ''}`, { who: about.from ? nameOfAddr(about.from) : w('req-a-message'), ...(about.subject ? { subject: quoted(about.subject) } : {}) }); v.yes = sendWord; }
         else if (c.action === 'forward') {
-            v.title = `Forward ${subj(about.subject)}${to ? ` to ${to}` : ''}`; v.yes = c.draft ? 'Save draft' : 'Forward';
+            v.title = w(`req-mail-forward${to ? '-to' : ''}`, { subject: aboutSubject, ...(to ? { to } : {}) }); v.yes = c.draft ? 'save-draft' : 'forward';
             const k = String(c.keep ?? 'all').toLowerCase();
-            v.facts.push(['Keeps', /^(none|false|no)$/.test(k) ? 'without its files' : /^(all|true|yes|)$/.test(k) ? (about.files?.length ? filesLine(about.files) : 'its files') : String(c.keep)]);
-        } else if (c.action === 'move') { v.title = `Move ${subj(about.subject)} to ${c.mailbox ?? 'a folder'}`; v.yes = 'Move'; }
-        else if (c.action === 'flag') { v.title = `Mark ${subj(about.subject)} ${c.flag ?? ''}`.trim(); v.yes = 'Mark'; }
-        else if (c.action === 'delete') { v.title = `Delete ${subj(about.subject)}`; v.yes = 'Delete'; v.irreversible = true; }
-        else v.title = `${c.action ?? 'mail'} ${q?.detail ?? ''}`.trim();
+            v.facts.push(fact('keeps', /^(none|false|no)$/.test(k) ? w('req-keeps-none') : /^(all|true|yes|)$/.test(k) ? (about.files?.length ? filesLine(about.files) : w('req-keeps-files')) : String(c.keep)));
+        } else if (c.action === 'move') { v.title = w('req-mail-move', { subject: aboutSubject, folder: c.mailbox ?? w('req-a-folder') }); v.yes = 'move'; }
+        else if (c.action === 'flag') { v.title = w('req-mail-flag', { subject: aboutSubject, flag: String(c.flag ?? '') }); v.yes = 'mark'; }
+        else if (c.action === 'delete') { v.title = w('req-mail-delete', { subject: aboutSubject }); v.yes = 'delete'; v.irreversible = true; }
+        else v.title = raw(c.action ?? 'mail');
         if (sending && !c.draft && ext.length) v.irreversible = true;
-        if (about.from && c.action !== 'reply') v.facts.push(['From', String(about.from)]);
-        if (about.date && !sending) v.facts.push(['Date', String(about.date)]);
-        if (c.to?.length) v.facts.push(['To', chips(c.to, ext)]);
-        if (c.cc?.length) v.facts.push(['Cc', chips(c.cc, ext)]);
-        if (c.bcc?.length) v.facts.push(['Bcc', chips(c.bcc, ext)]);
-        if (c.files?.length) v.facts.push(['Joined', filesLine(c.files)]);
-        if (c.at) v.facts.push(['Leaves', `${whenWords(c.at)} (waits in Drafts)`]);
+        if (about.from && c.action !== 'reply') v.facts.push(fact('from', String(about.from)));
+        if (about.date && !sending) v.facts.push(fact('date', when(about.date)));
+        if (c.to?.length) v.facts.push(fact('to', chips(c.to, ext)));
+        if (c.cc?.length) v.facts.push(fact('cc', chips(c.cc, ext)));
+        if (c.bcc?.length) v.facts.push(fact('bcc', chips(c.bcc, ext)));
+        if (c.files?.length) v.facts.push(fact('joined', filesLine(c.files)));
+        if (c.at) v.facts.push(fact('leaves', w('req-leaves', { when: when(c.at) })));
         if (where) sub.push(where);
-        if (c.body) { const lines = String(c.body).split('\n').length; sub.push(plural(lines, 'line')); v.quote = plain(c.body); }
-        if (c.files?.length) sub.push(plural(c.files.length, 'attachment'));
+        if (c.body) { sub.push(count(String(c.body).split('\n').length, 'req-lines')); v.quote = plain(c.body); }
+        if (c.files?.length) sub.push(count(c.files.length, 'req-attachments'));
     } else if (c.kind === 'calendar') {
-        const answer = { accept: 'Accept', yes: 'Accept', decline: 'Decline', no: 'Decline', refuse: 'Decline', tentative: 'Maybe', maybe: 'Maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
+        const answer = { accept: 'accept', yes: 'accept', decline: 'decline', no: 'decline', refuse: 'decline', tentative: 'maybe', maybe: 'maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
         const was = c.action === 'create' ? null : about;
         const ev = c.action === 'create' ? c : { ...about, ...Object.fromEntries(Object.entries(c).filter(([k]) => ['title', 'start', 'end', 'where'].includes(k))) };
-        const name = was?.title || c.title || 'an event';
+        const name = quoted(was?.title || c.title, 'req-an-event');
         const guests = c.action === 'create' || c.action === 'update' ? (c.with?.length ? c.with : (about.attendees ?? [])) : (about.attendees ?? []);
         const ext = outside(c.with ?? []);
-        if (c.action === 'respond') v.title = `${answer || 'Answer'} “${about.title || 'an invitation'}”${about.start ? ` (${whenWords(about.start, about.end)})` : ''}`;
-        else if (c.action === 'create') v.title = `Create “${c.title ?? 'New event'}”${c.start ? ` ${whenWords(c.start, c.end)}` : ''}`;
-        else if (c.action === 'delete') v.title = `Delete “${name}”${about.start ? ` (${whenWords(about.start, about.end)})` : ''}`;
-        else if (c.action === 'update') v.title = (c.start && c.start !== about.start) ? `Move “${name}” to ${whenWords(c.start, c.end ?? about.end)}` : `Change “${name}”`;
-        else if (c.action === 'attach') v.title = `Attach ${filesLine(c.files)} to “${name}”`;
-        else v.title = `${c.action ?? 'calendar'} ${q?.detail ?? ''}`.trim();
+        if (c.action === 'respond') v.title = w(`req-cal-respond${about.start ? '-when' : ''}`, { answer: w(`req-yes-${answer || 'answer'}`), name: quoted(about.title, 'req-an-invitation'), ...(about.start ? { when: when(about.start, about.end) } : {}) });
+        else if (c.action === 'create') v.title = w(`req-cal-create${c.start ? '-when' : ''}`, { name: c.title ? quoted(c.title) : w('req-new-event'), ...(c.start ? { when: when(c.start, c.end) } : {}) });
+        else if (c.action === 'delete') v.title = w(`req-cal-delete${about.start ? '-when' : ''}`, { name, ...(about.start ? { when: when(about.start, about.end) } : {}) });
+        else if (c.action === 'update') v.title = (c.start && c.start !== about.start) ? w('req-cal-move', { name, when: when(c.start, c.end ?? about.end) }) : w('req-cal-change', { name });
+        else if (c.action === 'attach') v.title = w('req-cal-attach', { files: filesLine(c.files), name });
+        else v.title = raw(c.action ?? 'calendar');
         /* Before -> after: what changes of a change, and the event itself otherwise. */
         if (c.action === 'update' && was?.start) {
-            v.before = [whenWords(was.start, was.end), was.where].filter(Boolean);
-            v.after = [whenWords(ev.start, ev.end), ev.where].filter(Boolean);
-            sub.push(`was ${whenWords(was.start, was.end)}`);
-        } else if (ev.start) { if (c.action !== 'respond' && c.action !== 'delete' && c.action !== 'create') sub.push(whenWords(ev.start, ev.end)); if (ev.where) v.facts.push(['Where', String(ev.where)]); }
-        if (guests.length && ['update', 'delete'].includes(c.action)) { sub.push(`${plural(guests.length, 'guest')} told`); v.irreversible = true; }
-        if (about.clashes?.length) v.risk.push(`Clashes with ${about.clashes.join(', ')}`);
-        if (ext.length) v.risk.push('Invites someone outside your domain');
-        if (about.organizer && c.action === 'respond') v.facts.push(['From', String(about.organizer)]);
-        if (guests.length) v.facts.push(['Guests', chips(guests, ext)]);
-        if (c.online === 'teams' || (c.action === 'create' && (c.with ?? []).length && !c.online)) v.facts.push(['Online', 'Teams meeting']);
+            v.before = [when(was.start, was.end), was.where].filter(Boolean);
+            v.after = [when(ev.start, ev.end), ev.where].filter(Boolean);
+            sub.push(w('req-was', { when: when(was.start, was.end) }));
+        } else if (ev.start) { if (c.action !== 'respond' && c.action !== 'delete' && c.action !== 'create') sub.push(when(ev.start, ev.end)); if (ev.where) v.facts.push(fact('where', String(ev.where))); }
+        if (guests.length && ['update', 'delete'].includes(c.action)) { sub.push(count(guests.length, 'req-guests-told')); v.irreversible = true; }
+        if (about.clashes?.length) v.risk.push(w('req-risk-clash', { what: { list: about.clashes.map(String) } }));
+        if (ext.length) v.risk.push(w('req-risk-invites-outside'));
+        if (about.organizer && c.action === 'respond') v.facts.push(fact('from', String(about.organizer)));
+        if (guests.length) v.facts.push(fact('guests', chips(guests, ext)));
+        if (c.online === 'teams' || (c.action === 'create' && (c.with ?? []).length && !c.online)) v.facts.push(fact('online', w('req-teams')));
         if (where) sub.unshift(where);
         if (c.notes) v.quote = String(c.notes);
-        v.yes = c.action === 'respond' ? (answer || 'Answer') : c.action === 'create' ? ((c.with ?? []).length ? 'Create and invite' : 'Create') : c.action === 'delete' ? 'Delete' : c.action === 'update' ? (v.before ? 'Move' : 'Change') : 'Accept';
+        v.yes = c.action === 'respond' ? (answer || 'answer') : c.action === 'create' ? ((c.with ?? []).length ? 'create-invite' : 'create') : c.action === 'delete' ? 'delete' : c.action === 'update' ? (v.before ? 'move' : 'change') : 'accept';
         if (c.action === 'delete') v.irreversible = true;
     } else if (c.kind === 'contacts') {
-        v.title = c.action === 'create' ? `Add ${c.name || c.email || 'a contact'}` : c.action === 'update' ? `Update ${c.name || 'a contact'}` : c.action === 'delete' ? `Delete ${c.name || 'a contact'}` : c.action === 'attach' ? `Set ${c.name ? `${c.name}'s` : 'a contact\'s'} photo` : `${c.action ?? 'contacts'} ${q?.detail ?? ''}`.trim();
-        if (c.name && c.action !== 'create') v.facts.push(['Name', String(c.name)]);
-        if (c.email) v.facts.push(['Email', String(c.email)]);
-        if (c.phone) v.facts.push(['Phone', String(c.phone)]);
+        const who = (x) => (x ? String(x) : w('req-a-contact'));
+        v.title = c.action === 'create' ? w('req-contact-add', { who: who(c.name || c.email) }) : c.action === 'update' ? w('req-contact-update', { who: who(c.name) }) : c.action === 'delete' ? w('req-contact-delete', { who: who(c.name) }) : c.action === 'attach' ? w('req-contact-photo', { who: who(c.name) }) : raw(c.action ?? 'contacts');
+        if (c.name && c.action !== 'create') v.facts.push(fact('name', String(c.name)));
+        if (c.email) v.facts.push(fact('email', String(c.email)));
+        if (c.phone) v.facts.push(fact('phone', String(c.phone)));
         if (where) sub.push(where);
         if (c.email && c.action === 'create') sub.push(String(c.email));
-        v.yes = c.action === 'create' ? 'Add' : c.action === 'delete' ? 'Delete' : 'Update';
+        v.yes = c.action === 'create' ? 'add' : c.action === 'delete' ? 'delete' : 'update';
         if (c.action === 'delete') v.irreversible = true;
     } else if (c.kind === 'terminal') {
-        const on = where || 'a machine';
-        v.title = c.action === 'run' ? `Run a command on ${on}` : c.action === 'type' ? `Type into a terminal on ${on}` : `Open a terminal on ${on}`;
-        if (/^\s*sudo\b/.test(c.command ?? '')) v.risk.push('As administrator');
+        const on = where || w('req-a-machine');
+        v.title = w(c.action === 'run' ? 'req-term-run' : c.action === 'type' ? 'req-term-type' : 'req-term-open', { on });
+        if (/^\s*sudo\b/.test(c.command ?? '')) v.risk.push(w('req-risk-admin'));
         if (c.command || c.text) { v.code = String(c.command ?? c.text); sub.push(v.code.split('\n')[0].slice(0, 60)); }
-        v.yes = c.action === 'run' ? 'Run' : c.action === 'type' ? 'Type' : 'Open';
+        v.yes = c.action === 'run' ? 'run' : c.action === 'type' ? 'type' : 'open';
         if (c.action === 'run') v.irreversible = true;
     } else if (c.kind === 'files') {
-        v.title = c.action === 'write' ? `Write ${c.path}` : c.action === 'delete' ? `Delete ${c.path}` : c.action === 'move' ? `Move ${c.from} → ${c.to}` : `${c.action ?? 'files'} ${c.path ?? ''}`.trim();
+        v.title = c.action === 'write' ? w('req-files-write', { path: String(c.path) }) : c.action === 'delete' ? w('req-files-delete', { path: String(c.path) }) : c.action === 'move' ? w('req-files-move', { from: String(c.from), to: String(c.to) }) : `${c.action ?? 'files'} ${c.path ?? ''}`.trim();
         if (where) sub.push(where);
-        if (c.bytes !== undefined) { const size = c.bytes >= 1024 ? `${Math.round(c.bytes / 1024)} KB` : `${c.bytes} bytes`; sub.push(size); v.facts.push(['Size', size]); }
+        if (c.bytes !== undefined) { const size = c.bytes >= 1024 ? w('req-size-kb', { n: Math.round(c.bytes / 1024) }) : w('req-size-bytes', { n: c.bytes }); sub.push(size); v.facts.push(fact('size', size)); }
         if (c.action === 'move') { v.before = [String(c.from ?? '')]; v.after = [String(c.to ?? '')]; }
-        else if (c.path) v.facts.push(['Path', String(c.path)]);
-        v.yes = c.action === 'delete' ? 'Delete' : c.action === 'move' ? 'Move' : 'Write';
-        if (c.action === 'delete') { v.irreversible = true; v.risk.push('Cannot be undone'); }
-    } else if (c.kind === 'browser' && c.action === 'open') { v.title = `Open ${c.url}`; v.yes = 'Open'; if (where) sub.push(where); }
+        else if (c.path) v.facts.push(fact('path', String(c.path)));
+        v.yes = c.action === 'delete' ? 'delete' : c.action === 'move' ? 'move' : 'write';
+        if (c.action === 'delete') { v.irreversible = true; v.risk.push(w('req-risk-final')); }
+    } else if (c.kind === 'browser' && c.action === 'open') { v.title = w('req-browser-open', { url: String(c.url) }); v.yes = 'open'; if (where) sub.push(where); }
     else { v.title = `${q?.verb ?? 'action'}${q?.detail ? ` ${q.detail}` : ''}`; if (where) sub.push(where); }
     const id = String(q?.id ?? '');
     return {
-        kind, title: v.title || String(q?.verb ?? 'A request'), sub: sub.filter(Boolean).slice(0, 3).join(' · '),
+        kind, title: v.title || (q?.verb ? String(q.verb) : w('req-a-request')), sub: sub.filter(Boolean).slice(0, 3),
         ...(v.risk.length ? { risk: v.risk } : {}), ...(v.facts.length ? { facts: v.facts } : {}),
         ...(v.before ? { before: v.before, after: v.after } : {}),
         ...(v.quote ? { quote: v.quote } : {}), ...(v.code ? { code: v.code } : {}),
@@ -132,9 +139,9 @@ export function demandeView(q) {
         /* The technical line, in "See all" only. */
         detail: [q?.verb, q?.detail].filter(Boolean).join(' — '),
         irreversible: v.irreversible,
-        yes: { id: `allow:${id}`, label: v.yes }, no: { id: `deny:${id}`, label: 'Refuse' },
+        yes: { id: `allow:${id}`, label: w(`req-yes-${v.yes}`) }, no: { id: `deny:${id}`, label: w('req-no') },
         /* "Always allow ...": behind "⋯", as before. */
-        ...(q?.rule ? { others: [{ id: `always:${id}`, label: `Always allow ${q.rule.value ?? 'this'}` }] } : {}),
+        ...(q?.rule ? { others: [{ id: `always:${id}`, label: q.rule.value ? w('req-always', { what: String(q.rule.value) }) : w('req-always-this') }] } : {}),
         hold: HOLD_S,
     };
 }
