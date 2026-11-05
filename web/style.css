@@ -2669,7 +2669,7 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-card .kit-conv-main > small { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); font-size: .8125rem; }
 .kit-conv-card .kit-conv-main > .last { color: var(--ink); opacity: .9; }
 .kit-conv-card .kit-conv-main > .last { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.kit-conv-card .kit-conv-head > b { font-size: .9375rem; }
+.kit-conv-card .kit-conv-head > b { font-size: .9375rem; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; line-height: 1.25; }
 .kit-conv-member { --kc-ring: var(--panel); align-items: center; padding: 8px 12px; }
 .kit-conv-member .kit-conv-head > b { font-size: .8125rem; }
 .kit-conv-member .kit-conv-main > small { font-size: .75rem; }
