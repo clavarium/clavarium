@@ -425,9 +425,10 @@
     }
     for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
     /* A room's title: its name, and under it who speaks now (salonLive). */
-    { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
+    /* The device page (/c/) has no rooms sheet (05-11: it stopped app.js there, the page stuck on connecting). */
+    if ($('salon')) { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
     /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
-    { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right').prepend(views); }
+    if ($('salon')) { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right')?.prepend(views); }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
         for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
