@@ -2309,7 +2309,6 @@
         paintConvStates(here);
         /* What can still be attached, for the picker. */
         const picker = $('attach-rows'); picker.replaceChildren();
-        $('attach-title').textContent = `Attach to "${current}"`;
         const offer = (name, kind, buttons) => {
             const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = name;
             const label = document.createElement('b'); label.textContent = name;
@@ -3661,13 +3660,54 @@
         await refresh();
         await paintPanel();
         $('attach-picker').hidden = !picking;
+        if (picking) openAttach();
         /* The folders button shows the folders: their chapter opened, in its tab. */
         openChapter('access', { show: !picking });
         if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
-    $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
-    $('attach-close').addEventListener('click', () => { $('attach-picker').hidden = true; });
+    /* ATTACH: ONE BUTTON (05-11). What is there already, to tick, or a new one -- the New asset box, with this
+       conversation as its context: what is made there is attached to it at the end. */
+    let attachNew = { kind: '', level: 'write' };
+    function openAttach() {
+        attachNew = { kind: '', level: 'write' };
+        if (justMade?.to) justMade = null;
+        $('attach-error').hidden = true;
+        paintAttach();
+    }
+    function closeAttach() {
+        $('attach-picker').hidden = true; $('attach-close').hidden = false;
+        attachNew.kind = ''; if (justMade?.to) justMade = null;
+        for (const f of $('attach-box').querySelectorAll('.as-form')) $('assets-forms').append(f);
+    }
+    function paintAttach() {
+        const box = $('attach-box');
+        for (const f of box.querySelectorAll('.as-form')) $('assets-forms').append(f);
+        $('attach-park').append($('attach-there'));
+        const who = shownName(conversations.find((c) => c.name === current)) || current;
+        const made = justMade?.to === current ? justMade : null;
+        const kind = made ? '' : attachNew.kind;
+        /* At its ending, one Done: the box's own. */
+        $('attach-close').hidden = Boolean(made) || (kind === 'box' && Boolean(boxFlow?.made));
+        /* A secret is used or not, a voice box speaks there: no level to choose. */
+        const level = kind && !['secret', 'box'].includes(kind) ? { options: [{ value: 'read', label: uiSaid('set-na-read', 'Read') }, { value: 'write', label: uiSaid('set-na-write', 'Write') }], value: attachNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { attachNew.level = v; } } : null;
+        box.replaceChildren(newAssetBox({
+            kind, existing: $('attach-there'), title: '',
+            context: made ? null : { line: uiSaid('set-na-will', 'Will be attached to {name}', { name: who }), level },
+            made: made ? { said: uiSaid('set-na-made-to', '{name} created and attached to {to}', { name: made.name, to: who }), note: made.note } : null,
+            onKind: (k) => {
+                attachNew.kind = k; justMade = null; $('attach-error').hidden = true; paintAttach(); focusFirst(box);
+                /* Its keys, read here too: Assets may not have been opened yet. */
+                if (k === 'git') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
+            },
+            onBack: () => { attachNew.kind = ''; $('attach-error').hidden = true; paintAttach(); },
+            onAnother: () => { attachNew.kind = made.kind; justMade = null; paintAttach(); focusFirst(box); },
+            onDone: () => { closeAttach(); },
+            boxHost: { where: current, repaint: () => paintAttach(), close: () => closeAttach() },
+        }));
+    }
+    $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; openAttach(); $('attach-picker').scrollIntoView({ block: 'nearest' }); });
+    $('attach-close').addEventListener('click', () => { closeAttach(); });
     $('attach-manage').addEventListener('click', () => { void openAssets(); });
 
     /* ---------- ASSETS: one design, two pages (G and H) ----------
@@ -3724,7 +3764,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -4555,7 +4595,7 @@
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
         paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
-        const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus('Attach an asset', () => { void openAccess(true); }));
+        const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus(uiSaid('set-na-attach', 'Attach'), () => { void openAccess(true); }));
         const pinnedRow = (entry, extra) => {
             const row = el('button', `as-row ts-entry${extra ? ` ${extra}` : ''}`); row.type = 'button'; row.dataset.asset = entry.key;
             if (chosen === entry) row.setAttribute('aria-current', 'true');
@@ -4884,7 +4924,7 @@
                 row.hidden = true;
                 const call = async (op, args) => { try { return { ok: true, data: await post(`${API}/tether/${op}`, args) }; } catch (error) { return { ok: false, text: error.message }; } };
                 /* A device that pairs (a voice box): a one-use code for the conversation that asked, made here. */
-                const pair = async (room) => { const r = await post(`${API}/boxes/code`, { conversation: String(job.agent).replace(/^conversation:/, ''), name: room, zone: Intl.DateTimeFormat().resolvedOptions().timeZone }); return { url: location.origin, code: r.code }; };
+                const pair = async (room) => { const r = await pairCode({ conversation: String(job.agent).replace(/^conversation:/, ''), name: room }); return { url: location.origin, code: r.code }; };
                 try { const { runJob } = await import('/vendor/tether/jobs.js'); await runJob(job, { call, root: place, pair }); }
                 catch (error) { place.textContent = `It could not start: ${error.message}`; }
                 setTimeout(() => { jobPlaces.delete(job.id); after?.(); }, 4000);
@@ -4930,6 +4970,76 @@
         if (!names.ok || pick.options.length) return;
         for (const [key, name] of Object.entries(names.data)) { const o = document.createElement('option'); o.value = key; o.textContent = name[binderLang()] ?? name.en; pick.append(o); }
     }
+    /* NEW ASSET (05-11, step 3): ONE BOX (kit.js NewAsset) wherever an asset is made -- Assets (the "+" of a
+       kind, the map's "+"), a conversation's Attach: the same kinds, the same forms (#assets-forms, moved in
+       when asked for), one ending. The words, once each. */
+    const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
+        ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
+        /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')]]
+        .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
+    /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
+    const BOX_STEPS = ['where', 'plug', 'pair'];
+    let boxFlow = null;
+    /* `boxHost` { where, repaint, close }: the frame a voice box is added in -- where it speaks (preselected),
+       how that frame draws itself again, and closes. A device is the share sheet itself, opened on `where`. */
+    function newAssetBox(opts) {
+        const host = opts.boxHost ?? { where: '', repaint: () => {}, close: () => {} };
+        const box = opts.kind === 'box' && !opts.made;
+        const boxMade = box && boxFlow?.made ? boxFlow.made : null;
+        const speaks = box && host.where ? { line: speaksLine(host.where) } : null;
+        return KIT.NewAsset({
+            kinds: newKinds(), ...opts,
+            ...(box ? { context: boxMade ? null : speaks, at: boxFlow ? 1 + BOX_STEPS.indexOf(boxFlow.step) : 1,
+                made: boxMade ? { said: uiSaid('set-na-box-made', '{name} answers in {where}', { name: boxMade.name, where: whereName(boxMade.where) }) } : null,
+                onAnother: () => { startBoxFlow(host); host.repaint(); }, onDone: () => { stopBoxWait(); boxFlow = null; host.close(); } } : {}),
+            onKind: (k) => {
+                if (k === 'device') { newDevice(host.where); return; }
+                if (k === 'box') startBoxFlow(host);
+                opts.onKind?.(k);
+            },
+            words: { title: opts.title ?? uiSaid('set-na-new', 'New asset'), there: uiSaid('set-na-there', 'Already there'), orNew: uiSaid('set-na-or-new', 'or a new one'),
+                steps: box ? [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-where', 'Where'), uiSaid('set-na-step-plug', 'Plug it'), uiSaid('set-na-step-pair', 'Pair it'), uiSaid('set-na-step-answers', 'It answers')]
+                    : [uiSaid('set-na-step-kind', 'Kind'), uiSaid('set-na-step-set', 'Set up'), uiSaid('set-na-step-made', 'Created')],
+                back: uiSaid('set-na-back', 'Back'), another: uiSaid('set-na-another', 'Create another'), done: uiSaid('set-na-done', 'Done') },
+            form: (kind) => {
+                if (kind === 'box') return paintBoxFlow();
+                const form = $(`${addForm(kind)}-box`); form.hidden = false;
+                if (kind === 'git') { fillKeyChoice(); showVia(); }
+                if (kind === 'list') void fillTemplates();
+                return form;
+            },
+        });
+    }
+    /* The first field of the form shown in `holder`, focused. */
+    const focusFirst = (holder) => { const f = holder.querySelector('.as-form input:not([type=radio])'); if (f) focusField(f); };
+    /* What was just made: the box's ending ("✓ <name> created"), until Done. `to`: the conversation it was attached to. */
+    let justMade = null;
+    /* A form is in the conversation's Attach (its context), or in Assets. */
+    const inAttach = (form) => $('attach-box').contains(form);
+    const newAssetError = (form, message) => { const e = inAttach(form) ? $('attach-error') : $('assets-error'); e.textContent = message; e.hidden = false; };
+    /* THE ONE ENDING. `give(conversation, level)` attaches it, when the box was opened from a conversation; in
+       Assets it is opened, the ending above it. */
+    async function assetMade(form, { key, name, give = null, note = '' }) {
+        if (inAttach(form) && current) {
+            const kind = attachNew.kind;
+            if (give) await give(current, attachNew.level);
+            justMade = { kind, key, name, note, to: current };
+            attachNew.kind = '';
+            await paintPanel();
+            paintAttach();
+            return;
+        }
+        justMade = { kind: assetsAdding, key, name, note };
+        assetOpen = key; assetsAdding = '';
+    }
+    /* Another kind asked from inside a form (New mailbox's Google, Microsoft: the account's form). */
+    async function newAssetKind(form, kind) {
+        if (inAttach(form)) { attachNew.kind = kind; paintAttach(); return; }
+        assetsAdding = kind; await paintAssets();
+    }
+    /* A Tether target given from Attach: Read watches, Write proposes (asks before each action). */
+    const targetLevel = (level) => (level === 'write' ? 'propose' : 'watch');
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
         watchTether();
@@ -4965,6 +5075,7 @@
         }
         const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
+        if (justMade && !justMade.to && justMade.key !== chosen?.key) justMade = null;
         /* A group can be the open thing too (its own detail: give it, rename it). */
         const chosenGroup = !assetsAdding && !chosen && assetOpen.startsWith('group:') ? assetGroups.find((g) => `group:${g.id}` === assetOpen) ?? null : null;
         /* Every call waiting for the owner, across all the connexions, gathered in one place
@@ -4995,35 +5106,14 @@
         for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
         detail.replaceChildren();
         const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
-        if (assetsAdding === 'choose' || (assetsAdding && assetsFromMap)) {
-            /* From the map's "+" of Assets: which kind, then its form; "<" goes back to the map. */
-            const out = el('button', 'as-link', '‹ Access'); out.type = 'button'; out.addEventListener('click', () => { if (!nav.close('compose')) back(); });
-            detail.append(out);
-            if (assetsAdding === 'choose') {
-                detail.append(el('h3', '', 'New asset'));
-                const kinds = el('div', 'as-kinds');
-                for (const [kind, word] of [['git', 'Git repository'], ['folder', 'Folder'], ['mailbox', 'Mailbox'], ['agenda', 'Calendar'], ['contacts', 'Address book'], ['secret', 'Secret'], ['list', LISTS_WORD.one]]) {
-                    const b = el('button', '', word); b.type = 'button'; b.dataset.kind = kind;
-                    b.addEventListener('click', () => { assetsAdding = kind; void paintAssets(); });
-                    b.prepend(kindIcon(kind)); kinds.append(b);
-                }
-                detail.append(kinds);
-                return;
-            }
-            const form = $(`${addForm(assetsAdding)}-box`); form.hidden = false;
-            detail.append(form);
-            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
-            if (assetsAdding === 'list') void fillTemplates();
-            focusField(form.querySelector('input:not([type=radio])'));
-            return;
-        }
         if (assetsAdding) {
-            const all2 = el('button', 'as-link as-back', '‹ Assets'); all2.type = 'button'; all2.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-            const form = $(`${addForm(assetsAdding)}-box`); form.hidden = false;
-            detail.append(all2, form);
-            if (assetsAdding === 'git') { fillKeyChoice(); showVia(); }
-            if (assetsAdding === 'list') void fillTemplates();
-            focusField(form.querySelector('input:not([type=radio])'));
+            /* The New asset box: from the map's "+" of Assets, which kind first ("<" goes back to the map);
+               from the "+" of a kind, its form ("<" Assets). */
+            const out = assetsFromMap || assetsAdding === 'choose' ? el('button', 'as-link', '‹ Access') : el('button', 'as-link as-back', '‹ Assets'); out.type = 'button';
+            out.addEventListener('click', () => { if (!nav.close(assetsFromMap || assetsAdding === 'choose' ? 'compose' : 'asset')) back(); });
+            const kind = assetsAdding === 'choose' ? '' : assetsAdding;
+            detail.append(out, newAssetBox({ kind, onKind: (k) => { assetsAdding = k; void paintAssets(); }, boxHost: { where: '', repaint: () => { void paintAssets(); }, close: back } }));
+            if (kind) focusFirst(detail);
             return;
         }
         if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
@@ -5035,6 +5125,13 @@
             return;
         }
         if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
+        /* Just made here: the box's ending above it -- Create another, or Done. */
+        if (justMade && !justMade.to && justMade.key === chosen.key) {
+            const made = justMade;
+            detail.append(newAssetBox({ kind: made.kind, made: { said: uiSaid('set-na-made', '{name} created', { name: made.name }), note: made.note },
+                onAnother: () => { justMade = null; placeAssetStep(); assetsAdding = made.kind || 'choose'; void paintAssets(); },
+                onDone: () => { justMade = null; void paintAssets(); } }));
+        }
         detail.append(asTitle(chosen, back));
         detail.append(groupPicker(chosen, assetGroups));
         const ready = conversations.filter((c) => c.phase === 'ready');
@@ -5401,6 +5498,31 @@
         }));
     }
     $('salon-new-search').addEventListener('input', paintSalonMembers);
+    /* A ROOM'S "+ Voice box": the New asset box, its kind a voice box, speaking in this room; once it answers, it is
+       among the room's boxes, switched on (kept with Save). */
+    function paintSalonBoxNew() {
+        const holder = $('salon-box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeSalonBoxNew() { const holder = $('salon-box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    $('salon-new-box-add').addEventListener('click', () => {
+        if (!salonEditing) return;
+        if (!$('salon-box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeSalonBoxNew(); return; }
+        startBoxFlow({ where: `room:${salonEditing.id}`, close: closeSalonBoxNew, repaint: () => {
+            paintSalonBoxNew();
+            if (!boxFlow?.made) return;
+            void getJson('/boxes', null).then((list) => {
+                if (!Array.isArray(list)) return;
+                salonBoxList = list; boxesKnown = list;
+                if (list.some((b) => b.id === boxFlow?.made?.id)) salonBoxes.add(boxFlow.made.id);
+                paintSalonMembers();
+            });
+        } });
+        paintSalonBoxNew();
+        focusFirst($('salon-box-newasset'));
+    });
     let salonDragged = '';
     $('salon-new-ais').addEventListener('dragstart', (e) => { salonDragged = e.target.closest?.('.salon-member-row')?.dataset.name ?? ''; });
     $('salon-new-host').addEventListener('dragover', (e) => { e.preventDefault(); $('salon-new-host').classList.add('over'); });
@@ -5420,7 +5542,9 @@
         salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
         try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
         if (Array.isArray(salonBoxList)) boxesKnown = salonBoxList; else salonBoxList = [];
-        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0;
+        /* A room that is there already adds a voice box of its own: "+ Voice box". */
+        $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0 && !editing;
+        $('salon-new-box-add').hidden = !editing; closeSalonBoxNew();
         paintSalonMembers();
         $('salon-new-name').focus();
     }
@@ -5462,7 +5586,13 @@
     async function openFeature(what, s = {}) {
         const chapter = String(s.chapter ?? '');
         if (what === 'new' || (chapter === 'new' && what === 'settings')) { await openNew(); return; }
-        if (what === 'boxes' || chapter === 'boxes') { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); return; }
+        if (what === 'boxes' || chapter === 'boxes') {
+            await openAccessPage('devices');
+            /* "Add a voice box": the New asset box, on its kind, where the boxes are. */
+            if (s.id === 'boxes:add') openBoxNew();
+            $('boxes')?.scrollIntoView({ block: 'start' });
+            return;
+        }
         if (what === 'mail' || chapter === 'access') { await openAssetsPlace(); return; }
         if (what === 'import') { await openAccessPage('map', { mode: 'flows' }); document.getElementById('flows-import')?.click(); return; }
         if (what === 'opencode') {
@@ -5575,16 +5705,35 @@
         }
         fillKeyChoice();
     }
-    /* The key offered in "Add a repository": the one chosen stays chosen. */
+    /* The key of "New repository": the kit's SecretPicker -- its keys, "+ New key…" made in place, and
+       the new one chosen (its public half shown under it, to give the hosting service). */
+    const gitKeyPick = KIT.SecretPicker({
+        ids: { select: 'git-key', add: 'git-key-new', row: 'git-key-make', name: 'git-key-name', go: 'git-key-make-go' },
+        none: 'No key yet: make one', addLabel: uiSaid('set-na-new-key', '+ New key…'), makeLabel: uiSaid('set-na-create', 'Create'), nameLabel: 'Name of the new key',
+        nameAttrs: { maxlength: '32', pattern: '[a-z]([a-z0-9-]{0,30}[a-z0-9])?', placeholder: 'deploy-key', spellcheck: 'false', autocapitalize: 'off' },
+        suggest: () => {
+            const taken = new Set(gitKeys.map((k) => k.name));
+            const wanted = $('git-name').value.trim();
+            let suggestion = wanted && !taken.has(wanted) ? wanted : '';
+            for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
+            return suggestion;
+        },
+        onMake: async (name) => {
+            $('git-error').hidden = true;
+            try {
+                const made = await post(`${API}/git-keys`, { name });
+                paintKeys(await fetch(`${API}/git-keys`).then((r) => r.json()));
+                fillKeyChoice(made.name);
+                return true;
+            } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; return false; }
+        },
+        onChange: () => showChosenKey(),
+    });
+    $('git-key-pick').append(gitKeyPick);
+    for (const [id, key] of [['git-key-new', 'set-na-new-key'], ['git-key-make-go', 'set-na-create']]) { const b = gitKeyPick.querySelector?.(`#${id}`); if (b) b.dataset.said = key; }
+    /* The key offered in "New repository": the one chosen stays chosen. */
     function fillKeyChoice(chosen = $('git-key').value) {
-        const select = $('git-key'); select.replaceChildren();
-        if (gitKeys.length === 0) { const none = document.createElement('option'); none.value = ''; none.textContent = 'No key yet: make one'; select.append(none); }
-        for (const key of gitKeys) {
-            const o = document.createElement('option'); o.value = key.name;
-            o.textContent = key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name;
-            select.append(o);
-        }
-        if (gitKeys.some((k) => k.name === chosen)) select.value = chosen;
+        gitKeyPick.set(gitKeys.map((key) => ({ value: key.name, label: key.usedBy.length ? `${key.name} (used by ${key.usedBy.join(', ')})` : key.name })), chosen);
         showChosenKey();
     }
     function showChosenKey() {
@@ -5604,25 +5753,6 @@
         const from = $('git-from').value.trim();
         const pick = looksSsh(from) ? 'ssh-key' : /^https:\/\//i.test(from) ? 'none' : '';
         if (pick) { $('git-new').querySelector(`input[name="git-via"][value="${pick}"]`).checked = true; showVia(); }
-    });
-    $('git-key').addEventListener('change', showChosenKey);
-    $('git-key-new').addEventListener('click', () => {
-        const taken = new Set(gitKeys.map((k) => k.name));
-        const wanted = $('git-name').value.trim();
-        let suggestion = wanted && !taken.has(wanted) ? wanted : '';
-        for (let n = 1; !suggestion; n += 1) if (!taken.has(`key-${n}`)) suggestion = `key-${n}`;
-        $('git-key-name').value = suggestion;
-        $('git-key-make').hidden = false; focusField($('git-key-name'));
-    });
-    $('git-key-make-go').addEventListener('click', async () => {
-        $('git-error').hidden = true;
-        try {
-            const made = await post(`${API}/git-keys`, { name: $('git-key-name').value.trim() });
-            $('git-key-make').hidden = true;
-            gitKeys = await fetch(`${API}/git-keys`).then((r) => r.json());
-            fillKeyChoice(made.name);
-            await paintAssets();
-        } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
     });
     $('git-key-copy').addEventListener('click', () => { void copyField($('git-key-public'), $('git-key-copy')); });
     /* Secrets: a name, and which conversations' tools are handed it. A value goes in and never comes back. */
@@ -5644,13 +5774,20 @@
     });
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true;
+        $('assets-error').hidden = true; $('attach-error').hidden = true;
         const lines = !$('secret-lines').hidden;
         /* A key's last line ends with a line break: kept as it was pasted. */
         const value = lines ? $('secret-lines').value.replace(/\r\n?/g, '\n') : $('secret-value').value;
         const expires = $('secret-expires').value;
-        try { await post(`${API}/secrets`, { name: $('secret-name').value.trim(), value, ...(expires ? { expires } : {}) }); assetOpen = `secret:${$('secret-name').value.trim()}`; assetsAdding = ''; $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, ''); }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        const name = $('secret-name').value.trim();
+        try {
+            await post(`${API}/secrets`, { name, value, ...(expires ? { expires } : {}) });
+            $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, '');
+            await assetMade($('secret-box'), { key: `secret:${name}`, name, give: async (to) => {
+                await handTo(to, name, true, 'attach-error');
+                $('secret-note').textContent = `${name} will be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
+            } });
+        } catch (error) { newAssetError($('secret-box'), error.message); }
         await paintAssets();
     });
 
@@ -5658,7 +5795,7 @@
     /* What those sheets share with the rest of the page: the requests, the
        automatic sending form of Access, the share sheet for a device to pair. */
     const links = DEVICE ? undefined : window.clavariumLinks?.({
-        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => { void openCompose([]); }, newConversation: () => createFromMap(),
+        API: () => API, refresh, focusTerminal, openAssets: () => { void openAssets(); }, newDevice: () => newDevice(''), newConversation: () => createFromMap(),
         newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
@@ -6040,7 +6177,7 @@
     $('nav-conversations').addEventListener('click', () => { leavePlace({ list: true }); });
     $('nav-access').addEventListener('click', () => { if (place !== 'access' || accessTab !== 'map' || mapMode !== 'map') void openAccessPage('map', { mode: 'map' }); });
     $('nav-assets').addEventListener('click', () => { if (place !== 'assets') void openAssetsPlace(); });
-    $('map-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('map-new-device').addEventListener('click', () => newDevice(accessFor));
     /* Every device and what each was given, by device or by thing: a step over the map. */
     $('map-all-devices').addEventListener('click', () => { void openAccessPage('devices'); });
     /* Voice boxes are on the page of all devices: opened there, at them. */
@@ -6051,7 +6188,6 @@
     $('access-for-clear').addEventListener('click', () => { accessFor = ''; void openAccessPage(accessTab, { push: false }); });
     for (const b of $('map-mode').querySelectorAll('[data-mode]')) b.addEventListener('click', () => { if (b.dataset.mode !== mapMode || accessTab !== 'map') void openAccessPage('map', { mode: b.dataset.mode }); });
     /* From a conversation's own sheet: Access, on that conversation alone. */
-    $('access-assets-here').addEventListener('click', () => { goTab('assets'); });
     $('access-devices-here').addEventListener('click', () => { void openAccessPage('map', { of: current }); });
 
     /* ---------- Settings: this device, and the platform ---------- */
@@ -7623,14 +7759,15 @@
             const made = await post(`${API}/resources`, { name: $('git-name').value.trim(), type: 'git', from, ...(from ? { via } : {}) });
             /* The secrets typed are not kept in the page a moment longer. */
             $('git-new').reset(); viaTouched = false; showVia(); fillKeyChoice(via.key);
-            /* A new repository opens on its card, where it is attached: the next thing to do. */
-            assetOpen = `git:${made.name}`;
+            /* First contact with its host: said in the ending, kept there. */
             if (made.firstSeen) {
                 $('git-said').textContent = `${made.name} was cloned. First contact with ${hostOf(made.from)}: its host key (${made.firstSeen.join(', ')}) was recorded. A different key later will be refused.`;
                 $('git-said').hidden = false;
-            } else assetsAdding = '';
+            }
+            /* A new repository opens on its card, where it is attached: the next thing to do. */
+            await assetMade($('git-box'), { key: `git:${made.name}`, name: made.name, note: made.firstSeen ? $('git-said').textContent : '', give: (to, level) => attachTo(to, made.name, level, 'attach-error') });
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
-        button.disabled = false; button.textContent = 'Add';
+        button.disabled = false; button.textContent = 'Create';
         await paintAssets();
     });
     /* ---------- a repository: what would go out, then send it ---------- */
@@ -7996,6 +8133,11 @@
        same levels, through Tether -- with its sending server (SMTP) too, unless "No sending". The former
        read-only copy as files stays, ticked on purpose. */
     let mailboxLooked = '';
+    /* An account connected: its targets (mail, calendar, contacts), the first opened, all given from Attach. */
+    const targetsMade = (made, user) => {
+        const targets = Array.isArray(made?.targets) ? made.targets : [];
+        return { key: targets[0] ? `connexion:${targets[0].id}` : '', name: targets[0]?.title ?? user, give: (to, level) => Promise.all(targets.map((t) => grantTarget(t.id, to, targetLevel(level)))) };
+    };
     $('mailbox-user').addEventListener('change', async () => {
         const user = $('mailbox-user').value.trim();
         if (!user.includes('@') || user === mailboxLooked) return;
@@ -8013,11 +8155,12 @@
         button.disabled = true; button.textContent = 'Trying it...';
         const host = $('mailbox-host').value.trim(); const port = $('mailbox-port').value.trim();
         try {
-            const made = await post(`${API}/accounts/classic`, { user: $('mailbox-user').value.trim(), password: $('mailbox-password').value, imap: port ? `${host}:${port}` : host, smtp: $('mailbox-smtp').value.trim(), kinds: ['mail'] });
-            if (made?.targets?.[0]?.id) assetOpen = `connexion:${made.targets[0].id}`;
-            assetsAdding = ''; $('mailbox-new').reset(); mailboxLooked = '';
+            const user = $('mailbox-user').value.trim();
+            const made = await post(`${API}/accounts/classic`, { user, password: $('mailbox-password').value, imap: port ? `${host}:${port}` : host, smtp: $('mailbox-smtp').value.trim(), kinds: ['mail'] });
+            $('mailbox-new').reset(); mailboxLooked = '';
+            await assetMade($('mailbox-box'), targetsMade(made, user));
         } catch (error) { $('mailbox-error').textContent = error.message; $('mailbox-error').hidden = false; }
-        button.disabled = false; button.textContent = 'Connect';
+        button.disabled = false; button.textContent = 'Create';
         await paintAssets();
     });
     /* New mailbox: IMAP and SMTP, connected live (02-11). Gmail and Microsoft sign in instead (token kept on
@@ -8032,7 +8175,7 @@
         const provider = b.dataset.provider;
         if (provider === 'classic') return;
         const user = $('mailbox-user').value.trim();
-        assetsAdding = 'connexion'; await paintAssets();
+        await newAssetKind($('mailbox-box'), 'connexion');
         setConnexionProvider(provider);
         if (user.includes('@')) $('connexion-email').value = user;
     });
@@ -8087,9 +8230,10 @@
         try {
             const made = await post(`${API}/accounts/classic`, { user: $('connexion-email').value.trim(), password: $('connexion-password').value, kinds,
                 imap: $('connexion-imap').value.trim(), smtp: $('connexion-smtp').value.trim(), caldav: $('connexion-caldav').value.trim(), carddav: $('connexion-carddav').value.trim() });
-            if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
-            assetsAdding = ''; lookedUp = '';
+            const user = $('connexion-email').value.trim();
+            lookedUp = '';
             $('connexion-new').reset(); setConnexionProvider('google');
+            await assetMade($('connexion-box'), targetsMade(made, user));
         } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
         $('connexion-password').value = '';
         btn.disabled = false; btn.textContent = was;
@@ -8125,9 +8269,9 @@
                 $('connexion-error').hidden = false;
                 $('connexion-code').value = ''; $('connexion-paste').hidden = true;
             } else {
-                if (made?.targets?.[0]) assetOpen = `connexion:${made.targets[0].id}`;
-                assetsAdding = '';
+                const user = $('connexion-email').value.trim();
                 $('connexion-new').reset(); setConnexionProvider('google');
+                await assetMade($('connexion-box'), targetsMade(made, user));
             }
         } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
         btn.disabled = false; btn.textContent = was;
@@ -8137,17 +8281,26 @@
     getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true;
+        $('assets-error').hidden = true; $('attach-error').hidden = true;
         const made = await binderCall('create-list', { template: $('listnew-template').value, title: $('listnew-title').value.trim(), lang: binderLang() });
-        if (made.ok) { $('listnew-title').value = ''; assetsAdding = ''; assetOpen = `list:${made.data.id}`; listOpen = assetOpen; remember(); }
-        else { $('assets-error').textContent = made.text; $('assets-error').hidden = false; }
+        if (made.ok) {
+            $('listnew-title').value = '';
+            const key = `list:${made.data.id}`;
+            const attaching = inAttach($('list-box'));
+            await assetMade($('list-box'), { key, name: made.data.title ?? $('listnew-template').selectedOptions[0]?.textContent ?? '', give: (to, level) => grantList(made.data.id, to, level) });
+            if (!attaching) { listOpen = key; remember(); }
+        } else newAssetError($('list-box'), made.text);
         await paintAssets();
     });
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        try { const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = ''; assetsAdding = ''; if (made?.name) assetOpen = `folder:${made.name}`; }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        $('attach-error').hidden = true;
+        try {
+            const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = '';
+            const name = made?.name ?? '';
+            await assetMade($('folder-box'), { key: name ? `folder:${name}` : '', name, give: name ? (to, level) => attachTo(to, name, level, 'attach-error') : null });
+        } catch (error) { newAssetError($('folder-box'), error.message); }
         await paintAssets();
     });
 
@@ -10154,15 +10307,88 @@
             rows.append(card);
         }
     }
-    $('box-new').addEventListener('click', () => {
-        const add = $('box-add'); add.hidden = !add.hidden;
-        /* Which conversation it speaks in: chosen on purpose, never a silent default. */
+    /* A NEW VOICE BOX: a kind of New asset (05-11, step 4), the same flow wherever it is asked for -- Assets, a
+       conversation's Attach, "+ Voice box" here and in a room, Features. Where it speaks (preselected from where it
+       was asked), plug it (a flash its conversation asked for waits here), pair it (the code, link and QR of before),
+       it answers (it shows among the boxes). The box itself is paired as it always was: one pairCode() for all. */
+    $('assets-forms').append($('box-add'));
+    /* Where it speaks, said: a conversation's name, or "room <name>". */
+    function whereName(where) {
+        const w = String(where ?? '');
+        if (w.startsWith('room:')) return `${uiSaid('set-na-room', 'room')} ${rooms.find((r) => `room:${r.id}` === w)?.name ?? '?'}`;
+        return shownName(conversations.find((c) => c.name === w)) || w;
+    }
+    const speaksLine = (where) => uiSaid('set-na-speaks', 'Will speak in {name}', { name: whereName(where) });
+    function stopBoxWait() { if (boxFlow?.timer) { clearTimeout(boxFlow.timer); boxFlow.timer = null; } }
+    function startBoxFlow(host) {
+        stopBoxWait();
+        boxFlow = { host, where: host.where ?? '', step: 'where', made: null, known: null, timer: null, until: 0 };
+        $('box-room').value = ''; $('box-ready').hidden = true; $('box-error').hidden = true; $('box-waiting').textContent = '';
+        if (!rooms.length) void loadRooms().then(() => { if (boxFlow?.host === host && boxFlow.step === 'where') fillBoxWhere(); });
+    }
+    /* Which conversation it speaks in, or a room (#281): chosen on purpose, never a silent default. */
+    function fillBoxWhere() {
         const pick = $('box-conversation'); pick.replaceChildren();
         const none = el('option', '', 'Choose a conversation...'); none.value = ''; pick.append(none);
         for (const c of conversations) { const o = el('option', '', shownName(c)); o.value = c.name; pick.append(o); }
-        pick.value = accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '';
-        $('box-ready').hidden = true;
+        if (rooms.length) { const g = document.createElement('optgroup'); g.label = 'Rooms'; for (const r of rooms) { const o = el('option', '', r.name); o.value = `room:${r.id}`; g.append(o); } pick.append(g); }
+        pick.value = [...pick.options].some((o) => o.value === boxFlow?.where) ? boxFlow.where : '';
+    }
+    /* The form at its step, for the box that shows it (newAssetBox). */
+    function paintBoxFlow() {
+        if (!boxFlow) startBoxFlow({ where: '', repaint: () => {}, close: () => {} });
+        const form = $('box-add'); form.hidden = false;
+        for (const part of form.querySelectorAll('.box-step')) part.hidden = part.dataset.step !== boxFlow.step;
+        if (boxFlow.step === 'where') fillBoxWhere();
+        if (boxFlow.step === 'plug') void paintBoxJobs();
+        $('box-back').hidden = boxFlow.step === 'where';
+        $('box-next').hidden = boxFlow.step === 'pair';
+        return form;
+    }
+    /* A flash its conversation asked for (Tether, device-flash): its card, as in the thread -- started here. */
+    async function paintBoxJobs() {
+        const tether = await getJson('/tether', {});
+        const jobs = Array.isArray(tether.jobs) ? tether.jobs : [];
+        if (boxFlow?.step !== 'plug') return;
+        $('box-jobs').replaceChildren(...jobs.map((j) => jobCard(j, () => { if (boxFlow?.step === 'plug') void paintBoxJobs(); })));
+    }
+    const boxGo = (step) => { if (!boxFlow) return; boxFlow.step = step; $('box-error').hidden = true; boxFlow.host.repaint(); };
+    $('box-next').addEventListener('click', () => {
+        if (!boxFlow) return;
+        if (boxFlow.step === 'where' && !$('box-conversation').value) { $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; $('box-conversation').focus(); return; }
+        boxGo(BOX_STEPS[BOX_STEPS.indexOf(boxFlow.step) + 1] ?? boxFlow.step);
     });
+    $('box-back').addEventListener('click', () => { if (boxFlow) { stopBoxWait(); boxGo(BOX_STEPS[Math.max(0, BOX_STEPS.indexOf(boxFlow.step) - 1)]); } });
+    $('box-conversation').addEventListener('change', () => {
+        if (!boxFlow) return;
+        boxFlow.where = $('box-conversation').value;
+        const line = $('box-add').closest('.kit-newasset')?.querySelector('.kit-na-context > span');
+        if (line && boxFlow.where) line.textContent = speaksLine(boxFlow.where);
+    });
+    /* ONE PAIRING CODE for a voice box (boxes.mjs), whoever asks: this flow, a flash run from the thread. With
+       `origin` (this page's address), the server adds the setup key, its link and QR code. */
+    function pairCode({ conversation, name, origin = '' }) {
+        return post(`${API}/boxes/code`, { conversation, name, ...(origin ? { origin } : {}), zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+    }
+    /* It answers: paired, it shows among the boxes -- read again until it does, while the code holds. */
+    function waitBoxPaired() {
+        stopBoxWait();
+        const flow = boxFlow;
+        const look = async () => {
+            if (boxFlow !== flow || flow.made || $('assets-forms').contains($('box-add')) || Date.now() > flow.until) return;
+            const list = await getJson('/boxes', null);
+            const fresh = Array.isArray(list) && flow.known ? list.find((b) => !flow.known.has(b.id)) : null;
+            if (boxFlow !== flow) return;
+            if (fresh) {
+                flow.made = { id: fresh.id, name: fresh.name, where: fresh.conversation };
+                flow.host.repaint();
+                if (!$('boxes').closest('[hidden]')) void paintBoxes();
+                return;
+            }
+            flow.timer = setTimeout(() => { void look(); }, 3000);
+        };
+        flow.timer = setTimeout(() => { void look(); }, 3000);
+    }
     $('box-key-copy').addEventListener('click', async () => {
         const key = $('box-key').textContent;
         try { await navigator.clipboard.writeText(key); $('box-key-copy').textContent = 'Copied'; }
@@ -10170,16 +10396,36 @@
         setTimeout(() => { $('box-key-copy').textContent = 'Copy the key'; }, 2000);
     });
     $('box-code').addEventListener('click', async () => {
-        if (!$('box-conversation').value) { $('box-conversation').focus(); $('box-code-minutes').textContent = 'Choose the conversation it speaks in first.'; $('box-ready').hidden = false; return; }
+        if (!$('box-conversation').value) { boxGo('where'); $('box-error').textContent = 'Choose the conversation it speaks in first.'; $('box-error').hidden = false; return; }
         try {
-            const r = await post(`${API}/boxes/code`, { conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin, zone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+            const before = await getJson('/boxes', null);
+            const r = await pairCode({ conversation: $('box-conversation').value, name: $('box-room').value.trim(), origin: location.origin });
             $('box-code-shown').textContent = r.code; $('box-code-minutes').textContent = `valid ${r.minutes} minutes, once`;
             $('box-key').textContent = r.key ?? '';
             $('box-link').href = r.link ?? '#';
             $('box-qr').innerHTML = r.qr ?? '';
             $('box-ready').hidden = false;
+            if (boxFlow && Array.isArray(before)) {
+                boxFlow.known = new Set(before.map((b) => b.id)); boxFlow.until = Date.now() + Number(r.minutes || 10) * 60_000;
+                $('box-waiting').textContent = uiSaid('set-na-box-waiting', 'Waiting for it to answer…');
+                waitBoxPaired();
+            }
         } catch (error) { $('box-code-minutes').textContent = error.message; $('box-ready').hidden = false; }
     });
+    /* "+ Voice box" of Access › Boxes: the New asset box, right here, on its kind; on the conversation Access is for. */
+    function paintBoxNew() {
+        const holder = $('box-newasset');
+        if (holder.contains($('box-add'))) $('assets-forms').append($('box-add'));
+        holder.hidden = false;
+        holder.replaceChildren(newAssetBox({ kind: 'box', boxHost: boxFlow.host }));
+    }
+    function closeBoxNew() { const holder = $('box-newasset'); if (holder.contains($('box-add'))) $('assets-forms').append($('box-add')); holder.replaceChildren(); holder.hidden = true; }
+    function openBoxNew() {
+        startBoxFlow({ where: accessFor && conversations.some((c) => c.name === accessFor) ? accessFor : '', repaint: paintBoxNew, close: closeBoxNew });
+        paintBoxNew();
+        focusFirst($('box-newasset'));
+    }
+    $('box-new').addEventListener('click', () => { if (!$('box-newasset').hidden) { stopBoxWait(); boxFlow = null; closeBoxNew(); } else openBoxNew(); });
     async function paintManage() {
         await readDevices();
         void paintBoxes();
@@ -10228,8 +10474,14 @@
     async function openManage() { await openAccessPage('devices'); }
     $('share-by-device').addEventListener('click', () => { manageBy = 'device'; void paintManage(); });
     $('share-by-thing').addEventListener('click', () => { manageBy = 'thing'; void paintManage(); });
+    /* A NEW DEVICE: a kind of New asset (05-11, step 4) -- the share sheet, the same for every way in (the Device
+       kind of the box, the map's "+", "+ New device" here and on the map). On a conversation (`of`), it is offered it. */
+    function newDevice(of = '') {
+        const c = String(of ?? '');
+        void openCompose(c && !c.startsWith('room:') ? [[`conversation:${c}`, partsFor(c)]] : []);
+    }
     /* Filtered on a conversation, a new device is offered that conversation. */
-    $('share-new-device').addEventListener('click', () => { void openCompose(accessFor ? [[`conversation:${accessFor}`, partsFor(accessFor)]] : []); });
+    $('share-new-device').addEventListener('click', () => newDevice(accessFor));
     /* From a conversation: that conversation, and nothing else, is in the basket. */
     $('share').addEventListener('click', () => { void openCompose([[`conversation:${current}`, partsFor(current)]]); });
     /* The Sharing chapter of a conversation: who has it, and which parts -- changed there, at once. */

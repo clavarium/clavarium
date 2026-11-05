@@ -49,13 +49,13 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.chapter('s-backup');
     for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, id);
     await page.locator('#settings-close').click();
-    /* From a conversation: its own Assets, and "+" to attach. */
-    await page.locator('#folders').click();
-    await me.chapter('access');
-    await page.locator('#access-assets-here').click();
+    /* From a conversation: its own Assets, and "+" to attach -- the one Attach box (05-11: Access no longer has a second button to it). */
+    await page.locator('#view-assets').click();
     await me.until('its own Assets', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#view-assets').getAttribute('aria-pressed')) === 'true');
     await page.locator('#cassets-rows .as-list-top .as-add').click();
     await me.until('the attach picker', async () => page.locator('#attach-picker').isVisible());
+    assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to attach');
+    assert.equal(await page.locator('#attach-picker .kit-newasset .as-kinds button').count(), 9, 'or a new one, of every kind (a voice box and a device too)');
     await page.locator('#attach-rows .folder[data-name="seeds"]').locator('button', { hasText: 'Read' }).click();
     await me.until('seeds is read by garden', async () => (await me.api('/api/conversations')).body[0].resources.some((r) => r.name === 'seeds' && r.access === 'read'));
     /* Share with a device: the map, on this conversation. */

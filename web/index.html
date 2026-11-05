@@ -227,20 +227,23 @@
         <details class="chapter" id="chapter-access" data-chapter="access">
           <summary><span class="chapter-title" data-said="set-ch-access">Access</span><span class="chapter-about">Folders, repositories, secrets, network.</span></summary>
           <div class="chapter-body">
-            <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary">+ Attach</button></div>
+            <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary" data-said="set-na-attach">Attach</button></div>
             <p class="hint tip" hidden>In its machine under <code>/resources/</code>. Read-only cannot be lifted by the tool.</p>
             <div id="panel-rows"></div>
             <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
-            <div class="row to-access"><button type="button" id="access-assets-here">Attach an asset</button><span class="hint">Every asset, in Access.</span></div>
             <div class="panel-top"><b>Secrets handed to its tool</b></div>
             <div id="access-secrets"></div>
             <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
             <p id="secret-note" class="hint" role="status"></p>
+            <!-- ATTACH: the New asset box (kit.js NewAsset) with this conversation as its context: what is
+                 there already (#attach-there, moved into it), or a new one, attached at the end. -->
             <div id="attach-picker" hidden>
-            <div class="panel-top"><b id="attach-title">Attach</b><button type="button" id="attach-close">Done</button></div>
-            <div id="attach-rows"></div>
-            <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p>
-            <button type="button" id="attach-manage">Manage all assets</button>
+            <div class="panel-top"><b id="attach-title" data-said="set-na-attach">Attach</b><button type="button" id="attach-close" data-said="set-na-done">Done</button></div>
+            <div id="attach-box"></div>
+            <p id="attach-error" class="error" role="alert" hidden></p>
+            <div id="attach-park" hidden><div id="attach-there"><div id="attach-rows"></div>
+            <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p></div></div>
+            <button type="button" id="attach-manage" class="as-link">Manage all assets</button>
             </div>
             <div id="signin-setup" hidden>
             <div class="panel-top"><b>Sign-in mailbox</b></div>
@@ -663,18 +666,32 @@
           <!-- Voice boxes: a speaker in a room, bound to one conversation (boxes.mjs). -->
           <section id="boxes" aria-label="Voice boxes">
             <div class="row"><b>Voice boxes</b><span class="sp"></span><button type="button" id="box-new" class="primary">+ Voice box</button></div>
-            <div id="box-add" class="card" hidden>
-              <div class="row">
-                <label>Conversation <select id="box-conversation"></select></label>
+            <!-- "+ Voice box": the New asset box (kit.js NewAsset), its kind a voice box. -->
+            <div id="box-newasset" class="card" hidden></div>
+            <!-- THE VOICE BOX'S FORM, a kind of New asset (05-11, step 4): where it speaks, plug it, pair it. Moved
+                 into the box that asks for it (Assets, a conversation's Attach, here, a room); waits in #assets-forms. -->
+            <div id="box-add" class="as-form box-flow" hidden>
+              <div class="box-step" data-step="where">
+                <label>Speaks in <select id="box-conversation"></select></label>
                 <label>Room <input id="box-room" maxlength="40" placeholder="Living room"></label>
-                <button type="button" id="box-code" class="primary">Get a code</button>
               </div>
-              <div id="box-ready" hidden>
-                <p class="hint">Phone on the box's Wi-Fi « Gambeli-… »: open this link, or scan the code. Its page opens filled in; choose your Wi-Fi. <span id="box-code-minutes"></span></p>
-                <div class="row box-setup"><div id="box-qr" class="box-qr"></div><a id="box-link" class="primary button-link" href="#">Open the box's page</a></div>
-                <div class="row"><code id="box-key" class="box-key"></code><button type="button" id="box-key-copy">Copy the key</button></div>
-                <p class="hint">Pairing code alone: <b id="box-code-shown"></b></p>
+              <div class="box-step" data-step="plug" hidden>
+                <p class="hint" data-said="set-na-box-plug">Plug it into power.</p>
+                <p class="hint" data-said="set-na-box-flash">Not flashed yet: its conversation flashes it (Tether).</p>
+                <div id="box-jobs"></div>
               </div>
+              <div class="box-step" data-step="pair" hidden>
+                <div class="row"><button type="button" id="box-code" class="primary">Get a code</button></div>
+                <div id="box-ready" hidden>
+                  <p class="hint">Phone on the box's Wi-Fi « Gambeli-… »: open this link, or scan the code. Its page opens filled in; choose your Wi-Fi. <span id="box-code-minutes"></span></p>
+                  <div class="row box-setup"><div id="box-qr" class="box-qr"></div><a id="box-link" class="primary button-link" href="#">Open the box's page</a></div>
+                  <div class="row"><code id="box-key" class="box-key"></code><button type="button" id="box-key-copy">Copy the key</button></div>
+                  <p class="hint">Pairing code alone: <b id="box-code-shown"></b></p>
+                  <p id="box-waiting" class="hint" role="status"></p>
+                </div>
+              </div>
+              <p id="box-error" class="error" role="alert" hidden></p>
+              <div class="row box-flow-acts"><button type="button" id="box-back" data-said="set-na-back">Back</button><button type="button" id="box-next" class="primary" data-said="set-na-next">Next</button></div>
             </div>
             <div id="box-list"></div>
           </section>
@@ -718,7 +735,8 @@
           </div>
           <h3 class="room-group" id="salon-new-voice-head" data-said="set-tab-chat">Chat &amp; voice</h3>
           <div class="nc-card" id="salon-new-boxes-card">
-            <span class="sub-head">Voice boxes</span>
+            <div class="row"><span class="sub-head">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>
+            <div id="salon-box-newasset" hidden></div>
             <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
           </div>
           <h3 class="room-group" id="salon-new-advanced-head" data-said="set-tab-advanced" hidden>Advanced</h3>
@@ -760,8 +778,8 @@
             </fieldset>
             <div id="git-via-ssh-key" class="git-via-part">
               <label for="git-key">Key</label>
-              <div class="row"><select id="git-key"></select><button type="button" id="git-key-new">New key</button></div>
-              <div id="git-key-make" class="row" hidden><input id="git-key-name" maxlength="32" pattern="[a-z]([a-z0-9-]{0,30}[a-z0-9])?" aria-label="Name of the new key" placeholder="deploy-key" spellcheck="false" autocapitalize="off"><button type="button" id="git-key-make-go" class="primary">Make the key</button></div>
+              <!-- A SecretPicker (kit.js): #git-key, "+ New key…" (#git-key-new), made in place (#git-key-make). -->
+              <div id="git-key-pick"></div>
               <div id="git-key-shown" hidden>
                 <label for="git-key-public">Public key: add it to the repository on the hosting service, then press Add</label>
                 <div class="row"><textarea id="git-key-public" class="public-key" readonly rows="3" spellcheck="false"></textarea><button type="button" id="git-key-copy">Copy</button></div>
@@ -781,13 +799,13 @@
               <label for="git-pass">Password (kept sealed here)</label>
               <input id="git-pass" type="password" autocomplete="new-password">
             </div>
-            <div class="row"><button type="submit" class="primary">Add</button></div>
+            <div class="row"><button type="submit" class="primary">Create</button></div>
             <p id="git-said" class="hint" role="status" hidden></p>
             <p id="git-error" class="error" role="alert" hidden></p>
           </form>
         <div class="panel-top"><b id="git-keys-title">SSH keys made here</b><small class="hint">the private half never leaves this server</small></div>
         <div id="git-keys"></div>
-        <p id="git-keys-empty" class="hint">No key yet: "New key" in Add a repository makes one.</p>
+        <p id="git-keys-empty" class="hint">No key yet: "+ New key…" in New repository makes one.</p>
           </div>
           <div id="mailbox-box" class="as-form" data-kind="mailbox"><h3>New mailbox</h3>
           <div id="mailbox-provider" class="choices" role="group" aria-label="Kind of mailbox">
@@ -805,7 +823,7 @@
             <input id="mailbox-smtp" class="mailbox-live" placeholder="smtp.example.com — empty: no sending" spellcheck="false" autocapitalize="off">
             <label for="mailbox-password">Password</label>
             <div class="row"><input id="mailbox-password" type="password" autocomplete="new-password">
-              <button type="submit" class="primary">Connect</button></div>
+              <button type="submit" class="primary">Create</button></div>
             <p id="mailbox-error" class="error" role="alert" hidden></p>
           </form>
           </div>
@@ -836,13 +854,13 @@
               <label for="connexion-carddav" id="connexion-carddav-label">Contacts address (CardDAV)</label>
               <input id="connexion-carddav" spellcheck="false" autocapitalize="off" placeholder="https://dav.example.com">
               <p class="hint">Filled from the email address when known; your host's help pages give them otherwise. The password stays on the server and never enters a machine.</p>
-              <div class="row"><button type="button" id="connexion-classic-connect" class="primary">Connect</button></div>
+              <div class="row"><button type="button" id="connexion-classic-connect" class="primary">Create</button></div>
             </div>
             <p class="hint" id="connexion-notice"></p>
             <div class="row" id="connexion-open-row"><button type="button" id="connexion-open" class="primary">Open the sign-in page</button></div>
             <div id="connexion-paste" hidden>
               <label for="connexion-code">After you allow, the page will not load — copy its full address and paste it here</label>
-              <div class="row"><input id="connexion-code" spellcheck="false" autocapitalize="off" placeholder="Paste the whole address from the bar"><button type="button" id="connexion-connect" class="primary">Connect</button></div>
+              <div class="row"><input id="connexion-code" spellcheck="false" autocapitalize="off" placeholder="Paste the whole address from the bar"><button type="button" id="connexion-connect" class="primary">Create</button></div>
             </div>
             <p id="connexion-error" class="error" role="alert" hidden></p>
           </form>
@@ -860,7 +878,7 @@
           <label for="secret-name">New secret, or a new value for an existing one</label>
           <div class="row"><input id="secret-name" maxlength="40" pattern="[A-Z][A-Z0-9_]*" title="Capitals, digits and underscores, starting with a letter. Example: MODEL_KEY" placeholder="MODEL_KEY" spellcheck="false" autocapitalize="characters" required>
             <input id="secret-value" type="password" placeholder="value (never shown again)" autocomplete="new-password" required>
-            <button type="submit" class="primary">Save</button></div>
+            <button type="submit" class="primary">Create</button></div>
           <div class="row secret-expiry"><label for="secret-expires">Expires</label><input id="secret-expires" type="date"><small class="hint">Optional</small></div>
           <!-- A key or a certificate is several lines: pasted into the line above, they come here by themselves. -->
           <textarea id="secret-lines" class="secret-lines" rows="7" spellcheck="false" autocomplete="off" autocapitalize="off" placeholder="-----BEGIN ...-----&#10;...&#10;-----END ...-----" aria-label="Value, several lines (never shown again)" hidden></textarea>

@@ -2155,6 +2155,13 @@ body.as-dragging #assets-rows .as-row { touch-action: none; }
 .box-setup { align-items: center; gap: 14px; flex-wrap: wrap; }
 .box-qr { width: 180px; max-width: 100%; background: #fff; border-radius: 8px; padding: 6px; }
 .box-qr svg { display: block; width: 100%; height: auto; }
+/* A new voice box, a kind of New asset (step 4): its steps one at a time, Back / Next at the end. */
+.box-flow .box-step { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.box-flow .box-step label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.box-flow .box-step select, .box-flow .box-step input { max-width: 100%; }
+.box-flow .box-key { overflow-wrap: anywhere; min-width: 0; }
+.box-flow-acts { justify-content: flex-end; gap: 8px; }
+#box-newasset, #salon-box-newasset { margin: 8px 0; }
 /* A link that looks like the main button (the charter): brass outline, no fill. */
 .button-link { display: inline-block; padding: 8px 12px; border-radius: 8px; background: transparent; border: 1px solid var(--brass); color: var(--brass-ink); font-weight: 600; text-decoration: none; }
 
@@ -2647,6 +2654,30 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 /* INLINE CONFIRM: in place of its button, Keep first. */
 .kit-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .kit-confirm-q { color: var(--ink); }
+/* STEPFLOW: the steps of a gesture, the one at hand marked, and "2 / 3". */
+.kit-steps { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kit-steps-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; min-width: 0; font-size: .8125rem; color: var(--ink2); }
+.kit-steps-list > li { display: inline-flex; align-items: center; gap: 5px; }
+.kit-step-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); font-size: .6875rem; font-weight: 600; }
+.kit-steps-list > li.done .kit-step-n { border-color: var(--ok); color: var(--ok); }
+.kit-steps-list > li[aria-current="step"] { color: var(--ink); font-weight: 600; }
+.kit-steps-list > li[aria-current="step"] .kit-step-n { border-color: var(--brass); background: var(--brass); color: var(--bg); }
+.kit-steps-count { margin-left: auto; flex: none; color: var(--ink2); font-size: .75rem; }
+/* SECRETPICKER: its keys, "+ New key…", and the new one's name made in place. */
+.kit-secret { display: flex; flex-direction: column; gap: 6px; }
+.kit-secret .row > select, .kit-secret .row > input { flex: 1; min-width: 0; }
+/* NEW ASSET: one box -- its context on top, its steps, the kinds or a form, one ending. */
+.kit-newasset { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.kit-na-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--brass) 10%, transparent); color: var(--brass-ink); font-size: .875rem; }
+.kit-na-context > .kit-seg { margin-left: auto; }
+.kit-na-head { display: flex; flex-direction: column; gap: 6px; }
+.kit-na-head > h3 { margin: 0; font-size: 1.125rem; }
+.kit-na-sub { margin: 4px 0 0; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+.kit-na-made { display: flex; flex-direction: column; gap: 8px; }
+.kit-na-made > p[role="status"] { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: var(--ink); }
+.kit-na-made > .hint { margin: 0; }
+.kit-na-acts { gap: 8px; justify-content: flex-end; }
+.as-detail > .kit-newasset[data-step="done"] { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 /* THE CONVERSATION CARD: its avatar with its point on the corner, its name, what it does now, its chips;
    the gestures of its place at its end. Sizes: row (the list), card (the deck), member (a room's). */
 .kit-conv { --kc-av: 28px; --kc-ring: var(--bar); position: relative; display: grid; grid-template-columns: var(--kc-av) minmax(0, 1fr) auto; column-gap: 10px; align-items: start; text-align: left; color: var(--ink); min-width: 0; }
@@ -2675,3 +2706,13 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-member .kit-conv-main > small { font-size: .75rem; }
 .salon-host-box > .kit-conv-member { flex: 1; padding: 0; --kc-ring: color-mix(in srgb, var(--brass) 10%, var(--panel)); }
 @media (max-width: 520px) { .kit-conv-card { --kc-av: 30px; column-gap: 8px; padding: 10px; } }
+
+/* THE ROW, compact (05-11, designers' review): a smaller initial, a bigger ringed point, the marks as small
+   coloured words beside the last words (not pills), the unread count beside the time. */
+.kit-conv-row { --kc-av: 24px; padding: 6px 10px; }
+.kit-conv-row > .state-dot { width: 10px; height: 10px; margin: calc(var(--kc-av) - 8px) -4px 0 0; box-shadow: 0 0 0 2px var(--kc-ring); }
+.kit-conv-row .kit-conv-head > .kit-chips { flex: none; margin: 0; }
+.kit-conv-sub { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.kit-conv-sub > small { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.kit-conv-row .kit-conv-main > .kit-chips, .kit-conv-sub > .kit-chips { flex: none; margin: 0; gap: 6px; flex-wrap: nowrap; }
+.kit-conv-row .kit-conv-main .kit-chip:not([data-tone="count"]) { border: 0; padding: 0; background: none; line-height: inherit; font-size: .75rem; }
