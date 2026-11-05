@@ -424,6 +424,8 @@
         return bar;
     }
     for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A room's title: its name, and under it who speaks now (salonLive). */
+    { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
     /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
     { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right').prepend(views); }
     const applyFold = (folded) => {
@@ -1257,6 +1259,17 @@
     /* The rooms known, even before their part of this page has run (a list painted early). */
     const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
+    /* Words of the screen's language (Parley's texts, /api/talk/words) once read; English till then. */
+    const uiSaid = (key, fallback, vars = {}) => {
+        let words = null; try { words = chatWords; } catch { /* not read yet */ }
+        return (typeof words?.[key] === 'string' ? words[key] : fallback).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all));
+    };
+    /* Who of a room speaks now (#282, an AI given a message and not done): « Cuisine parle… ». */
+    const speaking = (who) => (who.length > 1 ? uiSaid('room-speaking-many', '{names} are speaking\u2026', { names: who.join(', ') }) : uiSaid('room-speaking', '{name} is speaking\u2026', { name: who[0] }));
+    const thinkingOf = (r) => (Array.isArray(r?.thinking) ? r.thinking.filter((x) => typeof x === 'string' && x) : []);
+    /* ROOMS ONLY (a filter of the list): kept on this device. */
+    let roomsOnly = false;
+    try { roomsOnly = localStorage.getItem('clavarium-list-show') === 'rooms'; } catch { /* a private window */ }
     function roomItem(r) {
         /* The same row as a conversation's (03-11: « de même nature ») -- its name, when, its last words on one line,
            its state's dot -- told apart by a small room sign before its name. */
@@ -1265,12 +1278,15 @@
         const sign = document.createElement('span'); sign.className = 'room-sign'; sign.setAttribute('aria-hidden', 'true');
         title.append(sign, r.name);
         b.append(title);
-        if (r.last) {
-            const last = document.createElement('small'); last.className = 'last'; last.textContent = `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
-            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true';
+        /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
+        const who = thinkingOf(r);
+        if (who.length) b.dataset.live = 'true';
+        if (r.last || who.length) {
+            const last = document.createElement('small'); last.className = 'last'; last.textContent = who.length ? speaking(who) : `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
+            if (r.last) { const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true'; }
         } else { const sub = document.createElement('small'); sub.textContent = `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`; b.append(sub); }
-        /* Its dot: new words in it waiting (the colour of what waits for you), else ready. */
-        const point = statePoint(r.unread > 0 ? 'wait' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : 'Room'; b.append(point);
+        /* Its dot: new words in it waiting (the colour of what waits for you), else at work while one speaks, else ready. */
+        const point = statePoint(r.unread > 0 ? 'wait' : who.length ? 'work' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : who.length ? speaking(who) : 'Room'; b.append(point);
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
         b.addEventListener('click', () => { void openSalon(r.id); });
         return b;
@@ -1307,6 +1323,26 @@
         if (open) { const body = document.createElement('div'); body.className = 'group-body'; body.append(...inside.map((c) => itemButton(c))); unfolding(g, [body]); box.append(body); }
         return box;
     }
+    /* THE LIST'S FILTER (All | Rooms only): the same pressed buttons as the other views' (Files: List | Icons). */
+    let wordsAsked = false;
+    function paintListShow() {
+        const box = $('list-show'); if (!box) return;
+        box.hidden = DEVICE || roomsNow().length === 0;
+        /* Its words (and a room's « … parle… ») in the screen's language: read once, then painted again. */
+        if (!box.hidden && !wordsAsked) { wordsAsked = true; void readWords().then(() => paint(), () => { wordsAsked = false; }); }
+        for (const b of box.querySelectorAll('button')) {
+            b.textContent = b.dataset.show === 'rooms' ? uiSaid('list-rooms-only', 'Rooms only') : uiSaid('list-all', 'All');
+            b.setAttribute('aria-pressed', String((b.dataset.show === 'rooms') === roomsOnly));
+        }
+        box.setAttribute('aria-label', uiSaid('list-show', 'Show'));
+    }
+    for (const b of $('list-show')?.querySelectorAll('button') ?? []) {
+        b.addEventListener('click', () => {
+            roomsOnly = b.dataset.show === 'rooms';
+            try { localStorage.setItem('clavarium-list-show', roomsOnly ? 'rooms' : 'all'); } catch { /* a private window */ }
+            paint();
+        });
+    }
     function paint() {
         if (listHeld) { paintLater = true; return; }
         /* The groups, folded as a whole or not (a search shows them all). */
@@ -1319,7 +1355,11 @@
         const shown = conversations.filter((c) => (query ? matches(c) : c.hidden !== true || showHidden || c.name === current)).sort(byRank);
         const heading = (text) => { const h = document.createElement('h3'); h.className = 'list-head'; h.textContent = text; return h; };
         const groups = groupsInOrder();
-        if (query || DEVICE) {
+        /* ROOMS ONLY: the rooms alone (a search among them); offered once there is one. */
+        const onlyRooms = roomsOnly && !DEVICE && roomsNow().length > 0;
+        paintListShow();
+        if (onlyRooms) groupsOpen = false;
+        else if (query || DEVICE) {
             /* A search: everything found, in its place. */
             items.append(...shown.filter((c) => !c.group).map((c) => itemButton(c)));
         } else {
@@ -1391,15 +1431,15 @@
             if (inside.length === 0) continue;
             items.append(groupBox(g, inside, conversations.filter((c) => c.group === g).sort(byRank), Boolean(query) || !folded.has(g)));
         }
-        if (groupsOpen) unfolding(GROUPS, [...items.children]);
+        if (groupsOpen && !onlyRooms) unfolding(GROUPS, [...items.children]);
         /* ROOMS (03-11): their own list, after the groups of conversations; a search finds them by name. */
         const roomsShown = roomsNow().filter((r) => !query || r.name.toLowerCase().includes(String(query).toLowerCase()));
         if (!DEVICE && roomsShown.length) {
             const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = 'rooms';
-            const open = !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
+            const open = onlyRooms || !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
             const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
             b.append(chevron, document.createTextNode('Rooms'));
-            b.addEventListener('click', () => { if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
+            b.addEventListener('click', () => { if (onlyRooms) return; if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
             items.append(b);
             if (open) items.append(...roomsShown.map((r) => roomItem(r)));
         }
@@ -1410,7 +1450,7 @@
         if (query) hits.forEach((h, i) => { h.toggleAttribute('data-chosen', i === chosenHit); if (i === chosenHit) h.scrollIntoView?.({ block: 'nearest' }); });
         $('search-none').hidden = !query || hits.length > 0;
         const toggle = $('hidden-toggle');
-        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query);
+        toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query) || onlyRooms;
         toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
         toggle.setAttribute('aria-expanded', String(showHidden));
         const calling = hidden.some(needsYou);
@@ -2271,7 +2311,7 @@
     /* All folded when the app is opened: what the person opens stays open while this tab lives (a reload
        included), never from one day to the next -- a page that opens half-unfolded says nothing. What asks
        for them is said on the folded chapter instead (markAttention). */
-    const OPEN_AT_FIRST = {};
+    const OPEN_AT_FIRST = { 's-features': true };
     let chapters = {};
     try { chapters = JSON.parse(sessionStorage.getItem('clavarium-chapters') ?? '{}') ?? {}; } catch { /* a private window */ }
     try { localStorage.removeItem('clavarium-chapters'); } catch { /* as above */ }
@@ -2772,6 +2812,10 @@
     /* "Send when I stop", for dictation in the chat: kept by this device. */
     let chatAuto = false;
     try { chatAuto = localStorage.getItem('clavarium-chat-auto') === '1'; } catch { /* as above */ }
+    /* The silence before it sends by itself, chosen on this device (Parley's menu, under the switch). */
+    let chatAutoMs;
+    try { chatAutoMs = Number(localStorage.getItem('clavarium-chat-auto-ms')) || undefined; } catch { /* as above */ }
+    const keepAutoMs = (ms) => { chatAutoMs = ms; try { localStorage.setItem('clavarium-chat-auto-ms', String(ms)); } catch { /* as above */ } };
     const deviceLang = () => (navigator.language || 'en');
     let chatWords = null;
     async function readWords() {
@@ -2890,7 +2934,7 @@
             forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
             remind: () => post(talkPath(name, '/remind'), {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
-            voice: chatVoice(), autoSend: chatAuto,
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs,
             onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             touch: touchScreen,
         });
@@ -3332,7 +3376,8 @@
         $('alerts-on').hidden = Boolean(mine); $('alerts-off').hidden = $('alerts-test').hidden = !mine;
         state.textContent = said ?? (mine ? `On · ${about.devices.length} device${about.devices.length === 1 ? '' : 's'} in all` : `Off${about.devices.length > 0 ? ` · ${about.devices.length} other device${about.devices.length === 1 ? '' : 's'} on` : ''}`);
     }
-    $('alerts-on').addEventListener('click', async () => {
+    /* Turned on for this device: asked by its button, and by the next step of Features (features.js). */
+    async function alertsOn() {
         try {
             if ((await Notification.requestPermission()) !== 'granted') { await paintAlerts('Refused in this browser\'s settings'); return; }
             const { key } = await fetch(`${API}/alerts`).then((r) => r.json());
@@ -3341,7 +3386,8 @@
             await post(`${API}/alerts`, { subscription: subscription.toJSON(), label: /Android/.test(navigator.userAgent) ? 'Android' : /iPad|iPhone/.test(navigator.userAgent) ? 'iPhone or iPad' : 'Computer' });
             await paintAlerts();
         } catch (error) { await paintAlerts(`Could not be set up: ${error.message}`); }
-    });
+    }
+    $('alerts-on').addEventListener('click', () => { void alertsOn(); });
     $('alerts-off').addEventListener('click', async () => {
         const registration = await navigator.serviceWorker.ready;
         const mine = await registration.pushManager.getSubscription();
@@ -5160,6 +5206,12 @@
         return card;
     }
     let salonThread = null; let salonId = ''; let salonTimer = null;
+    /* A room's bar while one of its AIs speaks: its dot at work (gold, breathing), the words under its name. */
+    function salonLive(who) {
+        const dot = $('salon-state'); const line = $('salon-live');
+        if (dot) { dot.dataset.state = who.length ? 'work' : 'ok'; dot.title = who.length ? speaking(who) : ''; }
+        if (line) { line.hidden = who.length === 0; line.textContent = who.length ? speaking(who) : ''; }
+    }
     function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
     async function openSalon(id, push = true) {
         if (DEVICE) return;
@@ -5167,7 +5219,8 @@
         const r = rooms.find((x) => x.id === id); if (!r) return;
         enterPlace('salon', push);
         salonLeft(); salonId = id;
-        $('salon-title').textContent = r.name;
+        $('salon-name').textContent = r.name;
+        salonLive(thinkingOf(r));
         $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
         $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
         const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? 'People' : k === 'ai' ? 'AIs' : 'Boxes'), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', 'host')); return x; })); return row; }).filter(Boolean);
@@ -5179,10 +5232,14 @@
             words, markdown: true, agentName: '',
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
-                const who = Array.isArray(d?.thinking) ? d.thinking : [];
+                const who = thinkingOf(d);
                 $('salon-thinking').hidden = who.length === 0;
-                $('salon-thinking').replaceChildren(el('span', 'state-dot'), document.createTextNode(`${who.join(', ')} ${who.length > 1 ? 'are' : 'is'} thinking\u2026`));
+                $('salon-thinking').replaceChildren(el('span', 'state-dot'), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
                 $('salon-thinking').firstChild.dataset.state = 'work';
+                /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
+                salonLive(who);
+                const known = rooms.find((x) => x.id === id);
+                if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
                 return d;
             }),
             send: (text) => post(`${API}/rooms/${id}/talk`, { text }),
@@ -5190,7 +5247,7 @@
             view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
             diagram: drawDiagram, highlight: colourCode, touch: touchScreen,
-            voice: chatVoice(), autoSend: chatAuto, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
+            voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             draft: `room:${id}`,
         });
         salonTimer = setInterval(() => { if (salonThread && salonId === id) void salonThread.refresh(); }, 3000);
@@ -5287,6 +5344,43 @@
             await openSalon(made.id, false);
         } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
     });
+    /* ---------- FEATURES (features.js): what this Clavarium can do, and its next step ---------- */
+    /* Each gesture is done where it is done already: its own request, or its own place open on it. */
+    async function openFeature(what, s = {}) {
+        const chapter = String(s.chapter ?? '');
+        if (what === 'new' || (chapter === 'new' && what === 'settings')) { await openNew(); return; }
+        if (what === 'boxes' || chapter === 'boxes') { await openAccessPage('devices'); $('boxes')?.scrollIntoView({ block: 'start' }); return; }
+        if (what === 'mail' || chapter === 'access') { await openAssetsPlace(); return; }
+        if (what === 'import') { await openAccessPage('map', { mode: 'flows' }); document.getElementById('flows-import')?.click(); return; }
+        if (what === 'opencode') {
+            await openNew();
+            $('newconv-tools').querySelector('[data-tool="opencode"]')?.click();
+            await paintOpenCode();
+            const prov = $('newconv-oc-provider');
+            if (s.provider && [...prov.options].some((o) => o.value === s.provider)) { prov.value = s.provider; ocProvider(); }
+            const model = $('newconv-oc-model'); if (s.model && [...model.options].some((o) => o.value === s.model)) model.value = s.model;
+            const key = $('newconv-oc-key'); if (s.secret && [...key.options].some((o) => o.value === s.secret)) { key.value = s.secret; $('newconv-oc-new').hidden = true; }
+            return;
+        }
+        await openSettings();
+        if (/^s-[a-z-]{1,30}$/.test(chapter)) openChapter(chapter)?.scrollIntoView({ block: 'start' });
+    }
+    const features = DEVICE ? undefined : window.clavariumFeatures?.({
+        API, post, word: (key, en, vars) => uiSaid(key, en, vars), loadWords: () => readWords(),
+        lang: () => { try { return chatWords?.lang ?? 'en'; } catch { return 'en'; } },
+        mascot: () => `${MASCOTS[MASCOT]()}<span class="m-z">z</span><span class="m-z">z</span><span class="m-z">z</span>`,
+        alerts: () => alertsOn(),
+        /* The export of Settings, Backup (links.js): the server keeps its day as the backup's. */
+        backup: async () => { $('flows-export').click(); },
+        open: (what, s) => openFeature(what, s),
+        welcomed: () => { if (place === 'deck') void paintDeckFeatures(conversations.length); },
+    });
+    async function paintSettingsFeatures() {
+        if (!features) return;
+        const data = await features.mount($('settings-features'), 'settings');
+        $('features-title').textContent = uiSaid('features-title', 'Features');
+        $('features-about').textContent = data ? uiSaid('features-lit-of', '{n} of {t} rooms lit', { n: data.counts.ready, t: data.counts.total }) : '';
+    }
     async function paintDeck() {
         $('deck-title').textContent = appName;
         const list = [...conversations];
@@ -5299,7 +5393,19 @@
         const paint = () => $('deck-cards').replaceChildren(...rooms.map((r) => roomCard(r)), ...list.map((c) => convCard(c, (x) => { leavePlace(); select(x.name); })), add, ...(list.length ? [addRoom] : []));
         paint();
         $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
+        void paintDeckFeatures(list.length);
         await loadRooms(); paint();
+    }
+    /* FEATURES (features.js): the welcome in place of "No conversation yet" until it is passed; then the
+       next step over the cards. */
+    async function paintDeckFeatures(count) {
+        if (!features) return;
+        const data = await features.refresh();
+        const welcoming = count === 0 && data?.welcome === true;
+        $('deck-empty').hidden = count > 0 || welcoming;
+        const [on, off] = welcoming ? ['deck-welcome', 'deck-features'] : ['deck-features', 'deck-welcome'];
+        features.unmount($(off)); $(off).hidden = true;
+        features.show($(on), welcoming ? 'welcome' : 'home');
     }
     function openDeck(push = true) { if (DEVICE) return; enterPlace('deck', push); void paintDeck(); }
     $('deck-close').addEventListener('click', () => leavePlace());
@@ -5886,6 +5992,7 @@
     markGroup('device');
     async function openSettings({ push = true } = {}) {
         enterPlace('settings', push);
+        void paintSettingsFeatures().catch(() => {});
         void paintAlerts().catch(() => {});
         void paintWords().catch(() => {});
         void paintThreadLevels().catch(() => {});
@@ -5918,13 +6025,15 @@
         await Promise.all([paintHosts(), paintShelf(), paintServer(), paintUpdates()]);
     }
 
-    /* ---------- Dictation, in Settings: the engine, chosen here (server/voice.mjs) ---------- */
+    /* ---------- Dictation, in Settings: two engines, main and backup (server/voice.mjs, dictation-engines.mjs) ---------- */
     let dictationProviders = [];
-    const dictationChoice = () => {
-        const lang = $('dictation-language').value;
-        return { provider: $('dictation-provider').value, url: $('dictation-url').value.trim(), model: $('dictation-model').value.trim(), secret: $('dictation-secret').value,
-            language: lang === 'other' ? $('dictation-language-code').value.trim() : lang };
-    };
+    const DICT_SLOTS = { main: 'dictation', backup: 'dictation-backup' };
+    const NEW_KEY = '__new';
+    const dq = (slot, what) => $(`${DICT_SLOTS[slot]}-${what}`);
+    const engineChoice = (slot) => ({ provider: dq(slot, 'provider').value, url: dq(slot, 'url').value.trim(), model: dq(slot, 'model').value.trim(),
+        secret: dq(slot, 'secret').value === NEW_KEY ? '' : dq(slot, 'secret').value });
+    const dictationLanguage = () => { const lang = $('dictation-language').value; return lang === 'other' ? $('dictation-language-code').value.trim() : lang; };
+    const dictationChoice = () => ({ language: dictationLanguage(), main: engineChoice('main'), backup: engineChoice('backup') });
     const dictationSay = (error, saved = '') => {
         $('dictation-error').textContent = error ?? ''; $('dictation-error').hidden = !error;
         $('dictation-saved').textContent = saved;
@@ -5935,36 +6044,122 @@
         $('dictation-language-code').value = known ? '' : code;
         $('dictation-language-code').hidden = known;
     };
+    /* The name offered for a new key (dictation-engines.mjs, newKeyName). */
+    const newKeyName = (provider, names) => {
+        const base = `${provider === 'ovh' ? 'OVH_AI_ENDPOINTS' : String(provider).toUpperCase()}_DICTATION_KEY`;
+        if (!names.includes(base)) return base;
+        for (let i = 2; ; i++) if (!names.includes(`${base}_${i}`)) return `${base}_${i}`;
+    };
+    const fillSecrets = (slot, names, keep) => {
+        const select = dq(slot, 'secret');
+        const options = [['', 'No key'], ...names.map((n) => [n, n]), [NEW_KEY, '+ New key...']];
+        select.replaceChildren(...options.map(([value, text]) => Object.assign(document.createElement('option'), { value, textContent: text })));
+        select.value = names.includes(keep) ? keep : '';
+    };
+    /* Its models: the provider's own list, read with the key chosen (kept a day on the server), else the known ones. */
+    const modelAsked = { main: 0, backup: 0 };
+    async function paintModels(slot, wanted = dq(slot, 'model').value) {
+        const provider = dq(slot, 'provider').value;
+        const pick = dq(slot, 'model-pick'); const typed = dq(slot, 'model');
+        const free = provider === 'other';
+        pick.hidden = free; typed.hidden = !free;
+        if (free || provider === 'none') return;
+        const asked = ++modelAsked[slot];
+        const secret = engineChoice(slot).secret;
+        const models = await getJson(`/dictation/models?${new URLSearchParams({ provider, secret })}`, null)
+            ?? dictationProviders.find((p) => p.id === provider)?.models ?? [];
+        if (asked !== modelAsked[slot]) return;
+        const list = wanted && !models.some((m) => m.id === wanted) ? [{ id: wanted, label: '' }, ...models] : models;
+        pick.replaceChildren(...list.map((m) => Object.assign(document.createElement('option'), { value: m.id, textContent: m.label ? `${m.id} · ${m.label}` : m.id })));
+        pick.value = list.some((m) => m.id === wanted) ? wanted : list[0]?.id ?? '';
+        typed.value = pick.value;
+    }
+    /* What a provider shows: the address only for "Other"; nothing but "None" for no backup. */
+    const showProvider = (slot) => {
+        const provider = dq(slot, 'provider').value;
+        const none = provider === 'none';
+        dq(slot, 'url-row').hidden = provider !== 'other';
+        dq(slot, 'other-hint').hidden = provider !== 'other';
+        for (const what of ['model-row', 'secret-row', 'try']) dq(slot, what).hidden = none;
+        if (none) { dq(slot, 'newkey').hidden = true; dq(slot, 'heard').hidden = true; }
+        if (none) dq(slot, 'dot').dataset.off = ''; else delete dq(slot, 'dot').dataset.off;
+    };
     async function paintDictation() {
         const [about, secrets] = await Promise.all([getJson('/dictation', null), getJson('/secrets', [])]);
         if (!about) { $('settings-dictation').textContent = 'Not set from here'; $('dictation-form').hidden = true; return; }
-        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here`
+        const main = about.main; const backup = about.backup;
+        const short = (id) => about.providers.find((p) => p.id === id)?.short || about.providers.find((p) => p.id === id)?.label || id;
+        $('settings-dictation').textContent = about.source === 'settings' ? `On · "${about.model}" · chosen here${backup ? ` · backup: ${short(backup.provider)}` : ''}`
             : about.source === 'env' ? `On · "${about.env.model}" · set on the server` : 'Off · choose a provider';
         $('settings-dictation').dataset.tone = about.source ? 'ok' : '';
+        if (about.source === 'settings' && about.down) { $('settings-dictation').textContent = `${about.down} down · backup in use`; $('settings-dictation').dataset.tone = 'warn'; }
         /* Its key past its expiry day: not used (voice.mjs); said in red, a dot on the chapter. */
         if (about.source === 'settings' && about.secretExpired) { $('settings-dictation').textContent = 'Key expired: replace it in Assets > Secrets'; $('settings-dictation').dataset.tone = 'bad'; }
         if (about.secretMissing) dictationSay(`The secret "${about.secret}" is gone: choose another key.`);
+        else if (backup?.secretMissing) dictationSay(`Backup: the secret "${backup.secret}" is gone: choose another key.`);
+        if (about.down) dq('main', 'dot').dataset.down = ''; else delete dq('main', 'dot').dataset.down;
         dictationProviders = about.providers;
-        const provider = $('dictation-provider');
-        if (provider.options.length === 0) for (const p of about.providers) { const o = document.createElement('option'); o.value = p.id; o.textContent = p.label; provider.append(o); }
-        const secret = $('dictation-secret');
-        secret.replaceChildren(secret.options[0] ?? Object.assign(document.createElement('option'), { value: '', textContent: 'No key' }));
-        for (const s2 of secrets) { const o = document.createElement('option'); o.value = s2.name; o.textContent = s2.name; secret.append(o); }
-        if ($('dictation-form').contains(document.activeElement)) return;
-        provider.value = about.provider ?? 'ovh';
-        const first = dictationProviders.find((p) => p.id === provider.value);
-        $('dictation-url').value = about.provider ? about.url : first?.url ?? '';
-        $('dictation-model').value = about.provider ? about.model : first?.model ?? '';
-        secret.value = [...secret.options].some((o) => o.value === about.secret) ? about.secret : '';
+        const names = secrets.map((s2) => s2.name);
+        for (const slot of ['main', 'backup']) {
+            const provider = dq(slot, 'provider');
+            if (provider.options.length === 0) {
+                for (const p of about.providers) provider.append(Object.assign(document.createElement('option'), { value: p.id, textContent: p.label }));
+                if (slot === 'backup') provider.append(Object.assign(document.createElement('option'), { value: 'none', textContent: 'None' }));
+            }
+        }
+        if ($('dictation-form').contains(document.activeElement)) { for (const slot of ['main', 'backup']) fillSecrets(slot, names, dq(slot, 'secret').value); return; }
+        for (const [slot, saved] of [['main', main], ['backup', backup]]) {
+            const first = dictationProviders.find((p) => p.id === (saved?.provider ?? 'ovh'));
+            dq(slot, 'provider').value = saved?.provider ?? (slot === 'main' ? 'ovh' : 'none');
+            dq(slot, 'url').value = saved ? saved.url : first?.url ?? '';
+            dq(slot, 'model').value = saved ? saved.model : first?.model ?? '';
+            fillSecrets(slot, names, saved?.secret ?? '');
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, dq(slot, 'model').value);
+        }
         showLanguage(about.language ?? '');
-        $('dictation-other-hint').hidden = provider.value !== 'other';
         $('dictation-off').hidden = about.source !== 'settings';
     }
-    $('dictation-provider').addEventListener('change', () => {
-        const p = dictationProviders.find((x) => x.id === $('dictation-provider').value);
-        if (p) { $('dictation-url').value = p.url; $('dictation-model').value = p.model; }
-        $('dictation-other-hint').hidden = $('dictation-provider').value !== 'other';
-    });
+    for (const slot of ['main', 'backup']) {
+        dq(slot, 'provider').addEventListener('change', () => {
+            const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+            if (p) { dq(slot, 'url').value = p.url; dq(slot, 'model').value = p.model; }
+            /* A key whose name reads as this provider's, when the one chosen does not. */
+            const keys = [...dq(slot, 'secret').options].map((o) => o.value).filter((v) => v && v !== NEW_KEY);
+            const looks = { ovh: /^OVH_AI_ENDPOINTS/, mistral: /^MISTRAL/, groq: /^GROQ/, openai: /^OPENAI/ }[p?.id];
+            if (looks && !looks.test(dq(slot, 'secret').value)) { const k = keys.find((n) => looks.test(n)); if (k) dq(slot, 'secret').value = k; }
+            dq(slot, 'newkey').hidden = true;
+            showProvider(slot);
+            void paintModels(slot, p?.model ?? '');
+        });
+        dq(slot, 'model-pick').addEventListener('change', () => { dq(slot, 'model').value = dq(slot, 'model-pick').value; });
+        dq(slot, 'secret').addEventListener('change', () => {
+            const adding = dq(slot, 'secret').value === NEW_KEY;
+            dq(slot, 'newkey').hidden = !adding;
+            if (adding) {
+                const names = [...dq(slot, 'secret').options].map((o) => o.value);
+                const p = dictationProviders.find((x) => x.id === dq(slot, 'provider').value);
+                dq(slot, 'newkey-name').textContent = `Kept as ${newKeyName(p?.id ?? 'other', names)}`;
+                dq(slot, 'newkey-value').placeholder = `Paste the ${p?.short || p?.label || ''} key`.replace('  ', ' ');
+                dq(slot, 'newkey-value').focus();
+            } else void paintModels(slot);
+        });
+        /* "+ New key": kept in the secrets, never shown again, then chosen. */
+        dq(slot, 'newkey-keep').addEventListener('click', async () => {
+            const value = dq(slot, 'newkey-value').value.trim();
+            if (!value) { dictationSay('Paste the key first.'); return; }
+            const names = [...dq(slot, 'secret').options].map((o) => o.value);
+            const name = newKeyName(dq(slot, 'provider').value, names);
+            try {
+                await post(`${API}/secrets`, { name, value });
+                dq(slot, 'newkey-value').value = ''; dq(slot, 'newkey').hidden = true; dictationSay(null, `Key kept: ${name}.`);
+                const secrets = await getJson('/secrets', []);
+                for (const s2 of ['main', 'backup']) fillSecrets(s2, secrets.map((x) => x.name), s2 === slot ? name : dq(s2, 'secret').value);
+                void paintModels(slot);
+            } catch (error) { dictationSay(error.message); }
+        });
+    }
     $('dictation-language').addEventListener('change', () => { $('dictation-language-code').hidden = $('dictation-language').value !== 'other'; });
     $('dictation-form').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -5974,24 +6169,27 @@
     $('dictation-off').addEventListener('click', async () => {
         try { await post(`${API}/dictation/off`); dictationSay(null, 'Turned off.'); void paintDictation(); } catch (error) { dictationSay(error.message); }
     });
-    /* "Try it": a few seconds from this microphone, sent to the engine in the form (nothing saved), its text shown. */
+    /* "Try it", per engine: a few seconds from this microphone, sent to the engine in its card (nothing saved). */
     let stopTrying = null;
-    const endTry = () => { stopTrying?.(); stopTrying = null; $('dictation-try').textContent = 'Try it'; };
-    $('dictation-try').addEventListener('click', async () => {
+    const endTry = () => { stopTrying?.(); stopTrying = null; for (const slot of ['main', 'backup']) dq(slot, 'try').textContent = 'Try it'; };
+    for (const slot of ['main', 'backup']) dq(slot, 'try').addEventListener('click', async () => {
         if (stopTrying) { endTry(); return; }
         dictationSay(null);
-        const heard = $('dictation-heard');
+        const heard = dq(slot, 'heard');
+        for (const other of ['main', 'backup']) if (other !== slot) dq(other, 'heard').hidden = true;
         if (!window.clavariumVoice) { dictationSay('The microphone cannot be used on this page.'); return; }
-        const to = `${API}/dictation/try?${new URLSearchParams(dictationChoice())}`;
+        const to = `${API}/dictation/try?${new URLSearchParams({ ...engineChoice(slot), language: dictationLanguage() })}`;
         const words = { calibrating: 'Listening to the room...', listening: 'Speak now: a short sentence.', hearing: 'Hearing...', transcribing: 'Writing...' };
+        const began = Date.now();
         try {
-            heard.hidden = false; heard.textContent = 'Opening the microphone...';
+            heard.hidden = false; heard.dataset.tone = ''; heard.textContent = 'Opening the microphone...';
+            let spoke = began;
             const stop = await window.clavariumVoice.listen({
-                state: (w) => { if (stopTrying) heard.textContent = words[w] ?? w; },
-                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; },
+                state: (w) => { if (w === 'transcribing') spoke = Date.now(); if (stopTrying) heard.textContent = words[w] ?? w; },
+                phrase: (text) => { endTry(); heard.textContent = `Heard: ${text}`; heard.title = `${((Date.now() - spoke) / 1000).toFixed(1)} s`; },
                 error: (message) => { endTry(); heard.hidden = true; dictationSay(message); },
             }, { to });
-            stopTrying = stop; $('dictation-try').textContent = 'Stop';
+            stopTrying = stop; dq(slot, 'try').textContent = 'Stop';
             setTimeout(() => { if (stopTrying === stop) { endTry(); if (!heard.textContent.startsWith('Heard')) heard.textContent = 'Nothing was heard.'; } }, 15_000);
         } catch { heard.hidden = true; dictationSay('The microphone could not be opened.'); }
     });
@@ -9477,6 +9675,57 @@
         return card;
     }
     /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
+    /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): normal, or each wake clip kept with its label to train a better one. */
+    function boxWake(b) {
+        const part = el('div', 'box-wake');
+        const choice = el('div', 'levels'); choice.setAttribute('role', 'group'); choice.setAttribute('aria-label', uiSaid('box-wake', 'Wake word'));
+        const modes = [['normal', uiSaid('box-wake-normal', 'Normal')], ['learn', uiSaid('box-wake-learn', 'Learns from home')]].map(([mode, word]) => { const x = el('button', '', word); x.type = 'button'; x.dataset.mode = mode; choice.append(x); return x; });
+        const lines = el('div', 'box-wake-lines');
+        const row = el('div', 'action-row box-wake-row'); row.append(el('span', '', uiSaid('box-wake', 'Wake word')), choice);
+        part.append(row, lines);
+        const day = (iso) => new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        const paint = (w) => {
+            for (const x of modes) x.setAttribute('aria-pressed', String(x.dataset.mode === w.mode));
+            lines.replaceChildren();
+            if (w.mode !== 'learn' && !w.kept) return;
+            lines.append(el('small', 'hint', uiSaid('box-wake-kept', '{kept} kept \u00b7 {real} real \u00b7 {false} false \u00b7 {near} near', { kept: w.kept, real: w.real, false: w.false, near: w.near ?? 0 })));
+            lines.append(el('small', 'hint', w.model
+                ? uiSaid('box-wake-rate-model', 'False wakes: {before} a day \u2192 {after} a day since the model of {date}', { before: w.model.falsePerDayBefore, after: w.model.falsePerDayAfter, date: day(w.model.installedAt) })
+                : uiSaid('box-wake-rate', 'False wakes: {n} a day', { n: w.falsePerDay })));
+            const cut = (v) => Number(v).toFixed(2);
+            lines.append(el('small', 'hint', uiSaid('box-wake-missed', 'Missed calls: {n} a day \u00b7 threshold {cutoff}', { n: w.missedPerDay ?? 0, cutoff: cut(w.cutoff ?? 0.94) })));
+            const t = w.tuning;
+            if (t) lines.append(el('small', 'hint', t.better
+                ? (t.state === 'applied' ? uiSaid('box-wake-tuned', 'Tuned {date}: {from} \u2192 {to}', { date: day(t.appliedAt ?? t.at), from: cut(t.from), to: cut(t.to) })
+                    : t.state === 'refused' ? uiSaid('box-wake-tune-refused', 'Threshold {to} refused by the box', { to: cut(t.to) })
+                        : uiSaid('box-wake-tune-sent', 'Threshold {from} \u2192 {to}: waiting for the box', { from: cut(t.from), to: cut(t.to) }))
+                : t.reason === 'not-enough' ? uiSaid('box-wake-tune-few', 'Tuning: not enough clips yet')
+                    : uiSaid('box-wake-tune-kept', 'Tuned {date}: threshold {from} kept', { date: day(t.at), from: cut(t.from) })));
+            lines.append(el('small', 'hint', uiSaid('box-wake-private', 'Only the wake word\u2019s 1.6 s, on this server: nothing is sent elsewhere.')));
+            const acts = el('div', 'action-row');
+            if (w.mode === 'learn') {
+                const now = el('button', '', uiSaid('box-wake-improve', 'Improve now')); now.type = 'button';
+                now.addEventListener('click', async () => { now.disabled = true; try { await post(`${API}/boxes/${b.id}/wake-improve`, {}); const fresh = await getJson(`/boxes/${b.id}/wake`, null); if (fresh) paint(fresh); else now.disabled = false; } catch (error) { now.textContent = error.message; now.disabled = false; } });
+                acts.append(now);
+            }
+            if (w.kept) {
+                const erase = el('button', '', uiSaid('box-wake-erase', 'Erase all\u2026')); erase.type = 'button';
+                const sure = el('span', 'box-wake-sure'); sure.hidden = true;
+                const yes = el('button', 'danger', uiSaid('box-wake-erase-yes', 'Yes, erase')); yes.type = 'button';
+                sure.append(el('span', '', uiSaid('box-wake-erase-ask', 'Erase the {n} clips?', { n: w.kept })), ' ', yes);
+                erase.addEventListener('click', () => { sure.hidden = !sure.hidden; });
+                yes.addEventListener('click', async () => { yes.disabled = true; try { paint(await post(`${API}/boxes/${b.id}/wake-erase`, {})); } catch (error) { yes.textContent = error.message; yes.disabled = false; } });
+                acts.append(erase, sure);
+            }
+            if (acts.childElementCount) lines.append(acts);
+        };
+        for (const x of modes) x.addEventListener('click', async () => {
+            try { paint(await post(`${API}/boxes/${b.id}/wake-mode`, { mode: x.dataset.mode })); } catch (error) { lines.replaceChildren(el('small', 'warn', error.message)); }
+        });
+        paint({ mode: b.wake ?? 'normal', kept: 0 });
+        void getJson(`/boxes/${b.id}/wake`, null).then((w) => { if (w) paint(w); });
+        return part;
+    }
     async function paintBoxes() {
         const list = await getJson('/boxes', []); await loadRooms();
         const rows = $('box-list'); rows.replaceChildren();
@@ -9488,7 +9737,7 @@
             const card = el('div', 'device card box-card'); card.dataset.box = b.id;
             const head = el('div', 'device-head');
             const conv = conversations.find((c) => c.name === b.conversation);
-            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
+            head.append(el('b', '', b.place ? `${b.name} \u00b7 ${b.place}` : b.name), el('small', b.online ? '' : 'warn', `${b.online ? 'online' : 'offline'} · ${conv ? shownName(conv) : String(b.conversation ?? '').startsWith('room:') ? `room ${rooms.find((r) => `room:${r.id}` === b.conversation)?.name ?? '?'}` : b.conversation}${b.firmware ? ` · firmware ${b.firmware}` : ''}${b.muted ? ' · muted' : ''}`));
             const rename = el('button', '', 'Rename'); rename.type = 'button';
             rename.addEventListener('click', () => {
                 const field = el('input'); field.value = b.name; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this voice box');
@@ -9521,6 +9770,7 @@
             const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
             const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
+            card.append(boxWake(b));
             /* TESTED FROM HERE (01-11): its sound -- it says a test sentence -- and its microphone -- it listens
                once, and what it heard shows here, not in the conversation. */
             if (b.online) {
@@ -9986,6 +10236,12 @@
         }
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();
+        /* THE FIRST START (Features, features.js): nothing made yet, the welcome not passed -- the home
+           page opens on it, once; passed ("Skip", or a conversation made), it never comes back by itself. */
+        else if (home && !DEVICE && !current && conversations.length === 0) {
+            const d = await features?.refresh().catch(() => null);
+            if (d?.welcome && place === 'conversations' && !conversations.length) openDeck(false);
+        }
     }
     void start();
 })();

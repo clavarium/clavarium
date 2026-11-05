@@ -62,6 +62,7 @@ import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
+import { featureWords } from './features.mjs';
 import { importFile } from './files.mjs';
 import { KEYS } from 'clavarium-parley/ui';
 import { Refusal, SESSION } from './conversations.mjs';
@@ -267,7 +268,10 @@ export class Talk {
         const lang = s.lang === 'device' ? String(device ?? 'en') : s.lang;
         const words = texts(lang, s.own);
         this.#lastLang = words.lang;
-        return words;
+        /* The words of Features (features.mjs) for this language, the owner's own over them as over the others. */
+        const more = featureWords(words.lang);
+        for (const [key, value] of Object.entries(s.own ?? {})) if (key.startsWith('features-') && typeof value === 'string') more[key] = value.slice(0, 500);
+        return { ...more, ...words };
     }
 
     /* ---- what the tool posts ---- */

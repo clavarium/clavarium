@@ -10,7 +10,7 @@
  * SKIPPED and says so: a suite that passes without having run is worse than
  * one that is absent.
  */
-import { mkdtempSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -87,6 +87,10 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
     const sshRoot = join(dir, 'far');
     const gitSsh = installFakeSsh(sshRoot);
     process.env.FAKE_VM_LAUNCH_SECONDS = launchSeconds;
+    /* The first start's welcome (features.mjs) already passed: these tests begin where a person who
+       skipped it does. */
+    mkdirSync(join(dir, 'data'), { recursive: true });
+    writeFileSync(join(dir, 'data', 'features.json'), JSON.stringify({ welcomeDone: true }));
     const server = await startHome({
         port: 0, dataDir: join(dir, 'data'), tools: tools ? readTools(JSON.stringify(tools)) : TOOLS, stopDelayMs, mailReader, gitLocalRemotes: true, gitSsh,
         /* A test machine may have little free disk: no reserve beyond the cap. */

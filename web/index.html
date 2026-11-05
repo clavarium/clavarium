@@ -18,6 +18,8 @@
     <!-- SEARCH, discreet: opened by the magnifier, "/" or Ctrl+K; filters as it is typed. -->
     <div id="search" role="search" hidden><input id="search-field" type="search" placeholder="Search" aria-label="Search conversations: name, folder, identifier, tool" autocomplete="off" spellcheck="false" maxlength="60" aria-controls="items"></div>
     <!-- Needs you and Recent: copies of rows of the list below, by when they were last used (app.js, paint). -->
+    <!-- A FILTER of the list (once there is a room): everything, or the rooms only; kept on this device. -->
+    <div id="list-show" class="levels list-show" role="group" aria-label="Show" hidden><button type="button" data-show="all" aria-pressed="true">All</button><button type="button" data-show="rooms" aria-pressed="false">Rooms only</button></div>
     <div id="recent"></div>
     <div id="items"></div>
     <p id="search-none" class="hint" hidden>Nothing found.</p>
@@ -647,6 +649,9 @@
       </div>
       <div id="deck" class="sheet as-place" hidden>
         <div class="panel-top"><b id="deck-title">Conversations</b><button type="button" id="deck-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <!-- FEATURES (features.js): the next step over the cards; the welcome in place of "No conversation yet". -->
+        <div id="deck-features" hidden></div>
+        <div id="deck-welcome" hidden></div>
         <div id="deck-cards" class="deck"></div>
         <div id="deck-empty" class="deck-empty" hidden><p>No conversation yet.</p><div class="deck-empty-acts"><button type="button" id="deck-empty-new" class="primary">+ Create a conversation</button><button type="button" id="deck-empty-import">Import a configuration</button></div></div>
       </div>
@@ -846,6 +851,11 @@
           <button type="button" data-group="diagnostics">Diagnostics</button>
         </nav>
         <div id="settings-groups" class="settings-groups">
+        <!-- FEATURES (features.js): what this Clavarium can do, and its next step. -->
+        <details class="chapter" id="settings-ch-features" data-chapter="s-features">
+          <summary><span class="chapter-title" id="features-title">Features</span><span class="chapter-about" id="features-about"></span></summary>
+          <div class="chapter-body" id="settings-features"></div>
+        </details>
         <section class="settings-group" id="settings-group-device" data-group="device">
         <h3 class="chapter-group">This device</h3>
         <details class="chapter" id="settings-ch-screen" data-chapter="s-screen">
@@ -905,15 +915,31 @@
           <summary><span class="chapter-title">Dictation</span><span class="chapter-about">Speech to text.</span></summary>
           <div class="chapter-body">
         <p id="settings-dictation" class="status-line"></p>
-        <form id="dictation-form" class="set-rows" autocomplete="off">
-          <div class="set-row"><div class="set-what"><label for="dictation-provider">Provider</label></div><div class="set-control"><select id="dictation-provider"></select></div></div>
-          <div class="set-row"><div class="set-what"><label for="dictation-url">Address</label><small>Its transcription endpoint</small></div><div class="set-control"><input id="dictation-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div></div>
-          <div class="set-row"><div class="set-what"><label for="dictation-model">Model</label></div><div class="set-control"><input id="dictation-model" spellcheck="false" maxlength="100"></div></div>
-          <div class="set-row"><div class="set-what"><label for="dictation-secret">Key</label><small id="dictation-key-hint">One of your secrets. Never shown</small></div><div class="set-control"><select id="dictation-secret"><option value="">No key</option></select></div></div>
-          <div class="set-row"><div class="set-what"><label for="dictation-language">Language</label></div><div class="set-control"><select id="dictation-language"><option value="">Each device's</option><option value="auto">Automatic</option><option value="en">English (en)</option><option value="fr">French (fr)</option><option value="de">German (de)</option><option value="es">Spanish (es)</option><option value="it">Italian (it)</option><option value="nl">Dutch (nl)</option><option value="pt">Portuguese (pt)</option><option value="other">Another code...</option></select><input id="dictation-language-code" maxlength="8" spellcheck="false" placeholder="code, such as pl" aria-label="Language code" hidden></div></div>
-          <p class="hint" id="dictation-other-hint" hidden>Any engine with the same interface (<code>/v1/audio/transcriptions</code>); it alone may be on this server's own network.</p>
-          <div class="action-row"><span class="hint" id="dictation-saved" role="status"></span><button type="button" id="dictation-off">Turn off</button><button type="button" id="dictation-try">Try it</button><button type="submit" class="primary" id="dictation-save">Save</button></div>
-          <p class="hint" id="dictation-heard" role="status" hidden></p>
+        <form id="dictation-form" class="dict-form" autocomplete="off">
+          <div class="set-rows set-card dict-engine" id="dictation-card" data-slot="main">
+            <div class="dict-head"><span class="dict-dot" id="dictation-dot"></span><b>Main</b><small>used first</small></div>
+            <div class="set-row"><div class="set-what"><label for="dictation-provider">Provider</label></div><div class="set-control"><select id="dictation-provider"></select></div></div>
+            <div class="set-row" id="dictation-url-row" hidden><div class="set-what"><label for="dictation-url">Address</label><small>Its transcription endpoint</small></div><div class="set-control"><input id="dictation-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div></div>
+            <div class="set-row" id="dictation-model-row"><div class="set-what"><label for="dictation-model-pick">Model</label></div><div class="set-control"><select id="dictation-model-pick"></select><input id="dictation-model" spellcheck="false" maxlength="100" aria-label="Model" hidden></div></div>
+            <div class="set-row" id="dictation-secret-row"><div class="set-what"><label for="dictation-secret">Key</label><small>One of your secrets. Never shown</small></div><div class="set-control"><select id="dictation-secret"><option value="">No key</option></select></div></div>
+            <div class="set-row" id="dictation-newkey" hidden><div class="set-what"><label for="dictation-newkey-value">New key</label><small id="dictation-newkey-name"></small></div><div class="set-control"><input id="dictation-newkey-value" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key"><button type="button" class="primary" id="dictation-newkey-keep">Keep in secrets</button></div></div>
+            <p class="hint" id="dictation-other-hint" hidden>Any engine with the same interface (<code>/v1/audio/transcriptions</code>); it alone may be on this server's own network.</p>
+            <div class="action-row"><span class="hint" id="dictation-heard" role="status" hidden></span><button type="button" id="dictation-try" data-slot="main">Try it</button></div>
+          </div>
+          <div class="set-rows set-card dict-engine" id="dictation-backup-card" data-slot="backup">
+            <div class="dict-head"><span class="dict-dot" id="dictation-backup-dot"></span><b>Backup</b><small>if the main one is down</small></div>
+            <div class="set-row"><div class="set-what"><label for="dictation-backup-provider">Provider</label></div><div class="set-control"><select id="dictation-backup-provider"></select></div></div>
+            <div class="set-row" id="dictation-backup-url-row" hidden><div class="set-what"><label for="dictation-backup-url">Address</label><small>Its transcription endpoint</small></div><div class="set-control"><input id="dictation-backup-url" type="url" spellcheck="false" placeholder="https://.../v1/audio/transcriptions"></div></div>
+            <div class="set-row" id="dictation-backup-model-row"><div class="set-what"><label for="dictation-backup-model-pick">Model</label></div><div class="set-control"><select id="dictation-backup-model-pick"></select><input id="dictation-backup-model" spellcheck="false" maxlength="100" aria-label="Model" hidden></div></div>
+            <div class="set-row" id="dictation-backup-secret-row"><div class="set-what"><label for="dictation-backup-secret">Key</label><small>One of your secrets. Never shown</small></div><div class="set-control"><select id="dictation-backup-secret"><option value="">No key</option></select></div></div>
+            <div class="set-row" id="dictation-backup-newkey" hidden><div class="set-what"><label for="dictation-backup-newkey-value">New key</label><small id="dictation-backup-newkey-name"></small></div><div class="set-control"><input id="dictation-backup-newkey-value" type="password" autocomplete="off" spellcheck="false" placeholder="Paste the key"><button type="button" class="primary" id="dictation-backup-newkey-keep">Keep in secrets</button></div></div>
+            <p class="hint" id="dictation-backup-other-hint" hidden>Any engine with the same interface (<code>/v1/audio/transcriptions</code>); it alone may be on this server's own network.</p>
+            <div class="action-row"><span class="hint" id="dictation-backup-heard" role="status" hidden></span><button type="button" id="dictation-backup-try" data-slot="backup">Try it</button></div>
+          </div>
+          <div class="set-rows set-card">
+            <div class="set-row"><div class="set-what"><label for="dictation-language">Language</label></div><div class="set-control"><select id="dictation-language"><option value="">Each device's</option><option value="auto">Automatic</option><option value="en">English (en)</option><option value="fr">French (fr)</option><option value="de">German (de)</option><option value="es">Spanish (es)</option><option value="it">Italian (it)</option><option value="nl">Dutch (nl)</option><option value="pt">Portuguese (pt)</option><option value="other">Another code...</option></select><input id="dictation-language-code" maxlength="8" spellcheck="false" placeholder="code, such as pl" aria-label="Language code" hidden></div></div>
+            <div class="action-row"><span class="hint" id="dictation-saved" role="status"></span><button type="button" id="dictation-off">Turn off</button><button type="submit" class="primary" id="dictation-save">Save</button></div>
+          </div>
           <p class="error" id="dictation-error" role="alert" hidden></p>
         </form>
           </div>
@@ -1254,6 +1280,7 @@
 <script src="/vendor/diff2html.js"></script>
 <script src="/gitgraph.js"></script>
 <script src="/links.js"></script>
+<script src="/features.js"></script>
 <script src="/app.js"></script>
 <script type="module" src="/voice.js"></script>
 <script type="module" src="/icons.js"></script>
