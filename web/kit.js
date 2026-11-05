@@ -125,12 +125,20 @@
         const main = node('span', 'kit-conv-main');
         const head = node('span', 'kit-conv-head');
         head.append(node('b', '', m.title ?? ''));
+        /* A row (05-11, the designers' review): its unread count beside its time, its marks as small words on
+           the line below, beside its last words -- one line less than pills. */
+        const counts = size === 'row' ? (m.chips ?? []).filter((c) => c && !c.wide && c.tone === 'count') : [];
+        const countChips = Chips(counts);
+        if (countChips) head.append(countChips);
         if (m.when) head.append(node('small', 'when', m.when));
         main.append(head);
         const lines = [];
         if (size === 'row') {
-            if (m.last) lines.push(node('small', 'last', m.last));
-            if (m.now) lines.push(node('small', 'kit-conv-now', m.now));
+            const marks = Chips((m.chips ?? []).filter((c) => c && !c.wide && c.tone !== 'count'));
+            const sub = [m.last ? node('small', 'last', m.last) : null, m.now ? node('small', 'kit-conv-now', m.now) : null].filter(Boolean);
+            if (marks && sub.length) { const line = node('span', 'kit-conv-sub'); line.append(sub[0], marks); lines.push(line, ...sub.slice(1)); }
+            else if (marks) lines.push(marks);
+            else lines.push(...sub);
         } else if (size === 'card') {
             if (m.last) lines.push(node('small', 'last', m.last));
             const what = [m.now, m.who].filter(Boolean).join(' · ');
@@ -141,7 +149,7 @@
         }
         main.append(...lines);
         /* Its chips by place: all on a card; a row leaves out the wide ones; a member only what waits for you. */
-        const chips = Chips((m.chips ?? []).filter((c) => c && (size === 'card' || (size === 'row' ? !c.wide : c.tone === 'need' || c.tone === 'count'))));
+        const chips = size === 'row' ? null : Chips((m.chips ?? []).filter((c) => c && (size === 'card' || c.tone === 'need' || c.tone === 'count')));
         if (chips) main.append(chips);
         root.append(main);
         if (actions.length) { const acts = node('span', 'kit-conv-acts'); acts.append(...actions.filter(Boolean)); root.append(acts); }

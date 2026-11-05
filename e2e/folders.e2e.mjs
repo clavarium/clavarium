@@ -331,7 +331,7 @@ test('the points: one on the right of each conversation, its state; a folded gro
     await me.page.reload();
     await me.until('listed', async () => (await me.page.locator('#items .item').count()) === 7);
     await me.until('a1 asleep, a2 fine', async () => (await me.page.locator('#items .item[data-name="a1"] > .state-dot').getAttribute('data-state')) === 'sleep' && (await me.page.locator('#items .item[data-name="a2"] > .state-dot').getAttribute('data-state')) === 'ok', 30_000);
-    await me.until('all of Big settled', async () => (await me.page.locator('.group[data-group="Big"] .item > .state-dot[data-state="watch"]').count()) === 0, 30_000);
+    await me.until('all of Big settled', async () => (await me.page.locator('.group[data-group="Big"] .item > .state-dot:is([data-state="watch"], [data-state="busy"])').count()) === 0, 30_000);
     await me.page.locator('.group[data-group="Big"] .group-head').click();
     const sum = me.page.locator('.group[data-group="Big"] .group-head .state-sum');
     await me.until('folded: points', async () => (await sum.count()) === 1);

@@ -2706,3 +2706,13 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-member .kit-conv-main > small { font-size: .75rem; }
 .salon-host-box > .kit-conv-member { flex: 1; padding: 0; --kc-ring: color-mix(in srgb, var(--brass) 10%, var(--panel)); }
 @media (max-width: 520px) { .kit-conv-card { --kc-av: 30px; column-gap: 8px; padding: 10px; } }
+
+/* THE ROW, compact (05-11, designers' review): a smaller initial, a bigger ringed point, the marks as small
+   coloured words beside the last words (not pills), the unread count beside the time. */
+.kit-conv-row { --kc-av: 24px; padding: 6px 10px; }
+.kit-conv-row > .state-dot { width: 10px; height: 10px; margin: calc(var(--kc-av) - 8px) -4px 0 0; box-shadow: 0 0 0 2px var(--kc-ring); }
+.kit-conv-row .kit-conv-head > .kit-chips { flex: none; margin: 0; }
+.kit-conv-sub { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
+.kit-conv-sub > small { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink2); }
+.kit-conv-row .kit-conv-main > .kit-chips, .kit-conv-sub > .kit-chips { flex: none; margin: 0; gap: 6px; flex-wrap: nowrap; }
+.kit-conv-row .kit-conv-main .kit-chip:not([data-tone="count"]) { border: 0; padding: 0; background: none; line-height: inherit; font-size: .75rem; }
