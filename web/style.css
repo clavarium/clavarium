@@ -2583,3 +2583,8 @@ header.topbar .views .icon-btn { width: auto; height: auto; }
   .ft *, .ft *::before, .ft *::after, .ft-toast { animation: none !important; transition: none !important; }
   .ft-house .ft-wire.lit, .ft-house .ft-link.lit { stroke-dashoffset: 0 !important; }
 }
+
+/* The search atop a settings page (05-11). */
+:is(header.topbar, .panel-top) .settings-search { margin-left: auto; width: min(240px, 42vw); min-height: 32px; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .875rem; }
+.sheet[data-searching="on"] .settings-nav { opacity: .5; }
+.set-row.search-out { display: none; }
