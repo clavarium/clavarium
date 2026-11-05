@@ -135,6 +135,47 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
+test('one Attach in a conversation: what is there, or a new one made in the same box and attached to it at the end', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const me = await b.person();
+    const page = me.page;
+    await me.create('coder');
+    await me.newFolder('seeds');
+    await page.locator('#folders').click();
+    await me.chapter('access');
+    await page.locator('#attach-open').click();
+    const box = page.locator('#attach-picker .kit-newasset');
+    await me.until('the box, on its kinds', async () => (await box.getAttribute('data-step').catch(() => '')) === 'kind');
+    /* What is there already, to tick; or a new one, of every kind. */
+    assert.equal(await box.locator('#attach-rows .folder[data-name="seeds"]').count(), 1);
+    assert.equal(await box.locator('.as-kinds button').count(), 7);
+    assert.match(await box.locator('.kit-na-context').innerText(), /Will be attached to coder/);
+    assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
+    /* A folder, to read: made, then attached by itself. */
+    await box.locator('.as-kinds button[data-kind="folder"]').click();
+    await box.locator('.kit-na-context .kit-seg button[data-value="read"]').click();
+    await page.fill('#folder-name', 'notes');
+    await page.locator('#folder-new button[type=submit]').click();
+    await me.until('the ending', async () => /notes created and attached to coder/.test(await box.locator('.kit-na-made').innerText().catch(() => '')));
+    assert.ok((await me.api('/api/conversations')).body.find((c) => c.name === 'coder').resources.some((r) => r.name === 'notes' && r.access === 'read'));
+    assert.equal(await page.locator('#panel-rows .folder[data-name="notes"]').count(), 1, 'listed with what it has');
+    /* Create another: the same kind's form again; Back, the kinds. A secret, used by its tool. */
+    await box.locator('button[data-act="another"]').click();
+    await me.until('the form again', async () => page.locator('#attach-picker #folder-box').isVisible());
+    await box.locator('.kit-na-back').click();
+    await box.locator('.as-kinds button[data-kind="secret"]').click();
+    assert.equal(await box.locator('.kit-na-context .kit-seg').count(), 0, 'a secret is used or not');
+    await page.fill('#secret-name', 'NOTES_KEY');
+    await page.fill('#secret-value', 'not-shown-again');
+    await page.locator('#secret-new button[type=submit]').click();
+    await me.until('the secret, made and handed', async () => /NOTES_KEY created and attached to coder/.test(await box.locator('.kit-na-made').innerText().catch(() => '')));
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'NOTES_KEY').conversations, ['coder']);
+    /* Done: the box goes; its forms wait where they wait. */
+    await box.locator('button[data-act="done"]').click();
+    await me.until('closed', async () => !(await page.locator('#attach-picker').isVisible()));
+    assert.equal(await page.locator('#assets-forms #secret-box').count(), 1);
+});
+
 test('a git repository is added from the page, attached like a folder, and is a repository for the tool', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();

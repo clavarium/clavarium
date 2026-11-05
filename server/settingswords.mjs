@@ -29,5 +29,13 @@ export const SETTINGS_WORDS_FR = {
     'set-device': '1 appareil', 'set-devices': '{n} appareils', 'set-no-device': 'Aucun appareil', 'set-chat': 'Chat',
     'set-wakeups-on': '{on} sur {n} actifs', 'set-asleep': 'Endormie', 'set-not-looked': 'Pas encore regardée',
     'set-running-well': 'En marche · rien d\'anormal', 'set-conv-advanced': 'Archiver · remettre à neuf · supprimer',
+    /* New asset, one box (05-11, step 3): one verb per gesture -- Créer, Attacher, Terminé. */
+    'set-na-new': 'Nouvel asset', 'set-na-attach': 'Attacher', 'set-na-there': 'Déjà là', 'set-na-or-new': 'ou un nouveau',
+    'set-na-step-kind': 'Type', 'set-na-step-set': 'Réglage', 'set-na-step-made': 'Créé', 'set-na-back': 'Retour',
+    'set-na-will': 'Sera relié à {name}', 'set-na-level': 'Ce qu\'il pourra faire', 'set-na-read': 'Lecture', 'set-na-write': 'Écriture',
+    'set-na-made': '{name} créé', 'set-na-made-to': '{name} créé et relié à {to}', 'set-na-another': 'En créer un autre', 'set-na-done': 'Terminé',
+    'set-na-create': 'Créer', 'set-na-new-key': '+ Nouvelle clé…',
+    'set-na-k-folder': 'Dossier', 'set-na-k-git': 'Dépôt git', 'set-na-k-mailbox': 'Boîte mail', 'set-na-k-agenda': 'Agenda',
+    'set-na-k-contacts': 'Contacts', 'set-na-k-secret': 'Secret', 'set-na-k-list': 'Classeur',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

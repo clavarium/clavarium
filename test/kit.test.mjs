@@ -14,6 +14,8 @@ class Node {
     set textContent(v) { this.children = []; this.text = String(v); }
     get textContent() { return this.text + this.children.map((c) => (typeof c === 'string' ? c : c.textContent)).join(''); }
     append(...kids) { for (const k of kids) { if (k && typeof k === 'object') k.parent = this; this.children.push(k); } }
+    prepend(...kids) { for (const k of kids.reverse()) { if (k && typeof k === 'object') k.parent = this; this.children.unshift(k); } }
+    replaceChildren(...kids) { this.children = []; this.text = ''; this.append(...kids); }
     setAttribute(k, v) { this.attributes[k] = String(v); }
     getAttribute(k) { return this.attributes[k] ?? null; }
     addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
@@ -146,4 +148,76 @@ test('the pages load the kit before app.js, the server serves it, and app.js dra
     /* The hand-drawn copies are gone: the old card's plate and picture, the members' avatar, their switch. */
     assert.doesNotMatch(app, /conv-card-plate|conv-card-art|salon-av|'salon-switch'|className = 'state-dot'/);
     assert.match(app, /const statePoint = \(state\) => KIT\.StatusDot\(/);
+});
+
+test('steps: the done ones ticked, the one at hand marked, and where it is', () => {
+    const f = KIT.StepFlow({ steps: ['Kind', 'Set up', 'Created'], at: 1, label: 'Steps' });
+    const items = f.all((n) => n.tagName === 'LI');
+    assert.equal(items.length, 3);
+    assert.ok(items[0].classes.includes('done'));
+    assert.equal(items[0].find('kit-step-n').textContent, '✓');
+    assert.equal(items[1].getAttribute('aria-current'), 'step');
+    assert.equal(items[2].getAttribute('aria-current'), null);
+    assert.equal(f.find('kit-steps-count').textContent, '2 / 3');
+    const end = KIT.StepFlow({ steps: ['Kind', 'Set up', 'Created'], at: 3 });
+    assert.equal(end.all((n) => n.classes.includes('done')).length, 3);
+    assert.equal(end.find('kit-steps-count').textContent, '3 / 3');
+});
+
+test('a key: its keys to choose, "+ New key…" opens a name in place, made and chosen', async () => {
+    const made = [];
+    const p = KIT.SecretPicker({ ids: { select: 'k', add: 'k-new', row: 'k-make', name: 'k-name', go: 'k-go' }, keys: [{ value: 'a', label: 'a (used by site)' }], none: 'No key yet', suggest: () => 'site',
+        onMake: async (name) => { made.push(name); p.set([{ value: 'a' }, { value: name }], name); } });
+    const byId = (id) => p.all((n) => n.id === id)[0];
+    assert.equal(byId('k').children.length, 1);
+    assert.equal(byId('k-make').hidden, true);
+    byId('k-new').click();
+    assert.equal(byId('k-make').hidden, false);
+    assert.equal(byId('k-name').value, 'site');
+    byId('k-go').click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.deepEqual(made, ['site']);
+    assert.equal(byId('k').value, 'site');
+    assert.equal(byId('k-make').hidden, true);
+    p.set([]);
+    assert.equal(byId('k').children[0].textContent, 'No key yet');
+});
+
+test('new asset: one box -- its kinds, a form, one ending; its context on top', () => {
+    const kinds = [{ kind: 'folder', label: 'Folder' }, { kind: 'git', label: 'Git repository' }];
+    const seen = [];
+    const there = new Node('div');
+    const choose = KIT.NewAsset({ kinds, existing: there, context: { line: 'Will be attached to Homework' }, onKind: (k) => seen.push(k) });
+    assert.equal(choose.dataset.step, 'kind');
+    assert.equal(choose.find('kit-na-context').textContent, 'Will be attached to Homework');
+    assert.ok(choose.children.includes(there), 'what is there already, in the box');
+    const buttons = choose.find('as-kinds').children;
+    assert.deepEqual(buttons.map((b) => b.dataset.kind), ['folder', 'git']);
+    buttons[1].click(); assert.deepEqual(seen, ['git']);
+    assert.equal(choose.all((n) => n.getAttribute('aria-current') === 'step')[0].textContent, '1Kind');
+    const form = new Node('div');
+    const filling = KIT.NewAsset({ kinds, kind: 'folder', form: () => form, context: { line: 'x', level: { options: [{ value: 'read' }, { value: 'write' }], value: 'write' } } });
+    assert.equal(filling.dataset.step, 'form');
+    assert.ok(filling.children.includes(form));
+    assert.ok(filling.find('kit-seg'), 'the level, chosen in the context line');
+    assert.equal(filling.find('kit-steps-count').textContent, '2 / 3');
+    const ends = [];
+    const done = KIT.NewAsset({ kinds, kind: 'folder', made: { said: 'seeds created' }, onAnother: () => ends.push('another'), onDone: () => ends.push('done') });
+    assert.equal(done.dataset.step, 'done');
+    assert.match(done.find('kit-na-made').textContent, /✓ seeds created/);
+    for (const b of done.all((n) => n.tagName === 'BUTTON')) b.click();
+    assert.deepEqual(ends, ['another', 'done']);
+});
+
+test('the page makes every asset with the one box, and gives its git key with the SecretPicker', () => {
+    const app = web('app.js'); const html = web('index.html');
+    assert.equal((app.match(/KIT\.NewAsset\(/g) ?? []).length, 1, 'one place draws it');
+    assert.match(app, /KIT\.SecretPicker\(/);
+    /* Gone: the kinds drawn by hand, the second way to attach. */
+    assert.doesNotMatch(app, /el\('div', 'as-kinds'\)/);
+    assert.doesNotMatch(html, /id="access-assets-here"/);
+    /* One verb for the forms' main button. */
+    for (const form of ['folder-new', 'git-new', 'mailbox-new', 'list-new', 'secret-new']) {
+        const part = html.slice(html.indexOf(`id="${form}"`), html.indexOf('</form>', html.indexOf(`id="${form}"`)));
+        assert.match(part, /<button type="submit" class="primary">Create<\/button>/, form);
+    }
 });

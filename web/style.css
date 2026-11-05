@@ -2647,6 +2647,30 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 /* INLINE CONFIRM: in place of its button, Keep first. */
 .kit-confirm { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .kit-confirm-q { color: var(--ink); }
+/* STEPFLOW: the steps of a gesture, the one at hand marked, and "2 / 3". */
+.kit-steps { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.kit-steps-list { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0; padding: 0; list-style: none; min-width: 0; font-size: .8125rem; color: var(--ink2); }
+.kit-steps-list > li { display: inline-flex; align-items: center; gap: 5px; }
+.kit-step-n { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--line); font-size: .6875rem; font-weight: 600; }
+.kit-steps-list > li.done .kit-step-n { border-color: var(--ok); color: var(--ok); }
+.kit-steps-list > li[aria-current="step"] { color: var(--ink); font-weight: 600; }
+.kit-steps-list > li[aria-current="step"] .kit-step-n { border-color: var(--brass); background: var(--brass); color: var(--bg); }
+.kit-steps-count { margin-left: auto; flex: none; color: var(--ink2); font-size: .75rem; }
+/* SECRETPICKER: its keys, "+ New key…", and the new one's name made in place. */
+.kit-secret { display: flex; flex-direction: column; gap: 6px; }
+.kit-secret .row > select, .kit-secret .row > input { flex: 1; min-width: 0; }
+/* NEW ASSET: one box -- its context on top, its steps, the kinds or a form, one ending. */
+.kit-newasset { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.kit-na-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--brass) 10%, transparent); color: var(--brass-ink); font-size: .875rem; }
+.kit-na-context > .kit-seg { margin-left: auto; }
+.kit-na-head { display: flex; flex-direction: column; gap: 6px; }
+.kit-na-head > h3 { margin: 0; font-size: 1.125rem; }
+.kit-na-sub { margin: 4px 0 0; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+.kit-na-made { display: flex; flex-direction: column; gap: 8px; }
+.kit-na-made > p[role="status"] { display: flex; align-items: center; gap: 8px; margin: 0; font-weight: 600; color: var(--ink); }
+.kit-na-made > .hint { margin: 0; }
+.kit-na-acts { gap: 8px; justify-content: flex-end; }
+.as-detail > .kit-newasset[data-step="done"] { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
 /* THE CONVERSATION CARD: its avatar with its point on the corner, its name, what it does now, its chips;
    the gestures of its place at its end. Sizes: row (the list), card (the deck), member (a room's). */
 .kit-conv { --kc-av: 28px; --kc-ring: var(--bar); position: relative; display: grid; grid-template-columns: var(--kc-av) minmax(0, 1fr) auto; column-gap: 10px; align-items: start; text-align: left; color: var(--ink); min-width: 0; }

@@ -10,6 +10,10 @@
  *   ConvCard       ONE CONVERSATION, three sizes: `row` (the list, Recent), `card` (the home deck),
  *                  `member` (a room's members, and the one that welcomes it). Same dot, name, line
  *                  of what it does now, chips; each place adds its own gestures (`actions`).
+ *   StepFlow       the steps of a gesture, the one at hand marked, "2 / 3"
+ *   SecretPicker   a key to choose, or "+ New key…" made in place
+ *   NewAsset       ONE BOX to make an asset (05-11, step 3): kinds, the kind's form, one ending;
+ *                  opened with a context (a conversation it will be attached to).
  *
  * No framework: each piece is a function that returns an element. Words: English here; the page
  * hands its own (`setWords`, app.js `uiSaid`) for the few the kit says by itself.
@@ -144,9 +148,115 @@
         return root;
     }
 
+    /* The steps of a gesture: done ones ticked, the one at hand `aria-current="step"`, and "2 / 3".
+       `at`: the step at hand (0 is the first); `steps.length`: all done. */
+    function StepFlow({ steps = [], at = 0, label = '' } = {}) {
+        const box = node('div', 'kit-steps');
+        const list = node('ol', 'kit-steps-list');
+        if (label) list.setAttribute('aria-label', label);
+        steps.forEach((s, i) => {
+            const li = node('li', i < at ? 'done' : '');
+            if (i === at) li.setAttribute('aria-current', 'step');
+            const n = node('span', 'kit-step-n', i < at ? '✓' : String(i + 1)); n.setAttribute('aria-hidden', 'true');
+            li.append(n, node('span', 'kit-step-w', s));
+            list.append(li);
+        });
+        box.append(list, node('small', 'kit-steps-count', `${Math.min(at + 1, steps.length)} / ${steps.length}`));
+        return box;
+    }
+
+    /* A KEY TO CHOOSE, or one made in place: its keys, then "+ New key…" opens a name and Create right
+       there. `ids` keeps the page's names for its parts { select, add, row, name, go }. `keys` [{ value,
+       label }]; `none`: said when there is none. `suggest()`: the name offered; `onMake(name)`: the page
+       makes it (and calls `.set` with the new list). `.set(keys, chosen)` fills it again, the chosen kept. */
+    function SecretPicker({ ids = {}, keys = [], value = '', label = '', none = '', addLabel, makeLabel, nameLabel = '', nameAttrs = {}, suggest = () => '', onMake = async () => {}, onChange = () => {} } = {}) {
+        const box = node('div', 'kit-secret');
+        const select = node('select'); if (ids.select) select.id = ids.select;
+        if (label) select.setAttribute('aria-label', label);
+        const add = node('button', 'kit-secret-add', addLabel ?? say('kit-new-key', '+ New key…')); add.type = 'button'; if (ids.add) add.id = ids.add;
+        const pick = node('div', 'row'); pick.append(select, add);
+        const make = node('div', 'row kit-secret-make'); if (ids.row) make.id = ids.row; make.hidden = true;
+        const name = node('input'); if (ids.name) name.id = ids.name;
+        if (nameLabel) name.setAttribute('aria-label', nameLabel);
+        for (const [k, v] of Object.entries(nameAttrs)) name.setAttribute(k, v);
+        const go = node('button', 'primary', makeLabel ?? say('kit-create', 'Create')); go.type = 'button'; if (ids.go) go.id = ids.go;
+        make.append(name, go);
+        box.append(pick, make);
+        box.set = (list, chosen = select.value) => {
+            select.replaceChildren();
+            if (!list.length && none) { const o = node('option', '', none); o.value = ''; select.append(o); }
+            for (const k of list) { const o = node('option', '', k.label ?? k.value); o.value = k.value; select.append(o); }
+            if (list.some((k) => k.value === chosen)) select.value = chosen;
+        };
+        box.set(keys, value);
+        select.addEventListener('change', () => onChange(select.value));
+        add.addEventListener('click', () => { name.value = suggest() ?? ''; make.hidden = false; name.focus?.(); });
+        go.addEventListener('click', async () => {
+            go.disabled = true;
+            try { if ((await onMake(name.value.trim())) !== false) make.hidden = true; } finally { go.disabled = false; }
+        });
+        return box;
+    }
+
+    /* NEW ASSET: ONE BOX, wherever an asset is made (Assets, a conversation's Attach). Its kinds, then
+       that kind's form (the page's own: `form(kind)`), then one ending: "✓ <name> created", Create
+       another, Done. Opened with a context, it says it on top (`context`: { line, level? }, `level` a
+       Segmented's options) and the page attaches what is made at the end. `existing`: what is there
+       already, offered above "or a new one". `made`: { said, note? } draws the ending.
+         kinds  [{ kind, label, icon? }]     kind   '' : choose one       words  { title, there, orNew, steps[3], back, another, done }
+       `onBack`: a way back to the kinds from a form, where the frame has none of its own. */
+    function NewAsset({ kinds = [], kind = '', made = null, context = null, existing = null, form = () => null, words: w = {}, onKind = () => {}, onBack = null, onAnother = () => {}, onDone = () => {} } = {}) {
+        const root = node('div', 'kit-newasset');
+        root.dataset.step = made ? 'done' : kind ? 'form' : 'kind';
+        const steps = w.steps ?? [say('kit-step-kind', 'Kind'), say('kit-step-set', 'Set up'), say('kit-step-made', 'Created')];
+        if (context) {
+            const top = node('div', 'kit-na-context');
+            top.append(node('span', '', context.line ?? ''));
+            if (context.level) top.append(Segmented(context.level));
+            root.append(top);
+        }
+        const head = node('div', 'kit-na-head');
+        const title = w.title ?? say('kit-new-asset', 'New asset');
+        if (!kind && !made && title) head.append(node('h3', '', title));
+        head.append(StepFlow({ steps, at: made ? steps.length : kind ? 1 : 0 }));
+        root.append(head);
+        if (made) {
+            const end = node('div', 'kit-na-made');
+            const line = node('p', ''); line.setAttribute('role', 'status');
+            line.append(StatusDot({ state: 'ok' }), node('span', '', `✓ ${made.said}`));
+            end.append(line);
+            if (made.note) end.append(node('p', 'hint', made.note));
+            const acts = node('div', 'row kit-na-acts');
+            const again = node('button', '', w.another ?? say('kit-create-another', 'Create another')); again.type = 'button'; again.dataset.act = 'another';
+            const done = node('button', 'primary', w.done ?? say('kit-done', 'Done')); done.type = 'button'; done.dataset.act = 'done';
+            again.addEventListener('click', () => onAnother());
+            done.addEventListener('click', () => onDone());
+            acts.append(again, done); end.append(acts);
+            root.append(end);
+            return root;
+        }
+        if (kind) {
+            /* Back to the kinds, when the frame has no way back of its own. */
+            if (onBack) { const back = node('button', 'as-link kit-na-back', `\u2039 ${w.back ?? say('kit-back', 'Back')}`); back.type = 'button'; back.addEventListener('click', () => onBack()); root.append(back); }
+            const f = form(kind); if (f) root.append(f);
+            return root;
+        }
+        if (existing) root.append(node('h4', 'kit-na-sub', w.there ?? say('kit-already-there', 'Already there')), existing, node('h4', 'kit-na-sub', w.orNew ?? say('kit-or-new', 'or a new one')));
+        /* `.as-kinds`, `data-kind`: the names the page's rules and tests know. */
+        const list = node('div', 'as-kinds');
+        for (const k of kinds) {
+            const b = node('button', '', k.label ?? k.kind); b.type = 'button'; b.dataset.kind = k.kind;
+            if (k.icon) b.prepend(k.icon);
+            b.addEventListener('click', () => onKind(k.kind));
+            list.append(b);
+        }
+        root.append(list);
+        return root;
+    }
+
     window.clavariumKit = {
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,
         setWords(fn) { if (typeof fn === 'function') words = fn; },
-        StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard,
+        StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset,
     };
 })();
