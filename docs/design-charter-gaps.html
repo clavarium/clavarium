@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Écarts à la charte</title>
+<style>
+:root { --bg: #0f141a; --bar: #161d26; --panel: #131a22; --line: #2b3745; --ink: #e7edf4; --ink2: #a3b1c2; --brass: #d2a94e; --brass-ink: #d2a94e; --ok: #5fc39d; --danger: #ee7f79; color-scheme: dark; }
+:root[data-theme="light"] { --bg: #fbfbfa; --bar: #eef0f3; --panel: #ffffff; --line: #c5cdd8; --ink: #17202b; --ink2: #4f5d6d; --brass: #c79a3a; --brass-ink: #8a5d00; --ok: #1f7a5a; --danger: #b3261e; color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); }
+body { font: .875rem/1.5 system-ui, sans-serif; }
+main { max-width: 46rem; margin: 0 auto; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 48px max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-direction: column; gap: 12px; }
+h1 { font-size: 1.125rem; font-weight: 600; margin: 0; }
+p { margin: 0; }
+.small { color: var(--ink2); font-size: .75rem; }
+ol { margin: 0; padding-left: 1.3rem; display: flex; flex-direction: column; gap: 10px; }
+li b { font-weight: 600; }
+li .fix { display: block; }
+li .fix::before { content: "→ "; color: var(--brass-ink); }
+code { font: .75rem ui-monospace, Menlo, Consolas, monospace; color: var(--ink2); overflow-wrap: anywhere; }
+.done li { color: var(--ink2); }
+h2 { font-size: .875rem; font-weight: 600; margin: 8px 0 0; }
+button { font: 600 .8125rem system-ui, sans-serif; color: var(--ink2); background: transparent; border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; cursor: pointer; align-self: flex-start; }
+</style>
+</head>
+<body>
+<main>
+<h1>Écarts à la charte</h1>
+<p class="small">Ce que le code ne suit pas encore. Relevé le 3 novembre 2026 dans <code>clavarium/web/style.css</code>, <code>clavarium-parley/ui/parley-ui.css</code>, <code>clavarium-binder/ui/binder-ui.css</code>. Tout est presque invisible ; à corriger par petits lots.</p>
+<button id="theme" type="button">Clair / sombre</button>
+<h2>Corrigé, prêt pour cette nuit (branche « charte »)</h2>
+<ol>
+  <li><b>Tailles de texte</b> : les tailles fixes ramenées aux 7 de la charte (celles relatives au texte qui les entoure restent).</li>
+  <li><b>Graisses</b> : 400 et 600 seulement (sauf le gras écrit dans un message).</li>
+  <li><b>Teinte de sélection</b> : choisi 14 %, survol 12 %, partout.</li>
+  <li><b>Traits d'icônes</b> : 2 ; 1,5 pour les grandes vignettes.</li>
+  <li><b>Coins des cartes</b> de classeur : 10.</li>
+  <li><b>Couleurs écrites en dur</b> dans l'interface : remplacées par les jetons.</li>
+  <li><b>« Attend la personne »</b> : bleu partout (parloir, classeurs, compteur) ; le bleu un peu plus foncé en clair, pour être lisible.</li>
+  <li><b>Bouton normal</b> : contour seul, texte gris (choix C).</li>
+  <li><b>Lien en forme de bouton</b> (page du boîtier) : plus de fond plein.</li>
+</ol>
+<h2>Reste</h2>
+<ol>
+  <li><b>Petites coches</b> du parloir (≤ 1 em) : gardent un trait épais, sinon illisibles.<span class="fix">Exception à noter dans la charte, ou à revoir.</span></li>
+  <li><b>Anciennes maquettes</b> avec leurs propres couleurs.<span class="fix">Les nouvelles reprennent celles de la charte.</span></li>
+</ol>
+<h2>Déjà corrigé avant (en ligne)</h2>
+<ol class="done">
+  <li>Bouton principal lisible en clair.</li>
+  <li>Un seul rayon de bouton (8).</li>
+  <li>Danger en contour partout.</li>
+  <li>Inactif à 50 % partout.</li>
+  <li>Les cartes de conversation : les couleurs d'état, plus de couleur en dur.</li>
+  <li>Le fond du bouton défini en sombre comme en clair.</li>
+</ol>
+</main>
+<script>document.getElementById("theme").onclick = function () { var r = document.documentElement; if (r.dataset.theme === "light") delete r.dataset.theme; else r.dataset.theme = "light"; };</script>
+</body>
+</html>
