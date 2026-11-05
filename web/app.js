@@ -3652,7 +3652,9 @@
         await refresh();
         await paintPanel();
         $('attach-picker').hidden = !picking;
-        if (picking) { openChapter('access'); $('attach-picker').scrollIntoView({ block: 'nearest' }); }
+        /* The folders button shows the folders: their chapter opened, in its tab. */
+        openChapter('access', { show: !picking });
+        if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
     $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; $('attach-picker').scrollIntoView({ block: 'nearest' }); });
