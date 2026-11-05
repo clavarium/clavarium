@@ -603,7 +603,13 @@ export async function handleApi(request, response, conversations, headers, resou
         if (renaming && secrets) { const done = secrets.rename(renaming[1], String(body.name ?? '').trim()); await redeliver(String(body.name ?? '').trim()); return send(200, done), true; }
         /* A new value (never sent back) and/or a new expiry, in place. */
         const replacing = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/replace$/.exec(pathname);
-        if (replacing && secrets) { const done = secrets.replace(replacing[1], { value: body.value, expires: body.expires }); await redeliver(replacing[1]); return send(200, done), true; }
+        if (replacing && secrets) {
+            const done = secrets.replace(replacing[1], { value: body.value, expires: body.expires });
+            await redeliver(replacing[1]);
+            /* Its new value is in each machine's /run/secrets now; their tools are told again what that means (guide.mjs). */
+            for (const c of conversations.list()) if (secrets.of(c.name).includes(replacing[1])) void guide?.changed(c.name).catch(() => {});
+            return send(200, done), true;
+        }
         const dropped = /^\/api\/secrets\/([A-Z][A-Z0-9_]{0,39})\/remove$/.exec(pathname);
         if (dropped && secrets) { secrets.remove(dropped[1]); return send(200, { ok: true }), true; }
         if (pathname === '/api/alerts' && alerts) return send(201, alerts.add(body.subscription, body.label)), true;
