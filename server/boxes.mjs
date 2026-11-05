@@ -31,7 +31,7 @@ export const FIRMWARE_PATH = '/c/api/box/firmware/';
 export const FIRMWARE_MINUTES = 10;
 /* THE WAKE WORD HEARD AGAIN (03-11): « Mésange » and what a dictation makes of it (mes anges, mais sange...). */
 export const CLIP_MAX_BYTES = 16_000 * 2 * 3;
-export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\bmes anges?\b|\bmesange|\bmaisange|\bmessage?s?\b|\bmessenge?s?\b/;   /* « Messenges »: Whisper's reading of the server's own voice saying it */
+export const WAKE_HEARD = /\bm[ae]i?s+\s?an?ge?s?\b|\b[ml][ae]s anges?\b|\bmesange|\bmaisange|\bmessage?s?\b|\bmessenge?s?\b/;   /* « Messenges »: Whisper's reading of the server's own voice saying it */
 export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
 const plainWords = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
