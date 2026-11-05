@@ -18,6 +18,8 @@
     /* A paired device gets the same page with less in it, and asks its own
        door: see server/door.mjs. */
     const DEVICE = document.documentElement.dataset.door === 'device';
+    /* THE KIT (kit.js): the pieces every screen shares -- the state's point, the conversation's card... */
+    const KIT = window.clavariumKit;
     /* On a paired device, every request names the pairing it speaks for:
        the address is completed once the device has signed in. */
     let API = DEVICE ? '/c/api' : '/api';
@@ -1147,11 +1149,11 @@
         : (holds(c) || ['building', 'restarting', 'moving'].includes(c.phase)) ? 'busy' : 'online');
     const agentState = (c) => (c.asleep ? 'sleep' : (talkNeeds(c) || c.answerer?.needs) ? 'wait'
         : c.talk?.state === 'working' ? 'work' : c.talk?.state === 'done' ? 'done' : 'idle');
-    const STATE_WORDS = { problem: 'a problem', wait: 'waits for you', work: 'at work', busy: 'busy', ok: 'fine', sleep: 'asleep' };
+    const STATE_WORDS = KIT.STATE_WORDS;
     const rollup = (c) => { const m = machineState(c); const a = agentState(c);
         return (m === 'off' ? 'sleep' : m === 'problem' ? 'problem' : a === 'wait' ? 'wait' : a === 'work' ? 'work' : m === 'busy' ? 'busy' : 'ok'); };
-    const statePoint = (state) => { const d = document.createElement('span'); d.className = 'state-dot'; d.dataset.state = state; return d; };
-    const STATE_ORDER = ['problem', 'wait', 'work', 'busy', 'ok', 'sleep'];
+    const statePoint = (state) => KIT.StatusDot({ state });
+    const STATE_ORDER = KIT.STATES;
     function stateSummary(list) {
         const count = Object.fromEntries(STATE_ORDER.map((k) => [k, 0]));
         for (const c of list) count[rollup(c)] += 1;
@@ -1238,49 +1240,48 @@
         if (d.toDateString() === y.toDateString()) return 'yesterday';
         return now - d < 6 * 86_400_000 ? d.toLocaleDateString([], { weekday: 'short' }) : d.toLocaleDateString([], { day: 'numeric', month: 'short' });
     };
+    /* ONE CONVERSATION, as the kit draws it everywhere (kit.js ConvCard): what is known of it, said once --
+       its name, its point, what it does now, its last words and when, its chips. `told`: its last words and
+       when (a row of Needs you or Recent; a card). */
+    const agentWho = (c) => [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ');
+    function convModel(c, told = false) {
+        /* Under way: the step the panel shows, in its words (the tool named once). */
+        const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
+        /* What it is doing, when it says something: its tool is not named on every row. */
+        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? 'starting' : 'restarting') : c.phase === 'ready' ? (c.asleep ? 'asleep, wakes when opened' : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? 'moving its work' : c.phase === 'restarting' ? 'restarting' : 'failed');
+        /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
+        const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
+        const chips = [];
+        /* Found by a search while hidden: said. */
+        if (c.hidden === true && query) chips.push({ text: 'hidden', cls: 'shared-mark', tone: 'note' });
+        /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
+        const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
+        if (waking > 0) chips.push({ text: `${waking} wake-up${waking > 1 ? 's' : ''}`, cls: 'shared-mark', tone: 'note' });
+        /* It talks through the app, and asks or waits for its owner there. */
+        if (!c.asleep && talkNeeds(c)) chips.push({ text: c.talk.waiting > 0 ? 'asks you' : 'waits for you', cls: 'needs-mark', tone: 'need' });
+        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; chips.push({ text: needs ? 'asks for you' : 'answered in your place', cls: needs ? 'needs-mark' : 'shared-mark', tone: needs ? 'need' : 'note' }); }
+        /* Where else it speaks: its rooms, its voice boxes (said on a card). */
+        for (const r of roomsNow()) if (r.members?.some((m) => m.kind === 'ai' && m.ref === c.name)) chips.push({ text: r.name, icon: 'room', wide: true });
+        for (const b of boxesNow()) if (b.conversation === c.name) chips.push({ text: b.name, icon: 'box', wide: true });
+        /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
+           the person's own last word is marked "You:", which tells you it is your move. */
+        const last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? `You: ${c.talk.lastText}` : c.talk.lastText) : '';
+        const state = rollup(c);
+        return { title: shownName(c), state, stateLabel: STATE_WORDS[state], avatar: { name: shownName(c) }, when: told ? whenWords(activityOf(c)) : '', last, now: plain ? '' : now, who: agentWho(c), chips };
+    }
     /* `copy`: a row of Needs you or Recent, beside its place in its group: it is not moved by hand.
        `told`: it says what was said last, and when (a copy always; the one list when there is no group). */
     function itemButton(c, copy = false, told = copy) {
-        const b = document.createElement('button');
-        b.type = 'button'; b.className = copy ? 'item copy' : 'item'; b.dataset.phase = c.phase; b.dataset.name = c.name;
+        const b = KIT.ConvCard(convModel(c, told), { size: 'row', cls: copy ? 'item copy' : 'item' });
+        b.dataset.phase = c.phase; b.dataset.name = c.name;
         if (c.group) b.dataset.group = c.group;
         /* Ready, but its tool not there yet: it still reads as under way. */
         if (holds(c)) b.dataset.busy = 'true';
         if (c.name === current) b.setAttribute('aria-current', 'true');
-        const title = document.createElement('b');
-        title.append(shownName(c));
         if (c.title) b.title = c.name;
         if (c.hidden === true) b.dataset.hidden = 'true';
-        const sub = document.createElement('small');
-        /* Under way: the step the panel shows, in its words (the tool named once). */
-        const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
-        /* What it is doing, when it says something: its tool is not named on every row. */
-        sub.textContent = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? 'starting' : 'restarting') : c.phase === 'ready' ? (c.asleep ? 'asleep, wakes when opened' : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? 'moving its work' : c.phase === 'restarting' ? 'restarting' : 'failed');
         if (c.asleep) b.dataset.asleep = 'true';
-        /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
-        const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
-        if (told) {
-            /* In words, not a symbol: what a tap on it will do. */
-            /* Beside its name, never in it: the name reads (and is read) as it is. */
-            const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(activityOf(c));
-            b.append(title);
-            /* Its last message, and who said it: so it reads as the last message, not as a subject. */
-            /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
-               the person's own last word is marked "You:", which tells you it is your move. */
-            if (c.talk?.lastText) { const last = document.createElement('small'); last.className = 'last'; last.textContent = c.talk.lastFrom === 'person' ? `You: ${c.talk.lastText}` : c.talk.lastText; b.append(last); }
-            if (!plain) b.append(sub);
-            b.append(when); b.dataset.when = 'true';
-        } else b.append(title, ...(plain ? [] : [sub]));
-        /* Its state: one point, on the right. */
-        const point = statePoint(rollup(c)); point.title = STATE_WORDS[point.dataset.state]; b.append(point);
-        /* Found by a search while hidden: said. */
-        if (c.hidden === true && query) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = 'hidden'; b.append(mark); }
-        /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
-        const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
-        if (waking > 0) { const mark = document.createElement('small'); mark.className = 'shared-mark'; mark.textContent = `${waking} wake-up${waking > 1 ? 's' : ''}`; b.append(mark); }
-        /* It talks through the app, and asks or waits for its owner there. */
-        if (!c.asleep && talkNeeds(c)) { const mark = document.createElement('small'); mark.className = 'needs-mark'; mark.textContent = c.talk.waiting > 0 ? 'asks you' : 'waits for you'; b.append(mark); }
-        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; const mark = document.createElement('small'); mark.className = needs ? 'needs-mark' : 'shared-mark'; mark.textContent = needs ? 'asks for you' : 'answered in your place'; b.append(mark); }
+        if (told) b.dataset.when = 'true';
         /* Who else holds it is said in its Access, not in the list (where it said the same on every row). */
         b.addEventListener('click', () => select(c.name, { step: true }));
         return b;
@@ -1292,6 +1293,8 @@
     /* A ROOM IN THE LIST (03-11): like a conversation's row -- its name, its last words, when -- a room's chips before it. */
     /* The rooms known, even before their part of this page has run (a list painted early). */
     const roomsNow = () => { try { return Array.isArray(rooms) ? rooms : []; } catch { return []; } };
+    /* The voice boxes known (read with the deck and a room's settings): the chips of whom they speak for. */
+    const boxesNow = () => { try { return Array.isArray(boxesKnown) ? boxesKnown : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
     /* Words of the screen's language (Parley's texts, /api/talk/words) once read; English till then. */
     const uiSaid = (key, fallback, vars = {}) => {
@@ -1304,23 +1307,29 @@
     /* ROOMS ONLY (a filter of the list): kept on this device. */
     let roomsOnly = false;
     try { roomsOnly = localStorage.getItem('clavarium-list-show') === 'rooms'; } catch { /* a private window */ }
-    function roomItem(r) {
-        /* The same row as a conversation's (03-11: « de même nature ») -- its name, when, its last words on one line,
-           its state's dot -- told apart by a small room sign before its name. */
-        const b = document.createElement('button'); b.type = 'button'; b.className = 'item room-item'; b.dataset.room = r.id;
-        const title = document.createElement('b');
-        const sign = document.createElement('span'); sign.className = 'room-sign'; sign.setAttribute('aria-hidden', 'true');
-        title.append(sign, r.name);
-        b.append(title);
-        /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
+    /* A ROOM, drawn as a conversation (kit.js ConvCard): its sign for an initial, its last words or who speaks,
+       when; its point: new words waiting (the colour of what waits for you), else at work while one speaks, else fine. */
+    function roomModel(r) {
         const who = thinkingOf(r);
-        if (who.length) b.dataset.live = 'true';
-        if (r.last || who.length) {
-            const last = document.createElement('small'); last.className = 'last'; last.textContent = who.length ? speaking(who) : `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`; b.append(last);
-            if (r.last) { const when = document.createElement('small'); when.className = 'when'; when.textContent = whenWords(Date.parse(r.last.at)); b.append(when); b.dataset.when = 'true'; }
-        } else { const sub = document.createElement('small'); sub.textContent = `Room \u00b7 ${r.members.filter((m) => m.kind === 'ai').length} AIs`; b.append(sub); }
-        /* Its dot: new words in it waiting (the colour of what waits for you), else at work while one speaks, else ready. */
-        const point = statePoint(r.unread > 0 ? 'wait' : who.length ? 'work' : 'ready'); point.title = r.unread > 0 ? `${r.unread} new` : who.length ? speaking(who) : 'Room'; b.append(point);
+        const sign = document.createElement('span'); sign.className = 'room-sign';
+        const state = r.unread > 0 ? 'wait' : who.length ? 'work' : 'ok';
+        const chips = [];
+        if (r.unread > 0) chips.push({ text: r.unread > 99 ? '99+' : String(r.unread), tone: 'count', title: `${r.unread} new` });
+        for (const b of boxesNow()) if (b.conversation === `room:${r.id}`) chips.push({ text: b.name, icon: 'box', wide: true });
+        return {
+            title: r.name, state, stateLabel: r.unread > 0 ? `${r.unread} new` : who.length ? speaking(who) : 'Room', avatar: { name: r.name, glyph: sign },
+            last: who.length || r.last ? (who.length ? speaking(who) : `${r.last.by ? `${r.last.by}: ` : ''}${r.last.text}`) : '',
+            when: r.last ? whenWords(Date.parse(r.last.at)) : '',
+            now: r.last || who.length ? '' : `Room \u00b7 ${countOf(r.members ?? [])}`,
+            chips,
+        };
+    }
+    function roomItem(r) {
+        /* The same row as a conversation's (03-11: « de même nature »), told apart by its room sign. */
+        const b = KIT.ConvCard(roomModel(r), { size: 'row', cls: 'item room-item' }); b.dataset.room = r.id;
+        /* One of its AIs speaking now: said instead of its last message (a conversation at work: its dot, gold). */
+        if (thinkingOf(r).length) b.dataset.live = 'true';
+        if (r.last) b.dataset.when = 'true';
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
         b.addEventListener('click', () => { void openSalon(r.id); });
         return b;
@@ -5288,51 +5297,29 @@
     }
     async function openAssets() { await openAssetsPlace(); }
     /* ---------- the conversations as cards (02-11) ---------- */
-    /* ONE CONVERSATION AS A CARD, as a playing card: its name and its state on a plate, a picture of its own
-       (its colours drawn from its name, its initial), its agent and its tool, its last word. Reusable: any
-       page that shows conversations as things to pick or move takes it. `onOpen(c)`. */
+    /* ONE CONVERSATION AS A CARD (the home deck): the kit's card, its last words and when, its rooms and boxes. `onOpen(c)`. */
     function convCard(c, onOpen) {
-        let h = 0; for (const ch of String(c.name)) h = (h * 31 + ch.codePointAt(0)) >>> 0;
-        const hue = h % 360;
-        const card = el('button', 'conv-card'); card.type = 'button'; card.dataset.name = c.name;
-        const state = c.asleep ? 'asleep' : c.talk?.state === 'waiting' || (c.talk?.waiting ?? 0) > 0 ? 'waits' : c.phase === 'ready' ? 'ready' : 'busy';
-        const plate = el('span', 'conv-card-plate'); const dot = el('span', 'conv-card-dot'); dot.dataset.state = state;
-        plate.append(dot, el('b', '', shownName(c)));
-        const art = el('span', 'conv-card-art'); art.style.setProperty('--h', String(hue));
-        art.append(el('span', 'conv-card-initial', (shownName(c).trim()[0] ?? '?').toUpperCase()));
-        const kind = el('span', 'conv-card-type', [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' · '));
-        const text = el('span', 'conv-card-text');
-        if (c.talk?.lastText) text.append(el('i', '', c.talk.lastText));
-        text.append(el('small', '', c.asleep ? 'Asleep' : state === 'waits' ? 'Waits for you' : c.talk?.lastAt ? cardAgo(c.talk.lastAt) : c.phase === 'ready' ? 'Ready' : (c.step || c.phase || '')));
-        card.append(plate, art, kind, text);
-        card.setAttribute('aria-label', `${shownName(c)}, ${kind.textContent}`);
-        card.addEventListener('click', () => onOpen(c));
+        const card = KIT.ConvCard(convModel(c, true), { size: 'card', cls: 'conv-card', onOpen: () => onOpen(c) });
+        card.dataset.name = c.name;
         return card;
     }
-    const cardAgo = (at) => { const s = Math.max(0, (Date.now() - Date.parse(at)) / 1000); return s < 90 ? 'Just now' : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 129600 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
     /* ---------- ROOMS (#268): one thread for several AIs, the person and boxes ---------- */
     let rooms = [];
+    let boxesKnown = [];
+    const loadBoxes = async () => { if (DEVICE) return boxesKnown; try { const r = await fetch(`${API}/boxes`); if (r.ok) { const got = await r.json(); boxesKnown = Array.isArray(got) ? got : []; } } catch { /* kept as known */ } return boxesKnown; };
     const loadRooms = async () => { try { const r = await fetch(`${API}/rooms`); rooms = r.ok ? await r.json() : []; } catch { rooms = []; } return rooms; };
-    const huePick = (text) => { let h = 0; for (const ch of String(text)) h = (h * 31 + ch.codePointAt(0)) >>> 0; return h % 360; };
+    const huePick = KIT.hueOf;
     /* Its members as small chips, each by its shape: a person round, an AI a rounded square, a box an outline. */
     const memberChips = (members, max = 7) => {
         const stack = el('span', 'salon-stack');
-        for (const m of members.slice(0, max)) { const i = el('i', `salon-chip salon-chip-${m.kind}`, m.kind === 'box' ? '' : (m.name.trim()[0] ?? '?').toUpperCase()); if (m.kind !== 'box') i.style.setProperty('--h', String(huePick(m.name))); i.title = m.name; stack.append(i); }
+        for (const m of members.slice(0, max)) { const i = el('i', `salon-chip salon-chip-${m.kind}`, m.kind === 'box' ? '' : KIT.initialOf(m.name)); if (m.kind !== 'box') i.style.setProperty('--h', String(huePick(m.name))); i.title = m.name; stack.append(i); }
         return stack;
     };
     const countOf = (members) => { const n = (k) => members.filter((m) => m.kind === k).length; const say = (k, one, many) => (n(k) ? `${n(k)} ${n(k) > 1 ? many : one}` : ''); return [say('person', 'person', 'people'), say('ai', 'AI', 'AIs'), say('box', 'box', 'boxes')].filter(Boolean).join(' \u00b7 '); };
-    /* A ROOM AS A CARD: like a conversation's, a little thicker (a card behind it), its members' chips on its picture. */
+    /* A ROOM AS A CARD: the kit's card, as a conversation's (a card behind it says it holds several). */
     function roomCard(r) {
-        const card = el('button', 'conv-card conv-card-room'); card.type = 'button'; card.dataset.room = r.id;
-        const plate = el('span', 'conv-card-plate'); const dot = el('span', 'conv-card-dot'); dot.dataset.state = 'ready';
-        plate.append(dot, el('b', '', r.name));
-        /* What came since it was last opened (#282). */
-        if (r.unread > 0) { const n = el('span', 'salon-unread', String(r.unread > 99 ? '99+' : r.unread)); n.setAttribute('aria-label', `${r.unread} new`); plate.append(n); dot.dataset.state = 'waits'; }
-        const art = el('span', 'conv-card-art'); art.style.setProperty('--h', String(huePick(r.name)));
-        art.append(el('span', 'conv-card-initial', '\u2302'), memberChips(r.members));
-        card.append(plate, art, el('span', 'conv-card-type', `Room \u00b7 ${countOf(r.members)}`), el('span', 'conv-card-text'));
-        card.setAttribute('aria-label', `${r.name}, room`);
-        card.addEventListener('click', () => { void openSalon(r.id); });
+        const card = KIT.ConvCard(roomModel(r), { size: 'card', cls: 'conv-card conv-card-room', onOpen: () => { void openSalon(r.id); } });
+        card.dataset.room = r.id;
         return card;
     }
     let salonThread = null; let salonId = ''; let salonTimer = null;
@@ -5364,8 +5351,7 @@
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
                 const who = thinkingOf(d);
                 $('salon-thinking').hidden = who.length === 0;
-                $('salon-thinking').replaceChildren(el('span', 'state-dot'), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
-                $('salon-thinking').firstChild.dataset.state = 'work';
+                $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
                 /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
                 salonLive(who);
                 const known = rooms.find((x) => x.id === id);
@@ -5389,31 +5375,27 @@
        room or not) and « Welcomes »; a search; a row dragged into the box above welcomes too. Boxes: the same rows,
        with a switch only. `editing`: the room, or null for a new one. */
     let salonIn = new Set(); let salonHost = ''; let salonBoxes = new Set(); let salonEditing = null; let salonBoxList = [];
-    const salonAv = (name) => { const i = el('span', 'salon-av', (name.trim()[0] ?? '?').toUpperCase()); i.style.setProperty('--h', String(huePick(name))); return i; };
-    const salonWho = (c) => [c.chatName, c.toolLabel ?? c.tool].filter(Boolean).join(' \u00b7 ') || 'AI';
+    /* Every conversation as a member: the kit's card, its size `member`, its gestures (Welcomes, in the room) at its end. */
     function paintSalonMembers() {
         const hostC = conversations.find((c) => c.name === salonHost);
         const box = $('salon-new-host'); box.replaceChildren();
-        if (hostC) { const what = el('span', 'salon-host-what'); what.append(el('b', '', shownName(hostC)), el('small', '', `${salonWho(hostC)} \u00b7 answers, or hands the message on`)); box.append(salonAv(shownName(hostC)), what); }
+        if (hostC) box.append(KIT.ConvCard({ ...convModel(hostC), now: 'answers, or hands the message on' }, { size: 'member', cls: 'salon-host-what' }));
         else box.append(el('small', 'hint', 'Pick one below: « Welcomes »'));
         const q = $('salon-new-search').value.trim().toLowerCase();
         const rows = conversations.filter((c) => !q || `${shownName(c)} ${c.chatName ?? ''}`.toLowerCase().includes(q)).sort((a, b) => Number(salonIn.has(b.name)) - Number(salonIn.has(a.name)));
         $('salon-new-ais').replaceChildren(...rows.map((c) => {
-            const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem'); row.draggable = true; row.dataset.name = c.name;
-            const what = el('span', 'salon-member-what'); what.append(el('b', '', shownName(c)), el('small', '', salonWho(c)));
             const welcome = el('button', 'salon-welcome-btn', 'Welcomes'); welcome.type = 'button'; welcome.setAttribute('aria-pressed', String(c.name === salonHost)); welcome.setAttribute('aria-label', `${shownName(c)} welcomes the room`);
             welcome.addEventListener('click', () => { salonIn.add(c.name); salonHost = c.name; paintSalonMembers(); });
-            const sw = el('button', 'salon-switch'); sw.type = 'button'; sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', String(salonIn.has(c.name))); sw.setAttribute('aria-label', `${shownName(c)} in the room`);
-            sw.addEventListener('click', () => { if (salonIn.has(c.name)) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; } paintSalonMembers(); });
-            row.append(salonAv(shownName(c)), what, welcome, sw);
+            const sw = KIT.Switch({ on: salonIn.has(c.name), label: `${shownName(c)} in the room`, onChange: (on) => { if (!on) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; } paintSalonMembers(); } });
+            const row = KIT.ConvCard(convModel(c), { size: 'member', cls: 'salon-member-row', actions: [welcome, sw] });
+            row.setAttribute('role', 'listitem'); row.draggable = true; row.dataset.name = c.name;
             return row;
         }));
         $('salon-new-count').textContent = `\u00b7 ${salonIn.size} in the room`;
         $('salon-new-boxes').replaceChildren(...salonBoxList.map((b) => {
             const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem');
             const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || 'Voice box'));
-            const sw = el('button', 'salon-switch'); sw.type = 'button'; sw.setAttribute('role', 'switch'); sw.setAttribute('aria-checked', String(salonBoxes.has(b.id))); sw.setAttribute('aria-label', `${b.name} in the room`);
-            sw.addEventListener('click', () => { if (salonBoxes.has(b.id)) salonBoxes.delete(b.id); else salonBoxes.add(b.id); paintSalonMembers(); });
+            const sw = KIT.Switch({ on: salonBoxes.has(b.id), label: `${b.name} in the room`, onChange: (on) => { if (on) salonBoxes.add(b.id); else salonBoxes.delete(b.id); paintSalonMembers(); } });
             row.append(what, sw);
             return row;
         }));
@@ -5437,6 +5419,7 @@
         salonHost = editing?.members.find((m) => m.host)?.ref ?? '';
         salonBoxes = new Set(editing ? editing.members.filter((m) => m.kind === 'box').map((m) => m.ref) : []);
         try { const x = await fetch(`${API}/boxes`); salonBoxList = x.ok ? await x.json() : []; } catch { salonBoxList = []; }
+        if (Array.isArray(salonBoxList)) boxesKnown = salonBoxList; else salonBoxList = [];
         $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0;
         paintSalonMembers();
         $('salon-new-name').focus();
@@ -5524,7 +5507,7 @@
         paint();
         $('deck-cards').hidden = list.length === 0; $('deck-empty').hidden = list.length > 0;
         void paintDeckFeatures(list.length);
-        await loadRooms(); paint();
+        await Promise.all([loadRooms(), loadBoxes()]); paint();
     }
     /* FEATURES (features.js): the welcome in place of "No conversation yet" until it is passed; then the
        next step over the cards. */

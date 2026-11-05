@@ -101,6 +101,7 @@ export const FILES = {
     '/icons.js': ['web/icons.js', 'text/javascript; charset=utf-8'],
     '/links.js': ['web/links.js', 'text/javascript; charset=utf-8'],
     '/features.js': ['web/features.js', 'text/javascript; charset=utf-8'],
+    '/kit.js': ['web/kit.js', 'text/javascript; charset=utf-8'],
     '/gitgraph.js': ['web/gitgraph.js', 'text/javascript; charset=utf-8'],
     /* The page shown while an update stops this server (app.js goes to it); the front serves the same file while it is down. */
     '/maintenance.html': [MAINTENANCE, 'text/html; charset=utf-8'],
