@@ -6777,13 +6777,27 @@
     const aboveWords = (aboveMb, reserveMb) => (aboveMb >= 0 ? `${GB(aboveMb)} above the ${GB(reserveMb)} reserve` : `${GB(-aboveMb)} into the ${GB(reserveMb)} reserve: new machines are refused`);
     function parts(dl, rows) {
         dl.replaceChildren();
-        for (const [label, value, sub] of rows) {
+        for (const [label, value, sub, slot] of rows) {
             if (value === null || value === undefined) continue;
             const dt = document.createElement('dt'); dt.textContent = label; if (sub) dt.className = 'sub';
+            if (slot !== undefined) dt.prepend(KIT.ShareKey(slot));
             const dd = document.createElement('dd'); dd.textContent = typeof value === 'number' ? GB(value) : value; dd.className = [sub ? 'sub' : '', typeof value === 'number' ? '' : 'words'].filter(Boolean).join(' ');
             dl.append(dt, dd);
         }
     }
+    /* WHO TAKES IT, AT A GLANCE (06-11): a small donut by machine beside each list, the list its legend.
+       A machine keeps its colour on both bars while the page lives. */
+    const shareSlots = new Map();
+    const shareWords = () => ({ others: uiSaid('set-share-others', 'Others'), rest: uiSaid('set-share-rest', 'System and others'), free: uiSaid('set-share-free', 'Free') });
+    const machineTitle = (name) => conversations.find((x) => x.name === name)?.title || name;
+    /* The slices, and each machine's slot for its row (a machine folded into "Others" takes its colour). */
+    function shareOf(machines, restMb, freeMb, rest) {
+        const slices = KIT.shareSlices(machines, { restMb, freeMb, slots: shareSlots, words: { ...shareWords(), ...(rest ? { rest } : {}) } });
+        const slot = new Map(slices.flatMap((x) => (x.keys ? x.keys.map((k) => [k, 0]) : [[x.key, x.slot]])));
+        return { slices, slot };
+    }
+    /* The donut, its middle the main figure: what is used, of how much. */
+    const shareDonut = (slices, label, usedMb, totalMb) => KIT.ShareDonut({ slices, label, fmt: GB, center: { top: uiSaid('set-share-used', 'Used'), main: GB(usedMb), sub: uiSaid('set-share-of', 'of {total}', { total: GB(totalMb) }) } });
     const TITLES = { machines: "Disk of the machines", data: "Disk of this server's data", folders: 'Disk of the shared folders' };
     /* One block per disk of the server, with what it holds. */
     function paintDisks(r) {
@@ -6808,6 +6822,7 @@
             note.textContent = machines ? aboveWords(d.freeMb - r.reserve.diskMb, r.reserve.diskMb) : 'No reserve here: the machines are not on this disk.';
             const dl = document.createElement('dl'); dl.className = 'server-parts';
             const rows = [];
+            let share = null;
             if (u) {
                 if (d.holds.includes('data')) rows.push(["This server's data", c.dataMb]);
                 if (d.holds.includes('folders')) {
@@ -6815,7 +6830,9 @@
                     rows.push(['Shared folders', sum(shared)], ...shared);
                 }
                 if (machines) {
-                    const each = [...m.each.slice(0, 8).map((x) => [x.name, x.mb, true]), ...(m.each.length > 8 ? [[`${m.each.length - 8} more`, m.each.slice(8).reduce((a, x) => a + x.mb, 0), true]] : []), ...(m.shelfMb ? [['ready-made machine', m.shelfMb, true]] : []), ['images', m.imagesMb, true]];
+                    const rest = Math.max(0, d.sizeMb - d.freeMb - m.each.reduce((a, x) => a + x.mb, 0));
+                    share = shareOf(m.each.map((x) => ({ key: x.name, label: machineTitle(x.name), mb: x.mb })), rest, d.freeMb, uiSaid('set-share-else', 'Everything else'));
+                    const each = [...m.each.slice(0, 8).map((x) => [machineTitle(x.name), x.mb, true, share.slot.get(x.name)]), ...(m.each.length > 8 ? [[`${m.each.length - 8} more`, m.each.slice(8).reduce((a, x) => a + x.mb, 0), true]] : []), ...(m.shelfMb ? [['ready-made machine', m.shelfMb, true]] : []), ['images', m.imagesMb, true]];
                     rows.push(['Machines', sum(each)], ...each);
                     if (m.othersMb) rows.push(['Other machines', m.othersMb]);
                 }
@@ -6827,7 +6844,10 @@
                 if (rest > 50) rows.push(['The system and other programs', rest]);
             } else rows.push(['What takes it', r.measuring ? 'measuring...' : 'not measured yet']);
             parts(dl, rows);
-            block.append(head, bar, note, dl);
+            const row = document.createElement('div'); row.className = 'share-row';
+            if (share?.slices.some((x) => x.key !== 'free')) row.append(shareDonut(share.slices, uiSaid('set-share-disk', 'Disk by machine'), d.sizeMb - d.freeMb, d.sizeMb));
+            row.append(dl);
+            block.append(head, bar, note, row);
             box.append(block);
         }
     }
@@ -7560,10 +7580,14 @@
             $('server-memory-state').textContent = 'Short'; $('server-memory-state').hidden = !r.high.memory;
             $('server-memory-note').textContent = aboveWords(mem.freeMb - r.reserve.memoryMb, r.reserve.memoryMb);
             const held = r.machines.reduce((a, x) => a + x.rssMb, 0);
+            const rest = Math.max(0, mem.totalMb - mem.freeMb - held);
+            const named = r.machines.map((x, i) => ({ key: x.name ?? `vm-${i}`, label: x.shelf ? 'ready-made machine (being made)' : (x.name ? machineTitle(x.name) : 'another machine'), mb: x.rssMb, x }));
+            const share = shareOf(named, rest, mem.freeMb);
+            $('server-memory-share').replaceChildren(...(r.machines.length ? [shareDonut(share.slices, uiSaid('set-share-memory', 'Memory by machine'), mem.totalMb - mem.freeMb, mem.totalMb)] : []));
             parts($('server-memory-parts'), [
                 [`Running machines (${r.machines.length})`, held],
-                ...r.machines.map((x) => [x.shelf ? 'ready-made machine (being made)' : (x.name ?? 'another machine'), x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true]),
-                ['The system and other programs', Math.max(0, mem.totalMb - mem.freeMb - held)],
+                ...named.map(({ key, label, x }) => [label, x.sizeMb ? `uses ${GB(x.rssMb)} · given ${GB(x.sizeMb)}` : `uses ${GB(x.rssMb)}`, true, share.slot.get(key)]),
+                ['The system and other programs', rest, false, 'rest'],
             ]);
         }
         /* Still measuring: looked at again in a moment, while Settings is open. */

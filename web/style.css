@@ -1048,6 +1048,35 @@ button.inline:hover { color: var(--brass-ink); }
 .server-meter .mark { position: absolute; top: -1px; bottom: -1px; width: 2px; margin-left: -1px; background: var(--ink); opacity: .7; }
 .server-note { margin: 0; font-size: .75rem; color: var(--ink2); }
 /* The labels never squeezed by a long value: a value in words wraps in a column of its own width. */
+/* WHO TAKES IT (06-11, kit.js ShareDonut): a small donut by machine beside its list (above it, centred, on a
+   phone); the list's swatches are its legend. Parley's chart colours, by name (--parley-s1..s6; s0 "Others"),
+   the same steps per theme; the rest of the system a neutral ink; what is free pale. */
+:root { --parley-s1: #3987e5; --parley-s2: #d95926; --parley-s3: #199e70; --parley-s4: #c98500; --parley-s5: #d55181; --parley-s6: #008300; --parley-s0: #5b6878; }
+:root[data-theme="light"] { --parley-s1: #2a78d6; --parley-s2: #eb6834; --parley-s3: #1baf7a; --parley-s4: #eda100; --parley-s5: #e87ba4; --parley-s6: #008300; --parley-s0: #a4adb8; }
+.share-row { display: flex; align-items: flex-start; gap: 20px; min-width: 0; }
+.share-row > .server-parts { flex: 1 1 auto; min-width: 0; }
+.share-row > div:empty { display: none; }
+.share-donut { position: relative; flex: none; width: 96px; height: 96px; margin-top: 2px; }
+.share-donut svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.share-arc { fill: none; stroke-width: 14; cursor: default; transition: opacity .12s, stroke-width .12s; }
+.share-donut svg[data-on] .share-arc:not([data-on="true"]) { opacity: .4; }
+.share-arc[data-on="true"] { stroke-width: 17; }
+.share-mid { position: absolute; inset: 19%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; line-height: 1.15; pointer-events: none; font-variant-numeric: tabular-nums; }
+.share-mid > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share-mid-top, .share-mid-sub { font-size: .625rem; color: var(--ink2); }
+.share-mid-main { font-size: .8125rem; color: var(--ink); }
+.share-key { display: inline-block; width: 9px; height: 9px; margin-right: 6px; border-radius: 2px; vertical-align: 0; }
+.share-arc[data-s="1"] { stroke: var(--parley-s1); } .share-arc[data-s="2"] { stroke: var(--parley-s2); } .share-arc[data-s="3"] { stroke: var(--parley-s3); }
+.share-arc[data-s="4"] { stroke: var(--parley-s4); } .share-arc[data-s="5"] { stroke: var(--parley-s5); } .share-arc[data-s="6"] { stroke: var(--parley-s6); }
+.share-arc[data-s="0"] { stroke: var(--parley-s0); } .share-arc[data-s="rest"] { stroke: var(--ink2); }
+.share-arc[data-s="free"] { stroke: color-mix(in srgb, var(--ink2) 16%, transparent); }
+.share-key[data-s="1"] { background: var(--parley-s1); } .share-key[data-s="2"] { background: var(--parley-s2); } .share-key[data-s="3"] { background: var(--parley-s3); }
+.share-key[data-s="4"] { background: var(--parley-s4); } .share-key[data-s="5"] { background: var(--parley-s5); } .share-key[data-s="6"] { background: var(--parley-s6); }
+.share-key[data-s="0"] { background: var(--parley-s0); } .share-key[data-s="rest"] { background: var(--ink2); }
+@media (max-width: 560px) {
+  .share-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .share-donut { width: 88px; height: 88px; align-self: center; }
+}
 .server-parts { display: grid; grid-template-columns: minmax(9rem, 1fr) minmax(4.5rem, max-content); gap: 2px 16px; margin: 2px 0 0; font-size: .8125rem; max-width: 30rem; }
 .server-parts dt { margin: 0; font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
 .server-parts dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }

@@ -21,6 +21,8 @@ export const SETTINGS_WORDS_FR = {
     'set-just-now': 'à l\'instant', 'set-min-ago': 'il y a {n} min', 'set-h-ago': 'il y a {n} h', 'set-days-ago': 'il y a {n} jours',
     'set-on': 'Activé', 'set-off': 'Désactivé', 'set-none': 'Aucun', 'set-changed': '{n} modifiés', 'set-as-given': 'Comme livrés',
     'set-lang-device': 'La langue de chaque appareil', 'set-res-now': 'Mémoire {m} % · disque {d} %',
+    'set-share-memory': 'Mémoire par machine', 'set-share-disk': 'Disque par machine', 'set-share-others': 'Autres',
+    'set-share-rest': 'Système et autres', 'set-share-else': 'Tout le reste', 'set-share-free': 'Libre', 'set-share-used': 'Utilisé', 'set-share-of': 'sur {total}',
     'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs',
     'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
     'set-logs-now': 'Clavarium, machines, système',
