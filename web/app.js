@@ -2998,6 +2998,9 @@
                 label: (ref) => (/^file:\/(work|resources)\//.test(ref) ? 'Open' : null),
                 open: (ref) => { const m = /^file:\/(work|resources\/[^/]+)\/(.+)$/.exec(ref); if (!m) return; const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length); void openFromChat(tab, m[2]); },
             },
+            /* A mail it cites ([Subject](mail:TARGET/ID), Parley's schemes), what a request answers, the mail that came back:
+               a chip that opens the mail viewer, read when tapped, by whoever may read that mailbox (else the viewer says so). */
+            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: name }); } } },
             /* A reaction to one of its messages: wherever the chat may be written in. */
             ...(!DEVICE || deviceParts.chat === 'write' ? { react: (to, reaction) => post(talkPath(name, '/react'), { to, reaction }) } : {}),
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
@@ -4827,7 +4830,9 @@
             for (const q of approvals) {
                 if (!q.view) continue;
                 const view = withWho && q.agent?.name ? { ...q.view, sub: [q.agent.name, ...(Array.isArray(q.view.sub) ? q.view.sub : [q.view.sub])].filter(Boolean) } : q.view;
-                box.append(P.requestCard(view, { act, words, steps: cardSteps, host: document.body }));
+                /* The mail it answers (its `re`): opened in the mail viewer, Reply writing in the chat of the conversation that asks. */
+                const schemes = { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: String(q.agent?.id ?? '').startsWith('conversation:') ? q.agent.id.slice('conversation:'.length) : current }); } } };
+                box.append(P.requestCard(view, { act, words, steps: cardSteps, host: document.body, schemes }));
             }
         });
         return box;
@@ -5336,6 +5341,8 @@
         $('salon-thread').dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
         salonThread = mount($('salon-thread'), {
             words, markdown: true, agentName: '',
+            /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat. */
+            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label }); } } },
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
                 const who = thinkingOf(d);

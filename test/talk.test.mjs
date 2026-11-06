@@ -481,6 +481,11 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'line-done', v: { verb: 'x' } } }), null, 'no English: no line');
     assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'Not a word!', t: 'x' } }), null);
     assert.equal(b.talk.event('helper', { kind: 'tether-done', text: 'Done.', topic: { k: 'line-topic-request' } }).topic, undefined, 'a topic without its English: none');
+    /* What a line is about (the mail that came back): kept as given, bounded; anything else, none. */
+    const re = { ref: 'mail:box/m1%40example.com', label: 'Quote', lead: { k: 'line-re-sent', t: 'the mail sent' } };
+    assert.deepEqual(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re }).re, re);
+    assert.equal(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re: { label: 'x' } }).re, undefined);
+    assert.equal(b.talk.event('helper', { kind: 'tether-notice', text: 'Mail came back.', re: { ref: 'm'.repeat(2001) } }).re, undefined);
     /* The owner moves a kind: what is stored next follows, what was stored stays. */
     assert.throws(() => b.talk.setThread({ levels: { origin: 'loud' } }), /A level is one of/);
     assert.throws(() => b.talk.setThread({ levels: { gossip: 'news' } }), /no such kind/);

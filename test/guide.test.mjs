@@ -96,6 +96,7 @@ test('the part of one conversation: read-only and read-write right, the chat on 
     assert.ok(own.includes("git -C /resources/site fetch /resources/site-origin '+refs/heads/*:refs/remotes/origin/*'"));
     assert.match(own, /^- \/work is kept by the server/m);
     assert.match(own, /^- Chat with the person: on\. Parley is installed: run parley guide\. When you were given Parley as your own tools \(MCP: tell, ask, doing, status\.\.\.\), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same\.$/m);
+    assert.match(own, /^- To cite a mail, write \[its subject\]\(mail:REF\) with the ref Tether gives/m, 'how to cite a mail: a chip the person opens');
     /* How Parley is used is said by parley guide, not here again. */
     assert.ok(!/--short|parley close|parley tell|parley status/.test(own), 'no Parley usage described here');
     assert.doesNotMatch(own, /npm install|\.tgz/);

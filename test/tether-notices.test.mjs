@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Tethers, noticeLine, noticeWord, endedLine, resultLine } from '../server/tethers.mjs';
+import { Tethers, noticeLine, noticeWord, endedLine, resultLine, noticeRe } from '../server/tethers.mjs';
 
 /* TETHER'S NOTICES (something that happened later to what an agent did): said once in the thread of the
    conversation whose agent did it, and that agent woken once through its docket. A fake keeper hands
@@ -105,4 +105,18 @@ test('each word of these lines is in the dictionary of the screens', async () =>
     const walk = (x) => { if (x && typeof x === 'object') { if (x.k) keys.add(x.k); Object.values(x.v ?? {}).forEach(walk); } };
     sent.forEach(walk);
     for (const k of keys) assert.ok(KEYS.includes(k), k);
+});
+
+test('a bounce or a delay carries the mail sent as a chip (mail:TARGET/ID, its subject); other notices, or no Message-ID, none', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'clv-tnot-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const { hooks, said } = setup(dir);
+    hooks.notify(bounce());
+    assert.deepEqual(said[0].re, { ref: 'mail:box/m1%40example.com', label: 'Quote', lead: { k: 'line-re-sent', t: 'the mail sent' } });
+    hooks.notify(bounce({ id: 'n2', ref: undefined }));
+    assert.equal(said[1].re, undefined, 'no Message-ID: no chip');
+    hooks.notify(bounce({ id: 'n3', kind: 'mail.later-failed' }));
+    assert.equal(said[2].re, undefined, 'a mail never sent: nothing to open');
+    assert.deepEqual(noticeRe('mail.delayed', 'box', 'm2@example.com', 'odd words').label, { k: 'req-a-message', t: 'a message' }, 'no subject read: a word');
+    assert.equal(noticeRe('mail.bounced', 'a b', 'm@example.com', ''), null, 'a target that cannot be in a reference');
 });

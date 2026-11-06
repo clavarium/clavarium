@@ -595,7 +595,7 @@ export class Talk {
        Only where the chat is on; never counted as unread (the page counts
        the tool's messages only); at most SYSTEM_MAX kept. Resolves with the
        line kept, or null. `actions`: ids the page maps to buttons. */
-    event(name, { kind, text, level, tone, topic, brief, actions = [], request, outcome } = {}) {
+    event(name, { kind, text, level, tone, topic, brief, actions = [], request, outcome, re } = {}) {
         if (!Object.hasOwn(EVENT_LEVELS, kind)) throw new RangeError(`No such kind of event: ${kind}`);
         const said = lineSaid(text, EVENT_TEXT_MAX);
         if (said === null) return null;
@@ -614,6 +614,8 @@ export class Talk {
             actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && ACTION.test(a)).slice(0, ACTIONS_MAX),
             /* A request's card, as Parley draws it (demandes.mjs): plain data, bounded. */
             ...(request && typeof request === 'object' && !Array.isArray(request) && JSON.stringify(request).length <= REQUEST_MAX ? { request } : {}),
+            /* What it is about (Parley's `re`, 06-11): the mail that came back, a chip after its text. */
+            ...(re && typeof re === 'object' && typeof re.ref === 'string' && re.ref.length <= 2000 && JSON.stringify(re).length <= 4000 ? { re } : {}),
             /* How the call a line closes ended (tether-done): yes, always, no, timeout, withdrawn, stopped. */
             ...(OUTCOMES.includes(outcome) ? { outcome } : {}),
         };

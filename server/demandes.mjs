@@ -86,6 +86,12 @@ export function demandeView(q) {
         if (where) sub.push(where);
         if (c.body) { sub.push(count(String(c.body).split('\n').length, 'req-lines')); v.quote = plain(c.body); }
         if (c.files?.length) sub.push(count(c.files.length, 'req-attachments'));
+        /* The mail it answers, forwards or acts on (Tether's about.ref, 06-11): a chip under the title, « en réponse à
+           ✉ Subject · sender », opened in the mail viewer (Parley's `re`, app.js openMailRef) -- read only when tapped. */
+        if (typeof about.ref === 'string' && about.ref.startsWith('mail:') && ['reply', 'forward', 'move', 'flag', 'delete'].includes(c.action)) {
+            v.re = { ref: about.ref, label: about.subject ? String(about.subject) : w('req-a-message'), ...(about.from ? { note: nameOfAddr(about.from) } : {}),
+                ...(c.action === 'reply' ? {} : { lead: w(c.action === 'forward' ? 'request-re-forward' : 'request-re-mail') }) };
+        }
     } else if (c.kind === 'calendar') {
         const answer = { accept: 'accept', yes: 'accept', decline: 'decline', no: 'decline', refuse: 'decline', tentative: 'maybe', maybe: 'maybe' }[String(c.answer ?? '').toLowerCase()] ?? '';
         const was = c.action === 'create' ? null : about;
@@ -150,7 +156,7 @@ export function demandeView(q) {
         kind, title: v.title || (q?.verb ? String(q.verb) : w('req-a-request')), sub: sub.filter(Boolean).slice(0, 3),
         ...(v.risk.length ? { risk: v.risk } : {}), ...(v.facts.length ? { facts: v.facts } : {}),
         ...(v.before ? { before: v.before, after: v.after } : {}),
-        ...(v.quote ? { quote: v.quote } : {}), ...(v.code ? { code: v.code } : {}),
+        ...(v.quote ? { quote: v.quote } : {}), ...(v.code ? { code: v.code } : {}), ...(v.re ? { re: v.re } : {}),
         ...(q?.why ? { why: String(q.why) } : {}),
         /* The technical line, in "See all" only. */
         detail: [q?.verb, q?.detail].filter(Boolean).join(' — '),
