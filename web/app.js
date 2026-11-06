@@ -1316,6 +1316,8 @@
         let words = null; try { words = chatWords; } catch { /* not read yet */ }
         return (typeof words?.[key] === 'string' ? words[key] : fallback).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all));
     };
+    /* The kit says its few words in the screen's language too (Holders' "nobody", the rights, the list's). */
+    KIT.setWords((key, fallback) => uiSaid(key, fallback));
     /* Who of a room speaks now (#282, an AI given a message and not done): « Cuisine parle… ». */
     const speaking = (who) => (who.length > 1 ? uiSaid('room-speaking-many', '{names} are speaking\u2026', { names: who.join(', ') }) : uiSaid('room-speaking', '{name} is speaking\u2026', { name: who[0] }));
     const thinkingOf = (r) => (Array.isArray(r?.thinking) ? r.thinking.filter((x) => typeof x === 'string' && x) : []);
@@ -3750,7 +3752,7 @@
     /* BINDER'S LISTS, AS THIS PAGE NAMES THEM: the one place for the word (Assets, a conversation's tab). */
     const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
     $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
-    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['agenda', 'Calendars', 'calendar'], ['contacts', 'Contacts', 'users'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, '']];
+    const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['agenda', 'Calendars', 'calendar'], ['contacts', 'Contacts', 'users'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, ''], ['acces', 'Accesses', 'link']];
     /* A live Tether target shows in the category of its kind (a mailbox among the
        mailboxes), not apart. Its connecting account is the rest of its id. */
     const TETHER_CAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
@@ -3817,92 +3819,37 @@
         row.addEventListener('click', () => choose(item.key));
         return row;
     }
-    /* The rows, by kind. items: [{key, kind, name, sub, badge, badgeTitle, tone}]. */
-    function paintAsList(holder, items, { chosen, choose, add, empty }) {
-        holder.replaceChildren();
-        for (const [kind, title] of ASSET_KINDS) {
-            const mine = items.filter((i) => i.kind === kind);
-            if (mine.length === 0 && !add) continue;
-            const section = el('section', 'as-kind'); section.dataset.kind = kind;
-            const head = el('div', 'as-kind-head'); head.append(el('h3', '', title));
-            if (add) head.append(roundPlus(`Add ${{ git: 'a repository', folder: 'a folder', mailbox: 'a mailbox', agenda: 'a calendar', contacts: 'an address book', acces: 'an access', secret: 'a secret', list: LISTS_WORD.a }[kind]}`, () => add(kind)));
-            section.append(head);
-            if (mine.length === 0) section.append(el('p', 'hint as-none', 'None yet'));
-            for (const item of mine) section.append(assetRow(item, { chosen, choose }));
-            holder.append(section);
-        }
-        if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
+    /* AN ITEM OF THESE LISTS, as the kit's AssetCard takes it (06-11, assets step 2): its point when it asks for
+       you (a secret soon or past, a mailbox failing), the shade of its line, who has it or its right. */
+    const cardOf = (item) => ({ key: item.key, kind: item.kind, name: item.name, sub: item.sub ?? '', live: item.live,
+        state: item.dot === 'bad' || item.tone === 'bad' ? 'problem' : item.dot === 'warn' ? 'wait' : '', tone: item.dot || item.tone || '',
+        holders: item.holders, right: item.right, count: item.count });
+    /* Who has an asset, for its row: the conversations (their name as shown), then the devices given it. */
+    const holdersOf = (names, key) => [...names.map((n) => ({ name: shownName(conversations.find((c) => c.name === n)) || n })), ...sharedDevices.filter((d) => (d.grants ?? []).some((g) => g.asset === key)).map((d) => ({ name: d.name ?? d.id }))];
+    /* Who uses it, for the list (its holders) and for its panel's title (the number, as before: step 3 redraws it). */
+    const usedBy = (names, key) => ({ holders: holdersOf(names, key), badge: String(names.length), badgeTitle: `Used by ${names.length} conversation${names.length === 1 ? '' : 's'}`, badgeTone: 'count' });
+    /* A row pinned above the list (To send, Demandes): the same card, its number on its right. */
+    const pinnedCard = (entry, { chosen, onOpen, extra = '' }) => KIT.AssetCard({ key: entry.key, kind: entry.kind, name: entry.name, sub: entry.sub, count: entry.count },
+        { cls: `as-row ts-entry${extra ? ` ${extra}` : ''}`, current: entry.key === chosen, onOpen });
+    /* THE ONE LIST (kit AssetList), in `holder`: the Assets menu (scope 'all') or a conversation's tab. */
+    function paintAssetList(holder, model, opts) {
+        holder.replaceChildren(KIT.AssetList(model, { rowCls: 'as-row', ...opts }));
     }
     /* The group an asset is in, or '' for none. */
     const groupOf = (key, groups) => groups.find((g) => (g.members ?? []).includes(key))?.id ?? '';
     /* Groups the owner has folded shut in the by-group view (a convenience). */
     const groupsFolded = (() => { try { const v = JSON.parse(localStorage.getItem('clavarium-groups-folded') ?? '[]'); return new Set(Array.isArray(v) ? v : []); } catch { return new Set(); } })();
     const keepGroupsFolded = () => { try { localStorage.setItem('clavarium-groups-folded', JSON.stringify([...groupsFolded])); } catch { /* a private window */ } };
-    /* The rows, by the owner's groups: a foldable section per group, then the
-       loose ones. A group's name opens its own detail (rename, remove, give the
-       whole group); the chevron folds it; "+" makes a new one. An asset is put
-       into a group from the asset's own detail. */
-    function paintAsGroups(holder, items, groups, { chosen, choose, empty }) {
-        holder.replaceChildren();
-        const byKey = new Map(items.map((i) => [i.key, i]));
-        const addBar = el('div', 'as-group-new');
-        if (groupAdding) {
-            const form = el('form', 'as-group-form'); form.autocomplete = 'off';
-            const input = el('input'); input.placeholder = 'Group name'; input.maxLength = 40; input.setAttribute('aria-label', 'New group name');
-            const make = el('button', 'primary', 'Add'); make.type = 'submit';
-            const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
-            form.append(input, make, cancel);
-            form.addEventListener('submit', async (event) => {
-                event.preventDefault(); $('assets-error').hidden = true;
-                try { const made = await post(`${API}/asset-groups`, { label: input.value.trim() }); groupAdding = false; assetOpen = `group:${made.id}`; remember(); }
-                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                void paintAssets();
-            });
-            addBar.append(form);
-            holder.append(addBar);
-            queueMicrotask(() => input.focus());
-        } else {
-            addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
-            holder.append(addBar);
-        }
-        const section = (head, rows, none, { foldable, drop } = {}) => {
-            const s = el('section', 'as-kind as-group'); s.append(head); s.dataset.drop = drop;
-            if (!foldable || !head.dataset.folded) {
-                if (rows.length === 0) s.append(el('p', 'hint as-none', none));
-                for (const item of rows) s.append(assetRow(item, { chosen, choose }));
-            }
-            holder.append(s);
-        };
-        for (const g of groups) {
-            const members = (g.members ?? []).map((k) => byKey.get(k)).filter(Boolean);
-            const folded = groupsFolded.has(g.id);
-            const head = el('div', 'as-kind-head as-group-head'); if (folded) head.dataset.folded = 'true';
-            /* The whole header folds/unfolds the group; a gear opens its settings. */
-            const toggle = el('button', 'as-group-name'); toggle.type = 'button';
-            if (`group:${g.id}` === chosen) toggle.setAttribute('aria-current', 'true');
-            toggle.setAttribute('aria-expanded', String(!folded));
-            toggle.append(el('span', 'as-chev', folded ? '▸' : '▾'), el('h3', '', g.label), el('span', 'as-badge count', String(members.length)));
-            toggle.title = folded ? 'Unfold' : 'Fold';
-            toggle.addEventListener('click', () => { if (folded) groupsFolded.delete(g.id); else groupsFolded.add(g.id); keepGroupsFolded(); void paintAssets(); });
-            const gear = el('button', 'as-gear', '⚙'); gear.type = 'button'; gear.setAttribute('aria-label', `Settings for ${g.label}`); gear.title = 'Give, rename, remove';
-            gear.addEventListener('click', (e) => { e.stopPropagation(); choose(`group:${g.id}`); });
-            head.append(toggle, gear);
-            section(head, members, 'Empty. Drag an asset here, or open one to put it here.', { foldable: true, drop: g.id });
-        }
-        const grouped = new Set(groups.flatMap((g) => g.members ?? []));
-        const loose = items.filter((i) => !grouped.has(i.key));
-        const looseHead = el('div', 'as-kind-head'); looseHead.append(el('h3', '', 'No group'));
-        section(looseHead, loose, groups.length ? 'Every asset is in a group.' : 'Make a group above, then open an asset to put it in it.', { drop: '' });
-        if (items.length === 0 && empty) holder.append(el('p', 'hint', empty));
-        if (groups.length) dragToGroups(holder);
-    }
     /* DRAGGING AN ASSET ONTO A GROUP (#111), like a binder's Kanban: a mouse drags once it
        has moved a little; a finger after a short hold (so a swipe still scrolls). The row
        follows the pointer as a light copy; the group under it lights up; let go on it, and
        the asset is placed there ("No group" takes it out). A tap still opens the asset. */
     function dragToGroups(holder) {
+        /* Wired once: the list is drawn again and again inside the same holder. */
+        if (holder.dataset.dragWired) return;
+        holder.dataset.dragWired = 'true';
         let drag = null;
-        const sectionAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.as-group[data-drop]') ?? null;
+        const sectionAt = (x, y) => document.elementFromPoint(x, y)?.closest?.('.kit-aslist-group[data-drop]') ?? null;
         const end = () => { if (!drag) return; clearTimeout(drag.hold); drag.ghost?.remove(); drag.over?.classList.remove('as-drop-over'); document.body.classList.remove('as-dragging'); drag = null; };
         const start = (d) => {
             d.on = true;
@@ -3913,9 +3860,10 @@
             document.body.append(d.ghost); document.body.classList.add('as-dragging');
         };
         holder.addEventListener('pointerdown', (e) => {
-            const row = e.target.closest('.as-row[data-asset]');
-            if (!row || !holder.contains(row) || e.button > 0) return;
-            drag = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, touch: e.pointerType !== 'mouse', from: row.closest('.as-group')?.dataset.drop };
+            const row = e.target.closest('.as-row[data-asset]:not(.ts-entry)');
+            /* Only in the view by group, once there is a group to drag to. */
+            if (!row || !holder.contains(row) || e.button > 0 || !holder.querySelector('.kit-aslist-group[data-drop]:not([data-drop=""])')) return;
+            drag = { row, id: e.pointerId, x0: e.clientX, y0: e.clientY, on: false, touch: e.pointerType !== 'mouse', from: row.closest('.kit-aslist-group')?.dataset.drop };
             if (drag.touch) { const d = drag; d.hold = setTimeout(() => { if (drag === d) { start(d); try { row.setPointerCapture(d.id); } catch { /* still heard */ } } }, 350); }
         });
         holder.addEventListener('pointermove', (e) => {
@@ -3965,16 +3913,31 @@
         if (item.kind === 'list') return item.list.grants?.[id] ?? 'none';
         return item.resource?.attachments?.[conversationName] ?? 'none';
     }
-    /* The toggle above the rows: by type (default) or by the owner's groups. */
-    function paintAssetsView() {
+    /* The toggle above the rows: the owner's groups or the types (kit Segmented); `view`, the one shown. */
+    function paintAssetsView(view) {
         const bar = $('assets-view'); if (!bar) return;
-        bar.replaceChildren();
-        for (const [by, label] of [['type', 'By type'], ['group', 'By group']]) {
-            const b = el('button', '', label); b.type = 'button'; b.dataset.by = by;
-            b.setAttribute('aria-pressed', String(assetsBy === by));
-            b.addEventListener('click', () => { if (assetsBy === by) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); });
-            bar.append(b);
-        }
+        bar.replaceChildren(KIT.Segmented({ options: [{ value: 'group', label: uiSaid('set-as-by-group', 'Groups') }, { value: 'type', label: uiSaid('set-as-by-type', 'Types') }], value: view, label: 'Arrange assets',
+            onChange: (by) => { if (by === view) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); } }));
+    }
+    /* "+ New group", above the groups: a name in place, then made and opened. */
+    function newGroupBar() {
+        const addBar = el('div', 'as-group-new');
+        if (groupAdding) {
+            const form = el('form', 'as-group-form'); form.autocomplete = 'off';
+            const input = el('input'); input.placeholder = 'Group name'; input.maxLength = 40; input.setAttribute('aria-label', 'New group name');
+            const make = el('button', 'primary', 'Add'); make.type = 'submit';
+            const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
+            form.append(input, make, cancel);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { const made = await post(`${API}/asset-groups`, { label: input.value.trim() }); groupAdding = false; assetOpen = `group:${made.id}`; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            });
+            addBar.append(form);
+            queueMicrotask(() => input.focus());
+        } else addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
+        return addBar;
     }
     /* In an asset's detail: which group it is in. Moving it is a folder move
        (it leaves any other group). New groups are made in the by-group view. */
@@ -4594,6 +4557,10 @@
     const noAssetChosen = () => el('p', 'hint as-none', 'Select an asset to see its detail.');
 
     /* ---- a conversation's own ---- */
+    /* A conversation's tab, searched: its words, and whose they are. */
+    let cassetsQuery = ''; let cassetsFor = '';
+    $('cassets-search').addEventListener('input', () => { cassetsQuery = $('cassets-search').value.trim(); void paintRoomAssets(); });
+    $('cassets-attach').addEventListener('click', () => { void openAccess(true); });
     async function paintRoomAssets() {
         if (!assetsShown) return;
         watchTether();
@@ -4607,15 +4574,15 @@
         const mineJobs = (Array.isArray(tether.jobs) ? tether.jobs : []).filter((j) => j.agent === `conversation:${current}`);
         const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
         const items = [];
-        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write' });
+        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write', right: { level: 'write' } });
         for (const r of all.filter((x) => mine.has(x.name))) {
             const kind = kindOf(r); const access = mine.get(r.name);
             const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
-            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only',
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only', right: { key: kind, value: access },
                 sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
         markSecrets(secrets);
-        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...secretItem(s2, 'name only · used by its agent') });
+        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, right: { level: 'use' }, ...secretItem(s2, 'name only · used by its agent') });
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
@@ -4624,20 +4591,15 @@
         const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
-        paintAsList($('cassets-rows'), items, { chosen: chosen?.key, choose: (key) => pickRoomAsset(key), empty: 'Nothing is given to it yet.' });
-        const top = el('div', 'as-kind-head as-list-top'); top.append(el('h3', '', 'This conversation'), roundPlus(uiSaid('set-na-attach', 'Attach'), () => { void openAccess(true); }));
-        const pinnedRow = (entry, extra) => {
-            const row = el('button', `as-row ts-entry${extra ? ` ${extra}` : ''}`); row.type = 'button'; row.dataset.asset = entry.key;
-            if (chosen === entry) row.setAttribute('aria-current', 'true');
-            const words = el('span', 'as-words'); words.append(el('b', '', entry.name), el('small', 'as-sub', entry.sub));
-            row.append(kindIcon('send'), words);
-            if (entry.key === 'demandes:mine') row.append(el('b', 'count', String(waitingCount)));
-            row.addEventListener('click', () => pickRoomAsset(entry.key));
-            return row;
-        };
-        if (outbox) $('cassets-rows').prepend(pinnedRow(outbox));
-        if (demandes) $('cassets-rows').prepend(pinnedRow(demandes, 'demande-entry'));
-        $('cassets-rows').prepend(top);
+        /* THE ONE LIST (kit AssetList), scope this conversation: by type, its right on each row; To send and
+           Demandes pinned above. Its search is its own, emptied when another conversation is shown. */
+        if (cassetsFor !== current) { cassetsFor = current; cassetsQuery = ''; $('cassets-search').value = ''; }
+        const model = KIT.assetListModel({ items: items.map(cardOf), scope: `conversation:${current}`, query: cassetsQuery, kinds: ASSET_KINDS });
+        const pinned = cassetsQuery ? [] : [
+            demandes && pinnedCard({ ...demandes, count: waitingCount }, { chosen: chosen?.key, onOpen: pickRoomAsset, extra: 'demande-entry' }),
+            outbox && pinnedCard(outbox, { chosen: chosen?.key, onOpen: pickRoomAsset }),
+        ];
+        paintAssetList($('cassets-rows'), model, { chosen: chosen?.key, onOpen: pickRoomAsset, pinned, empty: 'Nothing is given to it yet.', noMatch: 'Nothing by that name.' });
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
         if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
@@ -4748,10 +4710,10 @@
 
     /* ---- the server's ---- */
     let assetOpen = ''; let assetsAdding = ''; let assetsQuery = ''; let remoteShown = ''; let remoteEditing = false; let listOpen = ''; let listsSig = '';
-    /* How the Assets list is arranged: by type (the categories, the default) or
-       by the owner's groups. A per-viewer convenience, kept in the browser. */
-    let assetsBy = 'type';
-    try { if (localStorage.getItem('clavarium-assets-by') === 'group') assetsBy = 'group'; } catch { /* a private window */ }
+    /* How the Assets list is arranged: by the owner's groups or by type. A per-viewer convenience, kept in the
+       browser once chosen; never chosen (''), groups as soon as one exists, else types (kit assetListModel). */
+    let assetsBy = '';
+    try { const kept = localStorage.getItem('clavarium-assets-by'); if (kept === 'group' || kept === 'type') assetsBy = kept; } catch { /* a private window */ }
     const keepAssetsBy = () => { try { localStorage.setItem('clavarium-assets-by', assetsBy); } catch { /* as above */ } };
     /* The "+ New group" inline form being shown in the by-group view. */
     let groupAdding = false;
@@ -4961,31 +4923,28 @@
         markSecrets(secrets);
         const items = [];
         for (const r of all) {
-            const kind = kindOf(r); const users = Object.keys(r.attachments ?? {}).length;
+            const kind = kindOf(r);
             const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
-            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, ...usedBy(Object.keys(r.attachments ?? {}), `${kind}:${r.name}`),
                 sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
         }
-        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, badge: String(s2.conversations.length), badgeTitle: `Used by ${s2.conversations.length} conversation${s2.conversations.length === 1 ? '' : 's'}`, badgeTone: 'count', ...secretItem(s2, 'name only') });
+        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...usedBy(s2.conversations, `secret:${s2.name}`), ...secretItem(s2, 'name only') });
         /* Tether targets ("Connexions"): a mailbox, calendar or address book connected
            by token, given to a conversation at a level. The token lives on the server. */
         const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
         for (const tgt of allTargets) {
-            const users = Object.keys(tgt.grants ?? {}).filter((id) => id.startsWith('conversation:')).length;
+            const users = Object.keys(tgt.grants ?? {}).filter((id) => id.startsWith('conversation:')).map((id) => id.slice('conversation:'.length));
             const acct = tetherAccount(tgt.id);
             const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
-            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true,
-                badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count',
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, ...usedBy(users, `connexion:${tgt.id}`),
                 sub: siblings.length ? `linked: ${siblings.join(', ')}` : connexionSub(tgt.kind) });
         }
         /* Binder's lists: given to a conversation (read, write) in Binder itself. */
         const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
         listsSig = binderSig(lists.data);
         for (const l of shownLists) {
-            const users = givenTo(l).length;
-            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, badge: String(users), badgeTitle: `Used by ${users} conversation${users === 1 ? '' : 's'}`, badgeTone: 'count', sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
+            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, ...usedBy(givenTo(l).map((id) => id.slice('conversation:'.length)), `list:${l.id}`), sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
         }
-        const shown = assetsQuery ? items.filter((i) => i.name.includes(assetsQuery.toLowerCase()) || i.name.toLowerCase().includes(assetsQuery.toLowerCase())) : items;
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         if (justMade && !justMade.to && justMade.key !== chosen?.key) justMade = null;
         /* A group can be the open thing too (its own detail: give it, rename it). */
@@ -4995,24 +4954,19 @@
         const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
         const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
         $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
-        /* The "by type / by group" toggle sits above the rows (built once, kept). */
-        paintAssetsView();
         const choose = (key) => { placeAssetStep(); if (key !== assetOpen) groupGiveShow.clear(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
-        if (assetsBy === 'group') {
-            paintAsGroups($('assets-rows'), shown, assetGroups, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : ''), choose, empty: assetsQuery ? 'Nothing by that name.' : '' });
-        } else {
-            paintAsList($('assets-rows'), shown, { chosen: chosen?.key, choose, add: (kind) => { placeAssetStep(); assetsAdding = kind; void paintAssets(); }, empty: assetsQuery ? 'Nothing by that name.' : '' });
-        }
-        /* Above them all, once something waits: the owner reaches every call from here,
-           not only by opening the right connexion. */
-        if (allApprovals.length && !assetsQuery) {
-            const row = el('button', 'as-row ts-entry demande-entry'); row.type = 'button'; row.dataset.asset = 'demandes:all';
-            if (onDemandes) row.setAttribute('aria-current', 'true');
-            const words = el('span', 'as-words'); words.append(el('b', '', 'Demandes'), el('small', 'as-sub', `${allApprovals.length} waiting for you`));
-            row.append(kindIcon('send'), words, el('b', 'count', String(allApprovals.length)));
-            row.addEventListener('click', () => choose('demandes:all'));
-            $('assets-rows').prepend(row);
-        }
+        /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
+        const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: ASSET_KINDS });
+        paintAssetsView(model.view);
+        /* Above them all, once something waits: the owner reaches every call from here, not only by opening the
+           right connexion. Then, in the view by group, "+ New group". */
+        const pinned = [];
+        if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: `${allApprovals.length} waiting for you`, count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
+        if (model.view === 'group') pinned.push(newGroupBar());
+        paintAssetList($('assets-rows'), model, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : onDemandes ? 'demandes:all' : ''), onOpen: choose, pinned,
+            onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
+            onGroup: (id) => choose(`group:${id}`), noMatch: 'Nothing by that name.' });
+        if (model.view === 'group') dragToGroups($('assets-rows'));
         const detail = $('assets-detail');
         /* The forms go back to where they wait before the detail is drawn again. */
         for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
@@ -5020,9 +4974,9 @@
         const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
         if (assetsAdding) {
             /* The New asset box: from the map's "+" of Assets, which kind first ("<" goes back to the map);
-               from the "+" of a kind, its form ("<" Assets). */
-            const out = assetsFromMap || assetsAdding === 'choose' ? el('button', 'as-link', '‹ Access') : el('button', 'as-link as-back', '‹ Assets'); out.type = 'button';
-            out.addEventListener('click', () => { if (!nav.close(assetsFromMap || assetsAdding === 'choose' ? 'compose' : 'asset')) back(); });
+               from "+ New" of the list, which kind first too ("<" Assets). */
+            const out = assetsFromMap ? el('button', 'as-link', '‹ Access') : el('button', 'as-link as-back', '‹ Assets'); out.type = 'button';
+            out.addEventListener('click', () => { if (!nav.close(assetsFromMap ? 'compose' : 'asset')) back(); });
             const kind = assetsAdding === 'choose' ? '' : assetsAdding;
             detail.append(out, newAssetBox({ kind, onKind: (k) => { assetsAdding = k; void paintAssets(); }, boxHost: { where: '', repaint: () => { void paintAssets(); }, close: back } }));
             if (kind) focusFirst(detail);
@@ -5294,6 +5248,8 @@
             : settings.sshKey ? `Push key: SSH key ${settings.sshKey}` : 'Push key: none · the clone\'s access, same server only';
     }
     $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
+    /* ONE "+ New" (06-11, assets step 2), in place of a "+" per kind: the New asset box, its kind chosen in it. */
+    $('assets-new').addEventListener('click', () => { placeAssetStep(); assetsAdding = 'choose'; remoteEditing = false; $('assets-error').hidden = true; void paintAssets(); });
     $('assets-close').addEventListener('click', () => leavePlace());
     /* The Assets place, on one asset (`key`), its remote form open (`remote`). */
     async function openAssetsPlace(key, { remote = false, push = true } = {}) {
@@ -6372,6 +6328,9 @@
         for (const b of document.querySelectorAll('button.tip-btn')) b.setAttribute('aria-label', uiSaid('set-why', 'Why'));
         const s = document.querySelector('#settings .settings-search'); if (s) s.placeholder = uiSaid('set-search', 'Search');
         const p = document.querySelector('#panel .settings-search'); if (p) p.placeholder = uiSaid('set-search', 'Search');
+        $('cassets-search').placeholder = uiSaid('set-search', 'Search');
+        /* The lists of assets drawn before the words came: drawn again, the kit's words in the screen's language. */
+        try { if (place === 'assets') void paintAssets(); if (assetsShown) void paintRoomAssets(); } catch { /* not drawn yet */ }
     }
     void readWords().then(saySettings).catch(() => {});
 

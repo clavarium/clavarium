@@ -105,7 +105,7 @@
            each opened on the right (a folder: its files). -->
       <div id="cassets" class="sheet as-room" hidden>
         <div class="as" id="cassets-as">
-          <div class="as-list"><div id="cassets-rows"></div></div>
+          <div class="as-list"><div class="as-tools"><input type="search" id="cassets-search" placeholder="Search" aria-label="Search its assets" spellcheck="false" autocomplete="off"><button type="button" id="cassets-attach" class="as-new"><span aria-hidden="true">+ </span><span data-said="set-na-attach">Attach</span></button></div><div id="cassets-rows"></div></div>
           <div class="as-detail" id="cassets-detail"></div>
         </div>
       </div>
@@ -751,7 +751,7 @@
         <div class="panel-top"><b>Assets</b><button type="button" id="assets-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <div class="as" id="assets-as">
-          <div class="as-list"><div class="as-view" id="assets-view" role="group" aria-label="Arrange assets"></div><input type="search" id="assets-search" placeholder="Search assets" aria-label="Search assets" spellcheck="false" autocomplete="off"><div id="assets-rows"></div></div>
+          <div class="as-list"><div class="as-tools"><input type="search" id="assets-search" placeholder="Search assets" aria-label="Search assets" spellcheck="false" autocomplete="off"><button type="button" id="assets-new" class="as-new primary"><span aria-hidden="true">+ </span><span data-said="set-as-new">New</span></button></div><div class="as-view" id="assets-view"></div><div id="assets-rows"></div></div>
           <div class="as-detail" id="assets-detail"></div>
         </div>
         <div id="assets-forms" hidden>

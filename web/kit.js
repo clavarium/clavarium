@@ -23,6 +23,8 @@
  *   AssetCard      ONE ASSET, three sizes like ConvCard (06-11, assets step 1): `row` (a list), `chip` (a pill:
  *                  a folded group, the thread, a call waiting), `head` (atop its panel). On its right, who has
  *                  it (Holders) or, seen from one holder, its right (RightsBadge).
+ *   AssetList      THE ONE LIST of assets (06-11, assets step 2): the Assets menu and a conversation's tab, only its
+ *                  scope changes; by type or by group; an empty type not shown; assetListModel places the rows.
  *   RIGHTS         THE ONE TABLE of what an asset can be given at, by its kind and by who gets it (a
  *                  conversation, a device); "none" first. RightsBadge reads a right, RightsPicker sets it.
  *
@@ -527,6 +529,7 @@
          live        a live link (a connexion): its rights are a connexion's
          sub         its one line ('' : none)                   state   a point when it asks for you (wait,
                                                                         problem: expiring, failing); else none
+         tone        its line's shade, when the page has one ('warn': soon; 'bad': past, failing)
          count       a number that waits for you (calls waiting)
          holders     [{ name, hue? }] who has it (Assets)       right   { level | value, holder? } its right,
                                                                         seen from one holder (a conversation)
@@ -551,6 +554,7 @@
             if (a.sub || a.state) {
                 const line = node('small', 'kit-asset-sub');
                 if (a.state) { line.append(StatusDot({ state: a.state, label: a.sub ?? '' })); line.dataset.state = stateOf(a.state); }
+                if (a.tone) line.dataset.tone = a.tone;
                 if (a.sub) line.append(node('span', '', a.sub));
                 main.append(line);
             }
@@ -567,8 +571,99 @@
         return root;
     }
 
+    /* THE LIST OF ASSETS (06-11, assets step 2): ONE LIST in the Assets menu and in a conversation's Assets tab;
+       only its scope changes -- 'all' (every asset, who has each on its right) or 'conversation:<name>' (what it
+       was given, each with its right). Two views of the same rows: by type, or by the owner's groups (the menu
+       only). A type with nothing in it is not shown; a group is (a place to drag to), unless a search empties it.
+
+       assetListModel: the rows placed, no page needed (tested alone).
+         items   [{ key, kind, name, … }] as AssetCard takes them       groups  [{ id, label, members: [key] }]
+         scope   'all' | 'conversation:x'                              by      the view kept ('type' | 'group'), or
+                                                                               '': groups once one exists, else types
+         query   a name searched (any case)     folded   group ids folded shut     kinds   [[kind, title]] in order
+       -> { view, canGroup, sections: [{ id, title, kind | group, items, holders, folded, drop, empty }], shown, total } */
+    const scopeOf = (scope) => (String(scope ?? 'all').startsWith('conversation:') ? 'conversation' : 'all');
+    function assetListModel({ items = [], groups = [], scope = 'all', by = '', query = '', folded = [], kinds = [] } = {}) {
+        const canGroup = scopeOf(scope) === 'all';
+        const view = canGroup && (by === 'group' || (by !== 'type' && groups.length > 0)) ? 'group' : 'type';
+        const q = String(query ?? '').trim().toLowerCase();
+        const shown = q ? items.filter((i) => String(i.name ?? '').toLowerCase().includes(q)) : [...items];
+        const sections = [];
+        if (view === 'type') {
+            const order = kinds.length ? kinds : [...new Set(shown.map((i) => i.kind))].map((k) => [k, k]);
+            const known = new Set(order.map(([k]) => k));
+            for (const [kind, title] of order) {
+                const mine = shown.filter((i) => i.kind === kind);
+                if (mine.length) sections.push({ id: `kind:${kind}`, kind, title, items: mine });
+            }
+            /* A kind the page did not name is never dropped: it comes last, under its own name. */
+            for (const kind of [...new Set(shown.map((i) => i.kind).filter((k) => !known.has(k)))]) sections.push({ id: `kind:${kind}`, kind, title: kind, items: shown.filter((i) => i.kind === kind) });
+        } else {
+            const byKey = new Map(shown.map((i) => [i.key, i]));
+            const shut = new Set(folded);
+            const grouped = new Set();
+            for (const g of groups) {
+                for (const k of g.members ?? []) grouped.add(k);
+                const mine = (g.members ?? []).map((k) => byKey.get(k)).filter(Boolean);
+                if (q && !mine.length) continue;
+                const seen = new Set(); const holders = [];
+                for (const h of mine.flatMap((i) => i.holders ?? [])) if (h?.name && !seen.has(h.name)) { seen.add(h.name); holders.push(h); }
+                sections.push({ id: `group:${g.id}`, group: g.id, title: g.label, items: mine, holders, folded: shut.has(g.id), drop: g.id, empty: mine.length ? '' : 'group' });
+            }
+            const loose = shown.filter((i) => !grouped.has(i.key));
+            /* The loose ones stay a place to drag to (out of a group) while there are groups, even emptied. */
+            if (loose.length || (!q && items.length)) sections.push({ id: 'group:', group: '', title: say('set-as-no-group', 'No group'), items: loose, drop: '', empty: loose.length ? '' : groups.length ? 'grouped' : 'nogroups' });
+        }
+        return { view, canGroup, sections, shown: shown.length, total: items.length };
+    }
+
+    /* The list drawn from its model. A row is an AssetCard (`rowCls` added: the page's handle on it); `pinned`,
+       rows above every section (what waits: To send, Demandes). `onOpen(key)`; a group's head folds it
+       (`onFold(id)`), its ⚙ opens it (`onGroup(id)`). `empty`: said when there is nothing at all; `noMatch`,
+       when a search finds nothing. */
+    function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '' } = {}) {
+        const box = node('div', 'kit-aslist'); box.dataset.view = model.view;
+        box.append(...pinned.filter(Boolean));
+        const hints = {
+            group: say('set-as-group-empty', 'Empty: drag an asset here'),
+            grouped: say('set-as-all-grouped', 'Every asset is in a group'),
+            nogroups: say('set-as-no-groups', 'Make a group, then drag an asset into it'),
+        };
+        for (const s of model.sections) {
+            const sec = node('section', `kit-aslist-sec${s.group !== undefined ? ' kit-aslist-group' : ''}`);
+            if (s.kind !== undefined) sec.dataset.kind = s.kind;
+            if (s.drop !== undefined) sec.dataset.drop = s.drop;
+            const head = node('div', 'kit-aslist-head');
+            if (s.group) {
+                if (s.folded) head.dataset.folded = 'true';
+                const toggle = node('button', 'kit-aslist-fold'); toggle.type = 'button';
+                if (`group:${s.group}` === chosen) toggle.setAttribute('aria-current', 'true');
+                toggle.setAttribute('aria-expanded', String(!s.folded));
+                toggle.title = s.folded ? say('set-as-unfold', 'Unfold') : say('set-as-fold', 'Fold');
+                toggle.append(node('span', 'kit-aslist-chev', s.folded ? '▸' : '▾'), node('h3', '', s.title), node('span', 'kit-aslist-n', String(s.items.length)));
+                toggle.addEventListener('click', () => onFold(s.group));
+                head.append(toggle);
+                if (s.holders?.length) head.append(Holders(s.holders));
+                const gear = node('button', 'kit-aslist-gear', '⚙'); gear.type = 'button';
+                gear.setAttribute('aria-label', say('set-as-group-open', 'Settings for {name}').replace('{name}', s.title));
+                gear.title = say('set-as-group-gear', 'Give, rename, remove');
+                gear.addEventListener('click', (e) => { e?.stopPropagation?.(); onGroup(s.group); });
+                head.append(gear);
+            } else head.append(node('h3', '', s.title));
+            sec.append(head);
+            if (!s.folded) {
+                for (const a of s.items) sec.append(AssetCard(a, { size: 'row', cls: rowCls, current: a.key === chosen, onOpen }));
+                if (s.empty) sec.append(node('p', 'hint kit-aslist-none', hints[s.empty] ?? ''));
+            }
+            box.append(sec);
+        }
+        if (!model.total && empty) box.append(node('p', 'hint kit-aslist-said', empty));
+        else if (model.total && !model.shown && noMatch) box.append(node('p', 'hint kit-aslist-said', noMatch));
+        return box;
+    }
+
     window.clavariumKit = {
-        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker,
+        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,

@@ -82,5 +82,10 @@ export const SETTINGS_WORDS_FR = {
     'set-rt-hint-free': 'Agit seul, tout est noté au journal', 'set-rt-hint-terminal': 'Tout son terminal',
     'set-rt-hint-chat': 'Lit et écrit dans son chat', 'set-rt-hint-both': 'Son chat et son terminal',
     'set-as-nobody': 'personne',
+    /* The one list of assets (06-11, kit AssetList): its views, its one button, a group's head, what an empty one says. */
+    'set-as-new': 'Nouveau', 'set-as-by-group': 'Groupes', 'set-as-by-type': 'Types', 'set-as-no-group': 'Sans groupe',
+    'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-open': 'Réglages de {name}', 'set-as-group-gear': 'Donner, renommer, supprimer',
+    'set-as-group-empty': 'Vide : glissez un asset ici', 'set-as-all-grouped': 'Chaque asset est dans un groupe',
+    'set-as-no-groups': 'Créez un groupe, puis glissez-y un asset',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});
