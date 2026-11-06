@@ -292,3 +292,60 @@ test('the donut: one arc a slice, its length its share, the main figure in its m
     assert.equal(mid.textContent, 'Used3 GBof 4 GB');
     assert.equal(KIT.ShareKey(3).dataset.s, '3');
 });
+
+/* THE TOP BAR (06-11): one bar atop every page of the right pane, two variants. */
+const kids = (n) => n.children.filter((c) => typeof c === 'object');
+test('top bar, main: the fold, its dot, its title with its line under it, its views on the right; its "‹" first', () => {
+    let folded = 0;
+    const views = document.createElement('div'); views.className = 'views';
+    const who = document.createElement('button'); who.id = 'salon-who';
+    const bar = KIT.TopBar({ variant: 'main', fold: true, onFold: () => { folded += 1; }, back: { label: 'Back', said: 'set-back' }, state: { id: 'salon-state', state: 'working' }, title: 'Family room', sub: ['2 AIs', who], actions: [views] });
+    assert.equal(bar.tagName, 'HEADER');
+    assert.deepEqual(bar.classes.slice(0, 2), ['topbar', 'kit-topbar']);
+    assert.equal(bar.dataset.variant, 'main');
+    const [fold, back, dot, head, right] = kids(bar);
+    assert.ok(fold.classes.includes('fold-here') && fold.classes.includes('topbar-fold'));
+    assert.equal(fold.textContent, '«'); assert.equal(fold.getAttribute('aria-pressed'), 'false');
+    fold.click(); assert.equal(folded, 1);
+    /* Main: the way back is its sign alone, before the dot (shown on a narrow screen); its words its name. */
+    assert.equal(back.className, 'topbar-lead-back'); assert.equal(back.textContent, '‹');
+    assert.equal(back.getAttribute('aria-label'), 'Back'); assert.equal(back.dataset.saidLabel, 'set-back');
+    assert.equal(dot.id, 'salon-state'); assert.equal(dot.dataset.state, 'work'); assert.ok(dot.classes.includes('topbar-dot'));
+    assert.equal(head.className, 'topbar-title');
+    assert.equal(head.find('topbar-name').textContent, 'Family room');
+    const line = head.find('topbar-sub'); assert.ok(line.textContent.startsWith('2 AIs')); assert.ok(line.children.includes(who));
+    assert.equal(right.className, 'bar-right'); assert.deepEqual(kids(right), [views]);
+});
+
+test('top bar, sub: no dot without a state, the page\'s own elements kept (ids, classes), its way back last, its words its key\'s', () => {
+    const fold = document.createElement('button'); fold.id = 'fold';
+    const title = document.createElement('b'); title.id = 'settings-title'; title.textContent = 'Settings';
+    const close = document.createElement('button'); close.id = 'settings-close'; close.textContent = '‹ Conversations';
+    const search = document.createElement('input');
+    const bar = KIT.TopBar({ variant: 'sub', fold, title, back: { element: close, label: 'Conversations', said: 'set-back-convs' }, actions: [search], cls: 'access-top' });
+    assert.equal(bar.dataset.variant, 'sub'); assert.ok(bar.classes.includes('access-top'));
+    const parts = kids(bar);
+    assert.equal(parts.length, 3, 'fold, title, right: no dot, no back on the left');
+    assert.equal(parts[0], fold); assert.equal(fold.id, 'fold'); assert.ok(fold.classes.includes('topbar-fold'));
+    assert.equal(parts[1].find('topbar-name'), title); assert.equal(title.id, 'settings-title');
+    const right = parts[2]; assert.deepEqual(kids(right), [search, close]);
+    assert.equal(close.id, 'settings-close');
+    assert.deepEqual(close.classes, ['as-link', 'place-back', 'topbar-back']);
+    assert.equal(close.textContent, '‹ Conversations');
+    assert.equal(close.find('topbar-back-label').dataset.said, 'set-back-convs');
+    /* Its default words: "Back"; any other variant is 'main'; the page's own dot kept as it is. */
+    const own = document.createElement('span'); own.id = 'state';
+    const other = KIT.TopBar({ variant: 'nonsense', state: own, back: {} , title: 'x' });
+    assert.equal(other.dataset.variant, 'main');
+    assert.equal(kids(other)[1], own); assert.equal(own.id, 'state');
+    assert.equal(kids(other)[0].getAttribute('aria-label'), 'Back');
+    assert.equal(KIT.TopBar({ variant: 'sub', back: {}, title: 'x' }).find('topbar-back-label').textContent, 'Back');
+});
+
+test('every top bar of the page is the kit\'s: no header drawn by hand, the old strip gone', () => {
+    const app = web('app.js');
+    assert.match(app, /KIT\.TopBar\(\{\s*variant,/);
+    assert.equal((app.match(/KIT\.TopBar\(/g) ?? []).length, 3, 'the places\', a conversation\'s, a device\'s');
+    assert.doesNotMatch(app, /createElement\('header'\)/);
+    assert.match(web('style.css'), /header\.topbar \{[^}]*height: 52px/);
+});

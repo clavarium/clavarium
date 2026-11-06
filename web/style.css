@@ -1133,7 +1133,6 @@ button.inline:hover { color: var(--brass-ink); }
 html:not([data-door="device"]) #room > header { flex-wrap: nowrap; }
 html:not([data-door="device"]) #room > header #state { flex: 0 0 auto; width: 10px; height: 10px; overflow: hidden; font-size: 0; color: transparent; }
 html:not([data-door="device"]) #room > header #state::before { width: 10px; height: 10px; margin: 0; vertical-align: top; }
-html:not([data-door="device"]) #room > header b#name { flex: 1 1 auto; min-width: 0; font-size: 1rem; }
 .views { display: inline-flex; flex: 0 0 auto; gap: 2px; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
 .views button { display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; color: var(--ink2); border-radius: 7px; padding: 5px 11px; }
 .views button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 0 0 1px var(--line); }
@@ -1391,8 +1390,7 @@ select.pill { appearance: auto; }
   .rv-tree { position: static; max-height: none; }
 }
 @media (max-width: 700px) {
-  html:not([data-door="device"]) #room > header { min-height: 44px; padding-block: 3px; }
-  html:not([data-door="device"]) #room > header .views button, html:not([data-door="device"]) #room > header #folders, html:not([data-door="device"]) #room > header #back { min-height: 36px; height: 36px; padding: 0 9px; }
+  html:not([data-door="device"]) #room > header .views button, html:not([data-door="device"]) #room > header #folders, html:not([data-door="device"]) #room > header .topbar-lead-back { min-height: 36px; height: 36px; }
   .views { padding: 2px; }
 }
 #copy-close, #files-close, #preview-close { font-size: 1.375rem; line-height: 1; min-width: 40px; padding: 4px 10px; }
@@ -2105,7 +2103,7 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 /* ON A TOUCH SCREEN THE SMALL CONTROLS TOO TAKE A FINGERTIP (last, above the rules that make them small):
    the back arrow and «, the round "+", a box to tick and its line, an "i" that opens more, "Show more" under Recent. */
 @media (pointer: coarse) {
-  html:not([data-door="device"]) #room > header :is(#back, #fold) { min-width: 40px; }
+  header.topbar > :is(.topbar-fold, .topbar-lead-back) { width: 40px; height: 40px; }
   button.as-add { width: 36px; height: 36px; }
   :is(input[type=checkbox], input[type=radio]):not(.binder *) { width: 20px; height: 20px; }
   .ts-row input[type=checkbox] { width: 24px; height: 24px; }
@@ -2395,28 +2393,48 @@ button.salon-welcome-btn[aria-pressed="true"] { color: var(--brass-ink); border-
 .nc-card > .salon-members-tools { padding-bottom: 4px; }
 .nc-card > .salon-host-box + *, .nc-card > .salon-member-list + * { border-top: 0; }
 /* The list's button on each page of its own (03-11), as the conversation's. */
-/* THE TOP BAR of every page (03-11): the conversation's header, the same element and looks (header {...} above). */
-header.topbar { flex-shrink: 0; }
-/* A place's top bar stays at the top while its page scrolls (05-11), as a conversation's does: the sheet scrolls,
-   so the bar sticks to its top edge, over its padding. */
-.sheet > header.topbar { position: sticky; top: -14px; z-index: 5; margin-top: -14px; padding-top: 14px; background: var(--panel); }
-header.topbar > .fold-here { font-size: 1rem; line-height: 1; padding: 4px 9px; flex: none; }
-@media (max-width: 700px) { header.topbar > .fold-here { display: none; } }
-header.topbar > b { flex: 1 1 auto; font-size: 1rem; }
-header.topbar > .bar-right { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
-header.topbar .bar-state { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+/* THE TOP BAR of every page (03-11; 06-11: kit.js TopBar, one look everywhere): a conversation's, a room's, their
+   settings', Assets', Access', Settings', the deck's, a new conversation's -- the same height, padding, type, button
+   and places. 'main' (a conversation, a room) has its views on the right; 'sub' (a page) its way back, last. */
+header.topbar { flex-shrink: 0; flex-wrap: nowrap; gap: 8px; box-sizing: border-box; height: 52px; min-height: 52px; padding: 0 12px; background: var(--bar); border-bottom: 1px solid var(--line); }
+header.topbar > :is(.topbar-fold, .topbar-lead-back) { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 36px; height: 36px; padding: 0; font-size: 1.125rem; line-height: 1; background: transparent; color: var(--ink2); border: 1px solid var(--line); border-radius: 8px; }
+header.topbar > :is(.topbar-fold, .topbar-lead-back):hover { color: var(--ink); border-color: var(--ink2); }
+header.topbar > .topbar-lead-back[hidden] { display: none; }
+@media (max-width: 700px) { header.topbar > .topbar-fold { display: none; } }
+@media (min-width: 701px) { header.topbar > .topbar-lead-back { display: none; } }
+header.topbar .bar-state, html:not([data-door="device"]) header.topbar #state { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+header.topbar .bar-state { background: var(--ok); }
+header.topbar .bar-state[hidden] { display: none; }
 /* A room one of whose AIs speaks now: its dot as a conversation's at work, the words under its name. */
 header.topbar .bar-state[data-state="work"] { background: var(--brass); animation: breathe 1.7s ease-in-out infinite; }
-#salon-title { display: flex; flex-direction: column; min-width: 0; }
+header.topbar > .topbar-title { display: flex; flex-direction: column; justify-content: center; flex: 1 1 auto; min-width: 0; line-height: 1.25; }
+header.topbar .topbar-name { display: block; flex: none; min-width: 0; max-width: 100%; font-size: 1rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+header.topbar .topbar-sub { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: .75rem; font-weight: 400; color: var(--ink2); overflow: hidden; white-space: nowrap; }
+header.topbar .topbar-sub > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+header.topbar .topbar-sub [hidden] { display: none; }
+header.topbar > .bar-right { display: flex; align-items: center; gap: 6px; flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; margin-left: auto; }
+header.topbar .topbar-back { flex: none; min-height: 36px; white-space: nowrap; }
+header.topbar .views .icon-btn { width: auto; height: auto; }
+/* Its views (tabs, gear): one height in every bar. */
+header.topbar .views button { height: 32px; min-height: 32px; padding-block: 0; }
+@media (max-width: 700px) { header.topbar { height: 48px; min-height: 48px; padding: 0 8px; gap: 6px; } }
+/* A device's page (/c/): the same bar, its own controls may take a second line on a narrow screen (its menu "..."). */
+html[data-door="device"] header.topbar { height: auto; }
+/* A place's top bar stays at the top while its page scrolls (05-11), edge to edge over the page's own margins.
+   (A page with a bar starts at its bar: no margin above it, so it sticks where it rests.) */
+:is(.sheet, #newconv, #salon-new):has(> header.topbar) { padding-top: 0; }
+.sheet > header.topbar { position: sticky; top: 0; z-index: 5; margin: 0 -14px 4px; }
+.sheet.as-place > header.topbar { margin: 0; }
+:is(#newconv, #salon-new) > header.topbar { margin: 0 -20px 4px; }
+@media (max-width: 700px) { #newconv > header.topbar { margin: 0 -16px 4px; } }
+/* A room: its name, who speaks now and who is in it on the line under it (a button that opens the list). */
 #salon-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-live { font-size: .75rem; font-weight: 400; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .salon-live[hidden] { display: none; }
-header.topbar .views .icon-btn { width: auto; height: auto; }
-/* Pages with margins of their own: their bar goes edge to edge, as a conversation's. */
-#places .sheet:not(.as-place) > header.topbar { margin: -14px -14px 4px; }
-#newconv > header.topbar { margin: -14px -20px 4px; }
-#salon-new > header.topbar { margin: -14px -20px 4px; }
-@media (max-width: 700px) { #newconv > header.topbar { margin: -12px -16px 4px; } }
+header.topbar .topbar-sub .salon-who { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 0; border: 0; background: transparent; color: var(--ink2); font: inherit; cursor: pointer; }
+header.topbar .topbar-sub .salon-who:hover { color: var(--ink); }
+header.topbar .topbar-sub .salon-chip { width: 15px; height: 15px; margin-left: -4px; border-width: 1px; font-size: .5625rem; }
+header.topbar .topbar-sub .salon-chip:first-child { margin-left: 0; }
 /* A room's row in the list (03-11): a conversation's row, with a small sign of a room before its name (Lucide « users »). */
 .room-sign { display: inline-block; width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; background: var(--ink2);
   -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87'/%3E%3Cpath d='M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E") center / contain no-repeat;

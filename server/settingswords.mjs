@@ -37,6 +37,8 @@ export const SETTINGS_WORDS_FR = {
     'set-na-will': 'Sera relié à {name}', 'set-na-level': 'Ce qu\'il pourra faire', 'set-na-read': 'Lecture', 'set-na-write': 'Écriture',
     'set-na-made': '{name} créé', 'set-na-made-to': '{name} créé et relié à {to}', 'set-na-another': 'En créer un autre', 'set-na-done': 'Terminé',
     'set-na-create': 'Créer', 'set-na-new-key': '+ Nouvelle clé…',
+    /* The top bar's way back (06-11, kit.js TopBar). */
+    'set-back': 'Retour', 'set-back-convs': 'Conversations',
     'set-na-k-folder': 'Dossier', 'set-na-k-git': 'Dépôt git', 'set-na-k-mailbox': 'Boîte mail', 'set-na-k-agenda': 'Agenda',
     'set-na-k-contacts': 'Contacts', 'set-na-k-secret': 'Secret', 'set-na-k-list': 'Classeur',
     /* Step 4: a voice box and a device, two more kinds of the same box. */

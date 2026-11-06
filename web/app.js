@@ -408,24 +408,43 @@
     /* ---------- the list of conversations, folded away or not ---------- */
     /* One click hides it and the terminal takes the room; one click brings
        it back. Kept on this device. */
-    /* THE TOP BAR, ONE COMPONENT (03-11): every page has the conversation's bar -- the button that shows or hides the
-       list on its left, a state's dot when there is one, its title, and on its right what that page offers (a
-       conversation: Chat, Terminal, Assets, Binders, its settings; a room: its settings; the others: their own
-       controls). Built once here from each page's top line: the same element, the same looks, the same place. */
-    function topBar(top, { state = null } = {}) {
-        const bar = document.createElement('header'); bar.className = ['topbar', ...[...top.classList].filter((c) => c !== 'panel-top')].join(' ');
-        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'fold-here'; fold.title = 'Hide or show the list of conversations';
-        fold.addEventListener('click', () => $('fold').click());
-        bar.append(fold);
-        if (state) { const dot = document.createElement('span'); dot.className = 'bar-state'; dot.id = state; dot.setAttribute('aria-hidden', 'true'); bar.append(dot); }
-        const title = top.querySelector(':scope > b'); if (title) bar.append(title);
-        const right = document.createElement('div'); right.className = 'bar-right';
-        right.append(...[...top.childNodes].filter((n) => n.nodeType === 1));
-        bar.append(right);
+    /* THE TOP BAR, ONE COMPONENT (03-11; 06-11: kit.js TopBar, the same visual everywhere): every page of the right
+       pane has the same bar -- the button that shows or hides the list on its left, a state's dot when there is one,
+       its title (a line under it when there is one), and on its right what that page offers. Two variants: 'main',
+       a conversation or a room (its views, its gear; its "‹" on a narrow screen), and 'sub', a page of its own or
+       inside one (its way back, last on the right). Built from each page's own elements: their ids, their gestures. */
+    const backSaid = (label) => ({ Back: 'set-back', Conversations: 'set-back-convs' })[label] ?? null;
+    function topBar(top, { variant = 'sub', state = null, title = top.querySelector(':scope > b'), sub = null, actions = null } = {}) {
+        const close = top.querySelector(':scope > .place-back');
+        const label = close ? close.textContent.replace(/^\s*‹\s*/, '').trim() : '';
+        const bar = KIT.TopBar({
+            variant, fold: true, onFold: () => $('fold').click(), state, title, sub,
+            back: close ? { element: close, label, said: backSaid(label) } : null,
+            actions: actions ?? [...top.children].filter((n) => n !== title && n !== close),
+            cls: [...top.classList].filter((c) => c !== 'panel-top').join(' '),
+        });
         top.replaceWith(bar);
         return bar;
     }
-    for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon' ? { state: 'salon-state' } : {});
+    /* A conversation's bar (its page, or a device's: no list to fold; its state in words and its own controls on the right). */
+    {
+        const old = document.getElementById('room')?.querySelector(':scope > header');
+        if (old) old.replaceWith(DEVICE
+            ? KIT.TopBar({ variant: 'main', title: $('name'), actions: [...old.children].filter((n) => n.id !== 'name') })
+            : KIT.TopBar({ variant: 'main', fold: $('fold'), back: { element: $('back'), label: 'Conversations' }, state: $('state'), title: $('name'), actions: [$('views')] }));
+    }
+    /* A room (the device page has none): its dot, its name, under it who speaks now and who is in it; its settings
+       in the same group of views a conversation's settings sit in; its way back, "‹", as a conversation's (kit: 'main'). */
+    if (document.getElementById('salon')) {
+        const top = $('salon').querySelector(':scope > .panel-top');
+        const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; t.replaceChildren(name);
+        const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true;
+        const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings'));
+        const strip = $('salon').querySelector('.salon-bar');
+        topBar(top, { variant: 'main', state: { id: 'salon-state' }, sub: [live, $('salon-who')], actions: [views] });
+        strip?.remove();
+    }
+    for (const top of [...document.querySelectorAll('#places .sheet > .panel-top')]) topBar(top, top.parentElement.id === 'salon-new' ? { state: { id: 'salon-new-state' } } : {});
     /* A SEARCH ATOP A SETTINGS PAGE (05-11): one field in its top bar; what is typed keeps only the chapters (or
        blocks) whose title or rows say it, opened; the headings left with nothing are hidden. Emptied, all comes back
        as it was. The server's Settings, a conversation's, and any sheet given the same shape. */
@@ -460,11 +479,6 @@
         field.addEventListener('keydown', (e) => { if (e.key === 'Escape' && field.value) { e.stopPropagation(); field.value = ''; field.dispatchEvent(new Event('input')); } });
     };
     for (const id of ['settings', 'panel']) settingsSearch($(id));
-    /* A room's title: its name, and under it who speaks now (salonLive). */
-    /* The device page (/c/) has no rooms sheet (05-11: it stopped app.js there, the page stuck on connecting). */
-    if ($('salon')) { const t = $('salon-title'); const name = document.createElement('span'); name.id = 'salon-name'; name.textContent = t.textContent; const live = document.createElement('small'); live.id = 'salon-live'; live.className = 'salon-live'; live.hidden = true; t.replaceChildren(name, live); }
-    /* A room's settings: on its bar's right, in the same group of views a conversation's settings sit in. */
-    if ($('salon')) { const views = document.createElement('div'); views.className = 'views'; views.setAttribute('role', 'group'); views.setAttribute('aria-label', 'Room'); views.append($('salon-settings')); $('salon').querySelector('.topbar .bar-right')?.prepend(views); }
     const applyFold = (folded) => {
         app.dataset.list = folded ? 'folded' : 'open';
         for (const f of [$('fold'), ...document.querySelectorAll('.fold-here')]) {
@@ -5435,6 +5449,8 @@
         salonEditing = editing;
         enterPlace('salon-new', push);
         $('salon-new-title').textContent = editing ? editing.name : 'New room';
+        /* Its settings say its state as the room's bar does; a room to be made has none yet. */
+        const dot = $('salon-new-state'); if (dot) { dot.hidden = !editing; dot.dataset.state = thinkingOf(editing).length ? 'work' : 'ok'; }
         $('salon-new-create').textContent = editing ? 'Save' : 'Create';
         $('salon-new-remove-card').hidden = $('salon-new-advanced-head').hidden = !editing;
         $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
@@ -6352,6 +6368,7 @@
        uiSaid): an element marked data-said="key" keeps its English as the fallback. */
     function saySettings() {
         for (const e of document.querySelectorAll('[data-said]')) { e.dataset.en ??= e.textContent; e.textContent = uiSaid(e.dataset.said, e.dataset.en); }
+        for (const e of document.querySelectorAll('[data-said-label]')) { e.dataset.enLabel ??= e.getAttribute('aria-label') ?? ''; const w = uiSaid(e.dataset.saidLabel, e.dataset.enLabel); e.setAttribute('aria-label', w); e.title = w; }
         for (const b of document.querySelectorAll('button.tip-btn')) b.setAttribute('aria-label', uiSaid('set-why', 'Why'));
         const s = document.querySelector('#settings .settings-search'); if (s) s.placeholder = uiSaid('set-search', 'Search');
         const p = document.querySelector('#panel .settings-search'); if (p) p.placeholder = uiSaid('set-search', 'Search');

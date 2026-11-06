@@ -15,6 +15,8 @@
  *   NewAsset       ONE BOX to make an asset (05-11, step 3): kinds, the kind's form, one ending;
  *                  opened with a context (a conversation it will be attached to). A voice box and
  *                  a device are two of its kinds too (step 4).
+ *   TopBar         THE BAR atop every page of the right-hand pane, two variants: `main` (a conversation, a room:
+ *                  its views on the right) and `sub` (a page of its own or inside one: a way back on the right)
  *   ShareDonut     who takes a whole (memory, a disk): a small donut, its slices from shareSlices, the main
  *                  figure in its middle; ShareKey, a slice's swatch beside its row in the list
  *
@@ -269,6 +271,64 @@
         return root;
     }
 
+    /* THE TOP BAR (06-11, the owner: « un ou deux composants réutilisables, le même visuel au final »): one bar
+       atop every page of the right-hand pane -- a conversation, a room, their settings, Assets, Access, Settings,
+       the deck, a new conversation. The same height, padding, type and places everywhere:
+         [fold «] [‹ back, main: a narrow screen's] [dot] [title / its one small line under it] .... [actions] [‹ Back, sub]
+       variant  'main': a conversation or a room (its views: tabs, its gear); 'sub': a page (a way back, last).
+       fold     true (a new « button, `onFold`) or the page's own element; null: none (a device's page).
+       back     { element?, id?, label, said? } (`said`: the page's key for its words, kept on the label).
+       state    { id?, state?, label? } (a dot drawn here) or the page's own element; null: no state, no dot.
+       title    words, or the page's element (its id kept); `sub`: words or elements, one line under it.
+       actions  elements on its right. `cls`: the page's own classes. Ids and listeners of what it is given stay. */
+    const addClass = (e, cls) => { e.className = [...new Set(`${e.className ?? ''} ${cls}`.split(/\s+/).filter(Boolean))].join(' '); return e; };
+    function TopBar({ variant = 'main', fold = null, onFold = null, back = null, state = null, title = '', sub = null, actions = [], cls = '' } = {}) {
+        const v = variant === 'sub' ? 'sub' : 'main';
+        const bar = node('header', `topbar kit-topbar${cls ? ` ${cls}` : ''}`); bar.dataset.variant = v;
+        if (fold) {
+            const f = fold === true ? node('button', 'fold-here', '«') : fold;
+            if (fold === true) {
+                f.type = 'button'; f.title = say('kit-fold', 'Hide or show the list of conversations');
+                f.setAttribute('aria-label', say('kit-fold-hide', 'Hide the list of conversations')); f.setAttribute('aria-pressed', 'false');
+                if (onFold) f.addEventListener('click', () => onFold());
+            }
+            bar.append(addClass(f, 'topbar-fold'));
+        }
+        let backButton = null;
+        if (back) {
+            const label = back.label ?? say('kit-back', 'Back');
+            backButton = back.element ?? node('button'); backButton.type = 'button';
+            if (back.id) backButton.id = back.id;
+            if (v === 'main') {
+                /* A conversation's or a room's way back: its sign alone, on a narrow screen (wide: the list is there). */
+                backButton.className = 'topbar-lead-back'; backButton.textContent = '‹';
+                backButton.setAttribute('aria-label', label); backButton.title = label;
+                if (back.said) backButton.dataset.saidLabel = back.said;
+                bar.append(backButton);
+            } else {
+                backButton.className = 'as-link place-back topbar-back';
+                const words = node('span', 'topbar-back-label', label); if (back.said) words.dataset.said = back.said;
+                backButton.replaceChildren('‹ ', words);
+            }
+        }
+        if (state) {
+            const dot = state.tagName ? state : node('span', 'bar-state');
+            if (dot !== state) { if (state.id) dot.id = state.id; dot.dataset.state = stateOf(state.state ?? 'ok'); dot.setAttribute('aria-hidden', 'true'); if (state.label) dot.title = state.label; }
+            bar.append(addClass(dot, 'topbar-dot'));
+        }
+        const head = node('span', 'topbar-title');
+        const name = typeof title === 'string' ? node('b', '', title) : title;
+        if (name) head.append(addClass(name, 'topbar-name'));
+        const subs = (Array.isArray(sub) ? sub : [sub]).filter((x) => x !== null && x !== undefined && x !== '');
+        if (subs.length) { const line = node('span', 'topbar-sub'); line.append(...subs.map((x) => (typeof x === 'string' ? node('small', '', x) : x))); head.append(line); }
+        bar.append(head);
+        const right = node('div', 'bar-right');
+        right.append(...actions.filter(Boolean));
+        if (backButton && v === 'sub') right.append(backButton);
+        bar.append(right);
+        return bar;
+    }
+
     /* WHO TAKES IT (06-11): one whole -- a server's memory or a disk -- split by who takes it: each machine
        (the largest first, at most `max`, the rest folded into "Others"), the rest of the system, and what is
        free. `parts` [{ key, label, mb }]. A machine keeps its colour while the page lives (`slots`, shared by
@@ -335,6 +395,6 @@
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,
         setWords(fn) { if (typeof fn === 'function') words = fn; },
-        StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset,
+        StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset, TopBar,
     };
 })();
