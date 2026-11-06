@@ -1277,7 +1277,8 @@
         if (c.group) b.dataset.group = c.group;
         /* Ready, but its tool not there yet: it still reads as under way. */
         if (holds(c)) b.dataset.busy = 'true';
-        if (c.name === current) b.setAttribute('aria-current', 'true');
+        /* The one open: never a conversation while a room is (06-11: the conversation left before stayed marked). */
+        if (c.name === current && !roomOpenNow()) b.setAttribute('aria-current', 'true');
         if (c.title) b.title = c.name;
         if (c.hidden === true) b.dataset.hidden = 'true';
         if (c.asleep) b.dataset.asleep = 'true';
@@ -5330,6 +5331,8 @@
         const r = rooms.find((x) => x.id === id); if (!r) return;
         enterPlace('salon', push);
         salonLeft(); salonId = id;
+        /* The list marks this room, and no conversation, at once. */
+        paint();
         $('salon-name').textContent = r.name;
         salonLive(thinkingOf(r));
         $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
