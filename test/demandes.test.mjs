@@ -131,6 +131,11 @@ test('a reply card says to whom, with the address (06-11): the original sender, 
     const all = demandeView({ id: 'r2', card: { kind: 'mail', action: 'reply', all: true, self: 'me@example.org', about: { from: 'a@example.org', to: ['me@example.org', 'b@example.org'], cc: ['c@example.com'] } } });
     const s = JSON.stringify(all.facts);
     assert.ok(s.includes('b@example.org') && s.includes('c@example.com') && !s.includes('"me@example.org"'), s);
+    /* The original goes quoted under the answer (Tether's quoteReply): one line says so (06-11). */
+    assert.deepEqual(v.facts.find((f) => f[0]?.k === 'req-fact-quoted'), [{ k: 'req-fact-quoted' }, { k: 'req-quoted-original' }]);
+    known(v);
+    const sent = demandeView({ id: 's1', card: { kind: 'mail', action: 'send', to: ['a@example.org'], subject: 'S' } });
+    assert.ok(!sent.facts.some((f) => f[0]?.k === 'req-fact-quoted'), 'a new mail quotes nothing');
 });
 
 test('the mail a reply answers (about.ref): a chip under the title, « en réponse à ✉ Subject · sender »; forward, move, delete say theirs; no ref, none', () => {

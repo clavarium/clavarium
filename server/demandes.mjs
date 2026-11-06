@@ -78,6 +78,8 @@ export function demandeView(q) {
             if (others.length) v.facts.push(fact('cc', mark(others)));
             if (away.size && !c.draft) { if (!v.risk.includes(w('req-risk-outside'))) v.risk.push(w('req-risk-outside')); v.irreversible = true; }
         }
+        /* A reply carries the original quoted under it, as mail programs do (Tether's quoteReply): said in one line (06-11). */
+        if (c.action === 'reply') v.facts.push(fact('quoted', w('req-quoted-original')));
         if (c.to?.length) v.facts.push(fact('to', chips(c.to, ext)));
         if (c.cc?.length) v.facts.push(fact('cc', chips(c.cc, ext)));
         if (c.bcc?.length) v.facts.push(fact('bcc', chips(c.bcc, ext)));
