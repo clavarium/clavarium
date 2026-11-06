@@ -10730,11 +10730,12 @@
        page ask (Chrome, Edge, Android), the button asks. On an iPhone or an
        iPad no page can ask: the button explains the two taps it takes.
        Already running as an app: there is nothing to offer. */
-    const asApp = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    const asApp = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: fullscreen)').matches || navigator.standalone === true;
     const apple = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
     let installEvent = null;
     let installOffered = false;
-    const offerInstall = () => { installOffered = true; $('install').hidden = false; $('install-row').hidden = false; };
+    /* 06-11: offered where it is seen -- a button at the top of the list too, not only in Settings › This device. */
+    const offerInstall = () => { installOffered = true; $('install').hidden = false; $('install-row').hidden = false; if (!DEVICE) $('install-top').hidden = false; };
     /* Chrome reads the manifest again when its address changes, and may then
        offer the install anew: that offer, if it comes soon, is the one used. */
     let freshOffer = null;
@@ -10742,7 +10743,9 @@
         event.preventDefault(); installEvent = event; offerInstall();
         if (freshOffer) { const take = freshOffer; freshOffer = null; take(event); }
     });
-    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-row').hidden = true; $('install-name-form').hidden = true; });
+    addEventListener('appinstalled', () => { installEvent = null; installOffered = false; $('install').hidden = true; $('install-row').hidden = true; $('install-name-form').hidden = true; $('install-top').hidden = true; });
+    /* The top button is the same gesture: Settings at This device, its Install pressed. */
+    $('install-top').addEventListener('click', () => { $('nav-settings').click(); openChapter('s-screen'); $('install-row').scrollIntoView({ block: 'center' }); $('install').click(); });
     if (apple && !asApp) offerInstall();
     /* FIRST A NAME FOR THIS DEVICE, then the browser's own question. */
     $('install').addEventListener('click', async () => {
