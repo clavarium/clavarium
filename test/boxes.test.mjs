@@ -784,3 +784,15 @@ test('the wake word by its sound (05-11): what Whisper writes for « Mésange »
     assert.equal(dropsWake(false, 2439, 'silence', ''), true, 'no word at all in the clip (a radio, 06-11): dropped');
     assert.equal(dropsWake(false, 812, 'silence', 'Laisse-moi te bouge.'), false, 'a real call of 05-11 missed by the check: always kept');
 });
+
+test('a false wake on a radio (06-11), the whole way: not heard + cut by the length limit, or no word in its clip -> dropped, nothing said; a real call missed but firm -> said', async () => {
+    const radio = wakeRig(Boxes, { clip: 'qui approche les 120%.', sentence: 'les intérêts vont coûter dix milliards' });
+    await radio.say({ clipBytes: 51_200, end: 'timeout' });
+    assert.equal(radio.whys.length, 0, 'a radio cut at the length limit: not said');
+    const music = wakeRig(Boxes, { clip: '' });
+    await music.say({ clipBytes: 51_200 });
+    assert.equal(music.whys.length, 0, 'no word in its clip: not said');
+    const real = wakeRig(Boxes, { clip: "l'application de ton téléphone" });
+    await real.say({ clipBytes: 51_200 });
+    assert.equal(real.whys.length, 1, 'a real call the check missed, ended by silence: said');
+});
