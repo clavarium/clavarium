@@ -46,7 +46,11 @@ export const wakeHeard = (text) => { const t = plainWords(text); return WAKE_HEA
 export const WAKE_FAINT = 600;
 /* 06-11: a radio or a TV read a whole news flash after a false wake (120 s, cut by the length limit, no voice measured):
    a sentence never ended is not someone speaking to the box -- not heard AND cut by the length limit is dropped too. */
-export const dropsWake = (ok, voice, reason = '') => !ok && (WAKE_DROP || reason === 'timeout' || (Number.isFinite(voice) && voice > 0 && voice < WAKE_FAINT));
+/* 06-11 (again): the wake's own 1.6 s held no word at all (heard: nothing) -- the word was certainly not said: a radio's
+   music or jingle. A real call missed by the check always held words (its sentence begun). */
+/* NOT "a second miss within 10 min": checked against the owner's calls of 05-11, it would have dropped a real one (05:18,
+   five minutes after a missed 05:13). A radio that says words after a false wake still comes through; nothing is answered. */
+export const dropsWake = (ok, voice, reason = '', heard = 'x') => !ok && (WAKE_DROP || reason === 'timeout' || !String(heard ?? '').trim() || (Number.isFinite(voice) && voice > 0 && voice < WAKE_FAINT));
 const plainWords = (t) => String(t).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
 export const SENTENCE_MAX = 300 * 32_000 + 32_000;      /* 5 min of 16 kHz 16-bit mono, and some slack */
 export const TRIES_PER_MINUTE = 10;
@@ -923,10 +927,10 @@ export class Boxes {
             /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
             link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;
             this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
-            if (dropsWake(check.ok, link.voice, link.endReason)) {
+            if (dropsWake(check.ok, link.voice, link.endReason, check.heard)) {
                 link.send({ t: 'cue', name: 'done' });
-                this.#log(`voice box ${box.name}: wake ignored (word not heard again, ${link.endReason === 'timeout' ? 'a sentence that never ended' : `faint voice ${Math.round(link.voice || 0)}`})`);
-                try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: « ${check.heard.slice(0, 40)} », ${link.endReason === 'timeout' ? 'a sound that never stopped (radio, TV)' : 'faint voice'}`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
+                this.#log(`voice box ${box.name}: wake ignored (word not heard again, ${link.endReason === 'timeout' ? 'a sentence that never ended' : !check.heard.trim() ? 'no word in its clip' : `faint voice ${Math.round(link.voice || 0)}`})`);
+                try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: « ${check.heard.slice(0, 40)} », ${link.endReason === 'timeout' ? 'a sound that never stopped (radio, TV)' : !check.heard.trim() ? 'no word where the wake word should be' : 'faint voice'}`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
                 return;
             }
         }
