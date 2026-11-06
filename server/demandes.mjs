@@ -65,6 +65,19 @@ export function demandeView(q) {
         if (sending && !c.draft && ext.length) v.irreversible = true;
         if (about.from && c.action !== 'reply') v.facts.push(fact('from', String(about.from)));
         if (about.date && !sending) v.facts.push(fact('date', when(about.date)));
+        /* A reply goes to the original's sender (and, to all, to its other recipients): said with their addresses even
+           when the act names none itself (06-11, the owner: « à qui, avec l'adresse mail »); outside the domain, said so. */
+        if (!c.to?.length && c.action === 'reply' && about.from) {
+            const addr = (x) => (/<([^>]+)>/.exec(String(x))?.[1] ?? String(x)).trim();
+            const me = String(c.self ?? '').toLowerCase();
+            const back = [String(about.from)];
+            const others = c.all ? [...(about.to ?? []), ...(about.cc ?? [])].map(String).filter((x) => x && addr(x).toLowerCase() !== me) : [];
+            const away = new Set(outside([...back, ...others].map(addr)));
+            const mark = (list) => list.map((x) => ({ text: x, ...(away.has(addr(x)) ? { ext: true } : {}) }));
+            v.facts.push(fact('to', mark(back)));
+            if (others.length) v.facts.push(fact('cc', mark(others)));
+            if (away.size && !c.draft) { if (!v.risk.includes(w('req-risk-outside'))) v.risk.push(w('req-risk-outside')); v.irreversible = true; }
+        }
         if (c.to?.length) v.facts.push(fact('to', chips(c.to, ext)));
         if (c.cc?.length) v.facts.push(fact('cc', chips(c.cc, ext)));
         if (c.bcc?.length) v.facts.push(fact('bcc', chips(c.bcc, ext)));
