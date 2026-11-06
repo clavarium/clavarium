@@ -130,6 +130,13 @@ export function mailPage(bytes) {
     const body = reader.pageOf(reader.parse(bytes), { remote: true }).html;
     return { body, headers: { ...MAIL_HEADERS, 'content-length': Buffer.byteLength(body) } };
 }
+/* A mail's name as a file: its subject, made a plain file name (a mail opened by its reference, downloaded). */
+export function mailName(bytes) {
+    let subject = '';
+    try { subject = mailReader().parse(bytes).subject; } catch { /* no subject read */ }
+    const plain = String(subject ?? '').replace(/[\\/:*?"<>|\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80);
+    return `${plain || 'mail'}.eml`;
+}
 /* The bytes of a mail file of a folder, for mailPage. */
 export async function mailFile(root, relative) {
     const file = await download(root, relative);

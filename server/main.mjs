@@ -280,7 +280,7 @@ const PARLEY_WAIT_MS = 20_000;
 /* The product: conversations are VMs. `host` is how the host program is
    reached on this installation, as an argument vector: it is the ONLY thing
    this server runs with more rights than its own. */
-export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS }) {
+export async function startHome({ port, host, dataDir, mntDir = dataDir, gitReserveBytes, env = process.env, conversations, resources, operators = [], publicOrigin, vaultKey, tools = loadTools(), stopDelayMs, mailReader, gitLocalRemotes = false, gitSsh, answerFetcher, answerEveryMs, wakeEveryMs, alertSend, talkEveryMs, gitEveryMs, shelfEveryMs, shelfFirstMs, healthEveryMs, healthSettleMs, setupPollMs, rereadAfterMs, serverRoomMs, updateState, updateConf, appName, startWaitMs = 20_000, vmWatchEveryMs, historyEveryMs = HISTORY_STEP_MS, tetherConnectors }) {
     /* The data, in the format this code reads, before anything reads it (dataformat.mjs). */
     const migrated = migrateData(dataDir);
     if (migrated.ran.length) console.log(`data: format ${migrated.from} -> ${migrated.to}`);
@@ -459,7 +459,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        mailbox, a calendar, an address book -- held here with their secrets read from
        the vault by name, never in a machine: see tethers.mjs. */
     /* Voice boxes are Tether targets too (boxes.mjs): their connector reaches them through `boxes`, made below. */
-    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) } } });
+    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) }, ...(tetherConnectors ?? {}) } });
     const stopTethers = tethers.start();
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a
@@ -534,6 +534,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     tethers.announce = (name, event) => { try { return talk.event(name, event); } catch { return null; } };
     /* A device given a conversation that talks through the app talks there too. */
     door.talk = talk;
+    /* A mail cited by its reference, opened on a device that may read its mailbox (mailref.mjs). */
+    door.tethers = tethers; door.mailboxes = mailboxes;
     /* AFTER AN UPDATE, the machines that run get the new tools at once (parley, docket: they serve from
        their next command); a tool started with older launchers is told, in its chat, that a restart
        gives it the rest (its hooks, its MCP servers: read only when it starts). Nothing is restarted. */

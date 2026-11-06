@@ -48,5 +48,9 @@ export const SETTINGS_WORDS_FR = {
     'set-mail-details': 'Afficher les détails', 'set-mail-hide-details': 'Masquer les détails', 'set-mail-no-subject': '(sans objet)',
     'set-mail-remote': 'Images distantes bloquées', 'set-mail-show-remote': 'Les afficher', 'set-mail-empty': 'Ce mail n\'a pas de texte.',
     'set-mail-file': '1 pièce jointe', 'set-mail-files': '{n} pièces jointes', 'set-mail-download': 'Télécharger', 'set-mail-of': 'Pièce jointe de {name}',
+    'set-mail-mail': 'Mail', 'set-mail-reply': 'Répondre…', 'set-mail-reply-ask': 'Réponds à ce mail :', 'set-mail-retry': 'Réessayer',
+    'set-mail-gone': 'Ce mail n\'est plus dans la boîte.', 'set-mail-not-yours': 'Vous n\'avez pas accès à cette boîte.',
+    'set-mail-old-ref': 'Réf. ancienne : demandez à l\'IA de la rattacher.', 'set-mail-unreachable': 'Boîte injoignable pour le moment.',
+    'set-mail-cut': 'Mail tronqué : pièces jointes incomplètes.',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

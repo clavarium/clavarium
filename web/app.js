@@ -5843,6 +5843,7 @@
                 if (a.kind === 'asset') void openAssetsPlace(a.ref);
                 else if (a.kind === 'message') void openCardMessage(whose(), a.ref);
                 else if (a.kind === 'file') void openCardFile(whose(), a.ref);
+                else if (a.kind === 'mail') openCardMail(whose(), a);
                 else if (a.kind === 'commit' || a.kind === 'branch') void openCardGit(whose(), a.ref, a.kind);
                 else if (a.kind === 'link' && /^https?:\/\//i.test(a.ref)) window.open(a.ref, '_blank', 'noopener');
             },
@@ -5912,6 +5913,39 @@
         if (DEVICE || !m || m[2].split('/').includes('..') || !toConversation(name)) return;
         const tab = m[1] === 'work' ? 'work' : m[1].slice('resources/'.length);
         void preview(tab, m[2], m[2].split('/').pop(), 0);
+    }
+    /* A mail of a card (06-11): its reference (mail:...) opens the mail viewer; a mail file (.eml), as a file;
+       an old bare id, where the server can still read it (else it says so, in the viewer). */
+    function openCardMail(name, a) {
+        const ref = String(a.ref ?? '').trim();
+        if (!ref.startsWith('mail:') && /\.eml$/i.test(ref)) { openCardFile(name, ref); return; }
+        void openMailRef(ref, { label: a.title, of: name });
+    }
+    /* A MAIL CITED BY ITS REFERENCE (mail:TARGET/MESSAGE-ID, 06-11): the viewer of the .eml files, over the
+       page, its bytes read by the server through Tether when it is opened -- never before, kept nowhere --
+       and only by whoever may read that mailbox. `of`: the conversation it was cited in, whose chat Reply
+       writes in. */
+    function openMailRef(ref, { label = '', of = current } = {}) {
+        const q = new URLSearchParams({ ref, ...(of ? { c: of } : {}) });
+        const name = `${String(label || '').trim() || uiSaid('set-mail-mail', 'Mail')}.eml`;
+        return preview('', '', name, 0, `${API}/mail/open?${q}`, { mailRef: { ref, of, label } });
+    }
+    /* Reply, from the viewer: nothing is sent -- the chat of its conversation is given the start of a request
+       to its AI (« Reply to this mail: » and the reference), for the person to finish and send. */
+    async function replyToMail({ ref, of }) {
+        closePreview();
+        if (!DEVICE && of && of !== current && !toConversation(of)) return;
+        goTab('chat');
+        for (let i = 0; i < 40; i++) {
+            const box = document.querySelector('#chat textarea.parley-box, #simple-thread textarea.parley-box, textarea.parley-box');
+            if (box && box.offsetParent !== null) {
+                box.value = `${uiSaid('set-mail-reply-ask', 'Reply to this mail:')} ${ref}\n`;
+                box.dispatchEvent(new Event('input', { bubbles: true })); box.focus();
+                box.setSelectionRange?.(box.value.length, box.value.length);
+                return;
+            }
+            await new Promise((r) => setTimeout(r, 100));
+        }
     }
     /* A commit or a branch of a repository of its conversation (ref "repository:sha" / "repository:branch"): the git review, at it. */
     function openCardGit(name, ref, kind) {
@@ -9014,7 +9048,8 @@
         editing = null;
         delete $('viewer').dataset.editing;
         $('preview-body').replaceChildren();
-        $('preview-edit').hidden = true;
+        $('preview-edit').hidden = true; $('preview-download').hidden = false;
+        $('viewer').classList.remove('viewer-sheet');
         offerCopy(null);
         const was = !$('viewer').hidden;
         $('viewer').hidden = true;
@@ -9240,18 +9275,20 @@
             if (!$('viewer').hidden) closePreview();
             return undefined;
         });
+        /* A mail cited by its reference: a sheet over the thread (a panel at the right on a wide screen), the thread seen behind. */
+        $('viewer').classList.toggle('viewer-sheet', Boolean(opts.mailRef));
         $('viewer').hidden = false;
         /* Text in a folder this conversation may write in: editable here. */
         $('preview-edit').hidden = Boolean(from) || !editable(name, size) || !canWrite(tab);
         $('preview-edit').onclick = () => { void editFile(tab, inner, name); };
         /* A file of the shared folders: attached to a card from here (#180). */
-        $('preview-attach').hidden = Boolean(from) || DEVICE;
+        $('preview-attach').hidden = (Boolean(from) && !opts.mailRef) || DEVICE;
         /* Full screen: the file takes the whole screen (the real API where granted, else a cover); kept while it is open. */
         const full = (on) => { $('viewer').classList.toggle('viewer-full', on); $('preview-full').setAttribute('aria-pressed', String(on)); const w2 = on ? 'Leave full screen' : 'Full screen'; $('preview-full').title = w2; $('preview-full').setAttribute('aria-label', w2); try { if (on) $('viewer').requestFullscreen?.().catch(() => {}); else if (document.fullscreenElement === $('viewer')) document.exitFullscreen?.(); } catch { /* the cover stands in */ } };
         $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
-        $('preview-attach').onclick = () => void attachToCard({ kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
+        $('preview-attach').onclick = () => void attachToCard(opts.mailRef ? { kind: 'mail', ref: opts.mailRef.got?.ref || opts.mailRef.ref, title: opts.mailRef.title || opts.mailRef.label || name } : { kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
-        const origin = opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const origin = opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : opts.mailRef ? '' : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
         /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
         const cannot = (why) => {
@@ -9268,8 +9305,27 @@
         const readIt = async () => {
             if (opts.bytes) return opts.bytes.buffer.slice(opts.bytes.byteOffset, opts.bytes.byteOffset + opts.bytes.byteLength);
             const r = await fetch(address);
-            if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'The file could not be read.');
+            if (!r.ok) { const said = await r.json().catch(() => ({})); throw Object.assign(new Error(said.error || 'The file could not be read.'), { kind: said.kind }); }
+            /* A mail read by its reference: where it was found, and its reference as it is now. */
+            if (opts.mailRef) { const h = (k) => { try { return decodeURIComponent(r.headers.get(k) ?? ''); } catch { return ''; } }; opts.mailRef.got = { box: h('x-mail-box'), folder: h('x-mail-folder'), ref: h('x-mail-ref') || opts.mailRef.ref, cut: r.headers.get('x-mail-cut') === '1' }; }
             return r.arrayBuffer();
+        };
+        /* A mail that cannot be opened by its reference: one clear line (gone, not theirs, unreachable), never a download. */
+        const mailState = (error) => {
+            const LINES = { gone: ['set-mail-gone', 'This mail is no longer in the mailbox.'], 'not-yours': ['set-mail-not-yours', 'This mailbox is not yours to open.'], 'old-ref': ['set-mail-old-ref', 'Old reference: ask the AI to attach it again.'], unreachable: ['set-mail-unreachable', 'The mailbox cannot be reached just now.'] };
+            const line = LINES[error.kind];
+            const box = el('div', 'preview-cannot mail-state'); box.dataset.kind = error.kind || 'error'; box.setAttribute('role', 'status');
+            const icon = el('div', 'preview-cannot-icon'); icon.setAttribute('aria-hidden', 'true');
+            icon.innerHTML = '<svg class="ic" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+            box.append(icon, el('b', 'mail-state-line', line ? uiSaid(line[0], line[1]) : error.message));
+            if (error.kind === 'unreachable' || !line) {
+                const again = el('button', 'quiet mail-state-retry', uiSaid('set-mail-retry', 'Try again')); again.type = 'button';
+                again.addEventListener('click', () => { void openMailRef(opts.mailRef.ref, { label: opts.mailRef.label, of: opts.mailRef.of }); });
+                box.append(again);
+            }
+            $('preview-name').textContent = opts.mailRef.label || uiSaid('set-mail-mail', 'Mail');
+            $('preview-body').replaceChildren(box); note('');
+            $('preview-attach').hidden = true; $('preview-download').hidden = true;
         };
         const kind = name.includes('.') ? name.split('.').pop().toLowerCase() : '';
         if (MEDIA[kind]) {
@@ -9292,7 +9348,7 @@
         if (size > (TEXTS.includes(kind) && kind !== 'eml' ? TEXT_MAX : PREVIEW_MAX)) { cannot(`${sizeOf(size)} · Too large to be shown here.`); return; }
         note('Loading...');
         let bytes;
-        try { bytes = await readIt(); } catch (error) { cannot(error.message); return; }
+        try { bytes = await readIt(); } catch (error) { if (opts.mailRef) { if (!$('viewer').hidden && $('preview-name').textContent === name) mailState(error); return; } cannot(error.message); return; }
         if ($('viewer').hidden || $('preview-name').textContent !== name) return;      /* closed meanwhile */
         const body = $('preview-body');
         if (PICTURES[kind]) {
@@ -9359,7 +9415,7 @@
                 note(doc.numPages > pages ? `The first ${pages} pages of ${doc.numPages}. Download the file to read the rest.` : `${doc.numPages} page${doc.numPages > 1 ? 's' : ''}.`);
             } catch { cannot('This PDF could not be shown here.'); }
         } else if (kind === 'eml') {
-            showMail({ bytes, name, tab, inner, from, note });
+            showMail({ bytes, name, tab, inner, from, note, ref: opts.mailRef });
         } else {
             const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
             const source = () => { const pre = document.createElement('pre'); pre.className = 'source'; pre.textContent = text; return pre; };
@@ -9427,7 +9483,7 @@
        runs nothing (sandbox: no scripts, no same-origin; its own rules: nothing fetched), made harmless
        first; remote pictures blocked till asked for -- then the server's page of it (files.mjs mailPage),
        still no script. Nothing is fetched on opening. */
-    function showMail({ bytes, name, tab, inner, from, note }) {
+    function showMail({ bytes, name, tab, inner, from, note, ref = null }) {
         const body = $('preview-body');
         const M = window.clavariumMail;
         /* Its source: the first megabyte of a large one (Download for all of it). */
@@ -9438,6 +9494,17 @@
         try { mail = M.parse(new Uint8Array(bytes)); } catch { mail = null; }
         if (!mail || (!mail.headers.length && mail.html === null && mail.text === null)) { body.append(source); note(''); return; }
         const view = el('div', 'mail-view');
+        /* Opened by its reference: its subject heads the window, where it is now is said, and its bytes are
+           what Download gives (read once, never fetched again for it). */
+        if (ref) {
+            $('preview-name').textContent = mail.subject || ref.label || name;
+            ref.title = [mail.subject || ref.label, mail.from[0]?.name || mail.from[0]?.address, mail.date ? mail.date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : ''].filter(Boolean).join(' · ');
+            const file = URL.createObjectURL(new Blob([bytes], { type: 'message/rfc822' })); mdUrls.add(file);
+            $('preview-download').href = file; $('preview-download').setAttribute('download', `${(mail.subject || 'mail').replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 80)}.eml`);
+            const where = [ref.got?.box, ref.got?.folder].filter(Boolean).join(' · ');
+            if (where) view.append(el('div', 'mail-where hint', where));
+            if (ref.got?.cut) view.append(el('div', 'mail-cut hint', uiSaid('set-mail-cut', 'Mail cut: attachments may be incomplete.')));
+        }
         /* Who, to whom, when. */
         const head = el('div', 'mail-head');
         head.append(el('h2', 'mail-subject', mail.subject || uiSaid('set-mail-no-subject', '(no subject)')));
@@ -9452,8 +9519,15 @@
         details.addEventListener('click', () => { all.hidden = !all.hidden; details.setAttribute('aria-expanded', String(!all.hidden)); details.textContent = all.hidden ? uiSaid('set-mail-details', 'Show details') : uiSaid('set-mail-hide-details', 'Hide details'); });
         head.append(details, all);
         view.append(head);
+        /* Reply: never sent from here -- the AI is asked in the chat, and its answer comes back as a request to approve. */
+        if (ref && (ref.of || DEVICE) && (!DEVICE || deviceParts.chat === 'write')) {
+            const acts = el('div', 'mail-acts');
+            const reply = el('button', 'mail-reply', uiSaid('set-mail-reply', 'Reply…')); reply.type = 'button';
+            reply.addEventListener('click', () => { void replyToMail({ ref: ref.got?.ref || ref.ref, of: ref.of }); });
+            acts.append(reply); view.append(acts);
+        }
         /* Its words: the HTML in a frame that runs nothing, or the plain words with their links. */
-        const offline = conversations.find((x) => x.name === current)?.offline === true;
+        const offline = conversations.find((x) => x.name === (ref ? ref.of : current))?.offline === true;
         const frameOf = () => { const f = document.createElement('iframe'); f.className = 'mail-frame'; f.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox'); f.setAttribute('referrerpolicy', 'no-referrer'); f.title = mail.subject || name; return f; };
         if (mail.html !== null) {
             const page = M.pageOf(mail);
@@ -9462,9 +9536,11 @@
                 const bar = el('div', 'mail-remote'); bar.setAttribute('role', 'status');
                 bar.append(el('span', '', uiSaid('set-mail-remote', 'Remote pictures blocked')));
                 /* Shown by the server's page of the same file: one of a folder kept here, a conversation not cut off. */
-                if (!from && !offline) {
+                /* A mail opened by its reference: the server's page of the same mail, read again then (asked for). */
+                if ((ref || !from) && !offline) {
                     const go = el('button', 'quiet mail-remote-show', uiSaid('set-mail-show-remote', 'Show them')); go.type = 'button';
-                    go.addEventListener('click', () => { const f = frameOf(); f.src = `${API}/files/mail?${new URLSearchParams({ c: current, r: tab, p: inner })}`; frame.replaceWith(f); frame = f; bar.remove(); });
+                    const shown = ref ? `${API}/mail/page?${new URLSearchParams({ ref: ref.got?.ref || ref.ref, ...(ref.of ? { c: ref.of } : {}) })}` : `${API}/files/mail?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+                    go.addEventListener('click', () => { const f = frameOf(); f.src = shown; frame.replaceWith(f); frame = f; bar.remove(); });
                     bar.append(' · ', go);
                 }
                 view.append(bar);
@@ -10757,6 +10833,8 @@
             enter();
             /* Where it talks through the app, the chat is what this device opens on. */
             void chatFirst();
+            /* A link to a mail (?mail=mail:...): opened over it, if this device may read that mailbox (else it says so). */
+            if (/^mail:/.test(new URLSearchParams(location.search).get('mail') ?? '')) void openMailRef(new URLSearchParams(location.search).get('mail'), { of: current });
             return;
         } else {
             view(current ? 'room' : 'list');
@@ -10779,6 +10857,8 @@
             await chatFirst();
             goTab('lists', { pick: { list: arrived.get('binder'), ...(/^\d{1,9}$/.test(card) ? { card } : {}) } });
         }
+        /* A link to a mail (?mail=mail:TARGET/MESSAGE-ID): the mail viewer opened on it, over the page. */
+        if (/^mail:/.test(arrived.get('mail') ?? '')) void openMailRef(arrived.get('mail'), { of: current });
         /* Arriving on the address of a place (a reload, a link): it is opened. */
         if (home && new URLSearchParams(location.search).has('open')) await followAddress();
         /* THE FIRST START (Features, features.js): nothing made yet, the welcome not passed -- the home
