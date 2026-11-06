@@ -18,6 +18,7 @@ import { mkdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Parley } from 'clavarium-parley/host';
 import { Refusal } from './conversations.mjs';
+import { scan } from './secret-scan.mjs';
 
 export const ROOM_NAME_MAX = 60;
 export const ROOMS_MAX = 20;
@@ -28,6 +29,12 @@ export const HOPS_MAX = 8;
 export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
+
+/* A SECRET IN A ROOM (06-11): a room's thread is read by all its members, now and later -- a token, a key pasted
+   there is never kept: the thread shows it as stars, and only the AI the message goes to gets it (lifted into its
+   own short-lived store by its chat, as any secret said to it). What an AI writes in a room is masked the same way:
+   a secret never passes from one AI to another through a room. */
+export const masked = (text) => { const str = String(text ?? ''); const hits = scan(str); if (!hits.length) return str; let out = ''; let last = 0; for (const h of hits) { out += str.slice(last, h.start) + '••••••'; last = h.end; } return out + str.slice(last); };
 
 /* A sign as the cards draw it (web/kit.js hueOf, initialOf): the same name, the same letter and colour. */
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
@@ -144,13 +151,13 @@ export class Rooms {
         const t = this.#thread(room.id);
         this.#hops.set(room.id, 0);
         /* The owner is the room's own side (no name over their words, as in any chat); anyone else is named. */
-        const now = t.say(text, undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } });
+        const now = t.say(masked(text), undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } });
         const said = now.messages.at(-1);
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
         for (const ai of named.length ? named : host ? [host] : []) {
             this.#think(room.id, ai.id, true);
-            await this.#say(ai.ref, said.text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } });
+            await this.#say(ai.ref, text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } });
         }
         /* Handed to its AIs: read, as a conversation's agent would say it (06-11: the clock stayed on every message). */
         try { t.seen?.(); } catch { /* an older Parley */ }
@@ -192,7 +199,7 @@ export class Rooms {
         }
         if (!String(entry.text ?? '').trim()) return null;
         /* @Name of a member, exactly: kept as its id (the screen says its name of the moment). */
-        const text = String(entry.text).replace(/@([^\s@{][^@\n]{0,40}?)(?=[\s,.;:!?)]|$)/g, (whole, name) => { const m = members.find((x) => x.name.toLowerCase() === name.toLowerCase()); return m ? `@{${m.id}}` : whole; });
+        const text = masked(entry.text).replace(/@([^\s@{][^@\n]{0,40}?)(?=[\s,.;:!?)]|$)/g, (whole, name) => { const m = members.find((x) => x.name.toLowerCase() === name.toLowerCase()); return m ? `@{${m.id}}` : whole; });
         const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai', look: me.look }, to, re, kind: kind === 'doing' ? 'doing' : 'say' });
         /* The boxes it is sent to say it aloud (#281): its words, a member named by its name, never an id. */
         const boxes = to.map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);

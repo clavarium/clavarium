@@ -173,3 +173,18 @@ test('the signs of a room: each AI by its conversation card (title, else name), 
     await rooms.say(r.id, 'Bonjour.');
     assert.equal(rooms.read(r.id).unread, 0, 'handed to its AIs: read, the clock goes');
 });
+
+test('a secret in a room (06-11): never kept in its thread (stars), given only to the AI the message goes to; an AI\'s is masked too', async (t) => {
+    const { rooms, said } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const key = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCD';
+    await rooms.say(r.id, `La clé : ${key}`);
+    const shown = rooms.read(r.id).messages.at(-1).text;
+    assert.ok(!shown.includes(key) && shown.includes('••••••'), shown);
+    assert.equal(said.at(-1).text, `La clé : ${key}`, 'the AI it goes to gets it (its chat lifts it into its store)');
+    const id = rooms.answered('hugo', { room: r.id, text: `Voici : ${key}` });
+    assert.ok(id);
+    const all = JSON.stringify(rooms.read(r.id).messages);
+    assert.ok(!all.includes(key), 'never in the thread');
+    assert.ok(!said.slice(1).some((x) => String(x.text).includes(key)), 'never handed from one AI to another');
+});
