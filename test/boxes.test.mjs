@@ -778,4 +778,7 @@ test('the wake word by its sound (05-11): what Whisper writes for « Mésange »
     assert.equal(dropsWake(false, NaN), false, 'no voice measured: kept');
     assert.equal(dropsWake(true, 100), false, 'heard: kept');
     assert.ok(WAKE_FAINT > 429 && WAKE_FAINT < 812);
+    assert.equal(dropsWake(false, NaN, 'timeout'), true, 'not heard and never ended (a radio, 06-11): dropped');
+    assert.equal(dropsWake(true, NaN, 'timeout'), false, 'heard: kept, even long');
+    assert.equal(dropsWake(false, 1200, 'silence'), false, 'not heard, firm, ended: kept');
 });
