@@ -15,6 +15,8 @@
  *   NewAsset       ONE BOX to make an asset (05-11, step 3): kinds, the kind's form, one ending;
  *                  opened with a context (a conversation it will be attached to). A voice box and
  *                  a device are two of its kinds too (step 4).
+ *   ShareDonut     who takes a whole (memory, a disk): a small donut, its slices from shareSlices, the main
+ *                  figure in its middle; ShareKey, a slice's swatch beside its row in the list
  *
  * No framework: each piece is a function that returns an element. Words: English here; the page
  * hands its own (`setWords`, app.js `uiSaid`) for the few the kit says by itself.
@@ -264,7 +266,70 @@
         return root;
     }
 
+    /* WHO TAKES IT (06-11): one whole -- a server's memory or a disk -- split by who takes it: each machine
+       (the largest first, at most `max`, the rest folded into "Others"), the rest of the system, and what is
+       free. `parts` [{ key, label, mb }]. A machine keeps its colour while the page lives (`slots`, shared by
+       the memory and the disks: a colour follows the machine, never its rank). Slots 1..6 are Parley's chart
+       colours (--parley-s1..s6); 0 is "Others"; 'rest' and 'free' are neutral. */
+    function shareSlices(parts, { restMb = 0, freeMb = 0, max = 6, slots = new Map(), words: w = {} } = {}) {
+        const most = Math.max(1, Math.min(6, max));
+        const sorted = (parts ?? []).filter((x) => Number.isFinite(x?.mb) && x.mb > 0).sort((a, b) => b.mb - a.mb);
+        const shown = sorted.length > most ? sorted.slice(0, most) : sorted;
+        const folded = sorted.slice(shown.length);
+        const used = new Set();
+        const held = new Set(slots.values());
+        const out = shown.map((x) => {
+            let s = slots.get(x.key);
+            if (!s || used.has(s)) s = [1, 2, 3, 4, 5, 6].find((n) => !used.has(n) && !held.has(n)) ?? [1, 2, 3, 4, 5, 6].find((n) => !used.has(n));
+            slots.set(x.key, s); held.add(s); used.add(s);
+            return { key: x.key, label: x.label, mb: x.mb, slot: s };
+        });
+        if (folded.length) out.push({ key: 'others', label: w.others ?? 'Others', mb: folded.reduce((a, x) => a + x.mb, 0), slot: 0, keys: folded.map((x) => x.key) });
+        if (restMb > 0) out.push({ key: 'rest', label: w.rest ?? 'System and others', mb: restMb, slot: 'rest' });
+        if (freeMb > 0) out.push({ key: 'free', label: w.free ?? 'Free', mb: freeMb, slot: 'free' });
+        const total = out.reduce((a, x) => a + x.mb, 0);
+        for (const x of out) x.share = total > 0 ? x.mb / total : 0;
+        return out;
+    }
+    const sharePct = (x) => `${x.share > 0 && x.share < 0.01 ? '<1' : Math.round(x.share * 100)} %`;
+    /* The swatch of a slice, beside its row in the list (the list is the legend). */
+    function ShareKey(slot) { const k = node('span', 'share-key'); k.dataset.s = String(slot); k.setAttribute('aria-hidden', 'true'); return k; }
+    const SVG = 'http://www.w3.org/2000/svg';
+    const svgNode = (tag, cls) => { const e = document.createElementNS(SVG, tag); if (cls) e.setAttribute('class', cls); return e; };
+    /* A SMALL DONUT of those slices (a "camembert"), its size set by the page's style; in its middle the main
+       figure (`center`: { top, main, sub }), or the slice under the pointer or the finger: its name, its size,
+       its share. Said whole to a screen reader. */
+    function ShareDonut({ slices = [], label = '', fmt = (mb) => `${mb} MB`, center = {} } = {}) {
+        const root = node('div', 'share-donut');
+        const svg = svgNode('svg'); svg.setAttribute('viewBox', '0 0 100 100'); svg.setAttribute('role', 'img');
+        svg.setAttribute('aria-label', `${label}: ${slices.map((x) => `${x.label} ${fmt(x.mb)} ${sharePct(x)}`).join('; ')}`);
+        const R = 40; const C = 2 * Math.PI * R; const gap = slices.length > 1 ? 1.2 : 0;
+        const mid = node('div', 'share-mid'); mid.setAttribute('aria-hidden', 'true');
+        const top = node('span', 'share-mid-top'); const main = node('b', 'share-mid-main'); const sub = node('span', 'share-mid-sub');
+        mid.append(top, main, sub);
+        const say = (t, m, b) => { top.textContent = t ?? ''; main.textContent = m ?? ''; sub.textContent = b ?? ''; };
+        const rest = () => { say(center.top, center.main, center.sub); for (const a of arcs) a.removeAttribute('data-on'); svg.removeAttribute('data-on'); };
+        let at = 0; let on = null;
+        const arcs = slices.map((x) => {
+            const len = x.share * C;
+            const a = svgNode('circle', 'share-arc'); a.dataset.s = String(x.slot);
+            for (const [k, v] of [['cx', 50], ['cy', 50], ['r', R], ['stroke-dasharray', `${Math.max(0.6, len - gap).toFixed(2)} ${C.toFixed(2)}`], ['stroke-dashoffset', (-at).toFixed(2)], ['transform', 'rotate(-90 50 50)']]) a.setAttribute(k, String(v));
+            at += len;
+            const show = () => { on = x.key; for (const o of arcs) o.setAttribute('data-on', String(o === a)); svg.setAttribute('data-on', 'true'); say(x.label, fmt(x.mb), sharePct(x)); };
+            a.addEventListener('pointerenter', (event) => { if (event?.pointerType !== 'touch') show(); });
+            /* A tap shows it; a second tap on the same slice puts the main figure back (a mouse's click only shows). */
+            a.addEventListener('click', (event) => { if (event?.pointerType !== 'mouse' && on === x.key && svg.getAttribute('data-on')) { on = null; rest(); } else show(); });
+            return a;
+        });
+        svg.addEventListener('pointerleave', (event) => { if (event?.pointerType !== 'touch') { on = null; rest(); } });
+        svg.append(...arcs);
+        rest();
+        root.append(svg, mid);
+        return root;
+    }
+
     window.clavariumKit = {
+        shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,
         setWords(fn) { if (typeof fn === 'function') words = fn; },
         StatusDot, Avatar, Chips, Switch, Segmented, InlineConfirm, ConvCard, StepFlow, SecretPicker, NewAsset,

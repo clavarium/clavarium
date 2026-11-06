@@ -21,6 +21,8 @@ export const SETTINGS_WORDS_FR = {
     'set-just-now': 'à l\'instant', 'set-min-ago': 'il y a {n} min', 'set-h-ago': 'il y a {n} h', 'set-days-ago': 'il y a {n} jours',
     'set-on': 'Activé', 'set-off': 'Désactivé', 'set-none': 'Aucun', 'set-changed': '{n} modifiés', 'set-as-given': 'Comme livrés',
     'set-lang-device': 'La langue de chaque appareil', 'set-res-now': 'Mémoire {m} % · disque {d} %',
+    'set-share-memory': 'Mémoire par machine', 'set-share-disk': 'Disque par machine', 'set-share-others': 'Autres',
+    'set-share-rest': 'Système et autres', 'set-share-else': 'Tout le reste', 'set-share-free': 'Libre', 'set-share-used': 'Utilisé', 'set-share-of': 'sur {total}',
     'set-binders-max': 'Les agents en font {n} au plus', 'set-admin-1': '1 administrateur', 'set-admins': '{n} administrateurs',
     'set-backup-now': 'Exporter · importer', 'set-git-key': '1 clé git', 'set-git-keys': '{n} clés git', 'set-restart': 'redémarrer',
     'set-logs-now': 'Clavarium, machines, système',
@@ -48,5 +50,9 @@ export const SETTINGS_WORDS_FR = {
     'set-mail-details': 'Afficher les détails', 'set-mail-hide-details': 'Masquer les détails', 'set-mail-no-subject': '(sans objet)',
     'set-mail-remote': 'Images distantes bloquées', 'set-mail-show-remote': 'Les afficher', 'set-mail-empty': 'Ce mail n\'a pas de texte.',
     'set-mail-file': '1 pièce jointe', 'set-mail-files': '{n} pièces jointes', 'set-mail-download': 'Télécharger', 'set-mail-of': 'Pièce jointe de {name}',
+    'set-mail-mail': 'Mail', 'set-mail-reply': 'Répondre…', 'set-mail-reply-ask': 'Réponds à ce mail :', 'set-mail-retry': 'Réessayer',
+    'set-mail-gone': 'Ce mail n\'est plus dans la boîte.', 'set-mail-not-yours': 'Vous n\'avez pas accès à cette boîte.',
+    'set-mail-old-ref': 'Réf. ancienne : demandez à l\'IA de la rattacher.', 'set-mail-unreachable': 'Boîte injoignable pour le moment.',
+    'set-mail-cut': 'Mail tronqué : pièces jointes incomplètes.',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

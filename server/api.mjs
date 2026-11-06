@@ -140,6 +140,7 @@
  *   POST /api/setup/pair                    {label}: what a device to pair will get (the code is made by /api/shares)
  *   POST /api/setup/drop                    {id}: something an import waits for, not wanted after all
  *   GET  /api/files/download?c=...&r=...&p=<path>                   one file
+ *   GET  /api/mail/open?ref=mail:...&c=   GET /api/mail/page?ref=...   a mail cited by its reference, read now (mailref.mjs)
  *   POST /api/files/import?c=...&r=...&p=<folder>&name=<file name>[&dir=<subfolders>&exists=keep|replace|skip&batch=<id>]  the body IS the file
  *   GET  /api/files/thumb|text   POST /api/files/save|make|rename|move|remove|taken   ?c=...&r=...&p=...   (see files.mjs)
  *
@@ -153,6 +154,7 @@ import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
 import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
+import { mailRoute } from './mailref.mjs';
 import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
@@ -250,6 +252,11 @@ export async function handleApi(request, response, conversations, headers, resou
             response.writeHead(200, shown.headers);
             response.end(shown.body);
             return true;
+        }
+        if (request.method === 'GET' && (pathname === '/api/mail/open' || pathname === '/api/mail/page')) {
+            /* A mail cited by its reference (mailref.mjs), read now through Tether: the owner may read every mailbox. */
+            const c = query.get('c') ?? '';
+            return await mailRoute(pathname.slice('/api'.length), query, response, { tethers, headers, who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' }, may: () => true, offline: conversations.list().find((x) => x.name === c)?.offline === true, of: c });
         }
         if (request.method === 'GET' && pathname === '/api/files/download') {
             const file = await download(attached(), query.get('p') ?? '');

@@ -262,6 +262,13 @@ export class Tethers {
         return this.#keeper.act(String(op ?? ''), args && typeof args === 'object' ? args : {}, who);
     }
 
+    /* A person's read, from the page (a mail opened by its reference, mailref.mjs): never asked, journaled as
+       that person's. `who`: { id, name }, the person the caller has already checked may read it. */
+    read(verb, args, who) {
+        const by = { id: String(who?.id ?? 'person:owner'), name: String(who?.name ?? 'Owner') };
+        return this.#keeper.read(String(verb ?? ''), args && typeof args === 'object' ? args : {}, by);
+    }
+
     /* The store behind it, for the Assets page to create/give/remove targets. */
     store() { return this.#keeper.store; }
 

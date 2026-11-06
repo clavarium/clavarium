@@ -18,6 +18,7 @@
  *   GET  /c/api/<pairing>/voice   POST .../voice
  *   GET  /c/api/<pairing>/files   GET .../files/download   GET .../files/machine   POST .../files/import
  *   GET  .../files/thumb|text   POST .../files/save|make|rename|move|remove|taken   (see files.mjs)
+ *   GET  .../mail/open?ref=   GET .../mail/page?ref=   a mail cited by its reference: only a mailbox it may read (mailref.mjs)
  *   POST /c/api/<pairing>/leave   the device removes this pairing itself
  *   GET  /c/api/<pairing>/talk/words?lang=
  *   GET  /c/api/<pairing>/conversations/<any>/talk          POST the same {text, answers}; ?last= ?days= ?before= ?from= ?since=: a part of it
@@ -50,6 +51,7 @@ import { readCookie, sessionCookie, cookieNameOf, isPairingId } from './devices.
 import { WORK_TAB } from './resources.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, CHANGE_ROUTES, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
+import { mailRoute, deviceMayRead } from './mailref.mjs';
 
 const BODY_MAX = 16 * 1024;
 
@@ -84,7 +86,7 @@ export function devicePairing(devices, headers, pairing) {
 }
 
 /* Returns true when the request was under /c/api/ (answered here). */
-export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair }) {
+export async function handleDoor(request, response, { devices, conversations, resources, shortcuts, voice, originOk, headers, secure, talk, repair, tethers, mailboxes }) {
     const url = new URL(request.url ?? '/', 'http://local');
     if (!url.pathname.startsWith('/c/api/')) return false;
     /* "/<pairing>/me" -> the pairing and "/me"; "/pair" has no pairing yet. */
@@ -155,7 +157,7 @@ export async function handleDoor(request, response, { devices, conversations, re
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */
-        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/mail' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave';
+        const forFiles = route === '/files' || route === '/files/download' || route === '/files/page' || route === '/files/mail' || route === '/files/import' || CHANGE_ROUTES.includes(route) || route === '/leave' || route === '/mail/open' || route === '/mail/page';
         if (!mine && !forFiles) return send(404, { error: 'This device was given no conversation.' });
         /* Shortcuts are typed into the terminal, or are the ready answers of the chat: one of the two must be its to write in. */
         if (request.method === 'GET' && route === '/shortcuts') { need(part.terminal || part.chat === 'write', 'the terminal or the chat'); return send(200, shortcuts.list()); }
@@ -214,6 +216,10 @@ export async function handleDoor(request, response, { devices, conversations, re
             response.writeHead(200, shown.headers);
             response.end(shown.body);
             return true;
+        }
+        /* A mail cited by its reference (mailref.mjs): only a mailbox this device was given to read. */
+        if (request.method === 'GET' && (route === '/mail/open' || route === '/mail/page')) {
+            return await mailRoute(route, url.searchParams, response, { tethers, headers, who: { id: `pairing:${pairing}`, name: 'A device' }, may: (t) => deviceMayRead(t, own, mailboxes), offline: mine?.offline === true });
         }
         if (request.method === 'GET' && route === '/files/download') {
             const file = await download(attached('read', 'open'), url.searchParams.get('p') ?? '');

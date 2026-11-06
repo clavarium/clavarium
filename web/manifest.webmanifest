@@ -5,6 +5,10 @@
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": [
+    "fullscreen",
+    "standalone"
+  ],
   "background_color": "#0f141a",
   "theme_color": "#0f141a",
   "icons": [

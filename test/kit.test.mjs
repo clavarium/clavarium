@@ -18,6 +18,7 @@ class Node {
     replaceChildren(...kids) { this.children = []; this.text = ''; this.append(...kids); }
     setAttribute(k, v) { this.attributes[k] = String(v); }
     getAttribute(k) { return this.attributes[k] ?? null; }
+    removeAttribute(k) { delete this.attributes[k]; }
     addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
     click() { for (const fn of this.listeners.click ?? []) fn({}); }
     get isConnected() { return Boolean(this.parent); }
@@ -27,7 +28,7 @@ class Node {
     all(pred, out = []) { for (const c of this.children) if (typeof c === 'object') { if (pred(c)) out.push(c); c.all(pred, out); } return out; }
     find(cls) { return this.all((n) => n.classes.includes(cls))[0] ?? null; }
 }
-globalThis.document = { createElement: (tag) => new Node(tag), activeElement: null };
+globalThis.document = { createElement: (tag) => new Node(tag), createElementNS: (ns, tag) => new Node(tag), activeElement: null };
 const window = {};
 new Function('window', web('kit.js'))(window);
 const KIT = window.clavariumKit;
@@ -243,4 +244,50 @@ test('the page makes every asset with the one box, and gives its git key with th
         const part = html.slice(html.indexOf(`id="${form}"`), html.indexOf('</form>', html.indexOf(`id="${form}"`)));
         assert.match(part, /<button type="submit" class="primary">Create<\/button>/, form);
     }
+});
+
+test('who takes it: machines the largest first, at most six, the rest folded into Others; then the system, then what is free', () => {
+    const parts = [3, 9, 1, 7, 5, 2, 8, 4].map((mb, i) => ({ key: `m${i}`, label: `M${i}`, mb }));
+    parts.push({ key: 'zero', label: 'Z', mb: 0 }, { key: 'nan', label: 'N', mb: Number.NaN });
+    const slots = new Map();
+    const s = KIT.shareSlices(parts, { restMb: 10, freeMb: 50, slots });
+    assert.deepEqual(s.map((x) => x.key), ['m1', 'm6', 'm3', 'm4', 'm7', 'm0', 'others', 'rest', 'free']);
+    assert.deepEqual(s.map((x) => x.mb), [9, 8, 7, 5, 4, 3, 3, 10, 50]);
+    const others = s.find((x) => x.key === 'others');
+    assert.equal(others.slot, 0); assert.deepEqual(others.keys, ['m5', 'm2']); assert.equal(others.label, 'Others');
+    assert.deepEqual(s.slice(0, 6).map((x) => x.slot), [1, 2, 3, 4, 5, 6]);
+    assert.equal(s.find((x) => x.key === 'rest').slot, 'rest'); assert.equal(s.find((x) => x.key === 'free').slot, 'free');
+    assert.ok(Math.abs(s.reduce((a, x) => a + x.share, 0) - 1) < 1e-9);
+    assert.equal(s.find((x) => x.key === 'free').share, 50 / 99);
+    /* A colour follows its machine, never its rank: m3 grows to the top, keeps its colour; a newcomer takes a free one. */
+    const again = KIT.shareSlices([{ key: 'm3', label: 'M3', mb: 20 }, { key: 'm1', label: 'M1', mb: 9 }, { key: 'new', label: 'New', mb: 1 }], { slots });
+    assert.deepEqual(again.map((x) => [x.key, x.slot]), [['m3', 3], ['m1', 1], ['new', 2]]);
+    /* Nothing running: only the system and what is free; no Others; nothing at all, nothing drawn. */
+    assert.deepEqual(KIT.shareSlices([], { restMb: 2, freeMb: 6 }).map((x) => x.key), ['rest', 'free']);
+    assert.deepEqual(KIT.shareSlices([], {}), []);
+    /* Six exactly: no Others. Words given: used. */
+    const six = KIT.shareSlices(parts.slice(0, 6), { freeMb: 1, words: { free: 'Libre' } });
+    assert.ok(!six.some((x) => x.key === 'others')); assert.equal(six.at(-1).label, 'Libre');
+});
+
+test('the donut: one arc a slice, its length its share, the main figure in its middle, a slice under the finger', () => {
+    const slices = KIT.shareSlices([{ key: 'a', label: 'Alpha', mb: 2048 }], { restMb: 1024, freeMb: 1024 });
+    const donut = KIT.ShareDonut({ slices, label: 'Memory by machine', fmt: (mb) => `${mb / 1024} GB`, center: { top: 'Used', main: '3 GB', sub: 'of 4 GB' } });
+    const svg = donut.children[0];
+    const arcs = donut.all((n) => n.attributes.class === 'share-arc');
+    assert.deepEqual(arcs.map((x) => x.dataset.s), ['1', 'rest', 'free']);
+    const C = 2 * Math.PI * 40;
+    /* Half, a quarter, a quarter: each less the gap between slices, each starting where the one before ended. */
+    assert.deepEqual(arcs.map((x) => Number(x.getAttribute('stroke-dasharray').split(' ')[0])), [C / 2 - 1.2, C / 4 - 1.2, C / 4 - 1.2].map((v) => Number(v.toFixed(2))));
+    assert.deepEqual(arcs.map((x) => Number(x.getAttribute('stroke-dashoffset'))), [0, -C / 2, (-3 * C) / 4].map((v) => Number(v.toFixed(2))));
+    assert.equal(svg.getAttribute('aria-label'), 'Memory by machine: Alpha 2 GB 50 %; System and others 1 GB 25 %; Free 1 GB 25 %');
+    const mid = donut.find('share-mid');
+    assert.equal(mid.textContent, 'Used3 GBof 4 GB');
+    arcs[1].click();
+    assert.equal(mid.textContent, 'System and others1 GB25 %');
+    assert.equal(arcs[1].getAttribute('data-on'), 'true'); assert.equal(arcs[0].getAttribute('data-on'), 'false');
+    /* The same slice again: the main figure back. */
+    arcs[1].click();
+    assert.equal(mid.textContent, 'Used3 GBof 4 GB');
+    assert.equal(KIT.ShareKey(3).dataset.s, '3');
 });
