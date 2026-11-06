@@ -459,7 +459,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        mailbox, a calendar, an address book -- held here with their secrets read from
        the vault by name, never in a machine: see tethers.mjs. */
     /* Voice boxes are Tether targets too (boxes.mjs): their connector reaches them through `boxes`, made below. */
-    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) } } });
+    const tethers = new Tethers({ dataDir, resources: folders, conversations: () => all.list().map((c) => c.name), secrets, dockets, connectors: { voicebox: { run: (...a) => voiceboxConnector(boxes).run(...a) } } });
     const stopTethers = tethers.start();
     /* Connecting a mailbox, calendar or address book by token: the consent happens
        in the owner's browser, the refresh token is kept host-only (never in a

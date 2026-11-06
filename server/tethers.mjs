@@ -31,19 +31,74 @@ const AGENT = 'conversation:';
 export const USB_DEVICE = 'usb-device';
 /* Accepted calls whose result is awaited, at most (an act that never ends is forgotten after these). */
 const ACTING_MAX = 200;
+/* Notices already said (their ids), at most: each said once, across restarts. */
+const NOTICES_MAX = 1000;
+
+/* SOMETHING THAT HAPPENED LATER to what an agent did (Tether's notices: a mail that came back, a scheduled
+   send that failed, an invitation declined). One short head per kind, said before Tether's own sentence;
+   a failure, a bounce, a decline is a warning (needs the person), a delay or a late send is news. */
+const NOTICE_HEADS = {
+    'mail.bounced': 'Mail came back',
+    'mail.delayed': 'Mail delayed',
+    'mail.send-failed': 'Mail not sent',
+    'mail.later-failed': 'Scheduled mail not sent',
+    'mail.later-unsure': 'Scheduled mail maybe sent',
+    'mail.later-late': 'Scheduled mail sent late',
+    'mail.sent-late': 'Mail sent late',
+    'mail.later-draft-kept': 'Scheduled mail sent, draft kept',
+    'calendar.declined': 'Invitation declined',
+};
+const NOTICE_INFO = /\.(delayed|later-late|sent-late)$/;
+export const noticeHead = (kind) => NOTICE_HEADS[kind] ?? 'Later news';
+/* The same head as a word of Parley's (notice-mail-bounced...), said in the reader's language. */
+export const noticeWord = (kind) => (Object.hasOwn(NOTICE_HEADS, kind) ? { k: `notice-${kind.replace(/\./g, '-')}`, t: NOTICE_HEADS[kind] } : { k: 'notice-later', t: 'Later news' });
+export const noticeWarns = (kind) => !NOTICE_INFO.test(String(kind ?? ''));
+
+/* A LINE IN THE READER'S WORDS (Parley 0.17.71, as a request's card since 0.17.70, demandes.mjs): a word of
+   Parley's dictionary and its values, said by each screen in its own language; `t`, the plain English an
+   older screen says. Values that are data (a verb, a name, a reason, Tether's own sentence) stay as given. */
+const said = (k, v, t) => ({ k, ...(v ? { v } : {}), t });
+const TOPIC_REQUEST = Object.freeze({ k: 'line-topic-request', t: 'Request' });
+const TOPIC_NOTICE = Object.freeze({ k: 'line-topic-notice', t: 'Later news' });
+/* A call that ended without being done (not accepted): how it ended, by its outcome. */
+const ENDED = {
+    no: ['line-refused', 'Refused'],
+    timeout: ['line-timeout', 'No answer in time'],
+    withdrawn: ['line-withdrawn', 'Withdrawn by the agent'],
+    stopped: ['line-stopped', 'Stopped'],
+};
+export function endedLine(verb, outcome) {
+    if (outcome === 'yes' || outcome === 'always') return said('line-accepted', { verb }, `Accepted: ${verb} — being done`);
+    const [k, head] = ENDED[outcome] ?? ['line-handled', 'Request handled'];
+    return said(k, { verb }, `${head}: ${verb}`);
+}
+export function resultLine(verb, error) {
+    if (error === undefined) return said('line-done', { verb }, `Done: ${verb}`);
+    const reason = String(error ?? '').trim();
+    return reason ? said('line-failed', { verb, reason }, `Failed: ${verb} — ${reason}`) : said('line-failed-plain', { verb }, `Failed: ${verb}`);
+}
+export function noticeLine(kind, target, text) {
+    const head = noticeWord(kind);
+    if (target && text) return said('line-notice', { head, target, text }, `${head.t} (${target}): ${text}`);
+    if (text) return said('line-notice-said', { head, text }, `${head.t}: ${text}`);
+    if (target) return said('line-notice-at', { head, target }, `${head.t} (${target})`);
+    return head;
+}
 
 export class Tethers {
-    #keeper; #resources; #conversations; #secrets; #timers = []; #changes = 0; #seen = new Map(); #offered; #ended = new Map(); #acting = [];
+    #keeper; #resources; #conversations; #secrets; #dockets; #timers = []; #changes = 0; #seen = new Map(); #offered; #noticed; #ended = new Map(); #acting = [];
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
 
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
-       `secrets`: the vault, read by name for a connector only (reveal). */
-    constructor({ dataDir, resources, conversations, secrets, connectors, now = () => Date.now() }) {
-        this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets;
+       `secrets`: the vault, read by name for a connector only (reveal). `dockets`: { on(name), post(name,
+       {kind, text, data}) } (dockets.mjs): what wakes an agent told of a notice. `make`: the keeper (tests). */
+    constructor({ dataDir, resources, conversations, secrets, connectors, dockets = null, now = () => Date.now(), make = keeper }) {
+        this.#resources = resources; this.#conversations = conversations; this.#secrets = secrets; this.#dockets = dockets;
         this.#offered = new JsonFile(`${dataDir}/tether-offered.json`, []);
-        this.#keeper = keeper(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), now, ...(connectors ? { connectors } : {}) });
+        this.#noticed = new JsonFile(`${dataDir}/tether-notices-seen.json`, []);
+        this.#keeper = make(`${dataDir}/tether`, { sides: () => this.#sides(), secrets: (name) => this.#reveal(name), notify: (n) => this.#notified(n), now, ...(connectors ? { connectors } : {}) });
         /* Every change a page shows -- a new approval waiting, one decided, the targets,
            the journal -- bumps the counter the client watches, so the approvals screen
            sees them all at once, not only when a store change happens to wake it. */
@@ -84,7 +139,7 @@ export class Tethers {
             /* `request`: the card Parley draws (demandes.mjs); the text and its buttons stay for an older screen. */
             let request;
             try { request = demandeView(r); } catch { request = undefined; }
-            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
+            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: TOPIC_REQUEST, tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
         }
         /* An approved call only the owner's browser can do (a device to flash): said once, with where to do it. */
         let jobs = [];
@@ -96,7 +151,9 @@ export class Tethers {
             if (!who.startsWith(AGENT)) continue;
             const name = who.slice(AGENT.length);
             this.#seen.set(j.id, { name, verb: j.verb });
-            try { this.announce(name, { kind: 'tether-job', text: `To do in your browser: ${j.args?.name ? `flash ${j.args.name}` : 'flash a device'}. Plug it in by USB here, then start.`, topic: 'Demande', tone: 'warn', actions: [`flash:${j.id}`] }); } catch { /* its chat is off */ }
+            const text = j.args?.name ? said('line-flash', { name: String(j.args.name) }, `To do in your browser: flash ${j.args.name}. Plug it in by USB here, then start.`)
+                : said('line-flash-device', undefined, 'To do in your browser: flash a device. Plug it in by USB here, then start.');
+            try { this.announce(name, { kind: 'tether-job', text, topic: TOPIC_REQUEST, tone: 'warn', actions: [`flash:${j.id}`] }); } catch { /* its chat is off */ }
         }
         for (const [id, info] of [...this.#seen]) {
             if (live.has(id)) continue;
@@ -107,8 +164,8 @@ export class Tethers {
                fail): said as being done, and its result said when Tether journals it (#tellResult). */
             const accepted = outcome === 'yes' || outcome === 'always';
             if (accepted) { this.#acting.push({ id, ...info }); if (this.#acting.length > ACTING_MAX) this.#acting.shift(); }
-            const text = accepted ? `Accepted: ${info.verb} — being done` : `Request handled: ${info.verb}${outcome ? ` (${outcome})` : ''}`;
-            try { this.announce(info.name, { kind: 'tether-done', text, topic: 'Demande', brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
+            const text = endedLine(info.verb, outcome);
+            try { this.announce(info.name, { kind: 'tether-done', text, topic: TOPIC_REQUEST, brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
         }
         for (const id of [...this.#ended.keys()]) if (!this.#seen.has(id)) this.#ended.delete(id);
     }
@@ -124,8 +181,37 @@ export class Tethers {
         if (i < 0) return;
         const [call] = this.#acting.splice(i, 1);
         const failed = l.ok === false;
-        const text = failed ? `Failed: ${call.verb}${l.error ? ` — ${l.error}` : ''}` : `Done: ${call.verb}`;
-        try { this.announce(call.name, { kind: 'tether-done', text, topic: 'Demande', ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        const text = resultLine(call.verb, failed ? (l.error ?? '') : undefined);
+        try { this.announce(call.name, { kind: 'tether-done', text, topic: TOPIC_REQUEST, ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+    }
+
+    /* A NOTICE (Tether calls `notify`): said once in the thread of the conversation whose agent did it,
+       and that agent woken through its docket where its chat is on (elsewhere its next Tether call
+       tells it: Tether puts what is new first in its answer). Each notice id kept, so a notice handed
+       twice -- or again after a restart -- is said once. An agent that is no conversation of this server: nothing. */
+    #notified(n) {
+        const id = String(n?.id ?? '');
+        const who = String(n?.agent ?? '');
+        if (!id || !who.startsWith(AGENT)) return;
+        const name = who.slice(AGENT.length);
+        let names;
+        try { names = this.#conversations(); } catch { return; }
+        if (!name || !names.includes(name)) return;
+        const seen = this.#noticed.get();
+        if (!Array.isArray(seen) || seen.includes(id)) return;
+        try { this.#noticed.set([...seen, id].slice(-NOTICES_MAX)); } catch { /* said anyway, this once */ }
+        const kind = String(n.kind ?? '');
+        const warns = noticeWarns(kind);
+        /* Clavarium's head and frame in the reader's words; Tether's own sentence as Tether wrote it. */
+        const line = noticeLine(kind, n.target?.title ? String(n.target.title) : '', String(n.text ?? '').trim());
+        const text = line.t;
+        try { this.announce?.(name, { kind: 'tether-notice', text: line, topic: TOPIC_NOTICE, ...(warns ? { tone: 'warn', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        try {
+            if (this.#dockets?.on(name)) {
+                this.#dockets.post(name, { kind: 'tether-notice', text: `${text}${/[.!?]$/.test(text) ? '' : '.'} See more: tether notices.`,
+                    data: { notice: id, kind, ...(n.ref ? { ref: String(n.ref) } : {}), ...(n.target?.id ? { target: String(n.target.id) } : {}) } });
+            }
+        } catch { /* its docket: its next Tether call tells it */ }
     }
 
     /* A secret's value for a connector, by name, from this server's vault; never seen by the agent.
