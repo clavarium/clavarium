@@ -55,7 +55,7 @@ export const SETTINGS_WORDS_FR = {
     'set-mail-old-ref': 'Réf. ancienne : demandez à l\'IA de la rattacher.', 'set-mail-unreachable': 'Boîte injoignable pour le moment.',
     'set-mail-cut': 'Mail tronqué : pièces jointes incomplètes.',
     'set-ch-s-apikeys': 'Clés d\'API', 'set-apikeys-about': 'Pour un programme ou une IA.', 'set-apikeys-n1': '1 clé', 'set-apikeys-n': '{n} clés',
-    'set-apikeys-once': 'Copiez-la : elle ne sera plus affichée.', 'set-apikeys-copy': 'Copier', 'set-apikeys-copied': 'Copiée',
+    'set-apikeys-once': 'Copiez-la : elle ne sera plus affichée.', 'set-apikeys-copy': 'Copier', 'set-apikeys-config-hint': 'Ou collez ceci dans votre outil d’IA (MCP) :', 'set-apikeys-config-copy': 'Copier la configuration', 'set-apikeys-copied': 'Copiée',
     'set-apikeys-select': 'Sélectionnée : copiez-la', 'set-apikeys-done': 'Fait', 'set-apikeys-none': 'Aucune clé.', 'set-apikeys-name': 'Nom',
     'set-apikeys-name-hint': 'À quoi elle sert', 'set-apikeys-scopes': 'Portées', 'set-apikeys-scopes-hint': 'Aucune tant que rien n\'est coché',
     'set-apikeys-expires': 'Expire', 'set-apikeys-30': 'Dans 30 jours', 'set-apikeys-90': 'Dans 90 jours', 'set-apikeys-365': 'Dans un an',
