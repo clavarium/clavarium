@@ -474,6 +474,13 @@ test('the thread\'s own lines: a level per kind of event, the owner\'s choice ov
     /* Bounds: topic, brief, text; a tone only of the two. */
     const long = b.talk.event('helper', { kind: 'refused', text: 'y'.repeat(900), topic: 't'.repeat(90), brief: 'b'.repeat(90), tone: 'pink' });
     assert.deepEqual([long.text.length, long.topic.length, long.brief.length, long.tone], [500, 40, 60, undefined]);
+    /* In the reader's words (Parley 0.17.71): a word, its values and its English kept as given, bounded; a word without its English is none. */
+    const keyed = b.talk.event('helper', { kind: 'tether-done', text: { k: 'line-failed', v: { verb: 'mail.send', reason: 'r'.repeat(900), 'Bad name': 'x', head: { k: 'notice-later', t: 'Later news' } }, t: 'Failed: mail.send' }, topic: { k: 'line-topic-request', t: 'Request' }, brief: 'q1' });
+    assert.deepEqual(keyed.text, { k: 'line-failed', v: { verb: 'mail.send', reason: 'r'.repeat(500), head: { k: 'notice-later', t: 'Later news' } }, t: 'Failed: mail.send' });
+    assert.deepEqual([keyed.topic, keyed.brief], [{ k: 'line-topic-request', t: 'Request' }, 'q1']);
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'line-done', v: { verb: 'x' } } }), null, 'no English: no line');
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: { k: 'Not a word!', t: 'x' } }), null);
+    assert.equal(b.talk.event('helper', { kind: 'tether-done', text: 'Done.', topic: { k: 'line-topic-request' } }).topic, undefined, 'a topic without its English: none');
     /* The owner moves a kind: what is stored next follows, what was stored stays. */
     assert.throws(() => b.talk.setThread({ levels: { origin: 'loud' } }), /A level is one of/);
     assert.throws(() => b.talk.setThread({ levels: { gossip: 'news' } }), /no such kind/);

@@ -179,6 +179,22 @@ const ACTIONS_MAX = 4;
 const ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
 const REQUEST_MAX = 8000;
 const OUTCOMES = ['yes', 'always', 'no', 'timeout', 'withdrawn', 'stopped'];
+/* A LINE'S TEXT IN THE READER'S WORDS (Parley 0.17.71): plain text, or `{k, v, t}` -- a word of Parley's
+   dictionary, its values (text, a number, or such a word again), and `t`, the plain English an older screen
+   says. Kept bounded: `t` as long as a plain text may be; a word without its `t` is none. */
+const WORD = /^[a-z0-9-]{1,60}$/;
+function lineWords(x, max, depth = 0) {
+    if (typeof x === 'string') { const t = x.trim(); return t ? t.slice(0, max) : null; }
+    if (typeof x === 'number') return Number.isFinite(x) ? x : null;
+    if (!x || typeof x !== 'object' || Array.isArray(x) || depth > 3 || typeof x.k !== 'string' || !WORD.test(x.k)) return null;
+    const t = typeof x.t === 'string' ? x.t.trim().slice(0, max) : '';
+    if (!t) return null;
+    const v = x.v && typeof x.v === 'object' && !Array.isArray(x.v)
+        ? Object.fromEntries(Object.entries(x.v).filter(([n]) => /^[a-z]{1,20}$/.test(n)).slice(0, 8).map(([n, y]) => [n, lineWords(y, EVENT_TEXT_MAX, depth + 1)]).filter(([, y]) => y !== null)) : null;
+    return { k: x.k, ...(v && Object.keys(v).length ? { v } : {}), t };
+}
+/* A line's text, topic or brief as given: text, or such a word; null when it says nothing. */
+const lineSaid = (x, max) => lineWords(x && typeof x === 'object' ? x : String(x ?? ''), max);
 /* Where the person's files go, in the bridge folder; one folder per file, named by an id. */
 const FILES = 'files';
 const ATTACHED = new RegExp(`^/work/\\${FOLDER}/${FILES}/([0-9a-f-]{36})/([^/]+)$`);
@@ -581,18 +597,20 @@ export class Talk {
        line kept, or null. `actions`: ids the page maps to buttons. */
     event(name, { kind, text, level, tone, topic, brief, actions = [], request, outcome } = {}) {
         if (!Object.hasOwn(EVENT_LEVELS, kind)) throw new RangeError(`No such kind of event: ${kind}`);
-        const said = String(text ?? '').trim();
-        if (!said) return null;
+        const said = lineSaid(text, EVENT_TEXT_MAX);
+        if (said === null) return null;
+        const group = lineSaid(topic, TOPIC_MAX);
+        const short = lineSaid(brief, BRIEF_MAX);
         /* The owner's choice when there is one (stored only where it differs from the kind's own). */
         const chosen = this.thread().levels[kind];
         const line = {
             /* Not `kind`: the page reads that of every message ('system' for these). */
             event: kind,
-            text: said.slice(0, EVENT_TEXT_MAX),
+            text: said,
             level: chosen !== EVENT_LEVELS[kind] ? chosen : LEVELS.includes(level) ? level : chosen,
             ...(TONES.includes(tone) ? { tone } : {}),
-            ...(topic ? { topic: String(topic).slice(0, TOPIC_MAX) } : {}),
-            ...(brief ? { brief: String(brief).slice(0, BRIEF_MAX) } : {}),
+            ...(group !== null ? { topic: group } : {}),
+            ...(short !== null ? { brief: short } : {}),
             actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && ACTION.test(a)).slice(0, ACTIONS_MAX),
             /* A request's card, as Parley draws it (demandes.mjs): plain data, bounded. */
             ...(request && typeof request === 'object' && !Array.isArray(request) && JSON.stringify(request).length <= REQUEST_MAX ? { request } : {}),

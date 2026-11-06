@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Tethers } from '../server/tethers.mjs';
+import { Tethers, noticeLine, noticeWord, endedLine, resultLine } from '../server/tethers.mjs';
 
 /* TETHER'S NOTICES (something that happened later to what an agent did): said once in the thread of the
    conversation whose agent did it, and that agent woken once through its docket. A fake keeper hands
@@ -39,7 +39,10 @@ test('a bounce is a warning in its conversation and wakes its agent once', (t) =
     assert.equal(said[0].kind, 'tether-notice');
     assert.equal(said[0].tone, 'warn');
     assert.equal(said[0].level, 'needs-you');
-    assert.equal(said[0].text, 'Mail came back (Work mail): The mail "Quote" to bob@example.com came back: no such mailbox.');
+    /* Keys and values, said by each screen in its language; Tether's own sentence as it wrote it; plain English for an older screen. */
+    assert.deepEqual(said[0].text, { k: 'line-notice', v: { head: { k: 'notice-mail-bounced', t: 'Mail came back' }, target: 'Work mail', text: 'The mail "Quote" to bob@example.com came back: no such mailbox.' },
+        t: 'Mail came back (Work mail): The mail "Quote" to bob@example.com came back: no such mailbox.' });
+    assert.deepEqual(said[0].topic, { k: 'line-topic-notice', t: 'Later news' });
     assert.equal(posted.length, 1);
     assert.equal(posted[0].name, 'beta');
     assert.equal(posted[0].kind, 'tether-notice');
@@ -68,7 +71,8 @@ test('a delay is news, not a warning; a chat that is off is not woken', (t) => {
     hooks.notify(bounce({ kind: 'mail.delayed', text: 'Not delivered yet; still trying.' }));
     assert.equal(said.length, 1);
     assert.equal(said[0].tone, undefined); assert.equal(said[0].level, undefined);
-    assert.match(said[0].text, /^Mail delayed/);
+    assert.equal(said[0].text.v.head.k, 'notice-mail-delayed');
+    assert.match(said[0].text.t, /^Mail delayed/);
     assert.equal(posted.length, 0);
 });
 
@@ -82,4 +86,23 @@ test('an unknown agent, or one that is no conversation, gives nothing and never 
     hooks.notify(null);
     hooks.notify({});
     assert.equal(said.length, 0); assert.equal(posted.length, 0);
+});
+
+test('each frame of a notice: with or without its target, with or without the sentence of Tether; an unknown kind is later news', () => {
+    assert.deepEqual(noticeLine('mail.sent-late', '', 'Sent at 10:02.'), { k: 'line-notice-said', v: { head: { k: 'notice-mail-sent-late', t: 'Mail sent late' }, text: 'Sent at 10:02.' }, t: 'Mail sent late: Sent at 10:02.' });
+    assert.deepEqual(noticeLine('calendar.declined', 'Work calendar', ''), { k: 'line-notice-at', v: { head: { k: 'notice-calendar-declined', t: 'Invitation declined' }, target: 'Work calendar' }, t: 'Invitation declined (Work calendar)' });
+    assert.deepEqual(noticeLine('mail.later-draft-kept', '', ''), { k: 'notice-mail-later-draft-kept', t: 'Scheduled mail sent, draft kept' });
+    assert.deepEqual(noticeLine('files.something', '', ''), { k: 'notice-later', t: 'Later news' });
+});
+
+/* Every word these lines send is one Parley's screens know (Parley 0.17.71 on). */
+test('each word of these lines is in the dictionary of the screens', async () => {
+    const { KEYS } = await import('clavarium-parley/ui');
+    const sent = [noticeLine('mail.bounced', 'a', 'b'), noticeLine('mail.bounced', '', 'b'), noticeLine('mail.bounced', 'a', ''), endedLine('x', 'yes'), resultLine('x', ''), resultLine('x', 'why'), resultLine('x')];
+    for (const kind of ['mail.bounced', 'mail.delayed', 'mail.send-failed', 'mail.later-failed', 'mail.later-unsure', 'mail.later-late', 'mail.sent-late', 'mail.later-draft-kept', 'calendar.declined', 'other']) sent.push(noticeWord(kind));
+    for (const o of ['no', 'timeout', 'withdrawn', 'stopped', '']) sent.push(endedLine('x', o));
+    const keys = new Set(['line-topic-request', 'line-topic-notice', 'line-flash', 'line-flash-device']);
+    const walk = (x) => { if (x && typeof x === 'object') { if (x.k) keys.add(x.k); Object.values(x.v ?? {}).forEach(walk); } };
+    sent.forEach(walk);
+    for (const k of keys) assert.ok(KEYS.includes(k), k);
 });

@@ -50,7 +50,40 @@ const NOTICE_HEADS = {
 };
 const NOTICE_INFO = /\.(delayed|later-late|sent-late)$/;
 export const noticeHead = (kind) => NOTICE_HEADS[kind] ?? 'Later news';
+/* The same head as a word of Parley's (notice-mail-bounced...), said in the reader's language. */
+export const noticeWord = (kind) => (Object.hasOwn(NOTICE_HEADS, kind) ? { k: `notice-${kind.replace(/\./g, '-')}`, t: NOTICE_HEADS[kind] } : { k: 'notice-later', t: 'Later news' });
 export const noticeWarns = (kind) => !NOTICE_INFO.test(String(kind ?? ''));
+
+/* A LINE IN THE READER'S WORDS (Parley 0.17.71, as a request's card since 0.17.70, demandes.mjs): a word of
+   Parley's dictionary and its values, said by each screen in its own language; `t`, the plain English an
+   older screen says. Values that are data (a verb, a name, a reason, Tether's own sentence) stay as given. */
+const said = (k, v, t) => ({ k, ...(v ? { v } : {}), t });
+const TOPIC_REQUEST = Object.freeze({ k: 'line-topic-request', t: 'Request' });
+const TOPIC_NOTICE = Object.freeze({ k: 'line-topic-notice', t: 'Later news' });
+/* A call that ended without being done (not accepted): how it ended, by its outcome. */
+const ENDED = {
+    no: ['line-refused', 'Refused'],
+    timeout: ['line-timeout', 'No answer in time'],
+    withdrawn: ['line-withdrawn', 'Withdrawn by the agent'],
+    stopped: ['line-stopped', 'Stopped'],
+};
+export function endedLine(verb, outcome) {
+    if (outcome === 'yes' || outcome === 'always') return said('line-accepted', { verb }, `Accepted: ${verb} — being done`);
+    const [k, head] = ENDED[outcome] ?? ['line-handled', 'Request handled'];
+    return said(k, { verb }, `${head}: ${verb}`);
+}
+export function resultLine(verb, error) {
+    if (error === undefined) return said('line-done', { verb }, `Done: ${verb}`);
+    const reason = String(error ?? '').trim();
+    return reason ? said('line-failed', { verb, reason }, `Failed: ${verb} — ${reason}`) : said('line-failed-plain', { verb }, `Failed: ${verb}`);
+}
+export function noticeLine(kind, target, text) {
+    const head = noticeWord(kind);
+    if (target && text) return said('line-notice', { head, target, text }, `${head.t} (${target}): ${text}`);
+    if (text) return said('line-notice-said', { head, text }, `${head.t}: ${text}`);
+    if (target) return said('line-notice-at', { head, target }, `${head.t} (${target})`);
+    return head;
+}
 
 export class Tethers {
     #keeper; #resources; #conversations; #secrets; #dockets; #timers = []; #changes = 0; #seen = new Map(); #offered; #noticed; #ended = new Map(); #acting = [];
@@ -106,7 +139,7 @@ export class Tethers {
             /* `request`: the card Parley draws (demandes.mjs); the text and its buttons stay for an older screen. */
             let request;
             try { request = demandeView(r); } catch { request = undefined; }
-            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: 'Demande', tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
+            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: TOPIC_REQUEST, tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
         }
         /* An approved call only the owner's browser can do (a device to flash): said once, with where to do it. */
         let jobs = [];
@@ -118,7 +151,9 @@ export class Tethers {
             if (!who.startsWith(AGENT)) continue;
             const name = who.slice(AGENT.length);
             this.#seen.set(j.id, { name, verb: j.verb });
-            try { this.announce(name, { kind: 'tether-job', text: `To do in your browser: ${j.args?.name ? `flash ${j.args.name}` : 'flash a device'}. Plug it in by USB here, then start.`, topic: 'Demande', tone: 'warn', actions: [`flash:${j.id}`] }); } catch { /* its chat is off */ }
+            const text = j.args?.name ? said('line-flash', { name: String(j.args.name) }, `To do in your browser: flash ${j.args.name}. Plug it in by USB here, then start.`)
+                : said('line-flash-device', undefined, 'To do in your browser: flash a device. Plug it in by USB here, then start.');
+            try { this.announce(name, { kind: 'tether-job', text, topic: TOPIC_REQUEST, tone: 'warn', actions: [`flash:${j.id}`] }); } catch { /* its chat is off */ }
         }
         for (const [id, info] of [...this.#seen]) {
             if (live.has(id)) continue;
@@ -129,8 +164,8 @@ export class Tethers {
                fail): said as being done, and its result said when Tether journals it (#tellResult). */
             const accepted = outcome === 'yes' || outcome === 'always';
             if (accepted) { this.#acting.push({ id, ...info }); if (this.#acting.length > ACTING_MAX) this.#acting.shift(); }
-            const text = accepted ? `Accepted: ${info.verb} — being done` : `Request handled: ${info.verb}${outcome ? ` (${outcome})` : ''}`;
-            try { this.announce(info.name, { kind: 'tether-done', text, topic: 'Demande', brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
+            const text = endedLine(info.verb, outcome);
+            try { this.announce(info.name, { kind: 'tether-done', text, topic: TOPIC_REQUEST, brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
         }
         for (const id of [...this.#ended.keys()]) if (!this.#seen.has(id)) this.#ended.delete(id);
     }
@@ -146,8 +181,8 @@ export class Tethers {
         if (i < 0) return;
         const [call] = this.#acting.splice(i, 1);
         const failed = l.ok === false;
-        const text = failed ? `Failed: ${call.verb}${l.error ? ` — ${l.error}` : ''}` : `Done: ${call.verb}`;
-        try { this.announce(call.name, { kind: 'tether-done', text, topic: 'Demande', ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        const text = resultLine(call.verb, failed ? (l.error ?? '') : undefined);
+        try { this.announce(call.name, { kind: 'tether-done', text, topic: TOPIC_REQUEST, ...(failed ? { tone: 'bad', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
     }
 
     /* A NOTICE (Tether calls `notify`): said once in the thread of the conversation whose agent did it,
@@ -166,12 +201,11 @@ export class Tethers {
         if (!Array.isArray(seen) || seen.includes(id)) return;
         try { this.#noticed.set([...seen, id].slice(-NOTICES_MAX)); } catch { /* said anyway, this once */ }
         const kind = String(n.kind ?? '');
-        const head = noticeHead(kind);
         const warns = noticeWarns(kind);
-        const said = String(n.text ?? '').trim();
-        const where = n.target?.title ? ` (${n.target.title})` : '';
-        const text = `${head}${where}${said ? `: ${said}` : ''}`;
-        try { this.announce?.(name, { kind: 'tether-notice', text, topic: 'Notice', ...(warns ? { tone: 'warn', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        /* Clavarium's head and frame in the reader's words; Tether's own sentence as Tether wrote it. */
+        const line = noticeLine(kind, n.target?.title ? String(n.target.title) : '', String(n.text ?? '').trim());
+        const text = line.t;
+        try { this.announce?.(name, { kind: 'tether-notice', text: line, topic: TOPIC_NOTICE, ...(warns ? { tone: 'warn', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
         try {
             if (this.#dockets?.on(name)) {
                 this.#dockets.post(name, { kind: 'tether-notice', text: `${text}${/[.!?]$/.test(text) ? '' : '.'} See more: tether notices.`,
