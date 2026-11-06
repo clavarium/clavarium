@@ -120,3 +120,15 @@ test('a contact changed or deleted: the card names who it is now (Tether reads i
     const up = demandeView({ id: 'r10', card: { kind: 'contacts', action: 'update', id: 'abc123', phone: '+33 6 00 00 00 00', about: { name: 'Alice Martin', email: 'alice@example.com' } } });
     assert.match(JSON.stringify(up.title), /Alice Martin/);
 });
+
+test('a reply card says to whom, with the address (06-11): the original sender, outside the domain marked', async () => {
+    const { demandeView } = await import('../server/demandes.mjs');
+    const v = demandeView({ id: 'r1', card: { kind: 'mail', action: 'reply', self: 'me@example.org', about: { from: 'Gabrielle <gabrielle@example.com>', subject: 'Pour Suez' }, body: 'Ok pour moi' } });
+    const to = JSON.stringify(v.facts);
+    assert.ok(to.includes('gabrielle@example.com'), to);
+    assert.ok(to.includes('"ext":true'), 'outside the domain marked');
+    assert.equal(v.irreversible, true);
+    const all = demandeView({ id: 'r2', card: { kind: 'mail', action: 'reply', all: true, self: 'me@example.org', about: { from: 'a@example.org', to: ['me@example.org', 'b@example.org'], cc: ['c@example.com'] } } });
+    const s = JSON.stringify(all.facts);
+    assert.ok(s.includes('b@example.org') && s.includes('c@example.com') && !s.includes('"me@example.org"'), s);
+});

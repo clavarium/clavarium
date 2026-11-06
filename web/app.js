@@ -6207,6 +6207,10 @@
             const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes: [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value), days: days === 'never' ? null : Number(days) });
             apiKeyFormShown(false);
             $('apikeys-secret').value = r.secret; $('apikeys-once').hidden = false;
+            /* 06-11 (the owner): the configuration an AI tool takes, ready to paste -- its MCP door and the key, shown this once too. */
+            const slug = (appName || 'clavarium').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'clavarium';
+            $('apikeys-config').textContent = JSON.stringify({ mcpServers: { [slug]: { type: 'http', url: `${location.origin}/api/ext/mcp`, headers: { Authorization: `Bearer ${r.secret}` } } } }, null, 2);
+            $('apikeys-curl').textContent = `curl -H "Authorization: Bearer ${r.secret}" ${location.origin}/api/ext/v1/status`;
         } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; return; }
         await paintApiKeys();
     });
@@ -6217,7 +6221,13 @@
         setTimeout(() => { b.textContent = uiSaid('set-apikeys-copy', 'Copy'); }, 2500);
     });
     /* Done: the secret leaves the page too. */
-    $('apikeys-done').addEventListener('click', () => { $('apikeys-secret').value = ''; $('apikeys-once').hidden = true; });
+    $('apikeys-config-copy').addEventListener('click', async () => {
+        const b = $('apikeys-config-copy'); const pre = $('apikeys-config');
+        try { await navigator.clipboard.writeText(pre.textContent); b.textContent = uiSaid('set-apikeys-copied', 'Copied'); }
+        catch { const range = document.createRange(); range.selectNodeContents(pre); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); b.textContent = uiSaid('set-apikeys-select', 'Selected: copy it'); }
+        setTimeout(() => { b.textContent = uiSaid('set-apikeys-config-copy', 'Copy the configuration'); }, 2500);
+    });
+    $('apikeys-done').addEventListener('click', () => { $('apikeys-secret').value = ''; $('apikeys-config').textContent = ''; $('apikeys-curl').textContent = ''; $('apikeys-once').hidden = true; });
     function showPassword(email, password) {
         $('operators-password-for').textContent = email; $('operators-password-value').value = password; $('operators-password').hidden = false;
     }

@@ -2777,3 +2777,7 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .mail-acts { display: flex; flex-wrap: wrap; gap: 8px; }
 #viewer .mail-reply { min-height: 40px; padding: 0 16px; border: 1px solid var(--brass); border-radius: 8px; background: transparent; color: var(--brass-ink); font-weight: 600; }
 .mail-state .mail-state-line { font-weight: 600; color: var(--ink); text-align: center; }
+
+/* An API key's configuration, shown with it once (06-11). */
+.apikeys-config { margin: 6px 0; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); font: .8125rem/1.45 var(--mono, ui-monospace, monospace); white-space: pre; overflow-x: auto; max-width: 100%; }
+.apikeys-curl code { word-break: break-all; font-size: .75rem; }
