@@ -1088,7 +1088,8 @@
        back to the list. Another one picked while one is open takes the
        place of the first (the list is still one Back away). */
     function select(name, { step = false } = {}) {
-        if (name !== current) { disconnect(); terminal.reset(); }
+        /* Another one: the chat of the one before goes at once -- never shown under this one's name while its own loads. */
+        if (name !== current) { disconnect(); terminal.reset(); thread?.destroy(); thread = null; threadOf = ''; }
         current = name;
         /* The strip over the terminal is the one of the conversation now open, at once -- never the last one's until the next look. */
         paintHealth();
@@ -1105,14 +1106,22 @@
         paint();
         enter();
         void chatFirst();
-        /* Opening a conversation gets the list out of the way, so its room has the room;
-           the "»" button brings the list back. Only on a real pick by the owner, never on a
-           device or when deselecting. */
-        if (step && name && !DEVICE && !listFolded && !listPinned) {
-            listFolded = true;
-            try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
-            applyFold(true); fit.fit?.();
-        }
+        if (step && name) foldOnOpen();
+    }
+    /* Opening a conversation or a room gets the list out of the way, so it has the room;
+       the "»" button brings the list back. Only on a real pick by the owner, never on a
+       device or when deselecting. */
+    function foldOnOpen() {
+        if (DEVICE || listFolded || listPinned) return;
+        listFolded = true;
+        try { localStorage.setItem('clavarium-list', 'folded'); } catch { /* a private window */ }
+        applyFold(true); fit.fit?.();
+    }
+    /* NEW CONTENT FADES IN, barely (style.css .fade-in, none under reduced motion): never a delay before it shows. */
+    function fadeIn(box) {
+        if (!box) return;
+        box.classList.remove('fade-in'); void box.offsetWidth; box.classList.add('fade-in');
+        box.addEventListener('animationend', () => box.classList.remove('fade-in'), { once: true });
     }
 
     /* ---------- THE NAME OF THIS CLAVARIUM (server/instance.mjs) ----------
@@ -1348,7 +1357,7 @@
         if (thinkingOf(r).length) b.dataset.live = 'true';
         if (r.last) b.dataset.when = 'true';
         if (r.id === roomOpenNow()) b.setAttribute('aria-current', 'true');
-        b.addEventListener('click', () => { void openSalon(r.id); });
+        b.addEventListener('click', () => { void openSalon(r.id, true, { step: true }); });
         return b;
     }
     /* What was just unfolded comes in gently, once (the next paints show it as it is). */
@@ -2145,8 +2154,9 @@
         listsShown = true; $('clists').hidden = false; paintViews();
         if (listsView && listsOf === current) { if (at) await listsView.go(at); else void listsView.refresh(); listsAddress(listsView.place); return; }
         const name = current; listsOf = name;
-        listsView = null;
-        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name, place: at, steps: listsSteps });
+        /* The binders of the one before go at once: never shown under this one's name while its own load. */
+        listsView?.destroy(); listsView = null; $('clists-binder').replaceChildren();
+        const view = await mountBinder($('clists-binder'), (l) => Boolean(l.grants?.[`conversation:${name}`]), { of: () => name, place: at, steps: listsSteps, still: () => listsOf === name && current === name });
         if (listsOf === name) listsView = view;
     }
     function closeRoomLists() {
@@ -2947,10 +2957,13 @@
         /* Whether it is on, nothing of the thread: asked every few seconds. */
         /* No answer (the network cut for a moment, the server restarting): what was known is kept. Taken
            for "off", the chat would be taken down and drawn again -- its box with it, and a tablet's keyboard. */
-        const known = talkOf === current ? talk : null;
+        const name = current;
+        const known = talkOf === name ? talk : null;
         const off = { on: false, messages: [] };
-        talk = await fetch(talkPath(current, '', { state: 1 })).then((r) => (r.ok ? r.json() : r.status >= 500 ? known ?? off : off)).catch(() => known ?? off);
-        talkOf = current;
+        const got = await fetch(talkPath(name, '', { state: 1 })).then((r) => (r.ok ? r.json() : r.status >= 500 ? known ?? off : off)).catch(() => known ?? off);
+        /* Asked for the one before, answered once another was open: not taken for this one's. */
+        if (name !== current) return talk;
+        talk = got; talkOf = name;
         return talk;
     }
     async function paintThread() {
@@ -2978,10 +2991,10 @@
         paintSimple();
         if (!wanted) { thread?.destroy(); thread = null; threadOf = ''; return; }
         if (thread && threadOf === current) { void thread.refresh(); return; }
-        thread?.destroy();
+        thread?.destroy(); thread = null; threadOf = '';
+        const name = current;
         /* From where this page is: a device's page lives under /c/, and nothing else is open to it. */
         const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL(DEVICE ? '/c/' : '/', location.href)).href), readWords()]);
-        const name = current;
         if (name !== current || (thread && threadOf === current)) return;
         threadOf = name;
         /* The short-lived secrets live in this conversation now (secret-scan.mjs): the chat shows each as
@@ -2997,12 +3010,13 @@
             for (const m of data.messages) if (m.from === 'system') lines.set(m.id, m);
             return data.since === true ? { ...data, messages: [...data.messages.filter((m) => m.from !== 'system'), ...lines.values()] } : data;
         };
+        let first = true;
         thread = mount(box, {
             words, view: chatView,
             onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             /* A part of the thread: its end at first, then what changed, the page before on demand (Parley's window). */
             window: windowFor(chatWindow),
-            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)).then((data) => (refreshSecrets(), data)),
+            load: (asked = {}) => fetch(talkPath(name, '', asked)).then((r) => r.json()).then((data) => withLines(data, asked)).then(machineLines).then((data) => withMachine(data, name)).then((data) => { refreshSecrets(); if (first) { first = false; fadeIn(box); } return data; }),
             /* The whole thread searched, however little of it is shown. */
             search: (q) => fetch(talkPath(name, '/search', { q })).then((r) => (r.ok ? r.json() : { matches: [], count: 0 })),
             /* `via: 'voice'`: part of it was dictated, said to the tool. */
@@ -4914,11 +4928,14 @@
     }
     /* A Tether target given from Attach: Read watches, Write proposes (asks before each action). */
     const targetLevel = (level) => (level === 'write' ? 'propose' : 'watch');
+    let assetsPainting = 0;
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
         watchTether();
+        const mine = ++assetsPainting;
         const [all, boxes, secrets, keys, lists, tether, assetGroups] = await Promise.all([getJson('/resources', []), getJson('/mailboxes', []), getJson('/secrets', []), getJson('/git-keys', []), binderCall('lists', {}), getJson('/tether', {}), getJson('/asset-groups', []), readDevices()]);
-        if (place !== 'assets') return;
+        /* A later paint asked meanwhile: it draws, with what it read (never this older reading over it). */
+        if (place !== 'assets' || mine !== assetsPainting) return;
         paintKeys(keys);
         markSecrets(secrets);
         const items = [];
@@ -4954,7 +4971,7 @@
         const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
         const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
         $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
-        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) groupGiveShow.clear(); assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
+        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupGiveShow.clear(); clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
         /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
         const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: ASSET_KINDS });
         paintAssetsView(model.view);
@@ -4967,10 +4984,7 @@
             onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
             onGroup: (id) => choose(`group:${id}`), noMatch: 'Nothing by that name.' });
         if (model.view === 'group') dragToGroups($('assets-rows'));
-        const detail = $('assets-detail');
-        /* The forms go back to where they wait before the detail is drawn again. */
-        for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
-        detail.replaceChildren();
+        const detail = clearAssetDetail();
         const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
         if (assetsAdding) {
             /* The New asset box: from the map's "+" of Assets, which kind first ("<" goes back to the map);
@@ -5233,6 +5247,13 @@
         void paintAssets();
     }
     /* One asset of the place opened (or a form to make one): a step; another one takes its place. */
+    /* The detail emptied (its forms back where they wait): another asset picked shows nothing of the one before while it is read. */
+    function clearAssetDetail() {
+        const detail = $('assets-detail');
+        for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
+        detail.replaceChildren();
+        return detail;
+    }
     function placeAssetStep() {
         const a = nav.last(['asset']);
         if (a >= 0 && a > nav.last(['place'])) { nav.cut(a + 1); return; }
@@ -5294,40 +5315,84 @@
         if (dot) { dot.dataset.state = who.length ? 'work' : 'ok'; dot.title = who.length ? speaking(who) : ''; }
         if (line) { line.hidden = who.length === 0; line.textContent = who.length ? speaking(who) : ''; }
     }
-    function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
-    async function openSalon(id, push = true) {
-        if (DEVICE) return;
-        await loadRooms();
-        const r = rooms.find((x) => x.id === id); if (!r) return;
-        enterPlace('salon', push);
-        salonLeft(); salonId = id;
-        /* The list marks this room, and no conversation, at once. */
-        paint();
+    let salonAsked = 0;
+    /* A room's bar: its name, its state, its members (folded). */
+    function salonHead(r) {
         $('salon-name').textContent = r.name;
         salonLive(thinkingOf(r));
         $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
         $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
         const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? 'People' : k === 'ai' ? 'AIs' : 'Boxes'), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', 'host')); return x; })); return row; }).filter(Boolean);
         $('salon-members').replaceChildren(...rows);
+    }
+    function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
+    /* `step`: picked by the owner (the list, the deck): as a conversation picked, the list folds. */
+    async function openSalon(id, push = true, { step = false } = {}) {
+        if (DEVICE) return;
+        const mine = ++salonAsked;
+        /* The same room again: as the same conversation again, read again, not drawn again (its draft, where it was). */
+        if (place === 'salon' && salonId === id && salonThread) {
+            void salonThread.refresh();
+            /* Shown by an address (Forward, a reload) with no step: picked, it takes one, as a conversation does -- Back and Escape go to the list. */
+            if (step && nav.last(['place']) < 0) { placeFrom = 'list'; nav.push('place', ({ quiet }) => leftPlace(quiet), { address: placeAddress() }); }
+            if (step) foldOnOpen();
+            return;
+        }
+        /* Known (the list read the rooms): opened at once, read again behind; else read first. */
+        if (!rooms.some((x) => x.id === id)) await loadRooms();
+        else void loadRooms().then(() => { const fresh = rooms.find((x) => x.id === id); if (fresh && salonId === id && place === 'salon') salonHead(fresh); });
+        /* Another room asked meanwhile: that one is shown, not this one (an answer come late). */
+        if (mine !== salonAsked) return;
+        const r = rooms.find((x) => x.id === id); if (!r) return;
+        /* Picked in the list while a conversation is open: it takes that one's place, as another conversation
+           would -- Back (Escape) goes to the list, not to the conversation left. */
+        if (step && place === 'conversations' && current) select('');
+        enterPlace('salon', push);
+        salonLeft(); salonId = id;
+        /* Its address names it: a reload, Back and Forward find it again. */
+        remember();
+        /* The list marks this room, and no conversation, at once. */
+        paint();
+        salonHead(r);
+        /* What the room before said of its AIs (« Chef is thinking… ») goes with it. */
+        $('salon-thinking').hidden = true; $('salon-thinking').replaceChildren();
+        if (step) foldOnOpen();
         const [{ mount }, words] = await Promise.all([import(new URL('vendor/parley-ui.js', new URL('/', location.href)).href), readWords()]);
-        if (salonId !== id) return;
+        if (salonId !== id || mine !== salonAsked) return;
+        let first = true;
         $('salon-thread').dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
         salonThread = mount($('salon-thread'), {
             words, markdown: true, agentName: '',
             /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat. */
             schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label }); } } },
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
+                /* Read for a room no longer shown: its words go nowhere (Parley drops them with its screen). */
+                if (salonId !== id || place !== 'salon') return d;
+                /* Read, it is seen (the server says so): its count in the list goes at once, as a conversation's. */
+                const seen = rooms.find((x) => x.id === id);
+                if (seen?.unread) { seen.unread = 0; paint(); }
+                if (first) {
+                    first = false; fadeIn($('salon-thread'));
+                    /* Its box takes what is typed, as a conversation's chat does (never on a touch screen: no keyboard raised). */
+                    requestAnimationFrame(() => { if (salonId === id && !touchScreen && !writingIn()) $('salon-thread').querySelector('textarea.parley-box')?.focus({ preventScroll: true }); });
+                }
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
                 const who = thinkingOf(d);
-                $('salon-thinking').hidden = who.length === 0;
-                $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
+                /* What they say they do (06-11): on this line, « Thomas : je demande à MSM… », never in the thread. */
+                const doing = (Array.isArray(d.doing) ? d.doing : []).filter((x) => x && typeof x.name === 'string' && typeof x.text === 'string' && x.text);
+                $('salon-thinking').hidden = who.length === 0 && doing.length === 0;
+                if (doing.length) $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(doing.map((x) => `${x.name} : ${x.text}`).join(' \u00b7 ')));
+                else $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
                 /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
                 salonLive(who);
                 const known = rooms.find((x) => x.id === id);
                 if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
                 return d;
             }),
-            send: (text) => post(`${API}/rooms/${id}/talk`, { text }),
+            send: (text, answers, files) => post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) }),
+            /* A file attached in a room (06-11): as in a conversation's chat; kept in the room, a copy to each AI the message goes to. */
+            attach: { upload: async (file) => { const x = await fetch(`${API}/rooms/${id}/talk/file?${new URLSearchParams({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }); const j = await x.json().catch(() => ({})); if (!x.ok) throw new Error(j.error || 'The file could not be sent.'); return j; } },
+            open: (file) => { if (!String(file.open ?? '').startsWith('room:')) return; const inner = file.open.slice('room:'.length); void preview('room', inner, file.name || inner.split('/').pop(), file.size ?? 0, `${API}/rooms/${id}/file?${new URLSearchParams({ p: inner })}`, { within: r.name }); },
             /* The same chat as a conversation's (03-11): its view, its formulas, its dictation, its keyboard rule. */
             view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
@@ -5714,7 +5779,8 @@
         $('salon').hidden = which !== 'salon'; $('salon-new').hidden = which !== 'salon-new';
         /* The places of the whole have a part of the page of their own, over the conversation (03-11). */
         $('places').hidden = !['access', 'settings', 'assets', 'deck', 'new', 'salon', 'salon-new'].includes(which);
-        if (which !== 'salon') { try { salonLeft(); } catch { /* not yet set up */ } }
+        /* A room left: its row no longer marked (as a conversation left). */
+        if (which !== 'salon') { try { const was = salonId; salonLeft(); if (was) paint(); } catch { /* not yet set up */ } }
         $('newconv').hidden = which !== 'new';
         if (which !== 'access') composing = false;
         /* What the conversation had open (its tab) waits under the place, as it was. */
@@ -5725,6 +5791,7 @@
         const q = new URLSearchParams();
         if (current) q.set('c', current);
         if (place !== 'conversations') q.set('open', place);
+        if (place === 'salon' && roomOpenNow()) q.set('room', roomOpenNow());
         if (place === 'assets' && assetOpen) q.set('a', assetOpen);
         if (place === 'assets' && assetOpen && assetOpen === listOpen && assetsView?.place.page === 'card') q.set('card', assetsView.place.card);
         if (place === 'access') { q.set('tab', accessTab === 'map' && mapMode === 'flows' ? 'flows' : accessTab); if (accessFor) q.set('for', accessFor); }
@@ -5802,12 +5869,14 @@
     /* What a page drew from the lists, to know when they changed. */
     function binderSig(lists) { return JSON.stringify((Array.isArray(lists) ? lists : []).map((l) => [l.id, l.title, l.archived, l.count, l.grants])); }
     /* `of`: the conversation its cards are of (its Binders tab); else the one the list was given to. */
-    async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null } = {}) {
+    /* `still()`: whether it is still wanted once its parts are read (another one asked meanwhile: not drawn). */
+    async function mountBinder(holder, keep, { onLists, of, place: at = null, steps = null, still = () => true } = {}) {
         binderParts ??= Promise.all([import(new URL('vendor/binder-ui.js', new URL('/', location.href)).href), fetch(`/vendor/binder-${binderLang()}.json`).then((r) => r.json()).catch(() => ({}))]);
         const [[{ mount }, words], seen] = await Promise.all([binderParts, getJson('/binder/people', null)]);
         if (seen) { binderPeople = seen.people; binderChanges = seen.changes; }
-        if (!holder.isConnected) return null;
+        if (!holder.isConnected || !still()) return null;
         let shown = [];
+        let first = true; let showing = null;
         const whose = () => {
             if (of) return of();
             const given = [...new Set(shown.flatMap((l) => Object.keys(l.grants ?? {})).filter((k) => k.startsWith('conversation:')).map((k) => k.slice('conversation:'.length)))];
@@ -5816,8 +5885,16 @@
         const view = mount(holder, {
             words, lang: binderLang(), people: () => binderPeople,
             call: async (op, args) => {
-                const r = await binderCall(op, args);
+                const asked = binderCall(op, args);
+                if (op === 'show') showing = asked;
+                let r = await asked;
+                /* A binder read, answered after another was asked (one binder picked, then another): the last one
+                   asked is what Binder shows, never this late answer painted under the other's tab (clavarium-binder
+                   load() keeps no order of its own). */
+                if (op === 'show') for (let seen = asked; seen !== showing;) { seen = showing; r = await seen; }
                 if (op === 'lists' && r.ok && Array.isArray(r.data)) { onLists?.(r.data); r.data = r.data.filter(keep); shown = r.data; }
+                /* Its first binder read: drawn now, barely faded in. */
+                if (op === 'show' && first) { first = false; fadeIn(holder); }
                 return r;
             },
             /* A thing attached opens where this page opens it. */
@@ -6065,6 +6142,7 @@
         const open = q.get('open') ?? '';
         if (open === 'new') { await openNew({ push: false }); return; }
         if (open === 'deck') { openDeck(false); return; }
+        if (open === 'salon' && q.get('room')) { await openSalon(q.get('room'), false); return; }
         if (open === 'settings') {
             await openSettings({ push: false });
             /* A link to one chapter of Settings (?open=settings&at=resources): that one opened, and shown. */

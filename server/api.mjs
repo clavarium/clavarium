@@ -96,7 +96,9 @@
  *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids]}
  *   POST /api/rooms/<id>/remove             the room and its thread
  *   GET  /api/rooms/<id>/talk?last=         its thread, with the room: {room, messages, ...}
- *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids]}: said in it; to its host, or to the AIs named
+ *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids], files?}: said in it; to its host, or to the AIs named
+ *   POST /api/rooms/<id>/talk/file?name=    the body IS a file the person attaches there -> {path, name, size}
+ *   GET  /api/rooms/<id>/file?p=<id>/<name> a file attached in it
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
@@ -299,6 +301,15 @@ export async function handleApi(request, response, conversations, headers, resou
             /* Rooms (#268, rooms.mjs): a thread shared by several AIs, the person and boxes. */
             if (pathname === '/api/rooms' && rooms) return send(200, rooms.list()), true;
             const roomTalk = /^\/api\/rooms\/([0-9a-f-]{36})\/talk$/.exec(pathname);
+            /* A file attached in a room, opened from its thread. */
+            const roomFile = /^\/api\/rooms\/([0-9a-f-]{36})\/file$/.exec(pathname);
+            if (roomFile && rooms) {
+                const file = await download(rooms.filesOf(roomFile[1]), query.get('p') ?? '');
+                response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
+                    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
+                file.stream.pipe(response);
+                return true;
+            }
             if (roomTalk && rooms) { const last = Number(query.get('last')); return send(200, rooms.read(roomTalk[1], Number.isInteger(last) && last > 0 ? { last } : undefined)), true; }
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
             /* Which providers and kinds an account can be connected for here. */
@@ -433,6 +444,12 @@ export async function handleApi(request, response, conversations, headers, resou
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
             return send(201, await talk.attach(decodeURIComponent(attaching[1]), query.get('name') ?? '', request)), true;
         }
+        /* A file the person attaches in a room (06-11): the same as in a chat, kept in the room. */
+        const roomAttaching = /^\/api\/rooms\/([0-9a-f-]{36})\/talk\/file$/.exec(pathname);
+        if (roomAttaching && rooms) {
+            if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
+            return send(201, await rooms.attach(roomAttaching[1], query.get('name') ?? '', request)), true;
+        }
         /* A flow with its files, sent from the page: the body is the .tar.gz. */
         if (pathname === '/api/setup/bundle' && setup && bundles) {
             if (!originOk(request.headers) || request.headers['content-type'] !== 'application/octet-stream') return send(403, { error: 'This request does not come from this site.' }), true;
@@ -450,7 +467,7 @@ export async function handleApi(request, response, conversations, headers, resou
             const r = /^\/api\/rooms\/([0-9a-f-]{36})(\/remove|\/talk)?$/.exec(pathname);
             if (r && !r[2]) return send(200, rooms.change(r[1], body ?? {})), true;
             if (r && r[2] === '/remove') { rooms.remove(r[1]); return send(200, { removed: r[1] }), true; }
-            if (r && r[2] === '/talk') return send(201, await rooms.say(r[1], body?.text, { to: body?.to })), true;
+            if (r && r[2] === '/talk') return send(201, await rooms.say(r[1], body?.text, { to: body?.to, files: body?.files })), true;
         }
         if (pathname === '/api/conversations') {
             await conversations.admit?.(body);

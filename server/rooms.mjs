@@ -14,9 +14,11 @@
  *
  * Each conversation of a room is told which rooms it is in, and who is there (Parley's rooms.json).
  */
-import { mkdirSync, rmSync } from 'node:fs';
+import { createReadStream, lstatSync, mkdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { Parley } from 'clavarium-parley/host';
+import { join } from 'node:path';
+import { Parley, FILES_MAX } from 'clavarium-parley/host';
+import { importFile } from './files.mjs';
 import { Refusal } from './conversations.mjs';
 import { scan } from './secret-scan.mjs';
 
@@ -28,6 +30,11 @@ export const HOPS_MAX = 8;
 /* How long an AI given a message is said to be thinking, at most (it may never answer). */
 export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
+/* A FILE THE PERSON ATTACHES IN A ROOM (06-11: a room carries what the chat carries): kept in the room's own folder
+   (rooms/<id>/attached/<uuid>/<name>), named in its thread by ROOM_FILE's path; a copy goes to each AI the message
+   goes to, attached in its own chat as the person attaches one there (talk.attach) -- never to the others. */
+export const ATTACHED_DIR = 'attached';
+const ROOM_FILE = /^\/room\/attached\/([0-9a-f-]{36})\/([^/]+)$/;
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
 
 /* A SECRET IN A ROOM (06-11): a room's thread is read by all its members, now and later -- a token, a key pasted
@@ -40,17 +47,18 @@ export const masked = (text) => { const str = String(text ?? ''); const hits = s
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
 
 export class Rooms {
-    #file; #dir; #say; #rooms; #conversations; #boxes; #now; #speak; #hops = new Map(); #thinking = new Map();
+    #file; #dir; #say; #attach; #rooms; #conversations; #boxes; #now; #speak; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
-       conversation's own chat (talk.say); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
+       conversation's own chat (talk.say; its 4th argument the paths of its files there); attach(name, fileName,
+       request): a file put in a conversation's chat as the person attaches one (talk.attach); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
        conversations(): the conversations there are; boxes(): the voice boxes there are. */
-    constructor({ file, dir, say, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date() }) {
-        this.#speak = speak;
+    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date() }) {
+        this.#speak = speak; this.#attach = attach;
         this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
     #save(list) { this.#file.set(list); this.#tellConversations(list); }
-    #thread(id) { mkdirSync(`${this.#dir}/${id}`, { recursive: true }); return new Parley(`${this.#dir}/${id}`, { room: true, now: this.#now }); }
+    #thread(id) { mkdirSync(`${this.#dir}/${id}`, { recursive: true }); return new Parley(`${this.#dir}/${id}`, { room: true, now: this.#now, reach: (path) => { const m = ROOM_FILE.exec(String(path ?? '')); return m ? `room:${m[1]}/${m[2]}` : null; } }); }
     #find(id) { const r = this.#all().find((x) => x.id === id); if (!r) throw new Refusal(404, 'No such room.'); return r; }
 
     /* Its members as they are now: names of the moment (a conversation renamed, a box renamed). */
@@ -64,7 +72,8 @@ export class Rooms {
             .map((m) => { const name = m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name;
                 return { id: m.id, kind: m.kind, name, ref: m.ref, look: lookOf(m.kind === 'ai' ? titles.get(m.ref) : name), ...(m.id === room.host ? { host: true } : {}) }; });
     }
-    #think(room, member, on) { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, Date.now()); else m.delete(member); this.#thinking.set(room, m); }
+    /* Who works for the room now, and what it says it does (06-11: « je fais… » on the status line, never in the thread). */
+    #think(room, member, on, text = '') { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, { at: Date.now(), text: String(text ?? '').slice(0, 160) }); else m.delete(member); this.#thinking.set(room, m); }
     has(id) { return this.#all().some((r) => r.id === id); }
     /* What came since the owner last looked (#282): the AIs' and the boxes' messages after it. */
     #unread(r) { try { const seen = Date.parse(r.seen ?? '') || 0; return this.#thread(r.id).read({ last: 200 }).messages.filter((m) => (m.from === 'agent' || m.by) && (Date.parse(m.at) || 0) > seen).length; } catch { return 0; } }
@@ -72,7 +81,8 @@ export class Rooms {
     #last(r) { try { const m = this.#thread(r.id).read({ last: 1 }).messages.at(-1); return m ? { at: m.at, text: String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(m.by?.name ? { by: m.by.name } : {}) } : null; } catch { return null; } }
     /* Who has a message of the room and has not answered yet (#282), by their names of the moment: « Hugo parle… »
        in its row of the list and on its bar, « Hugo réfléchit… » in its thread. */
-    #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, at]) => Date.now() - at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
+    #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => Date.now() - v.at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
+    #doingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => v.text && Date.now() - v.at < THINKING_MS).map(([mid, v]) => ({ name: members.find((m) => m.id === mid)?.name, text: v.text })).filter((x) => x.name); }
     list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members) }; }); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
 
@@ -137,27 +147,59 @@ export class Rooms {
         /* A member named in a text (@{id}): its name of the moment, on the screen. */
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
         if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
-        const thinking = this.#thinkingOf(id, members);
-        return { room: this.get(id), thinking, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
+        const thinking = this.#thinkingOf(id, members); const doing = this.#doingOf(id, members);
+        return { room: this.get(id), thinking, doing, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
+    }
+
+    /* A FILE THE PERSON ATTACHES, before the message that carries it: the same checks as in a conversation's chat
+       (its name, its size: importFile). Resolves with its path in the room, what the message then carries. */
+    async attach(id, fileName, request) {
+        const room = this.#find(id);
+        const root = join(this.#dir, room.id, ATTACHED_DIR); const one = randomUUID();
+        mkdirSync(join(root, one), { recursive: true });
+        try {
+            const kept = await importFile(root, one, String(fileName ?? ''), request);
+            return { path: `/room/${ATTACHED_DIR}/${one}/${kept.name}`, name: kept.name, size: kept.size };
+        } catch (error) { rmSync(join(root, one), { recursive: true, force: true }); throw error; }
+    }
+    /* Where its files are, for one to be read (files.mjs download walks in it). */
+    filesOf(id) { const room = this.#find(id); const root = join(this.#dir, room.id, ATTACHED_DIR); mkdirSync(root, { recursive: true }); return root; }
+    /* The files a message carries: only those attached in this room first, each there. */
+    #filesSaid(roomId, files) {
+        const given = files === undefined || files === null ? [] : files;
+        if (!Array.isArray(given) || given.length > FILES_MAX) throw new Refusal(400, `A message has ${FILES_MAX} files at most.`);
+        return given.map((item) => {
+            const path = item && typeof item === 'object' ? item.path : item;
+            const m = typeof path === 'string' ? ROOM_FILE.exec(path) : null;
+            const file = m ? join(this.#dir, roomId, ATTACHED_DIR, m[1], m[2]) : undefined;
+            const info = file ? lstatSync(file, { throwIfNoEntry: false }) : undefined;
+            if (!info?.isFile()) throw new Refusal(400, 'A file of this message was not attached here first.');
+            return { path, name: m[2], size: info.size, file };
+        });
     }
 
     /* SOMEONE OF THE PERSON'S SIDE SPEAKS (the person here, a box): kept in the room, given to the host -- or to the
-       AIs named (to: their member ids). */
-    async say(id, text, { by, box, to } = {}) {
+       AIs named (to: their member ids). Its files (paths from attach): in the thread, and a copy to each of those AIs. */
+    async say(id, text, { by, box, to, files } = {}) {
         const room = this.#find(id); const members = this.#shown(room);
         /* A box bound to this room speaks in it in its own name (#281): found by its box id. */
         const who = box ? members.find((m) => m.kind === 'box' && m.ref === box) : by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
         if (!who) throw new Refusal(400, 'Not a member of this room.');
+        const attached = this.#filesSaid(room.id, files);
         const t = this.#thread(room.id);
         this.#hops.set(room.id, 0);
         /* The owner is the room's own side (no name over their words, as in any chat); anyone else is named. */
-        const now = t.say(masked(text), undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } });
+        let now;
+        try { now = t.say(masked(text), undefined, attached.map(({ path, name, size }) => ({ path, name, size })), who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } }); } catch (error) { if (error instanceof RangeError) throw new Refusal(400, error.message); throw error; }
         const said = now.messages.at(-1);
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
         for (const ai of named.length ? named : host ? [host] : []) {
             this.#think(room.id, ai.id, true);
-            await this.#say(ai.ref, text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } });
+            /* Its own copy of each file, in its chat's files: as if attached there (a fresh read of the room's file). */
+            const copies = [];
+            for (const f of attached) { const stream = createReadStream(f.file); stream.headers = { 'content-length': String(f.size) }; copies.push((await this.#attach(ai.ref, f.name, stream)).path); }
+            await this.#say(ai.ref, text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } }, ...(copies.length ? [copies] : []));
         }
         /* Handed to its AIs: read, as a conversation's agent would say it (06-11: the clock stayed on every message). */
         try { t.seen?.(); } catch { /* an older Parley */ }
@@ -176,7 +218,15 @@ export class Rooms {
         const all = () => t.read({ all: true }).messages;
         const find = (id) => (typeof id === 'string' && id.length >= 8 ? all().find((m) => m.id.startsWith(id)) : undefined);
         const re = find(entry.re)?.id;
-        if (kind !== 'doing') this.#think(room.id, me.id, false);
+        /* What it does: on the room's status line only, never a line of its thread (06-11, the owner's choice). */
+        if (kind === 'doing') {
+            this.#think(room.id, me.id, true, masked(entry.text));
+            /* A box it is said to still says it aloud (first, at once, what it is about to do). */
+            const boxes = (Array.isArray(entry.to) ? entry.to : []).map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
+            if (boxes.length) try { this.#speak(`room:${room.id}`, masked(entry.text), boxes, { doing: true, asked: false }); } catch { /* the boxes' */ }
+            return 'doing';
+        }
+        this.#think(room.id, me.id, false);
         const ids = new Set(members.map((m) => m.id));
         const to = Array.isArray(entry.to) ? entry.to.filter((x) => ids.has(x) && x !== me.id) : [];
         /* The other AIs it is sent to (#280): they get it in their own chat, as said in the room -- never beyond a few

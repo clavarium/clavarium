@@ -2,11 +2,14 @@
    answer comes back signed by where it came from, and only into a room it is in. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Rooms, lookOf } from '../server/rooms.mjs';
 import { JsonFile } from '../server/store.mjs';
+import { importFile, IMPORT_MAX } from '../server/files.mjs';
 
 const setup = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
@@ -154,6 +157,10 @@ test('the list says who of a room is speaking now (its row: « Hugo parle… »)
     assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'handed on: the other one speaks now');
     rooms.answered('compta', { room: r.id, text: 'Je regarde.' }, 'doing');
     assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'still at it while it says what it does');
+    /* « Je fais… » on the status line, never in the thread (06-11). */
+    const shown = rooms.read(r.id);
+    assert.deepEqual(shown.doing, [{ name: 'Compta', text: 'Je regarde.' }]);
+    assert.ok(!shown.messages.some((m) => m.text === 'Je regarde.'), 'not a line of the thread');
     rooms.answered('compta', { room: r.id, text: 'Là aussi.' });
     assert.deepEqual(rooms.list()[0].thinking, [], 'done: nobody');
     assert.equal(rooms.list()[0].last.text, 'Là aussi.');
@@ -187,4 +194,64 @@ test('a secret in a room (06-11): never kept in its thread (stars), given only t
     const all = JSON.stringify(rooms.read(r.id).messages);
     assert.ok(!all.includes(key), 'never in the thread');
     assert.ok(!said.slice(1).some((x) => String(x.text).includes(key)), 'never handed from one AI to another');
+});
+
+/* A FILE ATTACHED IN A ROOM (06-11): kept in the room's thread; a copy, attached in its own chat, to each AI the
+   message goes to -- never to the others. The same checks as a conversation's chat (name, size). */
+const asked = (bytes) => { const r = Readable.from([Buffer.from(bytes)]); r.headers = { 'content-length': String(Buffer.byteLength(bytes)) }; return r; };
+const withFiles = (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'roomfiles-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const said = []; const copied = [];
+    const convs = [{ name: 'hugo' }, { name: 'compta' }, { name: 'jardin' }];
+    /* As talk.attach: each conversation's files folder, a folder of its own per file. */
+    const attach = async (name, fileName, request) => {
+        const root = join(dir, 'chats', name); const one = randomUUID(); mkdirSync(join(root, one), { recursive: true });
+        const kept = await importFile(root, one, fileName, request);
+        copied.push({ name, file: join(root, one, kept.name) });
+        return { path: `/work/.parley/files/${one}/${kept.name}`, name: kept.name, size: kept.size };
+    };
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra, files) => { said.push({ name, text, extra, files }); }, attach, conversations: () => convs });
+    return { rooms, said, copied, dir };
+};
+
+test('a file attached in a room: in its thread, opened from there; the host gets its own copy with the message', async (t) => {
+    const { rooms, said, copied } = withFiles(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const got = await rooms.attach(r.id, 'facture.txt', asked('42 euros'));
+    assert.match(got.path, /^\/room\/attached\/[0-9a-f-]{36}\/facture\.txt$/); assert.equal(got.size, 8);
+    await rooms.say(r.id, 'La voici', { files: [got.path] });
+    const m = rooms.read(r.id).messages.at(-1);
+    assert.equal(m.files.length, 1); assert.equal(m.files[0].name, 'facture.txt');
+    assert.equal(m.files[0].open, `room:${got.path.split('/').slice(-2).join('/')}`, 'opened by the room');
+    assert.equal(readFileSync(join(rooms.filesOf(r.id), m.files[0].open.slice('room:'.length)), 'utf8'), '42 euros');
+    assert.equal(said.length, 1); assert.equal(said[0].name, 'hugo');
+    assert.equal(said[0].files.length, 1); assert.match(said[0].files[0], /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/facture\.txt$/, 'a file of its own chat');
+    assert.deepEqual(copied.map((c) => c.name), ['hugo']); assert.equal(readFileSync(copied[0].file, 'utf8'), '42 euros');
+    await rooms.say(r.id, 'Sans fichier');
+    assert.equal(said[1].files, undefined, 'a message without files carries none');
+});
+
+test('a file to the AIs named: each its copy, never those the message is not for', async (t) => {
+    const { rooms, said, copied } = withFiles(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta', 'jardin'] });
+    const compta = r.members.find((m) => m.ref === 'compta'); const jardin = r.members.find((m) => m.ref === 'jardin');
+    const got = await rooms.attach(r.id, 'plan.md', asked('# plan'));
+    await rooms.say(r.id, '', { to: [compta.id, jardin.id], files: [got.path] });
+    assert.deepEqual(said.map((s) => s.name).sort(), ['compta', 'jardin']);
+    assert.deepEqual(copied.map((c) => c.name).sort(), ['compta', 'jardin'], 'not the host');
+    assert.notEqual(said[0].files[0], said[1].files[0], 'a copy each');
+});
+
+test('a room file: refused too large, a name leaving its folder refused, a path not attached here refused', async (t) => {
+    const { rooms, said, dir } = withFiles(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo'] });
+    const big = Readable.from([]); big.headers = { 'content-length': String(IMPORT_MAX + 1) };
+    await assert.rejects(rooms.attach(r.id, 'big.bin', big), (e) => e.status === 413);
+    await assert.rejects(rooms.attach(r.id, '../../evil.txt', asked('x')), (e) => e.status === 400);
+    assert.equal(existsSync(join(dir, 'evil.txt')) || existsSync(join(dir, 'rooms', 'evil.txt')), false, 'nothing written outside');
+    assert.deepEqual(readdirSync(rooms.filesOf(r.id)), [], 'nothing left of a file refused');
+    await assert.rejects(rooms.say(r.id, 'x', { files: ['/room/attached/00000000-0000-0000-0000-000000000000/../../../rooms.json'] }), (e) => e.status === 400);
+    await assert.rejects(rooms.say(r.id, 'x', { files: ['/etc/passwd'] }), (e) => e.status === 400);
+    assert.equal(said.length, 0);
 });

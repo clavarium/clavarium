@@ -61,6 +61,9 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--brass); out
 @keyframes unfold { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes breathe { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .5; transform: scale(.85); } }
 @media (prefers-reduced-motion: reduce) { .kit-conv > .state-dot, header.topbar .bar-state, .unfolding { animation: none !important; } }
+/* Another chat, room or binder shown: its content fades in, barely (app.js fadeIn) -- never a delay before it shows. */
+@media (prefers-reduced-motion: no-preference) { .fade-in { animation: fade-in .12s ease-out; } }
+@keyframes fade-in { from { opacity: 0; } }
 .choices { display: flex; flex-wrap: wrap; gap: 6px; }
 .choices button[aria-checked="true"] { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); }
 .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }

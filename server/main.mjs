@@ -679,7 +679,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         log: (line) => events.add({ kind: 'server', text: line }) });
     /* Rooms (#268): a thread shared by several AIs, the person and boxes (rooms.mjs). */
     rooms = new Rooms({ file: new JsonFile(`${dataDir}/rooms.json`, []), dir: `${dataDir}/rooms`,
-        say: (name, text, extra) => talk.say(name, text, undefined, undefined, undefined, extra),
+        say: (name, text, extra, files) => talk.say(name, text, undefined, files, undefined, extra),
+        attach: (name, fileName, request) => talk.attach(name, fileName, request),
         rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
         speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); } });
     rooms.boxesBound(boxes.all());
