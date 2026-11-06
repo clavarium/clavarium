@@ -118,6 +118,8 @@
        member says only what waits for you (tone 'need' or 'count').
        `tag`: 'button' (opens it: `onOpen`) or 'div' (a member: its gestures are `actions`). `cls`: the
        page's own classes, kept for its rules and tests. */
+    /* A line of a message as plain words: Markdown's marks taken off (**, __, `, #, > , links' addresses). */
+    const plainLine = (t) => String(t ?? '').replace(/\[([^\]\n]+)\]\([^)\s]+\)/g, '$1').replace(/(\*\*|__|\*|_|`+|~~)(?=\S)([^\n]*?\S)\1/g, '$2').replace(/^\s*(#{1,6}|>|[-*+]|\d+\.)\s+/gm, '').replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim();
     function ConvCard(m, { size = 'row', tag, cls = '', onOpen = null, actions = [] } = {}) {
         const t = tag ?? (size === 'member' ? 'div' : 'button');
         const root = node(t, `kit-conv kit-conv-${size}${cls ? ` ${cls}` : ''}`);
@@ -142,9 +144,10 @@
             else if (marks) lines.push(marks);
             else lines.push(...sub);
         } else if (size === 'card') {
-            if (m.last) lines.push(node('small', 'last', m.last));
-            const what = [m.now, m.who].filter(Boolean).join(' · ');
-            if (what) lines.push(node('small', 'kit-conv-now', what));
+            /* 06-11 (the owner's review): its last words without their Markdown marks; what it does now only when it
+               says something the point does not (asleep: the grey point says it); its tool in the details, not here. */
+            if (m.last) lines.push(node('small', 'last', plainLine(m.last)));
+            if (m.now && state !== 'sleep') lines.push(node('small', 'kit-conv-now', m.now));
         } else {
             const what = [m.who, m.now].filter(Boolean).join(' · ');
             if (what) lines.push(node('small', 'kit-conv-now', what));
