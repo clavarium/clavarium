@@ -29,6 +29,9 @@ export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
 
+/* A sign as the cards draw it (web/kit.js hueOf, initialOf): the same name, the same letter and colour. */
+export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
+
 export class Rooms {
     #file; #dir; #say; #rooms; #conversations; #boxes; #now; #speak; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
@@ -48,8 +51,11 @@ export class Rooms {
         const boxes = new Map(this.#boxes().map((b) => [b.id, b]));
         /* An AI is named as its chat names it (the name the owner gave it in its chat settings), else its title, else its name. */
         const convs = new Map(this.#conversations().map((c) => [c.name, c.chatName || c.title || c.name]));
+        /* Its sign (06-11): an AI by its conversation's card (letter and colour of its title), anyone else by its name. */
+        const titles = new Map(this.#conversations().map((c) => [c.name, c.title || c.name]));
         return room.members.filter((m) => (m.kind === 'ai' ? convs.has(m.ref) : m.kind === 'box' ? boxes.has(m.ref) : true))
-            .map((m) => ({ id: m.id, kind: m.kind, name: m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name, ref: m.ref, ...(m.id === room.host ? { host: true } : {}) }));
+            .map((m) => { const name = m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name;
+                return { id: m.id, kind: m.kind, name, ref: m.ref, look: lookOf(m.kind === 'ai' ? titles.get(m.ref) : name), ...(m.id === room.host ? { host: true } : {}) }; });
     }
     #think(room, member, on) { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, Date.now()); else m.delete(member); this.#thinking.set(room, m); }
     has(id) { return this.#all().some((r) => r.id === id); }
@@ -119,7 +125,7 @@ export class Rooms {
     /* ITS THREAD, as a screen reads it (Parley's read, the members' names of the moment). */
     read(id, options) {
         const room = this.#find(id); const t = this.#thread(room.id); const members = this.#shown(room);
-        t.setSpeakers(members.map((m) => ({ id: m.id, name: m.name, kind: m.kind })));
+        t.setSpeakers(members.map((m) => ({ id: m.id, name: m.name, kind: m.kind, look: m.look })));
         const read = t.read(options);
         /* A member named in a text (@{id}): its name of the moment, on the screen. */
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
@@ -138,14 +144,16 @@ export class Rooms {
         const t = this.#thread(room.id);
         this.#hops.set(room.id, 0);
         /* The owner is the room's own side (no name over their words, as in any chat); anyone else is named. */
-        const now = t.say(text, undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind } });
+        const now = t.say(text, undefined, [], who.ref === 'owner' ? {} : { by: { id: who.id, name: who.name, kind: who.kind, look: who.look } });
         const said = now.messages.at(-1);
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
         for (const ai of named.length ? named : host ? [host] : []) {
             this.#think(room.id, ai.id, true);
-            await this.#say(ai.ref, said.text, { by: { id: who.id, name: who.name, kind: who.kind }, room: { id: room.id, name: room.name, message: said.id } });
+            await this.#say(ai.ref, said.text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } });
         }
+        /* Handed to its AIs: read, as a conversation's agent would say it (06-11: the clock stayed on every message). */
+        try { t.seen?.(); } catch { /* an older Parley */ }
         return this.read(id);
     }
 
@@ -178,18 +186,18 @@ export class Rooms {
         /* Handed on as it is: the message itself, by who said it; the room's thread keeps no copy. */
         const forwarded = find(entry.forward);
         if (forwarded) {
-            const from = forwarded.by ? { id: forwarded.by.id, name: forwarded.by.name, kind: forwarded.by.kind ?? 'person' } : { id: members.find((m) => m.kind === 'person')?.id ?? 'owner', name: members.find((m) => m.kind === 'person')?.name ?? 'Owner', kind: 'person' };
+            const from = forwarded.by ? { id: forwarded.by.id, name: forwarded.by.name, kind: forwarded.by.kind ?? 'person', ...(forwarded.by.look ? { look: forwarded.by.look } : {}) } : { id: members.find((m) => m.kind === 'person')?.id ?? 'owner', name: members.find((m) => m.kind === 'person')?.name ?? 'Owner', kind: 'person' };
             for (const ai of ais) handOver(ai, forwarded.text, from, forwarded.id);
             if (!String(entry.text ?? '').trim()) return forwarded.id;
         }
         if (!String(entry.text ?? '').trim()) return null;
         /* @Name of a member, exactly: kept as its id (the screen says its name of the moment). */
         const text = String(entry.text).replace(/@([^\s@{][^@\n]{0,40}?)(?=[\s,.;:!?)]|$)/g, (whole, name) => { const m = members.find((x) => x.name.toLowerCase() === name.toLowerCase()); return m ? `@{${m.id}}` : whole; });
-        const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai' }, to, re, kind: kind === 'doing' ? 'doing' : 'say' });
+        const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai', look: me.look }, to, re, kind: kind === 'doing' ? 'doing' : 'say' });
         /* The boxes it is sent to say it aloud (#281): its words, a member named by its name, never an id. */
         const boxes = to.map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
         if (boxes.length) { const aloud = text.replace(/@\{([0-9a-f-]{36})\}/g, (w, mid) => members.find((x) => x.id === mid)?.name ?? ''); try { this.#speak(`room:${room.id}`, aloud, boxes, { doing: kind === 'doing', asked: kind === 'ask' }); } catch { /* the boxes' */ } }
-        if (!forwarded && kind !== 'doing') for (const ai of ais) handOver(ai, text, { id: me.id, name: me.name, kind: 'ai' }, id);
+        if (!forwarded && kind !== 'doing') for (const ai of ais) handOver(ai, text, { id: me.id, name: me.name, kind: 'ai', look: me.look }, id);
         return id;
     }
 
@@ -198,7 +206,7 @@ export class Rooms {
         const shown = list.map((r) => ({ ...r, members: this.#shown(r) }));
         for (const c of this.#conversations()) {
             const mine = shown.filter((r) => r.members.some((m) => m.kind === 'ai' && m.ref === c.name))
-                .map((r) => ({ id: r.id, name: r.name, members: r.members.map((m) => ({ id: m.id, name: m.name, kind: m.kind })) }));
+                .map((r) => ({ id: r.id, name: r.name, members: r.members.map((m) => ({ id: m.id, name: m.name, kind: m.kind, look: m.look })) }));
             try { this.#rooms(c.name, mine); } catch { /* its folder is not there yet */ }
         }
     }
