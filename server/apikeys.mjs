@@ -78,7 +78,7 @@ const USED_SAVE_MS = 60_000;
 export const EXT_PREFIX = '/api/ext/';
 
 /* The scopes a key may be given: [asset, rights] in the table. */
-export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Status (read)' } });
+export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Its state (memory, disk, versions)' } });
 /* What a key may do in one conversation: [rights in the table]. */
 export const LEVELS = Object.freeze({ read: 'r', talk: 'rw' });
 export const levelOf = (rights) => (String(rights).includes('w') ? 'talk' : String(rights).includes('r') ? 'read' : null);
