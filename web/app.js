@@ -5319,8 +5319,11 @@
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
                 /* Who was given a message and has not answered yet (#282): « Hugo réfléchit… ». */
                 const who = thinkingOf(d);
-                $('salon-thinking').hidden = who.length === 0;
-                $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
+                /* What they say they do (06-11): on this line, « Thomas : je demande à MSM… », never in the thread. */
+                const doing = (Array.isArray(d.doing) ? d.doing : []).filter((x) => x && typeof x.name === 'string' && typeof x.text === 'string' && x.text);
+                $('salon-thinking').hidden = who.length === 0 && doing.length === 0;
+                if (doing.length) $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(doing.map((x) => `${x.name} : ${x.text}`).join(' \u00b7 ')));
+                else $('salon-thinking').replaceChildren(KIT.StatusDot({ state: 'work' }), document.createTextNode(who.length > 1 ? uiSaid('room-thinking-many', '{names} are thinking\u2026', { names: who.join(', ') }) : uiSaid('room-thinking', '{name} is thinking\u2026', { name: who[0] ?? '' })));
                 /* Its bar says it too, as its row in the list: its dot at work, « Cuisine parle… » under its name. */
                 salonLive(who);
                 const known = rooms.find((x) => x.id === id);

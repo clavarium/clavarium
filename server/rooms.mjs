@@ -64,7 +64,8 @@ export class Rooms {
             .map((m) => { const name = m.kind === 'box' ? (boxes.get(m.ref)?.name ?? m.name) : m.kind === 'ai' ? convs.get(m.ref) : m.name;
                 return { id: m.id, kind: m.kind, name, ref: m.ref, look: lookOf(m.kind === 'ai' ? titles.get(m.ref) : name), ...(m.id === room.host ? { host: true } : {}) }; });
     }
-    #think(room, member, on) { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, Date.now()); else m.delete(member); this.#thinking.set(room, m); }
+    /* Who works for the room now, and what it says it does (06-11: « je fais… » on the status line, never in the thread). */
+    #think(room, member, on, text = '') { const m = this.#thinking.get(room) ?? new Map(); if (on) m.set(member, { at: Date.now(), text: String(text ?? '').slice(0, 160) }); else m.delete(member); this.#thinking.set(room, m); }
     has(id) { return this.#all().some((r) => r.id === id); }
     /* What came since the owner last looked (#282): the AIs' and the boxes' messages after it. */
     #unread(r) { try { const seen = Date.parse(r.seen ?? '') || 0; return this.#thread(r.id).read({ last: 200 }).messages.filter((m) => (m.from === 'agent' || m.by) && (Date.parse(m.at) || 0) > seen).length; } catch { return 0; } }
@@ -72,7 +73,8 @@ export class Rooms {
     #last(r) { try { const m = this.#thread(r.id).read({ last: 1 }).messages.at(-1); return m ? { at: m.at, text: String(m.text ?? '').replace(/\s+/g, ' ').slice(0, 120), ...(m.by?.name ? { by: m.by.name } : {}) } : null; } catch { return null; } }
     /* Who has a message of the room and has not answered yet (#282), by their names of the moment: « Hugo parle… »
        in its row of the list and on its bar, « Hugo réfléchit… » in its thread. */
-    #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, at]) => Date.now() - at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
+    #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => Date.now() - v.at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
+    #doingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => v.text && Date.now() - v.at < THINKING_MS).map(([mid, v]) => ({ name: members.find((m) => m.id === mid)?.name, text: v.text })).filter((x) => x.name); }
     list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members) }; }); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
 
@@ -137,8 +139,8 @@ export class Rooms {
         /* A member named in a text (@{id}): its name of the moment, on the screen. */
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
         if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
-        const thinking = this.#thinkingOf(id, members);
-        return { room: this.get(id), thinking, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
+        const thinking = this.#thinkingOf(id, members); const doing = this.#doingOf(id, members);
+        return { room: this.get(id), thinking, doing, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
     }
 
     /* SOMEONE OF THE PERSON'S SIDE SPEAKS (the person here, a box): kept in the room, given to the host -- or to the
@@ -176,7 +178,15 @@ export class Rooms {
         const all = () => t.read({ all: true }).messages;
         const find = (id) => (typeof id === 'string' && id.length >= 8 ? all().find((m) => m.id.startsWith(id)) : undefined);
         const re = find(entry.re)?.id;
-        if (kind !== 'doing') this.#think(room.id, me.id, false);
+        /* What it does: on the room's status line only, never a line of its thread (06-11, the owner's choice). */
+        if (kind === 'doing') {
+            this.#think(room.id, me.id, true, masked(entry.text));
+            /* A box it is said to still says it aloud (first, at once, what it is about to do). */
+            const boxes = (Array.isArray(entry.to) ? entry.to : []).map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
+            if (boxes.length) try { this.#speak(`room:${room.id}`, masked(entry.text), boxes, { doing: true, asked: false }); } catch { /* the boxes' */ }
+            return 'doing';
+        }
+        this.#think(room.id, me.id, false);
         const ids = new Set(members.map((m) => m.id));
         const to = Array.isArray(entry.to) ? entry.to.filter((x) => ids.has(x) && x !== me.id) : [];
         /* The other AIs it is sent to (#280): they get it in their own chat, as said in the room -- never beyond a few

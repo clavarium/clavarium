@@ -154,6 +154,10 @@ test('the list says who of a room is speaking now (its row: « Hugo parle… »)
     assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'handed on: the other one speaks now');
     rooms.answered('compta', { room: r.id, text: 'Je regarde.' }, 'doing');
     assert.deepEqual(rooms.list()[0].thinking, ['Compta'], 'still at it while it says what it does');
+    /* « Je fais… » on the status line, never in the thread (06-11). */
+    const shown = rooms.read(r.id);
+    assert.deepEqual(shown.doing, [{ name: 'Compta', text: 'Je regarde.' }]);
+    assert.ok(!shown.messages.some((m) => m.text === 'Je regarde.'), 'not a line of the thread');
     rooms.answered('compta', { room: r.id, text: 'Là aussi.' });
     assert.deepEqual(rooms.list()[0].thinking, [], 'done: nobody');
     assert.equal(rooms.list()[0].last.text, 'Là aussi.');
