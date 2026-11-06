@@ -2793,6 +2793,46 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-row .kit-conv-main > .kit-chips, .kit-conv-sub > .kit-chips { flex: none; margin: 0; gap: 6px; flex-wrap: nowrap; }
 .kit-conv-row .kit-conv-main .kit-chip:not([data-tone="count"]) { border: 0; padding: 0; background: none; line-height: inherit; font-size: .75rem; }
 
+/* ONE ASSET (06-11, assets step 1: kit.js AssetIcon, AssetCard, RightsBadge, RightsPicker, Holders). Its sign on a
+   tile of its kind's colour; a row (a list), a chip (a pill), a head (atop its panel). */
+.kit-asset-ic { --ka-ic: 30px; width: var(--ka-ic); height: var(--ka-ic); border-radius: 8px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, currentColor 12%, transparent); color: var(--brass-ink); }
+.kit-asset-ic svg { width: 57%; height: 57%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kit-asset-ic[data-kind="git"] { color: color-mix(in srgb, var(--danger) 75%, var(--warn)); }
+.kit-asset-ic[data-kind="mailbox"] { color: var(--wait); }
+.kit-asset-ic[data-kind="agenda"], .kit-asset-ic[data-kind="contacts"] { color: color-mix(in srgb, var(--wait) 55%, var(--danger)); }
+.kit-asset-ic[data-kind="secret"], .kit-asset-ic[data-kind="acces"], .kit-asset-ic[data-kind="device"], .kit-asset-ic[data-kind="conversation"] { color: var(--ink2); }
+.kit-asset-ic[data-kind="list"] { color: var(--ok); }
+.kit-asset { display: flex; align-items: center; gap: 10px; min-width: 0; text-align: left; color: var(--ink); }
+.kit-asset-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kit-asset-name { min-width: 0; margin: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-asset-sub { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink2); font-size: .75rem; }
+.kit-asset-sub > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-asset-sub[data-state="problem"] { color: var(--danger); }
+.kit-asset-side { flex: none; display: flex; align-items: center; gap: 6px; }
+.kit-asset-row { width: 100%; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; }
+.kit-asset-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.kit-asset-row[aria-current="true"] { background: color-mix(in srgb, var(--brass) 14%, transparent); }
+.kit-asset-chip { display: inline-flex; gap: 6px; max-width: 100%; padding: 2px 10px 2px 3px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: .8125rem; }
+.kit-asset-chip .kit-asset-ic { --ka-ic: 22px; border-radius: 50%; }
+.kit-asset-head { gap: 12px; align-items: flex-start; }
+.kit-asset-head .kit-asset-ic { --ka-ic: 38px; border-radius: 10px; }
+.kit-asset-head .kit-asset-name { font-size: 1.25rem; white-space: normal; overflow-wrap: anywhere; }
+.kit-asset-head .kit-asset-sub { font-size: .8125rem; }
+/* A RIGHT, READ: its tone by what it lets do (reads, changes, uses or watches, none). */
+.kit-rights { flex: none; padding: 1px 8px; border-radius: 999px; font-size: .6875rem; font-weight: 700; line-height: 1.6; white-space: nowrap; }
+.kit-rights[data-tone="r"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.kit-rights[data-tone="w"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.kit-rights[data-tone="x"] { color: var(--wait); background: color-mix(in srgb, var(--wait) 14%, transparent); }
+.kit-rights[data-tone="n"] { color: var(--ink2); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+/* A RIGHT, SET: the Segmented, smaller; it wraps on a narrow screen rather than overflow. */
+.kit-rights-pick { flex: none; max-width: 100%; flex-wrap: wrap; }
+.kit-rights-pick > button { min-height: 30px; padding: 0 9px; font-size: .78125rem; font-weight: 600; }
+/* WHO HAS IT: initials over each other, then "+n"; nobody in grey. */
+.kit-holders { display: inline-flex; align-items: center; flex: none; }
+.kit-holders > .kit-av { --kc-av: 22px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
+.kit-holders > .kit-av + .kit-av { margin-left: -6px; }
+.kit-holders-more, .kit-holders-none { margin-left: 4px; font-size: .75rem; color: var(--ink2); }
+
 /* A MAIL CITED BY ITS REFERENCE (06-11, app.js openMailRef): the same viewer, as a sheet over the thread --
    from the bottom on a phone, a panel at the right on a wide screen; where it is now, one line; Reply. */
 #viewer.viewer-sheet { padding: 0; align-items: flex-end; background: rgba(8, 11, 15, 0.45); }

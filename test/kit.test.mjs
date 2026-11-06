@@ -349,3 +349,180 @@ test('every top bar of the page is the kit\'s: no header drawn by hand, the old 
     assert.doesNotMatch(app, /createElement\('header'\)/);
     assert.match(web('style.css'), /header\.topbar \{[^}]*height: 52px/);
 });
+
+/* ---------- ASSETS, step 1 (06-11): AssetIcon, AssetCard, the rights' one table, RightsBadge, RightsPicker ---------- */
+const sameFills = (a, b) => assert.deepEqual([...a.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort(), [...b.matchAll(/\{(\w+)\}/g)].map((m) => m[1]).sort());
+
+test('the rights: one table by kind and holder, "none" first everywhere; the same sets the page offers today', () => {
+    for (const [key, cols] of Object.entries(KIT.RIGHTS)) {
+        for (const [holder, levels] of Object.entries(cols)) {
+            assert.equal(levels[0], 'none', `${key}/${holder}`);
+            assert.ok(levels.length >= 2, `${key}/${holder}`);
+            for (const l of levels) assert.ok(l in KIT.RIGHT_LEVELS, `${key}/${holder}: ${l}`);
+        }
+    }
+    /* app.js levelOptionsFor and the "Used by" options, today: a live link five levels, a secret off/use, a mailbox read, the rest read/write. */
+    const app = web('app.js');
+    assert.ok(app.includes("[['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]"));
+    assert.deepEqual(KIT.rightsFor('connexion'), ['none', 'watch', 'propose', 'frame', 'free']);
+    assert.deepEqual(KIT.rightsFor('secret'), ['none', 'use']);
+    assert.deepEqual(KIT.rightsFor('mailbox'), ['none', 'read']);
+    for (const k of ['folder', 'git', 'list']) assert.deepEqual(KIT.rightsFor(k), ['none', 'read', 'write'], k);
+    /* A device (levelControl, partsControl): a folder or a repository to read or write, a conversation in parts; a secret, never. */
+    assert.deepEqual(KIT.rightsFor('folder', 'device'), ['none', 'read', 'write']);
+    assert.deepEqual(KIT.rightsFor('conversation', 'device'), ['none', 'terminal', 'chat', 'both']);
+    assert.deepEqual(KIT.rightsFor('secret', 'device'), []);
+    assert.deepEqual(KIT.rightsFor('nonsense'), []);
+    /* A live link is a connexion, whatever it links; the lightest real level is what "give the group" gives (giveValue). */
+    assert.equal(KIT.rightsKey({ kind: 'agenda', live: true }), 'connexion');
+    assert.equal(KIT.rightsKey({ kind: 'mailbox', target: { id: 'mail-x' } }), 'connexion');
+    assert.equal(KIT.rightsKey({ kind: 'mailbox' }), 'mailbox');
+    assert.deepEqual(['connexion', 'secret', 'folder', 'list', 'mailbox'].map((k) => KIT.lightest(k)), ['watch', 'use', 'read', 'read', 'read']);
+});
+
+test('the rights as the server keeps them, and back: off and nothing are none; a device\'s r / rw / x / rwx', () => {
+    for (const v of [undefined, null, '', 'off', 'none']) assert.equal(KIT.rightOf('folder', v), 'none', String(v));
+    assert.equal(KIT.rightOf('secret', 'use'), 'use');
+    assert.equal(KIT.rightOf('connexion', 'frame'), 'frame');
+    assert.equal(KIT.rightOf('folder', 'write'), 'write');
+    assert.equal(KIT.rightOf('folder', 'r', 'device'), 'read');
+    assert.equal(KIT.rightOf('git', 'rw', 'device'), 'write');
+    assert.deepEqual(['x', 'rw', 'rwx'].map((v) => KIT.rightOf('conversation', v, 'device')), ['terminal', 'chat', 'both']);
+    assert.equal(KIT.rightOf('folder', 'nonsense'), 'none');
+    assert.equal(KIT.storedOf('secret', 'none'), 'off');
+    assert.equal(KIT.storedOf('secret', 'use'), 'use');
+    assert.equal(KIT.storedOf('list', 'none'), 'none');
+    assert.equal(KIT.storedOf('connexion', 'propose'), 'propose');
+    assert.deepEqual(['none', 'read', 'write'].map((l) => KIT.storedOf('folder', l, 'device')), [null, 'r', 'rw']);
+    assert.deepEqual(['terminal', 'chat', 'both'].map((l) => KIT.storedOf('conversation', l, 'device')), ['x', 'rw', 'rwx']);
+    /* Each level and back again, for every column of the table. */
+    for (const [key, cols] of Object.entries(KIT.RIGHTS)) for (const [holder, levels] of Object.entries(cols)) for (const l of levels) {
+        assert.equal(KIT.rightOf(key, KIT.storedOf(key, l, holder), holder), l, `${key}/${holder}/${l}`);
+    }
+});
+
+test('a right, read: its word, its tone, its line; as kept or as a level', () => {
+    const w = KIT.RightsBadge({ level: 'write' });
+    assert.ok(w.classes.includes('kit-rights'));
+    assert.equal(w.textContent, 'Writes'); assert.equal(w.dataset.tone, 'w'); assert.equal(w.title, 'Reads and writes');
+    assert.equal(KIT.RightsBadge({ key: 'secret', value: 'use' }).textContent, 'Uses');
+    assert.equal(KIT.RightsBadge({ key: 'secret', value: 'off' }).dataset.level, 'none');
+    assert.equal(KIT.RightsBadge({ key: 'folder', value: 'r', holder: 'device' }).dataset.tone, 'r');
+    assert.equal(KIT.RightsBadge({ level: 'watch' }).dataset.tone, 'x');
+    assert.equal(KIT.RightsBadge({ level: 'nonsense' }).textContent, 'None');
+});
+
+test('a right, set: the kind\'s levels, None first, the one held pressed; it waits while the page works, and goes back if refused', async () => {
+    const seen = [];
+    const p = KIT.RightsPicker({ key: 'folder', value: 'read', label: 'reports for Kitchen helper', onChange: async (l, s) => { seen.push([l, s]); } });
+    assert.ok(p.classes.includes('kit-rights-pick') && p.classes.includes('kit-seg'));
+    assert.deepEqual(p.children.map((b) => b.textContent), ['None', 'Read', 'Write']);
+    assert.deepEqual(p.children.map((b) => b.getAttribute('aria-pressed')), ['false', 'true', 'false']);
+    assert.equal(p.getAttribute('aria-label'), 'reports for Kitchen helper');
+    assert.equal(p.children[2].title, 'Reads and writes');
+    p.children[2].click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.deepEqual(seen, [['write', 'write']]);
+    assert.equal(p.children[2].getAttribute('aria-pressed'), 'true');
+    assert.ok(p.children.every((b) => !b.disabled));
+    p.children[2].click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.equal(seen.length, 1, 'the one held: nothing to do');
+    /* Refused (false, or it throws): the one held pressed again. */
+    const no = KIT.RightsPicker({ key: 'secret', value: 'off', onChange: async () => false });
+    assert.deepEqual(no.children.map((b) => b.dataset.value), ['none', 'use']);
+    no.children[1].click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.equal(no.children[0].getAttribute('aria-pressed'), 'true');
+    const boom = KIT.RightsPicker({ key: 'connexion', value: 'watch', onChange: async () => { throw new Error('refused'); } });
+    boom.children[4].click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.equal(boom.children[1].getAttribute('aria-pressed'), 'true');
+    /* A device, as it keeps them; a kind not given to that holder: nothing to choose. */
+    const dev = []; const d = KIT.RightsPicker({ key: 'conversation', holder: 'device', value: 'x', onChange: (l, s) => { dev.push(s); } });
+    assert.equal(d.children[1].getAttribute('aria-pressed'), 'true');
+    d.children[3].click(); await new Promise((ok) => setTimeout(ok, 0));
+    assert.deepEqual(dev, ['rwx']);
+    assert.equal(KIT.RightsPicker({ key: 'secret', holder: 'device' }), null);
+});
+
+test('an asset\'s sign by its kind: the set\'s icon, a binder drawn here, an unknown kind a folder', () => {
+    const asked = [];
+    const prev = window.clavariumIcons;
+    window.clavariumIcons = { icon: (name) => { asked.push(name); const s = document.createElementNS('svg', 'svg'); s.name = name; return s; } };
+    try {
+        for (const k of ['folder', 'git', 'mailbox', 'agenda', 'contacts', 'secret', 'acces', 'box', 'device']) assert.equal(KIT.AssetIcon({ kind: k }).dataset.kind, k);
+        assert.deepEqual(asked, ['folder', 'git-branch', 'mail', 'calendar', 'user', 'key-round', 'link', 'mic', 'smartphone']);
+        const list = KIT.AssetIcon({ kind: 'list' });
+        assert.equal(list.children[0].tagName, 'SVG'); assert.equal(list.children[0].children.length, 5);
+        assert.equal(KIT.AssetIcon({ kind: 'nonsense' }).dataset.kind, 'folder');
+        assert.equal(KIT.AssetIcon({ kind: 'git' }).getAttribute('aria-hidden'), 'true');
+    } finally { window.clavariumIcons = prev; }
+    /* The icons the kit asks for are in the set (Parley's): none falls back to a blank page. */
+    const set = readFileSync(new URL('../node_modules/clavarium-parley/ui/parley-icons.js', import.meta.url), 'utf8');
+    for (const name of Object.values(KIT.ASSET_ICONS).filter(Boolean)) assert.match(set, new RegExp(`'${name}'\\s*:|\\b${name.replace(/-/g, '\\-')}\\s*:`), name);
+});
+
+test('one asset, three sizes: the same sign and name; a row says who has it or its right, a chip is small, a head its chips', () => {
+    const repo = { key: 'git:website', kind: 'git', name: 'website', sub: '2 to send', state: 'wait', holders: [{ name: 'Kitchen helper' }, { name: 'Main Sales' }, { name: 'Homework' }, { name: 'Garden' }] };
+    let opened = '';
+    const row = KIT.AssetCard(repo, { size: 'row', current: true, onOpen: (k) => { opened = k; } });
+    const chip = KIT.AssetCard(repo, { size: 'chip' });
+    const head = KIT.AssetCard({ ...repo, chips: [{ text: 'Work ▾' }, { text: 'git' }] }, { size: 'head' });
+    for (const [el, tag] of [[row, 'BUTTON'], [chip, 'SPAN'], [head, 'DIV']]) {
+        assert.equal(el.tagName, tag);
+        assert.ok(el.classes.includes('kit-asset'));
+        assert.equal(el.dataset.asset, 'git:website');
+        assert.equal(el.children[0].dataset.kind, 'git');
+        assert.equal(el.find('kit-asset-name').textContent, 'website');
+    }
+    assert.equal(head.find('kit-asset-name').tagName, 'H2');
+    assert.equal(row.getAttribute('aria-current'), 'true');
+    row.click(); assert.equal(opened, 'git:website');
+    /* Its line: the point when it asks for you, then its words. */
+    assert.equal(row.find('kit-asset-sub').children[0].dataset.state, 'wait');
+    assert.equal(row.find('kit-asset-sub').textContent, '2 to send');
+    /* Who has it: three initials, then +1, their names in its title. A chip says none of it; a head its chips. */
+    const who = row.find('kit-holders');
+    assert.deepEqual(who.children.map((c) => c.textContent), ['K', 'M', 'H', '+1']);
+    assert.equal(who.title, 'Kitchen helper, Main Sales, Homework, Garden');
+    assert.equal(chip.find('kit-holders'), null); assert.equal(chip.find('kit-asset-sub'), null);
+    assert.deepEqual(head.all((n) => n.classes.includes('kit-chip')).map((n) => n.textContent), ['Work ▾', 'git']);
+    /* Nobody: said in grey. Seen from a conversation: its right in place of who has it. */
+    assert.equal(KIT.AssetCard({ kind: 'folder', name: 'reports', holders: [] }).find('kit-holders-none').textContent, 'nobody');
+    const given = KIT.AssetCard({ kind: 'agenda', name: 'Home calendar', live: true, right: { value: 'watch' }, holders: [{ name: 'x' }] });
+    assert.equal(given.find('kit-rights').textContent, 'Watches');
+    assert.equal(given.find('kit-holders'), null);
+    assert.equal(KIT.AssetCard({ kind: 'secret', name: 'MODEL_KEY', right: { value: 'use' } }, { size: 'chip' }).find('kit-rights').textContent, 'Uses');
+    /* Calls waiting: a count; quiet: no line, no side. */
+    assert.equal(KIT.AssetCard({ key: 'demandes:all', kind: 'demandes', name: 'Requests', count: 2 }).find('kit-chip').textContent, '2');
+    const quiet = KIT.AssetCard({ kind: 'folder', name: 'work' });
+    assert.equal(quiet.find('kit-asset-sub'), null); assert.equal(quiet.find('kit-asset-side'), null);
+    /* The place's own gestures, on its right. */
+    const act = document.createElement('button');
+    assert.ok(KIT.AssetCard({ kind: 'folder', name: 'work' }, { tag: 'div', actions: [act] }).find('kit-asset-side').children.includes(act));
+});
+
+test('the asset pieces\' words: English here, French in settingswords with « vous », one short line each, the same fills', async () => {
+    const { SETTINGS_WORDS_FR } = await import('../server/settingswords.mjs');
+    const kit = web('kit.js');
+    const keys = new Set([...kit.matchAll(/say\('(set-[a-z0-9-]+)'/g)].map((m) => m[1]));
+    for (const level of Object.keys(KIT.RIGHT_LEVELS)) for (const form of ['', 'pick-', 'hint-']) keys.add(`set-rt-${form}${level}`);
+    for (const k of keys) {
+        assert.ok(k in SETTINGS_WORDS_FR, k);
+        assert.ok(SETTINGS_WORDS_FR[k].length <= 48 && !SETTINGS_WORDS_FR[k].includes('\n'), k);
+        assert.doesNotMatch(SETTINGS_WORDS_FR[k], /\b(tu|ton|ta|tes)\b/i, k);
+    }
+    for (const [level, w] of Object.entries(KIT.RIGHT_LEVELS)) for (const form of ['badge', 'pick', 'hint']) sameFills(w[form], SETTINGS_WORDS_FR[`set-rt-${form === 'badge' ? '' : `${form}-`}${level}`]);
+    /* The kit says them through the page's words when it hands them (setWords). */
+    KIT.setWords((key, fallback) => SETTINGS_WORDS_FR[key] ?? fallback);
+    try {
+        assert.equal(KIT.RightsBadge({ level: 'read' }).textContent, 'Lit');
+        assert.deepEqual(KIT.RightsPicker({ key: 'folder', value: 'none' }).children.map((b) => b.textContent), ['Aucun', 'Lire', 'Écrire']);
+        assert.equal(KIT.Holders([]).textContent, 'personne');
+    } finally { KIT.setWords((key, fallback) => fallback); }
+});
+
+test('step 1 adds the asset pieces only: no screen draws them yet (step 2 moves the screens)', () => {
+    const app = web('app.js');
+    assert.doesNotMatch(app, /KIT\.(AssetCard|AssetIcon|RightsBadge|RightsPicker|Holders)\(/);
+    const css = web('style.css');
+    for (const cls of ['kit-asset-ic', 'kit-asset-row', 'kit-asset-chip', 'kit-asset-head', 'kit-rights', 'kit-rights-pick', 'kit-holders']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+    for (const tone of ['r', 'w', 'x', 'n']) assert.match(css, new RegExp(`\\.kit-rights\\[data-tone="${tone}"\\]`), tone);
+});
