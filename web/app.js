@@ -6153,6 +6153,36 @@
        scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
        Administrators only: hidden on a device, and where the server does not answer it. */
     const shortDate = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+    /* Its conversations, one by one (step 2): each Off / Read / Talk -- never "all". `chosen`: name -> level. */
+    const apiKeyLevelWord = (level) => (level === 'talk' ? uiSaid('set-apikeys-talk', 'Talk') : uiSaid('set-apikeys-read', 'Read'));
+    function apiKeyConvPicker(chosen, onChange) {
+        const box = el('div', 'apikey-convs');
+        const list = conversations.filter((c) => c && c.name);
+        if (!list.length) box.append(el('small', 'hint', uiSaid('set-apikeys-no-convs', 'No conversation yet')));
+        const options = [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }];
+        for (const c of list) {
+            const row = el('div', 'apikey-conv'); row.dataset.name = c.name;
+            row.append(el('span', '', shownName(c)), KIT.Segmented({ options, value: chosen.get(c.name) ?? '', label: shownName(c), onChange: (v) => onChange(c.name, v || null) }));
+            box.append(row);
+        }
+        return box;
+    }
+    const apiKeyNewConvs = new Map();
+    /* The key whose conversations or journal are open under it, kept across a repaint. */
+    let apiKeyOpen = null;
+    async function paintApiKeyJournal(box, id) {
+        const got = await fetch(`${API}/apikeys/${id}/journal`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        box.replaceChildren();
+        const uses = Array.isArray(got?.uses) ? got.uses.slice(0, 50) : [];
+        if (!uses.length) { box.append(el('small', 'hint', uiSaid('set-apikeys-no-use', 'No call yet'))); return; }
+        for (const u of uses) {
+            const line = el('div', 'apikey-use');
+            const when = el('small', '', agoSaid(u.at)); when.title = new Date(u.at).toLocaleString();
+            const code = el('b', '', String(u.status)); if (u.status >= 400) code.dataset.bad = 'true';
+            line.append(when, el('code', '', `${u.method} ${u.route}`), code);
+            box.append(line);
+        }
+    }
     async function paintApiKeys() {
         const got = DEVICE ? null : await fetch(`${API}/apikeys`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         $('settings-ch-apikeys').hidden = !got || !Array.isArray(got.keys);
@@ -6176,8 +6206,9 @@
             const head = el('b', '', k.label);
             what.append(head);
             const tags = el('span', 'apikey-scopes');
-            if (k.scopes.length) for (const sc of k.scopes) tags.append(el('span', 'chip', scopeWord(sc)));
-            else tags.append(el('span', 'chip', uiSaid('set-apikeys-no-scope', 'No scope')));
+            const given = [...k.scopes.map((sc) => ({ text: scopeWord(sc) })),
+                ...(k.conversations ?? []).map((c) => ({ text: `${shownName(conversations.find((x) => x.name === c.name) ?? { name: c.name })} · ${apiKeyLevelWord(c.level)}`, tone: c.level === 'talk' ? 'note' : undefined }))];
+            tags.append(KIT.Chips(given.length ? given : [{ text: uiSaid('set-apikeys-no-scope', 'No scope') }]));
             what.append(tags);
             const by = k.createdBy ? (k.createdBy === got.me ? uiSaid('set-apikeys-by-you', 'by you') : k.createdBy) : '';
             const facts = [
@@ -6195,14 +6226,40 @@
                     await paintApiKeys();
                 } });
             });
-            acts.append(revoke);
-            row.append(what, acts);
+            /* Its conversations, or its journal, opened under it (one at a time). */
+            const more = el('div', 'apikey-more'); more.hidden = true;
+            const open = async (kind) => {
+                apiKeyOpen = apiKeyOpen?.id === k.id && apiKeyOpen.what === kind ? null : { id: k.id, what: kind };
+                for (const b of acts.querySelectorAll('button[data-act="convs"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
+                more.hidden = apiKeyOpen?.id !== k.id;
+                more.replaceChildren();
+                if (!apiKeyOpen || apiKeyOpen.id !== k.id) return;
+                if (kind === 'journal') { more.dataset.what = 'journal'; await paintApiKeyJournal(more, k.id); return; }
+                more.dataset.what = 'convs';
+                more.append(apiKeyConvPicker(new Map((k.conversations ?? []).map((c) => [c.name, c.level])), async (name, level) => {
+                    $('apikeys-error').hidden = true;
+                    try { await post(`${API}/apikeys/${k.id}/conversations`, { conversation: name, level }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                    await paintApiKeys();
+                }));
+            };
+            const convs = el('button', '', uiSaid('set-apikeys-convs', 'Conversations')); convs.type = 'button'; convs.dataset.act = 'convs';
+            const journal = el('button', '', uiSaid('set-apikeys-journal', 'Journal')); journal.type = 'button'; journal.dataset.act = 'journal';
+            convs.addEventListener('click', () => void open('convs'));
+            journal.addEventListener('click', () => void open('journal'));
+            acts.append(convs, journal, revoke);
+            row.append(what, acts, more);
             rows.append(row);
+            if (apiKeyOpen?.id === k.id) { const kind = apiKeyOpen.what; apiKeyOpen = null; void open(kind); }
         }
     }
     const apiKeyFormShown = (on) => {
         $('apikeys-form').hidden = !on; $('apikeys-new-row').hidden = on; $('apikeys-error').hidden = true;
-        if (on) { $('apikeys-label').value = ''; $('apikeys-days').value = '90'; for (const b of $('apikeys-scopes').querySelectorAll('input')) b.checked = false; $('apikeys-label').focus(); }
+        if (on) {
+            $('apikeys-label').value = ''; $('apikeys-days').value = '90'; for (const b of $('apikeys-scopes').querySelectorAll('input')) b.checked = false;
+            apiKeyNewConvs.clear();
+            $('apikeys-convs').replaceChildren(apiKeyConvPicker(apiKeyNewConvs, (name, level) => { if (level) apiKeyNewConvs.set(name, level); else apiKeyNewConvs.delete(name); }));
+            $('apikeys-label').focus();
+        }
     };
     $('apikeys-new').addEventListener('click', () => apiKeyFormShown(true));
     $('apikeys-cancel').addEventListener('click', () => apiKeyFormShown(false));
@@ -6211,13 +6268,15 @@
         $('apikeys-error').hidden = true;
         const days = $('apikeys-days').value;
         try {
-            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes: [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value), days: days === 'never' ? null : Number(days) });
+            const scopes = [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value);
+            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes, conversations: Object.fromEntries(apiKeyNewConvs), days: days === 'never' ? null : Number(days) });
             apiKeyFormShown(false);
             $('apikeys-secret').value = r.secret; $('apikeys-once').hidden = false;
             /* 06-11 (the owner): the configuration an AI tool takes, ready to paste -- its MCP door and the key, shown this once too. */
             const slug = (appName || 'clavarium').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'clavarium';
             $('apikeys-config').textContent = JSON.stringify({ mcpServers: { [slug]: { type: 'http', url: `${location.origin}/api/ext/mcp`, headers: { Authorization: `Bearer ${r.secret}` } } } }, null, 2);
-            $('apikeys-curl').textContent = `curl -H "Authorization: Bearer ${r.secret}" ${location.origin}/api/ext/v1/status`;
+            /* The curl line reads what it was given: the status, or else its conversations. */
+            $('apikeys-curl').textContent = `curl -H "Authorization: Bearer ${r.secret}" ${location.origin}/api/ext/v1/${scopes.includes('status') || !apiKeyNewConvs.size ? 'status' : 'conversations'}`;
         } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; return; }
         await paintApiKeys();
     });

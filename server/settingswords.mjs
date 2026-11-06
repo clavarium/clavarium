@@ -64,5 +64,8 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-no-scope': 'Aucune portée', 'set-apikeys-by-you': 'par vous', 'set-apikeys-used': 'Utilisée {when}', 'set-apikeys-unused': 'Jamais utilisée',
     'set-apikeys-expired': 'Expirée', 'set-apikeys-expires-on': 'Expire le {date}', 'set-apikeys-no-expiry': 'N\'expire pas',
     'set-apikeys-created': 'Créée le {date}', 'set-apikeys-revoke': 'Révoquer', 'set-apikeys-revoke-q': 'Révoquer maintenant ?',
+    'set-apikeys-convs': 'Conversations', 'set-apikeys-convs-hint': 'Une par une : lire ou parler', 'set-apikeys-off': 'Non',
+    'set-apikeys-read': 'Lire', 'set-apikeys-talk': 'Parler', 'set-apikeys-no-convs': 'Aucune conversation pour l\'instant',
+    'set-apikeys-journal': 'Journal', 'set-apikeys-no-use': 'Aucun appel pour l\'instant',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

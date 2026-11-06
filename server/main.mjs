@@ -232,7 +232,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -693,10 +693,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     for (const name of ['clavarium-parley', 'clavarium-tether', 'clavarium-binder', 'clavarium-docket']) {
         try { components[name.slice('clavarium-'.length)] = JSON.parse(readFileSync(packageFile(name, 'package.json'), 'utf8')).version; } catch { /* not installed here */ }
     }
-    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log` });
+    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log`, exists: (name) => all.list().some((c) => c.name === name) });
     /* What the host program says of the server is never waited for long: a key gets what is known. */
     const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
-    const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }) };
+    const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
+        /* A key's conversations (their chat, through talk.mjs): read as the page reads it; a message posted as the page
+           posts one (its secrets lifted the same way), signed with the key's name. */
+        chats: {
+            list: () => all.list().map((c) => ({ id: c.name, name: typeof c.title === 'string' && c.title ? c.title : c.name })),
+            chatOn: (name) => { try { return talk.of(name, { state: '1' }).on === true; } catch { return false; } },
+            read: (name, part) => talk.of(name, part),
+            say: (name, text, by) => talk.say(name, text, undefined, [], undefined, { by }),
+        } };
     const features = new Features({ file: new JsonFile(`${dataDir}/features.json`, {}), context: async () => ({
         secrets: secrets.list(), dictation: voice.about(), boxes: boxes.all(), alerts: alerts.about().devices.length,
         conversations: all.list().map((c) => ({ tool: c.tool })), tools: all.tools().map((t) => t.id),
