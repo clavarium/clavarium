@@ -101,14 +101,33 @@ export const DROP_IN_TEXT = '# Written by the Clavarium updater: a crash loop ne
    during it, the installed app and the browser) shared one CSRF cookie, and the first to come back
    was refused ("Unable to find a valid CSRF token", found 20-10). One cookie per sign-in, and time
    to type a password. Added to a file that lacks them, the proxy restarted; nothing else touched. */
+/* THE DOOR FOR PROGRAMS (server/apikeys.mjs, API keys): /api/ext/ goes through without sign-on, as the
+   devices' /c/ does -- the key in each call is the right, and the server never looks at an identity
+   there (the proxy strips those headers on these routes). Added to the one-line list of routes the
+   proxy skips, beside "^/c/"; a file with no such line, or a list over several lines, is left as it is. */
+export const EXT_ROUTE = '^/api/ext/';
+const EXT_COMMENT = '# /api/ext/: programs with an API key; the server checks the key (added by the Clavarium updater).';
+export function withExtRoute(text) {
+    const lines = text.split('\n');
+    const i = lines.findIndex((l) => /^\s*skip_auth_routes\s*=/.test(l));
+    if (i < 0 || lines[i].includes(`"${EXT_ROUTE}"`)) return text;
+    const m = /^(\s*skip_auth_routes\s*=\s*\[)([^\]]*)\](\s*(#.*)?)$/.exec(lines[i]);
+    if (!m) return text;
+    const inner = m[2].trim().replace(/,\s*$/, '');
+    lines[i] = `${m[1]}${inner ? `${inner}, ` : ''}"${EXT_ROUTE}"]${m[3]}`;
+    if (lines[i - 1] !== EXT_COMMENT) lines.splice(i, 0, EXT_COMMENT);
+    return lines.join('\n');
+}
 export const PROXY_CFG = '/etc/oauth2-proxy/oauth2-proxy.cfg';
 export const PROXY_LINES = ['cookie_csrf_per_request = true', 'cookie_csrf_expire = "30m"'];
 export async function ensureProxySettings({ file = PROXY_CFG, run = runCommand } = {}) {
     let text;
     try { text = readFileSync(file, 'utf8'); } catch { return false; }
     const missing = PROXY_LINES.filter((l) => !text.split('\n').some((x) => x.trim().startsWith(l.split(' =')[0])));
-    if (!missing.length) return false;
-    writeFileSync(`${file}.new`, `${text.replace(/\n*$/, '\n')}# Added by the Clavarium updater: one CSRF cookie per sign-in.\n${missing.join('\n')}\n`, { mode: 0o600 });
+    let next = withExtRoute(text);
+    if (missing.length) next = `${next.replace(/\n*$/, '\n')}# Added by the Clavarium updater: one CSRF cookie per sign-in.\n${missing.join('\n')}\n`;
+    if (next === text) return false;
+    writeFileSync(`${file}.new`, next, { mode: 0o600 });
     renameSync(`${file}.new`, file);
     if (process.getuid?.() === 0) await run(['systemctl', 'try-restart', 'oauth2-proxy.service'], { timeoutMs: 60_000 });
     return true;
@@ -961,7 +980,7 @@ async function main(argv) {
             try { if (await u.ensureDropIn()) console.error('updater: the drop-in of the server\'s unit written'); } catch (error) { console.error(`updater: the drop-in could not be written: ${error.message}`); }
             try { if (await ensureFfmpeg()) console.error('updater: ffmpeg installed, for the sounds the voice boxes play'); } catch (error) { console.error(`updater: ffmpeg could not be installed: ${error.message}`); }
             try { if (await ensureQuietSudo()) console.error('updater: sudo no longer logs the host program\'s probes'); } catch (error) { console.error(`updater: sudo could not be made quiet: ${error.message}`); }
-            try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy takes one CSRF cookie per sign-in'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
+            try { if (await ensureProxySettings()) console.error('updater: the sign-in proxy set (one CSRF cookie per sign-in; /api/ext/ for API keys)'); } catch (error) { console.error(`updater: the sign-in proxy could not be set: ${error.message}`); }
             try { const c = await ensureGenericClientId({ run: runCommand }); if (c.changed.length) console.error('updater: the sign-in client id was made generic (nothing names the product in the open)'); } catch (error) { console.error(`updater: the sign-in client id could not be made generic: ${error.message}`); }
             try { if (await ensureTunnel({ run: runCommand })) console.error('updater: the tunnel to the relay notices a cut sooner'); } catch (error) { console.error(`updater: the tunnel could not be set: ${error.message}`); }
             /* What became of the relay is kept beside the state, for Settings (server/updates.mjs: relay). */

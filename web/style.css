@@ -1864,7 +1864,17 @@ button.tip-btn:hover, button.tip-btn[aria-expanded="true"] { color: var(--brass-
 .list-item > .set-what > b { font-size: .875rem; overflow-wrap: anywhere; }
 .list-item > .set-what > small { font-size: .75rem; color: var(--ink2); }
 .list-item > :is(button, .set-control) { justify-self: end; }
-:is(#settings, #panel) .chapter-body > :is(#settings-shortcuts, #operators-rows, #git-hosts) { padding: 0; }
+:is(#settings, #panel) .chapter-body > :is(#settings-shortcuts, #operators-rows, #git-hosts, #apikeys-rows) { padding: 0; }
+/* API keys (Settings, Access): its scopes as chips; the secret shown once, in a field as wide as it can be. */
+.apikey-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0; }
+.list-item.apikey > .set-what > small.bad { color: var(--danger); }
+.apikeys-once > p { margin: 0 0 6px; }
+.apikeys-once input { flex: 1 1 14rem; min-width: 0; font-family: ui-monospace, Menlo, Consolas, monospace; }
+#apikeys-scopes { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Revoke confirmed in place: the question and its buttons under the key, never squeezing its name. */
+.list-item.apikey:has(.kit-confirm) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 520px) { .apikeys-once input { flex-basis: 100%; } }
+#apikeys-where { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; }
 .mono-cut { font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings #export-note { max-width: none; text-align: left; margin: 0; order: 0; flex: none; }
 /* Several settings in one block: one line between them too. */

@@ -553,9 +553,10 @@ skip_provider_button = true
 approval_prompt = "auto"
 http_address = "127.0.0.1:4180"
 upstreams = ["http://127.0.0.1:$PORT/"]
-# A paired device does not sign in: its own door (/c/) checks its key. The
+# A paired device does not sign in: its own door (/c/) checks its key; nor
+# does a program with an API key (/api/ext/, server/apikeys.mjs). The
 # identity headers are stripped there, so nobody can claim to be an operator.
-skip_auth_routes = ["^/c/"]
+skip_auth_routes = ["^/c/", "^/api/ext/"]
 skip_auth_strip_headers = true
 # Two sign-ins at once (two tabs, a reload during it) each have their own CSRF
 # cookie; and there is time to type a password (deploy/updater.mjs, PROXY_LINES).

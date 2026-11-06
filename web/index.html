@@ -1027,6 +1027,24 @@
         <p class="error" id="operators-error" role="alert" hidden></p>
           </div>
         </details>
+        <!-- API KEYS (server/apikeys.mjs): what a program or an AI elsewhere may read, by a key; its secret
+             shown once. Administrators only: never on a device (app.js, paintApiKeys). -->
+        <details class="chapter" id="settings-ch-apikeys" data-chapter="s-apikeys" hidden>
+          <summary><span class="chapter-title" data-said="set-ch-s-apikeys">API keys</span><span class="chapter-about" id="apikeys-about">For a program or an AI.</span></summary>
+          <div class="chapter-body">
+        <div id="apikeys-once" class="callout apikeys-once" role="status" hidden><p><b data-said="set-apikeys-once">Copy it now: it won't be shown again.</b></p><div class="row"><input id="apikeys-secret" readonly spellcheck="false" aria-label="API key"><button type="button" id="apikeys-copy" class="primary" data-said="set-apikeys-copy">Copy</button><button type="button" id="apikeys-done" data-said="set-apikeys-done">Done</button></div></div>
+        <div id="apikeys-rows"></div>
+        <p class="hint" id="apikeys-empty" data-said="set-apikeys-none" hidden>No key yet.</p>
+        <form id="apikeys-form" class="set-rows" autocomplete="off" hidden>
+          <div class="set-row"><div class="set-what"><label for="apikeys-label" data-said="set-apikeys-name">Name</label><small data-said="set-apikeys-name-hint">What it is for</small></div><div class="set-control"><input id="apikeys-label" maxlength="40" spellcheck="false" required></div></div>
+          <div class="set-row"><div class="set-what"><span data-said="set-apikeys-scopes">Scopes</span><small data-said="set-apikeys-scopes-hint">None until ticked</small></div><div class="set-control" id="apikeys-scopes"></div></div>
+          <div class="set-row"><div class="set-what"><label for="apikeys-days" data-said="set-apikeys-expires">Expires</label></div><div class="set-control"><select id="apikeys-days"><option value="30" data-said="set-apikeys-30">In 30 days</option><option value="90" data-said="set-apikeys-90" selected>In 90 days</option><option value="365" data-said="set-apikeys-365">In a year</option><option value="never" data-said="set-apikeys-never">Never</option></select></div></div>
+          <div class="action-row"><span class="error" id="apikeys-error" role="alert" hidden></span><button type="button" id="apikeys-cancel" data-said="set-apikeys-cancel">Cancel</button><button type="submit" class="primary" data-said="set-apikeys-create">Create</button></div>
+        </form>
+        <div class="action-row" id="apikeys-new-row"><span class="hint" id="apikeys-where"></span><button type="button" id="apikeys-new" class="primary" data-said="set-apikeys-new">New key</button></div>
+        <p class="hint" data-said="set-apikeys-never-by-key">Never by key: secrets, keys, accounts, server</p>
+          </div>
+        </details>
         <!-- NETWORK: this server's Wi-Fi (server/wifi.mjs; done as root by the host program,
              through NetworkManager). A switch goes back by itself when the new network does not work. -->
         <details class="chapter" id="settings-wifi-top" data-chapter="s-network">
