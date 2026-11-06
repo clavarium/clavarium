@@ -119,6 +119,8 @@ export function ownText({ name, tool, workKept, resources = [], chat, online, se
         : '- Chat with the person: on. Parley is installed: run parley guide. When you were given Parley as your own tools (MCP: tell, ask, doing, status...), use them to talk to the person, and say with doing what you do at each new step; the parley command does the same.');
     /* How Parley is used is Parley's to say (parley guide); what is here is this chat's: it renders Markdown. */
     if (chat) out.push('- The chat shows Markdown (lists, tables, "> [!IMPORTANT]") and pictures of /work: ![before](/work/a.png).');
+    /* A mail cited by its reference (06-11): a chip the person opens in the mail viewer (Parley's schemes, app.js openMailRef). */
+    if (chat) out.push('- To cite a mail, write [its subject](mail:REF) with the ref Tether gives (ref: mail:...), copied whole: the person opens it with a tap.');
     /* The thread is kept whole: after a restart, its end is read, and further back on demand. */
     if (chat && reread) out.push(`- After a restart: ${plain(reread, 60)}, the end of the chat; it says how to read further back.`);
     /* 02-11: the one command a tool may ask of the server. */

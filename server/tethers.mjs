@@ -21,6 +21,7 @@
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { keeper } from 'clavarium-tether/host';
+import { mailRef } from 'clavarium-tether/verbs';
 import { JsonFile } from './store.mjs';
 import { demandeView } from './demandes.mjs';
 
@@ -83,6 +84,18 @@ export function noticeLine(kind, target, text) {
     if (text) return said('line-notice-said', { head, text }, `${head.t}: ${text}`);
     if (target) return said('line-notice-at', { head, target }, `${head.t} (${target})`);
     return head;
+}
+
+/* THE MAIL A NOTICE IS ABOUT (06-11): a mail that came back, or is delayed, carries the Message-ID of the mail sent
+   (`ref`); with its mailbox, that is a reference (mail:TARGET/ID) the line shows as a chip (Parley's `re`), opened in
+   the mail viewer -- its subject, from Tether's sentence, as the chip's label. Other notices: none. */
+const NOTICE_MAILS = new Set(['mail.bounced', 'mail.delayed']);
+export function noticeRe(kind, targetId, messageId, text) {
+    if (!NOTICE_MAILS.has(kind) || !targetId || !messageId) return null;
+    const ref = mailRef(String(targetId), String(messageId));
+    if (!ref) return null;
+    const subject = /\bmail "([^"\n]{1,200})"/.exec(String(text ?? ''))?.[1]?.trim();
+    return { ref, label: subject || { k: 'req-a-message', t: 'a message' }, lead: { k: 'line-re-sent', t: 'the mail sent' } };
 }
 
 export class Tethers {
@@ -205,7 +218,8 @@ export class Tethers {
         /* Clavarium's head and frame in the reader's words; Tether's own sentence as Tether wrote it. */
         const line = noticeLine(kind, n.target?.title ? String(n.target.title) : '', String(n.text ?? '').trim());
         const text = line.t;
-        try { this.announce?.(name, { kind: 'tether-notice', text: line, topic: TOPIC_NOTICE, ...(warns ? { tone: 'warn', level: 'needs-you' } : {}) }); } catch { /* its chat is off */ }
+        const re = noticeRe(kind, n.target?.id, n.ref, n.text);
+        try { this.announce?.(name, { kind: 'tether-notice', text: line, topic: TOPIC_NOTICE, ...(warns ? { tone: 'warn', level: 'needs-you' } : {}), ...(re ? { re } : {}) }); } catch { /* its chat is off */ }
         try {
             if (this.#dockets?.on(name)) {
                 this.#dockets.post(name, { kind: 'tether-notice', text: `${text}${/[.!?]$/.test(text) ? '' : '.'} See more: tether notices.`,

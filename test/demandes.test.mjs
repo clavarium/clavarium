@@ -132,3 +132,19 @@ test('a reply card says to whom, with the address (06-11): the original sender, 
     const s = JSON.stringify(all.facts);
     assert.ok(s.includes('b@example.org') && s.includes('c@example.com') && !s.includes('"me@example.org"'), s);
 });
+
+test('the mail a reply answers (about.ref): a chip under the title, « en réponse à ✉ Subject · sender »; forward, move, delete say theirs; no ref, none', () => {
+    const ref = 'mail:work/CAF12%40mail.example.com?in=INBOX&uid=42';
+    const reply = demandeView(q({ kind: 'mail', action: 'reply', self: 'me@example.org', about: { from: 'Plomberie <devis@example.com>', subject: 'Re: Fuite', ref }, body: 'Ok' }));
+    known(reply);
+    assert.deepEqual(reply.re, { ref, label: 'Re: Fuite', note: 'Plomberie' });
+    assert.deepEqual(fr(reply).re, { ref, label: 'Re: Fuite', note: 'Plomberie', lead: '' }, 'Parley says « en réponse à » itself');
+    const forward = demandeView(q({ kind: 'mail', action: 'forward', to: ['b@example.org'], about: { from: 'a@example.org', ref } }));
+    known(forward);
+    assert.equal(fr(forward).re.lead, 'transfert de');
+    assert.equal(fr(forward).re.label, 'un message', 'no subject: a word');
+    assert.equal(en(demandeView(q({ kind: 'mail', action: 'delete', about: { subject: 'Old', ref } }))).re.lead, 'the mail');
+    assert.equal(demandeView(q({ kind: 'mail', action: 'reply', about: { subject: 'No ref' } })).re, undefined);
+    assert.equal(demandeView(q({ kind: 'mail', action: 'send', to: ['b@example.org'], about: { ref } })).re, undefined, 'a new mail answers none');
+    assert.equal(demandeView(q({ kind: 'mail', action: 'reply', about: { ref: 'https://example.com/x' } })).re, undefined, 'only a mail reference');
+});

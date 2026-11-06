@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Refused } from 'clavarium-tether/verbs';
 import { bench, SKIP } from './bench.mjs';
@@ -10,7 +10,9 @@ import { bench, SKIP } from './bench.mjs';
    bytes read through Tether when it is opened; its HTML in a frame that runs nothing, its remote pictures
    only when asked; Reply writes the start of a request in the chat, never sends. A mail gone, and a device
    that may not read that mailbox: one line each. The mailbox is a connector of this test (Tether's own is
-   proved in Tether): it answers mail.open from the mails below. */
+   proved in Tether): it answers mail.open from the mails below.
+   CHIPS (phases B and C): a reply its AI asks for says « in reply to ✉ the original » under its title, and a
+   mail the AI cites ([Subject](mail:REF)) is a chip in its message; a tap on either opens the same viewer. */
 const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 const mail = (remote) => `Message-ID: <quote-1@example.com>
 From: Plomberie Example <contact@example.com>
@@ -46,7 +48,10 @@ test('a mail cited by its reference: from a card and from a link, the viewer as 
     t.after(() => far.close());
     const raw = mail(`http://localhost:${far.address().port}`);
     const reads = [];
-    const connector = { run: async (verb, target, a, ctx) => {
+    const connector = {
+        /* What a reply answers, as Tether's own connector says it (its about, with the original's reference). */
+        describe: async (verb) => (verb === 'mail.reply' ? { from: 'Plomberie Example <contact@example.com>', subject: 'Re: Bathroom leak', date: 'Thu, 05 Nov 2026 08:41:00 +0100', ref: REF } : null),
+        run: async (verb, target, a, ctx) => {
         reads.push({ verb, ref: a.ref, by: ctx.person?.id ?? ctx.agent });
         if (verb !== 'mail.open') throw new Refused(`${verb} is not done here`);
         if (!a.ref.startsWith('mail:work-mail/quote-1%40example.com')) throw Object.assign(new Refused(`${target.title}: this mail is no longer in the mailbox`), { code: 'gone' });
@@ -116,6 +121,44 @@ test('a mail cited by its reference: from a card and from a link, the viewer as 
     await me.until('the chat box holds the request', async () => (await chatBox.inputValue().catch(() => '')).startsWith('Reply to this mail: mail:work-mail/quote-1%40example.com?in=Archive&uid=3'), 15_000);
     await new Promise((ok) => setTimeout(ok, 500));
     assert.equal(said(), before, 'nothing was sent');
+    await chatBox.fill('');
+
+    /* C: a mail its AI cites is a chip in its message (icon, subject cut, sender apart); a tap, the same viewer. */
+    const work = join(b.dir, 'kept-work', 'asker', 'work');
+    appendFileSync(join(work, '.parley', 'from-agent.jsonl'), `${JSON.stringify({ id: 'mailchip-0000-4000-8000-000000000000', at: new Date().toISOString(), kind: 'say', text: `He confirms Thursday, deposit first: [Re: Bathroom leak · Plomberie](${REF}). Nothing else: [not a link](javascript:alert(1)).` })}\n`);
+    const cited = me.page.locator('#simple-thread .parley-said .parley-refchip[data-scheme="mail"]');
+    await me.until('the cited mail is a chip', async () => (await cited.count()) === 1, 20_000);
+    assert.equal(await cited.locator('.parley-refchip-text').innerText(), 'Re: Bathroom leak');
+    assert.equal(await cited.locator('.parley-refchip-note').innerText(), '· Plomberie');
+    assert.equal(await me.page.locator('#simple-thread .parley-said a[href^="javascript"]').count(), 0, 'any other scheme stays text');
+    /* B: a reply its AI asks for -- « in reply to ✉ Re: Bathroom leak · Plomberie Example » under its title. */
+    assert.equal((await me.api('/api/tether/level', { target: 'work-mail', agent: 'conversation:asker', level: 'propose' })).status, 200);
+    const side = join(work, '.tether');
+    mkdirSync(side, { recursive: true });
+    appendFileSync(join(side, 'asks.jsonl'), `${JSON.stringify({ id: 'r1', op: 'mail.reply', args: { target: 'work-mail', uid: '7', body: 'Thursday 8 am is fine.\nThe deposit follows.' }, at: new Date().toISOString() })}\n`);
+    const request = me.page.locator('#simple-thread .parley-request').first();
+    await me.until('the reply is a card in the thread', async () => (await request.locator('.parley-request-re').count()) === 1, 30_000);
+    assert.equal(await request.locator('.parley-request-re-lead').innerText(), 'in reply to');
+    const answered = request.locator('.parley-request-re .parley-refchip');
+    assert.equal(await answered.locator('.parley-refchip-text').innerText(), 'Re: Bathroom leak');
+    assert.equal(await answered.locator('.parley-refchip-note').innerText(), '· Plomberie Example');
+    const CHIPS = process.env.MAIL_CHIP_SHOTS ?? b.dir;
+    mkdirSync(CHIPS, { recursive: true });
+    await new Promise((ok) => setTimeout(ok, 800));
+    await me.page.screenshot({ path: join(CHIPS, 'chips-desktop-dark.png') });
+    const readsBefore = reads.length;
+    await answered.click();
+    await me.until('the original opens from the card', async () => (await me.page.locator('#preview-body .mail-subject').innerText().catch(() => '')) === 'Re: Bathroom leak', 15_000);
+    assert.deepEqual(reads.slice(readsBefore).map((r) => [r.verb, r.ref, r.by]), [['mail.open', REF, 'person:owner']], 'read when tapped, as the owner\'s read');
+    assert.equal(await request.locator('.parley-request-yes').isVisible(), true, 'the card still waits: opening decides nothing');
+    await me.page.keyboard.press('Escape');
+    await me.until('the viewer closed', async () => me.page.locator('#viewer').isHidden());
+    await cited.click();
+    await me.until('the cited mail opens', async () => (await me.page.locator('#preview-body .mail-subject').innerText().catch(() => '')) === 'Re: Bathroom leak', 15_000);
+    assert.equal(reads.length, readsBefore + 2);
+    assert.equal(reads.at(-1).ref, REF);
+    await me.page.keyboard.press('Escape');
+    await me.until('the viewer closed', async () => me.page.locator('#viewer').isHidden());
 
     /* A link to a mail (?mail=...): the same sheet; on a phone, light, from the bottom. */
     const phone = await b.person({ phone: true });
@@ -131,6 +174,13 @@ test('a mail cited by its reference: from a card and from a link, the viewer as 
     await phone.until('the line that says it is gone', async () => (await phone.page.locator('#preview-body .mail-state-line').innerText().catch(() => '')) === 'This mail is no longer in the mailbox.', 20_000);
     assert.equal(await phone.page.locator('#preview-download').isVisible(), false);
     await phone.page.screenshot({ path: join(SHOTS, 'ref-phone-light-gone.png') });
+    /* The chips on a phone, light: the card's and the message's, nothing past the edge. */
+    await phone.page.goto(`${b.origin}/?c=asker`);
+    if (await phone.page.locator('#view-chat').isVisible().catch(() => false)) await phone.page.locator('#view-chat').click();
+    await phone.until('the chips on the phone', async () => (await phone.page.locator('#simple-thread .parley-refchip').count()) === 2, 20_000);
+    await phone.page.locator('#simple-thread .parley-request-re').scrollIntoViewIfNeeded();
+    assert.equal(await phone.page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'nothing past the edge');
+    await phone.page.screenshot({ path: join(CHIPS, 'chips-phone-light.png') });
 
     /* A device given the chat, not that mailbox: not its to open -- and nothing read for it. */
     const shared = await me.api('/api/conversations/asker/share', { rights: 'rw' });
