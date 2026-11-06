@@ -686,7 +686,7 @@ const wakeRig = (Kind, { clip = 'Mésange', sentence = 'allume la lumière' } = 
     const s = new FakeSocket();
     boxes.accept(s, boxes.byKey(box.key));
     const settle = async () => { for (let k = 0; k < 8; k++) await tick(); };
-    const say = async ({ reason = 'wake', clipBytes = 0, end = 'silence' } = {}) => {
+    const say = async ({ reason = 'wake', clipBytes = 0, end = 'silence', voice } = {}) => {
         s.box({ t: 'listen.start', reason, ...(reason === 'wake' ? { score: 0.93 } : {}) });
         if (clipBytes) {
             s.box({ t: 'wake.clip', edge: 'start' });
@@ -694,7 +694,7 @@ const wakeRig = (Kind, { clip = 'Mésange', sentence = 'allume la lumière' } = 
             s.box({ t: 'wake.clip', edge: 'end' });
         }
         for (let i = 0; i < 40; i++) s.emit('message', Buffer.alloc(640), true);
-        s.box({ t: 'listen.end', reason: end });
+        s.box({ t: 'listen.end', reason: end, ...(voice !== undefined ? { ep: { voice } } : {}) });
         await settle();
     };
     return { boxes, s, whys, clips, sentences, say };
@@ -795,4 +795,20 @@ test('a false wake on a radio (06-11), the whole way: not heard + cut by the len
     const real = wakeRig(Boxes, { clip: "l'application de ton téléphone" });
     await real.say({ clipBytes: 51_200 });
     assert.equal(real.whys.length, 1, 'a real call the check missed, ended by silence: said');
+});
+
+test('woken by the word but no clip came to check it (06-11): a faint voice is dropped as the room\'s; a firm one, a button go', async () => {
+    const faint = wakeRig(Boxes);
+    await faint.say({ voice: 195 });
+    assert.equal(faint.whys.length, 0, 'faint, no clip: the room, dropped');
+    assert.deepEqual(faint.s.sent.at(-1), { t: 'cue', name: 'done' });
+    const firm = wakeRig(Boxes);
+    await firm.say({ voice: 900 });
+    assert.equal(firm.whys.length, 1, 'a firm voice: a real call may be, kept');
+    const button = wakeRig(Boxes);
+    await button.say({ reason: 'button', voice: 195 });
+    assert.equal(button.whys.length, 1, 'the button: always heard');
+    const unknown = wakeRig(Boxes);
+    await unknown.say({});
+    assert.equal(unknown.whys.length, 1, 'no voice measured: kept');
 });
