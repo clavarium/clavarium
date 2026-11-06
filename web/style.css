@@ -1159,26 +1159,17 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-detail { padding: 16px 20px 28px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 /* The detail scrolls as a whole: nothing in it is squeezed (a branch diagram cut, its buttons over it) when a folder's files open below. */
 .as-detail > * { flex-shrink: 0; }
-#assets-search { width: 100%; padding: 9px 12px; border-radius: 9px; margin-bottom: 4px; }
-/* By type / by group toggle, above the rows. */
-.as-view { display: flex; margin-bottom: 6px; }
-.as-view button { flex: 1 1 0; border-radius: 0; margin-left: -1px; font-size: .8125rem; padding: 7px 8px; }
-.as-view button:first-child { border-radius: 8px 0 0 8px; margin-left: 0; }
-.as-view button:last-child { border-radius: 0 8px 8px 0; }
-.as-view button[aria-pressed="true"] { border-color: var(--brass); color: var(--brass-ink); background: color-mix(in srgb, var(--brass) 14%, transparent); position: relative; z-index: 1; }
-/* The by-group view: make-a-group bar, a group's name button, its inline editor. */
+/* Above the list: its search and its one button (+ New in Assets, + Attach in a conversation). */
+.as-tools { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.as-tools input[type="search"] { flex: 1 1 auto; min-width: 0; width: 100%; padding: 9px 12px; border-radius: 9px; }
+.as-tools .as-new { flex: none; white-space: nowrap; font-size: .8125rem; font-weight: 600; padding: 8px 12px; border-radius: 9px; }
+/* Groups / Types (kit Segmented), above the rows. */
+.as-view { display: flex; margin-bottom: 4px; }
+.as-view .kit-seg { width: 100%; }
+.as-view .kit-seg > button { flex: 1 1 0; font-size: .8125rem; padding: 7px 8px; }
+/* The by-group view: make-a-group bar, its inline editor. */
 .as-group-new { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; }
 .as-group-new .hint { color: var(--ink2); }
-.as-group-head { gap: 4px; }
-.as-chev { flex: 0 0 auto; width: 16px; text-align: center; color: var(--ink2); font-size: .75rem; }
-.as-group-name { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; justify-content: flex-start; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 3px 6px; }
-.as-group-name:hover { border-color: var(--line); }
-.as-group-name[aria-current="true"] { background: var(--panel); border-color: var(--line); }
-.as-gear { flex: 0 0 auto; width: 30px; height: 30px; min-width: 0 !important; min-height: 0 !important; padding: 0; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 1rem; opacity: 1; }
-/* On a mouse, keep it quiet until the group is hovered or open; on touch (no
-   hover) it must stay visible, or it can never be reached. */
-@media (hover: hover) { .as-gear { opacity: 0; } .as-group-head:hover .as-gear, .as-group-name[aria-current="true"] + .as-gear { opacity: 1; } }
-.as-gear:hover { border-color: var(--line); color: var(--ink); }
 .as-group-members { display: flex; flex-direction: column; gap: 2px; }
 /* Give the group: a block per conversation, a row per asset at its own level. */
 .as-give { display: flex; flex-direction: column; gap: 12px; }
@@ -1207,10 +1198,7 @@ header .ic, #folders .ic { width: 18px; height: 18px; fill: none; stroke: curren
 .as-group-of { display: flex; align-items: center; gap: 10px; }
 .as-group-of-label { font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
 .as-group-of select { padding: 6px 9px; border-radius: 8px; }
-.as-kind { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
-.as-kind-head, .as-chapter { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.as-kind-head h3 { margin: 0; padding: 4px 6px; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); }
-.as-list-top h3 { text-transform: none; letter-spacing: 0; font-size: .8125rem; color: var(--ink); }
+.as-chapter { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .as-add { width: 30px; height: 30px; min-height: 0 !important; min-width: 0 !important; padding: 0; border-radius: 50%; font-size: 1rem; line-height: 1; color: var(--brass-ink); background: transparent; flex: 0 0 auto; }
 .as-add:hover { border-color: var(--brass); }
 .as-none { padding: 2px 8px 6px; }
@@ -2168,7 +2156,7 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .as-signature { display: flex; flex-direction: column; gap: 6px; margin: .6rem 0; }
 .as-signature textarea { width: 100%; font: inherit; }
 .as-drag-ghost { position: fixed; z-index: 90; pointer-events: none; opacity: .9; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); border-radius: 10px; background: var(--panel); }
-.as-group.as-drop-over { outline: 2px dashed var(--brass); outline-offset: 2px; border-radius: 10px; background: color-mix(in srgb, var(--brass) 7%, transparent); }
+.kit-aslist-group.as-drop-over { outline: 2px dashed var(--brass); outline-offset: 2px; border-radius: 10px; background: color-mix(in srgb, var(--brass) 7%, transparent); }
 body.as-dragging { user-select: none; -webkit-user-select: none; }
 body.as-dragging #assets-rows .as-row { touch-action: none; }
 /* A flash started from its button in the thread: Tether's module draws its steps here, over the page. */
@@ -2793,6 +2781,46 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-conv-row .kit-conv-main > .kit-chips, .kit-conv-sub > .kit-chips { flex: none; margin: 0; gap: 6px; flex-wrap: nowrap; }
 .kit-conv-row .kit-conv-main .kit-chip:not([data-tone="count"]) { border: 0; padding: 0; background: none; line-height: inherit; font-size: .75rem; }
 
+/* ONE ASSET (06-11, assets step 1: kit.js AssetIcon, AssetCard, RightsBadge, RightsPicker, Holders). Its sign on a
+   tile of its kind's colour; a row (a list), a chip (a pill), a head (atop its panel). */
+.kit-asset-ic { --ka-ic: 30px; width: var(--ka-ic); height: var(--ka-ic); border-radius: 8px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, currentColor 12%, transparent); color: var(--brass-ink); }
+.kit-asset-ic svg { width: 57%; height: 57%; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.kit-asset-ic[data-kind="git"] { color: color-mix(in srgb, var(--danger) 75%, var(--warn)); }
+.kit-asset-ic[data-kind="mailbox"] { color: var(--wait); }
+.kit-asset-ic[data-kind="agenda"], .kit-asset-ic[data-kind="contacts"] { color: color-mix(in srgb, var(--wait) 55%, var(--danger)); }
+.kit-asset-ic[data-kind="secret"], .kit-asset-ic[data-kind="acces"], .kit-asset-ic[data-kind="device"], .kit-asset-ic[data-kind="conversation"] { color: var(--ink2); }
+.kit-asset-ic[data-kind="list"] { color: var(--ok); }
+.kit-asset { display: flex; align-items: center; gap: 10px; min-width: 0; text-align: left; color: var(--ink); }
+.kit-asset-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.kit-asset-name { min-width: 0; margin: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-asset-sub { display: flex; align-items: center; gap: 5px; min-width: 0; color: var(--ink2); font-size: .75rem; }
+.kit-asset-sub > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-asset-sub[data-state="problem"] { color: var(--danger); }
+.kit-asset-side { flex: none; display: flex; align-items: center; gap: 6px; }
+.kit-asset-row { width: 100%; padding: 7px 8px; border: 0; border-radius: 10px; background: transparent; }
+.kit-asset-row:hover { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+.kit-asset-row[aria-current="true"] { background: color-mix(in srgb, var(--brass) 14%, transparent); }
+.kit-asset-chip { display: inline-flex; gap: 6px; max-width: 100%; padding: 2px 10px 2px 3px; border: 1px solid var(--line); border-radius: 999px; background: transparent; font-size: .8125rem; }
+.kit-asset-chip .kit-asset-ic { --ka-ic: 22px; border-radius: 50%; }
+.kit-asset-head { gap: 12px; align-items: flex-start; }
+.kit-asset-head .kit-asset-ic { --ka-ic: 38px; border-radius: 10px; }
+.kit-asset-head .kit-asset-name { font-size: 1.25rem; white-space: normal; overflow-wrap: anywhere; }
+.kit-asset-head .kit-asset-sub { font-size: .8125rem; }
+/* A RIGHT, READ: its tone by what it lets do (reads, changes, uses or watches, none). */
+.kit-rights { flex: none; padding: 1px 8px; border-radius: 999px; font-size: .6875rem; font-weight: 700; line-height: 1.6; white-space: nowrap; }
+.kit-rights[data-tone="r"] { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.kit-rights[data-tone="w"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 16%, transparent); }
+.kit-rights[data-tone="x"] { color: var(--wait); background: color-mix(in srgb, var(--wait) 14%, transparent); }
+.kit-rights[data-tone="n"] { color: var(--ink2); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+/* A RIGHT, SET: the Segmented, smaller; it wraps on a narrow screen rather than overflow. */
+.kit-rights-pick { flex: none; max-width: 100%; flex-wrap: wrap; }
+.kit-rights-pick > button { min-height: 30px; padding: 0 9px; font-size: .78125rem; font-weight: 600; }
+/* WHO HAS IT: initials over each other, then "+n"; nobody in grey. */
+.kit-holders { display: inline-flex; align-items: center; flex: none; }
+.kit-holders > .kit-av { --kc-av: 22px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel); }
+.kit-holders > .kit-av + .kit-av { margin-left: -6px; }
+.kit-holders-more, .kit-holders-none { margin-left: 4px; font-size: .75rem; color: var(--ink2); }
+
 /* A MAIL CITED BY ITS REFERENCE (06-11, app.js openMailRef): the same viewer, as a sheet over the thread --
    from the bottom on a phone, a panel at the right on a wide screen; where it is now, one line; Reply. */
 #viewer.viewer-sheet { padding: 0; align-items: flex-end; background: rgba(8, 11, 15, 0.45); }
@@ -2811,3 +2839,23 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 /* An API key's configuration, shown with it once (06-11). */
 .apikeys-config { margin: 6px 0; padding: 10px 12px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); font: .8125rem/1.45 var(--mono, ui-monospace, monospace); white-space: pre; overflow-x: auto; max-width: 100%; }
 .apikeys-curl code { word-break: break-all; font-size: .75rem; }
+
+/* THE ONE LIST OF ASSETS (06-11, kit AssetList): a section per type or per group, an empty type not shown; a group's
+   head folds it, says how many, who has its assets, its ⚙ opens it. Rows are AssetCards. */
+.kit-aslist { display: flex; flex-direction: column; gap: 2px; }
+.kit-aslist > .kit-asset-row { margin-bottom: 2px; }
+.kit-aslist-sec { display: flex; flex-direction: column; gap: 1px; margin-top: 8px; }
+.kit-aslist-head { display: flex; align-items: center; gap: 6px; min-height: 30px; }
+.kit-aslist-head h3 { margin: 0; padding: 4px 6px; font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.kit-aslist-fold { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; justify-content: flex-start; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 2px 4px; min-height: 0 !important; }
+.kit-aslist-fold:hover { border-color: var(--line); }
+.kit-aslist-fold[aria-current="true"] { background: var(--panel); border-color: var(--line); }
+.kit-aslist-chev { flex: none; width: 16px; text-align: center; color: var(--ink2); font-size: .75rem; }
+.kit-aslist-n { flex: none; font-size: .6875rem; font-weight: 600; padding: 0 7px; border-radius: 999px; background: var(--button); color: var(--ink); }
+.kit-aslist-gear { flex: none; width: 30px; height: 30px; min-width: 0 !important; min-height: 0 !important; padding: 0; border-radius: 7px; border: 1px solid transparent; background: transparent; color: var(--ink2); font-size: 1rem; }
+.kit-aslist-gear:hover { border-color: var(--line); color: var(--ink); }
+@media (hover: hover) { .kit-aslist-gear { opacity: 0; } .kit-aslist-head:hover .kit-aslist-gear, .kit-aslist-gear:focus-visible, .kit-aslist-fold[aria-current="true"] ~ .kit-aslist-gear { opacity: 1; } }
+.kit-aslist-none, .kit-aslist-said { margin: 2px 8px 4px; font-size: .8125rem; }
+/* A line that asks for you keeps its shade: soon (warn), past or failing (bad). */
+.kit-asset-sub[data-tone="warn"] > .state-dot { background: var(--warn); }
+.kit-asset-sub[data-tone="bad"] { color: var(--danger); }

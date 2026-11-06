@@ -787,7 +787,7 @@ export class Boxes {
                 this.#log(`voice box ${box.name}: a sentence while recording here, the recording closed`);
                 r.out.end(() => { void this.#recorded(link, r); });
             }
-            if (m.t === 'listen.start') { link.why = whyOf(m); link.wakeCheck = null; link.voice = NaN; link.endReason = ''; }   /* its clip, if any, comes after listen.start: an older check never carries over */
+            if (m.t === 'listen.start') { link.why = whyOf(m); link.wakeCheck = null; link.voice = NaN; link.endReason = ''; link.startReason = String(m.reason ?? ''); link.clipSeen = false; }   /* its clip, if any, comes after listen.start: an older check never carries over */
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
@@ -923,6 +923,16 @@ export class Boxes {
         /* The wake word heard again (wake.clip): said beside the message; dropped in silence only once that is
            turned on (WAKE_DROP), after its results were looked at -- a real call must never be lost to it. */
         const check = link.wakeCheck ? await link.wakeCheck.catch(() => null) : null; link.wakeCheck = null;
+        /* WOKEN BY THE WORD, BUT NO CLIP TO CHECK IT (06-11: « ce ne sera pas au niveau de fond », voice 195, passed): as a
+           clip with no word in it -- dropped only when faint too; a firm voice, a button, a knock still go. */
+        if (!check && link.startReason === 'wake' && dropsWake(false, link.voice, link.endReason, '')) {
+            if (Number.isFinite(link.voice) && link.voice > 0 && link.voice < WAKE_FAINT) {
+                link.send({ t: 'cue', name: 'done' });
+                this.#log(`voice box ${box.name}: wake ignored (no wake clip to check, faint voice ${Math.round(link.voice)})`);
+                try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: no wake word to check, faint voice`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
+                return;
+            }
+        }
         if (check) {
             /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
             link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;

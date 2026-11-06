@@ -217,10 +217,11 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await until(`the card of ${label}`, shown);
             return page.locator('#links-card .device');
         }
-        /* In the server's Assets: the "+" of a kind, then its form. */
+        /* In the server's Assets: the one "+ New", its kind, then its form. */
         async function addAsset(kind) {
             await openAccess('assets');
-            await page.locator(`#assets-rows .as-kind[data-kind="${kind}"] .as-add`).click();
+            await page.locator('#assets-new').click();
+            await page.locator(`#assets-detail .as-kinds button[data-kind="${kind}"]`).click();
         }
         /* One asset opened in the server's Assets; its detail. */
         async function openAsset(kind, name) {

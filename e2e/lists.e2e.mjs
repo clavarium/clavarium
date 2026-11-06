@@ -20,9 +20,12 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     assert.equal(await page.locator('#nav-lists').count(), 0);
     assert.equal(await page.locator('#view-lists').isVisible(), false, 'no Lists tab before it was given one');
     await page.locator('#nav-assets').click();
-    const kind = page.locator('#assets-rows .as-kind[data-kind="list"]');
-    await me.until('Lists, among the assets', async () => /None yet/.test(await kind.innerText().catch(() => '')));
-    await kind.locator('.as-add').click();
+    const kind = page.locator('#assets-rows .kit-aslist-sec[data-kind="list"]');
+    /* None yet: no empty section for them; the one "+ New", then the kind. */
+    await me.until('the Assets list', async () => await page.locator('#assets-new').isVisible());
+    assert.equal(await kind.count(), 0, 'an empty kind is not shown');
+    await page.locator('#assets-new').click();
+    await page.locator('#assets-detail .as-kinds button[data-kind="list"]').click();
     await me.until('the templates', async () => (await page.locator('#listnew-template option').count()) > 1);
     await page.locator('#listnew-template').selectOption('batches');
     await page.locator('#list-new button[type=submit]').click();

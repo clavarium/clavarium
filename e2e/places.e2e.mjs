@@ -52,7 +52,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     /* From a conversation: its own Assets, and "+" to attach -- the one Attach box (05-11: Access no longer has a second button to it). */
     await page.locator('#view-assets').click();
     await me.until('its own Assets', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#view-assets').getAttribute('aria-pressed')) === 'true');
-    await page.locator('#cassets-rows .as-list-top .as-add').click();
+    await page.locator('#cassets-attach').click();
     await me.until('the attach picker', async () => page.locator('#attach-picker').isVisible());
     assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to attach');
     assert.equal(await page.locator('#attach-picker .kit-newasset .as-kinds button').count(), 9, 'or a new one, of every kind (a voice box and a device too)');

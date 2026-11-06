@@ -154,7 +154,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     await me.page.fill('#secret-value', 'sk-soon-first');
     await me.page.fill('#secret-expires', day(3));
     await me.page.locator('#secret-new button[type=submit]').click();
-    const soonRow = me.page.locator('#assets-rows .as-row[data-asset="secret:SOON_KEY"] .as-sub');
+    const soonRow = me.page.locator('#assets-rows .as-row[data-asset="secret:SOON_KEY"] .kit-asset-sub');
     await me.until('its row says it is near', async () => (await soonRow.innerText().catch(() => '')) === 'Expires in 3 days');
     assert.equal(await soonRow.getAttribute('data-tone'), 'warn');
     await me.until('its sheet says it, with the day', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')) === `Expires in 3 days · ${day(3)}`);
@@ -170,7 +170,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     await me.openAsset('secret', 'PAST_KEY');
     await me.until('shown Expired, in red', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')).startsWith('Expired'));
     assert.equal(await me.page.locator('#assets-detail .secret-expiry-state').getAttribute('data-tone'), 'bad');
-    assert.equal(await me.page.locator('#assets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub').innerText(), 'Expired');
+    assert.equal(await me.page.locator('#assets-rows .as-row[data-asset="secret:PAST_KEY"] .kit-asset-sub').innerText(), 'Expired');
     /* Said once in What happened, with who had it. */
     await me.until('said in What happened', async () => (await me.api('/api/events?q=PAST_KEY')).body.some((e) => e.text.startsWith('Secret PAST_KEY expired')));
 
@@ -189,7 +189,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     /* Its own Assets show the expired one too. */
     await me.page.locator('#assets-close').click();
     await me.page.locator('#view-assets').click();
-    const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .as-sub');
+    const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .kit-asset-sub');
     await me.until('its own Assets say it expired', async () => (await pastHere.innerText().catch(() => '')) === 'Expired');
     assert.equal(await pastHere.getAttribute('data-tone'), 'bad');
     await me.until('a dot on its Assets', async () => (await me.page.locator('#view-assets[data-attention]').count()) === 1);

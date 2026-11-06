@@ -19,6 +19,14 @@
  *                  its views on the right) and `sub` (a page of its own or inside one: a way back on the right)
  *   ShareDonut     who takes a whole (memory, a disk): a small donut, its slices from shareSlices, the main
  *                  figure in its middle; ShareKey, a slice's swatch beside its row in the list
+ *   AssetIcon      an asset's sign and colour, by its kind (one table, ASSET_ICONS)
+ *   AssetCard      ONE ASSET, three sizes like ConvCard (06-11, assets step 1): `row` (a list), `chip` (a pill:
+ *                  a folded group, the thread, a call waiting), `head` (atop its panel). On its right, who has
+ *                  it (Holders) or, seen from one holder, its right (RightsBadge).
+ *   AssetList      THE ONE LIST of assets (06-11, assets step 2): the Assets menu and a conversation's tab, only its
+ *                  scope changes; by type or by group; an empty type not shown; assetListModel places the rows.
+ *   RIGHTS         THE ONE TABLE of what an asset can be given at, by its kind and by who gets it (a
+ *                  conversation, a device); "none" first. RightsBadge reads a right, RightsPicker sets it.
  *
  * No framework: each piece is a function that returns an element. Words: English here; the page
  * hands its own (`setWords`, app.js `uiSaid`) for the few the kit says by itself.
@@ -391,7 +399,272 @@
         return root;
     }
 
+    /* ---------- ASSETS (06-11, the unified assets, step 1: the pieces; the screens move to them in step 2) ---------- */
+
+    /* AN ASSET'S SIGN, by its kind: the icon set's name (Lucide, icons.js), or '' for one drawn here (a binder).
+       A live link (a connexion) takes the sign of what it links (a mailbox, a calendar); `acces`, any other. */
+    const ASSET_ICONS = { folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'user', secret: 'key-round', list: '', acces: 'link', send: 'arrow-up', demandes: 'arrow-up', box: 'mic', device: 'smartphone', conversation: 'message-square' };
+    const ASSET_KINDS = Object.keys(ASSET_ICONS);
+    /* A binder: the set has no such sign, so it is drawn here, in its style (was app.js listIcon). */
+    function listSign() {
+        const svg = svgNode('svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+        for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const p = svgNode('path'); p.setAttribute('d', d); svg.append(p); }
+        return svg;
+    }
+    function AssetIcon({ kind = 'folder', cls = '' } = {}) {
+        const k = kind in ASSET_ICONS ? kind : 'folder';
+        const box = node('span', `kit-asset-ic${cls ? ` ${cls}` : ''}`); box.dataset.kind = k; box.setAttribute('aria-hidden', 'true');
+        const name = ASSET_ICONS[k];
+        const svg = name ? window.clavariumIcons?.icon?.(name) : listSign();
+        if (svg) box.append(svg);
+        return box;
+    }
+
+    /* THE RIGHTS: one level each, its tone (r: reads, w: changes, x: uses or watches, n: none). The words come
+       three ways: `badge` (what it has: "Reads"), `pick` (a choice: "Read"), `hint` (one line, its title). */
+    const RIGHT_LEVELS = {
+        none: { tone: 'n', badge: 'None', pick: 'None', hint: 'Not given' },
+        read: { tone: 'r', badge: 'Reads', pick: 'Read', hint: 'Reads only' },
+        write: { tone: 'w', badge: 'Writes', pick: 'Write', hint: 'Reads and writes' },
+        use: { tone: 'x', badge: 'Uses', pick: 'Use', hint: 'Handed to its tool, never shown' },
+        watch: { tone: 'x', badge: 'Watches', pick: 'Watch', hint: 'Reads only' },
+        propose: { tone: 'x', badge: 'Proposes', pick: 'Propose', hint: 'Asks you before each action' },
+        frame: { tone: 'w', badge: 'Framed', pick: 'Frame', hint: 'Acts within its rules, asks the rest' },
+        free: { tone: 'w', badge: 'Free', pick: 'Free', hint: 'Acts, kept in the journal' },
+        terminal: { tone: 'x', badge: 'Terminal', pick: 'Terminal', hint: 'Its whole terminal' },
+        chat: { tone: 'r', badge: 'Chat', pick: 'Chat', hint: 'Reads and writes in its chat' },
+        both: { tone: 'w', badge: 'Chat + terminal', pick: 'Both', hint: 'Its chat and its terminal' },
+    };
+    /* THE ONE TABLE (was app.js levelOptionsFor, the "Used by" options, levelControl, partsControl, fixedRight,
+       fixedUse, Attach's Read / Write / Use): what each kind can be given at, by who gets it. "none" is first,
+       always: it replaces Off, Detach, Remove all and Take back. A kind not in a holder's column is not given
+       to it. `connexion`: a live link (Tether: a mailbox, a calendar, contacts or an access connected). */
+    const RIGHTS = {
+        folder: { conversation: ['none', 'read', 'write'], device: ['none', 'read', 'write'] },
+        git: { conversation: ['none', 'read', 'write'], device: ['none', 'read', 'write'] },
+        mailbox: { conversation: ['none', 'read'], device: ['none', 'read'] },
+        secret: { conversation: ['none', 'use'] },
+        list: { conversation: ['none', 'read', 'write'] },
+        connexion: { conversation: ['none', 'watch', 'propose', 'frame', 'free'] },
+        conversation: { device: ['none', 'terminal', 'chat', 'both'] },
+    };
+    const HOLDERS = ['conversation', 'device'];
+    /* The table's key of an asset: a live link is a connexion, whatever it links; else its kind. */
+    const rightsKey = (a) => (a?.live || a?.target ? 'connexion' : a?.kind ?? '');
+    const rightsFor = (key, holder = 'conversation') => [...(RIGHTS[key]?.[HOLDERS.includes(holder) ? holder : 'conversation'] ?? [])];
+    /* The lightest real level (what "give the group" gives): the first after none. */
+    const lightest = (key, holder) => rightsFor(key, holder)[1] ?? null;
+    /* AS THE SERVER KEEPS THEM -> a level, and back. A secret is 'off' / 'use' (secrets.mjs); a device's
+       grant is 'r' / 'rw', a conversation given to a device 'x' (terminal), 'rw' (chat), 'rwx' (devices.mjs);
+       the rest keeps the level's own name. Nothing, '', null, 'off': none. */
+    function rightOf(key, stored, holder = 'conversation') {
+        const s = String(stored ?? '').trim();
+        if (!s || s === 'off' || s === 'none') return 'none';
+        if (holder === 'device' || /^(r|rw|x|rwx)$/.test(s)) {
+            if (key === 'conversation') return { x: 'terminal', rw: 'chat', r: 'chat', rwx: 'both', xrw: 'both' }[s] ?? (s in RIGHT_LEVELS ? s : 'none');
+            if (s === 'r') return 'read';
+            if (s === 'rw' || s === 'rwx') return 'write';
+        }
+        return s in RIGHT_LEVELS ? s : 'none';
+    }
+    function storedOf(key, level, holder = 'conversation') {
+        if (holder === 'device') {
+            if (level === 'none') return null;
+            if (key === 'conversation') return { terminal: 'x', chat: 'rw', both: 'rwx' }[level] ?? null;
+            return { read: 'r', write: 'rw' }[level] ?? null;
+        }
+        if (key === 'secret') return level === 'use' ? 'use' : 'off';
+        return level;
+    }
+    const levelOf = (opts) => { const l = opts.level ?? rightOf(opts.key ?? '', opts.value, opts.holder); return l in RIGHT_LEVELS ? l : 'none'; };
+    const rightWord = (level, form = 'badge') => {
+        const l = RIGHT_LEVELS[level] ?? RIGHT_LEVELS.none;
+        return say(`set-rt-${form === 'badge' ? '' : `${form}-`}${level in RIGHT_LEVELS ? level : 'none'}`, l[form] ?? l.badge);
+    };
+
+    /* A RIGHT, READ: a small pill, its tone by what it lets do. `level`, or `value` as kept (with its `key`, `holder`). */
+    function RightsBadge(opts = {}) {
+        const level = levelOf(opts);
+        const b = node('span', `kit-rights${opts.cls ? ` ${opts.cls}` : ''}`, rightWord(level, 'badge'));
+        b.dataset.level = level; b.dataset.tone = RIGHT_LEVELS[level].tone;
+        b.title = rightWord(level, 'hint');
+        return b;
+    }
+
+    /* A RIGHT, SET: the kind's levels from the table, "None" first, the one held pressed. `onChange(level,
+       stored)`: the level, and as the server keeps it; the buttons wait while it works (a promise). Nothing
+       to choose (a kind not given to that holder): null. */
+    function RightsPicker({ key = '', holder = 'conversation', value, level, label = '', cls = '', onChange = () => {} } = {}) {
+        const levels = rightsFor(key, holder);
+        if (!levels.length) return null;
+        const now = level ?? rightOf(key, value, holder);
+        const options = levels.map((l) => ({ value: l, label: rightWord(l, 'pick') }));
+        let held = now;
+        const pick = Segmented({ options, value: now, label, onChange: async (l) => {
+            if (l === held) return;
+            const buttons = pick.children; for (const b of buttons) b.disabled = true;
+            try { if ((await onChange(l, storedOf(key, l, holder))) === false) pick.set(held); else held = l; }
+            catch { pick.set(held); }
+            finally { for (const b of buttons) b.disabled = false; }
+        } });
+        addClass(pick, `kit-rights-pick${cls ? ` ${cls}` : ''}`);
+        pick.dataset.key = key; pick.dataset.holder = holder;
+        for (const b of pick.children) b.title = rightWord(b.dataset.value, 'hint');
+        return pick;
+    }
+
+    /* WHO HAS IT: their initials, up to `max`, then "+n"; nobody, said in grey. `list` [{ name, hue?, glyph? }]. */
+    function Holders(list = [], { max = 3 } = {}) {
+        const box = node('span', 'kit-holders');
+        const all = (list ?? []).filter((h) => h && h.name);
+        if (!all.length) { box.dataset.none = 'true'; box.append(node('small', 'kit-holders-none', say('set-as-nobody', 'nobody'))); return box; }
+        for (const h of all.slice(0, max)) box.append(Avatar(h));
+        if (all.length > max) box.append(node('small', 'kit-holders-more', `+${all.length - max}`));
+        box.title = all.map((h) => h.name).join(', ');
+        return box;
+    }
+
+    /* ONE ASSET. `a`, what the page knows of it, said once:
+         key, kind   'folder:reports', its kind (ASSET_ICONS)   name    its name
+         live        a live link (a connexion): its rights are a connexion's
+         sub         its one line ('' : none)                   state   a point when it asks for you (wait,
+                                                                        problem: expiring, failing); else none
+         tone        its line's shade, when the page has one ('warn': soon; 'bad': past, failing)
+         count       a number that waits for you (calls waiting)
+         holders     [{ name, hue? }] who has it (Assets)       right   { level | value, holder? } its right,
+                                                                        seen from one holder (a conversation)
+         chips       [{ text, … }] on a head (its group ▾, its type, its size)
+       `size`: 'row' | 'chip' | 'head'. `tag`: 'button' (it opens: `onOpen`) or the page's; a head is a div.
+       `current`: the one open (aria-current). `actions`: the place's own gestures, on its right. */
+    function AssetCard(a, { size = 'row', tag, cls = '', current = false, onOpen = null, actions = [] } = {}) {
+        const s = ['row', 'chip', 'head'].includes(size) ? size : 'row';
+        const t = tag ?? (s === 'head' ? 'div' : onOpen || s === 'row' ? 'button' : 'span');
+        const root = node(t, `kit-asset kit-asset-${s}${cls ? ` ${cls}` : ''}`);
+        if (t === 'button') root.type = 'button';
+        if (a.key) root.dataset.asset = a.key;
+        root.dataset.kind = a.kind ?? 'folder'; root.dataset.name = a.name ?? '';
+        if (current) root.setAttribute('aria-current', 'true');
+        root.append(AssetIcon({ kind: a.kind }));
+        if (s === 'chip') {
+            root.append(node('span', 'kit-asset-name', a.name ?? ''));
+            if (a.right) root.append(RightsBadge({ ...a.right, key: a.right.key ?? rightsKey(a) }));
+        } else {
+            const main = node('span', 'kit-asset-main');
+            main.append(node(s === 'head' ? 'h2' : 'b', 'kit-asset-name', a.name ?? ''));
+            if (a.sub || a.state) {
+                const line = node('small', 'kit-asset-sub');
+                if (a.state) { line.append(StatusDot({ state: a.state, label: a.sub ?? '' })); line.dataset.state = stateOf(a.state); }
+                if (a.tone) line.dataset.tone = a.tone;
+                if (a.sub) line.append(node('span', '', a.sub));
+                main.append(line);
+            }
+            if (s === 'head') { const chips = Chips(a.chips ?? []); if (chips) main.append(chips); }
+            root.append(main);
+            const side = node('span', 'kit-asset-side');
+            if (Number.isFinite(a.count) && a.count > 0) side.append(Chips([{ text: String(a.count), tone: 'count' }]));
+            if (a.right) side.append(RightsBadge({ ...a.right, key: a.right.key ?? rightsKey(a) }));
+            else if (a.holders && s === 'row') side.append(Holders(a.holders));
+            side.append(...actions.filter(Boolean));
+            if (side.children.length) root.append(side);
+        }
+        if (onOpen && t === 'button') root.addEventListener('click', () => onOpen(a.key));
+        return root;
+    }
+
+    /* THE LIST OF ASSETS (06-11, assets step 2): ONE LIST in the Assets menu and in a conversation's Assets tab;
+       only its scope changes -- 'all' (every asset, who has each on its right) or 'conversation:<name>' (what it
+       was given, each with its right). Two views of the same rows: by type, or by the owner's groups (the menu
+       only). A type with nothing in it is not shown; a group is (a place to drag to), unless a search empties it.
+
+       assetListModel: the rows placed, no page needed (tested alone).
+         items   [{ key, kind, name, … }] as AssetCard takes them       groups  [{ id, label, members: [key] }]
+         scope   'all' | 'conversation:x'                              by      the view kept ('type' | 'group'), or
+                                                                               '': groups once one exists, else types
+         query   a name searched (any case)     folded   group ids folded shut     kinds   [[kind, title]] in order
+       -> { view, canGroup, sections: [{ id, title, kind | group, items, holders, folded, drop, empty }], shown, total } */
+    const scopeOf = (scope) => (String(scope ?? 'all').startsWith('conversation:') ? 'conversation' : 'all');
+    function assetListModel({ items = [], groups = [], scope = 'all', by = '', query = '', folded = [], kinds = [] } = {}) {
+        const canGroup = scopeOf(scope) === 'all';
+        const view = canGroup && (by === 'group' || (by !== 'type' && groups.length > 0)) ? 'group' : 'type';
+        const q = String(query ?? '').trim().toLowerCase();
+        const shown = q ? items.filter((i) => String(i.name ?? '').toLowerCase().includes(q)) : [...items];
+        const sections = [];
+        if (view === 'type') {
+            const order = kinds.length ? kinds : [...new Set(shown.map((i) => i.kind))].map((k) => [k, k]);
+            const known = new Set(order.map(([k]) => k));
+            for (const [kind, title] of order) {
+                const mine = shown.filter((i) => i.kind === kind);
+                if (mine.length) sections.push({ id: `kind:${kind}`, kind, title, items: mine });
+            }
+            /* A kind the page did not name is never dropped: it comes last, under its own name. */
+            for (const kind of [...new Set(shown.map((i) => i.kind).filter((k) => !known.has(k)))]) sections.push({ id: `kind:${kind}`, kind, title: kind, items: shown.filter((i) => i.kind === kind) });
+        } else {
+            const byKey = new Map(shown.map((i) => [i.key, i]));
+            const shut = new Set(folded);
+            const grouped = new Set();
+            for (const g of groups) {
+                for (const k of g.members ?? []) grouped.add(k);
+                const mine = (g.members ?? []).map((k) => byKey.get(k)).filter(Boolean);
+                if (q && !mine.length) continue;
+                const seen = new Set(); const holders = [];
+                for (const h of mine.flatMap((i) => i.holders ?? [])) if (h?.name && !seen.has(h.name)) { seen.add(h.name); holders.push(h); }
+                sections.push({ id: `group:${g.id}`, group: g.id, title: g.label, items: mine, holders, folded: shut.has(g.id), drop: g.id, empty: mine.length ? '' : 'group' });
+            }
+            const loose = shown.filter((i) => !grouped.has(i.key));
+            /* The loose ones stay a place to drag to (out of a group) while there are groups, even emptied. */
+            if (loose.length || (!q && items.length)) sections.push({ id: 'group:', group: '', title: say('set-as-no-group', 'No group'), items: loose, drop: '', empty: loose.length ? '' : groups.length ? 'grouped' : 'nogroups' });
+        }
+        return { view, canGroup, sections, shown: shown.length, total: items.length };
+    }
+
+    /* The list drawn from its model. A row is an AssetCard (`rowCls` added: the page's handle on it); `pinned`,
+       rows above every section (what waits: To send, Demandes). `onOpen(key)`; a group's head folds it
+       (`onFold(id)`), its ⚙ opens it (`onGroup(id)`). `empty`: said when there is nothing at all; `noMatch`,
+       when a search finds nothing. */
+    function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '' } = {}) {
+        const box = node('div', 'kit-aslist'); box.dataset.view = model.view;
+        box.append(...pinned.filter(Boolean));
+        const hints = {
+            group: say('set-as-group-empty', 'Empty: drag an asset here'),
+            grouped: say('set-as-all-grouped', 'Every asset is in a group'),
+            nogroups: say('set-as-no-groups', 'Make a group, then drag an asset into it'),
+        };
+        for (const s of model.sections) {
+            const sec = node('section', `kit-aslist-sec${s.group !== undefined ? ' kit-aslist-group' : ''}`);
+            if (s.kind !== undefined) sec.dataset.kind = s.kind;
+            if (s.drop !== undefined) sec.dataset.drop = s.drop;
+            const head = node('div', 'kit-aslist-head');
+            if (s.group) {
+                if (s.folded) head.dataset.folded = 'true';
+                const toggle = node('button', 'kit-aslist-fold'); toggle.type = 'button';
+                if (`group:${s.group}` === chosen) toggle.setAttribute('aria-current', 'true');
+                toggle.setAttribute('aria-expanded', String(!s.folded));
+                toggle.title = s.folded ? say('set-as-unfold', 'Unfold') : say('set-as-fold', 'Fold');
+                toggle.append(node('span', 'kit-aslist-chev', s.folded ? '▸' : '▾'), node('h3', '', s.title), node('span', 'kit-aslist-n', String(s.items.length)));
+                toggle.addEventListener('click', () => onFold(s.group));
+                head.append(toggle);
+                if (s.holders?.length) head.append(Holders(s.holders));
+                const gear = node('button', 'kit-aslist-gear', '⚙'); gear.type = 'button';
+                gear.setAttribute('aria-label', say('set-as-group-open', 'Settings for {name}').replace('{name}', s.title));
+                gear.title = say('set-as-group-gear', 'Give, rename, remove');
+                gear.addEventListener('click', (e) => { e?.stopPropagation?.(); onGroup(s.group); });
+                head.append(gear);
+            } else head.append(node('h3', '', s.title));
+            sec.append(head);
+            if (!s.folded) {
+                for (const a of s.items) sec.append(AssetCard(a, { size: 'row', cls: rowCls, current: a.key === chosen, onOpen }));
+                if (s.empty) sec.append(node('p', 'hint kit-aslist-none', hints[s.empty] ?? ''));
+            }
+            box.append(sec);
+        }
+        if (!model.total && empty) box.append(node('p', 'hint kit-aslist-said', empty));
+        else if (model.total && !model.shown && noMatch) box.append(node('p', 'hint kit-aslist-said', noMatch));
+        return box;
+    }
+
     window.clavariumKit = {
+        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel,
+        ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,
         setWords(fn) { if (typeof fn === 'function') words = fn; },

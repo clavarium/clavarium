@@ -69,5 +69,23 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-convs': 'Conversations', 'set-apikeys-convs-hint': 'Une par une : lire ou parler', 'set-apikeys-off': 'Non',
     'set-apikeys-read': 'Lire', 'set-apikeys-talk': 'Parler', 'set-apikeys-no-convs': 'Aucune conversation pour l\'instant',
     'set-apikeys-journal': 'Journal', 'set-apikeys-no-use': 'Aucun appel pour l\'instant',
+    /* The rights of an asset (06-11, kit.js RIGHTS): what it has (a pill), a choice, its one line. */
+    'set-rt-none': 'Aucun', 'set-rt-read': 'Lit', 'set-rt-write': 'Écrit', 'set-rt-use': 'Utilise', 'set-rt-watch': 'Surveille',
+    'set-rt-propose': 'Propose', 'set-rt-frame': 'Encadré', 'set-rt-free': 'Libre', 'set-rt-terminal': 'Terminal', 'set-rt-chat': 'Chat',
+    'set-rt-both': 'Chat + terminal',
+    'set-rt-pick-none': 'Aucun', 'set-rt-pick-read': 'Lire', 'set-rt-pick-write': 'Écrire', 'set-rt-pick-use': 'Utiliser',
+    'set-rt-pick-watch': 'Surveiller', 'set-rt-pick-propose': 'Proposer', 'set-rt-pick-frame': 'Encadrer', 'set-rt-pick-free': 'Libre',
+    'set-rt-pick-terminal': 'Terminal', 'set-rt-pick-chat': 'Chat', 'set-rt-pick-both': 'Les deux',
+    'set-rt-hint-none': 'Pas donné', 'set-rt-hint-read': 'Lecture seule', 'set-rt-hint-write': 'Lecture et écriture',
+    'set-rt-hint-use': 'Remis à son outil, jamais affiché', 'set-rt-hint-watch': 'Lecture seule',
+    'set-rt-hint-propose': 'Vous demande avant chaque action', 'set-rt-hint-frame': 'Agit selon ses règles, vous demande le reste',
+    'set-rt-hint-free': 'Agit seul, tout est noté au journal', 'set-rt-hint-terminal': 'Tout son terminal',
+    'set-rt-hint-chat': 'Lit et écrit dans son chat', 'set-rt-hint-both': 'Son chat et son terminal',
+    'set-as-nobody': 'personne',
+    /* The one list of assets (06-11, kit AssetList): its views, its one button, a group's head, what an empty one says. */
+    'set-as-new': 'Nouveau', 'set-as-by-group': 'Groupes', 'set-as-by-type': 'Types', 'set-as-no-group': 'Sans groupe',
+    'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-open': 'Réglages de {name}', 'set-as-group-gear': 'Donner, renommer, supprimer',
+    'set-as-group-empty': 'Vide : glissez un asset ici', 'set-as-all-grouped': 'Chaque asset est dans un groupe',
+    'set-as-no-groups': 'Créez un groupe, puis glissez-y un asset',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});
