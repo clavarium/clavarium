@@ -5330,7 +5330,10 @@
                 if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
                 return d;
             }),
-            send: (text) => post(`${API}/rooms/${id}/talk`, { text }),
+            send: (text, answers, files) => post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) }),
+            /* A file attached in a room (06-11): as in a conversation's chat; kept in the room, a copy to each AI the message goes to. */
+            attach: { upload: async (file) => { const x = await fetch(`${API}/rooms/${id}/talk/file?${new URLSearchParams({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }); const j = await x.json().catch(() => ({})); if (!x.ok) throw new Error(j.error || 'The file could not be sent.'); return j; } },
+            open: (file) => { if (!String(file.open ?? '').startsWith('room:')) return; const inner = file.open.slice('room:'.length); void preview('room', inner, file.name || inner.split('/').pop(), file.size ?? 0, `${API}/rooms/${id}/file?${new URLSearchParams({ p: inner })}`, { within: r.name }); },
             /* The same chat as a conversation's (03-11): its view, its formulas, its dictation, its keyboard rule. */
             view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
