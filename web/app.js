@@ -6142,6 +6142,82 @@
             rows.append(row);
         }
     }
+    /* API KEYS (server/apikeys.mjs): what a program or an AI elsewhere may read with a key. Made with no
+       scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
+       Administrators only: hidden on a device, and where the server does not answer it. */
+    const shortDate = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+    async function paintApiKeys() {
+        const got = DEVICE ? null : await fetch(`${API}/apikeys`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+        $('settings-ch-apikeys').hidden = !got || !Array.isArray(got.keys);
+        if (!got || !Array.isArray(got.keys)) return;
+        const scopeWord = (id) => uiSaid(`set-apikeys-scope-${id}`, got.scopes.find((x) => x.id === id)?.label ?? id);
+        const live = got.keys.filter((k) => !k.expired).length;
+        chapterNow('s-apikeys', got.keys.length ? uiSaid(live === 1 ? 'set-apikeys-n1' : 'set-apikeys-n', live === 1 ? '1 key' : '{n} keys', { n: live }) : uiSaid('set-apikeys-about', 'For a program or an AI.'));
+        $('apikeys-where').textContent = `MCP: ${location.origin}/api/ext/mcp`;
+        const scopes = $('apikeys-scopes');
+        if (!scopes.childElementCount) {
+            for (const sc of got.scopes) {
+                const l = el('label', 'check'); const box = document.createElement('input'); box.type = 'checkbox'; box.value = sc.id; box.name = 'apikeys-scope';
+                l.append(box, ' ', el('span', '', scopeWord(sc.id))); scopes.append(l);
+            }
+        }
+        const rows = $('apikeys-rows'); rows.replaceChildren();
+        $('apikeys-empty').hidden = got.keys.length > 0;
+        for (const k of got.keys) {
+            const row = el('div', 'list-item apikey'); row.dataset.id = k.id;
+            const what = el('div', 'set-what');
+            const head = el('b', '', k.label);
+            what.append(head);
+            const tags = el('span', 'apikey-scopes');
+            if (k.scopes.length) for (const sc of k.scopes) tags.append(el('span', 'chip', scopeWord(sc)));
+            else tags.append(el('span', 'chip', uiSaid('set-apikeys-no-scope', 'No scope')));
+            what.append(tags);
+            const by = k.createdBy ? (k.createdBy === got.me ? uiSaid('set-apikeys-by-you', 'by you') : k.createdBy) : '';
+            const facts = [
+                k.usedAt ? uiSaid('set-apikeys-used', 'Used {when}', { when: agoSaid(k.usedAt) }) : uiSaid('set-apikeys-unused', 'Never used'),
+                k.expired ? uiSaid('set-apikeys-expired', 'Expired') : k.expiresAt ? uiSaid('set-apikeys-expires-on', 'Expires {date}', { date: shortDate(k.expiresAt) }) : uiSaid('set-apikeys-no-expiry', 'No expiry'),
+                `${uiSaid('set-apikeys-created', 'Created {date}', { date: shortDate(k.createdAt) })}${by ? ` ${by}` : ''}`,
+            ];
+            what.append(el('small', k.expired ? 'bad' : '', facts.join(' · ')));
+            const acts = el('div', 'set-control');
+            const revoke = el('button', 'danger', uiSaid('set-apikeys-revoke', 'Revoke')); revoke.type = 'button'; revoke.dataset.act = 'revoke';
+            revoke.addEventListener('click', () => {
+                KIT.InlineConfirm(revoke, { question: uiSaid('set-apikeys-revoke-q', 'Revoke now?'), yes: uiSaid('set-apikeys-revoke', 'Revoke'), onYes: async () => {
+                    $('apikeys-error').hidden = true;
+                    try { await post(`${API}/apikeys/${k.id}/revoke`, {}); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; $('apikeys-form').hidden = false; }
+                    await paintApiKeys();
+                } });
+            });
+            acts.append(revoke);
+            row.append(what, acts);
+            rows.append(row);
+        }
+    }
+    const apiKeyFormShown = (on) => {
+        $('apikeys-form').hidden = !on; $('apikeys-new-row').hidden = on; $('apikeys-error').hidden = true;
+        if (on) { $('apikeys-label').value = ''; $('apikeys-days').value = '90'; for (const b of $('apikeys-scopes').querySelectorAll('input')) b.checked = false; $('apikeys-label').focus(); }
+    };
+    $('apikeys-new').addEventListener('click', () => apiKeyFormShown(true));
+    $('apikeys-cancel').addEventListener('click', () => apiKeyFormShown(false));
+    $('apikeys-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('apikeys-error').hidden = true;
+        const days = $('apikeys-days').value;
+        try {
+            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes: [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value), days: days === 'never' ? null : Number(days) });
+            apiKeyFormShown(false);
+            $('apikeys-secret').value = r.secret; $('apikeys-once').hidden = false;
+        } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; return; }
+        await paintApiKeys();
+    });
+    $('apikeys-copy').addEventListener('click', async () => {
+        const b = $('apikeys-copy'); const f = $('apikeys-secret');
+        try { await navigator.clipboard.writeText(f.value); b.textContent = uiSaid('set-apikeys-copied', 'Copied'); }
+        catch { f.focus(); f.select(); b.textContent = uiSaid('set-apikeys-select', 'Selected: copy it'); }
+        setTimeout(() => { b.textContent = uiSaid('set-apikeys-copy', 'Copy'); }, 2500);
+    });
+    /* Done: the secret leaves the page too. */
+    $('apikeys-done').addEventListener('click', () => { $('apikeys-secret').value = ''; $('apikeys-once').hidden = true; });
     function showPassword(email, password) {
         $('operators-password-for').textContent = email; $('operators-password-value').value = password; $('operators-password').hidden = false;
     }
@@ -6358,6 +6434,7 @@
         }
         void paintDictation();
         void paintOperators();
+        void paintApiKeys();
         /* With no shortcut, one line: how to add one (this is the only place to remove them). */
         $('settings-shortcuts-hint').textContent = saved.length ? 'Added under the terminal, with "+ Shortcut".' : 'No shortcut yet · add one under the terminal, with "+ Shortcut".';
         $('settings-people').textContent = (platform.operators ?? []).length

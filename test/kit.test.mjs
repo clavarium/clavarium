@@ -127,7 +127,8 @@ test('one conversation, three sizes: the same avatar, point, name, line and chip
     assert.deepEqual(chipsOf(row), ['asks you', '1 wake-up']);
     assert.deepEqual(chipsOf(card), ['asks you', '1 wake-up', 'Family room']);
     assert.deepEqual(chipsOf(member), ['asks you']);
-    assert.match(card.find('kit-conv-now').textContent, /Chef · OpenCode/);
+    /* A card leaves its tool to the details (06-11, the owner's tablet); a member keeps it. */
+    assert.equal(card.find('kit-conv-now'), null);
     assert.equal(member.find('kit-conv-now').textContent, 'Chef · OpenCode');
     assert.equal(member.find('kit-conv-acts').children[0].getAttribute('role'), 'switch');
     /* Nothing to say: no empty line, no empty chips. */

@@ -19,10 +19,16 @@
  *   mailbox           read the messages       (send, file: not built)  -
  *   git               see the files           change them              -
  *   secret            never                   -                        be handed to a conversation
+ *   server            read its state          -                        -
  *
- * Two kinds of subject: a CONVERSATION (what is attached to it reaches its
- * machine) and a PAIRING (what a device was given by a code). The owner is
- * not in the table: the owner may do everything, always.
+ * Three kinds of subject: a CONVERSATION (what is attached to it reaches its
+ * machine), a PAIRING (what a device was given by a code) and an API KEY
+ * (what a program elsewhere may ask with it: apikeys.mjs). The owner is not
+ * in the table: the owner may do everything, always.
+ *
+ * An API key is not a device and not a conversation: it is given only what
+ * its scopes name ("server:status", read), never a secret, a conversation or
+ * a folder in this version; and nothing else is ever given "server:".
  *
  * No groups, no inheritance. One rule sits on top, in the door: whoever was
  * given a conversation, its terminal or its chat, sees the files of that
@@ -41,14 +47,15 @@
  */
 import { Refusal } from './conversations.mjs';
 
-export const RIGHTS = Object.freeze({ conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x' });
-const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|pairing:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
-const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$/;
+export const RIGHTS = Object.freeze({ conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'r' });
+const SUBJECT = /^(conversation:[a-z]([a-z0-9-]{0,30}[a-z0-9])?|(pairing|apikey):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/;
+const ASSET = /^(conversation|folder|mailbox|git):[a-z]([a-z0-9-]{0,30}[a-z0-9])?$|^secret:[A-Z][A-Z0-9_]{0,39}$|^server:status$/;
 
 export const typeOf = (asset) => String(asset).split(':')[0];
 export const nameOf = (asset) => String(asset).slice(String(asset).indexOf(':') + 1);
 export const conversationSubject = (name) => `conversation:${name}`;
 export const pairingSubject = (id) => `pairing:${id}`;
+export const apiKeySubject = (id) => `apikey:${id}`;
 
 /* The rights asked for, in the one order they are written, or a refusal:
    only letters this type of asset takes, at least one, none twice. */
@@ -86,6 +93,8 @@ export class Grants {
            would be a way to read it. */
         if (typeOf(asset) === 'secret' && !subject.startsWith('conversation:')) throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
         if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:')) throw new Refusal(400, 'A conversation is shared with a device, not with another conversation.');
+        /* The state of the server is given to an API key, and an API key is given nothing else (yet). */
+        if ((typeOf(asset) === 'server') !== subject.startsWith('apikey:')) throw new Refusal(400, 'An API key is given the state of the server, and only that.');
         this.#store.put({ name: this.#key(subject, asset), subject, asset, rights: clean });
         return clean;
     }

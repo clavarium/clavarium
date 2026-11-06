@@ -83,6 +83,7 @@ import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PA
 import { Pocket } from './pocket.mjs';
 import { Speech } from './speech.mjs';
 import { Features, handleFeatures, cached } from './features.mjs';
+import { ApiKeys, handleExternal, handleApiKeys, statusOf } from './apikeys.mjs';
 import { WebSocketServer } from 'ws';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -180,7 +181,7 @@ const withoutTmux = (env) => Object.fromEntries(Object.entries(env).filter(([key
 
 const REFUSED = 'This Clavarium belongs to someone else: your account is not one of its operators.\n';
 
-function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features } = {}) {
+function serve(port, conversations, resources, { gate = () => 'local', originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, repair, capacity, updates, instance = new Instance(), certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features, apikeys } = {}) {
     /* Its manifest carries the name of this Clavarium, or the one a device chose (instance.mjs). */
     const sendManifest = (response, url) => response.writeHead(200, { ...HEADERS, 'content-type': 'application/manifest+json' }).end(instance.manifest(new URL(url ?? '/', 'http://local').searchParams.get('name') ?? undefined));
     const sendFile = async (response, file) => {
@@ -194,7 +195,8 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
            every page hears it at its next question, whatever it asks. */
         try { const notice = updates?.notice(); if (notice) response.setHeader('x-clavarium-update', notice); } catch { /* never in the way of an answer */ }
         /* The version that answers, to the page's own questions: a page loaded before an update starts again (app.js). */
-        if (platform?.version && (pathname.startsWith('/api/') || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
+        /* Not to a program at /api/ext/: what it may read, its key says (apikeys.mjs). */
+        if (platform?.version && ((pathname.startsWith('/api/') && !pathname.startsWith('/api/ext/')) || pathname.startsWith('/c/api/'))) response.setHeader('x-clavarium-version', platform.version);
         /* The device door first, and apart: it never consults the gate. */
         /* An address that wakes a tool, called from outside by what its owner
            runs elsewhere: the address is the right. Nothing else is looked at,
@@ -227,6 +229,12 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
             try { say(200, boxes.pair(JSON.parse(text || '{}'))); } catch (error) { say(error.status ?? 400, { error: error instanceof SyntaxError ? 'Not JSON.' : error.message }); }
             return;
         }
+        /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
+           /api/ext/ through without sign-on, and strips the identity headers there. */
+        if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, headers: HEADERS, originOk, version: platform?.version ?? null });
+            return;
+        }
         if (door && pathname.startsWith('/c/')) {
             if (await handleDoor(request, response, door)) return;
             if (pathname === '/c/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
@@ -243,6 +251,8 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* What this Clavarium can do and its next step (features.mjs); an export of the setup is its backup's day. */
         if (features && pathname.startsWith('/api/features') && await handleFeatures(request, response, features, originOk, HEADERS)) return;
         if (features && ((request.method === 'POST' && pathname === '/api/setup/export') || (request.method === 'GET' && pathname === '/api/setup/bundle' && !request.url.includes('stats=1')))) response.once('finish', () => { if (response.statusCode === 200) features.exported(); });
+        /* Settings, Access, API keys: made and revoked by an administrator only (past the gate). */
+        if (apikeys && pathname.startsWith('/api/apikeys') && await handleApiKeys(request, response, apikeys.keys, originOk, HEADERS, events)) return;
         if (boxes && pathname.startsWith('/api/boxes') && await handleBoxes(request, response, boxes, originOk, HEADERS, (text) => QRCode.toString(text, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))) return;
         if (conversations && await handleApi(request, response, conversations, HEADERS, resources, originOk, shortcuts, voice, sharing, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, repair, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, bundles, wifi, binders, meshcentral, tethers, accounts, groups, catalogue, rooms)) return;
         if (pathname === '/manifest.webmanifest' && request.method === 'GET') { sendManifest(response, request.url); return; }
@@ -678,6 +688,15 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
        catalogue are slow to ask: kept a while, and never waited for long. */
     const screenNow = cached(() => meshcentral.status().catch(() => null), 60_000);
     const quick = (p, ms, fallback) => Promise.race([p, new Promise((done) => { setTimeout(() => done(fallback), ms).unref?.(); })]);
+    /* API KEYS (apikeys.mjs): a third kind of subject in the table of rights; their door, /api/ext/. */
+    const components = {};
+    for (const name of ['clavarium-parley', 'clavarium-tether', 'clavarium-binder', 'clavarium-docket']) {
+        try { components[name.slice('clavarium-'.length)] = JSON.parse(readFileSync(packageFile(name, 'package.json'), 'utf8')).version; } catch { /* not installed here */ }
+    }
+    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log` });
+    /* What the host program says of the server is never waited for long: a key gets what is known. */
+    const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
+    const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }) };
     const features = new Features({ file: new JsonFile(`${dataDir}/features.json`, {}), context: async () => ({
         secrets: secrets.list(), dictation: voice.about(), boxes: boxes.all(), alerts: alerts.about().devices.length,
         conversations: all.list().map((c) => ({ tool: c.tool })), tools: all.tools().map((t) => t.id),
@@ -685,7 +704,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         answerer: answererConfig(env)?.models.length ?? 0, updates: updates.about(), team: team ? team.list().length : null,
         screen: await quick(screenNow(), 1500, null), catalogue: await quick(catalogue.providers().catch(() => []), 1500, []),
     }) });
-    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
+    const { server, listening } = serve(port, all, folders, { gate, originOk, shortcuts, voice, sharing, door, secrets, network, signin, mailboxes, gitReview, platform, answerer, wakeups, alerts, talk, gitAccess, gitKeeper, shelf, health, setup, guide, capacity, updates, instance, certificate, team, reacting, machinesMove, serverLogs, history, events, wifi, binders, meshcentral, tethers, accounts, groups, boxes, catalogue, rooms, features, apikeys, bundles: new Bundles({ dir: `${dataDir}/imports`, folder: (name) => folders.folder(name) }), repair: (name) => repairTerminal(name) });
     server.on('close', () => { closing = true; stopBinders(); stopTethers(); clearInterval(historyTimer); clearInterval(secretsTimer); history.save(); stopVmWatch(); stopShelf(); stopHealth(); stopNetworkWatch(); stopUpdates(); stopWatch(); clearInterval(mailTimer); clearInterval(restartTimer); clearInterval(expiryTimer); clearInterval(answerTimer); clearInterval(wakeTimer); clearInterval(docketTimer); dockets.stop(); clearInterval(gitTimer); talk.stop(); });
     let closing = false;
     boxes.attach(server, WebSocketServer);
