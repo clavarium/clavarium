@@ -27,8 +27,10 @@
  * in the table: the owner may do everything, always.
  *
  * An API key is not a device and not a conversation: it is given only what
- * its scopes name ("server:status", read), never a secret, a conversation or
- * a folder in this version; and nothing else is ever given "server:".
+ * its scopes name -- "server:status" (read), and conversations one by one,
+ * their chat to read ("r") or to talk in ("rw"), never their terminal ("x")
+ * -- never a secret nor a folder in this version; and nothing else is ever
+ * given "server:".
  *
  * No groups, no inheritance. One rule sits on top, in the door: whoever was
  * given a conversation, its terminal or its chat, sees the files of that
@@ -92,9 +94,12 @@ export class Grants {
         /* A secret is handed to a conversation, never to a device: a device
            would be a way to read it. */
         if (typeOf(asset) === 'secret' && !subject.startsWith('conversation:')) throw new Refusal(400, 'A secret is handed to a conversation, never shared with a device.');
-        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:')) throw new Refusal(400, 'A conversation is shared with a device, not with another conversation.');
-        /* The state of the server is given to an API key, and an API key is given nothing else (yet). */
-        if ((typeOf(asset) === 'server') !== subject.startsWith('apikey:')) throw new Refusal(400, 'An API key is given the state of the server, and only that.');
+        if (typeOf(asset) === 'conversation' && !subject.startsWith('pairing:') && !subject.startsWith('apikey:')) throw new Refusal(400, 'A conversation is shared with a device or an API key, not with another conversation.');
+        /* The state of the server is given to an API key only; an API key is given only that, and
+           conversations one by one -- their chat, to read or to write in, never their terminal. */
+        if (typeOf(asset) === 'server' && !subject.startsWith('apikey:')) throw new Refusal(400, 'The state of the server is given to an API key only.');
+        if (subject.startsWith('apikey:') && !['server', 'conversation'].includes(typeOf(asset))) throw new Refusal(400, 'An API key is given the state of the server and conversations, nothing else.');
+        if (subject.startsWith('apikey:') && clean.includes('x')) throw new Refusal(400, 'An API key reads a conversation or talks in it, never uses its terminal.');
         this.#store.put({ name: this.#key(subject, asset), subject, asset, rights: clean });
         return clean;
     }

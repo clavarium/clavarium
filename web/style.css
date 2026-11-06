@@ -1874,6 +1874,18 @@ button.tip-btn:hover, button.tip-btn[aria-expanded="true"] { color: var(--brass-
 /* Revoke confirmed in place: the question and its buttons under the key, never squeezing its name. */
 .list-item.apikey:has(.kit-confirm) { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 520px) { .apikeys-once input { flex-basis: 100%; } }
+/* Its conversations, one by one: a name and Off / Read / Talk; its journal, its last calls. Under the key, full width. */
+.list-item.apikey > .set-control { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.apikey-more { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+.apikey-convs { display: flex; flex-direction: column; gap: 6px; width: 100%; }
+.apikey-conv { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.apikey-conv > span { min-width: 0; overflow-wrap: anywhere; font-size: .875rem; }
+.apikey-use { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: baseline; font-size: .75rem; }
+.apikey-use > code { overflow-wrap: anywhere; }
+.apikey-use > small { color: var(--ink2); white-space: nowrap; }
+.apikey-use > b[data-bad] { color: var(--danger); }
+/* A phone: its buttons under its name, never squeezing it. */
+@media (max-width: 640px) { .list-item.apikey { grid-template-columns: minmax(0, 1fr); } .list-item.apikey > .set-control { justify-self: start; justify-content: flex-start; } }
 #apikeys-where { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .75rem; }
 .mono-cut { font-family: ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #settings #export-note { max-width: none; text-align: left; margin: 0; order: 0; flex: none; }
