@@ -80,6 +80,7 @@ import { Bundles } from './bundle.mjs';
 import { migrateData } from './dataformat.mjs';
 import { VmWatch } from './vmwatch.mjs';
 import { WakeLearn } from './wakelearn.mjs';
+import { BoxCollect } from './boxcollect.mjs';
 import { Boxes, handleBoxes, voiceboxConnector, syncTargets, PAIR_PATH as BOX_PAIR_PATH, FIRMWARE_PATH as BOX_FIRMWARE_PATH } from './boxes.mjs';
 import { Pocket } from './pocket.mjs';
 import { Speech } from './speech.mjs';
@@ -667,6 +668,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         react: (said) => voice.reaction(said),
         /* The wake word that learns: each box's wake clips, when it is set so (wakelearn.mjs). */
         learn: new WakeLearn({ dir: `${dataDir}/wake-learn` }),
+        /* A collect session: a box's false wakes kept on purpose, nothing answered (boxcollect.mjs; started by the owner). */
+        collect: new BoxCollect({ dir: `${dataDir}/box-collect`, log: (line) => events.add({ kind: 'server', text: line }) }),
         recordDir: `${dataDir}/recordings`, parts: (wav) => voice.transcribeParts(wav), keep: (name, file, text) => talk.keepText(name, file, text),
         hear: (wav, lang) => hearBox(voice, wav, lang),   /* any language heard; one neither the box's (its page's) nor English heard again in the box's (voice.mjs) */
         /* Said as the person's own message, the room named (one speaker for now). */
@@ -733,6 +736,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     boxes.attach(server, WebSocketServer);
     /* The wake word's weekly threshold tuning (Sunday from 03:00, each box's own time): looked at every 10 minutes. */
     const wakeWeekly = setInterval(() => { try { boxes.wakeWeekly(); } catch (error) { console.error(`wake tuning: ${error.message}`); } }, 10 * 60_000); wakeWeekly.unref?.(); server.on('close', () => clearInterval(wakeWeekly));
+    /* A collect session's clock: the stations asked, its end, the speaker told to stop (boxcollect.mjs). */
+    const collectTick = setInterval(() => { boxes.collectTick().catch((error) => console.error(`box collect: ${error.message}`)); }, 30_000); collectTick.unref?.(); server.on('close', () => clearInterval(collectTick));
     for (const c of all.list()) talk.speakers(c.name, boxes.speakersOf(c.name));
     try { syncTargets(tethers.store(), boxes.all()); } catch (error) { console.error(`voice boxes in Tether: ${error.message}`); }
     bridge = attachBridge(server, {

@@ -37,8 +37,8 @@
   <nav id="nav" aria-label="Places" hidden>
     <button type="button" id="nav-conversations" data-place="conversations" aria-current="page"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="message-square"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414 .586l-2.202 2.202A.71 .71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/></svg><span>Conversations</span></button>
     <button type="button" id="nav-assets" data-place="assets"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="layers"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span></button>
-    <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/></svg><span>Access</span></button>
-    <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="settings"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span>Settings</span></button>
+    <button type="button" id="nav-access" data-place="access"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="waypoints"><path d="m10.586 5.414-5.172 5.172"/><path d="m18.586 13.414-5.172 5.172"/><path d="M6 12h12"/><circle cx="12" cy="20" r="2"/><circle cx="12" cy="4" r="2"/><circle cx="20" cy="12" r="2"/><circle cx="4" cy="12" r="2"/></svg><span data-said="set-nav-access">Access</span></button>
+    <button type="button" id="nav-settings" data-place="settings"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true" data-icon="settings"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span data-said="set-nav-settings">Settings</span></button>
   </nav>
   <section id="room">
     <header>
@@ -52,7 +52,7 @@
         <button type="button" id="view-terminal" aria-pressed="false" title="Its terminal"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/></svg><span>Terminal</span></button>
         <button type="button" id="view-assets" aria-pressed="false" title="What it was given"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></svg><span>Assets</span><b id="assets-count" class="count"></b></button>
         <button type="button" id="view-lists" aria-pressed="false" title="Its binders" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg><span id="view-lists-word">Binders</span><b id="lists-count" class="count" title="Waiting for your approval"></b></button>
-        <button type="button" id="folders" aria-pressed="false" aria-label="Settings" title="Settings of this conversation" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span class="sr">Settings</span></button>
+        <button type="button" id="folders" aria-pressed="false" aria-label="Settings" title="Settings of this conversation" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/></svg><span class="sr" data-said="set-nav-settings">Settings</span></button>
       </div>
     </header>
     <div id="health-strip" role="status" hidden>
@@ -106,7 +106,7 @@
       <div id="cassets" class="sheet as-room" hidden>
         <p id="cassets-error" class="error" role="alert" hidden></p>
         <div class="as" id="cassets-as">
-          <div class="as-list"><div class="as-tools"><input type="search" id="cassets-search" placeholder="Search" aria-label="Search its assets" spellcheck="false" autocomplete="off"><button type="button" id="cassets-attach" class="as-new"><span aria-hidden="true">+ </span><span data-said="set-na-attach">Attach</span></button></div><div id="cassets-rows"></div></div>
+          <div class="as-list"><div class="as-tools"><input type="search" id="cassets-search" placeholder="Search" aria-label="Search its assets" spellcheck="false" autocomplete="off"><button type="button" id="cassets-attach" class="as-new"><span aria-hidden="true">+ </span><span data-said="set-as-give">Give…</span></button></div><div id="cassets-rows"></div></div>
           <div class="as-detail" id="cassets-detail"></div>
         </div>
       </div>
@@ -120,18 +120,18 @@
         <section class="at-hand" id="panel-hand" aria-label="At hand">
           <div class="hand-tiles" id="panel-tiles" hidden></div>
           <div class="hand-switches">
-            <div class="set-row"><div class="set-what"><b>Chat</b><small id="talk-about" class="tip" hidden>A chat screen instead of its terminal. What the tool posts there is read by this server</small></div><div class="set-control"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true">On</button><button type="button" data-on="false">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div></div>
+            <div class="set-row"><div class="set-what"><b data-said="set-chat">Chat</b><small id="talk-about" class="tip" hidden>A chat screen instead of its terminal. What the tool posts there is read by this server</small></div><div class="set-control"><div class="levels" id="talk-on" role="group" aria-label="Talk through the app"><button type="button" data-on="true" data-said="set-on">On</button><button type="button" data-on="false" data-said="set-off">Off</button></div><button type="button" id="talk-invite" hidden>Ask the tool to use it</button></div></div>
             <p class="hint" id="talk-declare" hidden></p>
             <!-- FULL RIGHTS IN ITS OWN MACHINE: the default, said plainly where it is changed. -->
             <div id="rights-box" hidden>
-            <div class="set-row"><div class="set-what"><b>Ask before acting</b><small id="rights-hint" class="tip" hidden>Off: <b>the tool acts without asking you</b>, inside its own machine. At its next start</small></div><div class="set-control"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false">Off</button><button type="button" data-on="true">On</button></div></div></div>
+            <div class="set-row"><div class="set-what"><b data-said="set-ask-first">Ask before acting</b><small id="rights-hint" class="tip" hidden>Off: <b>the tool acts without asking you</b>, inside its own machine. At its next start</small></div><div class="set-control"><div class="levels" id="ask-first" role="group" aria-label="Ask before acting"><button type="button" data-on="false" data-said="set-off">Off</button><button type="button" data-on="true" data-said="set-on">On</button></div></div></div>
             </div>
-            <div class="set-row" id="network-row"><div class="set-what"><b>Online</b><small class="tip" hidden>Offline: its machine reaches nothing outside. The tool cannot undo it.</small></div><div class="set-control"><div class="levels" id="network" role="group" aria-label="Network of this conversation"><button type="button" data-online="true">Online</button><button type="button" data-online="false">Offline</button></div></div></div>
+            <div class="set-row" id="network-row"><div class="set-what"><b data-said="set-online">Online</b><small class="tip" hidden>Offline: its machine reaches nothing outside. The tool cannot undo it.</small></div><div class="set-control"><div class="levels" id="network" role="group" aria-label="Network of this conversation"><button type="button" data-online="true" data-said="set-online">Online</button><button type="button" data-online="false" data-said="set-offline-btn">Offline</button></div></div></div>
           </div>
           <div class="hand-acts" id="panel-actions">
             <button type="button" id="quick-wake" class="primary" hidden>Wake it</button>
               <button type="button" id="restart" hidden data-said="set-restart-dots">Restart&hellip;</button>
-              <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation">Sleep</button>
+              <button type="button" id="sleep" hidden title="Freezes the tool as it is; it wakes when you open the conversation" data-said="set-sleep">Sleep</button>
             <button type="button" id="hand-terminal" data-said="set-terminal">Terminal</button>
           </div>
         </section>
@@ -228,11 +228,11 @@
         <details class="chapter" id="chapter-access" data-chapter="access">
           <summary><span class="chapter-title" data-said="set-ch-access">Access</span><span class="chapter-about">Folders, repositories, secrets, network.</span></summary>
           <div class="chapter-body">
-            <div class="panel-top"><b>Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary" data-said="set-na-attach">Attach</button></div>
+            <div class="panel-top"><b data-said="set-acc-folders">Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary" data-said="set-na-attach">Attach</button></div>
             <p class="hint tip" hidden>In its machine under <code>/resources/</code>. Read-only cannot be lifted by the tool.</p>
             <div id="panel-rows"></div>
             <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
-            <div class="panel-top"><b>Secrets handed to its tool</b></div>
+            <div class="panel-top"><b data-said="set-acc-secrets">Secrets handed to its tool</b></div>
             <div id="access-secrets"></div>
             <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
             <p id="secret-note" class="hint" role="status"></p>
@@ -420,13 +420,13 @@
         <div class="row"><button type="button" id="paste-send">Send to the terminal</button></div>
       </div>
       <div id="files" class="sheet" hidden>
-        <div class="panel-top"><b>Files</b><button type="button" id="files-close" aria-label="Close" title="Close">&times;</button></div>
+        <div class="panel-top"><b data-said="set-as-files">Files</b><button type="button" id="files-close" aria-label="Close" title="Close">&times;</button></div>
         <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
         <p id="files-none" class="hint" hidden>This conversation works on the disk of its machine, and no folder is attached to it. Attach one with "Folders".</p>
         <div class="files-bar">
           <div id="files-path" class="path"></div>
           <div id="files-views" class="levels" role="group" aria-label="Show as">
-            <button type="button" data-view="list" aria-pressed="true" title="Show as a list">List</button><button type="button" data-view="icons" aria-pressed="false" title="Show as icons, with pictures">Icons</button>
+            <button type="button" data-view="list" aria-pressed="true" title="Show as a list" data-said="set-files-list">List</button><button type="button" data-view="icons" aria-pressed="false" title="Show as icons, with pictures" data-said="set-files-icons">Icons</button>
           </div>
         </div>
         <div class="row" id="files-actions" hidden>
@@ -458,7 +458,7 @@
           <div class="row"><button type="submit" class="primary" id="files-name-go">Create</button><button type="button" id="files-name-cancel">Cancel</button></div>
         </form>
         <div id="files-rows" data-view="list"></div>
-        <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        <p id="files-empty" class="hint" hidden data-said="set-files-empty">This folder is empty.</p>
         <div id="files-drop" hidden><p id="files-drop-text">Drop to upload here</p></div>
       </div>
       <!-- THE REVIEW (E): one page for what a repository would send, or for one
@@ -721,17 +721,17 @@
           <!-- The same names as every settings page (General, Access, Chat & voice, Advanced): a room has no machine. -->
           <h3 class="room-group" data-said="set-tab-general">General</h3>
           <div class="nc-card">
-            <div class="set-row"><div class="set-what"><label for="salon-new-name">Name</label></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off"></div></div>
+            <div class="set-row"><div class="set-what"><label for="salon-new-name" data-said="set-room-name">Name</label></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off"></div></div>
           </div>
           <h3 class="room-group" data-said="set-tab-access">Access</h3>
           <div class="nc-card">
-            <span class="sub-head">Welcomes the room</span>
+            <span class="sub-head" data-said="set-room-host">Welcomes the room</span>
             <div id="salon-new-host" class="salon-host-box" aria-live="polite"></div>
           </div>
           <div class="nc-card">
-            <span class="sub-head">Its AIs <span id="salon-new-count" class="hint"></span></span>
+            <span class="sub-head"><span data-said="set-room-ais">Its AIs</span> <span id="salon-new-count" class="hint"></span></span>
             <small class="tip" hidden>The switch puts it in the room or takes it out; « Welcomes » makes it the one that answers first. On a computer, a row can also be dragged into the box above.</small>
-            <div class="salon-members-tools"><input id="salon-new-search" type="search" placeholder="Find a conversation" aria-label="Find a conversation" autocomplete="off"></div>
+            <div class="salon-members-tools"><input id="salon-new-search" type="search" placeholder="Find a conversation" data-said-placeholder="set-room-find" aria-label="Find a conversation" autocomplete="off"></div>
             <div id="salon-new-ais" class="salon-member-list" role="list" aria-label="AIs"></div>
           </div>
           <!-- Each AI's assets (06-11): its own, as its conversation has them; no room asset. -->
@@ -742,20 +742,20 @@
           </div>
           <h3 class="room-group" id="salon-new-voice-head" data-said="set-tab-chat">Chat &amp; voice</h3>
           <div class="nc-card" id="salon-new-boxes-card">
-            <div class="row"><span class="sub-head">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>
+            <div class="row"><span class="sub-head" data-said="set-room-boxes">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>
             <div id="salon-box-newasset" hidden></div>
             <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
           </div>
           <h3 class="room-group" id="salon-new-advanced-head" data-said="set-tab-advanced" hidden>Advanced</h3>
           <div class="nc-card" id="salon-new-remove-card" hidden>
-            <div class="set-row"><div class="set-what"><label>Remove the room</label><small>The thread goes · AIs and boxes stay</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger">Remove…</button></div></div>
+            <div class="set-row"><div class="set-what"><label data-said="set-room-remove">Remove the room</label><small data-said="set-room-remove-what">The thread goes · AIs and boxes stay</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger" data-said="set-room-remove-dots">Remove…</button></div></div>
           </div>
           <span id="salon-new-error" class="err" role="alert" hidden></span>
         </div>
-        <div class="action-row"><span class="hint" id="salon-new-status"></span><button type="button" id="salon-new-cancel">Cancel</button><button type="button" id="salon-new-create" class="primary">Create</button></div>
+        <div class="action-row"><span class="hint" id="salon-new-status"></span><button type="button" id="salon-new-cancel" data-said="set-room-cancel">Cancel</button><button type="button" id="salon-new-create" class="primary">Create</button></div>
       </div>
       <div id="assets" class="sheet as-place" hidden>
-        <div class="panel-top"><b>Assets</b><button type="button" id="assets-close" class="as-link place-back">&lsaquo; Conversations</button></div>
+        <div class="panel-top"><b>Assets</b></div>
         <p id="assets-error" class="error" role="alert" hidden></p>
         <div class="as" id="assets-as">
           <div class="as-list"><div class="as-tools"><input type="search" id="assets-search" placeholder="Search assets" aria-label="Search assets" spellcheck="false" autocomplete="off"><button type="button" id="assets-new" class="as-new primary"><span aria-hidden="true">+ </span><span data-said="set-as-new">New</span></button></div><div class="as-view" id="assets-view"></div><div id="assets-rows"></div></div>
@@ -905,7 +905,7 @@
         </div>
       </div>
       <div id="settings" class="sheet" hidden>
-        <div class="panel-top"><b>Settings</b><button type="button" id="settings-close" class="as-link place-back">&lsaquo; Conversations</button></div>
+        <div class="panel-top"><b data-said="set-nav-settings">Settings</b><button type="button" id="settings-close" class="as-link place-back">&lsaquo; Conversations</button></div>
         <!-- THE CATEGORIES: a list beside them on a wide screen, headings one under the other on a phone. -->
         <!-- AT HAND (settings redesign, step 1): what is looked at most -- memory, disk, CPU -- with its state
              and the gestures done most, above the tabs; never folded (app.js, paintSettingsHand). -->

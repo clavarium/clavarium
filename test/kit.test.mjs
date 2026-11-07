@@ -743,12 +743,34 @@ test('the screens open an asset in the one panel: the Assets menu and a conversa
     assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits \}\)/, 'from a conversation');
     assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 1, 'one list of who has it');
     assert.doesNotMatch(app, /function asTitle|chapter\('Used by'/, 'the old heads and « Used by » are gone');
-    /* The tab: a calendar, contacts, an access given live, its binders. */
-    assert.match(app, /tgt\.grants\?\.\[`conversation:\$\{current\}`\]\?\.level/);
-    assert.match(app, /l\.grants\?\.\[`conversation:\$\{current\}`\]/);
+    /* The tab: a calendar, contacts, an access given live, its binders -- one function (givenItems), which the bar's count
+       and a room's « Leurs assets » use too (07-11: the same rows everywhere). */
+    assert.match(app, /tgt\.grants\?\.\[`conversation:\$\{name\}`\]\?\.level/);
+    assert.match(app, /l\.grants\?\.\[`conversation:\$\{name\}`\]/);
+    assert.equal((app.match(/function givenItems\(/g) ?? []).length, 1, 'one list of what a conversation was given');
+    assert.match(app, /const items = givenItems\(current, \{ all, secrets, boxes, tether, lists \}\)/, 'its tab');
+    assert.match(app, /return givenItems\(c\.name, /, 'the bar\'s « Assets N »');
+    assert.match(app, /const assetsOf = \(name\) => givenItems\(name, /, 'a room\'s « Leurs assets »');
+    /* Its right said once: the head's badge only when no picker of its own row says it. */
+    assert.match(app, /right: inMenu \|\| model\?\.here \? undefined : chosen\.right/);
+    /* One verb in the tab (« Donner… »); the Assets bar without a way back of its own (the list, the bottom bar). */
+    assert.match(html, /id="cassets-attach"[^>]*>.*data-said="set-as-give">Give…</);
+    assert.doesNotMatch(html, /id="assets-close"/);
     /* A folder browsed from the menu: its files, in the panel, with the owner's rights. */
     assert.match(app, /embedFiles\(holder, chosen\.name, \{ owner: true \}\)/);
     assert.match(app, /const filesC = \(\) =>/);
     assert.match(html, /id="cassets-error"/);
     for (const cls of ['kit-aspanel', 'kit-access', 'kit-access-row', 'kit-access-here', 'kit-rights-same']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+});
+
+test('a box\'s learning session in one state for its line: none, scheduled, running (kept), ended (kept)', () => {
+    const now = Date.parse('2026-11-07T07:00:00Z');
+    const s = { from: '2026-11-07T08:00:00Z', until: '2026-11-07T16:00:00Z' };
+    assert.deepEqual(KIT.collectModel({ on: false, count: 0 }, now), { state: 'none' });
+    assert.deepEqual(KIT.collectModel(null, now), { state: 'none' });
+    assert.deepEqual(KIT.collectModel({ on: false, ...s, kept: 0 }, now), { state: 'scheduled', ...s });
+    assert.equal(KIT.collectModel({ on: true, ...s, kept: 12 }, now + 3_600_000 * 2).kept, 12);
+    assert.equal(KIT.collectModel({ on: true, ...s, kept: 12 }, now + 3_600_000 * 2).state, 'running');
+    assert.equal(KIT.collectModel({ on: false, ...s, kept: 80 }, now + 10 * 3_600_000).state, 'ended', 'its end passed, before the clock turned it off');
+    assert.deepEqual(KIT.collectModel({ on: false, last: { ...s, kept: 84 } }, now + 10 * 3_600_000), { state: 'ended', kept: 84, ...s });
 });

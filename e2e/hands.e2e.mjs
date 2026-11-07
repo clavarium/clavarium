@@ -131,7 +131,7 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     await asset.locator('.danger-link').click();
     await asset.locator('button.danger').click();
     await me.until('the folder is gone from the list', async () => (await me.page.locator('#assets-rows .as-row[data-asset^="folder:"]').count()) === 0);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
@@ -191,7 +191,7 @@ test('a git repository is added from the page, attached like a folder, and is a 
        attached: under load they ended after, and that line was typed into
        the command below, which never ran. */
     await me.until('it is read, and said empty', async () => /Nothing has been committed on a branch in this repository yet/.test(await me.page.locator('#assets-detail').innerText().catch(() => '')), 30_000);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.access('site', 'Write');
     assert.match(await me.page.locator('#view-assets').getAttribute('title'), /site - write/);
     await me.type('cd ../resources/site && git status --short --branch && echo "# site" > README.md && git add README.md && git -c user.name=t -c user.email=t@example.com commit -q -m first && git log --oneline | wc -l; cd - >/dev/null');
@@ -261,7 +261,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     /* The key: kept, sealed, and in nothing the tool can read. */
     assert.deepEqual((await me.api('/api/git/site')).body, { remote, user: null, hasKey: true, sshKey: null });
     await me.page.locator('#gitview-close').click();
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     /* The page closed: its Assets tab is there again, as it was left; the terminal is one tab away. */
     await me.page.locator('#view-terminal').click();
     await me.type('grep -r "a-token-the-tool-never-sees" ../resources/site /work 2>/dev/null | wc -l');

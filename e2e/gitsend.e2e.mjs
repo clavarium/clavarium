@@ -272,7 +272,7 @@ test('automatic sending is set per conversation, right under its write access: h
     assert.equal((await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper, undefined, 'not attached yet');
     await me.page.locator('#assets-error .attach-shared').click();
     await me.until('helper writes', async () => (await me.api('/api/resources')).body.find((r) => r.name === 'shop').attachments.helper === 'write');
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
     await me.page.locator('#folders').click();

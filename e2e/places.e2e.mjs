@@ -43,7 +43,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.until('the Assets place', async () => (await page.locator('#assets').isVisible()) && /open=assets/.test(page.url()));
     await page.locator('#assets-rows .as-row[data-asset="folder:seeds"]').click();
     await me.until('seeds, opened', async () => /a=folder%3Aseeds/.test(page.url()));
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
     /* Export and Import: in Settings. */
     await page.locator('#nav-settings').click();
     await me.chapter('s-backup');

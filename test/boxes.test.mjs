@@ -813,18 +813,8 @@ test('woken by the word but no clip came to check it (06-11): a faint voice is d
     assert.equal(unknown.whys.length, 1, 'no voice measured: kept');
 });
 
-test('the word heard by its sound only (« Mise en œuvre ») with a faint voice is the room\'s talk, dropped; by its spelling, or firm, it goes (06-11)', async () => {
-    const { wakeBySoundOnly } = await import('../server/boxes.mjs');
-    assert.equal(wakeBySoundOnly('Mise en oeuvre'), true);
-    assert.equal(wakeBySoundOnly('Mésange.'), false, 'by its spelling');
-    assert.equal(wakeBySoundOnly('Mes anges.'), false, 'by its spelling');
-    const faint = wakeRig(Boxes, { clip: 'Mise en oeuvre' });
-    await faint.say({ clipBytes: 51_200, voice: 396 });
-    assert.equal(faint.whys.length, 0, 'sound only, faint: dropped');
-    const firm = wakeRig(Boxes, { clip: 'Mise en jeu' });
-    await firm.say({ clipBytes: 51_200, voice: 900 });
-    assert.equal(firm.whys.length, 1, 'sound only, firm: a real call, kept');
-    const spelled = wakeRig(Boxes, { clip: 'Mésange' });
-    await spelled.say({ clipBytes: 51_200, voice: 300 });
-    assert.equal(spelled.whys.length, 1, 'the word itself, even faint: kept');
+test('the word heard by its sound only, even with a faint voice, is kept: a real call may be whispered (07-11, the rule of 0.2.358 taken back)', async () => {
+    const whisper = wakeRig(Boxes, { clip: 'Mise en jeu' });
+    await whisper.say({ clipBytes: 51_200, voice: 279 });
+    assert.equal(whisper.whys.length, 1, 'a whispered call of 05-11: never lost');
 });

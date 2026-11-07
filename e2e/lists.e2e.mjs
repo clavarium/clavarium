@@ -36,7 +36,7 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     await page.locator('#assets-detail .as-picker .given-row[data-conversation="coder"] button', { hasText: 'Write' }).click();
     await me.until('given', async () => (await me.api('/api/binder', { op: 'lists', args: {} })).body.data[0].grants['conversation:coder'] === 'write');
     await me.until('used by it', async () => /coder/.test(await page.locator('#assets-detail .as-users:not(.as-picker)').innerText()));
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
 
     /* In the conversation, a Lists tab: its lists alone. */
     await me.until('the Lists tab', async () => page.locator('#view-lists').isVisible(), 15_000);
@@ -85,7 +85,7 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     await kind.locator('.as-row', { hasText: 'Batches' }).click();
     await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'None' }).click();
     await me.until('taken back', async () => !(await me.api('/api/binder', { op: 'lists', args: {} })).body.data.find((l) => l.id === 'batches').grants['conversation:coder']);
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.until('no Lists tab', async () => !(await page.locator('#view-lists').isVisible()), 15_000);
     assert.equal(await page.locator('#assets').isVisible(), false);
     assert.deepEqual(me.errors, [], 'no error in the page');

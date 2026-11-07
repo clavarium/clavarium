@@ -789,7 +789,20 @@
         return box;
     }
 
+    /* A BOX'S COLLECT SESSION (boxcollect.mjs), from GET /api/boxes/<id>/collect, in one state for its one line:
+       none · scheduled (from, until) · running (kept) · ended (kept). */
+    function collectModel(c, now = Date.now()) {
+        if (c?.until) {
+            const from = Date.parse(c.from); const until = Date.parse(c.until);
+            if (!c.on && from > now) return { state: 'scheduled', from: c.from, until: c.until };
+            return { state: c.on || now < until ? 'running' : 'ended', kept: c.kept ?? 0, from: c.from, until: c.until };
+        }
+        if (c?.last) return { state: 'ended', kept: c.last.kept ?? 0, from: c.last.from, until: c.last.until };
+        return { state: 'none' };
+    }
+
     window.clavariumKit = {
+        collectModel,
         AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
