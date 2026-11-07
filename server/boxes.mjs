@@ -940,8 +940,9 @@ export class Boxes {
             /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
             link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;
             this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
-            const soundOnlyFaint = check.ok && wakeBySoundOnly(check.heard) && Number.isFinite(link.voice) && link.voice > 0 && link.voice < WAKE_FAINT;
-            if (dropsWake(check.ok, link.voice, link.endReason, check.heard) || soundOnlyFaint) {
+            /* 07-11: « heard by its sound only + faint voice = dropped » was taken back -- replayed on the logs it would have
+               lost 3 real whispered calls (05-11); the owner's rule stands: never lose a real call. */
+            if (dropsWake(check.ok, link.voice, link.endReason, check.heard)) {
                 link.send({ t: 'cue', name: 'done' });
                 this.#log(`voice box ${box.name}: wake ignored (word not heard again, ${link.endReason === 'timeout' ? 'a sentence that never ended' : !check.heard.trim() ? 'no word in its clip' : `faint voice ${Math.round(link.voice || 0)}`})`);
                 try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: « ${check.heard.slice(0, 40)} », ${link.endReason === 'timeout' ? 'a sound that never stopped (radio, TV)' : !check.heard.trim() ? 'no word where the wake word should be' : 'faint voice'}`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
