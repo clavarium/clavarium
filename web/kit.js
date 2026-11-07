@@ -30,6 +30,8 @@
  *   AccessList     WHO HAS IT (06-11, assets step 3): a row per conversation or device, its RightsPicker; seen from one
  *                  conversation, its row first, then "Also with"; accessModel places the rows.
  *   AssetPanel     ONE ASSET OPENED, the same in the Assets menu and a conversation's tab: head, parts, foot (AssetDelete).
+ *   AssetPicker    GIVE… (07-11, assets step 4): the one list of what a conversation has not yet, one chosen, its right,
+ *                  then « Give »; a new asset below it (NewAsset). assetPickModel places the rows.
  *   RIGHTS         THE ONE TABLE of what an asset can be given at, by its kind and by who gets it (a
  *                  conversation, a device); "none" first. RightsBadge reads a right, RightsPicker sets it.
  *
@@ -427,7 +429,7 @@
 
     /* AN ASSET'S SIGN, by its kind: the icon set's name (Lucide, icons.js), or '' for one drawn here (a binder).
        A live link (a connexion) takes the sign of what it links (a mailbox, a calendar); `acces`, any other. */
-    const ASSET_ICONS = { folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'user', secret: 'key-round', list: '', acces: 'link', send: 'arrow-up', demandes: 'arrow-up', box: 'mic', device: 'smartphone', conversation: 'message-square' };
+    const ASSET_ICONS = { folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'user', secret: 'key-round', list: '', acces: 'link', give: 'plus', send: 'arrow-up', demandes: 'arrow-up', box: 'mic', device: 'smartphone', conversation: 'message-square' };
     const ASSET_KINDS = Object.keys(ASSET_ICONS);
     /* A binder: the set has no such sign, so it is drawn here, in its style (was app.js listIcon). */
     function listSign() {
@@ -714,8 +716,8 @@
     /* The list drawn from its model. A row is an AssetCard (`rowCls` added: the page's handle on it); `pinned`,
        rows above every section (what waits: To send, Demandes). `onOpen(key)`; a group's head folds it
        (`onFold(id)`), its ⚙ opens it (`onGroup(id)`). `empty`: said when there is nothing at all; `noMatch`,
-       when a search finds nothing. */
-    function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '' } = {}) {
+       when a search finds nothing. `after(a)`: a node drawn under a row (Give…: the chosen one's right). */
+    function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '', after = null } = {}) {
         const box = node('div', 'kit-aslist'); box.dataset.view = model.view;
         box.append(...pinned.filter(Boolean));
         const hints = {
@@ -746,7 +748,7 @@
             } else head.append(node('h3', '', s.title));
             sec.append(head);
             if (!s.folded) {
-                for (const a of s.items) sec.append(AssetCard(a, { size: 'row', cls: rowCls, current: a.key === chosen, onOpen }));
+                for (const a of s.items) { sec.append(AssetCard(a, { size: 'row', cls: rowCls, current: a.key === chosen, onOpen })); const more = after?.(a); if (more) sec.append(more); }
                 if (s.empty) sec.append(node('p', 'hint kit-aslist-none', hints[s.empty] ?? ''));
             }
             box.append(sec);
@@ -754,6 +756,60 @@
         if (!model.total && empty) box.append(node('p', 'hint kit-aslist-said', empty));
         else if (model.total && !model.shown && noMatch) box.append(node('p', 'hint kit-aslist-said', noMatch));
         return box;
+    }
+
+    /* GIVE… (07-11, assets step 4): ONE LIST of what a conversation has not been given yet (the same AssetList, by type),
+       searched; one chosen, its right below it (the kind's levels, without « None »: the lightest first pressed), then
+       « Give ». A new asset below the list (`newAsset`, the page's NewAsset): made there, it is given at the end.
+       Taking a right back is « None » in its own panel (AccessList): the asset stays in Assets.
+
+       assetPickModel: the rows placed, no page needed (tested alone).
+         items  [cards] every asset         given   [keys] what the conversation has        query, kinds  as AssetList's */
+    function assetPickModel({ items = [], given = [], query = '', kinds = [] } = {}) {
+        const have = new Set(given);
+        return assetListModel({ items: (items ?? []).filter((i) => i && i.key && !have.has(i.key)), scope: 'conversation:', by: 'type', query, kinds });
+    }
+    /* Drawn, its state its own (the search typed, the one chosen, its level): the page repaints it only once given.
+       `onGive(card, level, stored)` gives it (the button waits; false or a throw: nothing changes); `onPick(key)`,
+       `onQuery(text)` keep the page's memory of them for its next paint. */
+    function AssetPicker({ items = [], given = [], kinds = [], query = '', chosen = '', newAsset = null, words: w = {}, onPick = () => {}, onQuery = () => {}, onGive = () => {} } = {}) {
+        const root = node('div', 'kit-aspick');
+        const search = node('input', 'kit-aspick-search'); search.type = 'search'; search.value = query;
+        search.placeholder = say('set-search', 'Search'); search.setAttribute('aria-label', search.placeholder);
+        search.spellcheck = false; search.autocomplete = 'off';
+        const list = node('div', 'kit-aspick-list');
+        const byKey = new Map((items ?? []).map((i) => [i.key, i]));
+        let q = query; let at = byKey.has(chosen) && !given.includes(chosen) ? chosen : '';
+        const give = (a) => {
+            const key = rightsKey(a);
+            const levels = rightsFor(key).filter((l) => l !== 'none');
+            if (!levels.length) return null;
+            let level = levels[0];
+            const bar = node('div', 'kit-aspick-give');
+            const pick = Segmented({ options: levels.map((l) => ({ value: l, label: wordOf(key, l, 'pick') })), value: level, label: say('set-acc-what', 'What {who} may do with {name}').replace('{who}', w.who ?? '').replace('{name}', a.name ?? ''), onChange: (l) => { level = l; } });
+            addClass(pick, 'kit-rights-pick');
+            for (const b of pick.children) b.title = wordOf(key, b.dataset.value, 'hint');
+            const go = node('button', 'primary kit-aspick-go', say('set-give-go', 'Give')); go.type = 'button';
+            go.addEventListener('click', async () => {
+                go.disabled = true;
+                try { if ((await onGive(a, level, storedOf(key, level))) === false) go.disabled = false; }
+                catch { go.disabled = false; }
+            });
+            bar.append(pick, go);
+            return bar;
+        };
+        const draw = () => {
+            const model = assetPickModel({ items, given, query: q, kinds });
+            if (at && !model.sections.some((s) => s.items.some((i) => i.key === at))) at = '';
+            list.replaceChildren(AssetList(model, { chosen: at, rowCls: 'as-row kit-aspick-row', after: (a) => (a.key === at ? give(a) : null),
+                onOpen: (key) => { at = at === key ? '' : key; onPick(at); draw(); },
+                empty: w.empty ?? say('set-give-all', 'It has every asset already.'), noMatch: say('set-as-no-match', 'Nothing by that name.') }));
+        };
+        search.addEventListener('input', () => { q = search.value.trim(); onQuery(q); draw(); });
+        draw();
+        root.append(search, list);
+        if (newAsset) root.append(node('h4', 'kit-na-sub kit-aspick-or', w.orNew ?? say('set-na-or-new', 'or a new one')), newAsset);
+        return root;
     }
 
     /* WHO HAS IT (06-11, assets step 3): ONE LIST of who was given an asset -- each conversation and each device on a
@@ -887,7 +943,7 @@
 
     window.clavariumKit = {
         collectModel,
-        AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
+        AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, AssetPicker, assetPickModel, RIGHT_SAME,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, MCP_WORDS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf, IDLE_MS, idleFor, idleWords, tidyList,

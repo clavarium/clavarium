@@ -2137,7 +2137,6 @@
     void offerVoice();
 
     /* ---------- folders ---------- */
-    const LEVELS = [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
     /* THE BAR (G): Chat | Terminal | Assets N, then its settings. What was
        given to it is counted on "Assets", and shown there. */
     let assetsShown = false; let roomPick = '';
@@ -2196,7 +2195,7 @@
     const tabNow = () => (assetsShown ? 'assets' : listsShown ? 'lists' : panelShown ? 'settings' : simple ? 'chat' : 'terminal');
     const TAB_WORD = { chat: 'Chat', terminal: 'Terminal', assets: 'Assets', get lists() { return LISTS_WORD.many; }, settings: 'Settings' };
     function openPanelZone() { closeRoomLists(); if (panelShown) return; panelShown = true; $('panel').hidden = false; paintViews(); }
-    function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; $('attach-picker').hidden = true; paintViews(); }
+    function closePanelZone() { if (!panelShown) return; panelShown = false; $('panel').hidden = true; paintViews(); }
     function showTab(which, pick) {
         if (which === 'assets') { closePanelZone(); void openRoomAssets(pick); return; }
         if (which === 'settings') { closeRoomAssets(); openPanelZone(); return; }
@@ -2391,65 +2390,11 @@
     async function paintPanel() {
         const here = conversations.find((x) => x.name === current);
         $('panel-title').textContent = uiSaid('set-this-conv', 'This conversation - {name}', { name: current });
-        const all = await (await fetch(`${API}/resources`)).json();
-        const mine = new Map((here?.resources ?? []).map((r) => [r.name, r.access]));
-        const rows = $('panel-rows');
-        rows.replaceChildren();
-        for (const resource of all.filter((r) => mine.has(r.name))) {
-            const kind = kindOf(resource);
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = resource.name;
-            const label = document.createElement('b'); label.textContent = resource.name;
-            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${uiSaid(`set-as-kind-${kind}`, KIND_WORD[kind] ?? kind)}`; label.append(about);
-            const levels = kind === 'mailbox' ? fixedRight('mailbox')
-                : modes([['read', uiSaid('set-rt-pick-read', 'Read')], ['write', uiSaid('set-rt-pick-write', 'Write')]], mine.get(resource.name), async (access) => { await attachTo(current, resource.name, access); await paintPanel(); }, `Access of this conversation to ${resource.name}`);
-            row.append(label, levels);
-            if (kind === 'git') {
-                const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
-                review.addEventListener('click', () => { void openGit(resource.name); });
-                row.append(review);
-            }
-            /* Detached, not removed: it stays in Assets. */
-            const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = uiSaid('set-acc-detach', 'Detach'); detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
-            detach.addEventListener('click', async () => { detach.disabled = true; detach.textContent = 'Detaching...'; await attachTo(current, resource.name, 'none'); await paintPanel(); });
-            row.append(detach);
-            /* Right under the access it depends on: read-only, the agent has nothing of its own to send. */
-            if (kind === 'git' && mine.get(resource.name) === 'write' && !DEVICE) row.append(autoSending(current, resource.name));
-            rows.append(row);
-        }
-        $('panel-empty').hidden = mine.size > 0;
-        /* The secrets its tool is handed. */
-        const secrets = DEVICE ? [] : await (await fetch(`${API}/secrets`)).json().catch(() => []);
-        const handed = $('access-secrets'); handed.replaceChildren();
-        for (const secret of secrets.filter((x) => x.conversations.includes(current))) {
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = secret.name;
-            const label = document.createElement('b'); label.textContent = secret.name;
-            const off = document.createElement('button'); off.type = 'button'; off.textContent = uiSaid('set-acc-detach', 'Detach'); off.setAttribute('aria-label', `Stop handing ${secret.name} to this conversation`);
-            off.addEventListener('click', async () => {
-                await handTo(current, secret.name, false); await paintPanel();
-                $('secret-note').textContent = `${secret.name} will no longer be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
-            });
-            row.append(label, fixedUse(), off); handed.append(row);
-        }
-        $('access-secrets-empty').hidden = handed.children.length > 0;
+        /* ITS ASSETS (07-11, assets step 4): one line, « N assets · see », that opens its Assets tab -- what it was given
+           lives there only (given, its right set, taken back: « None »). Its sign-in mailbox (not an asset) stays below. */
+        const n = givenCount(here);
+        $('access-assets').textContent = uiSaid(n === 1 ? 'set-acc-assets-1' : 'set-acc-assets-n', n === 1 ? '1 asset · see' : '{n} assets · see', { n });
         paintConvStates(here);
-        /* What can still be attached, for the picker. */
-        const picker = $('attach-rows'); picker.replaceChildren();
-        const offer = (name, kind, buttons) => {
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = name;
-            const label = document.createElement('b'); label.textContent = name;
-            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${kind}`; label.append(about);
-            row.append(label, ...buttons); picker.append(row);
-        };
-        const act = (text, run) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.addEventListener('click', async () => { b.disabled = true; b.textContent = '...'; await run(); await paintPanel(); }); return b; };
-        for (const resource of all.filter((r) => !mine.has(r.name))) {
-            const kind = kindOf(resource);
-            offer(resource.name, KIND_WORD[kind], kind === 'mailbox' ? [act('Read', () => attachTo(current, resource.name, 'read'))]
-                : [act('Read', () => attachTo(current, resource.name, 'read')), act('Write', () => attachTo(current, resource.name, 'write'))]);
-        }
-        for (const secret of secrets.filter((x) => !x.conversations.includes(current))) {
-            offer(secret.name, 'secret', [act('Use', async () => { await handTo(current, secret.name, true); $('secret-note').textContent = `${secret.name} will be handed to the tool the next time it starts (leave the tool, then "Start it again").`; })]);
-        }
-        $('attach-empty').hidden = picker.children.length > 0;
         /* Where the tool works, and the way to the other place. */
         const kept = here?.work === 'kept';
         $('work-box').hidden = DEVICE || !here;
@@ -2860,8 +2805,8 @@
         const join = (...parts) => parts.filter(Boolean).join(' · ');
         chapterNow('general', join(here.title || here.name, here.group, here.toolLabel ?? here.tool));
         chapterNow('machine', join(sizeWords(here.memoryMb), uiSaid(here.cpus === 1 ? 'set-core' : 'set-cores', here.cpus === 1 ? '1 core' : '{n} cores', { n: here.cpus ?? 1 }), here.diskGb ? `${here.diskGb} GB` : ''));
-        const attached = (here.resources ?? []).length; const secrets = $('access-secrets').children.length;
-        chapterNow('access', join(uiSaid('set-attached', '{n} attached', { n: attached }), secrets ? uiSaid(secrets === 1 ? 'set-secret' : 'set-secrets', secrets === 1 ? '1 secret' : '{n} secrets', { n: secrets }) : '', here.offline ? uiSaid('set-offline', 'offline') : ''));
+        const given = givenCount(here);
+        chapterNow('access', join(uiSaid(given === 1 ? 'set-acc-asset-1' : 'set-acc-asset-n', given === 1 ? '1 asset' : '{n} assets', { n: given }), here.offline ? uiSaid('set-offline', 'offline') : ''));
         const shared = $('share-here').children.length;
         chapterNow('sharing', shared ? uiSaid(shared === 1 ? 'set-device' : 'set-devices', shared === 1 ? '1 device' : '{n} devices', { n: shared }) : uiSaid('set-no-device', 'No device'));
         const chatOn = levelsWord('talk-on');
@@ -3824,7 +3769,6 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/answerer/resume`, {}); await refresh(); await paintAnswerer(); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
     });
-    const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = uiSaid('set-rt-pick-use', 'Use'); return s; };
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
@@ -3834,64 +3778,21 @@
             await paintPanel();
         });
     }
-    /* `picking`: open on what can be attached (the "+ Attach" of the bar). */
-    async function openAccess(picking = false) {
+    /* Its settings, on the Access chapter. `giving`: « Give… » instead, in its Assets tab (07-11, assets step 4). */
+    async function openAccess(giving = false) {
         if (DEVICE || !current) return;
         if (place !== 'conversations') leavePlace();
+        if (giving) { openGive(); return; }
         goTab('settings');
-        /* What is attached may have changed from another screen: asked again before it is shown. */
+        /* What it has may have changed from another screen: asked again before it is shown. */
         await refresh();
         await paintPanel();
-        $('attach-picker').hidden = !picking;
-        if (picking) openAttach();
         /* The folders button shows the folders: their chapter opened, in its tab. */
-        openChapter('access', { show: !picking });
-        if (picking) $('attach-picker').scrollIntoView({ block: 'nearest' });
+        openChapter('access');
     }
     $('folders').addEventListener('click', () => { void openAccess(false); });
-    /* ATTACH: ONE BUTTON (05-11). What is there already, to tick, or a new one -- the New asset box, with this
-       conversation as its context: what is made there is attached to it at the end. */
-    let attachNew = { kind: '', level: 'write' };
-    function openAttach() {
-        attachNew = { kind: '', level: 'write' };
-        if (justMade?.to) justMade = null;
-        $('attach-error').hidden = true;
-        paintAttach();
-    }
-    function closeAttach() {
-        $('attach-picker').hidden = true; $('attach-close').hidden = false;
-        attachNew.kind = ''; if (justMade?.to) justMade = null;
-        for (const f of $('attach-box').querySelectorAll('.as-form')) $('assets-forms').append(f);
-    }
-    function paintAttach() {
-        const box = $('attach-box');
-        for (const f of box.querySelectorAll('.as-form')) $('assets-forms').append(f);
-        $('attach-park').append($('attach-there'));
-        const who = shownName(conversations.find((c) => c.name === current)) || current;
-        const made = justMade?.to === current ? justMade : null;
-        const kind = made ? '' : attachNew.kind;
-        /* At its ending, one Done: the box's own. */
-        $('attach-close').hidden = Boolean(made) || (kind === 'box' && Boolean(boxFlow?.made));
-        /* A secret is used or not, a voice box speaks there: no level to choose. */
-        const level = kind && !['secret', 'box'].includes(kind) ? { options: [{ value: 'read', label: uiSaid('set-na-read', 'Read') }, { value: 'write', label: uiSaid('set-na-write', 'Write') }], value: attachNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { attachNew.level = v; } } : null;
-        box.replaceChildren(newAssetBox({
-            kind, existing: $('attach-there'), title: '',
-            context: made ? null : { line: uiSaid('set-na-will', 'Will be attached to {name}', { name: who }), level },
-            made: made ? { said: uiSaid('set-na-made-to', '{name} created and attached to {to}', { name: made.name, to: who }), note: made.note } : null,
-            onKind: (k) => {
-                attachNew.kind = k; justMade = null; $('attach-error').hidden = true; paintAttach(); focusFirst(box);
-                /* Its keys, read here too: Assets may not have been opened yet. */
-                if (k === 'git') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
-            },
-            onBack: () => { attachNew.kind = ''; $('attach-error').hidden = true; paintAttach(); },
-            onAnother: () => { attachNew.kind = made.kind; justMade = null; paintAttach(); focusFirst(box); },
-            onDone: () => { closeAttach(); },
-            boxHost: { where: current, repaint: () => paintAttach(), close: () => closeAttach() },
-        }));
-    }
-    $('attach-open').addEventListener('click', () => { openChapter('access'); $('attach-picker').hidden = false; openAttach(); $('attach-picker').scrollIntoView({ block: 'nearest' }); });
-    $('attach-close').addEventListener('click', () => { closeAttach(); });
-    $('attach-manage').addEventListener('click', () => { void openAssets(); });
+    /* « N assets · see »: its Assets tab. */
+    $('access-assets').addEventListener('click', () => { goTab('assets'); });
 
     /* ---------- ASSETS: one design, two pages (G and H) ----------
        The server's (a place, beside Access and Settings): everything kept
@@ -4045,11 +3946,6 @@
         /* Once a finger's drag has begun, the page must not scroll under it. */
         holder.addEventListener('touchmove', (e) => { if (drag?.on) e.preventDefault(); }, { passive: false });
     }
-    /* The level buttons an asset takes, by its type (same sets as its own detail). */
-    const levelOptionsFor = (item) => (item.target ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
-        : item.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']]
-        : item.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']]
-        : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']]);
     /* The shortcut "give all": each member at the lightest real level for its type. */
     const giveValue = (item, on) => (!on ? (item.target || item.kind !== 'secret' ? 'none' : 'off')
         : item.target ? 'watch' : item.kind === 'secret' ? 'use' : 'read');
@@ -4134,14 +4030,17 @@
             const block = el('div', 'as-give-conv');
             const head = el('div', 'as-give-head');
             const giveAll = el('button', 'as-mini', 'Give all'); giveAll.type = 'button'; giveAll.addEventListener('click', () => setAll(c, true));
-            const clearAll = el('button', 'as-mini', 'Remove all'); clearAll.type = 'button'; clearAll.addEventListener('click', () => setAll(c, false));
+            const clearAll = el('button', 'as-mini', uiSaid('set-group-none-all', 'All to None')); clearAll.type = 'button'; clearAll.addEventListener('click', () => setAll(c, false));
             head.append(el('b', '', shownName(c)), el('span', 'as-give-acts', ''));
             head.lastChild.append(giveAll, clearAll);
             block.append(head);
             for (const m of members) {
                 const line = el('div', 'as-give-row');
                 const nm = el('span', 'as-give-name'); nm.append(kindIcon(m.kind), el('span', '', m.name));
-                line.append(nm, modes(levelOptionsFor(m), memberCurrent(m, c.name), async (v) => { await applyMemberGrant(m, c.name, v); repaint(); }, `${m.name} for ${shownName(c)}`));
+                /* The one picker (kit RightsPicker, « None » first): the same levels as the asset's own panel. */
+                const pick = KIT.RightsPicker({ key: KIT.rightsKey(m), kind: m.kind, value: memberCurrent(m, c.name), label: `${m.name} for ${shownName(c)}`,
+                    onChange: async (level, stored) => { await applyMemberGrant(m, c.name, stored ?? level); repaint(); } });
+                if (pick) line.append(nm, pick); else line.append(nm);
                 block.append(line);
             }
             if (members.length === 0) block.append(el('p', 'hint', 'The group is empty.'));
@@ -4710,7 +4609,80 @@
     /* A conversation's tab, searched: its words, and whose they are. */
     let cassetsQuery = ''; let cassetsFor = '';
     $('cassets-search').addEventListener('input', () => { cassetsQuery = $('cassets-search').value.trim(); void paintRoomAssets(); });
-    $('cassets-attach').addEventListener('click', () => { void openAccess(true); });
+    $('cassets-attach').addEventListener('click', () => { openGive(); });
+    /* GIVE… (07-11, assets step 4): in its tab, in place of an asset opened -- the one list of what it has not yet
+       (kit AssetPicker), its right, then « Give »; a new asset below (the New asset box, given at its end). Its state:
+       the search typed, the one chosen, the kind of a new one being made. */
+    const GIVE = 'give:';
+    let giveQuery = ''; let giveChosen = ''; let giveNew = { kind: '', level: '' };
+    function openGive() {
+        if (DEVICE || !current) return;
+        giveQuery = ''; giveChosen = ''; giveNew = { kind: '', level: '' };
+        if (justMade?.to) justMade = null;
+        $('cassets-error').hidden = true;
+        if (tabNow() !== 'assets') goTab('assets');
+        pickRoomAsset(GIVE);
+    }
+    const closeGive = () => { giveNew = { kind: '', level: '' }; if (justMade?.to) justMade = null; if (roomPick === GIVE && !nav.close('asset')) { roomPick = ''; void paintRoomAssets(); } };
+    /* A secret given or taken back: its tool has it, or not, at its next start -- said under the tab a moment. */
+    let noteTimer = 0;
+    function secretNote(name, on) {
+        const p = $('cassets-note');
+        p.textContent = uiSaid(on ? 'set-secret-next-on' : 'set-secret-next-off', on ? '{name}: handed to its tool at its next start' : '{name}: no longer handed from its next start', { name });
+        p.hidden = false;
+        clearTimeout(noteTimer); noteTimer = setTimeout(() => { p.hidden = true; }, 12_000);
+    }
+    /* Every asset as a card, for Give…: what the Assets menu lists, without who has it. */
+    function everyCard({ all = [], boxes = [], secrets = [], tether = {}, lists = {} } = {}) {
+        const out = [];
+        for (const r of Array.isArray(all) ? all : []) {
+            const kind = kindOf(r); const box = kind === 'mailbox' ? (Array.isArray(boxes) ? boxes : []).find((m) => m.name === r.name) : undefined;
+            out.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of Array.isArray(secrets) ? secrets : []) out.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...secretItem(s2, uiSaid('set-as-name-only', 'name only')) });
+        for (const tgt of Array.isArray(tether?.targets) ? tether.targets : []) out.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, live: true, sub: connexionOwnSub(tgt.kind) });
+        for (const l of lists?.ok && Array.isArray(lists.data) ? lists.data.filter((x) => !x.archived) : []) out.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, sub: cardsSub(l.count) });
+        return out;
+    }
+    /* Given from the picker: the same grant as « None » takes back (applyMemberGrant), then the list again. */
+    async function giveOne(item, level, stored) {
+        $('cassets-error').hidden = true;
+        await applyMemberGrant(item, current, stored ?? level);
+        if (!$('cassets-error').hidden) return false;
+        if (item.kind === 'secret') secretNote(item.name, true);
+        giveChosen = '';
+        await paintRoomAssets();
+        return true;
+    }
+    /* The levels a new asset of that kind is given at (a live link made: Read watches, Write proposes -- targetLevel). */
+    const newLevels = (kind) => (['secret', 'box', 'device'].includes(kind) ? [] : kind === 'mailbox' ? ['read'] : ['read', 'write']);
+    function paintGive(detail, data, items) {
+        const c = conversations.find((x) => x.name === current);
+        const who = shownName(c) || current;
+        const made = justMade?.to === current ? justMade : null;
+        const kind = made ? '' : giveNew.kind;
+        const levels = newLevels(kind);
+        if (kind && !levels.includes(giveNew.level)) giveNew.level = levels[0] ?? '';
+        const level = levels.length ? { options: levels.map((l) => ({ value: l, label: KIT.rightWord(l, 'pick') })), value: giveNew.level, label: uiSaid('set-na-level', 'What it may do'), onChange: (v) => { giveNew.level = v; } } : null;
+        const box = newAssetBox({
+            kind, title: '',
+            context: kind && !made ? { line: uiSaid('set-na-will', 'Will be given to {name}', { name: who }), level } : null,
+            made: made ? { said: uiSaid('set-na-made-to', '{name} created and given to {to}', { name: made.name, to: who }), note: made.note } : null,
+            onKind: (k) => {
+                giveNew.kind = k; justMade = null; $('cassets-error').hidden = true; void paintRoomAssets();
+                /* Its keys, read here too: Assets may not have been opened yet. */
+                if (k === 'git') void getJson('/git-keys', []).then((keys) => paintKeys(keys));
+            },
+            onBack: () => { giveNew.kind = ''; $('cassets-error').hidden = true; void paintRoomAssets(); },
+            onAnother: () => { giveNew.kind = made.kind; justMade = null; void paintRoomAssets(); },
+            onDone: () => { closeGive(); },
+            boxHost: { where: current, repaint: () => { void paintRoomAssets(); }, close: () => closeGive() },
+        });
+        const body = kind || made ? box : KIT.AssetPicker({ items: everyCard(data).map((i) => ({ ...cardOf(i), item: i })), given: items.map((i) => i.key), kinds: assetKinds(), query: giveQuery, chosen: giveChosen,
+            newAsset: box, words: { who }, onPick: (key) => { giveChosen = key; }, onQuery: (q) => { giveQuery = q; }, onGive: (card, l, stored) => giveOne(card.item, l, stored) });
+        detail.append(KIT.AssetPanel({ key: GIVE, kind: 'give', name: uiSaid('set-as-give', 'Give…'), sub: who }, { back: { onBack: () => { if (!nav.close('asset')) { roomPick = ''; void paintRoomAssets(); } } }, parts: [body] }));
+        if (kind) focusFirst(detail);
+    }
     /* WHAT A CONVERSATION WAS GIVEN, the rows of its Assets tab (each with its right): its work folder, its folders,
        repositories and mailboxes, its secrets, what it was given live (Tether) and its binders. The tab draws them,
        its bar counts them, a room's settings show them for each of its AIs: the same rows everywhere. */
@@ -4757,13 +4729,17 @@
         const secrets = secretsKnown.length ? secretsKnown : (c.secrets ?? []).map((n) => ({ name: n, conversations: [c.name] }));
         return givenItems(c.name, { all, secrets, tether: givenKnown.tether, lists: givenKnown.lists }).length;
     }
+    /* Painted again while a paint reads (a right changed, then the list refreshed): only the last one draws. */
+    let roomPainting = 0;
     async function paintRoomAssets() {
         if (!assetsShown) return;
+        const mine = ++roomPainting; const stale = () => mine !== roomPainting || !assetsShown;
         watchTether();
         const c = conversations.find((x) => x.name === current);
         roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
         const [all, secrets, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {}), readDevices()]);
         keepGiven(tether, lists); paintAssetsCount();
+        if (stale()) return;
         /* The calls this conversation's agent asked the owner to allow: validated here,
            in the parloir, without leaving for the Assets page. */
         const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
@@ -4776,9 +4752,11 @@
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: uiSaid('set-as-to-send', 'To send'), sub: uiSaid('set-as-to-send-sub', 'every repository, reviewed and sent at once') } : null;
         const waitingCount = mineDemandes.length + mineJobs.length;
         const demandes = waitingCount ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: waitingCount }) } : null;
-        const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
+        const giving = roomPick === GIVE;
+        const chosen = giving ? null : (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
-        as.dataset.open = chosen ? 'detail' : 'list';
+        as.dataset.open = chosen || giving ? 'detail' : 'list';
+        $('cassets-attach').setAttribute('aria-pressed', String(giving));
         /* THE ONE LIST (kit AssetList), scope this conversation: by type, its right on each row; To send and
            Demandes pinned above. Its search is its own, emptied when another conversation is shown. */
         if (cassetsFor !== current) { cassetsFor = current; cassetsQuery = ''; $('cassets-search').value = ''; }
@@ -4790,11 +4768,22 @@
         paintAssetList($('cassets-rows'), model, { chosen: chosen?.key, onOpen: pickRoomAsset, pinned, empty: uiSaid('set-as-none-given', 'Nothing is given to it yet.'), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
-        if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
+        /* The New asset forms wait in Assets: put back before the detail is drawn again (Give… may hold one). */
+        const parkForms = () => { for (const f of detail.querySelectorAll('.as-form')) $('assets-forms').append(f); };
+        if (giving) {
+            /* Drawn again only when what it shows changed: a form being filled, a search typed, keep their place. */
+            const sig = JSON.stringify([GIVE, giveNew.kind, justMade?.to === current ? justMade.key : '', items.map((i) => i.key), [all, secrets, tether?.targets, lists?.data].map((x) => (Array.isArray(x) ? x.length : 0))]);
+            if (detail.dataset.asset === GIVE && detail.dataset.sig === sig) return;
+            unembedFiles(); parkForms(); detail.replaceChildren();
+            detail.dataset.asset = GIVE; detail.dataset.sig = sig;
+            paintGive(detail, { all, boxes, secrets, tether, lists }, items);
+            return;
+        }
+        if (!chosen) { unembedFiles(); parkForms(); detail.replaceChildren(); delete detail.dataset.asset; if (items.length) detail.append(noAssetChosen()); return; }
         /* The same folder still shown, nothing changed in who has it: only its files are read again (no blink). */
         const sig = JSON.stringify([chosen.key, chosen.own ? '' : chosen.kind === 'send' || chosen.kind === 'demandes' ? waitingCount : accessHolders(chosen)]);
         const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && !chosen.target && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key && detail.dataset.sig === sig;
-        if (!keepFiles) { unembedFiles(); detail.replaceChildren(); }
+        if (!keepFiles) { unembedFiles(); parkForms(); detail.replaceChildren(); }
         detail.dataset.asset = chosen.key; detail.dataset.sig = sig;
         const back = () => { roomPick = ''; void paintRoomAssets(); };
         if (keepFiles) { void paintFiles(); return; }
@@ -4811,7 +4800,7 @@
             } else await sendDetail(body, gits);
             return;
         }
-        await assetPanel(detail, chosen, { from: current, back, tether, gits });
+        await assetPanel(detail, chosen, { from: current, back, tether, gits, stale });
     }
     /* One asset opened: a step (another one opened takes its place); Back, the list. */
     const assetStep = () => { if (nav.last(['asset']) < 0) nav.push('asset', ({ quiet }) => { roomPick = ''; if (!quiet && assetsShown) void paintRoomAssets(); }); };
@@ -4840,6 +4829,8 @@
     function closeRoomAssets() {
         if (!assetsShown) return;
         assetsShown = false; $('cassets').hidden = true; unembedFiles(); paintViews();
+        for (const f of $('cassets-detail').querySelectorAll('.as-form')) $('assets-forms').append(f);
+        if (roomPick === GIVE) { roomPick = ''; giveNew = { kind: '', level: '' }; delete $('cassets-detail').dataset.asset; }
         if ($('cassets').contains($('gitview'))) shutGit();
     }
 
@@ -5075,19 +5066,19 @@
     const focusFirst = (holder) => { const f = holder.querySelector('.as-form input:not([type=radio])'); if (f) focusField(f); };
     /* What was just made: the box's ending ("✓ <name> created"), until Done. `to`: the conversation it was attached to. */
     let justMade = null;
-    /* A form is in the conversation's Attach (its context), or in Assets. */
-    const inAttach = (form) => $('attach-box').contains(form);
-    const newAssetError = (form, message) => { const e = inAttach(form) ? $('attach-error') : $('assets-error'); e.textContent = message; e.hidden = false; };
+    /* A form is in a conversation's Give… (its context), or in Assets. */
+    const inGive = (form) => $('cassets-detail').contains(form);
+    const newAssetError = (form, message) => { const e = inGive(form) ? $('cassets-error') : $('assets-error'); e.textContent = message; e.hidden = false; };
     /* THE ONE ENDING. `give(conversation, level)` attaches it, when the box was opened from a conversation; in
        Assets it is opened, the ending above it. */
     async function assetMade(form, { key, name, give = null, note = '' }) {
-        if (inAttach(form) && current) {
-            const kind = attachNew.kind;
-            if (give) await give(current, attachNew.level);
+        if (inGive(form) && current) {
+            const kind = giveNew.kind;
+            if (give) await give(current, giveNew.level || 'read');
             justMade = { kind, key, name, note, to: current };
-            attachNew.kind = '';
-            await paintPanel();
-            paintAttach();
+            giveNew.kind = '';
+            await refresh();
+            await paintRoomAssets();
             return;
         }
         justMade = { kind: assetsAdding, key, name, note };
@@ -5095,10 +5086,10 @@
     }
     /* Another kind asked from inside a form (New mailbox's Google, Microsoft: the account's form). */
     async function newAssetKind(form, kind) {
-        if (inAttach(form)) { attachNew.kind = kind; paintAttach(); return; }
+        if (inGive(form)) { giveNew.kind = kind; await paintRoomAssets(); return; }
         assetsAdding = kind; await paintAssets();
     }
-    /* A Tether target given from Attach: Read watches, Write proposes (asks before each action). */
+    /* A Tether target made in Give…: Read watches, Write proposes (asks before each action). */
     const targetLevel = (level) => (level === 'write' ? 'propose' : 'watch');
     /* ONE ASSET OPENED (06-11, assets step 3): the same panel (kit AssetPanel, AccessList) in the Assets menu and in a
        conversation's tab. Seen from the menu (`from` ''), the asset itself is changed there too: its group, its name, its
@@ -5128,7 +5119,11 @@
                 if (stored) await post(`${API}/devices/${id}/give`, { asset: chosen.key, rights: stored });
                 else await post(`${API}/devices/${id}/take`, { asset: chosen.key });
                 await readDevices();
-            } else await applyMemberGrant(chosen, String(row.id).slice('conversation:'.length), stored ?? level);
+            } else {
+                await applyMemberGrant(chosen, String(row.id).slice('conversation:'.length), stored ?? level);
+                /* A secret: its tool has it, or no longer, at its next start (said where it was changed, its tab). */
+                if (chosen.kind === 'secret' && place !== 'assets' && row.id === `conversation:${current}`) secretNote(chosen.name, level !== 'none');
+            }
         } catch (error) { sayAsErr(error); return false; }
         await repaintAsset();
         return true;
@@ -5199,7 +5194,7 @@
     }
     /* `detail`: where it is drawn. `from`: the conversation it is seen from ('' : the menu). `back`: the way back (a phone).
        `tether`, `groups`: as the page read them. `gits`: the conversation's repositories (To send, beside). */
-    async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [] } = {}) {
+    async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [], stale = () => false } = {}) {
         const inMenu = !from;
         const r = chosen.resource;
         const parts = []; const foot = [];
@@ -5379,7 +5374,10 @@
                 edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
             } else edit.addEventListener('click', () => { void openAssetsPlace(chosen.key, { remote: true }); });
             gitHolder = el('div', 'as-git');
-            parts.push({ title: 'Settings', extra: [edit], body }, gitHolder);
+            parts.push({ title: 'Settings', extra: [edit], body });
+            /* What THIS conversation's agent may send by itself: under the right it depends on (it writes), seen from it. */
+            if (!inMenu && !DEVICE && model?.here?.level === 'write') parts.push(autoSending(from, chosen.name));
+            parts.push(gitHolder);
         }
         if (t) {
             /* An MCP server's rights say themselves (Off / Read / All with approval / All / Custom): no levels' words under them. */
@@ -5425,6 +5423,8 @@
         }
         /* Its right said once: by its own row's picker when it has one (« Lire » pressed), else by the head's badge. */
         const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: chipsOf(chosen) };
+        /* A later paint began while this one read: it draws, not this one. */
+        if (stale()) return;
         detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
         if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
     }
@@ -6121,7 +6121,7 @@
     });
     $('secret-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true; $('attach-error').hidden = true;
+        $('assets-error').hidden = true; $('cassets-error').hidden = true;
         const lines = !$('secret-lines').hidden;
         /* A key's last line ends with a line break: kept as it was pasted. */
         const value = lines ? $('secret-lines').value.replace(/\r\n?/g, '\n') : $('secret-value').value;
@@ -6131,8 +6131,8 @@
             await post(`${API}/secrets`, { name, value, ...(expires ? { expires } : {}) });
             $('secret-name').value = ''; $('secret-expires').value = ''; secretLines(false, '');
             await assetMade($('secret-box'), { key: `secret:${name}`, name, give: async (to) => {
-                await handTo(to, name, true, 'attach-error');
-                $('secret-note').textContent = `${name} will be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
+                await handTo(to, name, true, 'cassets-error');
+                secretNote(name, true);
             } });
         } catch (error) { newAssetError($('secret-box'), error.message); }
         await paintAssets();
@@ -8387,7 +8387,7 @@
                 $('git-said').hidden = false;
             }
             /* A new repository opens on its card, where it is attached: the next thing to do. */
-            await assetMade($('git-box'), { key: `git:${made.name}`, name: made.name, note: made.firstSeen ? $('git-said').textContent : '', give: (to, level) => attachTo(to, made.name, level, 'attach-error') });
+            await assetMade($('git-box'), { key: `git:${made.name}`, name: made.name, note: made.firstSeen ? $('git-said').textContent : '', give: (to, level) => attachTo(to, made.name, level, 'cassets-error') });
         } catch (error) { $('git-error').textContent = error.message; $('git-error').hidden = false; }
         button.disabled = false; button.textContent = 'Create';
         await paintAssets();
@@ -8931,12 +8931,12 @@
     getJson('/accounts', null).then((d) => { if (d?.supported) { accountSupported = { ...d.supported, classic: ['mail', 'calendar', 'contacts'] }; setConnexionProvider($('connexion-new').dataset.provider || 'google'); } });
     $('list-new').addEventListener('submit', async (event) => {
         event.preventDefault();
-        $('assets-error').hidden = true; $('attach-error').hidden = true;
+        $('assets-error').hidden = true; $('cassets-error').hidden = true;
         const made = await binderCall('create-list', { template: $('listnew-template').value, title: $('listnew-title').value.trim(), lang: binderLang() });
         if (made.ok) {
             $('listnew-title').value = '';
             const key = `list:${made.data.id}`;
-            const attaching = inAttach($('list-box'));
+            const attaching = inGive($('list-box'));
             await assetMade($('list-box'), { key, name: made.data.title ?? $('listnew-template').selectedOptions[0]?.textContent ?? '', give: (to, level) => grantList(made.data.id, to, level) });
             if (!attaching) { listOpen = key; remember(); }
         } else newAssetError($('list-box'), made.text);
@@ -8945,11 +8945,11 @@
     $('folder-new').addEventListener('submit', async (event) => {
         event.preventDefault();
         $('assets-error').hidden = true;
-        $('attach-error').hidden = true;
+        $('cassets-error').hidden = true;
         try {
             const made = await post(`${API}/resources`, { name: $('folder-name').value.trim() }); $('folder-name').value = '';
             const name = made?.name ?? '';
-            await assetMade($('folder-box'), { key: name ? `folder:${name}` : '', name, give: name ? (to, level) => attachTo(to, name, level, 'attach-error') : null });
+            await assetMade($('folder-box'), { key: name ? `folder:${name}` : '', name, give: name ? (to, level) => attachTo(to, name, level, 'cassets-error') : null });
         } catch (error) { newAssetError($('folder-box'), error.message); }
         await paintAssets();
     });

@@ -361,9 +361,9 @@ test('the rights: one table by kind and holder, "none" first everywhere; the sam
             for (const l of levels) assert.ok(l in KIT.RIGHT_LEVELS, `${key}/${holder}: ${l}`);
         }
     }
-    /* app.js levelOptionsFor and the "Used by" options, today: a live link five levels, a secret off/use, a mailbox read, the rest read/write. */
+    /* The page's own copy (levelOptionsFor, « Off » first) is gone (07-11, step 4): a group's rows use the one picker too. */
     const app = web('app.js');
-    assert.ok(app.includes("[['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]"));
+    assert.doesNotMatch(app, /levelOptionsFor|\['none', 'Off'\]|\[\['off', 'Off'\], \['use'/);
     assert.deepEqual(KIT.rightsFor('connexion'), ['none', 'watch', 'propose', 'frame', 'free']);
     assert.deepEqual(KIT.rightsFor('secret'), ['none', 'use']);
     assert.deepEqual(KIT.rightsFor('mailbox'), ['none', 'read']);
@@ -740,7 +740,7 @@ test('the screens open an asset in the one panel: the Assets menu and a conversa
     const app = web('app.js'); const css = web('style.css'); const html = web('index.html');
     assert.equal((app.match(/async function assetPanel\(/g) ?? []).length, 1, 'one panel');
     assert.match(app, /await assetPanel\(detail, chosen, \{ back, tether, groups: assetGroups \}\)/, 'from the menu');
-    assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits \}\)/, 'from a conversation');
+    assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits, stale \}\)/, 'from a conversation (the last paint draws)');
     assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 1, 'one list of who has it');
     assert.doesNotMatch(app, /function asTitle|chapter\('Used by'/, 'the old heads and « Used by » are gone');
     /* The tab: a calendar, contacts, an access given live, its binders -- one function (givenItems), which the bar's count
@@ -761,6 +761,72 @@ test('the screens open an asset in the one panel: the Assets menu and a conversa
     assert.match(app, /const filesC = \(\) =>/);
     assert.match(html, /id="cassets-error"/);
     for (const cls of ['kit-aspanel', 'kit-access', 'kit-access-row', 'kit-access-here', 'kit-rights-same']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+});
+
+/* GIVE… (assets step 4): what a conversation has not yet, its right, then « Give »; a new asset below. */
+test('give: the one list of what it has not yet, by type, searched; nothing left, said', () => {
+    const m = KIT.assetPickModel({ items: ITEMS, given: ['folder:photos', 'git:site'], kinds: KINDS });
+    assert.equal(m.view, 'type');
+    assert.deepEqual(m.sections.map((x) => [x.id, x.items.map((i) => i.key)]), [['kind:folder', ['folder:recipes']], ['kind:secret', ['secret:KEY']], ['kind:acces', ['connexion:files-a@example.com']]]);
+    assert.deepEqual(KIT.assetPickModel({ items: ITEMS, given: [], query: 'REC', kinds: KINDS }).sections.flatMap((x) => x.items.map((i) => i.key)), ['folder:recipes']);
+    const none = KIT.AssetPicker({ items: ITEMS.slice(0, 1), given: ['folder:photos'], kinds: KINDS });
+    assert.equal(none.find('kit-aslist-said').textContent, 'It has every asset already.');
+});
+
+test('give, drawn: a row chosen opens its right (no « None », the lightest pressed) and « Give »; a refusal leaves it; a new one below', async () => {
+    const given = []; const picked = [];
+    const na = KIT.NewAsset({ kinds: [{ kind: 'folder', label: 'Folder' }] });
+    const box = KIT.AssetPicker({ items: ITEMS.map((i) => ({ ...i, holders: undefined })), given: ['folder:photos'], kinds: KINDS, newAsset: na, words: { who: 'Kitchen helper' },
+        onPick: (k) => picked.push(k), onGive: async (card, level, stored) => { given.push([card.key, level, stored]); return given.length > 1; } });
+    assert.ok(box.find('kit-aspick-search'));
+    assert.equal(box.find('kit-aspick-give'), null, 'nothing chosen: no right yet');
+    assert.equal(box.children.at(-1), na, 'the New asset box last');
+    assert.equal(box.find('kit-aspick-or').textContent, 'or a new one');
+    const row = (key) => box.all((n) => n.dataset.asset === key && n.classes.includes('kit-asset-row'))[0];
+    row('git:site').click();
+    assert.deepEqual(picked, ['git:site']);
+    const bar = box.find('kit-aspick-give');
+    const sec = bar.parent; assert.equal(sec.children[sec.children.indexOf(bar) - 1].dataset.asset, 'git:site', 'under the row chosen');
+    const pick = bar.find('kit-rights-pick');
+    assert.deepEqual(pick.children.map((b) => b.dataset.value), ['read', 'write']);
+    assert.equal(pick.children.find((b) => b.getAttribute('aria-pressed') === 'true').dataset.value, 'read');
+    pick.children[1].click();
+    const go = bar.find('kit-aspick-go'); assert.equal(go.textContent, 'Give');
+    go.click(); await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(given[0], ['git:site', 'write', 'write']);
+    assert.equal(go.disabled, false, 'refused: it can be given again');
+    /* A secret: Use only; kept as the server keeps it. */
+    row('secret:KEY').click();
+    const bar2 = box.find('kit-aspick-give');
+    assert.deepEqual(bar2.find('kit-rights-pick').children.map((b) => b.dataset.value), ['use']);
+    bar2.find('kit-aspick-go').click(); await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(given[1], ['secret:KEY', 'use', 'use']);
+    /* Chosen again: closed. */
+    row('secret:KEY').click();
+    assert.equal(box.find('kit-aspick-give'), null);
+});
+
+test('the screens give from a conversation\'s tab: no Attach, no Detach; Settings › Access one line; its automatic sending in its repository', async () => {
+    const app = web('app.js'); const html = web('index.html'); const css = web('style.css');
+    const { SETTINGS_WORDS_FR } = await import('../server/settingswords.mjs');
+    assert.doesNotMatch(html, /id="attach-(picker|open|rows|manage|box)"|id="panel-rows"|id="access-secrets"|id="secret-note"/, 'the old Attach and its lists are gone');
+    assert.doesNotMatch(app, /function paintAttach|attachNew|'Detach'|set-acc-detach|Manage all assets|'Remove all'/);
+    assert.equal((app.match(/KIT\.AssetPicker\(/g) ?? []).length, 1, 'one place gives');
+    assert.match(app, /\$\('cassets-attach'\)\.addEventListener\('click', \(\) => \{ openGive\(\); \}\)/);
+    assert.match(html, /id="access-assets"/);
+    assert.match(app, /\$\('access-assets'\)\.addEventListener\('click', \(\) => \{ goTab\('assets'\); \}\)/);
+    /* Kept from Settings › Access: its sign-in mailbox (not an asset), a repository's automatic sending, a secret's next start. */
+    assert.match(html, /id="chapter-access"[\s\S]*id="signin-setup"[\s\S]*id="chapter-sharing"/);
+    assert.match(app, /if \(!inMenu && !DEVICE && model\?\.here\?\.level === 'write'\) parts\.push\(autoSending\(from, chosen\.name\)\)/);
+    assert.match(html, /id="cassets-note"/);
+    assert.match(app, /secretNote\(chosen\.name, level !== 'none'\)/);
+    /* Made in Give…: a live link given at Read watches, at Write proposes (as Attach did). */
+    assert.match(app, /const targetLevel = \(level\) => \(level === 'write' \? 'propose' : 'watch'\)/);
+    for (const k of ['set-give-go', 'set-give-all', 'set-group-none-all', 'set-acc-assets-1', 'set-acc-assets-n', 'set-acc-asset-1', 'set-acc-asset-n', 'set-secret-next-on', 'set-secret-next-off']) {
+        assert.ok(k in SETTINGS_WORDS_FR, k);
+        assert.match(app + web('kit.js'), new RegExp(`'${k}'`), k);
+    }
+    for (const cls of ['kit-aspick', 'kit-aspick-give', 'kit-aspick-go', 'access-assets']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
 });
 
 test('a box\'s learning session in one state for its line: none, scheduled, running (kept), ended (kept)', () => {

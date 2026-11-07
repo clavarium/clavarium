@@ -22,14 +22,10 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     assert.equal((await me.page.content()).includes('sk-not-shown-again'), false, 'the value is nowhere in the page');
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
     await me.leaveAssets();
-    /* Handed to this conversation's tool from Access, in two taps. */
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#attach-open').click();
-    await me.page.locator('#attach-rows .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Use' }).click();
-    await me.until('the reminder is shown', async () => /next time it starts/.test(await me.page.locator('#secret-note').innerText()));
-    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').count()) === 1);
-    await me.page.goBack();
+    /* Handed to this conversation's tool from its Assets tab: Give…, the secret, Use, Give. */
+    await me.access('MODEL_KEY', 'Use');
+    assert.match(await me.page.locator('#cassets-note').textContent(), /MODEL_KEY: handed to its tool at its next start/);
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'MODEL_KEY').conversations, ['with-key']);
 
     const restart = async () => {
         await me.type('exit');
@@ -43,11 +39,10 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.type('echo "after=[$MODEL_KEY]"');
     await me.sees('after=[sk-not-shown-again]');
 
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#access-secrets .folder[data-name="MODEL_KEY"]').locator('button', { hasText: 'Detach' }).click();
-    await me.until('it is no longer handed', async () => (await me.page.locator('#access-secrets .folder').count()) === 0);
-    await me.page.goBack();
+    /* « None » in its own panel: no longer handed, said; it stays in Assets. */
+    await me.access('MODEL_KEY', 'None');
+    assert.match(await me.page.locator('#cassets-note').textContent(), /MODEL_KEY: no longer handed from its next start/);
+    assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'MODEL_KEY').conversations, []);
     await restart();
     await me.type('echo "off=[$MODEL_KEY]"');
     await me.sees('off=[]');
@@ -75,12 +70,7 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
     assert.equal((await me.page.content()).includes('line one'), false, 'the value is nowhere in the page');
     assert.equal(await me.page.locator('#secret-lines').isVisible(), false, 'back to one line for the next one');
     await me.leaveAssets();
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#attach-open').click();
-    await me.page.locator('#attach-rows .folder[data-name="DEPLOY_KEY"]').locator('button', { hasText: 'Use' }).click();
-    await me.until('it is listed as handed', async () => (await me.page.locator('#access-secrets .folder[data-name="DEPLOY_KEY"]').count()) === 1);
-    await me.page.goBack();
+    await me.access('DEPLOY_KEY', 'Use');
     await me.type('exit');
     await me.until('the tool has exited', async () => (await me.state()) === 'ended');
     await me.page.locator('#notice-action').click();

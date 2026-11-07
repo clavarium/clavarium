@@ -105,6 +105,7 @@
            each opened on the right (a folder: its files). -->
       <div id="cassets" class="sheet as-room" hidden>
         <p id="cassets-error" class="error" role="alert" hidden></p>
+        <p id="cassets-note" class="hint" role="status" hidden></p>
         <div class="as" id="cassets-as">
           <div class="as-list"><div class="as-tools"><input type="search" id="cassets-search" placeholder="Search" aria-label="Search its assets" spellcheck="false" autocomplete="off"><button type="button" id="cassets-attach" class="as-new"><span aria-hidden="true">+ </span><span data-said="set-as-give">Give…</span></button></div><div id="cassets-rows"></div></div>
           <div class="as-detail" id="cassets-detail"></div>
@@ -226,26 +227,10 @@
         </section>
         <section class="settings-group" id="panel-group-access" data-group="access" role="tabpanel" aria-label="Access">
         <details class="chapter" id="chapter-access" data-chapter="access">
-          <summary><span class="chapter-title" data-said="set-ch-access">Access</span><span class="chapter-about">Folders, repositories, secrets, network.</span></summary>
+          <summary><span class="chapter-title" data-said="set-ch-access">Access</span><span class="chapter-about">Its assets, its sign-in mailbox.</span></summary>
           <div class="chapter-body">
-            <div class="panel-top"><b data-said="set-acc-folders">Folders, repositories, mailboxes</b><button type="button" id="attach-open" class="primary" data-said="set-na-attach">Attach</button></div>
-            <p class="hint tip" hidden>In its machine under <code>/resources/</code>. Read-only cannot be lifted by the tool.</p>
-            <div id="panel-rows"></div>
-            <p id="panel-empty" class="hint" hidden>Nothing is attached to this conversation.</p>
-            <div class="panel-top"><b data-said="set-acc-secrets">Secrets handed to its tool</b></div>
-            <div id="access-secrets"></div>
-            <p id="access-secrets-empty" class="hint" hidden>No secret is handed to it.</p>
-            <p id="secret-note" class="hint" role="status"></p>
-            <!-- ATTACH: the New asset box (kit.js NewAsset) with this conversation as its context: what is
-                 there already (#attach-there, moved into it), or a new one, attached at the end. -->
-            <div id="attach-picker" hidden>
-            <div class="panel-top"><b id="attach-title" data-said="set-na-attach">Attach</b><button type="button" id="attach-close" data-said="set-na-done">Done</button></div>
-            <div id="attach-box"></div>
-            <p id="attach-error" class="error" role="alert" hidden></p>
-            <div id="attach-park" hidden><div id="attach-there"><div id="attach-rows"></div>
-            <p id="attach-empty" class="hint" hidden>Everything there is is attached already.</p></div></div>
-            <button type="button" id="attach-manage" class="as-link">Manage all assets</button>
-            </div>
+            <!-- ITS ASSETS (07-11, assets step 4): one line; what it was given lives in its Assets tab (Give…, its rights). -->
+            <div class="row access-assets"><button type="button" id="access-assets" class="as-link"></button></div>
             <div id="signin-setup" hidden>
             <div class="panel-top"><b>Sign-in mailbox</b></div>
             <p class="hint">Its sign-in links, beside the terminal</p><p class="hint tip" hidden>A mailbox for this tool's account, read only; its password never enters the machine.</p>

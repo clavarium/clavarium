@@ -671,7 +671,7 @@
             rm.addEventListener('click', () => {
                 const last = a.kind === 'device' && graph.links.filter((x) => x.from === a.id).length === 1;
                 /* The question in words above, two short buttons side by side below. */
-                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}?${last ? ' It has nothing else: the device is removed too.' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}?` : `Detach ${b.name} from ${a.name}?`;
+                const question = a.kind === 'device' ? `Take ${b.name} back from ${a.name}?${last ? ' It has nothing else: the device is removed too.' : ''}` : b.kind === 'secret' ? `Stop handing ${b.name} to ${a.name}?` : `Take ${b.name} from ${a.name}? It stays in Assets.`;
                 const ask = h('p', { class: 'lk-ask', text: question });
                 const sure = h('button', { type: 'button', class: 'danger', text: 'Remove' });
                 const keep = h('button', { type: 'button', text: 'Cancel', onclick: () => openPop(l) });
@@ -772,7 +772,7 @@
                 h('div', { class: 'lk-top' }, h('i', { style: `background:${css(KIND(l))}` }), h('b', { text: other.name }), h('span', { class: 'lk-sb', text: what }),
                     l.pending ? null : h('button', { type: 'button', class: 'lk-x', 'aria-label': `Remove the link to ${other.name}`, text: '×', onclick: (ev) => {
                         const btn = ev.currentTarget;
-                        btn.replaceWith(h('button', { type: 'button', class: 'danger', text: n.kind === 'device' || node(l.from).kind === 'device' ? 'Take back' : 'Detach', onclick: async () => { try { await takeAway(l); await changed(); } catch (e) { err(e.message); } } }));
+                        btn.replaceWith(h('button', { type: 'button', class: 'danger', text: n.kind === 'device' || node(l.from).kind === 'device' ? 'Take back' : 'Remove', onclick: async () => { try { await takeAway(l); await changed(); } catch (e) { err(e.message); } } }));
                     } })),
                 seg(l));
             const out = graph.links.filter((l) => l.from === n.id); const inn = graph.links.filter((l) => l.to === n.id);

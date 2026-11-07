@@ -49,16 +49,18 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     await me.chapter('s-backup');
     for (const id of ['#flows-export', '#flows-import']) assert.equal(await page.locator(id).isVisible(), true, id);
     await page.locator('#settings-close').click();
-    /* From a conversation: its own Assets, and "+" to attach -- the one Attach box (05-11: Access no longer has a second button to it). */
+    /* From a conversation: its own Assets, and « Give… » -- the one picker (07-11: Settings › Access is one line to it). */
     await page.locator('#view-assets').click();
     await me.until('its own Assets', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#view-assets').getAttribute('aria-pressed')) === 'true');
     await page.locator('#cassets-attach').click();
-    await me.until('the attach picker', async () => page.locator('#attach-picker').isVisible());
-    assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to attach');
-    assert.equal(await page.locator('#attach-picker .kit-newasset .as-kinds button').count(), 9, 'or a new one, of every kind (a voice box and a device too)');
-    await page.locator('#attach-rows .folder[data-name="seeds"]').locator('button', { hasText: 'Read' }).click();
+    await me.until('the picker', async () => page.locator('#cassets-detail .kit-aspick').isVisible());
+    assert.equal(await page.locator('#access-assets-here').count(), 0, 'one way to give');
+    assert.equal(await page.locator('#cassets-detail .kit-aspick .kit-newasset .as-kinds button').count(), 10, 'or a new one, of every kind (a voice box, a device, an MCP server too)');
+    await page.locator('#cassets-detail .kit-aspick-row[data-name="seeds"]').click();
+    await page.locator('#cassets-detail .kit-aspick-give .kit-aspick-go').click();
     await me.until('seeds is read by garden', async () => (await me.api('/api/conversations')).body[0].resources.some((r) => r.name === 'seeds' && r.access === 'read'));
-    /* Share with a device: the map, on this conversation. */
+    /* Share with a device: the map, on this conversation (its Settings). */
+    await page.locator('#folders').click();
     await me.chapter('sharing');
     await page.locator('#access-devices-here').click();
     await me.until('the map, on garden', async () => (await page.locator('#links-card').isVisible()) && /garden/.test(await page.locator('#links-card h3').innerText()));
