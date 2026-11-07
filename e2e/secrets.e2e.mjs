@@ -86,7 +86,7 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
 test('a secret is renamed: its value and the conversation it is handed to go with it; its tool sees it under the new name at its next start', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('renamer');
+    await me.create('renamer', 'Shell', { chat: false });
     await me.api('/api/secrets', { name: 'OLD_KEY', value: 'kept-value' });
     await me.api('/api/conversations/renamer/secrets', { secret: 'OLD_KEY', attached: true });
     await me.page.reload();

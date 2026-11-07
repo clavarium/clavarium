@@ -24,7 +24,7 @@ async function share(owner, label = 'A phone') {
 test('a phone that scans the code is welcomed in plain words, then sees that conversation and nothing else', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const owner = await b.person();
-    await owner.create('family');
+    await owner.create('family', 'Shell', { chat: false });
     await owner.create('private-work', 'Other tool');
     await owner.page.locator('#items .item', { hasText: 'family' }).click();
     await owner.until('family is live', async () => (await owner.state()) === 'live');
@@ -61,7 +61,7 @@ test('a phone that scans the code is welcomed in plain words, then sees that con
 test('a code works once; a removed device is out at once, with nothing left on screen that cannot work', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const owner = await b.person();
-    await owner.create('family');
+    await owner.create('family', 'Shell', { chat: false });
     const url = await share(owner);
     const path = url.replace(/^https?:\/\/[^/]+/, '');
     const phone = await b.person({ phone: true, at: path });
@@ -93,7 +93,7 @@ test('a code works once; a removed device is out at once, with nothing left on s
 test('shared with a phone: files of the conversation, and only where the owner allowed writing', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const owner = await b.person();
-    await owner.create('family');
+    await owner.create('family', 'Shell', { chat: false });
     for (const [folder, access] of [['photos', 'Write'], ['papers', 'Read']]) {
         await owner.newFolder(folder);
         await owner.access(folder, access);
@@ -214,8 +214,8 @@ test('a device paired before several conversations were possible keeps its conve
 test('a share is a basket: the conversation shown, one more, a folder to read -- named, coded, then seen by device and by thing', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const owner = await b.person();
-    await owner.create('family');
-    await owner.create('garden');
+    await owner.create('family', 'Shell', { chat: false });
+    await owner.create('garden', 'Shell', { chat: false });
     await owner.api('/api/resources', { name: 'recipes' });
     await owner.api('/api/resources', { name: 'accounts' });
     await owner.page.locator('#folders').click();
@@ -254,7 +254,8 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await tablet.menu();
     await tablet.page.locator('#files-open').click();
     const tab = tablet.page.locator('#files-assets .as-row', { hasText: 'recipes' });
-    assert.match(await tab.innerText(), /recipes\s+Given to this device\s+Reads/);
+    /* A row of the kit's asset list (assets step 6): its name, its line, its right -- side by side, no break between. */
+    assert.match(await tab.innerText(), /recipes\s*Given to this device\s*Reads/);
     await tablet.page.locator('#files-close').click();
 
     /* WHO HAS WHAT, by device: a card with a name, what it has, each thing with its way back. */
@@ -337,7 +338,7 @@ test('a device given a folder and no conversation shows its files, and nothing e
 test('a phone whose terminal is taken back while it is open loses it at once: nothing it types gets through, and nothing of the terminal is left to tap', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const owner = await b.person();
-    await owner.create('family');
+    await owner.create('family', 'Shell', { chat: false });
     await owner.page.locator('#items .item', { hasText: 'family' }).click();
     await owner.until('family is live', async () => (await owner.state()) === 'live');
     const shared = await owner.api('/api/shares', { grants: [{ asset: 'conversation:family', rights: 'rwx' }], label: 'A phone' });

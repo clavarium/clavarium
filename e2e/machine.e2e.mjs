@@ -16,7 +16,7 @@ const stateOf = (b, name) => readFileSync(join(vmHome(b, name), 'state'), 'utf8'
 test('folders that came loose while it slept are put back when it wakes; a machine asleep is never touched', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('loose');
+    await me.create('loose', 'Shell', { chat: false });
     await me.newFolder('notes');
     await me.access('notes', 'Write');
     await me.page.locator('#folders').click();
@@ -35,12 +35,13 @@ test('folders that came loose while it slept are put back when it wakes; a machi
     process.env.FAKE_VM_START_SECONDS = '2';
     t.after(() => { delete process.env.FAKE_VM_START_SECONDS; });
     await me.page.locator('#notice-action', { hasText: 'Wake it' }).click();
-    /* Told step by step: what it is, the step of how many with its time so far, the step under way, and what is usual. */
-    await me.until('the wait is said, with its time so far', async () => /^Step 1 of \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    /* Told step by step (« 1 / 4 · 0:03 », 03-11): what it is, the step of how many with its time so far, the step under way, and what is usual. */
+    await me.until('the wait is said, with its time so far', async () => /^1 \/ \d \u00b7 0:0\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
     assert.equal(await me.page.locator('#state').innerText(), 'Waking the machine...');
     assert.match(await me.page.locator('#notice-title').innerText(), /waking it up/i);
     assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').innerText(), 'Waking the machine');
-    assert.match(await me.page.locator('#notice-text').innerText(), /^A start usually takes a minute or two\. Its work, its files and its chat are kept\.$/);
+    /* The step under way in one line; what is usual, only once it is passed (03-11, less is more). */
+    assert.equal(await me.page.locator('#notice-text').innerText(), 'Waking the machine');
     /* Its machine looked at meanwhile: what is known is said, never a restart for a start that is merely under way. */
     await new Promise((r) => setTimeout(r, 900));
     assert.equal(await me.page.locator('#notice-restart').isVisible(), false, 'no restart offered while it starts');
@@ -60,7 +61,7 @@ test('folders that came loose while it slept are put back when it wakes; a machi
 test('a machine that does not answer is said over the terminal; Restart is asked first, and forces the stop when the clean one fails', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('silent');
+    await me.create('silent', 'Shell', { chat: false });
     await me.type('MARK=before-restart; echo set rights:$RIGHTS');
     /* Every right in its machine: the default, given at its first start. */
     await me.sees('\nset rights:full');
@@ -97,8 +98,8 @@ test('a machine that does not answer is said over the terminal; Restart is asked
     await me.page.locator('#notice-action', { hasText: 'Restart' }).click();
     await me.until('the page says it restarts', async () => /restarting/.test(await me.state()));
     /* While it restarts, the page says the step, the time so far and what is usual. */
-    await me.until('a clock while it restarts', async () => /^Step \d of 6 \u00b7 \d+:\d\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
-    assert.match(await me.page.locator('#notice-text').innerText(), /A restart usually takes one to two minutes/);
+    await me.until('a clock while it restarts', async () => /^\d \/ 6 \u00b7 \d+:\d\d$/.test(await me.page.locator('#notice-count').innerText().catch(() => '')));
+    assert.doesNotMatch(await me.page.locator('#notice-text').innerText(), /usually/, 'what is usual is said only once it is passed');
     await me.until('live again', async () => (await me.state()) === 'live', 30_000);
     assert.equal(existsSync(join(vmHome(b, 'silent'), 'killed')), true, 'stopped by force');
     const c = (await me.api('/api/conversations')).body.find((x) => x.name === 'silent');
@@ -132,7 +133,7 @@ test('a machine that does not answer is said over the terminal; Restart is asked
 test('a terminal not opened for a blink is tried again in silence, under a neutral word; a fault is said only if it lasts', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('blink');
+    await me.create('blink', 'Shell', { chat: false });
     /* The bridge refuses the first openings, with no reason a page could act on (a server starting again). */
     let refused = 2;
     await me.page.routeWebSocket(/\/terminal\?/, (ws) => {
@@ -202,13 +203,16 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     /* Its chat says it too, where it happened, with the same ways out; and the terminal is shown only when asked. */
     await me.page.goBack();
     await me.page.locator('#view-chat').click();
-    const line = me.page.locator('#simple-thread .parley-system');
+    const line = me.page.locator('#simple-thread .parley-system', { hasText: 'whole machine ran out of memory' });
     await me.until('a line of the machine in its chat', async () => /whole machine ran out of memory 2 times/.test(await line.first().innerText().catch(() => '')));
     assert.deepEqual(await line.first().locator('button').allInnerTexts(), ['More memory...', 'Restart...', 'See the terminal', '\u2713 Seen']);
     assert.equal(await me.page.locator('#health-room').isVisible(), true, 'the strip offers its terminal over the chat');
+    /* One line per problem (Parley 0.17.53): its lines, and their ways out, one tap away under « details ». */
+    await me.page.locator('#simple-thread .parley-issue', { hasText: 'whole machine ran out of memory' }).first().locator('.parley-issue-more').click();
     await line.first().locator('button', { hasText: 'See the terminal' }).click();
     assert.equal(await me.page.locator('#simple').isVisible(), false);
-    await me.page.locator('#folders').click();
+    if (!(await me.page.locator('#panel').isVisible())) await me.page.locator('#folders').click();
+    await me.until('its settings', async () => me.page.locator('#panel').isVisible());
     await me.chapter('machine');
     await me.page.selectOption('#machine-memory', '2048');
     await me.page.selectOption('#machine-disk', '16');
@@ -229,14 +233,16 @@ test('memory saturated and a full disk are said; memory and disk are changed fro
     /* The line that offered Restart before it offers it no more: its machine was restarted since. */
     await me.page.locator('#view-chat').click();
     await me.until('Restart no longer offered by the older line', async () => !(await line.first().locator('button').allInnerTexts().catch(() => ['Restart...'])).includes('Restart...'), 20_000);
-    assert.ok((await line.first().locator('button').allInnerTexts()).includes('More memory...'));
+    /* Its problem went away since (machine-ok, 0.2.148): nothing left to do on that line, More memory gone too. */
+    await me.until('More memory no longer offered either', async () => !(await line.first().locator('button').allInnerTexts().catch(() => ['More memory...'])).includes('More memory...'), 20_000);
     await me.page.locator('#view-terminal').click();
     assert.equal(c.memoryMb, 2048); assert.equal(c.diskGb, 16);
     assert.deepEqual(JSON.parse(readFileSync(join(vmHome(b, 'roomy'), 'size.json'), 'utf8')), { memory: 2048, disk: 16 });
     /* A disk never shrinks; a tool's least memory is kept. */
     assert.match((await me.api('/api/conversations/roomy/machine', { diskGb: 8 })).body.error, /can only grow: it has 16 GB/);
     assert.match((await me.api('/api/conversations/roomy/machine', { memoryMb: 512 })).body.error, /between 768 MB/);
-    await me.page.locator('#folders').click();
+    if (!(await me.page.locator('#panel').isVisible())) await me.page.locator('#folders').click();
+    await me.chapter('machine');
     await me.until('the choices follow what it has now', async () => (await me.page.locator('#machine-disk option').first().innerText()) === '16 GB (now)');
     assert.equal(await me.page.locator('#machine-memory').inputValue(), '2048');
     assert.equal(await me.page.locator('#machine-memory option[value="2048"]').innerText(), '2 GB (now)');

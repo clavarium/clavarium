@@ -173,11 +173,13 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         }, ms);
         const type = async (text) => { await page.locator('#terminal').click(); await page.keyboard.type(text); await page.keyboard.press('Enter'); };
         const api = (path, body) => page.evaluate(async ([p, b]) => { const r = await fetch(p, b === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); return { status: r.status, body: await r.json().catch(() => null) }; }, [path, body]);
-        /* Creates a conversation from the page, as a person does, and waits for its terminal. */
-        async function create(name, tool = 'Shell', { onDisk = false } = {}) {
+        /* Creates a conversation from the page, as a person does, and waits for its terminal. Its chat is on from
+           the start, as in the product (02-11); `chat: false` unticks it in « More »: its terminal only. */
+        async function create(name, tool = 'Shell', { onDisk = false, chat = true } = {}) {
             await page.locator('#new').click();
             await page.fill('#newconv-name', name);
             if (onDisk) await page.locator('#newconv-work [data-work="disk"]').click();
+            if (!chat) { await page.locator('#newconv-more > summary').click(); await page.locator('#newconv-chat').uncheck(); }
             await page.locator('#newconv-tools button', { hasText: tool }).click();
             await page.locator('#newconv-create').click();
             await until(`${name} is live`, async () => (await state()) === 'live', 30_000);
