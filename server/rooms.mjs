@@ -60,7 +60,7 @@ export const masked = (text) => { const str = String(text ?? ''); const hits = s
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
 
 export class Rooms {
-    #file; #dir; #say; #attach; #read; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #hops = new Map(); #thinking = new Map();
+    #file; #dir; #say; #attach; #read; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #removed; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
        conversation's own chat (talk.say; its 4th argument the paths of its files there); attach(name, fileName,
        request): a file put in a conversation's chat as the person attaches one (talk.attach); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
@@ -68,9 +68,10 @@ export class Rooms {
        reach(name, path): how a conversation's chat opens a path of its own ("work:a.png"), or null (talk.reachOf);
        shown(name, ref): whether that chat has that file (talk.shown) -- what an AI shows in a room is read through them.
        read(name, ref): that file of that conversation ({ name, size, stream }), read with its rights -- what an AI
-       shows or cites to another AI of the room is copied from it (#carried). */
-    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false, read = async () => { throw new Refusal(404, 'No such file.'); } }) {
-        this.#speak = speak; this.#attach = attach; this.#read = read; this.#reachOf = reach; this.#shownIn = shown;
+       shows or cites to another AI of the room is copied from it (#carried).
+       removed(id): a room removed (what was given of it, to an API key, goes with it). */
+    constructor({ file, dir, say, removed = () => {}, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false, read = async () => { throw new Refusal(404, 'No such file.'); } }) {
+        this.#removed = removed; this.#speak = speak; this.#attach = attach; this.#read = read; this.#reachOf = reach; this.#shownIn = shown;
         this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
@@ -158,7 +159,7 @@ export class Rooms {
         this.#save(list);
         return this.get(id);
     }
-    remove(id) { this.#find(id); this.#save(this.#all().filter((r) => r.id !== id)); rmSync(`${this.#dir}/${id}`, { recursive: true, force: true }); }
+    remove(id) { this.#find(id); this.#save(this.#all().filter((r) => r.id !== id)); rmSync(`${this.#dir}/${id}`, { recursive: true, force: true }); try { this.#removed(id); } catch { /* the caller's */ } }
 
     /* ITS THREAD, as a screen reads it (Parley's read, the members' names of the moment). */
     read(id, options) {
@@ -247,11 +248,20 @@ export class Rooms {
     }
 
     /* SOMEONE OF THE PERSON'S SIDE SPEAKS (the person here, a box): kept in the room, given to the host -- or to the
-       AIs named (to: their member ids). Its files (paths from attach): in the thread, and a copy to each of those AIs. */
-    async say(id, text, { by, box, to, files } = {}) {
+       AIs named (to: their member ids). Its files (paths from attach): in the thread, and a copy to each of those AIs.
+       `as`: an API key ({ id, name, kind, look }, apikeys.mjs), not a member: signed with its own name, never the
+       person's -- and its `to` are the NAMES of the room's AIs (it is never told an id). */
+    async say(id, text, { by, box, to, files, as } = {}) {
         const room = this.#find(id); const members = this.#shown(room);
+        if (as && (files !== undefined || box || by)) throw new Refusal(400, 'An API key says words only.');
+        if (as && (typeof as.id !== 'string' || !as.id.startsWith('apikey:') || !as.name)) throw new Refusal(400, 'Not an API key.');
+        if (as && Array.isArray(to)) {
+            const ais = to.map((n) => members.find((m) => m.kind === 'ai' && m.name.toLowerCase() === String(n).trim().toLowerCase()));
+            if (ais.some((m) => !m)) throw new Refusal(400, 'to: the names of AIs of this room.');
+            to = ais.map((m) => m.id);
+        }
         /* A box bound to this room speaks in it in its own name (#281): found by its box id. */
-        const who = box ? members.find((m) => m.kind === 'box' && m.ref === box) : by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
+        const who = as ? { id: as.id, name: String(as.name).slice(0, 40), kind: as.kind ?? 'ai', look: as.look ?? lookOf(as.name), ref: 'apikey' } : box ? members.find((m) => m.kind === 'box' && m.ref === box) : by ? members.find((m) => m.id === by && m.kind !== 'ai') : members.find((m) => m.kind === 'person');
         if (!who) throw new Refusal(400, 'Not a member of this room.');
         const attached = this.#filesSaid(room.id, files);
         const t = this.#thread(room.id);

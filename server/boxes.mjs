@@ -284,12 +284,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #note; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn; #collect; #stopSay = new Map();
+    #exists; #hear; #say; #note; #speak; #log; #removed; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn; #collect; #stopSay = new Map();
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, note = null, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null, collect = null }) {
-        this.#react = react; this.#learn = learn; this.#collect = collect;
+    constructor({ file, removed = () => {}, exists = () => true, hear, say, note = null, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null, collect = null }) {
+        this.#removed = removed; this.#react = react; this.#learn = learn; this.#collect = collect;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#note = note; this.#speak = speak; this.#now = now; this.#log = log;
     }
@@ -302,7 +302,8 @@ export class Boxes {
 
     /* What the operator sees: never the key, nor its hash. */
     all() {
-        return this.#all().map(({ keyHash, ...b }) => ({ ...b, online: this.#links.has(b.id), muted: this.#links.get(b.id)?.muted ?? null, volume: b.volume ?? this.#links.get(b.id)?.volume ?? VOLUME_DEFAULT }));
+        return this.#all().map(({ keyHash, ...b }) => { const l = this.#links.get(b.id);
+            return { ...b, online: Boolean(l), muted: l?.muted ?? null, volume: b.volume ?? l?.volume ?? VOLUME_DEFAULT, heardAt: l?.heardAt ? new Date(l.heardAt).toISOString() : null }; });
     }
 
     code(conversation, name, zone = '') {
@@ -436,6 +437,21 @@ export class Boxes {
         return { ok: true };
     }
 
+    /* SAID ALOUD FOR AN API KEY (apikeys.mjs, "speak"): a short text, as given -- never another assistant's call, the
+       box does not listen after, nothing of its settings touched. `by`: the key's signature, for the log. */
+    async announce(id, text, by = null) {
+        const link = this.#links.get(id);
+        if (!link) throw new Refusal(409, 'This voice box is not connected.');
+        /* A meeting being recorded is not spoken over. */
+        if (link.recording) throw new Refusal(409, 'This voice box is recording: not now.');
+        const words = forSpeech(text);
+        if (!words) throw new Refusal(400, 'Nothing to say.');
+        const pcm = await this.#speak(words);
+        link.play(pcm);
+        this.#log(`voice box ${link.box().name}: said aloud for the API key "${String(by?.name ?? '?').slice(0, 40)}"`);
+        return { ok: true, seconds: Math.round(pcm.length / 32_000) };
+    }
+
     /* LISTENING TO THE INTERNET: a radio, a podcast, a music file, a playlist, read by this server (ffmpeg,
        any format it knows) and sent on to the box at the pace it is played, a few seconds ahead -- until it
        ends, stop(), or the person presses the button or says the wake word (the box then starts a sentence). */
@@ -517,6 +533,7 @@ export class Boxes {
         this.#save(list.filter((b) => b.id !== id));
         this.#links.get(id)?.socket.close(4001, 'withdrawn');
         try { this.#learn?.forget(id); } catch { /* nothing kept */ }
+        try { this.#removed(id); } catch { /* the caller's */ }
     }
 
     /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): "normal" keeps nothing, "learn" keeps each wake clip with

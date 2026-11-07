@@ -175,6 +175,11 @@ test('a real server: administrators manage keys, a program reads the status with
     assert.equal((await post('/api/apikeys', { label: 'Every', conversations: { '*': 'read' } })).status, 404);
     assert.equal((await post(`/api/apikeys/${none.key.id}/conversations`, { conversation: 'ghost', level: 'read' })).status, 404);
     assert.equal((await fetch(`${base}/api/ext/v1/conversations`, { headers: { authorization: bearer(none.secret) } }).then((x) => x.json())).conversations.length, 0);
+    /* Rooms and voice boxes, wired: none here, none given; one that is not there, never. */
+    assert.deepEqual(await fetch(`${base}/api/ext/v1/rooms`, { headers: { authorization: bearer(none.secret) } }).then((x) => x.json()), { rooms: [] });
+    assert.deepEqual(await fetch(`${base}/api/ext/v1/boxes`, { headers: { authorization: bearer(none.secret) } }).then((x) => x.json()), { boxes: [] });
+    assert.equal((await post('/api/apikeys', { label: 'Ghost room', rooms: { '11111111-2222-4333-8444-555555555555': 'read' } })).status, 404);
+    assert.equal((await post(`/api/apikeys/${none.key.id}/boxes`, { box: '11111111-2222-4333-8444-555555555555', level: 'speak' })).status, 404);
     const listed = await (await fetch(`${base}/api/apikeys`, { headers: owner })).json();
     assert.equal(JSON.stringify(listed).includes(secret), false, 'listed without its secret');
     assert.deepEqual(listed.keys.map((k) => k.label).sort(), ['No scope', 'Steering AI']);
@@ -200,7 +205,7 @@ test('a real server: administrators manage keys, a program reads the status with
     assert.equal(init.result.protocolVersion, '2025-06-18'); assert.ok(init.result.capabilities.tools);
     assert.equal((await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' })).status, 202);
     const tools = await (await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' })).json();
-    assert.deepEqual(tools.result.tools.map((x) => x.name), ['clavarium_status', 'clavarium_conversations', 'clavarium_read', 'clavarium_say']);
+    assert.deepEqual(tools.result.tools.map((x) => x.name), ['clavarium_status', 'clavarium_conversations', 'clavarium_read', 'clavarium_say', 'clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_boxes', 'clavarium_box_say']);
     assert.equal(tools.result.tools[0].annotations.readOnlyHint, true);
     const called = await (await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'clavarium_status', arguments: {} } })).json();
     assert.ok(Array.isArray(called.result.structuredContent.conversations));

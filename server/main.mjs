@@ -235,7 +235,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -675,6 +675,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         /* The voice by default: Kyutai's Pocket TTS, run here (pocket.mjs); CLAVARIUM_POCKET=0 to leave it out. */
         pocket: process.env.CLAVARIUM_POCKET === '0' ? null : new Pocket({ dir: `${dataDir}/voices`, log: speechLog }) });
     boxes = new Boxes({ file: new JsonFile(`${dataDir}/boxes.json`, []),
+        /* A box withdrawn: what an API key was given of it goes with it. */
+        removed: (id) => grants.forgetAsset(`box:${id}`),
         /* A box speaks in a conversation, or in a room ('room:<id>', #281). */
         exists: (name) => all.list().some((c) => c.name === name) || (/^room:/.test(name) && Boolean(rooms?.has(name.slice(5)))),
         /* A long recording (a meeting): transcribed in parts, kept beside the conversation for its assistant. */
@@ -696,6 +698,7 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         log: (line) => events.add({ kind: 'server', text: line }) });
     /* Rooms (#268): a thread shared by several AIs, the person and boxes (rooms.mjs). */
     rooms = new Rooms({ file: new JsonFile(`${dataDir}/rooms.json`, []), dir: `${dataDir}/rooms`,
+        removed: (id) => grants.forgetAsset(`room:${id}`),
         say: (name, text, extra, files) => talk.say(name, text, undefined, files, undefined, extra),
         attach: (name, fileName, request) => talk.attach(name, fileName, request),
         rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
@@ -724,7 +727,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     for (const name of ['clavarium-parley', 'clavarium-tether', 'clavarium-binder', 'clavarium-docket']) {
         try { components[name.slice('clavarium-'.length)] = JSON.parse(readFileSync(packageFile(name, 'package.json'), 'utf8')).version; } catch { /* not installed here */ }
     }
-    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log`, exists: (name) => all.list().some((c) => c.name === name) });
+    const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log`, exists: (name) => all.list().some((c) => c.name === name),
+        roomExists: (id) => rooms.has(id), boxExists: (id) => boxes.all().some((b) => b.id === id) });
     /* What the host program says of the server is never waited for long: a key gets what is known. */
     const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
     const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
@@ -735,6 +739,20 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             chatOn: (name) => { try { return talk.of(name, { state: '1' }).on === true; } catch { return false; } },
             read: (name, part) => talk.of(name, part),
             say: (name, text, by) => talk.say(name, text, undefined, [], undefined, { by }),
+        },
+        /* Its rooms: read as the room's page reads them (names of the moment), never marked seen; posted as the person
+           posts there (rooms.mjs say, `as` the key). */
+        rooms: {
+            list: () => rooms.list().map((r) => ({ id: r.id, name: r.name, host: r.members.find((m) => m.host)?.name ?? null, members: r.members.map((m) => ({ name: m.name, kind: m.kind })) })),
+            read: (id, part) => rooms.read(id, { ...part, ...(part.last ? { last: Number(part.last) } : {}), seen: false }),
+            say: (id, text, how) => rooms.say(id, text, how),
+        },
+        /* Its voice boxes: their state only, and a short text said aloud (boxes.mjs announce). */
+        boxes: {
+            list: () => { const names = new Map([...all.list().map((c) => [c.name, c.title || c.name]), ...rooms.list().map((r) => [`room:${r.id}`, r.name])]);
+                return boxes.all().map((b) => ({ id: b.id, name: b.name, online: b.online, volume: b.volume, heardAt: b.heardAt ?? null,
+                    where: /^room:/.test(String(b.conversation)) ? { kind: 'room', name: names.get(b.conversation) ?? null } : { kind: 'conversation', name: names.get(b.conversation) ?? null } })); },
+            say: (id, text, by) => boxes.announce(id, text, by),
         } };
     const features = new Features({ file: new JsonFile(`${dataDir}/features.json`, {}), context: async () => ({
         secrets: secrets.list(), dictation: voice.about(), boxes: boxes.all(), alerts: alerts.about().devices.length,

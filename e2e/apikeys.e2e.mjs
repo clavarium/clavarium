@@ -12,6 +12,8 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     await me.context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: b.origin });
     await me.create('alpha');
     await me.create('beta');
+    /* A room, given to the key to talk in (07-11): its rows beside the conversations', Off first. */
+    const kitchen = (await me.api('/api/rooms', { name: 'Kitchen', conversations: ['alpha'] })).body;
     await me.page.locator('#nav-settings').click();
     await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
     await me.until('the chapter is there', async () => !(await me.page.locator('#settings-ch-apikeys').evaluate((d) => d.hidden)));
@@ -28,6 +30,10 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     const pick = me.page.locator('#apikeys-convs .apikey-conv[data-name="alpha"] .kit-seg');
     assert.equal(await pick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'Off until chosen');
     await pick.locator('button[data-value="talk"]').click();
+    const roomPick = me.page.locator(`#apikeys-rooms .apikey-room[data-id="${kitchen.id}"] .kit-seg`);
+    assert.equal(await roomPick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'a room: Off until chosen');
+    await roomPick.locator('button[data-value="talk"]').click();
+    assert.match(await me.page.locator('#apikeys-boxes').innerText(), /No voice box yet/);
     await me.page.locator('#apikeys-form button[type="submit"]').click();
 
     /* Shown this once, copied. */
@@ -40,7 +46,7 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal(secret, shown);
     await me.until('the key is listed', async () => (await me.page.locator('#apikeys-rows .list-item').count()) === 1);
     const row = me.page.locator('#apikeys-rows .list-item').first();
-    assert.match(await row.innerText(), /Home automation[\s\S]*Status \(read\)[\s\S]*alpha · Talk[\s\S]*Never used[\s\S]*Expires/);
+    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*alpha · Talk[\s\S]*Kitchen · Talk[\s\S]*Never used[\s\S]*Expires/);
     await me.page.locator('#apikeys-done').click();
     assert.equal(await me.page.locator('#apikeys-once').isVisible(), false);
     assert.equal(await me.page.locator('#apikeys-secret').inputValue(), '', 'Done: gone from the page');
@@ -67,10 +73,19 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal(mine?.from, 'person'); assert.equal(mine?.by, 'Home automation');
     assert.equal((await ext('/conversations/beta/messages')).status, 403, 'a conversation not given');
 
+    /* Its room: listed by name, a message posted there signed with the key, read back by names. */
+    assert.deepEqual((await (await ext('/rooms')).json()).rooms.map((r) => [r.name, r.level]), [['Kitchen', 'talk']]);
+    assert.equal((await ext(`/rooms/${kitchen.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Dinner at eight' }) })).status, 201);
+    const inRoom = (await (await ext(`/rooms/${kitchen.id}/messages?last=10`)).json()).messages.find((m) => m.text === 'Dinner at eight');
+    assert.equal(inRoom?.by, 'Home automation');
+    assert.deepEqual((await (await ext('/boxes')).json()).boxes, [], 'no box given');
+
     /* Its journal, under it: its last calls, the newest first. */
     await row.locator('button[data-act="journal"]').click();
     await me.until('the journal is shown', async () => (await row.locator('.apikey-more .apikey-use').count()) >= 4);
-    assert.match(await row.locator('.apikey-more .apikey-use').first().innerText(), /GET \/v1\/conversations\/beta\/messages[\s\S]*403/);
+    assert.match(await row.locator('.apikey-more .apikey-use').first().innerText(), /GET \/v1\/boxes[\s\S]*200/, 'the newest first');
+    assert.match(await row.locator('.apikey-more').innerText(), /POST \/v1\/rooms\/[0-9a-f-]{36}\/messages[\s\S]*201/);
+    assert.match(await row.locator('.apikey-more').innerText(), /GET \/v1\/conversations\/beta\/messages[\s\S]*403/);
     assert.match(await row.locator('.apikey-more').innerText(), /POST \/v1\/conversations\/alpha\/messages[\s\S]*201/);
 
     /* Turned to Read in place: the next post is refused. */
@@ -79,6 +94,11 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     await level.locator('button[data-value="read"]').click();
     await me.until('the row says Read', async () => /alpha · Read/.test(await me.page.locator('#apikeys-rows .list-item').first().innerText()));
     assert.equal((await ext('/conversations/alpha/messages', { method: 'POST', body: JSON.stringify({ text: 'Again' }) })).status, 403);
+    /* Its room turned Off in place: the next read is refused. */
+    await row.locator('button[data-act="rooms"]').click();
+    await row.locator(`.apikey-more .apikey-room[data-id="${kitchen.id}"] .kit-seg button[data-value=""]`).click();
+    await me.until('the row no longer says Kitchen', async () => !/Kitchen ·/.test(await me.page.locator('#apikeys-rows .list-item').first().innerText()));
+    assert.equal((await ext(`/rooms/${kitchen.id}/messages`)).status, 403);
 
     /* Revoked, confirmed in place: the next call is refused. */
     await row.locator('button[data-act="revoke"]').click();
