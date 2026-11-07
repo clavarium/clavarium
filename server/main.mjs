@@ -23,12 +23,13 @@ import pty from 'node-pty';
 import { attachBridge } from './bridge.mjs';
 import { attachCommand } from './tmux.mjs';
 import { handleApi } from './api.mjs';
-import { Conversations, DRAWN_MS } from './conversations.mjs';
+import { Conversations, DRAWN_MS, Refusal } from './conversations.mjs';
 import { Store, JsonFile } from './store.mjs';
 import { Instance } from './instance.mjs';
 import { loadTools } from './tools.mjs';
 import { Vms, runner } from './vm.mjs';
-import { Resources } from './resources.mjs';
+import { Resources, WORK_TAB } from './resources.mjs';
+import { download } from './files.mjs';
 import { makeGate, makeOriginCheck, readOperators } from './gate.mjs';
 import { Shortcuts } from './shortcuts.mjs';
 import { hearBox, Dictation } from './voice.mjs';
@@ -684,7 +685,18 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
         speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); },
         /* What an AI shows in a room: opened through its own conversation, with its rights (talk.mjs). */
-        reach: (name, path) => talk.reachOf(name, path), shown: (name, ref) => talk.shown(name, ref) });
+        reach: (name, path) => talk.reachOf(name, path), shown: (name, ref) => talk.shown(name, ref),
+        /* What an AI gives another AI of the room: read from its own folders, as the room's /shown route does (api.mjs). */
+        read: async (name, ref) => {
+            const m = /^([a-z][a-z0-9-]{0,31}):(.+)$/.exec(String(ref ?? ''));
+            if (!m) throw new Refusal(404, 'No such file.');
+            if (m[1] === WORK_TAB) {
+                if (all.list().find((x) => x.name === name)?.work !== 'kept') throw new Refusal(404, 'No such file.');
+                return download(folders.workFolder(name), m[2]);
+            }
+            if (!folders.of(name).some((r) => r.name === m[1])) throw new Refusal(404, 'No such file.');
+            return download(folders.folder(m[1]), m[2]);
+        } });
     rooms.boxesBound(boxes.all());
     rooms.refresh();
     /* FEATURES (features.mjs): read from what the modules say, never a secret's value. The remote screen and the

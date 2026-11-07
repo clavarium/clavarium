@@ -2,14 +2,14 @@
    answer comes back signed by where it came from, and only into a room it is in. */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, posix } from 'node:path';
 import { Rooms, lookOf } from '../server/rooms.mjs';
 import { JsonFile } from '../server/store.mjs';
-import { importFile, IMPORT_MAX } from '../server/files.mjs';
+import { importFile, IMPORT_MAX, download } from '../server/files.mjs';
 
 const setup = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
@@ -325,4 +325,95 @@ test('a file an AI shows in a room (show): relayed in its thread, never empty', 
     assert.ok(rooms.answered('hugo', { room: r.id, kind: 'show', text: '', path: '/work/out/plan.png' }, 'show'));
     assert.match(rooms.read(r.id).messages.at(-1).text, /plan\.png/);
     assert.equal(rooms.answered('hugo', { room: r.id, kind: 'show', text: 'rien' }, 'show'), null, 'nothing shown: nothing relayed');
+});
+
+/* A FILE ONE AI GIVES ANOTHER IN A ROOM (06-11): shown or cited `to` it, the receiver gets its own copy with the
+   message, read from the giver's conversation with its rights (the stand-ins: talk.reachOf, talk.shown, the
+   folders as main.mjs reads them); never an AI the message is not for; one it may not give: the message alone. */
+const giving = (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'roomgive-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const convs = [{ name: 'hugo' }, { name: 'compta' }, { name: 'jardin' }];
+    const own = { hugo: { work: true, folders: ['shared'] }, compta: { work: true, folders: [] }, jardin: { work: true, folders: [] } };
+    const reach = (name, path) => {
+        const p = posix.normalize(path); if (p.includes('/../')) return null;
+        if (p.startsWith('/work/')) return own[name]?.work ? `work:${p.slice('/work/'.length)}` : null;
+        const m = /^\/resources\/([a-z][a-z0-9-]*)\/(.+)$/.exec(p);
+        return m && own[name]?.folders.includes(m[1]) ? `${m[1]}:${m[2]}` : null;
+    };
+    const chats = new Map(convs.map((c) => [c.name, new Set()]));
+    const shown = (name, ref) => chats.get(name)?.has(ref) === true;
+    const folderOf = (name, tab) => join(dir, tab === 'work' ? `work-${name}` : `res-${tab}`);
+    const read = async (name, ref) => { const m = /^([a-z][a-z0-9-]*):(.+)$/.exec(ref); return download(folderOf(name, m[1]), m[2]); };
+    const put = (name, tab, inner, content) => { const f = join(folderOf(name, tab), inner); mkdirSync(join(f, '..'), { recursive: true }); writeFileSync(f, content); return f; };
+    const said = []; const copied = [];
+    const attach = async (name, fileName, request) => {
+        const root = join(dir, 'chats', name); const one = randomUUID(); mkdirSync(join(root, one), { recursive: true });
+        const kept = await importFile(root, one, fileName, request);
+        copied.push({ name, file: join(root, one, kept.name) });
+        return { path: `/work/.parley/files/${one}/${kept.name}`, name: kept.name, size: kept.size };
+    };
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async (name, text, extra, files) => { said.push({ name, text, extra, files }); }, attach, conversations: () => convs, reach, shown, read });
+    /* As its own chat would have it: each path it shows or cites, as its conversation opens it. */
+    const answer = (name, entry, kind = 'say') => {
+        for (const p of [entry.path, ...(entry.files ?? []).map((f) => f.path), ...(String(entry.text ?? '').match(/\/(work|resources)\/[^\s)]+/g) ?? [])].filter(Boolean)) { const o = reach(name, p.replace(/[.,;:!?]+$/, '')); if (o) chats.get(name).add(o); }
+        return rooms.answered(name, entry, kind);
+    };
+    const until = async (n) => { for (let i = 0; i < 200 && said.length < n; i++) await new Promise((r) => setTimeout(r, 5)); await new Promise((r) => setTimeout(r, 20)); };
+    return { rooms, said, copied, chats, put, answer, until, dir };
+};
+
+test('an AI shows a file to another AI of the room: that one gets its own copy with the message; a third, nothing', async (t) => {
+    const { rooms, said, copied, put, answer, until } = giving(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta', 'jardin'] });
+    const compta = r.members.find((m) => m.ref === 'compta');
+    put('hugo', 'work', 'photos/grand-mere.jpg', 'souvenir');
+    assert.ok(answer('hugo', { room: r.id, kind: 'show', text: 'Un souvenir de famille', path: '/work/photos/grand-mere.jpg', to: [compta.id] }, 'show'));
+    await until(1);
+    assert.deepEqual(said.map((s) => s.name), ['compta'], 'only the AI it is for');
+    assert.equal(said[0].files.length, 1); assert.match(said[0].files[0], /^\/work\/\.parley\/files\/[0-9a-f-]{36}\/grand-mere\.jpg$/, 'a file of its own chat');
+    assert.deepEqual(copied.map((c) => c.name), ['compta']); assert.equal(readFileSync(copied[0].file, 'utf8'), 'souvenir');
+    const m = rooms.read(r.id).messages.at(-1);
+    assert.equal(m.kind, 'show'); assert.match(m.open, /^ai:[0-9a-f-]{36}:work:photos\/grand-mere\.jpg$/, 'the thread still opens it through the giver');
+    /* A path cited in a message to it (a say with `to`): the same; and a message to nobody gives nobody a copy. */
+    put('hugo', 'shared', 'devis.pdf', 'pdf');
+    answer('hugo', { room: r.id, text: 'Le devis : /resources/shared/devis.pdf', to: [compta.id] });
+    await until(2);
+    assert.equal(said.length, 2); assert.equal(said[1].name, 'compta'); assert.match(said[1].files[0], /\/devis\.pdf$/);
+    answer('hugo', { room: r.id, text: 'Pour la maison : /work/photos/grand-mere.jpg' });
+    await new Promise((done) => setTimeout(done, 50));
+    assert.equal(said.length, 2, 'no AI named: no AI handed it'); assert.deepEqual(copied.map((c) => c.name), ['compta', 'compta']);
+});
+
+test('a file an AI may not give: not copied, the message still goes; too large, ../, a name cleaned', async (t) => {
+    const { rooms, said, copied, chats, put, answer, until, dir } = giving(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta', 'jardin'] });
+    const compta = r.members.find((m) => m.ref === 'compta');
+    /* compta has no folder `shared`: what is there is not its to give. */
+    put('hugo', 'shared', 'secret.txt', 'hugo only');
+    answer('compta', { room: r.id, kind: 'show', text: 'tiens', path: '/resources/shared/secret.txt', to: [r.members.find((m) => m.ref === 'jardin').id] }, 'show');
+    await until(1);
+    assert.equal(said.length, 1); assert.equal(said[0].name, 'jardin'); assert.equal(said[0].files, undefined, 'the message, without the file');
+    /* Its own file, but its chat no longer has it. */
+    put('hugo', 'work', 'a.txt', 'a');
+    rooms.answered('hugo', { room: r.id, kind: 'show', text: 'a', path: '/work/a.txt', to: [compta.id] }, 'show');
+    chats.get('hugo').clear();
+    await until(2);
+    assert.equal(said[1].files, undefined);
+    /* Too large (as a chat's upload), and a path that leaves its folder. */
+    const big = put('hugo', 'work', 'big.bin', ''); truncateSync(big, IMPORT_MAX + 1);
+    answer('hugo', { room: r.id, kind: 'show', text: 'gros', path: '/work/big.bin', to: [compta.id] }, 'show');
+    await until(3);
+    assert.equal(said[2].files, undefined, 'too large: not given');
+    writeFileSync(join(dir, 'outside.txt'), 'out');
+    answer('hugo', { room: r.id, kind: 'show', text: 'hors', path: '/work/../outside.txt', to: [compta.id] }, 'show');
+    answer('hugo', { room: r.id, kind: 'show', text: 'hors', files: [{ path: '/work/photos/../../outside.txt' }], to: [compta.id] }, 'show');
+    await until(5);
+    assert.equal(said.length, 5); assert.ok(said.slice(3).every((s) => s.files === undefined), '../: not given');
+    assert.equal(copied.length, 0, 'nothing copied of any of them');
+    /* A name a chat would refuse: cleaned. */
+    put('hugo', 'work', 'note\u0001du jour.txt', 'n');
+    answer('hugo', { room: r.id, kind: 'show', text: 'note', path: '/work/note\u0001du jour.txt', to: [compta.id] }, 'show');
+    await until(6);
+    assert.match(said[5].files?.[0] ?? '', /\/note-du jour\.txt$/);
 });

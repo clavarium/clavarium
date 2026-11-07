@@ -18,7 +18,7 @@ import { createReadStream, lstatSync, mkdirSync, rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { Parley, FILES_MAX } from 'clavarium-parley/host';
-import { importFile } from './files.mjs';
+import { importFile, IMPORT_MAX } from './files.mjs';
 import { Refusal } from './conversations.mjs';
 import { scan } from './secret-scan.mjs';
 
@@ -40,6 +40,13 @@ const ROOM_FILE = /^\/room\/attached\/([0-9a-f-]{36})\/([^/]+)$/;
    rights -- never another's. In the thread, its reference reads `ai:<member id>:<how its chat opens it>` (work:report.html);
    the room's /shown route opens it only when that AI cited it in this room AND its own chat has it (talk.shown). */
 const CITE = 'cite:';
+/* A file name as a chat's files take it (files.mjs isFileName): one visible segment, at most 120 characters. */
+const cleanName = (name) => {
+    const plain = String(name ?? '').replace(/[\\/\u0000-\u001f\u007f-\u009f]+/g, '-').replace(/^[.\s]+/, '').trim();
+    if (plain.length <= 120) return plain;
+    const dot = plain.lastIndexOf('.'); const ext = dot > 0 && plain.length - dot <= 16 ? plain.slice(dot) : '';
+    return plain.slice(0, 120 - ext.length) + ext;
+};
 const AI_OPEN = /^ai:([0-9a-f-]{36}):([a-z][a-z0-9-]{0,31}):(.+)$/;
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
 
@@ -53,15 +60,17 @@ export const masked = (text) => { const str = String(text ?? ''); const hits = s
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
 
 export class Rooms {
-    #file; #dir; #say; #attach; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #hops = new Map(); #thinking = new Map();
+    #file; #dir; #say; #attach; #read; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
        conversation's own chat (talk.say; its 4th argument the paths of its files there); attach(name, fileName,
        request): a file put in a conversation's chat as the person attaches one (talk.attach); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
        conversations(): the conversations there are; boxes(): the voice boxes there are.
        reach(name, path): how a conversation's chat opens a path of its own ("work:a.png"), or null (talk.reachOf);
-       shown(name, ref): whether that chat has that file (talk.shown) -- what an AI shows in a room is read through them. */
-    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false }) {
-        this.#speak = speak; this.#attach = attach; this.#reachOf = reach; this.#shownIn = shown;
+       shown(name, ref): whether that chat has that file (talk.shown) -- what an AI shows in a room is read through them.
+       read(name, ref): that file of that conversation ({ name, size, stream }), read with its rights -- what an AI
+       shows or cites to another AI of the room is copied from it (#carried). */
+    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false, read = async () => { throw new Refusal(404, 'No such file.'); } }) {
+        this.#speak = speak; this.#attach = attach; this.#read = read; this.#reachOf = reach; this.#shownIn = shown;
         this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
@@ -290,12 +299,16 @@ export class Rooms {
         /* The other AIs it is sent to (#280): they get it in their own chat, as said in the room -- never beyond a few
            hand-overs after the person last spoke (no two AIs talking for ever). */
         const ais = to.map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
-        const handOver = (ai, text, from, message) => {
+        /* `paths`: the files it shows or cites in it -- each AI it goes to gets its own copy, as when the person attaches one. */
+        const handOver = (ai, text, from, message, paths = []) => {
             const n = (this.#hops.get(room.id) ?? 0) + 1;
             if (n > HOPS_MAX) return false;
             this.#hops.set(room.id, n);
             this.#think(room.id, ai.id, true);
-            void this.#say(ai.ref, text, { by: from, room: { id: room.id, name: room.name, message } }).catch(() => {});
+            void (async () => {
+                const copies = paths.length ? await this.#carried(me, ai, paths) : [];
+                await this.#say(ai.ref, text, { by: from, room: { id: room.id, name: room.name, message } }, ...(copies.length ? [copies] : []));
+            })().catch(() => {});
             return true;
         };
         /* Handed on as it is: the message itself, by who said it; the room's thread keeps no copy. */
@@ -319,8 +332,39 @@ export class Rooms {
         /* The boxes it is sent to say it aloud (#281): its words, a member named by its name, never an id. */
         const boxes = to.map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
         if (boxes.length) { const aloud = text.replace(/@\{([0-9a-f-]{36})\}/g, (w, mid) => members.find((x) => x.id === mid)?.name ?? ''); try { this.#speak(`room:${room.id}`, aloud, boxes, { doing: kind === 'doing', asked: kind === 'ask' }); } catch { /* the boxes' */ } }
-        if (!forwarded && kind !== 'doing') for (const ai of ais) handOver(ai, text, { id: me.id, name: me.name, kind: 'ai', look: me.look }, id);
+        if (!forwarded && kind !== 'doing' && ais.length) {
+            /* What it shows, and the paths it cites (its message's refs, as the room's thread read them). */
+            const said = all().find((m) => m.id === id);
+            const paths = [...new Set([...(show?.path ? [show.path] : []), ...(show?.files ?? []).map((f) => f.path),
+                ...(Array.isArray(said?.refs) ? said.refs.filter((r) => String(r.open ?? '').startsWith(CITE)).map((r) => r.path) : [])])].slice(0, FILES_MAX);
+            for (const ai of ais) handOver(ai, text, { id: me.id, name: me.name, kind: 'ai', look: me.look }, id, paths);
+        }
         return id;
+    }
+
+    /* A FILE AN AI GIVES ANOTHER AI OF THE ROOM (06-11): read from the giver's conversation, with its rights -- a path
+       its own chat opens (its /work, a folder attached to it) and has (shown or cited there), as the room's preview --
+       then put in the receiver's chat files, as if the person attached it there. One it may not give, too large, or
+       of a name that cannot be cleaned: not given (the message still goes). Resolves with the receiver's paths. */
+    async #carried(from, to, paths) {
+        const copies = [];
+        for (const path of paths) {
+            if (typeof path !== 'string' || path.split('/').includes('..')) continue;
+            let own = null; try { own = this.#reachOf(from.ref, path); } catch { own = null; }
+            if (typeof own !== 'string' || !own) continue;
+            let has = false; try { has = this.#shownIn(from.ref, own) === true; } catch { has = false; }
+            if (!has) continue;
+            let file = null;
+            try {
+                file = await this.#read(from.ref, own);
+                if (!file?.stream || !(file.size <= IMPORT_MAX)) continue;
+                const name = cleanName(file.name);
+                if (!name) continue;
+                file.stream.headers = { 'content-length': String(file.size) };
+                copies.push((await this.#attach(to.ref, name, file.stream)).path);
+            } catch { /* not given */ } finally { file?.stream?.destroy?.(); }
+        }
+        return copies;
     }
 
     /* Each conversation told the rooms it is in, and who is there. */
