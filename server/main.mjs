@@ -59,6 +59,7 @@ import { GitKeeper } from './gitkeeper.mjs';
 import { GitRunner } from './gitrunner.mjs';
 import { Shelf } from './shelf.mjs';
 import { Health } from './health.mjs';
+import { LinkGuard, removedLine, toolLine } from './linkguard.mjs';
 import { Setup } from './setup.mjs';
 import { Capacity } from './capacity.mjs';
 import { packageFile, PARLEY } from './parley.mjs';
@@ -575,7 +576,17 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         }
     }, 15_000); restartTimer.unref?.();
     /* The health of each machine, and folders that came loose put back: see health.mjs. */
-    const health = new Health({ vms, conversations: all, resources: folders, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
+    /* Links its folders hold that the share cannot serve: removed where safe, said once (linkguard.mjs). */
+    const linkGuard = typeof folders.attachedTo === 'function' ? new LinkGuard({ resources: folders }) : null;
+    if (linkGuard) linkGuard.removed = (name, link) => {
+        try { talk.event(name, { kind: 'machine-ok', text: removedLine(link), topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ }
+        if (link.path.split('/').pop() !== 'node_modules') return;
+        /* Its tool told it may install them again: through its docket where its chat is on, else typed to its agent. */
+        const line = toolLine(link);
+        try { if (dockets.on(name)) { dockets.post(name, { kind: 'shared-folder', text: line, data: { folder: link.folder, path: link.path } }); return; } } catch { /* typed instead */ }
+        if (all.list().find((c) => c.name === name)?.ai === true) void wakeups.say(name, line).catch(() => {});
+    };
+    const health = new Health({ vms, conversations: all, resources: folders, links: linkGuard, seen: new Store(`${dataDir}/health-seen.json`), ...(healthSettleMs === undefined ? {} : { settleMs: healthSettleMs }) });
     const stopHealth = health.start(healthEveryMs);
     /* What is wrong with its machine is said in its chat too, where it happened. */
     /* And what its owner chose that it does on top (healthreact.mjs): its agent told, or a command run. */
@@ -589,6 +600,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
     const problemsSaid = new Map();
     health.judged = (name, record) => {
         talk.machine(name, record); void reacting.judged(name, record).catch(() => {});
+        /* A folder that came loose and was put back: said once, in its chat (the look that put it back). */
+        for (const path of record?.remounted ?? []) { try { talk.event(name, { kind: 'machine-ok', text: `Le dossier ${path} s'était détaché de la machine : il a été remonté.`, topic: 'Machine', brief: 'Shared folder' }); } catch { /* its chat is off */ } }
         try { healthDocket.judged(name, record); } catch { /* its docket: nothing more */ }
         const now = (record?.problems ?? []).filter((x) => x.level === 'bad' || (x.level === 'warn' && ['memory', 'disk'].includes(x.kind)));
         const before = problemsSaid.get(name) ?? new Set();

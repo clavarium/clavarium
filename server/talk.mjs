@@ -653,10 +653,11 @@ export class Talk {
             tone: fresh.some((p) => p.level === 'bad') ? 'bad' : 'warn',
             topic: 'Machine',
             /* Its name on the one line a problem is in the simple view (Parley, 03-11). */
-            brief: fresh.some((p) => p.kind === 'memory' || /^oom:|^memory/.test(p.key ?? '')) ? 'Out of memory' : fresh.every((p) => p.kind === 'disk') ? 'Disk almost full' : 'Machine problem',
+            brief: fresh.some((p) => p.kind === 'memory' || /^oom:|^memory/.test(p.key ?? '')) ? 'Out of memory' : fresh.every((p) => p.kind === 'disk') ? 'Disk almost full' : fresh.every((p) => p.kind === 'link') ? 'Shared folder' : 'Machine problem',
             /* What can be done: a disk short of room is looked at (what takes it) or made larger --
                a restart frees nothing; otherwise more memory where memory is short, a restart, its terminal. */
-            actions: [...(fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
+            /* A link in a folder (linkguard.mjs) is the folder's business: a restart changes nothing. */
+            actions: [...(fresh.every((p) => p.kind === 'link') ? [] : fresh.every((p) => p.kind === 'disk') ? ['room', 'disk'] : [...(fresh.some((p) => p.kind === 'memory') ? ['memory'] : []), 'restart', 'terminal']), 'seen'],
         });
     }
 
