@@ -92,6 +92,9 @@ export class Rooms {
     #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => Date.now() - v.at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
     #doingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => v.text && Date.now() - v.at < THINKING_MS).map(([mid, v]) => ({ name: members.find((m) => m.id === mid)?.name, text: v.text })).filter((x) => x.name); }
     list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members) }; }); }
+    /* ITS AIs, as conversations (06-11): the names of the conversations of its AI members that are there now --
+       never a box, never the person, never one taken out of the room. What « give to all its AIs » gives to. */
+    ais(id) { return this.#shown(this.#find(id)).filter((m) => m.kind === 'ai').map((m) => m.ref); }
     get(id) { const r = this.#find(id); return { id: r.id, name: r.name, host: r.host, members: this.#shown(r), at: r.at }; }
 
     /* A new room: its name, its AIs (conversation names), its boxes (ids), and which AI is the host (the first by default). */

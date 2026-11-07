@@ -2383,6 +2383,18 @@ button.salon-welcome-btn[aria-pressed="true"] { color: var(--brass-ink); border-
 .nc-card > .salon-host-box { padding: 8px 12px; }
 .nc-card > .salon-members-tools { padding-bottom: 4px; }
 .nc-card > .salon-host-box + *, .nc-card > .salon-member-list + * { border-top: 0; }
+/* Each AI's assets in a room's settings (06-11): its member card, its assets as chips below; give to all its AIs. */
+.salon-assets-list { max-height: none; }
+.salon-asset-ai { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; border-top: 1px solid var(--line); }
+.salon-asset-ai:first-child { border-top: 0; }
+.salon-asset-chips { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px; }
+button.salon-give-btn { border-radius: 999px; padding: 4px 10px; font-size: .75rem; min-height: 32px; background: transparent; color: var(--ink2); white-space: nowrap; }
+.nc-card > .salon-give { margin: 4px 16px 12px; padding: 10px 12px; border: 1px solid var(--brass); border-radius: 10px; background: color-mix(in srgb, var(--brass) 6%, var(--panel)); display: flex; flex-direction: column; gap: 8px; }
+.salon-give-assets { display: flex; flex-wrap: wrap; gap: 6px; max-height: 12rem; overflow-y: auto; }
+.salon-give-said { display: flex; flex-direction: column; gap: 2px; }
+.salon-give .action-row { padding: 0; border: 0; }
+button.kit-asset-chip { min-height: 32px; color: var(--ink); cursor: pointer; }
+.kit-asset-chip[aria-current="true"] { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 16%, transparent); }
 /* The list's button on each page of its own (03-11), as the conversation's. */
 /* THE TOP BAR of every page (03-11; 06-11: kit.js TopBar, one look everywhere): a conversation's, a room's, their
    settings', Assets', Access', Settings', the deck's, a new conversation's -- the same height, padding, type, button

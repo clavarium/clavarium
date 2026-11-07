@@ -87,5 +87,9 @@ export const SETTINGS_WORDS_FR = {
     'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-open': 'Réglages de {name}', 'set-as-group-gear': 'Donner, renommer, supprimer',
     'set-as-group-empty': 'Vide : glissez un asset ici', 'set-as-all-grouped': 'Chaque asset est dans un groupe',
     'set-as-no-groups': 'Créez un groupe, puis glissez-y un asset',
+    /* A room's settings (06-11): each AI's own assets; one right given to each of them. */
+    'set-room-assets': 'Leurs assets', 'set-room-give': '+ Donner…', 'set-room-give-all': 'Donner à toutes ses IA…',
+    'set-room-assets-none': 'Rien encore', 'set-room-give-pick': 'Choisissez un asset', 'set-room-give-go': 'Donner à {n} IA',
+    'set-room-give-done': 'Donné à {name}', 'set-room-give-kept': '{name} a déjà plus', 'set-room-give-cancel': 'Annuler',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

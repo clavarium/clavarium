@@ -5438,6 +5438,70 @@
         }));
     }
     $('salon-new-search').addEventListener('input', paintSalonMembers);
+    /* EACH AI'S ASSETS (06-11), in a room's settings: what each of its AIs has, as its own conversation has it --
+       there is no room asset. « + Give… » opens that conversation's own give; « Give to all its AIs… » gives one
+       asset at one right to each (POST /rooms/<id>/give): ordinary rights of each conversation, taken back one by one. */
+    let salonGive = null;
+    const GIVE_LETTERS = { read: 'r', write: 'rw', use: 'x' };
+    const salonOpenConv = (name, pick) => { salonEditing = null; salonGive = null; select(name, { step: true }); if (pick) { goTab('assets', { pick }); assetStep(); } else void openAccess(true); };
+    async function paintSalonAssets() {
+        const r = salonEditing; const card = $('salon-assets-card');
+        card.hidden = !r; if (!r) return;
+        const [all, held] = await Promise.all([getJson('/resources', []), getJson('/secrets', [])]);
+        if (salonEditing !== r) return;
+        const list = (Array.isArray(all) ? all : []).map((x) => { const kind = kindOf(x); return { key: `${kind}:${x.name}`, kind, name: x.name }; });
+        const keys = Array.isArray(held) ? held : [];
+        const ais = r.members.filter((m) => m.kind === 'ai').sort((a, b) => Number(Boolean(b.host)) - Number(Boolean(a.host)));
+        const assetsOf = (name) => {
+            const mine = new Map((conversations.find((x) => x.name === name)?.resources ?? []).map((x) => [x.name, x.access]));
+            return [...list.filter((a) => mine.has(a.name)).map((a) => ({ ...a, right: { key: a.kind, value: mine.get(a.name) } })),
+                ...keys.filter((k) => (k.conversations ?? []).includes(name)).map((k) => ({ key: `secret:${k.name}`, kind: 'secret', name: k.name, right: { key: 'secret', level: 'use' } }))];
+        };
+        $('salon-assets').replaceChildren(...ais.map((m) => {
+            const c = conversations.find((x) => x.name === m.ref);
+            const give = el('button', 'salon-give-btn', uiSaid('set-room-give', '+ Give\u2026')); give.type = 'button';
+            give.setAttribute('aria-label', `Give to ${shownName(c) || m.name}`);
+            give.addEventListener('click', () => salonOpenConv(m.ref));
+            const head = c ? KIT.ConvCard(convModel(c), { size: 'member', actions: [give] }) : el('b', '', m.name);
+            const chips = el('div', 'salon-asset-chips'); const mine = assetsOf(m.ref);
+            if (mine.length) chips.append(...mine.map((a) => KIT.AssetCard(a, { size: 'chip', onOpen: (key) => salonOpenConv(m.ref, key) })));
+            else chips.append(el('small', 'hint', uiSaid('set-room-assets-none', 'Nothing yet')));
+            const row = el('div', 'salon-asset-ai'); row.setAttribute('role', 'listitem'); row.dataset.name = m.ref;
+            row.append(head, chips);
+            return row;
+        }));
+        $('salon-assets-all').setAttribute('aria-expanded', String(Boolean(salonGive)));
+        paintSalonGive(r, [...list, ...keys.map((k) => ({ key: `secret:${k.name}`, kind: 'secret', name: k.name }))], ais.length);
+    }
+    /* « Give to all its AIs… »: an asset, a right (None first), then given to each. What each got is said below. */
+    function paintSalonGive(r, items, n) {
+        const box = $('salon-assets-give'); box.hidden = !salonGive;
+        if (!salonGive) { box.replaceChildren(); return; }
+        const chosen = items.find((a) => a.key === salonGive.asset);
+        const pick = el('div', 'salon-give-assets');
+        pick.append(...items.map((a) => KIT.AssetCard(a, { size: 'chip', current: a.key === salonGive.asset, onOpen: (key) => { salonGive = { asset: key, level: '', said: [] }; paintSalonGive(r, items, n); } })));
+        const go = el('button', 'primary', uiSaid('set-room-give-go', 'Give to {n} AIs', { n })); go.type = 'button';
+        go.disabled = !(chosen && salonGive.level);
+        const parts = [el('small', 'hint', uiSaid('set-room-give-pick', 'Pick an asset')), pick];
+        if (chosen) parts.push(KIT.RightsPicker({ key: chosen.kind, level: salonGive.level || 'none', label: `Right on ${chosen.name}`, cls: 'salon-give-right',
+            onChange: (l) => { salonGive.level = l === 'none' ? '' : l; go.disabled = !salonGive.level; } }));
+        go.addEventListener('click', async () => {
+            go.disabled = true; $('salon-new-error').hidden = true;
+            try { const out = await post(`${API}/rooms/${r.id}/give`, { asset: chosen.key, rights: GIVE_LETTERS[salonGive.level] }); salonGive.said = Array.isArray(out.given) ? out.given : []; await refresh(); }
+            catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; }
+            await paintSalonAssets();
+        });
+        const cancel = el('button', '', uiSaid('set-room-give-cancel', 'Cancel')); cancel.type = 'button';
+        cancel.addEventListener('click', () => { salonGive = null; void paintSalonAssets(); });
+        const said = el('div', 'salon-give-said'); said.setAttribute('role', 'status');
+        for (const g of salonGive.said) {
+            const who = shownName(conversations.find((x) => x.name === g.conversation)) || g.conversation;
+            said.append(el('small', g.ok ? 'hint' : 'err', !g.ok ? `${who}: ${g.error}` : g.kept ? uiSaid('set-room-give-kept', '{name} already has more', { name: who }) : `\u2713 ${uiSaid('set-room-give-done', 'Given to {name}', { name: who })}`));
+        }
+        const actions = el('div', 'action-row'); actions.append(cancel, go);
+        box.replaceChildren(...parts, ...(said.children.length ? [said] : []), actions);
+    }
+    $('salon-assets-all').addEventListener('click', () => { salonGive = salonGive ? null : { asset: '', level: '', said: [] }; void paintSalonAssets(); });
     /* A ROOM'S "+ Voice box": the New asset box, its kind a voice box, speaking in this room; once it answers, it is
        among the room's boxes, switched on (kept with Save). */
     function paintSalonBoxNew() {
@@ -5488,6 +5552,7 @@
         $('salon-new-boxes-card').hidden = $('salon-new-voice-head').hidden = salonBoxList.length === 0 && !editing;
         $('salon-new-box-add').hidden = !editing; closeSalonBoxNew();
         paintSalonMembers();
+        salonGive = null; void paintSalonAssets();
         $('salon-new-name').focus();
     }
     $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
