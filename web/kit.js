@@ -470,11 +470,13 @@
         secret: { conversation: ['none', 'use'] },
         list: { conversation: ['none', 'read', 'write'] },
         connexion: { conversation: ['none', 'watch', 'propose', 'frame', 'free'] },
+        /* An external MCP server (Tether's mcp target): the same levels, said by what they let its tools do. */
+        mcp: { conversation: ['none', 'watch', 'propose', 'free', 'frame'] },
         conversation: { device: ['none', 'terminal', 'chat', 'both'] },
     };
     const HOLDERS = ['conversation', 'device'];
     /* The table's key of an asset: a live link is a connexion, whatever it links; else its kind. */
-    const rightsKey = (a) => (a?.live || a?.target ? 'connexion' : a?.kind ?? '');
+    const rightsKey = (a) => (a?.target?.kind === 'mcp' ? 'mcp' : a?.live || a?.target ? 'connexion' : a?.kind ?? '');
     const rightsFor = (key, holder = 'conversation') => [...(RIGHTS[key]?.[HOLDERS.includes(holder) ? holder : 'conversation'] ?? [])];
     /* The lightest real level (what "give the group" gives): the first after none. */
     const lightest = (key, holder) => rightsFor(key, holder)[1] ?? null;
@@ -506,12 +508,22 @@
         return say(`set-rt-${form === 'badge' ? '' : `${form}-`}${level in RIGHT_LEVELS ? level : 'none'}`, l[form] ?? l.badge);
     };
 
+    /* AN MCP SERVER'S LEVELS, in its own words: Off, Read, All with approval, All, Custom (Tether's table). */
+    const MCP_WORDS = {
+        none: { pick: 'Off', badge: 'Off', hint: 'Not given' },
+        watch: { pick: 'Read', badge: 'Reads', hint: 'Its read-only tools' },
+        propose: { pick: 'All with approval', badge: 'All, approved', hint: 'Every tool, you approve each change' },
+        free: { pick: 'All', badge: 'All', hint: 'Every tool; deletes still asked' },
+        frame: { pick: 'Custom', badge: 'Custom', hint: 'Your choice for each kind of tool' },
+    };
+    const wordOf = (key, level, form) => (key === 'mcp' && MCP_WORDS[level] ? say(`set-rt-mcp-${form === 'badge' ? '' : `${form}-`}${level}`, MCP_WORDS[level][form] ?? MCP_WORDS[level].pick) : rightWord(level, form));
+
     /* A RIGHT, READ: a small pill, its tone by what it lets do. `level`, or `value` as kept (with its `key`, `holder`). */
     function RightsBadge(opts = {}) {
         const level = levelOf(opts);
-        const b = node('span', `kit-rights${opts.cls ? ` ${opts.cls}` : ''}`, rightWord(level, 'badge'));
+        const b = node('span', `kit-rights${opts.cls ? ` ${opts.cls}` : ''}`, wordOf(opts.key, level, 'badge'));
         b.dataset.level = level; b.dataset.tone = RIGHT_LEVELS[level].tone;
-        b.title = rightWord(level, 'hint');
+        b.title = wordOf(opts.key, level, 'hint');
         return b;
     }
 
@@ -524,7 +536,7 @@
         const levels = rightsFor(key, holder);
         if (!levels.length) return null;
         const now = level ?? rightOf(key, value, holder);
-        const options = levels.map((l) => ({ value: l, label: rightWord(l, 'pick') }));
+        const options = levels.map((l) => ({ value: l, label: wordOf(key, l, 'pick') }));
         let held = now;
         const pick = Segmented({ options, value: now, label, onChange: async (l) => {
             if (l === held) return;
@@ -537,7 +549,7 @@
         pick.dataset.key = key; pick.dataset.holder = holder;
         const same = key === 'connexion' ? RIGHT_SAME[kind] : null;
         for (const b of pick.children) {
-            b.title = rightWord(b.dataset.value, 'hint');
+            b.title = wordOf(key, b.dataset.value, 'hint');
             const as = same?.[b.dataset.value];
             if (as) { const w = rightWord(as, 'pick'); b.append(node('small', 'kit-rights-same', `= ${w}`)); b.title = `${b.title} (= ${w})`; }
         }
@@ -876,7 +888,7 @@
     window.clavariumKit = {
         collectModel,
         AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
-        ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
+        ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, MCP_WORDS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf, IDLE_MS, idleFor, idleWords, tidyList,
         setWords(fn) { if (typeof fn === 'function') words = fn; },

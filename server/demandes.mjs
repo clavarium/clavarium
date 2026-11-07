@@ -32,6 +32,34 @@ const whom = (list) => (list.length ? `${list[0]}${list.length > 1 ? ` +${list.l
 const plain = (body) => String(body ?? '').replace(/\*\*(\S[^*\n]*?)\*\*/g, '$1').replace(/__(\S[^_\n]*?)__/g, '$1').replace(/(^|[^*\w])\*(\S[^*\n]*?)\*(?!\w)/g, '$1$2')
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, '$1 ($2)').replace(/^#{1,6}\s+/gm, '');
 
+/* A CALL OF AN EXTERNAL MCP SERVER'S TOOL (Tether's card { kind: 'mcp', action: 'call', server, tool, title?, class, open?,
+ * fresh?, args }, 07-11): which server, which tool, its class, its arguments in short, the AI's why. Parley has no card
+ * of this kind nor its words yet: drawn as its generic card (kind 'other'), each word with its English (`t`), which an
+ * older or unknowing screen says as it is. A tool that deletes or overwrites: irreversible (amber, never in Accept all). */
+export const MCP_CLASS_SAID = { read: 'Reads only', write: 'Writes', destructive: 'Deletes or overwrites' };
+const MCP_ARGS_MAX = 6; const MCP_ARG_MAX = 160;
+const said = (k, t, v) => ({ k, ...(v ? { v } : {}), t });
+function mcpCard(c, v, sub) {
+    const server = String(c.server ?? '') || 'an MCP server';
+    const tool = String(c.title || c.tool || 'a tool');
+    const cls = Object.hasOwn(MCP_CLASS_SAID, c.class) ? c.class : 'destructive';
+    v.title = said('req-mcp-call', `Use ${tool} on ${server}`, { tool, server });
+    sub.push(server, said(`req-mcp-class-${cls}`, MCP_CLASS_SAID[cls]));
+    v.facts.push([said('req-fact-server', 'Server'), server]);
+    v.facts.push([said('req-fact-tool', 'Tool'), c.title && c.tool && c.title !== c.tool ? `${c.title} (${c.tool})` : tool]);
+    v.facts.push([said('req-fact-class', 'Kind'), said(`req-mcp-class-${cls}`, MCP_CLASS_SAID[cls])]);
+    if (c.fresh === true) v.risk.push(said('req-risk-mcp-fresh', 'New or changed on its server'));
+    if (cls === 'destructive') v.risk.push(said('req-risk-mcp-destructive', 'May delete or overwrite'));
+    if (c.open === true && cls !== 'read') v.risk.push(said('req-risk-mcp-open', 'Reaches outside'));
+    /* Its arguments, in short: a name and its value on a line each, the first few. */
+    const args = Array.isArray(c.args) ? c.args.filter((a) => a && typeof a.name === 'string') : [];
+    if (args.length) {
+        const line = (a) => { const t = String(a.value ?? '').replace(/\s+/g, ' ').trim(); return `${a.name}: ${t.length > MCP_ARG_MAX ? `${t.slice(0, MCP_ARG_MAX - 1)}…` : t}`; };
+        v.code = [...args.slice(0, MCP_ARGS_MAX).map(line), ...(args.length > MCP_ARGS_MAX ? [`… +${args.length - MCP_ARGS_MAX}`] : [])].join('\n');
+    }
+    v.irreversible = cls === 'destructive';
+}
+
 export function demandeView(q) {
     const c = q?.card ?? {}; const about = c.about ?? {};
     const kind = KINDS.has(c.kind) ? c.kind : 'other';
@@ -152,6 +180,7 @@ export function demandeView(q) {
         v.yes = c.action === 'delete' ? 'delete' : c.action === 'move' ? 'move' : 'write';
         if (c.action === 'delete') { v.irreversible = true; v.risk.push(w('req-risk-final')); }
     } else if (c.kind === 'browser' && c.action === 'open') { v.title = w('req-browser-open', { url: String(c.url) }); v.yes = 'open'; if (where) sub.push(where); }
+    else if (c.kind === 'mcp') mcpCard(c, v, sub);
     else { v.title = `${q?.verb ?? 'action'}${q?.detail ? ` ${q.detail}` : ''}`; if (where) sub.push(where); }
     const id = String(q?.id ?? '');
     return {

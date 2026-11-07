@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import { Rooms, lookOf } from '../server/rooms.mjs';
 import { JsonFile } from '../server/store.mjs';
+import { Refusal } from '../server/conversations.mjs';
 import { importFile, IMPORT_MAX, download } from '../server/files.mjs';
 
 const setup = (t) => {
@@ -429,4 +430,23 @@ test('a file an AI may not give: not copied, the message still goes; too large, 
     answer('hugo', { room: r.id, kind: 'show', text: 'note', path: '/work/note\u0001du jour.txt', to: [compta.id] }, 'show');
     await until(6);
     assert.match(said[5].files?.[0] ?? '', /\/note-du jour\.txt$/);
+});
+
+/* 07-11: an AI of the room whose chat is off: what was said stays posted, the others still get it, and the one not
+   reached is said back by name -- never a failure of the whole post. */
+test('an AI that cannot be reached: the message is kept, the others get it, the one missed is named', async (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'rooms-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const said = [];
+    const convs = [{ name: 'hugo' }, { name: 'compta' }];
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), conversations: () => convs,
+        say: async (name, text) => { if (name === 'hugo') throw new Refusal(409, 'Its chat is off.'); said.push({ name, text }); } });
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const [hugo, compta] = ['hugo', 'compta'].map((n) => r.members.find((m) => m.ref === n));
+    const done = await rooms.say(r.id, 'Qui passe à la poste ?', { to: [hugo.id, compta.id] });
+    assert.equal(done.messages.at(-1).text, 'Qui passe à la poste ?');
+    assert.deepEqual(done.missed.map((m) => m.name), [hugo.name]);
+    assert.deepEqual(said.map((s) => s.name), ['compta']);
+    assert.equal(rooms.read(r.id).thinking?.includes?.(hugo.name) ?? false, false, 'not shown as thinking');
+    assert.equal((await rooms.say(r.id, 'Compta ?', { to: [compta.id] })).missed, undefined);
 });
