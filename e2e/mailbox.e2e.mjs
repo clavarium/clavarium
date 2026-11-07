@@ -39,8 +39,8 @@ test('a mailbox becomes a folder of files that a conversation can read and never
     await me.page.locator('#assets-detail .as-chapter .as-add').click();
     const line = me.page.locator('#assets-detail .given-row[data-conversation="reads-mail"]');
     await me.until('the row is open', async () => (await line.count()) === 1);
-    assert.deepEqual(await line.locator('.levels button').allInnerTexts(), ['Off', 'Read']);
-    await line.locator('.levels button', { hasText: 'Read' }).click();
+    assert.deepEqual(await line.locator('.kit-rights-pick button').allInnerTexts(), ['None', 'Read']);
+    await line.locator('.kit-rights-pick button', { hasText: 'Read' }).click();
     await me.until('attached', async () => (await me.page.locator('#view-assets').getAttribute('title')).includes('inbox - read'));
     await me.page.locator('#assets-close').click();
     /* What the tool sees: files, and an index that starts with a warning. */

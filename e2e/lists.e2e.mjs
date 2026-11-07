@@ -83,7 +83,7 @@ test('Lists: the owner makes a list in Assets and gives it to a conversation, wh
     /* Taken back, in Assets: the tab goes. */
     await page.locator('#nav-assets').click();
     await kind.locator('.as-row', { hasText: 'Batches' }).click();
-    await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'Off' }).click();
+    await page.locator('#assets-detail .as-users:not(.as-picker) .given-row[data-conversation="coder"] button', { hasText: 'None' }).click();
     await me.until('taken back', async () => !(await me.api('/api/binder', { op: 'lists', args: {} })).body.data.find((l) => l.id === 'batches').grants['conversation:coder']);
     await page.locator('#assets-close').click();
     await me.until('no Lists tab', async () => !(await page.locator('#view-lists').isVisible()), 15_000);

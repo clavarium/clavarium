@@ -124,9 +124,9 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     const asset = await me.openAsset('folder', 'reports');
     await me.until('it says which conversation uses it', async () => (await asset.locator('.as-users .given-row[data-conversation="with-folders"]').count()) === 1);
     assert.equal(await asset.locator('.danger-link').isDisabled(), true);
-    assert.match(await asset.innerText(), /used by 1 conversation: set it to Off first/);
-    /* Set to Off from there, for that conversation. */
-    await asset.locator('.given-row[data-conversation="with-folders"] .levels button', { hasText: 'Off' }).click();
+    assert.match(await asset.innerText(), /used by 1 conversation: set it to None first/);
+    /* Set to None from there, for that conversation. */
+    await asset.locator('.given-row[data-conversation="with-folders"] .kit-rights-pick button', { hasText: 'None' }).click();
     await me.until('it is not used any more', async () => /No conversation uses it/.test(await asset.innerText().catch(() => '')));
     await asset.locator('.danger-link').click();
     await asset.locator('button.danger').click();

@@ -2874,3 +2874,25 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 /* A line that asks for you keeps its shade: soon (warn), past or failing (bad). */
 .kit-asset-sub[data-tone="warn"] > .state-dot { background: var(--warn); }
 .kit-asset-sub[data-tone="bad"] { color: var(--danger); }
+
+/* ONE ASSET OPENED (kit AssetPanel, AccessList; 06-11, assets step 3): the same panel in the Assets menu and in a
+   conversation's tab -- its head, its parts, who has it (a row per conversation or device, its right set in place). */
+.kit-aspanel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.kit-aspanel > *, .kit-aspanel-part > * { flex-shrink: 0; }
+.kit-aspanel-part { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.kit-aspanel-top .kit-asset-head { width: 100%; }
+.kit-aspanel-top .kit-asset-head .kit-asset-main { flex: 1 1 auto; min-width: 0; }
+.kit-aspanel-top .kit-chips { margin-top: 6px; }
+.kit-access { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.kit-access-row { justify-content: space-between; }
+.kit-access-who { display: flex; align-items: center; gap: 10px; flex: 1 1 160px; min-width: 0; }
+.kit-access-who > .kit-av { --kc-av: 26px; border-radius: 50%; }
+.kit-access-name { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.kit-access-name > small { color: var(--ink2); font-size: .75rem; }
+.as-users.kit-access-here { border-color: color-mix(in srgb, var(--brass) 45%, var(--line)); background: color-mix(in srgb, var(--brass) 7%, var(--bar)); }
+.as-users > .kit-access-also { margin: 0; padding: 10px 16px 4px; border-top: 0; font-size: .6875rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink2); }
+.as-users > .kit-access-also + .given-row { border-top: 0; }
+.kit-access-acts { display: flex; gap: 14px; flex-wrap: wrap; }
+.kit-rights-pick > button > .kit-rights-same { display: block; font-size: .6875rem; font-weight: 500; opacity: .8; }
+.kit-asdelete { display: inline; }
+.as-files-menu #files.embedded > .panel-top { display: none; }
