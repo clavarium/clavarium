@@ -623,3 +623,132 @@ test('the screens draw the one list: Assets and a conversation\'s tab, one "+ Ne
     assert.match(html, /id="cassets-search"/);
     assert.equal((app.match(/roundPlus\(`Add /g) ?? []).length, 0, 'no "+" per kind');
 });
+
+/* ONE ASSET OPENED (assets step 3): who has it (accessModel, AccessList) and its panel (AssetPanel, AssetDelete). */
+const HOLDERS = [
+    { id: 'conversation:cuisine', name: 'Kitchen helper', value: 'write' },
+    { id: 'conversation:devoirs', name: 'Homework', value: 'none' },
+    { id: 'conversation:clavarium', name: 'Clavarium dev', value: 'read' },
+    { id: 'conversation:sleepy', name: 'Asleep', value: 'none', ready: false },
+    { id: 'device:d1', name: 'Kitchen tablet', value: 'r' },
+];
+
+test('who has an asset: those given it (conversations, then devices), the ready others to give it to; seen from one, its row first', () => {
+    const all = KIT.accessModel({ key: 'folder', holders: HOLDERS });
+    assert.equal(all.here, null);
+    assert.deepEqual(all.given.map((r) => [r.id, r.holder, r.level]), [['conversation:cuisine', 'conversation', 'write'], ['conversation:clavarium', 'conversation', 'read'], ['device:d1', 'device', 'read']]);
+    assert.deepEqual(all.others.map((r) => r.id), ['conversation:devoirs'], 'a conversation not ready is not offered; a device never is');
+    assert.equal(all.count, 3);
+    assert.equal(all.said, '');
+    const seen = KIT.accessModel({ key: 'folder', holders: HOLDERS, from: 'conversation:cuisine' });
+    assert.equal(seen.here.id, 'conversation:cuisine');
+    assert.deepEqual(seen.given.map((r) => r.id), ['conversation:clavarium', 'device:d1'], 'then « Also with »');
+    /* A secret: kept "off" / "use"; never a device's. */
+    const secret = KIT.accessModel({ key: 'secret', holders: [{ id: 'conversation:a', name: 'A', value: 'use' }, { id: 'conversation:b', name: 'B', value: 'off' }, { id: 'device:d1', name: 'T', value: 'r' }] });
+    assert.deepEqual([secret.given.map((r) => r.level), secret.others.map((r) => r.level)], [['use'], ['none']]);
+    /* Nobody, everybody, nobody ready: said. */
+    assert.equal(KIT.accessModel({ key: 'folder', holders: [{ id: 'conversation:a', name: 'A', value: 'none' }] }).said, 'nobody');
+    assert.equal(KIT.accessModel({ key: 'folder', holders: [{ id: 'conversation:a', name: 'A', value: 'read' }] }).said, 'everyone');
+    assert.equal(KIT.accessModel({ key: 'folder', holders: [] }).said, 'noready');
+});
+
+test('who has it, drawn: a row each with « None » first, its right pressed; « + » opens the others; a change waits on the page', async () => {
+    const changed = [];
+    const box = KIT.AccessList(KIT.accessModel({ key: 'folder', holders: HOLDERS }), { key: 'folder', name: 'recipes', onChange: (row, level, stored) => { changed.push([row.id, level, stored]); return true; } });
+    assert.equal(box.find('as-chapter').find('kit-access-give').getAttribute('aria-label'), 'Give to…');
+    const given = box.all((n) => n.classes.includes('kit-access-given'))[0];
+    const rows = given.all((n) => n.classes.includes('given-row'));
+    assert.deepEqual(rows.map((r) => r.dataset.conversation ?? `device:${r.dataset.device}`), ['cuisine', 'clavarium', 'device:d1']);
+    const pick = rows[0].find('kit-rights-pick');
+    assert.deepEqual(pick.children.map((b) => b.textContent), ['None', 'Read', 'Write']);
+    assert.equal(pick.children.find((b) => b.getAttribute('aria-pressed') === 'true').dataset.value, 'write');
+    assert.equal(rows[2].find('kit-access-name').textContent, 'Kitchen tabletDevice', 'a device says so');
+    assert.equal(rows[2].find('kit-rights-pick').dataset.holder, 'device');
+    /* The others, behind « + », each at None. */
+    const picker = box.find('as-picker');
+    assert.equal(picker.hidden, true);
+    box.find('kit-access-give').click();
+    assert.equal(picker.hidden, false);
+    assert.deepEqual(picker.all((n) => n.classes.includes('given-row')).map((r) => r.dataset.conversation), ['devoirs']);
+    /* Set to None: the level, and as the server keeps it (a device's: taken back). */
+    pick.children[0].click(); await new Promise((r) => setTimeout(r, 0));
+    rows[2].find('kit-rights-pick').children[0].click(); await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(changed, [['conversation:cuisine', 'none', 'none'], ['device:d1', 'none', null]]);
+    /* Seen from a conversation: its row first, apart; « Also with » the others. */
+    const seen = KIT.AccessList(KIT.accessModel({ key: 'folder', holders: HOLDERS, from: 'conversation:cuisine' }), { key: 'folder' });
+    assert.equal(seen.find('kit-access-here').find('given-row').dataset.conversation, 'cuisine');
+    assert.equal(seen.find('kit-access-also').textContent, 'Also with');
+    /* Nobody has it: said; nobody ready: said in the picker too. */
+    assert.match(KIT.AccessList(KIT.accessModel({ key: 'folder', holders: [{ id: 'conversation:a', name: 'A', value: 'none' }] }), { key: 'folder' }).textContent, /No conversation uses it\./);
+    assert.match(KIT.AccessList(KIT.accessModel({ key: 'folder', holders: [] }), { key: 'folder' }).find('as-picker').textContent, /No conversation is ready\./);
+});
+
+test('a calendar\'s and contacts\' levels say what they are: Watch = Read, Propose = Write; another link\'s do not', () => {
+    for (const kind of ['agenda', 'contacts']) {
+        const pick = KIT.RightsPicker({ key: 'connexion', kind, value: 'watch' });
+        assert.deepEqual(pick.children.map((b) => b.textContent), ['None', 'Watch= Read', 'Propose= Write', 'Frame', 'Free'], kind);
+        assert.match(pick.children[1].title, /\(= Read\)$/);
+    }
+    assert.deepEqual(KIT.RightsPicker({ key: 'connexion', kind: 'mailbox', value: 'watch' }).children.map((b) => b.textContent), ['None', 'Watch', 'Propose', 'Frame', 'Free']);
+    assert.deepEqual(KIT.RIGHT_SAME.agenda, { watch: 'read', propose: 'write' });
+    /* Through the page's words, in French too. */
+    return import('../server/settingswords.mjs').then(({ SETTINGS_WORDS_FR }) => {
+        KIT.setWords((key, fallback) => SETTINGS_WORDS_FR[key] ?? fallback);
+        try { assert.deepEqual(KIT.RightsPicker({ key: 'connexion', kind: 'agenda', value: 'none' }).children.slice(1, 3).map((b) => b.textContent), ['Surveiller= Lire', 'Proposer= Écrire']); }
+        finally { KIT.setWords((key, fallback) => fallback); }
+    });
+});
+
+test('one asset opened: its head (an AssetCard head) under « ‹ Assets », its parts in order, a chapter for a titled one, its foot', () => {
+    let backs = 0;
+    const access = KIT.AccessList(KIT.accessModel({ key: 'folder', holders: HOLDERS }), { key: 'folder' });
+    const files = document.createElement('div');
+    const panel = KIT.AssetPanel({ key: 'folder:recipes', kind: 'folder', name: 'recipes', chips: [{ text: 'Home', tone: 'note' }, { text: 'Folder' }] },
+        { back: { onBack: () => { backs++; } }, parts: [access, { title: 'Files', extra: [document.createElement('button')], body: [files] }, null], foot: [document.createElement('button')] });
+    assert.equal(panel.dataset.asset, 'folder:recipes');
+    const top = panel.children[0];
+    assert.ok(top.classes.includes('as-title'));
+    assert.equal(top.find('as-back').textContent, '‹ Assets');
+    top.find('as-back').click();
+    assert.equal(backs, 1);
+    const head = top.find('kit-asset-head');
+    assert.equal(head.all((n) => n.tagName === 'H2')[0].textContent, 'recipes');
+    assert.deepEqual(head.find('kit-chips').children.map((c) => c.textContent), ['Home', 'Folder']);
+    assert.equal(panel.children[1], access, 'who has it, then what is in it');
+    assert.equal(panel.children[2].find('as-chapter').children[0].textContent, 'Files');
+    assert.ok(panel.children[2].children.includes(files));
+    assert.ok(panel.children.at(-1).classes.includes('as-foot'));
+    /* No way back asked (wide): none drawn. */
+    assert.equal(KIT.AssetPanel({ kind: 'secret', name: 'KEY' }).find('as-back'), null);
+});
+
+test('delete, out of the way: refused while used (said why), else asked in place, what is lost, Keep first', async () => {
+    const blocked = KIT.AssetDelete({ label: 'Delete...', blocked: 'used by 1 conversation: set it to None first' });
+    assert.equal(blocked.find('danger-link').disabled, true);
+    assert.match(blocked.textContent, /set it to None first/);
+    let gone = 0;
+    const free = KIT.AssetDelete({ label: 'Delete...', lost: 'Its value is lost for good.', yes: 'Yes, delete KEY', onYes: () => { gone++; } });
+    free.find('danger-link').click();
+    const ask = free.find('kit-confirm');
+    assert.equal(ask.find('kit-confirm-q').textContent, 'Its value is lost for good.');
+    assert.deepEqual(ask.children.slice(1).map((b) => b.textContent), ['Keep', 'Yes, delete KEY']);
+    ask.children[2].click(); await new Promise((r) => setTimeout(r, 0));
+    assert.equal(gone, 1);
+});
+
+test('the screens open an asset in the one panel: the Assets menu and a conversation\'s tab, which shows at last what it was given live and its binders', () => {
+    const app = web('app.js'); const css = web('style.css'); const html = web('index.html');
+    assert.equal((app.match(/async function assetPanel\(/g) ?? []).length, 1, 'one panel');
+    assert.match(app, /await assetPanel\(detail, chosen, \{ back, tether, groups: assetGroups \}\)/, 'from the menu');
+    assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits \}\)/, 'from a conversation');
+    assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 1, 'one list of who has it');
+    assert.doesNotMatch(app, /function asTitle|chapter\('Used by'/, 'the old heads and « Used by » are gone');
+    /* The tab: a calendar, contacts, an access given live, its binders. */
+    assert.match(app, /tgt\.grants\?\.\[`conversation:\$\{current\}`\]\?\.level/);
+    assert.match(app, /l\.grants\?\.\[`conversation:\$\{current\}`\]/);
+    /* A folder browsed from the menu: its files, in the panel, with the owner's rights. */
+    assert.match(app, /embedFiles\(holder, chosen\.name, \{ owner: true \}\)/);
+    assert.match(app, /const filesC = \(\) =>/);
+    assert.match(html, /id="cassets-error"/);
+    for (const cls of ['kit-aspanel', 'kit-access', 'kit-access-row', 'kit-access-here', 'kit-rights-same']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+});

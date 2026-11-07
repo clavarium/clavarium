@@ -87,6 +87,13 @@ export const SETTINGS_WORDS_FR = {
     'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-open': 'Réglages de {name}', 'set-as-group-gear': 'Donner, renommer, supprimer',
     'set-as-group-empty': 'Vide : glissez un asset ici', 'set-as-all-grouped': 'Chaque asset est dans un groupe',
     'set-as-no-groups': 'Créez un groupe, puis glissez-y un asset',
+    /* One asset opened (06-11, kit AssetPanel, AccessList): who has it, its kind, what a calendar's levels mean, delete. */
+    'set-as-assets': 'Assets', 'set-acc-title': 'Qui y a accès', 'set-acc-give': 'Donner à…', 'set-acc-also': 'Aussi chez',
+    'set-acc-device': 'Appareil', 'set-acc-what': 'Ce que {who} peut faire avec {name}',
+    'set-acc-nobody': 'Aucune conversation ne l’utilise.', 'set-acc-everyone': 'Chaque conversation l’a.', 'set-acc-noready': 'Aucune conversation n’est prête.',
+    'set-acc-delete': 'Supprimer…', 'set-acc-delete-yes': 'Supprimer',
+    'set-acc-kind-folder': 'Dossier', 'set-acc-kind-git': 'Dépôt', 'set-acc-kind-mailbox': 'Boîte mail', 'set-acc-kind-agenda': 'Calendrier',
+    'set-acc-kind-contacts': 'Contacts', 'set-acc-kind-secret': 'Secret', 'set-acc-kind-list': 'Binder', 'set-acc-kind-acces': 'Accès',
     /* A room's settings (06-11): each AI's own assets; one right given to each of them. */
     'set-room-assets': 'Leurs assets', 'set-room-give': '+ Donner…', 'set-room-give-all': 'Donner à toutes ses IA…',
     'set-room-assets-none': 'Rien encore', 'set-room-give-pick': 'Choisissez un asset', 'set-room-give-go': 'Donner à {n} IA',

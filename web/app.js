@@ -2193,7 +2193,7 @@
             $(errorId).textContent = error.message; $(errorId).hidden = false;
             if (error.kind === 'confirm-shared') {
                 const yes = document.createElement('button'); yes.type = 'button'; yes.className = 'danger attach-shared'; yes.textContent = 'Confirm and attach';
-                yes.addEventListener('click', async () => { yes.disabled = true; await attachTo(conversation, name, access, errorId, true); if (errorId === 'panel-error') await paintPanel(); else await paintAssets(); });
+                yes.addEventListener('click', async () => { yes.disabled = true; await attachTo(conversation, name, access, errorId, true); if (errorId === 'panel-error') await paintPanel(); else await repaintAsset(); });
                 $(errorId).append(' ', yes);
             }
         }
@@ -3916,9 +3916,9 @@
         : item.target ? 'watch' : item.kind === 'secret' ? 'use' : 'read');
     async function applyMemberGrant(item, conversationName, value) {
         if (item.target) return grantTarget(item.target.id, conversationName, value);
-        if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', 'assets-error');
+        if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', asErrId());
         if (item.kind === 'list') return grantList(item.list.id, conversationName, value);
-        return attachTo(conversationName, item.name, value, 'assets-error');
+        return attachTo(conversationName, item.name, value, asErrId());
     }
     function memberCurrent(item, conversationName) {
         const id = `conversation:${conversationName}`;
@@ -4054,15 +4054,6 @@
         remove.append(del, el('p', 'hint', 'The assets stay; only the group is removed.'));
         detail.append(remove);
     }
-    /* The top of a detail: "All assets" (a phone), the icon, the name, a badge. */
-    function asTitle(item, back) {
-        const top = el('div', 'as-title');
-        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-        const h = el('h2'); h.append(kindIcon(item.kind), el('span', '', item.name));
-        if (item.badge) h.append(el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badgeLong ?? item.badge));
-        top.append(all, h);
-        return top;
-    }
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
     const boxSub = (box) => (!box ? 'mailbox' : box.failure ? box.failure : `${box.messages} message${box.messages === 1 ? '' : 's'}`);
     const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
@@ -4092,7 +4083,8 @@
         const send = el('button', 'primary', 'Send...'); send.type = 'button'; send.dataset.act = 'send'; send.hidden = true;
         acts.append(review, send);
         /* In a conversation, its files too, below. */
-        if (!place) { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name); files.disabled = true; }); acts.prepend(files); }
+        /* Its files too, below: in a conversation, through it; in the Assets menu, with the owner's rights. */
+        { const files = el('button', '', 'Files'); files.type = 'button'; files.dataset.act = 'files'; files.addEventListener('click', () => { embedFiles(holder, name, { owner: place }); files.disabled = true; }); acts.prepend(files); }
         const diagram = el('div', 'as-graph'); diagram.append(el('p', 'hint busy', 'Drawing the branches...'));
         holder.append(facts, chapter('Branches', acts), diagram);
         const back = place ? { label: name, go: () => { void paintAssets(); } } : { label: name, go: () => { void paintRoomAssets(); } };
@@ -4552,10 +4544,14 @@
     }
     /* The files of a folder or a mailbox, in a conversation: the Files sheet, moved into the detail. */
     let filesHome = null;
-    function embedFiles(holder, name) {
+    /* A folder browsed from the Assets menu ('' : from a conversation), and the asset whose files stay open there on a repaint. */
+    let filesOwner = ''; let filesBrowsing = '';
+    /* `owner`: opened from the Assets menu -- that folder alone, with the owner's own rights (no conversation in between). */
+    function embedFiles(holder, name, { owner = false } = {}) {
         const f = $('files');
         if (!filesHome) filesHome = { parent: f.parentNode, next: f.nextSibling };
         holder.append(f); f.classList.add('embedded');
+        filesOwner = owner ? name : '';
         if (filesOf !== name) { filesOf = name; filesAt = ''; }
         f.hidden = false;
         void paintFiles();
@@ -4563,7 +4559,7 @@
     function unembedFiles() {
         const f = $('files');
         if (!f.classList.contains('embedded') || !filesHome) return;
-        f.classList.remove('embedded'); f.hidden = true;
+        f.classList.remove('embedded'); f.hidden = true; filesOwner = '';
         filesHome.parent.insertBefore(f, filesHome.next);
     }
 
@@ -4580,7 +4576,7 @@
         watchTether();
         const c = conversations.find((x) => x.name === current);
         roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
-        const [all, secrets, boxes, tether] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {})]);
+        const [all, secrets, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {}), readDevices()]);
         /* The calls this conversation's agent asked the owner to allow: validated here,
            in the parloir, without leaving for the Assets page. */
         const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
@@ -4597,6 +4593,18 @@
         }
         markSecrets(secrets);
         for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, right: { level: 'use' }, ...secretItem(s2, 'name only · used by its agent') });
+        /* WHAT IT WAS GIVEN LIVE AND ITS BINDERS (06-11, assets step 3): a calendar, contacts, a mailbox or an access
+           connected (Tether), its binders -- shown at last, the same rows, each with its right. */
+        const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
+        for (const tgt of allTargets) {
+            const level = tgt.grants?.[`conversation:${current}`]?.level;
+            if (!level || level === 'none') continue;
+            const acct = tetherAccount(tgt.id);
+            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, right: { key: 'connexion', value: level }, sub: connexionSub(tgt.kind) });
+        }
+        const givenLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${current}`]) : [];
+        for (const l of givenLists) items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, right: { key: 'list', value: l.grants[`conversation:${current}`] }, sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
         const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
@@ -4617,30 +4625,27 @@
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
         if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
-        const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key;
+        /* The same folder still shown, nothing changed in who has it: only its files are read again (no blink). */
+        const sig = JSON.stringify([chosen.key, chosen.own ? '' : chosen.kind === 'send' || chosen.kind === 'demandes' ? waitingCount : accessHolders(chosen)]);
+        const keepFiles = (chosen.kind === 'folder' || chosen.kind === 'mailbox') && !chosen.target && $('files').classList.contains('embedded') && detail.contains($('files')) && detail.dataset.asset === chosen.key && detail.dataset.sig === sig;
         if (!keepFiles) { unembedFiles(); detail.replaceChildren(); }
-        detail.dataset.asset = chosen.key;
+        detail.dataset.asset = chosen.key; detail.dataset.sig = sig;
         const back = () => { roomPick = ''; void paintRoomAssets(); };
         if (keepFiles) { void paintFiles(); return; }
-        detail.append(asTitle(chosen, back));
-        if (chosen.kind === 'demandes') {
-            for (const j of mineJobs) detail.append(jobCard(j, () => paintRoomAssets()));
-            if (mineDemandes.length) {
-                detail.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
-                detail.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
-            }
-        } else if (chosen.kind === 'folder' || chosen.kind === 'mailbox') {
-            if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-            embedFiles(detail, chosen.name);
-        } else if (chosen.kind === 'send') await sendDetail(detail, gits);
-        else if (chosen.kind === 'git') await gitDetail(detail, chosen.name, { others: gits.length > 1 });
-        else {
-            if (chosen.secret.expires) detail.append(secretLine(chosen.secret, 'not given to its tool'));
-            detail.append(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'), chapter('Used by'));
-            const list = el('div', 'as-chips');
-            for (const who of chosen.secret.conversations) list.append(el('span', 'as-chip', shownName(conversations.find((x) => x.name === who)) || who));
-            detail.append(list);
+        if (chosen.kind === 'demandes' || chosen.kind === 'send') {
+            /* What waits (To send, Demandes): the same head, its own content. */
+            const body = el('div', 'as-waits');
+            detail.append(KIT.AssetPanel({ key: chosen.key, kind: chosen.kind, name: chosen.name, sub: chosen.sub }, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts: [body] }));
+            if (chosen.kind === 'demandes') {
+                for (const j of mineJobs) body.append(jobCard(j, () => paintRoomAssets()));
+                if (mineDemandes.length) {
+                    body.append(el('p', 'hint', 'Its agent asked you to allow these Tether calls. Accept, and it runs; refuse, and it is told so.'));
+                    body.append(demandesList(mineDemandes, { withWho: false, after: () => paintRoomAssets() }));
+                }
+            } else await sendDetail(body, gits);
+            return;
         }
+        await assetPanel(detail, chosen, { from: current, back, tether, gits });
     }
     /* One asset opened: a step (another one opened takes its place); Back, the list. */
     const assetStep = () => { if (nav.last(['asset']) < 0) nav.push('asset', ({ quiet }) => { roomPick = ''; if (!quiet && assetsShown) void paintRoomAssets(); }); };
@@ -4741,9 +4746,9 @@
     /* A list given to a conversation, or taken back: a grant of Binder's. */
     const givenTo = (l) => Object.keys(l.grants ?? {}).filter((id) => id.startsWith('conversation:'));
     async function grantList(list, name, value) {
-        $('assets-error').hidden = true;
+        $(asErrId()).hidden = true;
         const done = await binderCall('grant', { list, to: `conversation:${name}`, access: value === 'none' ? null : value });
-        if (!done.ok) { $('assets-error').textContent = done.text; $('assets-error').hidden = false; }
+        if (!done.ok) sayAsErr(new Error(done.text));
         await refresh();
     }
     /* The plain word for a Tether target's kind, in a Connexion's sub-line. */
@@ -4751,18 +4756,18 @@
     const connexionSub = (kind) => CONNEXION_SUB[kind] ?? kind;
     /* Give a Tether target to a conversation at a level, or take it back (none). */
     async function grantTarget(id, name, level) {
-        $('assets-error').hidden = true;
+        $(asErrId()).hidden = true;
         try { await post(`${API}/tether/level`, { target: id, agent: `conversation:${name}`, level }); }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+        catch (error) { sayAsErr(error); }
         await refresh();
     }
     /* Accept or refuse a Tether call that is waiting for a person. `after` repaints the
        surface the row sits in (the Assets page by default; the room passes its own). */
     async function decideTether(id, decision, after) {
-        $('assets-error').hidden = true;
+        $(asErrId()).hidden = true;
         try { await post(`${API}/tether/decide`, { id, decision }); }
-        catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-        if (after) await after(); else await paintAssets();
+        catch (error) { sayAsErr(error); }
+        if (after) await after(); else await repaintAsset();
     }
     /* Every call waiting for the owner, on one surface. `withWho`: name who asks. */
     /* A JOB: a call the owner approved that only this browser can do -- a device to flash
@@ -4928,6 +4933,275 @@
     }
     /* A Tether target given from Attach: Read watches, Write proposes (asks before each action). */
     const targetLevel = (level) => (level === 'write' ? 'propose' : 'watch');
+    /* ONE ASSET OPENED (06-11, assets step 3): the same panel (kit AssetPanel, AccessList) in the Assets menu and in a
+       conversation's tab. Seen from the menu (`from` ''), the asset itself is changed there too: its group, its name, its
+       value, its settings, deleted. Seen from a conversation, what it is, who has it (its own row first, then "Also
+       with"), what is in it (its files at once), and "Open in Assets" for the rest. */
+    const asErrId = () => (place === 'assets' ? 'assets-error' : 'cassets-error');
+    const sayAsErr = (error) => { const e = $(asErrId()); if (e) { e.textContent = error.message; e.hidden = false; } };
+    const repaintAsset = () => (place === 'assets' ? paintAssets() : paintRoomAssets());
+    /* Who has it: every conversation (the ready ones offered, any other that has it kept), then the devices given it. */
+    function accessHolders(chosen) {
+        const rows = [];
+        for (const c of conversations) {
+            const value = memberCurrent(chosen, c.name);
+            if (c.phase !== 'ready' && ['none', 'off'].includes(value)) continue;
+            rows.push({ id: `conversation:${c.name}`, name: shownName(c) || c.name, sub: c.toolLabel ?? '', value, ready: c.phase === 'ready' });
+        }
+        if (!chosen.target && ['folder', 'git', 'mailbox'].includes(chosen.kind)) {
+            for (const d of sharedDevices) { const g = (d.grants ?? []).find((x) => x.asset === chosen.key); if (g) rows.push({ id: `device:${d.id}`, name: d.label ?? d.name ?? d.id, value: g.rights }); }
+        }
+        return rows;
+    }
+    async function setAccess(chosen, row, level, stored) {
+        $(asErrId()).hidden = true;
+        try {
+            if (row.holder === 'device') {
+                const id = String(row.id).slice('device:'.length);
+                if (stored) await post(`${API}/devices/${id}/give`, { asset: chosen.key, rights: stored });
+                else await post(`${API}/devices/${id}/take`, { asset: chosen.key });
+                await readDevices();
+            } else await applyMemberGrant(chosen, String(row.id).slice('conversation:'.length), stored ?? level);
+        } catch (error) { sayAsErr(error); return false; }
+        await repaintAsset();
+        return true;
+    }
+    /* `detail`: where it is drawn. `from`: the conversation it is seen from ('' : the menu). `back`: the way back (a phone).
+       `tether`, `groups`: as the page read them. `gits`: the conversation's repositories (To send, beside). */
+    async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [] } = {}) {
+        const inMenu = !from;
+        const r = chosen.resource;
+        const parts = []; const foot = [];
+        const t = chosen.target;
+        const copyBox = (chosen.kind === 'mailbox' || chosen.kind === 'folder') && !t;
+        /* WHAT IT IS. */
+        if (chosen.kind === 'mailbox' && !t) parts.push(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
+        if (inMenu && groups) parts.push(groupPicker(chosen, groups));
+        /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
+           send, reply, move, flag -- within the rights given. Made here with its address and password (they
+           stay on the server); only its sending server is asked, found from the address when known. */
+        if (inMenu && chosen.kind === 'mailbox' && !t && chosen.box && !chosen.box.provider) {
+            const live = el('div', 'as-live');
+            const go = el('button', '', 'Also allow actions (send, move…)'); go.type = 'button';
+            live.append(el('p', 'hint', 'Read only here. Connected live too, an agent can send, reply, move or flag its mail, each within the rights you give.'), go);
+            go.addEventListener('click', async () => {
+                go.hidden = true;
+                const box = chosen.box; const emailLike = String(box.user ?? '').includes('@');
+                const email = el('input'); email.type = 'email'; email.value = emailLike ? box.user : ''; email.placeholder = 'its email address'; email.setAttribute('aria-label', 'Email address');
+                const smtp = el('input'); smtp.placeholder = 'smtp.example.com'; smtp.spellcheck = false; smtp.setAttribute('aria-label', 'Sending server (SMTP)');
+                const make = el('button', 'primary', 'Connect'); make.type = 'button';
+                const said = el('p', 'error'); said.hidden = true;
+                const form = el('div', 'as-live-form');
+                form.append(el('label', '', 'Email address'), email, el('label', '', 'Sending server (SMTP)'), smtp, make, said);
+                live.append(form);
+                const guess = async () => { try { const found = await post(`${API}/accounts/lookup`, { user: email.value.trim() }); if (found?.smtp && !smtp.value.trim()) smtp.value = found.smtp; } catch { /* typed by hand */ } if (!smtp.value.trim() && box.host) smtp.value = String(box.host).replace(/^imap\./, 'smtp.'); };
+                if (email.value) void guess();
+                email.addEventListener('change', () => void guess());
+                make.addEventListener('click', async () => {
+                    make.disabled = true; make.textContent = 'Trying it…'; said.hidden = true;
+                    try { await post(`${API}/mailboxes/${encodeURIComponent(box.name)}/live`, { email: email.value.trim(), smtp: smtp.value.trim() }); void repaintAsset(); }
+                    catch (error) { said.textContent = error.message; said.hidden = false; make.disabled = false; make.textContent = 'Connect'; }
+                });
+                focusField(smtp.value ? make : smtp);
+            });
+            parts.push(live);
+        }
+        /* A live link: what it is, and that it is associated with the same account's others. */
+        if (t) {
+            parts.push(el('p', 'hint', ['live', connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
+            /* The account's real permissions, read from the token (server-side) --
+               shown here so they can be checked at any time, not only at connection.
+               "Re-check" reads them live, to catch a permission removed since. */
+            if (inMenu && ['google', 'microsoft'].includes(t.config?.provider)) {
+                const KINDS3 = ['mail', 'calendar', 'contacts'];
+                const perms = el('div', 'as-perms');
+                parts.push(perms);
+                const draw = (authorized) => {
+                    perms.replaceChildren();
+                    if (Array.isArray(authorized)) {
+                        const line = el('p', 'hint');
+                        line.append(el('b', '', 'Permissions: '));
+                        line.append(document.createTextNode(KINDS3.map((k) => `${k} ${authorized.includes(k) ? '✓' : '✗'}`).join('   ')));
+                        perms.append(line);
+                    } else { perms.append(el('p', 'hint', 'Permissions not checked yet.')); }
+                    const btn = el('button', '', Array.isArray(authorized) ? 'Re-check' : 'Check permissions');
+                    btn.type = 'button';
+                    btn.addEventListener('click', async () => {
+                        btn.disabled = true; btn.textContent = 'Checking…';
+                        try { const got = await post(`${API}/accounts/verify`, { id: t.id }); draw(got.authorized); }
+                        catch (e) { perms.append(el('p', 'error', e.message)); btn.disabled = false; btn.textContent = 'Re-check'; }
+                    });
+                    perms.append(btn);
+                };
+                draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
+            }
+            /* A mailbox: its signature, in Markdown, added under what the agent sends. */
+            if (inMenu && t.kind === 'mail') {
+                const box = el('div', 'as-signature');
+                const lab = el('label', '', 'Signature'); lab.htmlFor = `sig-${t.id}`;
+                const ta = document.createElement('textarea'); ta.id = `sig-${t.id}`; ta.rows = 3; ta.value = t.config?.signature ?? ''; ta.placeholder = 'Added under every mail the agent sends from this mailbox (Markdown: **bold**, links…)';
+                const save = el('button', '', 'Save'); save.type = 'button';
+                const said = el('small', 'hint', '');
+                save.addEventListener('click', async () => {
+                    save.disabled = true;
+                    try { await post(`${API}/tether/signature`, { target: t.id, signature: ta.value }); said.textContent = ta.value.trim() ? 'Saved.' : 'Removed.'; t.config = { ...(t.config ?? {}), signature: ta.value.trim() }; }
+                    catch (e) { said.textContent = e.message; }
+                    save.disabled = false;
+                });
+                const row = el('div', 'row'); row.append(save, said);
+                box.append(lab, ta, row);
+                parts.push(box);
+            }
+            if (chosen.siblings?.length) {
+                const a = el('p', 'as-assoc hint');
+                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
+                parts.push(a);
+            }
+        }
+        if (chosen.kind === 'secret') {
+            if (inMenu) {
+                /* Renamed: its value and the conversations it is handed to go with it. */
+                const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
+                const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
+                const go = el('button', '', 'Rename'); go.type = 'submit';
+                const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Applies at next start'));
+                const control = el('div', 'set-control'); control.append(name, go);
+                form.append(what, control);
+                form.addEventListener('submit', async (event) => {
+                    event.preventDefault();
+                    $('assets-error').hidden = true;
+                    try { const done = await post(`${API}/secrets/${chosen.name}/rename`, { name: name.value.trim() }); assetOpen = `secret:${done.name}`; }
+                    catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                    await paintAssets();
+                });
+                parts.push(secretLine(chosen.secret, 'not given to machines'));
+                const replace = secretReplace(chosen);
+                const box = el('div', 'set-rows as-block'); box.append(form, ...replace.rows);
+                parts.push(box, ...replace.card);
+            } else {
+                if (chosen.secret.expires) parts.push(secretLine(chosen.secret, 'not given to its tool'));
+                parts.push(el('p', 'hint', 'Handed to its tool as a variable and a file, the next time it starts. Its value is never shown.'));
+            }
+        }
+        /* WHO HAS IT: a row per conversation and device, its right set in place ("None" first). */
+        const own = chosen.own;
+        const model = own ? null : KIT.accessModel({ key: KIT.rightsKey(chosen), holders: accessHolders(chosen), from: from ? `conversation:${from}` : '' });
+        if (model) {
+            /* Given to a device: from here too (the map shows who has it). */
+            const share = !t && ['folder', 'git', 'mailbox'].includes(chosen.kind) ? el('button', 'as-link', 'Share with a device...') : null;
+            if (share) { share.type = 'button'; share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); }); }
+            parts.push(KIT.AccessList(model, { key: KIT.rightsKey(chosen), kind: chosen.kind, name: chosen.name, onChange: (row, level, stored) => setAccess(chosen, row, level, stored), actions: [share] }));
+        }
+        /* WHAT IS IN IT. */
+        if (copyBox) {
+            /* Its files: at once in a conversation; in the menu, a button opens them in the panel (the files sheet, moved in). */
+            const holder = el('div', 'as-files');
+            if (inMenu) {
+                const browse = el('button', '', 'Browse'); browse.type = 'button'; browse.dataset.act = 'files';
+                browse.addEventListener('click', () => { browse.disabled = true; filesBrowsing = chosen.key; embedFiles(holder, chosen.name, { owner: true }); });
+                parts.push({ title: 'Files', extra: [browse], body: [holder], cls: 'as-files-menu' });
+                if (filesBrowsing === chosen.key) queueMicrotask(() => browse.click());
+            } else parts.push({ body: [holder], cls: 'as-files-part' });
+            if (!inMenu) queueMicrotask(() => embedFiles(holder, chosen.name));
+        }
+        if (chosen.kind === 'list') {
+            if (inMenu) {
+                /* The list itself, Binder's screen, here: that list alone. */
+                const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
+                const holder = el('div', 'binder-holder as-binder');
+                open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
+                parts.push({ title: 'Cards', extra: [open], body: [holder] });
+                const id = chosen.list.id;
+                if (listOpen === chosen.key) {
+                    /* Drawn again (the lists changed): on the card it showed, if it showed one; after a reload, the card of the address. */
+                    const was = assetsView?.place;
+                    const at = assetsAt?.list === id ? assetsAt : was?.list === id && was.page === 'card' ? { list: id, card: was.card } : null;
+                    assetsAt = null;
+                    queueMicrotask(() => void mountBinder(holder, (l) => l.id === id, { place: at, steps: assetsSteps, onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } })
+                        .then((view) => { if (view) assetsView = view; }));
+                }
+            } else {
+                /* In a conversation, its cards are in its Lists tab. */
+                const open = el('button', '', 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
+                open.addEventListener('click', () => { goTab('lists'); });
+                parts.push({ title: 'Cards', extra: [open], body: [el('p', 'hint', `${chosen.list.count} card${chosen.list.count === 1 ? '' : 's'}`)] });
+            }
+        }
+        let gitHolder = null;
+        if (chosen.kind === 'git') {
+            /* Settings: where it is sent, with what. */
+            const settings = await getJson(`/git/${chosen.name}`, {});
+            const edit = el('button', 'as-edit', '✎ Edit'); edit.type = 'button';
+            const table = el('dl', 'as-settings');
+            const fact = (k, v) => { table.append(el('dt', '', k), el('dd', '', v)); };
+            fact('Remote', settings.remote ?? 'none');
+            fact('Sent with', settings.hasKey ? 'a key kept for it' : settings.sshKey ? `SSH key ${settings.sshKey}` : r?.via?.method && r.via.method !== 'none' ? viaText(r.via).replace(/^, with /, '') : 'what it was cloned with');
+            if (r?.from && r.via?.hostKey) fact('Host key', `${hostOf(r.from)}: ${r.via.hostKey}`);
+            const body = [table];
+            if (inMenu) {
+                const box = $('gitview-remote-box');
+                remoteShown = chosen.name;
+                await fillRemote(chosen.name, settings);
+                box.hidden = !remoteEditing; box.open = true;
+                body.push(box);
+                edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
+            } else edit.addEventListener('click', () => { void openAssetsPlace(chosen.key, { remote: true }); });
+            gitHolder = el('div', 'as-git');
+            parts.push({ title: 'Settings', extra: [edit], body }, gitHolder);
+        }
+        if (t) {
+            parts.push(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
+            /* Calls waiting for a person (propose/frame). Accept or refuse each. */
+            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
+            if (waiting.length) {
+                const box = el('div', 'as-users');
+                for (const q of waiting) {
+                    const line = el('div', 'given-row');
+                    const what = el('span', ''); what.append(el('b', '', q.verb ?? 'action'), document.createTextNode(` ${q.detail ?? ''}`.trimEnd()));
+                    if (q.why) what.append(el('small', 'hint', ` — ${q.why}`));
+                    const yes = el('button', 'primary', 'Accept'); yes.type = 'button'; yes.addEventListener('click', () => { yes.disabled = true; void decideTether(q.id, 'yes', repaintAsset); });
+                    const no = el('button', 'danger', 'Refuse'); no.type = 'button'; no.addEventListener('click', () => { no.disabled = true; void decideTether(q.id, 'no', repaintAsset); });
+                    const acts = el('div', 'levels'); acts.append(yes, no);
+                    line.append(what, acts); box.append(line);
+                }
+                parts.push({ title: 'Waiting for you', body: [box] });
+            }
+        }
+        if (inMenu && !own) {
+            /* Delete, out of the way; refused while it is used, and why (a secret goes even used). */
+            const using = model ? model.given.filter((x) => x.holder === 'conversation').length : 0;
+            const inUse = chosen.kind !== 'secret' && using > 0;
+            const lost = t ? 'The connection is removed; the account token stays on the server.' : ({ secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.');
+            foot.push(KIT.AssetDelete({ label: 'Delete...', lost,
+                blocked: inUse ? `used by ${using} conversation${using > 1 ? 's' : ''}: set ${using > 1 ? 'them' : 'it'} to None first` : '',
+                yes: chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`,
+                onYes: async () => {
+                    try {
+                        if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
+                        else if (t) await post(`${API}/tether/remove-target`, { target: t.id });
+                        else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
+                        assetOpen = '';
+                    }
+                    catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                    await paintAssets();
+                } }));
+        } else if (!inMenu && !own) {
+            const there = el('button', 'as-link', 'Open in Assets'); there.type = 'button'; there.dataset.act = 'in-assets';
+            there.addEventListener('click', () => { void openAssetsPlace(chosen.key); });
+            foot.push(there);
+        }
+        const card = { ...cardOf(chosen), holders: undefined, right: inMenu ? undefined : chosen.right, chips: chipsOf(chosen) };
+        detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
+        if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
+    }
+    const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
+    /* Under its name: its kind (its group is the picker below it, in the menu). */
+    function chipsOf(chosen) {
+        const kind = chosen.target ? (TETHER_CAT[chosen.target.kind] ?? 'acces') : chosen.kind;
+        const word = uiSaid(`set-acc-kind-${kind}`, ASSET_WORD[kind] ?? kind);
+        /* Said once: not again when its line already says it ("folder"). */
+        return String(chosen.sub ?? '').toLowerCase() === word.toLowerCase() ? [] : [{ text: word }];
+    }
     let assetsPainting = 0;
     async function paintAssets() {
         if (place !== 'assets' || DEVICE) return;
@@ -4998,10 +5272,9 @@
         }
         if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
         if (onDemandes) {
-            detail.append(asTitle({ kind: 'send', name: 'Demandes', badge: String(allApprovals.length), badgeTone: 'count' }, back));
-            detail.append(el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'));
-            if (allApprovals.length) detail.append(demandesList(allApprovals, { withWho: true, after: () => paintAssets() }));
-            else detail.append(el('p', 'hint', 'Nothing is waiting now.'));
+            const body = [el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'),
+                allApprovals.length ? demandesList(allApprovals, { withWho: true, after: () => paintAssets() }) : el('p', 'hint', 'Nothing is waiting now.')];
+            detail.append(KIT.AssetPanel({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', count: allApprovals.length }, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts: body }));
             return;
         }
         if (!chosen) { if (items.length) detail.append(noAssetChosen()); return; }
@@ -5012,225 +5285,8 @@
                 onAnother: () => { justMade = null; placeAssetStep(); assetsAdding = made.kind || 'choose'; void paintAssets(); },
                 onDone: () => { justMade = null; void paintAssets(); } }));
         }
-        detail.append(asTitle(chosen, back));
-        detail.append(groupPicker(chosen, assetGroups));
-        const ready = conversations.filter((c) => c.phase === 'ready');
-        const r = chosen.resource;
-        /* State, in a line. */
-        if (chosen.kind === 'mailbox' && !chosen.target) detail.append(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-        /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
-           send, reply, move, flag -- within the rights given. Made here with its address and password (they
-           stay on the server); only its sending server is asked, found from the address when known. */
-        if (chosen.kind === 'mailbox' && !chosen.target && chosen.box && !chosen.box.provider) {
-            const live = el('div', 'as-live');
-            const go = el('button', '', 'Also allow actions (send, move…)'); go.type = 'button';
-            live.append(el('p', 'hint', 'Read only here. Connected live too, an agent can send, reply, move or flag its mail, each within the rights you give.'), go);
-            go.addEventListener('click', async () => {
-                go.hidden = true;
-                const box = chosen.box; const emailLike = String(box.user ?? '').includes('@');
-                const email = el('input'); email.type = 'email'; email.value = emailLike ? box.user : ''; email.placeholder = 'its email address'; email.setAttribute('aria-label', 'Email address');
-                const smtp = el('input'); smtp.placeholder = 'smtp.example.com'; smtp.spellcheck = false; smtp.setAttribute('aria-label', 'Sending server (SMTP)');
-                const make = el('button', 'primary', 'Connect'); make.type = 'button';
-                const said = el('p', 'error'); said.hidden = true;
-                const form = el('div', 'as-live-form');
-                form.append(el('label', '', 'Email address'), email, el('label', '', 'Sending server (SMTP)'), smtp, make, said);
-                live.append(form);
-                const guess = async () => { try { const found = await post(`${API}/accounts/lookup`, { user: email.value.trim() }); if (found?.smtp && !smtp.value.trim()) smtp.value = found.smtp; } catch { /* typed by hand */ } if (!smtp.value.trim() && box.host) smtp.value = String(box.host).replace(/^imap\./, 'smtp.'); };
-                if (email.value) void guess();
-                email.addEventListener('change', () => void guess());
-                make.addEventListener('click', async () => {
-                    make.disabled = true; make.textContent = 'Trying it…'; said.hidden = true;
-                    try { await post(`${API}/mailboxes/${encodeURIComponent(box.name)}/live`, { email: email.value.trim(), smtp: smtp.value.trim() }); void paintAssets(); }
-                    catch (error) { said.textContent = error.message; said.hidden = false; make.disabled = false; make.textContent = 'Connect'; }
-                });
-                focusField(smtp.value ? make : smtp);
-            });
-            detail.append(live);
-        }
-        /* A live link: what it is, and that it is associated with the same account's others. */
-        if (chosen.target) {
-            const t = chosen.target;
-            detail.append(el('p', 'hint', ['live', connexionSub(t.kind), t.config?.user].filter(Boolean).join(' · ')));
-            /* The account's real permissions, read from the token (server-side) --
-               shown here so they can be checked at any time, not only at connection.
-               "Re-check" reads them live, to catch a permission removed since. */
-            if (['google', 'microsoft'].includes(t.config?.provider)) {
-                const KINDS3 = ['mail', 'calendar', 'contacts'];
-                const perms = el('div', 'as-perms');
-                detail.append(perms);
-                const draw = (authorized) => {
-                    perms.replaceChildren();
-                    if (Array.isArray(authorized)) {
-                        const line = el('p', 'hint');
-                        line.append(el('b', '', 'Permissions: '));
-                        line.append(document.createTextNode(KINDS3.map((k) => `${k} ${authorized.includes(k) ? '✓' : '✗'}`).join('   ')));
-                        perms.append(line);
-                    } else { perms.append(el('p', 'hint', 'Permissions not checked yet.')); }
-                    const btn = el('button', '', Array.isArray(authorized) ? 'Re-check' : 'Check permissions');
-                    btn.type = 'button';
-                    btn.addEventListener('click', async () => {
-                        btn.disabled = true; btn.textContent = 'Checking…';
-                        try { const r = await post(`${API}/accounts/verify`, { id: t.id }); draw(r.authorized); }
-                        catch (e) { perms.append(el('p', 'error', e.message)); btn.disabled = false; btn.textContent = 'Re-check'; }
-                    });
-                    perms.append(btn);
-                };
-                draw(Array.isArray(t.config?.authorizedKinds) ? t.config.authorizedKinds : null);
-            }
-            /* A mailbox: its signature, in Markdown, added under what the agent sends. */
-            if (t.kind === 'mail') {
-                const box = el('div', 'as-signature');
-                const lab = el('label', '', 'Signature'); lab.htmlFor = `sig-${t.id}`;
-                const ta = document.createElement('textarea'); ta.id = `sig-${t.id}`; ta.rows = 3; ta.value = t.config?.signature ?? ''; ta.placeholder = 'Added under every mail the agent sends from this mailbox (Markdown: **bold**, links…)';
-                const save = el('button', '', 'Save'); save.type = 'button';
-                const said = el('small', 'hint', '');
-                save.addEventListener('click', async () => {
-                    save.disabled = true;
-                    try { await post(`${API}/tether/signature`, { target: t.id, signature: ta.value }); said.textContent = ta.value.trim() ? 'Saved.' : 'Removed.'; t.config = { ...(t.config ?? {}), signature: ta.value.trim() }; }
-                    catch (e) { said.textContent = e.message; }
-                    save.disabled = false;
-                });
-                const row = el('div', 'row'); row.append(save, said);
-                box.append(lab, ta, row);
-                detail.append(box);
-            }
-            if (chosen.siblings?.length) {
-                const a = el('p', 'as-assoc hint');
-                a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
-                detail.append(a);
-            }
-        }
-        if (chosen.kind === 'secret') {
-            /* Renamed: its value and the conversations it is handed to go with it. */
-            const form = el('form', 'set-row secret-rename'); form.autocomplete = 'off';
-            const name = el('input'); name.id = 'secret-rename-name'; name.value = chosen.name; name.maxLength = 40; name.pattern = '[A-Z][A-Z0-9_]*'; name.spellcheck = false; name.autocapitalize = 'characters'; name.setAttribute('aria-label', 'New name');
-            const go = el('button', '', 'Rename'); go.type = 'submit';
-            const what = el('div', 'set-what'); what.append(el('span', '', 'Name'), el('small', '', 'Applies at next start'));
-            const control = el('div', 'set-control'); control.append(name, go);
-            form.append(what, control);
-            form.addEventListener('submit', async (event) => {
-                event.preventDefault();
-                $('assets-error').hidden = true;
-                try { const done = await post(`${API}/secrets/${chosen.name}/rename`, { name: name.value.trim() }); assetOpen = `secret:${done.name}`; }
-                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                await paintAssets();
-            });
-            detail.append(secretLine(chosen.secret, 'not given to machines'));
-            const replace = secretReplace(chosen);
-            const box = el('div', 'set-rows as-block'); box.append(form, ...replace.rows);
-            detail.append(box, ...replace.card);
-        }
-        /* Used by: each conversation that has it, what it may do; "+" offers the others. */
-        const options = chosen.target ? [['none', 'Off'], ['watch', 'Watch'], ['propose', 'Propose'], ['frame', 'Frame'], ['free', 'Free']]
-            : chosen.kind === 'secret' ? [['off', 'Off'], ['use', 'Use']] : chosen.kind === 'mailbox' ? [['none', 'Off'], ['read', 'Read']]
-            : [['none', 'Off'], ['read', 'Read'], ['write', 'Write']];
-        const has = (c) => (chosen.target ? chosen.target.grants?.[`conversation:${c.name}`]?.level ?? 'none'
-            : chosen.kind === 'secret' ? (chosen.secret.conversations.includes(c.name) ? 'use' : 'off') : chosen.kind === 'list' ? chosen.list.grants?.[`conversation:${c.name}`] ?? 'none'
-            : r.attachments?.[c.name] ?? 'none');
-        const using = ready.filter((c) => !['none', 'off'].includes(has(c)));
-        const others = ready.filter((c) => ['none', 'off'].includes(has(c)));
-        const users = el('div', 'as-users');
-        const picker = el('div', 'as-users as-picker'); picker.hidden = true;
-        const row = (c) => {
-            const line = el('div', 'given-row'); line.dataset.conversation = c.name;
-            line.append(el('span', '', shownName(c)), modes(options, has(c), async (value) => {
-                if (chosen.target) await grantTarget(chosen.target.id, c.name, value);
-                else if (chosen.kind === 'secret') await handTo(c.name, chosen.name, value === 'use', 'assets-error');
-                else if (chosen.kind === 'list') await grantList(chosen.list.id, c.name, value);
-                else await attachTo(c.name, chosen.name, value, 'assets-error');
-                await paintAssets();
-            }, `What ${c.name} may do with ${chosen.name}`));
-            return line;
-        };
-        for (const c of using) users.append(row(c));
-        if (using.length === 0) users.append(el('p', 'hint', 'No conversation uses it.'));
-        for (const c of others) picker.append(row(c));
-        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation has it.' : 'No conversation is ready.'));
-        detail.append(chapter('Used by', roundPlus('Give it to a conversation', () => { picker.hidden = !picker.hidden; })), users, picker);
-        if (chosen.kind === 'list') {
-            /* The list itself, Binder's screen, here: that list alone. */
-            const open = el('button', '', listOpen === chosen.key ? 'Close' : 'Open'); open.type = 'button'; open.dataset.act = 'open-list';
-            const holder = el('div', 'binder-holder as-binder');
-            open.addEventListener('click', () => { listOpen = listOpen === chosen.key ? '' : chosen.key; void paintAssets(); });
-            detail.append(chapter('Cards', open), holder);
-            const id = chosen.list.id;
-            if (listOpen === chosen.key) {
-                /* Drawn again (the lists changed): on the card it showed, if it showed one; after a reload, the card of the address. */
-                const was = assetsView?.place;
-                const at = assetsAt?.list === id ? assetsAt : was?.list === id && was.page === 'card' ? { list: id, card: was.card } : null;
-                assetsAt = null;
-                void mountBinder(holder, (l) => l.id === id, { place: at, steps: assetsSteps, onLists: (data) => { if (place === 'assets' && binderSig(data) !== listsSig) void paintAssets(); } })
-                    .then((view) => { if (view) assetsView = view; });
-            }
-        }
-        if (chosen.kind === 'git') {
-            const holder = el('div', 'as-git'); detail.append(holder);
-            /* Settings: where it is sent, with what. */
-            const settings = await getJson(`/git/${chosen.name}`, {});
-            const edit = el('button', 'as-edit', '✎ Edit'); edit.type = 'button';
-            const table = el('dl', 'as-settings');
-            const fact = (k, v) => { table.append(el('dt', '', k), el('dd', '', v)); };
-            fact('Remote', settings.remote ?? 'none');
-            fact('Sent with', settings.hasKey ? 'a key kept for it' : settings.sshKey ? `SSH key ${settings.sshKey}` : r.via?.method && r.via.method !== 'none' ? viaText(r.via).replace(/^, with /, '') : 'what it was cloned with');
-            if (r.from && r.via?.hostKey) fact('Host key', `${hostOf(r.from)}: ${r.via.hostKey}`);
-            detail.append(chapter('Settings', edit), table);
-            const box = $('gitview-remote-box');
-            remoteShown = chosen.name;
-            await fillRemote(chosen.name, settings);
-            box.hidden = !remoteEditing; box.open = true;
-            detail.append(box);
-            edit.addEventListener('click', () => { remoteEditing = !remoteEditing; box.hidden = !remoteEditing; if (remoteEditing) focusField($('gitview-url')); });
-            void gitDetail(holder, chosen.name, { place: true });
-        }
-        if (chosen.target) {
-            const t = chosen.target;
-            detail.append(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
-            /* Calls waiting for a person (propose/frame). Accept or refuse each. */
-            const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
-            if (waiting.length) {
-                const box = el('div', 'as-users');
-                for (const q of waiting) {
-                    const line = el('div', 'given-row');
-                    const what = el('span', ''); what.append(el('b', '', q.verb ?? 'action'), document.createTextNode(` ${q.detail ?? ''}`.trimEnd()));
-                    if (q.why) what.append(el('small', 'hint', ` — ${q.why}`));
-                    const yes = el('button', 'primary', 'Accept'); yes.type = 'button'; yes.addEventListener('click', () => { yes.disabled = true; void decideTether(q.id, 'yes'); });
-                    const no = el('button', 'danger', 'Refuse'); no.type = 'button'; no.addEventListener('click', () => { no.disabled = true; void decideTether(q.id, 'no'); });
-                    const acts = el('div', 'levels'); acts.append(yes, no);
-                    line.append(what, acts); box.append(line);
-                }
-                detail.append(chapter('Waiting for you'), box);
-            }
-        }
-        /* Delete, out of the way; refused while it is used, and why. */
-        const remove = el('button', 'as-link danger-link', 'Delete...'); remove.type = 'button';
-        const why = el('small', 'hint');
-        const inUse = chosen.kind !== 'secret' && using.length > 0;
-        const lost = chosen.target ? 'The connection is removed; the account token stays on the server.' : ({ secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.');
-        if (inUse) { remove.disabled = true; why.textContent = ` used by ${using.length} conversation${using.length > 1 ? 's' : ''}: set ${using.length > 1 ? 'them' : 'it'} to Off first`; }
-        remove.addEventListener('click', () => {
-            const sure = el('button', 'danger', chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`); sure.type = 'button';
-            const keep = el('button', '', 'Keep'); keep.type = 'button';
-            keep.addEventListener('click', () => { void paintAssets(); });
-            const ask = el('div', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog');
-            ask.append(el('span', '', lost), keep, sure);
-            sure.addEventListener('click', async () => {
-                try {
-                    if (chosen.kind === 'list') { const done = await binderCall('delete-list', { list: chosen.list.id }); if (!done.ok) throw new Error(done.text); }
-                    else if (chosen.target) await post(`${API}/tether/remove-target`, { target: chosen.target.id });
-                    else await post(chosen.kind === 'secret' ? `${API}/secrets/${chosen.name}/remove` : `${API}/resources/${chosen.name}/remove`);
-                    assetOpen = '';
-                }
-                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-                await paintAssets();
-            });
-            remove.replaceWith(ask); why.remove();
-            sure.focus();
-        });
-        /* Given to a device: from here too (the map shows who has it). */
-        const share = el('button', 'as-link', 'Share with a device...'); share.type = 'button';
-        share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); });
-        const foot = el('div', 'as-foot'); foot.append(...(['secret', 'list'].includes(chosen.kind) || chosen.target ? [] : [share, el('br')]), remove, why);
-        detail.append(foot);
+        if (filesBrowsing && filesBrowsing !== chosen.key) filesBrowsing = '';
+        await assetPanel(detail, chosen, { back, tether, groups: assetGroups });
     }
     /* From the map's "+" of Assets: the Assets page over the map, on "which kind"; Back, the map. */
     let assetsFromMap = false;
@@ -5250,6 +5306,7 @@
     /* The detail emptied (its forms back where they wait): another asset picked shows nothing of the one before while it is read. */
     function clearAssetDetail() {
         const detail = $('assets-detail');
+        if (detail.contains($('files'))) unembedFiles();
         for (const form of detail.querySelectorAll('.as-form, #gitview-remote-box')) $('assets-forms').append(form);
         detail.replaceChildren();
         return detail;
@@ -8763,7 +8820,9 @@
     let editing = null;          /* the text file being edited: { tab, inner, name, version, saved, area } */
     let filesChanged = false;    /* edited: the list behind shows the new size and time */
     const sizeOf = (n) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : n === 1 ? '1 byte' : `${n} bytes`);
-    const filesQuery = (extra = {}) => new URLSearchParams({ c: current, r: filesOf, p: filesAt, ...extra }).toString();
+    /* The conversation the files are read through: none when browsed from the Assets menu (the owner's own rights). */
+    const filesC = () => (filesOwner && place === 'assets' ? '' : current);
+    const filesQuery = (extra = {}) => new URLSearchParams({ c: filesC(), r: filesOf, p: filesAt, ...extra }).toString();
     /* When it was last changed, short: the time today, the day otherwise. */
     const whenOf = (iso) => {
         const d = new Date(iso); if (Number.isNaN(d.getTime())) return '';
@@ -8848,6 +8907,8 @@
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
             ...ownerOthers.filter((o) => !attachedHere.some((r) => r.name === o.name))];
+        /* Browsed from the Assets menu: that folder alone, as the owner has it. */
+        if (filesOwner && place === 'assets') mine.splice(0, mine.length, ...ownerOthers.filter((o) => o.name === filesOwner).map((o) => ({ ...o, yours: false })));
         /* Given to the device to write, attached to the conversation to read: the larger of the two holds. */
         for (const r of mine) if (deviceShared.some((s) => s.name === r.name && s.access === 'write')) r.access = 'write';
         filesTabs = mine;
@@ -8867,7 +8928,8 @@
         filesWritable = mine.find((r) => r.name === filesOf)?.access === 'write';
         $('files-actions').hidden = !filesOf || !filesWritable;
         $('files-readonly').hidden = !filesOf || filesWritable;
-        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.' : 'Read-only: attached to this conversation to read. Nothing can be added or changed here.';
+        $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.'
+            : filesOwner && place === 'assets' ? 'Read-only: a copy of the mail. Nothing can be added or changed here.' : 'Read-only: attached to this conversation to read. Nothing can be added or changed here.';
         $('files-views').hidden = !filesOf;
         for (const b of $('files-views').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.view === filesView));
         if (!filesOf) { rows.replaceChildren(); path.replaceChildren(); $('files-empty').hidden = true; return; }
@@ -9167,7 +9229,7 @@
         if (total > DROP_BYTES) { filesFailed(`At most ${DROP_BYTES / 1073741824} GB at a time: this was ${sizeOf(total)}.`); return; }
         if (items.length === 0 && folders.length === 0) { filesFailed(notes.length ? `Nothing to upload: ${notes.join('; ')}.` : 'Nothing to upload.'); return; }
         /* Where it goes is fixed now: moving elsewhere meanwhile does not move the upload. */
-        const where = { c: current, r: filesOf, p: filesAt };
+        const where = { c: filesC(), r: filesOf, p: filesAt };
         const at = (route, extra = {}) => `${API}/files/${route}?${new URLSearchParams({ ...where, ...extra })}`;
         uploading = { stopped: false, xhr: null };
         try {
@@ -9559,7 +9621,7 @@
     async function preview(tab, inner, name, size, from, opts = {}) {
         closePreview();
         if (opts.own) mdUrls.add(opts.own);
-        const address = from ?? `${API}/files/download?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+        const address = from ?? `${API}/files/download?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
         $('preview-name').textContent = name;
         $('preview-download').href = address; $('preview-download').setAttribute('download', name);
         /* From the terminal, a way to the folder it sits in. */
@@ -9736,7 +9798,7 @@
                 frame.setAttribute('sandbox', 'allow-scripts');
                 frame.setAttribute('referrerpolicy', 'no-referrer');
                 frame.title = `${name}, a page written by the tool`;
-                frame.src = `${API}/files/page?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+                frame.src = `${API}/files/page?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
                 const toggle = document.createElement('button'); toggle.type = 'button'; toggle.textContent = 'Show its source';
                 let shown = 'page';
                 toggle.addEventListener('click', () => {
@@ -9752,7 +9814,7 @@
                 try {
                     page = await markdownPage(text, {
                         /* Pictures as the thumbnails of Files allow them (the server checks the folder and the bytes); a file of the machine's disk shows none. */
-                        picture: (src) => { const p = from ? null : besideFile(tab, inner, src); return p && /\.(png|jpe?g|gif|webp)$/i.test(p) ? `${API}/files/thumb?${new URLSearchParams({ c: current, r: tab, p })}` : null; },
+                        picture: (src) => { const p = from ? null : besideFile(tab, inner, src); return p && /\.(png|jpe?g|gif|webp)$/i.test(p) ? `${API}/files/thumb?${new URLSearchParams({ c: filesC(), r: tab, p })}` : null; },
                         open: (href) => { const p = from ? null : besideFile(tab, inner, href); return p ? () => { void preview(tab, p, p.split('/').pop(), 0); } : null; },
                         diagram: drawDiagram, highlight: colourCode,
                     });
@@ -9843,7 +9905,7 @@
                 /* A mail opened by its reference: the server's page of the same mail, read again then (asked for). */
                 if ((ref || !from) && !offline) {
                     const go = el('button', 'quiet mail-remote-show', uiSaid('set-mail-show-remote', 'Show them')); go.type = 'button';
-                    const shown = ref ? `${API}/mail/page?${new URLSearchParams({ ref: ref.got?.ref || ref.ref, ...(ref.of ? { c: ref.of } : {}) })}` : `${API}/files/mail?${new URLSearchParams({ c: current, r: tab, p: inner })}`;
+                    const shown = ref ? `${API}/mail/page?${new URLSearchParams({ ref: ref.got?.ref || ref.ref, ...(ref.of ? { c: ref.of } : {}) })}` : `${API}/files/mail?${new URLSearchParams({ c: filesC(), r: tab, p: inner })}`;
                     go.addEventListener('click', () => { const f = frameOf(); f.src = shown; frame.replaceWith(f); frame = f; bar.remove(); });
                     bar.append(' · ', go);
                 }
@@ -9931,7 +9993,7 @@
     }
     async function editFile(tab, inner, name) {
         closePreview();
-        const query = new URLSearchParams({ c: current, r: tab, p: inner });
+        const query = new URLSearchParams({ c: filesC(), r: tab, p: inner });
         $('preview-name').textContent = name;
         $('preview-download').href = `${API}/files/download?${query}`; $('preview-download').setAttribute('download', name);
         $('preview-where').hidden = true; $('preview-edit').hidden = true;
@@ -9989,7 +10051,7 @@
         if (!editing) return;
         const e = editing;
         const text = e.area.value;
-        const query = new URLSearchParams({ c: current, r: e.tab, p: e.inner, ...(how === 'copy' ? { copy: '1' } : { version: how === 'any' ? 'any' : e.version }) });
+        const query = new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner, ...(how === 'copy' ? { copy: '1' } : { version: how === 'any' ? 'any' : e.version }) });
         e.ask.hidden = true;
         let j;
         try {
@@ -10004,7 +10066,7 @@
             /* Saved beside it: what is edited from now on is the copy. */
             e.inner = [...e.inner.split('/').slice(0, -1), j.name].join('/'); e.name = j.name;
             $('preview-name').textContent = j.name;
-            $('preview-download').href = `${API}/files/download?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`; $('preview-download').setAttribute('download', j.name);
+            $('preview-download').href = `${API}/files/download?${new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner })}`; $('preview-download').setAttribute('download', j.name);
         }
         e.version = j.version; e.saved = text;
         e.tell(how === 'copy' ? `saved as "${j.name}"; the file the tool wrote is left as it was` : `saved at ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`);
@@ -10019,7 +10081,7 @@
         look.addEventListener('click', async () => {
             look.disabled = true;
             try {
-                const r = await fetch(`${API}/files/text?${new URLSearchParams({ c: current, r: e.tab, p: e.inner })}`);
+                const r = await fetch(`${API}/files/text?${new URLSearchParams({ c: filesC(), r: e.tab, p: e.inner })}`);
                 const theirs = await r.json();
                 if (!r.ok) throw new Error(theirs.error || 'Its new version could not be read.');
                 const when = document.createElement('small'); when.className = 'hint';
@@ -10169,7 +10231,7 @@
     });
 
     /* FILES, a sheet over the screen: on a device's page only (the owner's are in the Assets tab of a conversation). */
-    function showFiles() { nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
+    function showFiles() { if ($('assets-detail').contains($('files'))) unembedFiles(); nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
     $('files-open').addEventListener('click', async () => { await paintFiles(); showFiles(); });
     $('files-close').addEventListener('click', () => { if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
 

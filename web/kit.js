@@ -25,6 +25,9 @@
  *                  it (Holders) or, seen from one holder, its right (RightsBadge).
  *   AssetList      THE ONE LIST of assets (06-11, assets step 2): the Assets menu and a conversation's tab, only its
  *                  scope changes; by type or by group; an empty type not shown; assetListModel places the rows.
+ *   AccessList     WHO HAS IT (06-11, assets step 3): a row per conversation or device, its RightsPicker; seen from one
+ *                  conversation, its row first, then "Also with"; accessModel places the rows.
+ *   AssetPanel     ONE ASSET OPENED, the same in the Assets menu and a conversation's tab: head, parts, foot (AssetDelete).
  *   RIGHTS         THE ONE TABLE of what an asset can be given at, by its kind and by who gets it (a
  *                  conversation, a device); "none" first. RightsBadge reads a right, RightsPicker sets it.
  *
@@ -494,7 +497,9 @@
     /* A RIGHT, SET: the kind's levels from the table, "None" first, the one held pressed. `onChange(level,
        stored)`: the level, and as the server keeps it; the buttons wait while it works (a promise). Nothing
        to choose (a kind not given to that holder): null. */
-    function RightsPicker({ key = '', holder = 'conversation', value, level, label = '', cls = '', onChange = () => {} } = {}) {
+    /* A CALENDAR, CONTACTS: given live, Read is Watch and Write is Propose (what Attach made of them) -- said on the picker. */
+    const RIGHT_SAME = { agenda: { watch: 'read', propose: 'write' }, contacts: { watch: 'read', propose: 'write' } };
+    function RightsPicker({ key = '', kind = '', holder = 'conversation', value, level, label = '', cls = '', onChange = () => {} } = {}) {
         const levels = rightsFor(key, holder);
         if (!levels.length) return null;
         const now = level ?? rightOf(key, value, holder);
@@ -509,7 +514,12 @@
         } });
         addClass(pick, `kit-rights-pick${cls ? ` ${cls}` : ''}`);
         pick.dataset.key = key; pick.dataset.holder = holder;
-        for (const b of pick.children) b.title = rightWord(b.dataset.value, 'hint');
+        const same = key === 'connexion' ? RIGHT_SAME[kind] : null;
+        for (const b of pick.children) {
+            b.title = rightWord(b.dataset.value, 'hint');
+            const as = same?.[b.dataset.value];
+            if (as) { const w = rightWord(as, 'pick'); b.append(node('small', 'kit-rights-same', `= ${w}`)); b.title = `${b.title} (= ${w})`; }
+        }
         return pick;
     }
 
@@ -662,8 +672,125 @@
         return box;
     }
 
+    /* WHO HAS IT (06-11, assets step 3): ONE LIST of who was given an asset -- each conversation and each device on a
+       row, its right set in place (RightsPicker, "None" first). Seen from a conversation, its own row comes first, then
+       "Also with" the others. "+ Give to…" opens the conversations that do not have it yet, each at None.
+
+       accessModel: the rows placed, no page needed (tested alone).
+         key      the table's key (rightsKey)       from    'conversation:x' when seen from it ('' : the Assets menu)
+         holders  [{ id: 'conversation:x' | 'device:y', name, sub?, value | level, ready?: false, hue? }]
+       -> { here, given: [rows], others: [rows], count, said: '' | 'nobody' | 'everyone' | 'noready' } -- a row with its
+          `holder` ('conversation' | 'device') and its `level`; a device is never offered (it is shared from its own sheet). */
+    const holderOf = (id) => (String(id ?? '').startsWith('device:') ? 'device' : 'conversation');
+    function accessModel({ key = '', holders = [], from = '' } = {}) {
+        const rows = (holders ?? []).filter((h) => h && h.id).map((h) => {
+            const holder = holderOf(h.id);
+            const level = h.level ?? rightOf(key, h.value, holder);
+            return { ...h, holder, level: level in RIGHT_LEVELS ? level : 'none' };
+        }).filter((r) => rightsFor(key, r.holder).length > 0);
+        const here = from ? rows.find((r) => r.id === from) ?? null : null;
+        const rest = rows.filter((r) => r !== here);
+        const given = [...rest.filter((r) => r.holder === 'conversation' && r.level !== 'none'), ...rest.filter((r) => r.holder === 'device' && r.level !== 'none')];
+        const others = rest.filter((r) => r.holder === 'conversation' && r.level === 'none' && r.ready !== false);
+        const count = given.length + (here && here.level !== 'none' ? 1 : 0);
+        const convs = rows.filter((r) => r.holder === 'conversation' && r.ready !== false);
+        const said = !convs.length && !count ? 'noready' : !count ? 'nobody' : !others.length && !here ? 'everyone' : '';
+        return { here, given, others, count, said };
+    }
+
+    /* The list drawn from its model. `onChange(row, level, stored)` sets one right (the picker waits on it); `kind`, the
+       asset's own kind (a calendar's levels say what they mean); `actions`, more gestures under it (Share with a device…).
+       Its old handles kept for the pages' tests: .as-chapter .as-add, .as-users, .as-picker, .given-row[data-conversation]. */
+    function AccessList(model, { key = '', kind = '', name = '', onChange = () => {}, actions = [] } = {}) {
+        const box = node('section', 'kit-access');
+        const head = node('div', 'as-chapter kit-access-head');
+        head.append(node('h3', '', say('set-acc-title', 'Who has it')));
+        const picker = node('div', 'as-users as-picker kit-access-pick'); picker.hidden = true;
+        const give = node('button', 'as-add kit-access-give', '+'); give.type = 'button';
+        const giveWord = say('set-acc-give', 'Give to…');
+        give.setAttribute('aria-label', giveWord); give.title = giveWord; give.setAttribute('aria-expanded', 'false');
+        give.addEventListener('click', () => { picker.hidden = !picker.hidden; give.setAttribute('aria-expanded', String(!picker.hidden)); });
+        head.append(give);
+        box.append(head);
+        const row = (r) => {
+            const line = node('div', 'given-row kit-access-row');
+            line.dataset[r.holder === 'device' ? 'device' : 'conversation'] = String(r.id).replace(/^[a-z]+:/, '');
+            line.dataset.level = r.level;
+            const who = node('span', 'kit-access-who');
+            who.append(Avatar({ name: r.name, hue: r.hue }));
+            const nm = node('span', 'kit-access-name', r.name);
+            const sub = r.sub ?? (r.holder === 'device' ? say('set-acc-device', 'Device') : '');
+            if (sub) nm.append(node('small', '', sub));
+            who.append(nm);
+            line.append(who);
+            const pick = RightsPicker({ key, kind, holder: r.holder, level: r.level, label: say('set-acc-what', 'What {who} may do with {name}').replace('{who}', r.name).replace('{name}', name),
+                onChange: (level, stored) => onChange(r, level, stored) });
+            if (pick) line.append(pick);
+            return line;
+        };
+        if (model.here) {
+            const mine = node('div', 'as-users kit-access-here');
+            mine.append(row(model.here));
+            box.append(mine);
+        }
+        const users = node('div', 'as-users kit-access-given');
+        if (model.here && model.given.length) users.append(node('h4', 'kit-access-also', say('set-acc-also', 'Also with')));
+        for (const r of model.given) users.append(row(r));
+        const said = { nobody: say('set-acc-nobody', 'No conversation uses it.'), everyone: '', noready: say('set-acc-noready', 'No conversation is ready.') }[model.said];
+        if (said && !model.here) users.append(node('p', 'hint', said));
+        if (users.children.length) box.append(users);
+        for (const r of model.others) picker.append(row(r));
+        if (!model.others.length) picker.append(node('p', 'hint', model.said === 'noready' ? say('set-acc-noready', 'No conversation is ready.') : say('set-acc-everyone', 'Every conversation has it.')));
+        box.append(picker);
+        const more = actions.filter(Boolean);
+        if (more.length) { const acts = node('div', 'kit-access-acts'); acts.append(...more); box.append(acts); }
+        return box;
+    }
+
+    /* ONE ASSET OPENED (06-11, assets step 3): the same panel in the Assets menu and in a conversation's tab. Its head (an
+       AssetCard head: sign, name, line, chips) under "‹ Assets" (a phone's way back), then its parts in order -- what it is,
+       who has it (AccessList), what is in it (files, branches, cards) -- then its foot (rename, delete…).
+         back      { label?, onBack } the way back            parts    [node | { title, extra: [nodes], body: [nodes], cls }]
+         foot      [nodes]                                   before   [nodes] above the head (an ending: "✓ created")
+       A part's title draws a chapter head (.as-chapter), its `extra` on its right. */
+    function AssetPanel(card, { back = null, parts = [], foot = [], before = [], cls = '' } = {}) {
+        const root = node('div', `kit-aspanel${cls ? ` ${cls}` : ''}`);
+        if (card?.key) root.dataset.asset = card.key;
+        root.append(...before.filter(Boolean));
+        const top = node('div', 'as-title kit-aspanel-top');
+        if (back) {
+            const b = node('button', 'as-link as-back', back.label ?? `‹ ${say('set-as-assets', 'Assets')}`); b.type = 'button';
+            b.addEventListener('click', () => back.onBack?.());
+            top.append(b);
+        }
+        top.append(AssetCard(card ?? {}, { size: 'head' }));
+        root.append(top);
+        for (const p of parts) {
+            if (!p) continue;
+            if (!p.title && !p.body) { root.append(p); continue; }
+            const part = node('section', `kit-aspanel-part${p.cls ? ` ${p.cls}` : ''}`);
+            if (p.title) { const h = node('div', 'as-chapter'); h.append(node('h3', '', p.title), ...(p.extra ?? []).filter(Boolean)); part.append(h); }
+            part.append(...(p.body ?? []).filter(Boolean));
+            root.append(part);
+        }
+        const f = foot.filter(Boolean);
+        if (f.length) { const box = node('div', 'as-foot kit-aspanel-foot'); box.append(...f); root.append(box); }
+        return root;
+    }
+
+    /* DELETE…, out of the way: refused while `blocked` (said why, beside it); else confirmed in place (InlineConfirm):
+       what is lost, Keep, then `yes`. */
+    function AssetDelete({ label, blocked = '', lost = '', yes = '', onYes = () => {} } = {}) {
+        const box = node('span', 'kit-asdelete');
+        const b = node('button', 'as-link danger-link', label ?? say('set-acc-delete', 'Delete…')); b.type = 'button';
+        box.append(b);
+        if (blocked) { b.disabled = true; box.append(node('small', 'hint', ` ${blocked}`)); return box; }
+        b.addEventListener('click', () => InlineConfirm(b, { question: lost, yes: yes || say('set-acc-delete-yes', 'Delete'), onYes }));
+        return box;
+    }
+
     window.clavariumKit = {
-        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel,
+        AssetIcon, AssetCard, Holders, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, RIGHT_SAME,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf,
