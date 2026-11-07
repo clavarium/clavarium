@@ -80,6 +80,9 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-convs': 'Conversations', 'set-apikeys-convs-hint': 'Une par une : lire ou parler', 'set-apikeys-off': 'Non',
     'set-apikeys-read': 'Lire', 'set-apikeys-talk': 'Parler', 'set-apikeys-no-convs': 'Aucune conversation pour l\'instant',
     'set-apikeys-journal': 'Journal', 'set-apikeys-no-use': 'Aucun appel pour l\'instant',
+    'set-apikeys-rooms': 'Salons', 'set-apikeys-rooms-hint': 'Un par un : lire ou parler', 'set-apikeys-no-rooms': 'Aucun salon pour l\'instant',
+    'set-apikeys-boxes': 'Boîtiers vocaux', 'set-apikeys-boxes-hint': 'Un par un : état, ou parler à voix haute', 'set-apikeys-no-boxes': 'Aucun boîtier pour l\'instant',
+    'set-apikeys-state': 'État', 'set-apikeys-speak': 'Parler à voix haute',
     /* The rights of an asset (06-11, kit.js RIGHTS): what it has (a pill), a choice, its one line. */
     'set-rt-none': 'Aucun', 'set-rt-read': 'Lit', 'set-rt-write': 'Écrit', 'set-rt-use': 'Utilise', 'set-rt-watch': 'Surveille',
     'set-rt-propose': 'Propose', 'set-rt-frame': 'Encadré', 'set-rt-free': 'Libre', 'set-rt-terminal': 'Terminal', 'set-rt-chat': 'Chat',

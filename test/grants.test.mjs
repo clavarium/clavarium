@@ -15,7 +15,7 @@ const DEVICE = pairingSubject('0f8fad5b-d9cb-469f-a165-70867728950e');
 const TALK = conversationSubject('family');
 
 test('each type of asset takes only the rights that mean something for it', () => {
-    assert.deepEqual(RIGHTS, { conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'r' });
+    assert.deepEqual(RIGHTS, { conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'r', room: 'rw', box: 'rw' });
     /* The state of the server, read by an API key (apikeys.mjs). */
     assert.equal(readRights('server:status', 'r'), 'r');
     assert.equal(readRights('folder:reports', 'r'), 'r');
