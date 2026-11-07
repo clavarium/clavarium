@@ -3192,7 +3192,7 @@
             /* Short-lived secrets of this conversation: the stars say their time left and offer to forget them. */
             secrets: chatSecrets,
             forget: (secretName) => post(`${API}/conversations/${encodeURIComponent(name)}/secrets/${encodeURIComponent(secretName)}/forget`, {}).then(() => { delete chatSecrets[secretName]; if (thread && threadOf === name) void thread.refresh(); }).catch(() => {}),
-            remind: () => post(talkPath(name, '/remind'), {}),
+            remind: (o) => post(talkPath(name, '/remind'), o?.urgent ? { urgent: true } : {}),
             /* The helpers of the terminal, in the chat: this page's voice, the owner's ready answers, the keyboard rule of this device. */
             voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs,
             onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },

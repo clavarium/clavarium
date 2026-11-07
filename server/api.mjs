@@ -757,7 +757,7 @@ export async function handleApi(request, response, conversations, headers, resou
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
             if (talking[2] === '/invite') return send(200, await talk.invite(conversation, typeof body.lang === 'string' ? body.lang : 'en')), true;
-            if (talking[2] === '/remind') return send(200, await talk.remind(conversation)), true;
+            if (talking[2] === '/remind') return send(200, await talk.remind(conversation, { urgent: body?.urgent === true })), true;
             if (talking[2] === '/react') return send(200, await talk.react(conversation, body.to, body.reaction ?? null)), true;
             if (typeof body.on === 'boolean') { const now = await talk.set(conversation, body.on); retell(conversation); return send(200, now), true; }
             /* What the chat may add to an answer: the choices ticked, the answers of a group, the zone of a picture it is about (Parley checks each). */

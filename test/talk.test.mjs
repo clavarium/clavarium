@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { Store } from '../server/store.mjs';
 import { Talk, SYSTEM_MAX, EVENT_LEVELS, TYPING_QUIET_MS, RETRY_MS, REREAD_AFTER_MS, SETTLED_MS, READY_MAX_MS, typeCommand, enterCommand, ENTER_AFTER_MS, TYPED_KNOWN_MS, HEALTH_KNOWN_MS } from '../server/talk.mjs';
 import { Readable } from 'node:stream';
-import { WAKE, REREAD } from 'clavarium-parley/host';
+import { WAKE, REREAD, URGENT } from 'clavarium-parley/host';
 import { packageFile } from '../server/parley.mjs';
 const { run } = await import(packageFile('clavarium-parley', 'bin/parley.mjs'));
 
@@ -119,6 +119,10 @@ test('the line that wakes it: typed once until it has read, and the message itse
     /* The owner asks to remind it: typed again, though it was typed already. */
     assert.equal((await b.talk.remind('helper')).told, 'typed');
     assert.equal(b.typed.length, 6);
+    /* #322: "Read it now" while it works -- the urgent line, typed at once. */
+    assert.equal((await b.talk.remind('helper', { urgent: true })).told, 'typed');
+    assert.deepEqual(b.typed.slice(6), [URGENT, 'Enter']);
+    assert.match(URGENT, /URGENT/);
 });
 
 test('the line waits: while somebody types in its terminal, while it sleeps, while its machine does not run; then it is typed, once', async (t) => {
