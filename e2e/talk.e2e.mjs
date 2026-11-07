@@ -231,12 +231,9 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.chapter('sharing');
     await me.page.locator('#share').click();
     await me.until('the basket holds it', async () => (await me.page.locator('#share-basket .folder').count()) === 1);
-    /* It talks through the app: its chat is proposed, not its terminal; the one ticked cannot be unticked. */
-    const part = (where, name) => me.page.locator(`${where} label[data-part=${name}] input`);
-    assert.deepEqual([await part('#share-basket', 'chat').isChecked(), await part('#share-basket', 'terminal').isChecked(), await part('#share-basket', 'chat').getAttribute('aria-disabled')], [true, false, 'true']);
-    await part('#share-basket', 'chat').uncheck({ force: true }).catch(() => {});
-    assert.equal(await part('#share-basket', 'chat').isChecked(), true, 'at least one');
-    assert.equal(await me.page.locator('#share-basket .parts-need').isVisible(), true);
+    /* It talks through the app: its chat is proposed, not its terminal; in the basket « None » is not offered (Remove is). */
+    const parts = me.page.locator('#share-basket .kit-rights-pick button');
+    assert.deepEqual(await parts.evaluateAll((bs) => bs.map((b) => [b.dataset.value, b.getAttribute('aria-pressed')])), [['terminal', 'false'], ['chat', 'true'], ['both', 'false']]);
     assert.match(await me.page.locator('#sharing-summary').innerText(), /will be able to write in the chat of helper, and see its files\./);
     await me.page.fill('#sharing-label', 'A phone');
     await me.page.locator('#sharing-new').click();
@@ -322,8 +319,8 @@ test('the chat screen: parley installed by the server from /tools, the tool asks
     await me.chapter('sharing');
     const row = me.page.locator('#share-here .given-row', { hasText: 'A phone' });
     await me.until('the device is listed with its parts', async () => (await row.count()) === 1);
-    assert.match(await row.innerText(), /Its chat is off/);
-    await row.locator('label[data-part=terminal] input').check();
+    assert.match(await me.page.locator('#share-here').innerText(), /Chat off/);
+    await row.locator('.kit-rights-pick button[data-value=both]').click();
     await me.until('its terminal is given', async () => (await me.api('/api/devices')).body.find((d) => d.id === pairing)?.grants[0].rights === 'rwx');
     await device.page.reload();
     await device.until('the device has its terminal now', async () => (await device.state()) === 'live');

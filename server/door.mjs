@@ -153,7 +153,8 @@ export async function handleDoor(request, response, { devices, conversations, re
         if (request.method === 'GET' && route === '/me') {
             /* `conversations`: all this pairing may use. `shared`: what it was given for itself. */
             /* `terminal` and `chat`: the parts it was given, for the page to show only those. */
-            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, chatName: mine.chatName, voiceMark: mine.voiceMark, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name), ...part } : { name: null, resources: [] };
+            /* Each attached one with its type: the page draws it as the asset it is (assets step 6). */
+            const about = mine ? { name: mine.name, toolLabel: mine.toolLabel, chatName: mine.chatName, voiceMark: mine.voiceMark, phase: mine.phase, step: mine.step, progress: mine.progress, error: mine.error, work: mine.work, resources: resources.of(name).map((r) => ({ ...r, type: resources.get(r.name)?.type ?? 'folder' })), ...part } : { name: null, resources: [] };
             return send(200, { ...about, conversations: names.filter((n) => conversations.list().some((c) => c.name === n)), shared: own });
         }
         /* The files a device was given for itself need no conversation; everything else does. */

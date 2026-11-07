@@ -53,7 +53,7 @@ test('a paired phone sees ITS conversation and nothing of the others, by any rou
     const phone = await b.pairPhone('family');
     assert.match(phone.raw, /HttpOnly/); assert.match(phone.raw, /Path=\/c\//); assert.match(phone.raw, /Secure/);
     const me = await (await b.device(`/c/api/${phone.id}/me`, { cookie: phone.cookie })).json();
-    assert.deepEqual([me.name, me.resources], ['family', [{ name: 'photos', access: 'write' }]]);
+    assert.deepEqual([me.name, me.resources], ['family', [{ name: 'photos', access: 'write', type: 'folder' }]]);
     assert.deepEqual((await (await b.device(`/c/api/${phone.id}/files?r=photos&p=`, { cookie: phone.cookie })).json()).entries.map((e) => e.name), ['beach.txt']);
     /* Asking for another conversation changes nothing: the answer is for the device's own. */
     assert.equal((await b.device(`/c/api/${phone.id}/files?c=work&r=accounts&p=`, { cookie: phone.cookie })).status, 404);

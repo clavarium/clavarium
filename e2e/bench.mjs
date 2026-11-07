@@ -212,10 +212,10 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             const box = page.locator('#links .lk-node[data-id^="device:"]', { hasText: label }).first();
             await until(`${label} is on the map`, async () => (await box.count()) === 1);
             /* Already shown (the map opened on it): a second tap would put it away. */
-            const shown = async () => (await page.locator('#links-card').isVisible()) && (await page.locator('#links-card .device', { hasText: label }).count()) === 1;
+            const shown = async () => (await page.locator('#links-card').isVisible()) && (await page.locator('#links-card .device-panel', { hasText: label }).count()) === 1;
             if (!(await shown())) await box.click();
             await until(`the card of ${label}`, shown);
-            return page.locator('#links-card .device');
+            return page.locator('#links-card .device-panel');
         }
         /* In the server's Assets: the one "+ New", its kind, then its form. */
         async function addAsset(kind) {

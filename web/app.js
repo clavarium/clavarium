@@ -6140,7 +6140,7 @@
         newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
-        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? deviceCard(d, '', true) : null; },
+        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? devicePanel(d, '', true) : null; },
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
         modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); subStep(); } },
         /* Its box rising from the bottom on a phone: over the screen, closed by Back. */
@@ -9253,13 +9253,35 @@
         return box;
     }
 
+    /* THE DEVICE'S FILES (/c/, assets step 6): the owner's one list (kit AssetList), scoped to this device -- by type, its
+       right on each row, no « + New », no « Give… » -- and the one chosen opened in the asset panel (AssetPanel), its
+       files inside it, read-only unless given to write. On a phone, the list or the one opened (« ‹ Files » back to the
+       list); wider, both side by side. One thing only: opened at once. */
+    let filesListing = false;
+    function paintDeviceAssets(items) {
+        const sheet = $('files');
+        const model = KIT.assetListModel({ items, scope: `device:${pairing}`, kinds: assetKinds() });
+        const chosen = items.find((i) => i.name === filesOf) ?? null;
+        sheet.dataset.open = chosen && (!filesListing || items.length <= 1) ? 'detail' : 'list';
+        sheet.dataset.many = String(items.length > 1);
+        paintAssetList($('files-assets'), model, { chosen: chosen?.key ?? '',
+            onOpen: (key) => { const i = items.find((x) => x.key === key); if (!i) return; filesListing = false; if (filesOf !== i.name) { filesOf = i.name; filesAt = ''; } void paintFiles(); } });
+        const holder = $('files-panel');
+        if (!chosen) { holder.replaceChildren(); holder.append($('files-body')); $('files-body').hidden = true; return; }
+        $('files-body').hidden = false;
+        const panel = KIT.AssetPanel(chosen, { back: items.length > 1 ? { label: `‹ ${uiSaid('set-dev-files', 'Files')}`, onBack: () => { filesListing = true; sheet.dataset.open = 'list'; } } : null,
+            parts: [{ title: uiSaid('set-dev-files', 'Files'), body: [$('files-body')] }], cls: 'files-asset' });
+        holder.replaceChildren(panel);
+    }
     /* `keep`: an error just said stays (painted after a change that failed in part). */
     async function paintFiles({ keep = false } = {}) {
         const ownerOthers = DEVICE ? [] : (await (await fetch(`${API}/resources`)).json().catch(() => [])).map((r) => ({ name: r.name, access: r.type === 'mailbox' ? 'read' : 'write', yours: true }));
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const attachedHere = here?.resources ?? [];
-        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
+        /* ON A DEVICE (/c/, assets step 6): what it sees is the kit's (deviceItems), drawn as the owner's one list. */
+        const seen = DEVICE ? KIT.deviceItems({ shared: deviceShared, resources: attachedHere, work: here?.work, chatOnly: noTerminal(), conversation: shownName(here) || current }) : [];
+        const mine = DEVICE ? seen.map((i) => ({ name: i.name, access: i.access, given: i.via === 'device', own: i.via === 'work' })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
             /* On a device: what it was given for itself, whatever the conversation. */
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
@@ -9272,7 +9294,8 @@
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
-        for (const r of mine) {
+        if (DEVICE) paintDeviceAssets(seen);
+        for (const r of DEVICE ? [] : mine) {
             const b = document.createElement('button');
             b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access === 'write' ? 'read-write' : 'read-only'}${r.given ? ' (given to this device)' : r.yours ? ' (not attached here)' : ''}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
@@ -10589,8 +10612,9 @@
 
     /* FILES, a sheet over the screen: on a device's page only (the owner's are in the Assets tab of a conversation). */
     function showFiles() { if ($('assets-detail').contains($('files'))) unembedFiles(); nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
-    $('files-open').addEventListener('click', async () => { await paintFiles(); showFiles(); });
-    $('files-close').addEventListener('click', () => { if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
+    /* On a device, Files opens on its list (a phone): the one to open is chosen there. */
+    $('files-open').addEventListener('click', async () => { filesListing = DEVICE; await paintFiles(); showFiles(); });
+    $('files-close').addEventListener('click', () => { filesListing = false; if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
 
     /* ---------- sign-in mailbox ---------- */
     /* While a conversation with a mailbox is open, the page asks every few
@@ -10666,56 +10690,35 @@
         $('sharing-top').hidden = which === 'manage';
     };
 
-    /* A two-way control: Read | Write. `onChange(rights)`. */
-    function levelControl(rights, onChange, label) {
-        const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
-        for (const [value, text] of [['r', 'Read'], ['rw', 'Write']]) {
-            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = value;
-            b.setAttribute('aria-pressed', String(value === rights));
-            b.addEventListener('click', () => { if (value !== rights) onChange(value); });
-            group.append(b);
-        }
-        return group;
-    }
-    const fixedRight = (type) => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = type === 'conversation' ? 'Use - the whole terminal' : 'Read only'; return s; };
-    /* A CONVERSATION IS GIVEN IN TWO PARTS, ticked one by one: its terminal
-       ("x") and its chat ("rw": read, and write there). At least one: the
-       last one ticked cannot be unticked (taking it all back is "Take back").
-       The server holds the device to it (see server/door.mjs). */
+    /* A DEVICE'S RIGHT ON ONE THING (07-11, assets step 6): the kit's RightsPicker, its device column -- a folder, a
+       repository: Read, Write; a mailbox: Read; a conversation in parts: Terminal, Chat, Both. « None » takes it back
+       where it is given; in the share basket it is not offered (« Remove » is). Was levelControl, partsControl, fixedRight. */
     const talksHere = (name) => Boolean(conversations.find((c) => c.name === name)?.talk);
     /* What is proposed when a conversation is added: its chat where it talks through the app, else its terminal. */
     const partsFor = (name) => (talksHere(name) ? 'rw' : 'x');
-    function partsControl(rights, onChange, name) {
-        const group = document.createElement('div'); group.className = 'parts'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What of ${name} it gets`);
-        const has = { terminal: rights.includes('x'), chat: rights.includes('r') };
-        const boxes = {};
-        for (const [part, text] of [['terminal', 'Terminal'], ['chat', 'Chat']]) {
-            const label = document.createElement('label'); label.className = 'check'; label.dataset.part = part;
-            const box = document.createElement('input'); box.type = 'checkbox'; box.checked = has[part];
-            box.addEventListener('change', () => {
-                const next = { ...has, [part]: box.checked };
-                /* The last one ticked stays ticked, and says why. */
-                if (!next.terminal && !next.chat) { box.checked = true; need.hidden = false; return; }
-                const chat = next.chat ? (has.chat ? rights.replace('x', '') : 'rw') : '';
-                onChange(`${chat}${next.terminal ? 'x' : ''}`);
-            });
-            boxes[part] = box;
-            label.append(box, ` ${text}`); group.append(label);
-        }
-        /* The one left ticked cannot be unticked: marked so, and said when tried. */
-        for (const [part, other] of [['terminal', 'chat'], ['chat', 'terminal']]) if (has[part] && !has[other]) boxes[part].setAttribute('aria-disabled', 'true');
-        const need = document.createElement('small'); need.className = 'hint parts-need'; need.hidden = true; need.textContent = 'At least one. To give nothing, take it back.';
-        group.append(need);
-        /* Its chat, given while it is off: said, so that nobody wonders why the device shows nothing. */
-        if (has.chat && !talksHere(name)) {
-            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Its chat is off: the device waits until you turn it on (General).'; off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
-            group.append(off);
-        }
-        return group;
+    function deviceRight(type, name, rights, onChange, { who = '', none = true } = {}) {
+        const levels = KIT.rightsFor(type, 'device').filter((l) => none || l !== 'none');
+        return KIT.RightsPicker({ key: type, holder: 'device', value: rights, levels, label: uiSaid('set-acc-what', 'What {who} may do with {name}', { who: who || 'it', name }), onChange });
     }
-    /* The right control of a thing given: a conversation in parts, a folder or a repository to read or write. */
-    const rightControl = (type, name, rights, onChange, label) => (type === 'conversation' ? partsControl(rights, onChange, name)
-        : type === 'folder' || type === 'git' ? levelControl(rights, onChange, label) : fixedRight(type));
+    /* Its chat given while it is off: said, so that nobody wonders why the device shows nothing. */
+    function chatOff(type, name, rights) {
+        if (type !== 'conversation' || !String(rights ?? '').includes('r') || talksHere(name)) return null;
+        const off = el('small', 'hint parts-off', uiSaid('set-dev-chat-off', 'Chat off: the device waits'));
+        off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
+        return off;
+    }
+    /* One thing given, or to give, to a device: the asset it is (an AssetCard row), its right and gestures on its right. */
+    function deviceThing(asset, { sub, actions = [], cls = '' } = {}) {
+        const at = asset.indexOf(':'); const type = asset.slice(0, at); const name = asset.slice(at + 1);
+        const row = KIT.AssetCard({ key: asset, kind: type, name, sub: sub ?? KIND_WORD[type] ?? type }, { tag: 'div', cls: `given-row dev-thing${cls ? ` ${cls}` : ''}`, actions });
+        row.dataset.asset = asset;
+        return row;
+    }
+    /* A right set from any of these places: given at its level, or taken back (« None »). */
+    async function setDeviceRight(id, asset, level, stored) {
+        if (level === 'none') await post(`${API}/devices/${id}/take`, { asset }).catch(() => {});
+        else await post(`${API}/devices/${id}/give`, { asset, rights: stored }).catch(() => {});
+    }
 
     async function loadCatalog() {
         const things = await (await fetch(`${API}/resources`)).json().catch(() => []);
@@ -10763,13 +10766,12 @@
         const box = $('share-basket'); box.replaceChildren();
         for (const [asset, rights] of basket) {
             const [type, name] = asset.split(':');
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = asset;
-            const label = document.createElement('b'); label.textContent = name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-            const right = rightControl(type, name, rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`);
-            const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Remove'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
+            const out = el('button', '', uiSaid('set-dev-remove', 'Remove')); out.type = 'button'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
             out.addEventListener('click', () => { basket.delete(asset); paintCompose(); });
-            row.append(label, right, out); box.append(row);
+            const right = deviceRight(type, name, rights, (level, stored) => { basket.set(asset, stored); paintCompose(); }, { none: false });
+            const row = deviceThing(asset, { actions: [right, out], cls: 'folder' });
+            const off = chatOff(type, name, rights); if (off) row.append(off);
+            box.append(row);
         }
         $('share-basket-title').textContent = `It will get (${basket.size})`;
         $('share-basket-empty').hidden = basket.size > 0;
@@ -10787,17 +10789,14 @@
         const order = (c) => `${c.near ? 0 : 1}${KINDS.findIndex(([k]) => k === c.type)}${c.name}`;
         for (const c of [...catalog].sort((a, b2) => order(a).localeCompare(order(b2)))) {
             if ((shareKind && c.type !== shareKind) || (wanted && !c.name.includes(wanted))) continue;
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = c.asset;
-            const label = document.createElement('b'); label.textContent = c.name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`; label.append(kind);
-            const plus = document.createElement('button'); plus.type = 'button';
-            if (basket.has(c.asset)) { plus.textContent = 'Added'; plus.disabled = true; }
+            const plus = el('button'); plus.type = 'button';
+            if (basket.has(c.asset)) { plus.textContent = uiSaid('set-dev-added', 'Added'); plus.disabled = true; }
             else {
-                plus.textContent = '+ Add'; plus.setAttribute('aria-label', `Add ${c.name}`);
+                plus.textContent = uiSaid('set-dev-add', '+ Add'); plus.setAttribute('aria-label', `Add ${c.name}`);
                 /* A conversation is given whole; anything else to read -- writing is asked for, never assumed. */
                 plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r'); paintCompose(); });
             }
-            row.append(label, plus); add.append(row);
+            add.append(deviceThing(c.asset, { sub: `${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`, actions: [plus], cls: 'folder' }));
         }
         sayChoice();
     }
@@ -10848,77 +10847,67 @@
         const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
         button.replaceWith(ask); sure.focus();
     }
-    function grantRow(device, g) {
+    /* One thing a device has, its right set in place; « None » takes it back. */
+    function deviceGrantRow(device, g) {
         const [type, name] = g.asset.split(':');
-        const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
-        const label = document.createElement('span'); label.textContent = name;
-        const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await repaintDevices(); }, `What ${device.label} may do with ${name}`);
-        const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-        take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
-        row.append(label, right, take);
+        const right = deviceRight(type, name, g.rights, async (level, stored) => { await setDeviceRight(device.id, g.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); }, { who: device.label });
+        const row = deviceThing(g.asset, { actions: [right] });
+        const off = chatOff(type, name, g.rights); if (off) row.append(off);
         return row;
     }
     let manageBy = 'device';
-    const deviceShut = new Set();      /* the device cards folded on this page */
+    const deviceShut = new Set();      /* the device panels folded on this page */
     /* After a change to a device: its list (the Devices pane) or the map, drawn again. */
     async function repaintDevices() {
         if (place === 'access' && accessTab === 'devices') { await paintManage(); return; }
         await readDevices(); await links?.changed();
     }
-    /* One device's card: its name (renamed here), what it has, revoke it. On
-       the map's card of the device too (`onMap`: never folded). */
-    function deviceCard(device, only, onMap = false) {
-        const card = document.createElement('div'); card.className = 'device card'; card.dataset.device = device.id;
-        const name = document.createElement('b'); name.textContent = device.label;
-        const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
-        rename.addEventListener('click', () => {
-            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
-            const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
-            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
-            save.addEventListener('click', () => { void done(); });
-            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
-            name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
-        });
-        const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
-        if (!device.seenAt) seen.className = 'warn';
-        const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
-        revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
-        /* A card that folds, as the chapters of a conversation do: open unless folded on purpose. */
+    const thingsSaid = (n) => (n === 1 ? uiSaid('set-dev-things-1', '1 thing') : uiSaid('set-dev-things-n', '{n} things', { n }));
+    /* ONE DEVICE OPENED (07-11, assets step 6): the asset panel -- its head (its name, how many things, when it was
+       last seen; folded here), what it has (each thing with its right, « None » takes it back), then + Give more,
+       Rename, Revoke device (asked in place). On the map's card of the device too (`onMap`: never folded). */
+    function devicePanel(device, only, onMap = false) {
         const shut = !onMap && deviceShut.has(device.id);
-        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'card-fold'; fold.textContent = shut ? 'Expand' : 'Collapse';
-        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
+        const fold = el('button', 'card-fold', shut ? uiSaid('set-dev-expand', 'Expand') : uiSaid('set-dev-collapse', 'Collapse')); fold.type = 'button';
+        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${fold.textContent} ${device.label}`);
         fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void repaintDevices(); });
-        const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
-        const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
-        const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
-        const given = document.createElement('div'); given.className = 'given';
+        const seen = uiSaid('set-dev-seen', '{ago} · paired {date}', { ago: ago(device.seenAt), date: new Date(device.createdAt).toLocaleDateString() });
+        const given = el('div', 'given');
         const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
-        for (const g of mine) given.append(grantRow(device, g));
-        /* Several chats given while off: said once for the card, not under each. */
+        for (const g of mine) given.append(deviceGrantRow(device, g));
+        /* Several chats given while off: said once for the panel, not under each. */
         const waiting = [...given.querySelectorAll('.parts-off')];
         if (waiting.length > 1) {
             for (const w of waiting) w.remove();
-            const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
-            once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
+            const once = el('p', 'hint parts-off', `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`); once.title = waiting[0].title;
             given.prepend(once);
         }
         if (only && mine.length === 0) {
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
-            const label = document.createElement('span'); label.textContent = accessFor;
-            const none = document.createElement('small'); none.className = 'hint'; none.textContent = ' not shared'; label.append(none);
-            const give = document.createElement('button'); give.type = 'button'; give.className = 'primary'; give.textContent = `Give ${accessFor}`;
+            const give = el('button', 'primary', `Give ${accessFor}`); give.type = 'button';
             give.addEventListener('click', async () => { give.disabled = true; await post(`${API}/devices/${device.id}/give`, { asset: only, rights: partsFor(accessFor) }).catch(() => {}); await repaintDevices(); void refresh(); });
-            row.append(label, give); given.append(row);
+            given.append(deviceThing(only, { sub: 'not shared', actions: [give] }));
         }
         /* What the filter leaves out is named, never only counted. */
-        if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
-        const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
+        if (only && device.grants.length > mine.length) given.append(el('p', 'hint', `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`));
+        const more = el('button', '', uiSaid('set-dev-more', '+ Give more')); more.type = 'button';
         more.addEventListener('click', () => { void openCompose([], device.id); });
-        const acts = document.createElement('div'); acts.className = 'action-row device-acts'; acts.append(more, rename, revoke);
-        const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
-        card.append(head, body);
-        return card;
+        const rename = el('button', '', uiSaid('set-dev-rename', 'Rename')); rename.type = 'button';
+        const revoke = KIT.AssetDelete({ label: uiSaid('set-dev-revoke', 'Revoke device'), lost: uiSaid('set-dev-revoke-q', '{name} loses everything, now', { name: device.label }), yes: uiSaid('set-dev-revoke-yes', 'Revoke'),
+            onYes: async () => { await post(`${API}/devices/${device.id}/revoke`).catch(() => {}); await repaintDevices(); void refresh(); } });
+        const panel = KIT.AssetPanel({ key: `device:${device.id}`, kind: 'device', name: device.label, sub: `${thingsSaid(device.grants.length)} · ${seen}`, tone: device.seenAt ? '' : 'warn' },
+            { cls: 'device-panel', actions: onMap ? [] : [fold], parts: [{ title: uiSaid('set-dev-has', 'What it has'), body: [given] }], foot: [more, rename, revoke] });
+        panel.dataset.device = device.id;
+        if (shut) for (const part of panel.children) if (!part.classList.contains('as-title')) part.hidden = true;
+        rename.addEventListener('click', () => {
+            const name = panel.querySelector('.kit-asset-name');
+            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', uiSaid('set-dev-name', 'Name of this device'));
+            const save = el('button', 'primary', uiSaid('set-dev-save', 'Save')); save.type = 'button';
+            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
+            save.addEventListener('click', () => { void done(); });
+            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+            name?.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
+        });
+        return panel;
     }
     /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
     /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): normal, or each wake clip kept with its label to train a better one. */
@@ -11265,34 +11254,32 @@
         if (manageBy === 'device' || only) {
             rows.hidden = false; things.hidden = true;
             for (const device of [...sharedDevices].sort((a, b2) => String(b2.seenAt ?? '').localeCompare(String(a.seenAt ?? '')))) {
-                rows.append(deviceCard(device, only));
+                rows.append(devicePanel(device, only));
             }
             return;
         }
-        /* By thing: who can see this folder? What nobody has is folded away. */
+        /* By thing: who can see this folder? Each thing (an AssetCard), who has it (the kit's AccessList, devices only:
+           each with its right, « None » takes it back). What nobody has is folded away, each with « Share… ». */
         await loadCatalog();
         const alone = [];
         for (const c of catalog) {
             const holders = devicesWith(c.asset);
             if (holders.length === 0) { alone.push(c); continue; }
-            const block = document.createElement('details'); block.className = 'thing'; block.dataset.asset = c.asset; block.open = true;
-            const top = document.createElement('summary'); top.textContent = `${c.name} - ${KIND_WORD[c.type]} - ${holders.length} device${holders.length > 1 ? 's' : ''}`;
+            const block = el('details', 'thing'); block.dataset.asset = c.asset; block.open = true;
+            const top = el('summary');
+            top.append(KIT.AssetCard({ key: c.asset, kind: c.type, name: c.name, sub: `${KIND_WORD[c.type]} · ${holders.length === 1 ? uiSaid('set-device', '1 device') : uiSaid('set-devices', '{n} devices', { n: holders.length })}` }, { tag: 'span' }));
             block.append(top);
-            for (const device of holders) {
-                const row = grantRow(device, device.grants.find((g) => g.asset === c.asset));
-                row.firstChild.textContent = device.label;
-                block.append(row);
-            }
+            const model = KIT.accessModel({ key: c.type, holders: holders.map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((g) => g.asset === c.asset).rights })) });
+            block.append(KIT.AccessList(model, { key: c.type, name: c.name, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), c.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); } }));
             things.append(block);
         }
-        const rest = document.createElement('details'); rest.className = 'thing';
-        const top = document.createElement('summary'); top.textContent = `Not shared (${alone.length})`; rest.append(top);
+        const rest = el('details', 'thing');
+        rest.append(el('summary', '', uiSaid('set-dev-not-shared', 'Not shared ({n})', { n: alone.length })));
         for (const c of alone) {
-            const row = document.createElement('div'); row.className = 'given-row';
-            const label = document.createElement('span'); label.textContent = `${c.name} - ${KIND_WORD[c.type]}`;
-            const give = document.createElement('button'); give.type = 'button'; give.textContent = 'Share...';
+            const give = el('button', '', uiSaid('set-dev-share', 'Share…')); give.type = 'button';
             give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r']]); });
-            row.append(label, give); rest.append(row);
+            rest.append(deviceThing(c.asset, { actions: [give] }));
         }
         things.append(rest);
     }
@@ -11316,23 +11303,15 @@
         await readDevices();
         const box = $('share-here'); box.replaceChildren();
         const asset = `conversation:${current}`;
-        for (const device of devicesWith(asset)) {
-            const g = device.grants.find((x) => x.asset === asset);
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.device = device.id;
-            const label = document.createElement('span'); label.textContent = device.label;
-            const right = partsControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset, rights: value }).catch(() => {}); await paintShareHere(); }, current);
-            const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-            take.addEventListener('click', () => {
-                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Take ${current} back from ${device.label}`;
-                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
-                keep.addEventListener('click', () => { void paintShareHere(); });
-                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset }).catch(() => {}); await paintShareHere(); void refresh(); });
-                const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
-                take.replaceWith(ask); sure.focus();
-            });
-            row.append(label, right, take); box.append(row);
+        /* The devices that have it (the kit's AccessList): each with its parts, « None » takes it back. */
+        const holders = devicesWith(asset).map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((x) => x.asset === asset).rights }));
+        if (holders.length) {
+            box.append(KIT.AccessList(KIT.accessModel({ key: 'conversation', holders }), { key: 'conversation', name: current, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), asset, level, stored); await paintShareHere(); if (level === 'none') void refresh(); } }));
+            const off = chatOff('conversation', current, holders.find((h) => String(h.value).includes('r'))?.value);
+            if (off) box.append(off);
         }
-        $('share-here-none').hidden = box.children.length > 0;
+        $('share-here-none').hidden = holders.length > 0;
     }
     /* Back from choosing or from the code: where it was opened from, as Back and Escape. */
     const leaveCompose = () => { void refresh(); if (!nav.close('compose')) leavePlace(); };

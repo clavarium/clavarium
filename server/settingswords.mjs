@@ -189,5 +189,13 @@ export const SETTINGS_WORDS_FR = {
     'set-room-people': 'Personnes', 'set-room-ais-of': 'IA', 'set-room-boxes-of': 'Boîtiers', 'set-room-host-mark': 'accueille',
     'set-room-n-person': '1 personne', 'set-room-n-people': '{n} personnes', 'set-room-n-ai': '1 IA', 'set-room-n-ais': '{n} IA',
     'set-room-n-box': '1 boîtier', 'set-room-n-boxes': '{n} boîtiers',
+    /* Devices on the same pieces (assets step 6): /c/'s Files, a device's panel, by thing, the share basket. */
+    'set-dev-given': 'Donné à cet appareil', 'set-dev-with': 'Avec {name}', 'set-dev-work': 'Là où travaille son outil',
+    'set-dev-files': 'Fichiers', 'set-dev-has': 'Ce qu’il a', 'set-dev-things-1': '1 chose', 'set-dev-things-n': '{n} choses',
+    'set-dev-seen': '{ago} · appairé le {date}', 'set-dev-collapse': 'Replier', 'set-dev-expand': 'Déplier',
+    'set-dev-rename': 'Renommer', 'set-dev-save': 'Enregistrer', 'set-dev-name': 'Nom de cet appareil',
+    'set-dev-revoke': 'Révoquer l’appareil', 'set-dev-revoke-q': '{name} perd tout, maintenant', 'set-dev-revoke-yes': 'Révoquer',
+    'set-dev-more': '+ Donner plus', 'set-dev-add': '+ Ajouter', 'set-dev-added': 'Ajouté', 'set-dev-remove': 'Retirer',
+    'set-dev-not-shared': 'Non partagé ({n})', 'set-dev-share': 'Partager…', 'set-dev-chat-off': 'Chat coupé : l’appareil attend',
 };
 export const settingsWords = (lang) => (String(lang ?? '').toLowerCase().split('-')[0] === 'fr' ? { ...SETTINGS_WORDS_FR } : {});

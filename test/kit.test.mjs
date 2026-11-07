@@ -745,7 +745,7 @@ test('the screens open an asset in the one panel: the Assets menu and a conversa
     assert.equal((app.match(/async function assetPanel\(/g) ?? []).length, 1, 'one panel');
     assert.match(app, /await assetPanel\(detail, chosen, \{ back, tether, groups: assetGroups \}\)/, 'from the menu');
     assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits, stale \}\)/, 'from a conversation (the last paint draws)');
-    assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 2, 'one list of who has it: an asset\'s, a group\'s (step 5)');
+    assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 4, 'one list of who has it: an asset\'s, a group\'s (step 5), a thing\'s devices and a conversation\'s Sharing (step 6)');
     assert.doesNotMatch(app, /function asTitle|chapter\('Used by'/, 'the old heads and « Used by » are gone');
     /* The tab: a calendar, contacts, an access given live, its binders -- one function (givenItems), which the bar's count
        and a room's « Leurs assets » use too (07-11: the same rows everywhere). */
@@ -1088,4 +1088,84 @@ test('a room\'s settings: the chapters of every settings page, saved at once (no
     /* Its bar: one line, the members on its right before the gear, no line of counts under the name. */
     assert.match(app, /sub: \[live\], actions: \[\$\('salon-who'\), views\]/);
     assert.doesNotMatch(app, /\\u25BE`\)/);
+});
+
+/* DEVICE MODE (/c/, assets step 6): the same list and panel, scoped to the device; read-only by its rights, no New, no Give. */
+const ME = { conversation: 'cuisine', work: 'kept', chatOnly: false,
+    resources: [{ name: 'recipes', access: 'read', type: 'folder' }, { name: 'site', access: 'read', type: 'git' }],
+    shared: [{ name: 'recipes', type: 'folder', access: 'write' }, { name: 'family-photos', type: 'folder', access: 'read' }, { name: 'news', type: 'mailbox', access: 'read' }] };
+
+test('what a device sees: its conversation\'s work and what is attached to it, then what was given to the device; the larger right holds', () => {
+    const items = KIT.deviceItems(ME);
+    assert.deepEqual(items.map((i) => [i.key, i.right.level, i.via]), [
+        ['folder:work', 'write', 'work'], ['folder:recipes', 'write', 'device'], ['git:site', 'read', 'conversation'], ['folder:family-photos', 'read', 'device'], ['mailbox:news', 'read', 'device']]);
+    for (const i of items) assert.equal(i.right.holder, 'device');
+    assert.equal(items.find((i) => i.name === 'site').sub, 'With cuisine');
+    assert.equal(items.find((i) => i.name === 'news').sub, 'Given to this device');
+    /* Given its chat alone: only what was given to the device itself. */
+    assert.deepEqual(KIT.deviceItems({ ...ME, chatOnly: true }).map((i) => i.key), ['folder:recipes', 'folder:family-photos', 'mailbox:news']);
+    /* No conversation (a device given folders only): those, and nothing else of the owner's. */
+    assert.deepEqual(KIT.deviceItems({ shared: [{ name: 'album', type: 'folder', access: 'read' }] }).map((i) => i.key), ['folder:album']);
+    assert.deepEqual(KIT.deviceItems({}), []);
+    /* Its work on the disk of its machine: not offered. */
+    assert.equal(KIT.deviceItems({ ...ME, work: 'disk' }).some((i) => i.name === 'work'), false);
+});
+
+test('the list, scoped to a device: by type, never by group, nothing to make or give; the owner\'s scopes keep New and Give', () => {
+    const items = KIT.deviceItems(ME);
+    const m = KIT.assetListModel({ items, groups: GROUPS, by: 'group', scope: 'device:p1', kinds: KINDS });
+    assert.equal(m.view, 'type');
+    assert.deepEqual([m.canGroup, m.canNew, m.canGive], [false, false, false]);
+    assert.deepEqual(m.sections.map((s) => s.kind), ['git', 'folder', 'mailbox']);
+    for (const scope of ['all', 'conversation:cuisine']) {
+        const own = KIT.assetListModel({ items: ITEMS, scope });
+        assert.deepEqual([own.canNew, own.canGive], [true, true], scope);
+    }
+    /* Drawn: the same AssetCard rows, each with its right read (a badge, never a picker); no group head, no « + ». */
+    const list = KIT.AssetList(m, { rowCls: 'as-row' });
+    assert.equal(list.dataset.scope, 'device');
+    const rows = list.all((n) => n.classes.includes('as-row'));
+    assert.equal(rows.length, 5);
+    assert.equal(list.all((n) => n.classes.includes('kit-rights-pick')).length, 0);
+    assert.deepEqual(rows.map((r) => r.find('kit-rights').dataset.level), ['read', 'write', 'write', 'read', 'read']);
+    assert.equal(list.find('kit-aslist-fold'), null);
+    /* Opened: the one panel, its right on its head, and nothing to give, rename or delete. */
+    const site = items.find((i) => i.name === 'site');
+    const panel = KIT.AssetPanel(site, { back: { label: '‹ Files', onBack: () => {} }, parts: [document.createElement('div')] });
+    assert.equal(panel.find('as-back').textContent, '‹ Files');
+    assert.equal(panel.find('kit-asset-head').find('kit-rights').textContent, 'Reads');
+    assert.equal(panel.find('kit-access'), null);
+    assert.equal(panel.find('as-foot'), null);
+});
+
+test('a device\'s own sharing on the same pieces: its panel (head gestures, its things, its foot); who has a thing without « Give to… »', () => {
+    const fold = document.createElement('button');
+    const panel = KIT.AssetPanel({ key: 'device:d1', kind: 'device', name: 'Kitchen tablet', sub: '2 things' }, { actions: [fold], parts: [{ title: 'What it has', body: [] }], foot: [document.createElement('button')] });
+    assert.ok(panel.find('kit-asset-head').find('kit-asset-side').children.includes(fold));
+    const box = KIT.AccessList(KIT.accessModel({ key: 'folder', holders: [{ id: 'device:d1', name: 'Kitchen tablet', value: 'r' }] }), { key: 'folder', name: 'recipes', title: '', give: false });
+    assert.equal(box.find('kit-access-give'), null);
+    assert.equal(box.find('as-chapter'), null);
+    assert.equal(box.all((n) => n.classes.includes('given-row')).length, 1);
+    /* A conversation given to a device: its parts are its levels (Terminal, Chat, Both), « None » takes it back. */
+    assert.deepEqual(KIT.RightsPicker({ key: 'conversation', holder: 'device', value: 'rw' }).children.map((b) => [b.dataset.value, b.getAttribute('aria-pressed')]),
+        [['none', 'false'], ['terminal', 'false'], ['chat', 'true'], ['both', 'false']]);
+});
+
+test('the screens: /c/ draws its Files with the one list and panel scoped to the device; the owner\'s device sharing with the kit\'s pieces', async () => {
+    const app = web('app.js'); const device = web('device.html');
+    const { SETTINGS_WORDS_FR } = await import('../server/settingswords.mjs');
+    assert.match(app, /KIT\.deviceItems\(/);
+    assert.match(app, /assetListModel\(\{[^}]*scope: `device:\$\{pairing\}`/);
+    assert.match(device, /id="files-assets"/);
+    assert.match(device, /id="files-panel"/);
+    /* The owner's side: a device's card, by thing, the basket and a conversation's Sharing, on the kit's pieces. */
+    assert.doesNotMatch(app, /function levelControl|function partsControl|const rightControl|const fixedRight|function grantRow/, 'the old controls are gone');
+    assert.match(app, /function devicePanel\(/);
+    assert.match(app, /KIT\.AccessList\(KIT\.accessModel\(\{ key: 'conversation'/);
+    for (const k of ['set-dev-given', 'set-dev-with', 'set-dev-work', 'set-dev-files', 'set-dev-has', 'set-dev-revoke', 'set-dev-revoke-q', 'set-dev-revoke-yes', 'set-dev-more', 'set-dev-rename', 'set-dev-add', 'set-dev-added', 'set-dev-remove', 'set-dev-not-shared', 'set-dev-share', 'set-dev-things-1', 'set-dev-things-n', 'set-dev-chat-off', 'set-dev-save', 'set-dev-name', 'set-dev-collapse', 'set-dev-expand', 'set-dev-seen']) {
+        assert.ok(k in SETTINGS_WORDS_FR, k);
+        assert.ok(SETTINGS_WORDS_FR[k].length <= 48, k);
+        assert.doesNotMatch(SETTINGS_WORDS_FR[k], /\b(tu|ton|ta|tes)\b/i, k);
+        assert.match(app + web('kit.js'), new RegExp(`'${k}'`), k);
+    }
 });

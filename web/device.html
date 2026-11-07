@@ -62,8 +62,16 @@
       </div>
       <div id="files" class="sheet" hidden>
         <div class="panel-top"><b>Files</b><button type="button" id="files-close" aria-label="Close" title="Close">&times;</button></div>
-        <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders"></div>
-        <p id="files-none" class="hint" hidden>No folder is attached to this conversation. Attach one with "Folders".</p>
+        <div id="files-tabs" class="choices" role="tablist" aria-label="Attached folders" hidden></div>
+        <!-- WHAT THIS DEVICE SEES (assets step 6): the owner's one asset list, scoped to the device, read by its rights;
+             one opened in the same asset panel, its files inside it. No New, no Give. -->
+        <div id="files-split">
+        <div id="files-side">
+          <div id="files-assets"></div>
+          <p id="files-none" class="hint" hidden>Nothing is shared with this device.</p>
+        </div>
+        <div id="files-panel">
+        <div id="files-body">
         <div class="files-bar">
           <div id="files-path" class="path"></div>
           <div id="files-views" class="levels" role="group" aria-label="Show as">
@@ -100,6 +108,9 @@
         </form>
         <div id="files-rows" data-view="list"></div>
         <p id="files-empty" class="hint" hidden>This folder is empty.</p>
+        </div>
+        </div>
+        </div>
         <div id="files-drop" hidden><p id="files-drop-text">Drop to upload here</p></div>
       </div>
       <!-- A file, shown over whatever is on the screen; closing it leaves you where you were. -->

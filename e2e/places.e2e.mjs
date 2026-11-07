@@ -29,7 +29,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     assert.equal(await page.locator('#map-new-device').isVisible(), true);
     assert.equal(await page.locator('#flows-export').isVisible(), false, 'Export is in Settings now');
     const card = await me.openDevice('Kitchen tablet');
-    assert.deepEqual(await card.locator('.device-acts button').allInnerTexts(), ['+ Give more', 'Rename', 'Revoke device']);
+    assert.deepEqual(await card.locator('.kit-aspanel-foot button').allInnerTexts(), ['+ Give more', 'Rename', 'Revoke device']);
     assert.equal(await card.locator('.given-row').count(), 1, 'what it has');
     await page.locator('#map-mode [data-mode=flows]').click();
     await me.until('the flows are shown', async () => (await page.locator('#flows').isVisible()) && !(await page.locator('#links').isVisible()));

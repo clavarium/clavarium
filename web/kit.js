@@ -688,9 +688,12 @@
                                                                                '': groups once one exists, else types
          query   a name searched (any case)     folded   group ids folded shut     kinds   [[kind, title]] in order
        -> { view, canGroup, sections: [{ id, title, kind | group, items, holders, folded, drop, empty }], shown, total } */
-    const scopeOf = (scope) => (String(scope ?? 'all').startsWith('conversation:') ? 'conversation' : 'all');
+    /* 'device:<pairing>' (07-11, assets step 6): what a device sees on /c/ -- read by its rights, nothing to make or give. */
+    const scopeOf = (scope) => { const s = String(scope ?? 'all'); return s.startsWith('conversation:') ? 'conversation' : s.startsWith('device:') ? 'device' : 'all'; };
     function assetListModel({ items = [], groups = [], scope = 'all', by = '', query = '', folded = [], kinds = [] } = {}) {
         const canGroup = scopeOf(scope) === 'all';
+        /* « + New » and « Give… »: the owner's (the menu, a conversation's tab), never a device's. */
+        const canNew = scopeOf(scope) !== 'device'; const canGive = canNew;
         const view = canGroup && (by === 'group' || (by !== 'type' && groups.length > 0)) ? 'group' : 'type';
         const q = String(query ?? '').trim().toLowerCase();
         const shown = q ? items.filter((i) => String(i.name ?? '').toLowerCase().includes(q)) : [...items];
@@ -720,7 +723,33 @@
             /* The loose ones stay a place to drag to (out of a group) while there are groups, even emptied. */
             if (loose.length || (!q && items.length)) sections.push({ id: 'group:', group: '', title: say('set-as-no-group', 'No group'), items: loose, drop: '', empty: loose.length ? '' : groups.length ? 'grouped' : 'nogroups' });
         }
-        return { view, canGroup, sections, shown: shown.length, total: items.length };
+        return { view, canGroup, canNew, canGive, scope: scopeOf(scope), sections, shown: shown.length, total: items.length };
+    }
+
+    /* WHAT A DEVICE SEES (07-11, assets step 6), as the list's items: its conversation's work folder (kept here) and what
+       is attached to it, then what was given to the device itself; given its chat alone, only the latter. The larger of
+       two rights holds (given to write, attached to read). Each with its right as the device has it (a badge, read only).
+         shared     [{ name, type, access }] given to the device (GET /c/api/<pairing>/me, `shared`)
+         resources  [{ name, access, type }] attached to its conversation       work   'kept' | 'disk'
+         chatOnly   given the chat alone                                         conversation  its name */
+    function deviceItems({ shared = [], resources = [], work = '', chatOnly = false, conversation = '' } = {}) {
+        const kind = (t) => (t === 'mailbox' || t === 'git' ? t : 'folder');
+        const out = new Map();
+        const put = (r, via) => {
+            if (!r?.name) return;
+            const access = r.access === 'write' ? 'write' : 'read';
+            const was = out.get(r.name);
+            if (was) { if (access === 'write') was.access = 'write'; if (via === 'device') was.via = 'device'; return; }
+            out.set(r.name, { name: r.name, kind: kind(r.type), access, via });
+        };
+        if (!chatOnly) {
+            if (work === 'kept') put({ name: 'work', access: 'write' }, 'work');
+            for (const r of resources ?? []) put(r, 'conversation');
+        }
+        for (const r of shared ?? []) put(r, 'device');
+        return [...out.values()].map((i) => ({ key: `${i.kind}:${i.name}`, kind: i.kind, name: i.name, access: i.access, via: i.via,
+            right: { key: i.kind, level: i.access, holder: 'device' },
+            sub: i.via === 'work' ? say('set-dev-work', 'Where its tool works') : i.via === 'device' ? say('set-dev-given', 'Given to this device') : say('set-dev-with', 'With {name}').replace('{name}', conversation) }));
     }
 
     /* The list drawn from its model. A row is an AssetCard (`rowCls` added: the page's handle on it); `pinned`,
@@ -729,6 +758,7 @@
        when a search finds nothing. `after(a)`: a node drawn under a row (Give…: the chosen one's right). */
     function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '', after = null } = {}) {
         const box = node('div', 'kit-aslist'); box.dataset.view = model.view;
+        if (model.scope) box.dataset.scope = model.scope;
         box.append(...pinned.filter(Boolean));
         const hints = {
             group: say('set-as-group-empty', 'Empty: drag an asset here'),
@@ -854,17 +884,20 @@
     /* The list drawn from its model. `onChange(row, level, stored)` sets one right (the picker waits on it); `kind`, the
        asset's own kind (a calendar's levels say what they mean); `actions`, more gestures under it (Share with a device…).
        Its old handles kept for the pages' tests: .as-chapter .as-add, .as-users, .as-picker, .given-row[data-conversation]. */
-    function AccessList(model, { key = '', kind = '', name = '', levels = null, onChange = () => {}, actions = [] } = {}) {
+    /* `title`: '' draws no head (the page has its own: a device's thing, a conversation's Sharing); `give`: false, no
+       « + Give to… » (a device is shared from its own sheet). */
+    function AccessList(model, { key = '', kind = '', name = '', levels = null, onChange = () => {}, actions = [], title, give: giving = true } = {}) {
         const box = node('section', 'kit-access');
         const head = node('div', 'as-chapter kit-access-head');
-        head.append(node('h3', '', say('set-acc-title', 'Who has it')));
+        const heading = title ?? say('set-acc-title', 'Who has it');
+        if (heading) head.append(node('h3', '', heading));
         const picker = node('div', 'as-users as-picker kit-access-pick'); picker.hidden = true;
         const give = node('button', 'as-add kit-access-give', '+'); give.type = 'button';
         const giveWord = say('set-acc-give', 'Give to…');
         give.setAttribute('aria-label', giveWord); give.title = giveWord; give.setAttribute('aria-expanded', 'false');
         give.addEventListener('click', () => { picker.hidden = !picker.hidden; give.setAttribute('aria-expanded', String(!picker.hidden)); });
-        head.append(give);
-        box.append(head);
+        if (giving) head.append(give);
+        if (head.children.length) box.append(head);
         const row = (r) => {
             const line = node('div', 'given-row kit-access-row');
             line.dataset[r.holder === 'device' ? 'device' : 'conversation'] = String(r.id).replace(/^[a-z]+:/, '');
@@ -898,9 +931,11 @@
         const said = { nobody: say('set-acc-nobody', 'No conversation uses it.'), everyone: '', noready: say('set-acc-noready', 'No conversation is ready.') }[model.said];
         if (said && !model.here) users.append(node('p', 'hint', said));
         if (users.children.length) box.append(users);
-        for (const r of model.others) picker.append(row(r));
-        if (!model.others.length) picker.append(node('p', 'hint', model.said === 'noready' ? say('set-acc-noready', 'No conversation is ready.') : say('set-acc-everyone', 'Every conversation has it.')));
-        box.append(picker);
+        if (giving) {
+            for (const r of model.others) picker.append(row(r));
+            if (!model.others.length) picker.append(node('p', 'hint', model.said === 'noready' ? say('set-acc-noready', 'No conversation is ready.') : say('set-acc-everyone', 'Every conversation has it.')));
+            box.append(picker);
+        }
         const more = actions.filter(Boolean);
         if (more.length) { const acts = node('div', 'kit-access-acts'); acts.append(...more); box.append(acts); }
         return box;
@@ -1013,7 +1048,8 @@
          back      { label?, onBack } the way back            parts    [node | { title, extra: [nodes], body: [nodes], cls }]
          foot      [nodes]                                   before   [nodes] above the head (an ending: "✓ created")
        A part's title draws a chapter head (.as-chapter), its `extra` on its right. */
-    function AssetPanel(card, { back = null, parts = [], foot = [], before = [], cls = '' } = {}) {
+    /* `actions`: gestures on its head's right (a device's fold). */
+    function AssetPanel(card, { back = null, parts = [], foot = [], before = [], cls = '', actions = [] } = {}) {
         const root = node('div', `kit-aspanel${cls ? ` ${cls}` : ''}`);
         if (card?.key) root.dataset.asset = card.key;
         root.append(...before.filter(Boolean));
@@ -1023,7 +1059,7 @@
             b.addEventListener('click', () => back.onBack?.());
             top.append(b);
         }
-        top.append(AssetCard(card ?? {}, { size: 'head' }));
+        top.append(AssetCard(card ?? {}, { size: 'head', actions }));
         root.append(top);
         for (const p of parts) {
             if (!p) continue;
@@ -1063,7 +1099,7 @@
 
     window.clavariumKit = {
         collectModel,
-        AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, AssetPicker, assetPickModel, RIGHT_SAME,
+        AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, deviceItems, AccessList, accessModel, AssetPanel, AssetDelete, AssetPicker, assetPickModel, RIGHT_SAME,
         memberLevel, groupLevels, groupLevel, groupFanOut, skippedSaid, GroupChip,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, MCP_WORDS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,

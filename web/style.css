@@ -910,6 +910,17 @@ svg.lk-links path.temp { stroke: var(--k-pick); stroke-dasharray: 4 4; }
 .files-card b { overflow-wrap: anywhere; }
 #files-ask, #files-progress { position: sticky; top: 0; z-index: 2; box-shadow: 0 6px 18px rgba(0, 0, 0, .25); }
 #files-ask { border-color: var(--brass); }
+/* A device's Files (/c/, assets step 6): the one asset list beside the asset opened; on a phone, one or the other. */
+#files-split { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+#files-side, #files-body { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#files-panel { min-width: 0; }
+#files-side .kit-aslist-head h3 { margin: 6px 0 2px; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); }
+#files[data-open="list"] #files-panel, #files[data-open="detail"] #files-side { display: none; }
+@media (min-width: 720px) {
+  #files[data-many="true"] #files-split { grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); align-items: start; }
+  #files[data-many="true"] #files-side, #files[data-many="true"] #files-panel { display: flex; flex-direction: column; }
+  #files-panel .as-back { display: none; }
+}
 #files-name input { font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; min-width: 0; width: min(100%, 420px); }
 #files-name label { font-size: .75rem; color: var(--ink2); }
 .bar { height: 8px; border-radius: 999px; background: var(--line); overflow: hidden; }
@@ -2937,3 +2948,29 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
   .tidy-wrap .lk-sheet { width: min(440px, 92vw); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
   .tidy-wrap .lk-sheet::before { display: none; }
 }
+
+/* A DEVICE'S SHARING ON THE SAME PIECES (07-11, assets step 6): a device opened is the asset panel; each thing it has, or
+   may get, an AssetCard row with its right (RightsPicker) on its right; by thing, the thing's row and who has it. */
+.device-panel { border: 1px solid var(--line); border-radius: 10px; background: var(--bar); padding: 10px 12px; margin-top: 8px; gap: 8px; }
+.device-panel .kit-aspanel-part .as-chapter h3 { margin: 0; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--ink2); }
+.device-panel .given { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.device-panel .given > * { border-top: 1px solid var(--line); }
+.device-panel .given > :first-child { border-top: 0; }
+.device-panel .given > .hint { margin: 0; padding: 8px 12px; }
+.device-panel input { min-height: 40px; font: .875rem var(--sans); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; min-width: 0; flex: 1 1 auto; }
+.device-panel .kit-aspanel-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.device-panel .kit-aspanel-foot button { min-height: 40px; }
+.kit-asset.dev-thing { flex-wrap: wrap; padding: 8px 12px; border-radius: 0; gap: 6px 10px; }
+.kit-asset.dev-thing .kit-asset-main { flex: 1 1 140px; }
+.kit-asset.dev-thing .kit-asset-side { flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
+.kit-asset.dev-thing > .parts-off { flex-basis: 100%; }
+.kit-asset.dev-thing .kit-rights-pick button { min-height: 36px; }
+#share-basket, #share-add { display: flex; flex-direction: column; }
+#share-basket > .dev-thing, #share-add > .dev-thing { border-top: 1px solid var(--line); }
+.thing > summary .kit-asset { flex: 1 1 auto; padding: 4px 0; }
+.thing > .kit-access { padding: 0 12px 10px; }
+.thing > .kit-access .as-users { background: var(--panel); }
+.thing > .dev-thing { border-top: 1px solid var(--line); }
+#share-here .kit-access .given-row { padding: 10px 12px; }
+.kit-asset.dev-thing > .kit-asset-ic { flex: none; }
+.device-panel .kit-aspanel-foot.as-foot { flex-direction: row; justify-content: flex-start; align-items: center; }
