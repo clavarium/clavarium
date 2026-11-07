@@ -30,6 +30,8 @@
  *   AccessList     WHO HAS IT (06-11, assets step 3): a row per conversation or device, its RightsPicker; seen from one
  *                  conversation, its row first, then "Also with"; accessModel places the rows.
  *   AssetPanel     ONE ASSET OPENED, the same in the Assets menu and a conversation's tab: head, parts, foot (AssetDelete).
+ *                  A group of assets opens in it too (assets step 5): groupLevels, groupLevel, groupFanOut give a level
+ *                  to every member that takes it (skippedSaid: the others, said once); GroupChip, an asset's group ▾.
  *   AssetPicker    GIVE… (07-11, assets step 4): the one list of what a conversation has not yet, one chosen, its right,
  *                  then « Give »; a new asset below it (NewAsset). assetPickModel places the rows.
  *   RIGHTS         THE ONE TABLE of what an asset can be given at, by its kind and by who gets it (a
@@ -71,10 +73,12 @@
 
     /* A chip: { text, cls?, tone?: 'need' | 'note', icon?: 'room' | 'box', title? }. Empty: nothing. */
     function Chips(list = []) {
-        const shown = list.filter((c) => c && c.text !== undefined && c.text !== '');
+        const shown = list.filter((c) => c && (c.node || (c.text !== undefined && c.text !== '')));
         if (!shown.length) return null;
         const box = node('span', 'kit-chips');
         for (const c of shown) {
+            /* A chip that is a control of the page's (an asset's group ▾): placed as it is, a chip by its look. */
+            if (c.node) { addClass(c.node, 'kit-chip'); box.append(c.node); continue; }
             const chip = node('small', `kit-chip${c.cls ? ` ${c.cls}` : ''}`);
             if (c.tone) chip.dataset.tone = c.tone;
             if (c.icon) { const i = node('span', `kit-chip-ic kit-ic-${c.icon}`); i.setAttribute('aria-hidden', 'true'); chip.append(i); }
@@ -429,19 +433,24 @@
 
     /* AN ASSET'S SIGN, by its kind: the icon set's name (Lucide, icons.js), or '' for one drawn here (a binder).
        A live link (a connexion) takes the sign of what it links (a mailbox, a calendar); `acces`, any other. */
-    const ASSET_ICONS = { folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'user', secret: 'key-round', list: '', acces: 'link', give: 'plus', send: 'arrow-up', demandes: 'arrow-up', box: 'mic', device: 'smartphone', conversation: 'message-square' };
+    const ASSET_ICONS = { folder: 'folder', git: 'git-branch', mailbox: 'mail', agenda: 'calendar', contacts: 'user', secret: 'key-round', list: '', group: '', acces: 'link', give: 'plus', send: 'arrow-up', demandes: 'arrow-up', box: 'mic', device: 'smartphone', conversation: 'message-square' };
     const ASSET_KINDS = Object.keys(ASSET_ICONS);
-    /* A binder: the set has no such sign, so it is drawn here, in its style (was app.js listIcon). */
-    function listSign() {
+    /* A binder, a group of assets: the set has no such sign, so each is drawn here, in its style (was app.js listIcon;
+       a group, the layers of the Assets menu and the map). */
+    const OWN_SIGNS = {
+        list: ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8'],
+        group: ['m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z', 'm22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65', 'm22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65'],
+    };
+    function ownSign(kind) {
         const svg = svgNode('svg'); svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
-        for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const p = svgNode('path'); p.setAttribute('d', d); svg.append(p); }
+        for (const d of OWN_SIGNS[kind] ?? OWN_SIGNS.list) { const p = svgNode('path'); p.setAttribute('d', d); svg.append(p); }
         return svg;
     }
     function AssetIcon({ kind = 'folder', cls = '' } = {}) {
         const k = kind in ASSET_ICONS ? kind : 'folder';
         const box = node('span', `kit-asset-ic${cls ? ` ${cls}` : ''}`); box.dataset.kind = k; box.setAttribute('aria-hidden', 'true');
         const name = ASSET_ICONS[k];
-        const svg = name ? window.clavariumIcons?.icon?.(name) : listSign();
+        const svg = name ? window.clavariumIcons?.icon?.(name) : ownSign(k);
         if (svg) box.append(svg);
         return box;
     }
@@ -534,8 +543,9 @@
        to choose (a kind not given to that holder): null. */
     /* A CALENDAR, CONTACTS: given live, Read is Watch and Write is Propose (what Attach made of them) -- said on the picker. */
     const RIGHT_SAME = { agenda: { watch: 'read', propose: 'write' }, contacts: { watch: 'read', propose: 'write' } };
-    function RightsPicker({ key = '', kind = '', holder = 'conversation', value, level, label = '', cls = '', onChange = () => {} } = {}) {
-        const levels = rightsFor(key, holder);
+    function RightsPicker({ key = '', kind = '', holder = 'conversation', value, level, levels: given = null, label = '', cls = '', onChange = () => {} } = {}) {
+        /* `levels`: a group's (the levels its members take, groupLevels); else the kind's, from the table. */
+        const levels = given ?? rightsFor(key, holder);
         if (!levels.length) return null;
         const now = level ?? rightOf(key, value, holder);
         const options = levels.map((l) => ({ value: l, label: wordOf(key, l, 'pick') }));
@@ -714,8 +724,8 @@
     }
 
     /* The list drawn from its model. A row is an AssetCard (`rowCls` added: the page's handle on it); `pinned`,
-       rows above every section (what waits: To send, Demandes). `onOpen(key)`; a group's head folds it
-       (`onFold(id)`), its ⚙ opens it (`onGroup(id)`). `empty`: said when there is nothing at all; `noMatch`,
+       rows above every section (what waits: To send, Demandes). `onOpen(key)`; a group's row (05-11, assets step 5):
+       its ▾ folds it (`onFold(id)`), its name and count open it in the asset panel (`onGroup(id)`), who has it on its right. `empty`: said when there is nothing at all; `noMatch`,
        when a search finds nothing. `after(a)`: a node drawn under a row (Give…: the chosen one's right). */
     function AssetList(model, { chosen = '', onOpen = () => {}, onFold = () => {}, onGroup = () => {}, rowCls = '', pinned = [], empty = '', noMatch = '', after = null } = {}) {
         const box = node('div', 'kit-aslist'); box.dataset.view = model.view;
@@ -733,18 +743,18 @@
             if (s.group) {
                 if (s.folded) head.dataset.folded = 'true';
                 const toggle = node('button', 'kit-aslist-fold'); toggle.type = 'button';
-                if (`group:${s.group}` === chosen) toggle.setAttribute('aria-current', 'true');
                 toggle.setAttribute('aria-expanded', String(!s.folded));
+                toggle.setAttribute('aria-label', `${s.folded ? say('set-as-unfold', 'Unfold') : say('set-as-fold', 'Fold')} ${s.title}`);
                 toggle.title = s.folded ? say('set-as-unfold', 'Unfold') : say('set-as-fold', 'Fold');
-                toggle.append(node('span', 'kit-aslist-chev', s.folded ? '▸' : '▾'), node('h3', '', s.title), node('span', 'kit-aslist-n', String(s.items.length)));
+                toggle.append(node('span', 'kit-aslist-chev', s.folded ? '▸' : '▾'));
                 toggle.addEventListener('click', () => onFold(s.group));
-                head.append(toggle);
+                const open = node('button', 'kit-aslist-open'); open.type = 'button'; open.dataset.group = s.group;
+                if (`group:${s.group}` === chosen) open.setAttribute('aria-current', 'true');
+                open.title = say('set-as-group-gear', 'Give, rename, remove');
+                open.append(node('h3', '', s.title), node('span', 'kit-aslist-n', String(s.items.length)));
+                open.addEventListener('click', () => onGroup(s.group));
+                head.append(toggle, open);
                 if (s.holders?.length) head.append(Holders(s.holders));
-                const gear = node('button', 'kit-aslist-gear', '⚙'); gear.type = 'button';
-                gear.setAttribute('aria-label', say('set-as-group-open', 'Settings for {name}').replace('{name}', s.title));
-                gear.title = say('set-as-group-gear', 'Give, rename, remove');
-                gear.addEventListener('click', (e) => { e?.stopPropagation?.(); onGroup(s.group); });
-                head.append(gear);
             } else head.append(node('h3', '', s.title));
             sec.append(head);
             if (!s.folded) {
@@ -818,16 +828,19 @@
 
        accessModel: the rows placed, no page needed (tested alone).
          key      the table's key (rightsKey)       from    'conversation:x' when seen from it ('' : the Assets menu)
-         holders  [{ id: 'conversation:x' | 'device:y', name, sub?, value | level, ready?: false, hue? }]
+         holders  [{ id: 'conversation:x' | 'device:y', name, sub?, value | level, ready?: false, hue?, parts?: [{ name, key, level }] }]
        -> { here, given: [rows], others: [rows], count, said: '' | 'nobody' | 'everyone' | 'noready' } -- a row with its
           `holder` ('conversation' | 'device') and its `level`; a device is never offered (it is shared from its own sheet). */
     const holderOf = (id) => (String(id ?? '').startsWith('device:') ? 'device' : 'conversation');
-    function accessModel({ key = '', holders = [], from = '' } = {}) {
+    /* `levels`: a group's, by holder ({ conversation: [...], device: [...] }, groupLevels); its row's level may be 'some'
+       (part of its members, or not all at one level: no level pressed). */
+    function accessModel({ key = '', holders = [], from = '', levels = null } = {}) {
+        const levelsOf = (holder) => levels?.[holder] ?? rightsFor(key, holder);
         const rows = (holders ?? []).filter((h) => h && h.id).map((h) => {
             const holder = holderOf(h.id);
             const level = h.level ?? rightOf(key, h.value, holder);
-            return { ...h, holder, level: level in RIGHT_LEVELS ? level : 'none' };
-        }).filter((r) => rightsFor(key, r.holder).length > 0);
+            return { ...h, holder, level: level in RIGHT_LEVELS || (levels && level === 'some') ? level : 'none' };
+        }).filter((r) => levelsOf(r.holder).length > 0);
         const here = from ? rows.find((r) => r.id === from) ?? null : null;
         const rest = rows.filter((r) => r !== here);
         const given = [...rest.filter((r) => r.holder === 'conversation' && r.level !== 'none'), ...rest.filter((r) => r.holder === 'device' && r.level !== 'none')];
@@ -841,7 +854,7 @@
     /* The list drawn from its model. `onChange(row, level, stored)` sets one right (the picker waits on it); `kind`, the
        asset's own kind (a calendar's levels say what they mean); `actions`, more gestures under it (Share with a device…).
        Its old handles kept for the pages' tests: .as-chapter .as-add, .as-users, .as-picker, .given-row[data-conversation]. */
-    function AccessList(model, { key = '', kind = '', name = '', onChange = () => {}, actions = [] } = {}) {
+    function AccessList(model, { key = '', kind = '', name = '', levels = null, onChange = () => {}, actions = [] } = {}) {
         const box = node('section', 'kit-access');
         const head = node('div', 'as-chapter kit-access-head');
         head.append(node('h3', '', say('set-acc-title', 'Who has it')));
@@ -861,9 +874,15 @@
             const nm = node('span', 'kit-access-name', r.name);
             const sub = r.sub ?? (r.holder === 'device' ? say('set-acc-device', 'Device') : '');
             if (sub) nm.append(node('small', '', sub));
+            /* A group's row given in part: what it has of it, each member with its right (nothing hidden behind « 2 of 3 »). */
+            if (r.parts?.length) {
+                const has = node('span', 'kit-access-parts');
+                for (const p of r.parts) { const it = node('span', 'kit-access-part'); it.append(node('span', '', p.name), RightsBadge({ key: p.key, level: p.level })); has.append(it); }
+                nm.append(has);
+            }
             who.append(nm);
             line.append(who);
-            const pick = RightsPicker({ key, kind, holder: r.holder, level: r.level, label: say('set-acc-what', 'What {who} may do with {name}').replace('{who}', r.name).replace('{name}', name),
+            const pick = RightsPicker({ key, kind, holder: r.holder, level: r.level, levels: levels?.[r.holder] ?? null, label: say('set-acc-what', 'What {who} may do with {name}').replace('{who}', r.name).replace('{name}', name),
                 onChange: (level, stored) => onChange(r, level, stored) });
             if (pick) line.append(pick);
             return line;
@@ -884,6 +903,107 @@
         box.append(picker);
         const more = actions.filter(Boolean);
         if (more.length) { const acts = node('div', 'kit-access-acts'); acts.append(...more); box.append(acts); }
+        return box;
+    }
+
+    /* A GROUP OF ASSETS (05-11, assets step 5): only a label its members carry (server groups.mjs); a right stays stored
+       asset by asset. « Give the group » is a shortcut: the level chosen for a conversation or a device is given to
+       every member that takes it, « None » takes it from every member; a member whose kind cannot take it is skipped,
+       and said once. A calendar's, contacts' Read is Watch, Write is Propose (RIGHT_SAME, as their own picker says).
+       Members: the page's items (rightsKey reads them); `current`: { [member key]: level } for one holder. */
+    const sameOf = (m) => (rightsKey(m) === 'connexion' ? RIGHT_SAME[m.kind] ?? null : null);
+    /* What a member gets for a group's level: its own level, or what it means for its kind; null: it cannot take it. */
+    function memberLevel(m, level, holder = 'conversation') {
+        const own = rightsFor(rightsKey(m), holder);
+        if (!own.length) return null;
+        if (own.includes(level)) return level;
+        const same = sameOf(m);
+        const as = same ? Object.keys(same).find((k) => same[k] === level) : null;
+        return as && own.includes(as) ? as : null;
+    }
+    /* The levels a group offers a holder: every level one of its members takes, in the table's order, « None » first.
+       A calendar's Watch, Propose are not offered again beside Read, Write (the same for it). */
+    function groupLevels(members = [], holder = 'conversation') {
+        const own = new Set((members ?? []).flatMap((m) => rightsFor(rightsKey(m), holder)));
+        const plain = new Set((members ?? []).filter((m) => !sameOf(m)).flatMap((m) => rightsFor(rightsKey(m), holder)));
+        const said = (l) => (members ?? []).some((m) => sameOf(m)?.[l] && plain.has(sameOf(m)[l]));
+        return own.size ? Object.keys(RIGHT_LEVELS).filter((l) => own.has(l) && (plain.has(l) || !said(l))) : [];
+    }
+    /* A holder's level of the group: the one all its members have (a calendar's Watch read as Read when the group offers
+       Read), 'none' when none has any, else 'some'; `has` of `of` its members that it can take have something. */
+    function groupLevel(members = [], current = {}, holder = 'conversation') {
+        const offered = groupLevels(members, holder);
+        const can = (members ?? []).filter((m) => rightsFor(rightsKey(m), holder).length);
+        const lv = can.map((m) => { const l = current[m.key] ?? 'none'; const as = sameOf(m)?.[l]; return as && offered.includes(as) ? as : l; });
+        const has = lv.filter((l) => l !== 'none').length;
+        const level = !has ? 'none' : has === can.length && new Set(lv).size === 1 ? lv[0] : 'some';
+        return { level, has, of: can.length };
+    }
+    /* THE FAN-OUT: one level for one holder -> each member's own grant (`give`: { m, key, level, stored }, only those it
+       changes), and those skipped (`skip`, by kind: { kind, n, levels }: what that kind takes). */
+    function groupFanOut({ members = [], level = 'none', holder = 'conversation', current = {} } = {}) {
+        const give = []; const skipped = [];
+        for (const m of members ?? []) {
+            const key = rightsKey(m);
+            const l = level === 'none' ? (rightsFor(key, holder).length ? 'none' : null) : memberLevel(m, level, holder);
+            if (!l) { if (level !== 'none') skipped.push(m); continue; }
+            if ((current[m.key] ?? 'none') === l) continue;
+            give.push({ m, key: m.key, level: l, stored: storedOf(key, l, holder) });
+        }
+        const skip = [];
+        for (const m of skipped) {
+            const k = m.kind ?? rightsKey(m);
+            const was = skip.find((x) => x.kind === k);
+            if (was) was.n++; else skip.push({ kind: k, n: 1, levels: rightsFor(rightsKey(m), holder).filter((l) => l !== 'none') });
+        }
+        return { give, skip };
+    }
+    /* Said once, under the group's « Who has it »: « 2 skipped: Secret, Use only ». */
+    const KIND_WORDS = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: 'Binder', acces: 'Access' };
+    function skippedSaid(skip = []) {
+        const n = skip.reduce((a, x) => a + x.n, 0);
+        if (!n) return '';
+        const why = skip.map((x) => {
+            const kind = say(`set-acc-kind-${x.kind}`, KIND_WORDS[x.kind] ?? x.kind);
+            return x.levels.length ? say('set-group-only', '{kind}, {levels} only').replace('{kind}', kind).replace('{levels}', x.levels.map((l) => rightWord(l, 'pick')).join(' / '))
+                : say('set-group-no-device', '{kind}, not for a device').replace('{kind}', kind);
+        }).join('; ');
+        return say(n === 1 ? 'set-group-skipped-1' : 'set-group-skipped-n', n === 1 ? '1 skipped: {why}' : '{n} skipped: {why}').replace('{n}', String(n)).replace('{why}', why);
+    }
+
+    /* AN ASSET'S GROUP, as a chip on its head (« Home ▾ »): no group, a group, or « New group… » -- made in place, then
+       the asset placed in it. `onPlace(id | null)`; `onMake(label)` (a promise; false or a throw: the name stays to fix). */
+    function GroupChip({ groups = [], value = '', name = '', onPlace = () => {}, onMake = () => {} } = {}) {
+        const box = node('span', 'kit-groupchip');
+        const sel = node('select', 'kit-groupchip-sel');
+        sel.setAttribute('aria-label', say('set-group-of', 'Group of {name}').replace('{name}', name));
+        const opt = (v, text) => { const o = node('option', '', text); o.value = v; sel.append(o); return o; };
+        opt('', say('set-as-no-group', 'No group'));
+        for (const g of groups ?? []) opt(g.id, g.label);
+        opt('+new', say('set-group-new-dots', 'New group…'));
+        const has = (groups ?? []).some((g) => g.id === value);
+        sel.value = has ? value : '';
+        for (const o of sel.children) if (o.value === sel.value) o.selected = true;
+        const form = node('form', 'kit-groupchip-form'); form.hidden = true; form.autocomplete = 'off';
+        const input = node('input'); input.maxLength = 40; input.placeholder = say('set-group-name', 'Group name'); input.setAttribute('aria-label', input.placeholder);
+        const add = node('button', 'primary', say('set-group-add', 'Add')); add.type = 'submit';
+        const cancel = node('button', '', say('set-group-cancel', 'Cancel')); cancel.type = 'button';
+        form.append(input, add, cancel);
+        const back = () => { form.hidden = true; sel.hidden = false; sel.value = has ? value : ''; };
+        cancel.addEventListener('click', back);
+        sel.addEventListener('change', async () => {
+            if (sel.value === '+new') { sel.hidden = true; form.hidden = false; input.focus?.(); return; }
+            sel.disabled = true;
+            try { await onPlace(sel.value || null); } finally { sel.disabled = false; }
+        });
+        form.addEventListener('submit', async (e) => {
+            e?.preventDefault?.();
+            const label = String(input.value ?? '').trim();
+            if (!label) { input.focus?.(); return; }
+            add.disabled = true;
+            try { if ((await onMake(label)) === false) add.disabled = false; } catch { add.disabled = false; }
+        });
+        box.append(sel, form);
         return box;
     }
 
@@ -944,6 +1064,7 @@
     window.clavariumKit = {
         collectModel,
         AssetIcon, AssetCard, Holders, MemberStack, memberStackModel, roomPatch, RightsBadge, RightsPicker, AssetList, assetListModel, AccessList, accessModel, AssetPanel, AssetDelete, AssetPicker, assetPickModel, RIGHT_SAME,
+        memberLevel, groupLevels, groupLevel, groupFanOut, skippedSaid, GroupChip,
         ASSET_ICONS, ASSET_KINDS, RIGHTS, RIGHT_LEVELS, MCP_WORDS, rightsKey, rightsFor, rightOf, storedOf, lightest, rightWord,
         shareSlices, ShareDonut, ShareKey,
         STATES, STATE_WORDS, stateOf, hueOf, initialOf, IDLE_MS, idleFor, idleWords, tidyList,

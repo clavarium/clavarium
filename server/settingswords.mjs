@@ -101,7 +101,7 @@ export const SETTINGS_WORDS_FR = {
     'set-as-nobody': 'personne',
     /* The one list of assets (06-11, kit AssetList): its views, its one button, a group's head, what an empty one says. */
     'set-as-new': 'Nouveau', 'set-as-by-group': 'Groupes', 'set-as-by-type': 'Types', 'set-as-no-group': 'Sans groupe',
-    'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-open': 'Réglages de {name}', 'set-as-group-gear': 'Donner, renommer, supprimer',
+    'set-as-fold': 'Replier', 'set-as-unfold': 'Déplier', 'set-as-group-gear': 'Donner, renommer, supprimer',
     'set-as-group-empty': 'Vide : glissez un asset ici', 'set-as-all-grouped': 'Chaque asset est dans un groupe',
     'set-as-no-groups': 'Créez un groupe, puis glissez-y un asset',
     /* One asset opened (06-11, kit AssetPanel, AccessList): who has it, its kind, what a calendar's levels mean, delete. */
@@ -140,7 +140,6 @@ export const SETTINGS_WORDS_FR = {
     'set-as-card': '1 carte', 'set-as-cards': '{n} cartes', 'set-as-linked': 'lié : {list}',
     'set-as-to-send': 'À envoyer', 'set-as-to-send-sub': 'tous les dépôts, relus et envoyés ensemble', 'set-as-waiting': '{n} vous attendent',
     'set-as-none-given': 'Rien ne lui est encore donné.', 'set-as-no-match': 'Rien à ce nom.',
-    'set-as-group': 'Groupe', 'set-as-group-make': 'Créez-en un dans la vue « Groupes ».',
     'set-as-files': 'Fichiers', 'set-as-browse': 'Parcourir',
     'set-cx-mail': 'boîte mail', 'set-cx-calendar': 'agenda', 'set-cx-contacts': 'carnet d\'adresses', 'set-cx-files': 'dossier en ligne',
     /* External MCP servers (mcpx.mjs): the form, their tools, the rights in their own words. */
@@ -163,7 +162,16 @@ export const SETTINGS_WORDS_FR = {
     'set-acc-share': 'Partager avec un appareil…', 'set-acc-in-assets': 'Ouvrir dans Assets',
     'set-acc-used-1': 'Utilisé par 1 conversation : mettez « Aucun »', 'set-acc-used-n': 'Utilisé par {n} conversations : mettez « Aucun »',
     /* Give… (07-11, assets step 4): in a conversation's tab; Settings › Access one line; a secret's next start. */
-    'set-give-go': 'Donner', 'set-give-all': 'Elle a déjà chaque asset.', 'set-group-none-all': 'Tout à Aucun',
+    'set-give-go': 'Donner', 'set-give-all': 'Elle a déjà chaque asset.',
+    /* A group (07-11, assets step 5): opened in the asset panel, given to every member, made from any view. */
+    'set-group-new': 'Nouveau groupe', 'set-group-new-dots': 'Nouveau groupe…', 'set-group-name': 'Nom du groupe',
+    'set-group-add': 'Ajouter', 'set-group-cancel': 'Annuler', 'set-group-of': 'Groupe de {name}',
+    'set-group-in': 'Dans le groupe', 'set-group-has': '{has} sur {of}', 'set-group-per-asset': 'Le droit reste sur chaque asset.',
+    'set-group-empty-hint': 'Vide : choisissez ce groupe sur un asset.',
+    'set-group-rename': 'Renommer…', 'set-group-save': 'Renommer', 'set-group-remove': 'Retirer le groupe…',
+    'set-group-remove-q': 'Ses assets restent ; seul le groupe part.', 'set-group-remove-yes': 'Retirer',
+    'set-group-skipped-1': '1 ignoré : {why}', 'set-group-skipped-n': '{n} ignorés : {why}',
+    'set-group-only': '{kind}, {levels} seulement', 'set-group-no-device': '{kind}, pas pour un appareil',
     'set-acc-assets-1': '1 asset · voir', 'set-acc-assets-n': '{n} assets · voir', 'set-acc-asset-1': '1 asset', 'set-acc-asset-n': '{n} assets',
     'set-secret-next-on': '{name} : remis à son outil au prochain démarrage', 'set-secret-next-off': '{name} : plus remis dès son prochain démarrage',
     'set-files-list': 'Liste', 'set-files-icons': 'Icônes', 'set-files-empty': 'Ce dossier est vide.',

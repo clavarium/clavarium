@@ -3858,21 +3858,6 @@
         for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); svg.append(path); }
         return svg;
     }
-    const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
-    /* One row, used by both the by-type and the by-group views. The icon
-       follows the item's own kind (a group mixes kinds). */
-    function assetRow(item, { chosen, choose }) {
-        const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
-        if (item.key === chosen) row.setAttribute('aria-current', 'true');
-        const name = el('b', '', item.name);
-        if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
-        const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
-        if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
-        const words = el('span', 'as-words'); words.append(name, sub);
-        row.append(kindIcon(item.kind), words);
-        row.addEventListener('click', () => choose(item.key));
-        return row;
-    }
     /* AN ITEM OF THESE LISTS, as the kit's AssetCard takes it (06-11, assets step 2): its point when it asks for
        you (a secret soon or past, a mailbox failing), the shade of its line, who has it or its right. */
     const cardOf = (item) => ({ key: item.key, kind: item.kind, name: item.name, sub: item.sub ?? '', live: item.live,
@@ -3946,9 +3931,6 @@
         /* Once a finger's drag has begun, the page must not scroll under it. */
         holder.addEventListener('touchmove', (e) => { if (drag?.on) e.preventDefault(); }, { passive: false });
     }
-    /* The shortcut "give all": each member at the lightest real level for its type. */
-    const giveValue = (item, on) => (!on ? (item.target || item.kind !== 'secret' ? 'none' : 'off')
-        : item.target ? 'watch' : item.kind === 'secret' ? 'use' : 'read');
     async function applyMemberGrant(item, conversationName, value) {
         if (item.target) return grantTarget(item.target.id, conversationName, value);
         if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', asErrId());
@@ -3968,14 +3950,15 @@
         bar.replaceChildren(KIT.Segmented({ options: [{ value: 'group', label: uiSaid('set-as-by-group', 'Groups') }, { value: 'type', label: uiSaid('set-as-by-type', 'Types') }], value: view, label: 'Arrange assets',
             onChange: (by) => { if (by === view) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); } }));
     }
-    /* "+ New group", above the groups: a name in place, then made and opened. */
+    /* "+ New group", above the list in either view (05-11, step 5: groups are made from any view): a name in place,
+       then made and opened. */
     function newGroupBar() {
         const addBar = el('div', 'as-group-new');
         if (groupAdding) {
             const form = el('form', 'as-group-form'); form.autocomplete = 'off';
-            const input = el('input'); input.placeholder = 'Group name'; input.maxLength = 40; input.setAttribute('aria-label', 'New group name');
-            const make = el('button', 'primary', 'Add'); make.type = 'submit';
-            const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
+            const input = el('input'); input.placeholder = uiSaid('set-group-name', 'Group name'); input.maxLength = 40; input.setAttribute('aria-label', input.placeholder);
+            const make = el('button', 'primary', uiSaid('set-group-add', 'Add')); make.type = 'submit';
+            const cancel = el('button', '', uiSaid('set-group-cancel', 'Cancel')); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
             form.append(input, make, cancel);
             form.addEventListener('submit', async (event) => {
                 event.preventDefault(); $('assets-error').hidden = true;
@@ -3985,112 +3968,128 @@
             });
             addBar.append(form);
             queueMicrotask(() => input.focus());
-        } else addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
+        } else {
+            const word = uiSaid('set-group-new', 'New group');
+            const go = el('button', 'as-group-add'); go.type = 'button';
+            go.append(el('span', 'as-add', '+'), el('span', 'hint', word));
+            go.addEventListener('click', () => { groupAdding = true; void paintAssets(); });
+            addBar.append(go);
+        }
         return addBar;
     }
-    /* In an asset's detail: which group it is in. Moving it is a folder move
-       (it leaves any other group). New groups are made in the by-group view. */
-    function groupPicker(chosen, groups) {
-        const wrap = el('div', 'as-group-of'); wrap.append(el('span', 'as-group-of-label', uiSaid('set-as-group', 'Group')));
-        if (!groups.length) { wrap.append(el('small', 'hint', uiSaid('set-as-group-make', 'Make one in “By group”.'))); return wrap; }
-        const sel = el('select'); sel.setAttribute('aria-label', `Group for ${chosen.name}`);
-        const none = el('option', '', uiSaid('set-as-no-group', 'No group')); none.value = ''; sel.append(none);
-        const inId = groupOf(chosen.key, groups);
-        for (const g of groups) { const o = el('option', '', g.label); o.value = g.id; if (g.id === inId) o.selected = true; sel.append(o); }
-        if (!inId) none.selected = true;
-        sel.addEventListener('change', async () => {
+    /* AN ASSET'S GROUP, a chip on its head in the menu (kit GroupChip: « Home ▾ »): moving it is a folder move (it leaves any
+       other group); « New group… » makes one in place and puts it there. */
+    function groupChip(chosen, groups) {
+        const place = async (group) => {
             $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group: sel.value || null }); }
+            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group }); }
             catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
             void paintAssets();
-        });
-        wrap.append(sel);
-        return wrap;
-    }
-    /* A group's own detail: rename it, remove it (the assets stay), give the
-       whole group to a conversation at a level, and its members (each opens). */
-    function groupDetail(detail, group, items, back) {
-        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
-        const top = el('div', 'as-title');
-        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-        const h = el('h2'); h.append(el('span', '', group.label), el('span', 'as-badge count', String(members.length)));
-        top.append(all, h);
-        detail.append(top);
-        const repaint = () => void paintAssets();
-        const openAsset = (key) => { placeAssetStep(); if (key !== assetOpen) groupGiveShow.clear(); assetOpen = key; remember(); void paintAssets(); };
-
-        /* GIVE THE GROUP: a block per conversation, a row per asset AT ITS OWN
-           level. Two shortcuts set or clear all at once (not a sticky state).
-           Rights stay stored per asset -- this is just a handy place to set them. */
-        const ready = conversations.filter((c) => c.phase === 'ready');
-        const isGiven = (c) => members.some((m) => !['none', 'off'].includes(memberCurrent(m, c.name)));
-        const shownConvs = ready.filter((c) => isGiven(c) || groupGiveShow.has(c.name));
-        const setAll = async (c, on) => { for (const m of members) { try { await applyMemberGrant(m, c.name, giveValue(m, on)); } catch { /* shown by the grant */ } } repaint(); };
-        const convBlock = (c) => {
-            const block = el('div', 'as-give-conv');
-            const head = el('div', 'as-give-head');
-            const giveAll = el('button', 'as-mini', 'Give all'); giveAll.type = 'button'; giveAll.addEventListener('click', () => setAll(c, true));
-            const clearAll = el('button', 'as-mini', uiSaid('set-group-none-all', 'All to None')); clearAll.type = 'button'; clearAll.addEventListener('click', () => setAll(c, false));
-            head.append(el('b', '', shownName(c)), el('span', 'as-give-acts', ''));
-            head.lastChild.append(giveAll, clearAll);
-            block.append(head);
-            for (const m of members) {
-                const line = el('div', 'as-give-row');
-                const nm = el('span', 'as-give-name'); nm.append(kindIcon(m.kind), el('span', '', m.name));
-                /* The one picker (kit RightsPicker, « None » first): the same levels as the asset's own panel. */
-                const pick = KIT.RightsPicker({ key: KIT.rightsKey(m), kind: m.kind, value: memberCurrent(m, c.name), label: `${m.name} for ${shownName(c)}`,
-                    onChange: async (level, stored) => { await applyMemberGrant(m, c.name, stored ?? level); repaint(); } });
-                if (pick) line.append(nm, pick); else line.append(nm);
-                block.append(line);
-            }
-            if (members.length === 0) block.append(el('p', 'hint', 'The group is empty.'));
-            return block;
         };
-        detail.append(chapter('Give the group to a conversation'));
-        const giveBox = el('div', 'as-give');
-        for (const c of shownConvs) giveBox.append(convBlock(c));
-        if (shownConvs.length === 0) giveBox.append(el('p', 'hint', members.length ? 'Not given to any conversation yet.' : 'Add assets to the group first (open an asset, pick this group).'));
-        detail.append(giveBox);
-        /* Add a conversation to set up, even before any asset is given to it. */
-        const others = ready.filter((c) => !shownConvs.includes(c));
-        const addConv = el('button', 'as-link as-add-conv', '+ a conversation'); addConv.type = 'button';
-        const picker = el('div', 'as-pick'); picker.hidden = true;
-        for (const c of others) { const b = el('button', 'as-pick-conv', shownName(c)); b.type = 'button'; b.addEventListener('click', () => { groupGiveShow.add(c.name); repaint(); }); picker.append(b); }
-        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation is shown.' : 'No conversation is ready.'));
-        addConv.addEventListener('click', () => { picker.hidden = !picker.hidden; });
-        if (members.length) detail.append(addConv, picker);
-        const note = el('p', 'as-assoc hint');
-        note.append(el('b', '', 'Per asset'), document.createTextNode(': each keeps the levels of its own type (a mailbox reads, a secret is used, a connexion watches…). The two shortcuts just set or clear all at once; each row stays editable, and the right is stored per asset.'));
-        detail.append(note);
-
-        /* The assets in the group, each opens its own detail. */
-        detail.append(chapter('Assets in the group'));
-        const rowsBox = el('div', 'as-group-members');
-        for (const m of members) rowsBox.append(assetRow(m, { chosen: '', choose: openAsset }));
-        if (members.length === 0) rowsBox.append(el('p', 'hint', 'Open an asset and pick this group to put it here.'));
-        detail.append(rowsBox);
-
-        /* Rename, then remove (a plain link -- it only drops the grouping). */
-        detail.append(chapter('Name'));
-        const form = el('form', 'as-group-rename'); form.autocomplete = 'off';
-        const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', 'Group name');
-        const go = el('button', 'btn', 'Rename'); go.type = 'submit';
-        form.append(name, go);
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault(); $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-            repaint();
+        return KIT.GroupChip({ groups, value: groupOf(chosen.key, groups), name: chosen.name, onPlace: place,
+            onMake: async (label) => {
+                $('assets-error').hidden = true;
+                let made;
+                try { made = await post(`${API}/asset-groups`, { label }); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return false; }
+                await place(made.id);
+                return true;
+            } });
+    }
+    /* A GROUP OPENED (05-11, assets step 5): the same panel as an asset (kit AssetPanel). Who has it: a conversation or a
+       device given a level gets it on every member that takes it, « None » takes it from every member (kit groupFanOut);
+       those skipped are said once. A right stays stored asset by asset: the group is only a label. Then its members (each
+       opens), Rename, Remove (the assets stay). */
+    let groupSaid = null;
+    /* One holder's level of each member: { [key]: level }. */
+    function groupCurrent(members, row) {
+        if (String(row.id).startsWith('device:')) {
+            const grants = sharedDevices.find((d) => `device:${d.id}` === row.id)?.grants ?? [];
+            return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), grants.find((g) => g.asset === m.key)?.rights, 'device')]));
+        }
+        const name = String(row.id).slice('conversation:'.length);
+        return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), memberCurrent(m, name))]));
+    }
+    function groupHolders(members) {
+        const rows = [];
+        const has = (g) => (g.level === 'some' ? uiSaid('set-group-has', '{has} of {of}', { has: g.has, of: g.of }) : '');
+        /* Given in part: each member it has, with its right (as the old screen showed each one's level). */
+        const parts = (g, now) => (g.level === 'some' ? members.filter((m) => (now[m.key] ?? 'none') !== 'none').map((m) => ({ name: m.name, key: KIT.rightsKey(m), level: now[m.key] })) : undefined);
+        for (const c of conversations) {
+            const id = `conversation:${c.name}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'conversation');
+            if (c.phase !== 'ready' && g.level === 'none') continue;
+            rows.push({ id, name: shownName(c) || c.name, sub: has(g) || (c.toolLabel ?? ''), level: g.level, ready: c.phase === 'ready', parts: parts(g, now) });
+        }
+        for (const d of sharedDevices) {
+            if (!(d.grants ?? []).some((x) => members.some((m) => m.key === x.asset))) continue;
+            const id = `device:${d.id}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'device');
+            rows.push({ id, name: d.label ?? d.name ?? d.id, sub: has(g) || undefined, level: g.level, parts: parts(g, now) });
+        }
+        return rows;
+    }
+    async function setGroupAccess(group, members, row, level) {
+        const err = $('assets-error'); err.hidden = true;
+        const fan = KIT.groupFanOut({ members, level, holder: row.holder, current: groupCurrent(members, row) });
+        let ok = true;
+        for (const x of fan.give) {
+            if (row.holder === 'device') {
+                const id = String(row.id).slice('device:'.length);
+                try { if (x.stored) await post(`${API}/devices/${id}/give`, { asset: x.key, rights: x.stored }); else await post(`${API}/devices/${id}/take`, { asset: x.key }); }
+                catch (error) { sayAsErr(error); ok = false; }
+            } else await applyMemberGrant(x.m, String(row.id).slice('conversation:'.length), x.stored ?? x.level);
+            /* The first refusal stops it, said (a repository shared for writing asks its confirmation there). */
+            if (!ok || !err.hidden) { ok = false; break; }
+        }
+        if (row.holder === 'device') await readDevices();
+        groupSaid = { id: group.id, text: KIT.skippedSaid(fan.skip) };
+        await paintAssets();
+        return ok;
+    }
+    function groupPanel(detail, group, items, { back, choose }) {
+        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
+        if (groupSaid?.id !== group.id) groupSaid = null;
+        const parts = [];
+        if (members.length) {
+            const levels = { conversation: KIT.groupLevels(members, 'conversation'), device: KIT.groupLevels(members, 'device') };
+            const model = KIT.accessModel({ key: 'group', holders: groupHolders(members), levels });
+            parts.push(KIT.AccessList(model, { key: 'group', name: group.label, levels, onChange: (row, level) => setGroupAccess(group, members, row, level) }));
+            if (groupSaid?.text) parts.push(el('p', 'hint as-group-skipped', groupSaid.text));
+            parts.push(el('p', 'hint as-group-note', uiSaid('set-group-per-asset', 'A right stays on each asset.')));
+        }
+        const rows = el('div', 'as-group-members');
+        for (const m of members) rows.append(KIT.AssetCard(cardOf(m), { cls: 'as-row', onOpen: choose }));
+        if (!members.length) rows.append(el('p', 'hint', uiSaid('set-group-empty-hint', 'Empty: pick this group on an asset.')));
+        parts.push({ title: uiSaid('set-group-in', 'In the group'), body: [rows], cls: 'as-group-in' });
+        /* Rename in place; remove, asked in place: the assets stay, only the label goes. */
+        const rename = el('button', 'as-link as-group-rename-open', uiSaid('set-group-rename', 'Rename…')); rename.type = 'button';
+        rename.addEventListener('click', () => {
+            const form = el('form', 'as-group-rename'); form.autocomplete = 'off';
+            const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', uiSaid('set-group-name', 'Group name'));
+            const go = el('button', 'primary', uiSaid('set-group-save', 'Rename')); go.type = 'submit';
+            const keep = el('button', '', uiSaid('set-group-cancel', 'Cancel')); keep.type = 'button';
+            keep.addEventListener('click', () => { form.replaceWith(rename); });
+            form.append(name, go, keep);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return; }
+                void paintAssets();
+            });
+            rename.replaceWith(form); focusField(name);
         });
-        detail.append(form);
-        const remove = el('div', 'as-group-remove');
-        const del = el('button', 'as-remove-link', 'Remove the group'); del.type = 'button';
-        del.addEventListener('click', async () => {
-            $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/${group.id}/remove`, {}); groupGiveShow.clear(); assetOpen = ''; remember(); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-            repaint();
-        });
-        remove.append(del, el('p', 'hint', 'The assets stay; only the group is removed.'));
-        detail.append(remove);
+        const remove = KIT.AssetDelete({ label: uiSaid('set-group-remove', 'Remove group…'), lost: uiSaid('set-group-remove-q', 'Its assets stay; only the group goes.'), yes: uiSaid('set-group-remove-yes', 'Remove'),
+            onYes: async () => {
+                $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/remove`, {}); assetOpen = ''; groupSaid = null; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            } });
+        const n = members.length;
+        const card = { key: `group:${group.id}`, kind: 'group', name: group.label, sub: uiSaid(n === 1 ? 'set-acc-asset-1' : 'set-acc-asset-n', n === 1 ? '1 asset' : '{n} assets', { n }) };
+        detail.append(KIT.AssetPanel(card, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts, foot: [rename, remove], cls: 'as-group-panel' }));
     }
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
     const boxSub = (box) => (!box ? '' : box.failure ? box.failure : uiSaid(box.messages === 1 ? 'set-as-message' : 'set-as-messages', box.messages === 1 ? '1 message' : '{n} messages', { n: box.messages }));
@@ -4891,12 +4890,8 @@
     let assetsBy = '';
     try { const kept = localStorage.getItem('clavarium-assets-by'); if (kept === 'group' || kept === 'type') assetsBy = kept; } catch { /* a private window */ }
     const keepAssetsBy = () => { try { localStorage.setItem('clavarium-assets-by', assetsBy); } catch { /* as above */ } };
-    /* The "+ New group" inline form being shown in the by-group view. */
+    /* The "+ New group" inline form being shown above the list. */
     let groupAdding = false;
-    /* Conversations shown in a group's "give" settings although none of its
-       assets is given to them yet (the owner just added them to set levels).
-       Cleared when the open group changes. */
-    const groupGiveShow = new Set();
     /* A binder opened in Assets: its screen, the card of the address (a reload); a card, a step (binderSteps). */
     let assetsView = null; let assetsAt = null;
     const assetsSteps = binderSteps(() => assetsView, { address: () => remember() });
@@ -5202,7 +5197,6 @@
         const copyBox = (chosen.kind === 'mailbox' || chosen.kind === 'folder') && !t;
         /* WHAT IT IS. */
         if (chosen.kind === 'mailbox' && !t) parts.push(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-        if (inMenu && groups) parts.push(groupPicker(chosen, groups));
         /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
            send, reply, move, flag -- within the rights given. Made here with its address and password (they
            stay on the server); only its sending server is asked, found from the address when known. */
@@ -5422,14 +5416,14 @@
             foot.push(there);
         }
         /* Its right said once: by its own row's picker when it has one (« Lire » pressed), else by the head's badge. */
-        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: chipsOf(chosen) };
+        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: [inMenu && groups && !own ? { node: groupChip(chosen, groups) } : null, ...chipsOf(chosen)] };
         /* A later paint began while this one read: it draws, not this one. */
         if (stale()) return;
         detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
         if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
     }
     const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
-    /* Under its name: its kind (its group is the picker below it, in the menu). */
+    /* Under its name: its kind (its group, a chip before it, in the menu). */
     function chipsOf(chosen) {
         const kind = chosen.target ? (TETHER_CAT[chosen.target.kind] ?? 'acces') : chosen.kind;
         const word = uiSaid(`set-acc-kind-${kind}`, ASSET_WORD[kind] ?? kind);
@@ -5479,15 +5473,15 @@
         const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
         const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
         $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
-        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupGiveShow.clear(); clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
+        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupSaid = null; clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
         /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
         const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: assetKinds() });
         paintAssetsView(model.view);
         /* Above them all, once something waits: the owner reaches every call from here, not only by opening the
-           right connexion. Then, in the view by group, "+ New group". */
+           right connexion. Then "+ New group", in either view. */
         const pinned = [];
         if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: allApprovals.length }), count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
-        if (model.view === 'group') pinned.push(newGroupBar());
+        if (!assetsQuery || groupAdding) pinned.push(newGroupBar());
         paintAssetList($('assets-rows'), model, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : onDemandes ? 'demandes:all' : ''), onOpen: choose, pinned,
             onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
             onGroup: (id) => choose(`group:${id}`), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
@@ -5504,7 +5498,7 @@
             if (kind) focusFirst(detail);
             return;
         }
-        if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
+        if (chosenGroup) { groupPanel(detail, chosenGroup, items, { back, choose }); return; }
         if (onDemandes) {
             const body = [el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'),
                 allApprovals.length ? demandesList(allApprovals, { withWho: true, after: () => paintAssets() }) : el('p', 'hint', 'Nothing is waiting now.')];

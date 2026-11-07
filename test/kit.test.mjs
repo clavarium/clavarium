@@ -521,7 +521,7 @@ test('the asset pieces\' words: English here, French in settingswords with « vo
 
 test('the asset pieces have their style', () => {
     const css = web('style.css');
-    for (const cls of ['kit-asset-ic', 'kit-asset-row', 'kit-asset-chip', 'kit-asset-head', 'kit-rights', 'kit-rights-pick', 'kit-holders', 'kit-aslist', 'kit-aslist-sec', 'kit-aslist-head', 'kit-aslist-gear']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+    for (const cls of ['kit-asset-ic', 'kit-asset-row', 'kit-asset-chip', 'kit-asset-head', 'kit-rights', 'kit-rights-pick', 'kit-holders', 'kit-aslist', 'kit-aslist-sec', 'kit-aslist-head', 'kit-aslist-open', 'kit-aslist-fold', 'kit-groupchip', 'kit-groupchip-sel']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
     for (const tone of ['r', 'w', 'x', 'n']) assert.match(css, new RegExp(`\\.kit-rights\\[data-tone="${tone}"\\]`), tone);
 });
 
@@ -593,10 +593,14 @@ test('the list drawn: the same AssetCard rows (who has it in Assets, its right i
     const sections = list.all((n) => n.classes.includes('kit-aslist-sec'));
     assert.deepEqual(sections.map((s) => s.dataset.drop), ['g1', 'g2', '']);
     assert.match(sections[1].textContent, /drag an asset here/);
+    /* A group's row: ▾ folds it, its name and count open it (no ⚙ any more), who has it on its right. */
     list.find('kit-aslist-fold').click();
-    list.find('kit-aslist-gear').click();
+    list.find('kit-aslist-open').click();
     assert.deepEqual([folded, groups], [['g1'], ['g1']]);
-    assert.equal(list.find('kit-aslist-gear').getAttribute('aria-label'), 'Settings for Home');
+    assert.equal(list.find('kit-aslist-gear'), null);
+    assert.equal(list.find('kit-aslist-fold').getAttribute('aria-label'), 'Fold Home');
+    assert.equal(list.find('kit-aslist-open').textContent, 'Home2');
+    assert.equal(list.find('kit-aslist-head').find('kit-holders').children.length, 2, 'who has its assets');
     /* Folded: its head stays, its rows go. */
     const shut = KIT.AssetList(KIT.assetListModel({ items: ITEMS, groups: GROUPS, kinds: KINDS, folded: ['g1'] }), {});
     assert.equal(shut.all((n) => n.dataset.asset === 'folder:photos').length, 0);
@@ -605,7 +609,7 @@ test('the list drawn: the same AssetCard rows (who has it in Assets, its right i
     const mine = KIT.AssetList(KIT.assetListModel({ items: [{ key: 'folder:work', kind: 'folder', name: 'work', right: { level: 'write' } }, { key: 'secret:KEY', kind: 'secret', name: 'KEY', right: { level: 'use' } }], scope: 'conversation:cuisine', kinds: KINDS }), {});
     assert.deepEqual(mine.all((n) => n.classes.includes('kit-rights')).map((b) => b.dataset.level), ['write', 'use']);
     assert.equal(mine.find('kit-holders'), null);
-    assert.equal(mine.find('kit-aslist-gear'), null);
+    assert.equal(mine.find('kit-aslist-open'), null);
     assert.deepEqual(mine.all((n) => n.tagName === 'H3').map((h) => h.textContent), ['Folders', 'Secrets']);
     /* Nothing at all, or nothing found: said. */
     assert.equal(KIT.AssetList(KIT.assetListModel({ items: [] }), { empty: 'Nothing is given to it yet.' }).find('kit-aslist-said').textContent, 'Nothing is given to it yet.');
@@ -741,7 +745,7 @@ test('the screens open an asset in the one panel: the Assets menu and a conversa
     assert.equal((app.match(/async function assetPanel\(/g) ?? []).length, 1, 'one panel');
     assert.match(app, /await assetPanel\(detail, chosen, \{ back, tether, groups: assetGroups \}\)/, 'from the menu');
     assert.match(app, /await assetPanel\(detail, chosen, \{ from: current, back, tether, gits, stale \}\)/, 'from a conversation (the last paint draws)');
-    assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 1, 'one list of who has it');
+    assert.equal((app.match(/KIT\.AccessList\(/g) ?? []).length, 2, 'one list of who has it: an asset\'s, a group\'s (step 5)');
     assert.doesNotMatch(app, /function asTitle|chapter\('Used by'/, 'the old heads and « Used by » are gone');
     /* The tab: a calendar, contacts, an access given live, its binders -- one function (givenItems), which the bar's count
        and a room's « Leurs assets » use too (07-11: the same rows everywhere). */
@@ -822,11 +826,159 @@ test('the screens give from a conversation\'s tab: no Attach, no Detach; Setting
     assert.match(app, /secretNote\(chosen\.name, level !== 'none'\)/);
     /* Made in Give…: a live link given at Read watches, at Write proposes (as Attach did). */
     assert.match(app, /const targetLevel = \(level\) => \(level === 'write' \? 'propose' : 'watch'\)/);
-    for (const k of ['set-give-go', 'set-give-all', 'set-group-none-all', 'set-acc-assets-1', 'set-acc-assets-n', 'set-acc-asset-1', 'set-acc-asset-n', 'set-secret-next-on', 'set-secret-next-off']) {
+    for (const k of ['set-give-go', 'set-give-all', 'set-acc-assets-1', 'set-acc-assets-n', 'set-acc-asset-1', 'set-acc-asset-n', 'set-secret-next-on', 'set-secret-next-off']) {
         assert.ok(k in SETTINGS_WORDS_FR, k);
         assert.match(app + web('kit.js'), new RegExp(`'${k}'`), k);
     }
     for (const cls of ['kit-aspick', 'kit-aspick-give', 'kit-aspick-go', 'access-assets']) assert.match(css, new RegExp(`\\.${cls}\\b`), cls);
+});
+
+/* A GROUP (assets step 5): only a label; « give the group » gives each member its own right, those that cannot are skipped. */
+const MIXED = [
+    { key: 'folder:photos', kind: 'folder', name: 'photos' },
+    { key: 'folder:recipes', kind: 'folder', name: 'recipes' },
+    { key: 'secret:KEY', kind: 'secret', name: 'KEY' },
+    { key: 'secret:SHOP', kind: 'secret', name: 'SHOP' },
+    { key: 'connexion:cal', kind: 'agenda', name: 'Agenda maison', live: true },
+    { key: 'mailbox:news', kind: 'mailbox', name: 'news' },
+];
+test('a group\'s levels: every level one of its members takes, « None » first, in the table\'s order; a calendar\'s Read is Watch', () => {
+    /* A calendar's Watch, Propose are Read, Write beside a folder: not offered twice. Alone, its own words. */
+    assert.deepEqual(KIT.groupLevels(MIXED), ['none', 'read', 'write', 'use', 'frame', 'free']);
+    assert.deepEqual(KIT.groupLevels([MIXED[4]]), ['none', 'watch', 'propose', 'frame', 'free']);
+    assert.deepEqual(KIT.groupLevels([MIXED[0], { key: 'connexion:mcp', kind: 'acces', name: 'tools', live: true, target: { kind: 'browser' } }]), ['none', 'read', 'write', 'watch', 'propose', 'frame', 'free'], 'an access has no Read of its own');
+    assert.deepEqual(KIT.groupLevels(MIXED.slice(0, 2)), ['none', 'read', 'write']);
+    assert.deepEqual(KIT.groupLevels(MIXED, 'device'), ['none', 'read', 'write'], 'a device: folders and a mailbox only');
+    assert.deepEqual(KIT.groupLevels([]), []);
+    assert.equal(KIT.memberLevel(MIXED[4], 'read'), 'watch');
+    assert.equal(KIT.memberLevel(MIXED[4], 'write'), 'propose');
+    assert.equal(KIT.memberLevel(MIXED[4], 'frame'), 'frame');
+    assert.equal(KIT.memberLevel(MIXED[5], 'write'), null, 'a mailbox copy only reads');
+    assert.equal(KIT.memberLevel(MIXED[2], 'read'), null);
+    assert.equal(KIT.memberLevel(MIXED[2], 'use', 'device'), null);
+});
+
+test('a holder\'s level of a group: the one all its members have, none, or « some » (how many of how many)', () => {
+    const two = MIXED.slice(0, 2);
+    assert.deepEqual(KIT.groupLevel(two, {}), { level: 'none', has: 0, of: 2 });
+    assert.deepEqual(KIT.groupLevel(two, { 'folder:photos': 'read', 'folder:recipes': 'read' }), { level: 'read', has: 2, of: 2 });
+    assert.deepEqual(KIT.groupLevel(two, { 'folder:photos': 'read' }), { level: 'some', has: 1, of: 2 });
+    assert.deepEqual(KIT.groupLevel(two, { 'folder:photos': 'read', 'folder:recipes': 'write' }), { level: 'some', has: 2, of: 2 });
+    /* A folder read and a calendar watched: both Read. A calendar alone keeps its own words. */
+    assert.equal(KIT.groupLevel([MIXED[0], MIXED[4]], { 'folder:photos': 'read', 'connexion:cal': 'watch' }).level, 'read');
+    assert.equal(KIT.groupLevel([MIXED[4]], { 'connexion:cal': 'watch' }).level, 'watch');
+    /* A device: the secrets and the calendar are not counted (never given to a device). */
+    assert.deepEqual(KIT.groupLevel(MIXED, { 'folder:photos': 'read', 'folder:recipes': 'read', 'mailbox:news': 'read' }, 'device'), { level: 'read', has: 3, of: 3 });
+});
+
+test('give the group: each member at the level, its own way of keeping it; a member that cannot is skipped, said once; « None » takes from all', () => {
+    const read = KIT.groupFanOut({ members: MIXED, level: 'read', current: { 'folder:photos': 'read' } });
+    assert.deepEqual(read.give.map((x) => [x.key, x.level, x.stored]), [['folder:recipes', 'read', 'read'], ['connexion:cal', 'watch', 'watch'], ['mailbox:news', 'read', 'read']], 'photos already reads: no call');
+    assert.deepEqual(read.skip, [{ kind: 'secret', n: 2, levels: ['use'] }]);
+    assert.equal(KIT.skippedSaid(read.skip), '2 skipped: Secret, Use only');
+    const use = KIT.groupFanOut({ members: MIXED, level: 'use' });
+    assert.deepEqual(use.give.map((x) => [x.key, x.stored]), [['secret:KEY', 'use'], ['secret:SHOP', 'use']], 'a secret kept as the server keeps it');
+    assert.equal(KIT.skippedSaid(use.skip), '4 skipped: Folder, Read / Write only; Calendar, Watch / Propose / Frame / Free only; Mailbox, Read only');
+    const write = KIT.groupFanOut({ members: MIXED, level: 'write' });
+    assert.deepEqual(write.give.map((x) => [x.key, x.level]), [['folder:photos', 'write'], ['folder:recipes', 'write'], ['connexion:cal', 'propose']]);
+    assert.equal(KIT.skippedSaid(write.skip), '3 skipped: Secret, Use only; Mailbox, Read only');
+    /* None: from every member that has something, skipping none; a secret back to 'off'. */
+    const none = KIT.groupFanOut({ members: MIXED, level: 'none', current: { 'folder:photos': 'read', 'secret:KEY': 'use', 'connexion:cal': 'watch' } });
+    assert.deepEqual(none.give.map((x) => [x.key, x.stored]), [['folder:photos', 'none'], ['secret:KEY', 'off'], ['connexion:cal', 'none']]);
+    assert.deepEqual(none.skip, []);
+    assert.equal(KIT.skippedSaid(none.skip), '');
+    /* A device: 'r' / 'rw', the others skipped (never given to a device); None: only those a device takes. */
+    const dev = KIT.groupFanOut({ members: MIXED, level: 'write', holder: 'device' });
+    assert.deepEqual(dev.give.map((x) => [x.key, x.stored]), [['folder:photos', 'rw'], ['folder:recipes', 'rw']]);
+    assert.equal(KIT.skippedSaid(dev.skip), '4 skipped: Secret, not for a device; Calendar, not for a device; Mailbox, Read only');
+    assert.deepEqual(KIT.groupFanOut({ members: MIXED, level: 'none', holder: 'device', current: { 'folder:photos': 'read' } }).give.map((x) => [x.key, x.stored]), [['folder:photos', null]]);
+    assert.equal(KIT.skippedSaid([{ kind: 'secret', n: 1, levels: ['use'] }]), '1 skipped: Secret, Use only');
+});
+
+test('a group\'s « Who has it »: its levels offered, « some » pressed nowhere, how many said; a choice handed to the page', async () => {
+    const levels = { conversation: KIT.groupLevels(MIXED.slice(0, 3)), device: KIT.groupLevels(MIXED.slice(0, 3), 'device') };
+    const model = KIT.accessModel({ key: 'group', levels, holders: [
+        { id: 'conversation:cuisine', name: 'Kitchen helper', level: 'some', sub: '1 of 3', parts: [{ name: 'photos', key: 'folder', level: 'read' }] },
+        { id: 'conversation:coder', name: 'Coder', level: 'read' },
+        { id: 'conversation:homework', name: 'Homework', level: 'none' },
+        { id: 'device:d1', name: 'Kitchen tablet', level: 'read' },
+    ] });
+    assert.deepEqual(model.given.map((r) => [r.id, r.level]), [['conversation:cuisine', 'some'], ['conversation:coder', 'read'], ['device:d1', 'read']]);
+    assert.deepEqual(model.others.map((r) => r.id), ['conversation:homework']);
+    const changed = [];
+    const list = KIT.AccessList(model, { key: 'group', name: 'Home', levels, onChange: (row, level) => { changed.push([row.id, level]); return true; } });
+    const row = (who) => list.all((n) => n.dataset.conversation === who && n.classes.includes('given-row'))[0];
+    const pick = row('cuisine').find('kit-rights-pick');
+    assert.deepEqual(pick.children.map((b) => b.dataset.value), ['none', 'read', 'write', 'use']);
+    assert.equal(pick.children.filter((b) => b.getAttribute('aria-pressed') === 'true').length, 0, 'mixed: none pressed');
+    assert.match(row('cuisine').textContent, /1 of 3/);
+    /* What it has of it, each with its right: nothing hidden behind the count. */
+    assert.equal(row('cuisine').find('kit-access-parts').textContent, 'photosReads');
+    assert.equal(row('coder').find('kit-access-parts'), null, 'all at one level: the pressed button says it');
+    assert.deepEqual(list.all((n) => n.dataset.device === 'd1')[0].find('kit-rights-pick').children.map((b) => b.dataset.value), ['none', 'read', 'write']);
+    pick.children[2].click(); await new Promise((r) => setTimeout(r, 0));
+    assert.deepEqual(changed, [['conversation:cuisine', 'write']]);
+    /* No member: nothing to give (the page says it is empty instead). */
+    assert.deepEqual(KIT.accessModel({ key: 'group', levels: { conversation: [], device: [] }, holders: [{ id: 'conversation:x', name: 'X', level: 'none' }] }).others, []);
+});
+
+test('an asset\'s group, a chip: no group, its group, « New group… » made in place then placed', async () => {
+    const placed = []; const made = [];
+    const chip = KIT.GroupChip({ groups: GROUPS, value: 'g1', name: 'photos', onPlace: (id) => { placed.push(id); }, onMake: async (label) => { made.push(label); return made.length > 1; } });
+    const sel = chip.find('kit-groupchip-sel');
+    assert.deepEqual(sel.children.map((o) => [o.value, o.textContent]), [['', 'No group'], ['g1', 'Home'], ['g2', 'Empty'], ['+new', 'New group…']]);
+    assert.equal(sel.value, 'g1');
+    assert.equal(sel.getAttribute('aria-label'), 'Group of photos');
+    const fire = async (node, type) => { for (const fn of node.listeners[type] ?? []) await fn({ preventDefault() {} }); };
+    sel.value = ''; await fire(sel, 'change');
+    assert.deepEqual(placed, [null], 'out of its group');
+    const form = chip.find('kit-groupchip-form');
+    assert.equal(form.hidden, true);
+    sel.value = '+new'; await fire(sel, 'change');
+    assert.deepEqual([form.hidden, sel.hidden, placed.length], [false, true, 1], 'a name asked, nothing placed yet');
+    const input = form.children[0];
+    input.value = '  '; await fire(form, 'submit');
+    assert.deepEqual(made, [], 'no name, nothing made');
+    input.value = 'Travail'; await fire(form, 'submit');
+    assert.deepEqual(made, ['Travail']);
+    assert.equal(form.children[1].disabled, false, 'refused: the name stays to fix');
+    await fire(form, 'submit');
+    assert.equal(form.children[1].disabled, true);
+    /* Cancel: the chip again, on its group. */
+    form.children[2].click();
+    assert.deepEqual([form.hidden, sel.hidden, sel.value], [true, false, 'g1']);
+    /* A head shows it among its chips, as a chip. */
+    const head = KIT.AssetCard({ key: 'folder:photos', kind: 'folder', name: 'photos', chips: [{ node: chip }, { text: 'Folder' }] }, { size: 'head' });
+    const chips = head.find('kit-chips');
+    assert.equal(chips.children[0], chip);
+    assert.ok(chip.classes.includes('kit-chip'));
+    /* A group's own sign. */
+    assert.equal(KIT.AssetIcon({ kind: 'group' }).dataset.kind, 'group');
+    assert.ok(KIT.AssetIcon({ kind: 'group' }).children.length === 1);
+});
+
+test('the screens open a group in the one panel: who has it given to every member, its members, rename, remove; groups made from any view', async () => {
+    const app = web('app.js');
+    const { SETTINGS_WORDS_FR } = await import('../server/settingswords.mjs');
+    assert.doesNotMatch(app, /function groupDetail|function groupPicker|giveValue|groupGiveShow|'Give all'|'Remove the group'|set-group-none-all/, 'the old group screen is gone');
+    assert.match(app, /function groupPanel\(detail, group, items, \{ back, choose \}\)/);
+    assert.match(app, /KIT\.AssetPanel\(card, \{ back: \{ onBack: [^}]*\} \}, parts, foot: \[rename, remove\], cls: 'as-group-panel' \}\)/);
+    assert.match(app, /KIT\.accessModel\(\{ key: 'group', holders: groupHolders\(members\), levels \}\)/);
+    assert.match(app, /KIT\.groupFanOut\(\{ members, level, holder: row\.holder, current: groupCurrent\(members, row\) \}\)/);
+    assert.match(app, /KIT\.skippedSaid\(fan\.skip\)/);
+    assert.match(app, /KIT\.GroupChip\(/, 'an asset\'s group, a chip on its head');
+    assert.match(app, /chips: \[inMenu && groups && !own \? \{ node: groupChip\(chosen, groups\) \} : null, \.\.\.chipsOf\(chosen\)\]/);
+    /* « + New group » above the list in either view, not only by group. */
+    assert.match(app, /if \(!assetsQuery \|\| groupAdding\) pinned\.push\(newGroupBar\(\)\)/);
+    assert.doesNotMatch(app, /if \(model\.view === 'group'\) pinned\.push\(newGroupBar\(\)\)/);
+    /* Drag to a group kept. */
+    assert.match(app, /if \(model\.view === 'group'\) dragToGroups\(\$\('assets-rows'\)\)/);
+    for (const k of ['set-group-new', 'set-group-new-dots', 'set-group-name', 'set-group-add', 'set-group-cancel', 'set-group-of', 'set-group-in', 'set-group-has', 'set-group-per-asset', 'set-group-empty-hint',
+        'set-group-rename', 'set-group-save', 'set-group-remove', 'set-group-remove-q', 'set-group-remove-yes', 'set-group-skipped-1', 'set-group-skipped-n', 'set-group-only', 'set-group-no-device']) {
+        assert.ok(k in SETTINGS_WORDS_FR, k);
+        assert.match(app + web('kit.js'), new RegExp(`'${k}'`), k);
+    }
+    for (const cls of ['as-group-panel', 'as-group-add', 'as-group-skipped', 'as-group-note', 'kit-groupchip-form']) assert.match(web('style.css') + app, new RegExp(`\\.?${cls}\\b`), cls);
 });
 
 test('a box\'s learning session in one state for its line: none, scheduled, running (kept), ended (kept)', () => {
