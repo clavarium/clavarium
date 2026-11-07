@@ -5363,8 +5363,8 @@
         $('salon-thread').dataset.theme = document.documentElement.dataset.theme === 'light' ? 'light' : 'dark';
         salonThread = mount($('salon-thread'), {
             words, markdown: true, agentName: '',
-            /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat. */
-            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label }); } } },
+            /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat, read for the conversation of the AI that cited it. */
+            schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: '', room: id }); } } },
             load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
                 /* Read for a room no longer shown: its words go nowhere (Parley drops them with its screen). */
                 if (salonId !== id || place !== 'salon') return d;
@@ -5392,7 +5392,10 @@
             send: (text, answers, files) => post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) }),
             /* A file attached in a room (06-11): as in a conversation's chat; kept in the room, a copy to each AI the message goes to. */
             attach: { upload: async (file) => { const x = await fetch(`${API}/rooms/${id}/talk/file?${new URLSearchParams({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }); const j = await x.json().catch(() => ({})); if (!x.ok) throw new Error(j.error || 'The file could not be sent.'); return j; } },
-            open: (file) => { if (!String(file.open ?? '').startsWith('room:')) return; const inner = file.open.slice('room:'.length); void preview('room', inner, file.name || inner.split('/').pop(), file.size ?? 0, `${API}/rooms/${id}/file?${new URLSearchParams({ p: inner })}`, { within: r.name }); },
+            /* A file an AI of the room showed or cited (ai:<member>:work:a.png): read from its own conversation, in the same viewer as in its chat. */
+            open: (file) => { const o = String(file.open ?? ''); if (o.startsWith('ai:')) { const at = o.split(':').slice(3).join(':'); void preview('', '', at.split('/').pop() || 'file', 0, `${API}/rooms/${id}/shown?${new URLSearchParams({ o })}`, { origin: '' }); return; } if (!o.startsWith('room:')) return; const inner = file.open.slice('room:'.length); void preview('room', inner, file.name || inner.split('/').pop(), file.size ?? 0, `${API}/rooms/${id}/file?${new URLSearchParams({ p: inner })}`, { within: r.name }); },
+            /* Its pictures, as its chat shows them: those its AIs showed, read from their own conversations (type proved by the bytes). */
+            picture: (file) => (String(file.open ?? '').startsWith('ai:') ? `${API}/rooms/${id}/shown?${new URLSearchParams({ o: file.open, thumb: '1' })}` : null),
             /* The same chat as a conversation's (03-11): its view, its formulas, its dictation, its keyboard rule. */
             view: chatView, onView: (v) => { chatView = v; try { localStorage.setItem('clavarium-chat-view', v); } catch { /* as above */ } },
             math: { url: new URL('vendor/katex/katex.mjs', new URL('/', location.href)).href },
@@ -5984,7 +5987,9 @@
        page, its bytes read by the server through Tether when it is opened -- never before, kept nowhere --
        and only by whoever may read that mailbox. `of`: the conversation it was cited in, whose chat Reply
        writes in. */
-    function openMailRef(ref, { label = '', of = current } = {}) {
+    function openMailRef(ref, { label = '', of = current, room = '' } = {}) {
+        /* Cited in a room: read for the conversation of the AI that cited it (the server finds it, and says which). */
+        if (room) return preview('', '', `${String(label || '').trim() || uiSaid('set-mail-mail', 'Mail')}.eml`, 0, `${API}/rooms/${room}/mail/open?${new URLSearchParams({ ref })}`, { mailRef: { ref, of: '', label, room } });
         const q = new URLSearchParams({ ref, ...(of ? { c: of } : {}) });
         const name = `${String(label || '').trim() || uiSaid('set-mail-mail', 'Mail')}.eml`;
         return preview('', '', name, 0, `${API}/mail/open?${q}`, { mailRef: { ref, of, label } });
@@ -9522,7 +9527,7 @@
         $('preview-full').onclick = () => full(!$('viewer').classList.contains('viewer-full'));
         $('preview-attach').onclick = () => void attachToCard(opts.mailRef ? { kind: 'mail', ref: opts.mailRef.got?.ref || opts.mailRef.ref, title: opts.mailRef.title || opts.mailRef.label || name } : { kind: 'file', ref: tab === 'work' ? `/work/${inner}` : `/resources/${tab}/${inner}`, title: name });
         /* A file read from the machine's disk says so, whatever else is said. */
-        const origin = opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : opts.mailRef ? '' : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
+        const origin = typeof opts.origin === 'string' ? opts.origin : opts.within ? uiSaid('set-mail-of', 'An attachment of {name}', { name: opts.within }) : opts.mailRef ? '' : from ? 'Read from the disk of the machine: this file is not kept here, and goes with the machine.' : '';
         const note = (text) => { const all = [text, text === 'Loading...' ? '' : origin].filter(Boolean).join(' '); $('preview-note').textContent = all; $('preview-note').hidden = !all; };
         /* NOTHING TO SHOW (02-11): not an empty frame, but a file, why, and a Download button that is seen. */
         const cannot = (why) => {
@@ -9541,7 +9546,7 @@
             const r = await fetch(address);
             if (!r.ok) { const said = await r.json().catch(() => ({})); throw Object.assign(new Error(said.error || 'The file could not be read.'), { kind: said.kind }); }
             /* A mail read by its reference: where it was found, and its reference as it is now. */
-            if (opts.mailRef) { const h = (k) => { try { return decodeURIComponent(r.headers.get(k) ?? ''); } catch { return ''; } }; opts.mailRef.got = { box: h('x-mail-box'), folder: h('x-mail-folder'), ref: h('x-mail-ref') || opts.mailRef.ref, cut: r.headers.get('x-mail-cut') === '1' }; }
+            if (opts.mailRef) { const h = (k) => { try { return decodeURIComponent(r.headers.get(k) ?? ''); } catch { return ''; } }; opts.mailRef.got = { box: h('x-mail-box'), folder: h('x-mail-folder'), ref: h('x-mail-ref') || opts.mailRef.ref, cut: r.headers.get('x-mail-cut') === '1' }; if (h('x-mail-of')) opts.mailRef.of = h('x-mail-of'); }
             return r.arrayBuffer();
         };
         /* A mail that cannot be opened by its reference: one clear line (gone, not theirs, unreachable), never a download. */
@@ -9554,7 +9559,7 @@
             box.append(icon, el('b', 'mail-state-line', line ? uiSaid(line[0], line[1]) : error.message));
             if (error.kind === 'unreachable' || !line) {
                 const again = el('button', 'quiet mail-state-retry', uiSaid('set-mail-retry', 'Try again')); again.type = 'button';
-                again.addEventListener('click', () => { void openMailRef(opts.mailRef.ref, { label: opts.mailRef.label, of: opts.mailRef.of }); });
+                again.addEventListener('click', () => { void openMailRef(opts.mailRef.ref, { label: opts.mailRef.label, of: opts.mailRef.of, room: opts.mailRef.of ? '' : opts.mailRef.room }); });
                 box.append(again);
             }
             $('preview-name').textContent = opts.mailRef.label || uiSaid('set-mail-mail', 'Mail');

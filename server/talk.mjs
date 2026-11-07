@@ -310,6 +310,10 @@ export class Talk {
         return m && this.#resources.of(name).some((x) => x.name === m[1]) ? `${m[1]}:${m[2]}` : null;
     }
 
+    /* How this conversation's chat opens a path of its own ("work:report.html"), or null: what a room it is in
+       opens of what it shows there (rooms.mjs), with its rights. */
+    reachOf(name, path) { return this.#reach(name, path); }
+
     #parley(name, reacted = () => {}) {
         return new Parley(this.#dir(name), {
             keep: this.#keep(name),
@@ -319,7 +323,8 @@ export class Talk {
                 if (event.type === 'person-wrote') { this.#want(name); return; }
                 /* What the tool says or asks: a voice box of this conversation may read it aloud (boxes.mjs). */
                 /* Answered in a room it is in (#268): the room takes it, signed by where it came from (rooms.mjs). */
-                if (['agent-said', 'agent-asked', 'agent-doing'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : event.type === 'agent-asked' ? 'ask' : 'say'); } catch { /* the room's */ } return; }
+                /* A file it shows there too (06-11), once its Parley carries `room` on a show: opened through this conversation. */
+                if (['agent-said', 'agent-asked', 'agent-doing', 'agent-showed'].includes(event.type) && typeof event.message?.room === 'string') { try { this.#inRoom(name, event.message, event.type === 'agent-doing' ? 'doing' : event.type === 'agent-asked' ? 'ask' : event.type === 'agent-showed' ? 'show' : 'say'); } catch { /* the room's */ } return; }
                 if (event.type === 'agent-said' || event.type === 'agent-asked') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { asked: event.type === 'agent-asked' });
                 /* What it is doing: said by a box that was just spoken to, so nobody waits in silence. */
                 if (event.type === 'agent-doing') this.#spoke(name, event.message?.text ?? '', Array.isArray(event.message?.to) ? event.message.to : null, { doing: true });

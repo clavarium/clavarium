@@ -35,6 +35,12 @@ const KINDS = ['person', 'ai', 'box'];
    goes to, attached in its own chat as the person attaches one there (talk.attach) -- never to the others. */
 export const ATTACHED_DIR = 'attached';
 const ROOM_FILE = /^\/room\/attached\/([0-9a-f-]{36})\/([^/]+)$/;
+/* WHAT AN AI SHOWS IN A ROOM (06-11: a room carries what the chat carries): a file of its own it cites (a path, a
+   picture placed in its text) or shows (a file, a gallery) is opened FROM ITS CONVERSATION, with that conversation's
+   rights -- never another's. In the thread, its reference reads `ai:<member id>:<how its chat opens it>` (work:report.html);
+   the room's /shown route opens it only when that AI cited it in this room AND its own chat has it (talk.shown). */
+const CITE = 'cite:';
+const AI_OPEN = /^ai:([0-9a-f-]{36}):([a-z][a-z0-9-]{0,31}):(.+)$/;
 const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_NAME_MAX);
 
 /* A SECRET IN A ROOM (06-11): a room's thread is read by all its members, now and later -- a token, a key pasted
@@ -47,18 +53,20 @@ export const masked = (text) => { const str = String(text ?? ''); const hits = s
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
 
 export class Rooms {
-    #file; #dir; #say; #attach; #rooms; #conversations; #boxes; #now; #speak; #hops = new Map(); #thinking = new Map();
+    #file; #dir; #say; #attach; #rooms; #conversations; #boxes; #now; #speak; #reachOf; #shownIn; #hops = new Map(); #thinking = new Map();
     /* file: a JsonFile of the rooms; dir: where their threads are; say(name, text, extra): a message written in a
        conversation's own chat (talk.say; its 4th argument the paths of its files there); attach(name, fileName,
        request): a file put in a conversation's chat as the person attaches one (talk.attach); rooms(name, list): what a conversation is told of its rooms (talk.rooms);
-       conversations(): the conversations there are; boxes(): the voice boxes there are. */
-    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date() }) {
-        this.#speak = speak; this.#attach = attach;
+       conversations(): the conversations there are; boxes(): the voice boxes there are.
+       reach(name, path): how a conversation's chat opens a path of its own ("work:a.png"), or null (talk.reachOf);
+       shown(name, ref): whether that chat has that file (talk.shown) -- what an AI shows in a room is read through them. */
+    constructor({ file, dir, say, attach = async () => { throw new Refusal(409, 'Files cannot be given here.'); }, rooms = () => {}, conversations = () => [], boxes = () => [], speak = () => {}, now = () => new Date(), reach = () => null, shown = () => false }) {
+        this.#speak = speak; this.#attach = attach; this.#reachOf = reach; this.#shownIn = shown;
         this.#file = file; this.#dir = dir; this.#say = say; this.#rooms = rooms; this.#conversations = conversations; this.#boxes = boxes; this.#now = now;
     }
     #all() { const v = this.#file.get(); return Array.isArray(v) ? v : []; }
     #save(list) { this.#file.set(list); this.#tellConversations(list); }
-    #thread(id) { mkdirSync(`${this.#dir}/${id}`, { recursive: true }); return new Parley(`${this.#dir}/${id}`, { room: true, now: this.#now, reach: (path) => { const m = ROOM_FILE.exec(String(path ?? '')); return m ? `room:${m[1]}/${m[2]}` : null; } }); }
+    #thread(id) { mkdirSync(`${this.#dir}/${id}`, { recursive: true }); return new Parley(`${this.#dir}/${id}`, { room: true, now: this.#now, reach: (path) => { const m = ROOM_FILE.exec(String(path ?? '')); if (m) return `room:${m[1]}/${m[2]}`; return /^\/(work|resources)\//.test(String(path ?? '')) ? `${CITE}${path}` : null; } }); }
     #find(id) { const r = this.#all().find((x) => x.id === id); if (!r) throw new Refusal(404, 'No such room.'); return r; }
 
     /* Its members as they are now: names of the moment (a conversation renamed, a box renamed). */
@@ -148,7 +156,54 @@ export class Rooms {
         const named = (text) => String(text ?? '').replace(/@\{([0-9a-f-]{36})\}/g, (whole, mid) => { const m = members.find((x) => x.id === mid); return m ? `@${m.name}` : whole; });
         if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
         const thinking = this.#thinkingOf(id, members); const doing = this.#doingOf(id, members);
-        return { room: this.get(id), thinking, doing, ...read, messages: (read.messages ?? []).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m)) };
+        const messages = (read.messages ?? []).map((m) => this.#opened(m, members)).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m));
+        /* The files of the thread (shown, cited): each as the message that has it opens it; one nobody opens here, not listed. */
+        const opens = new Map(); for (const m of messages) for (const f of [...(m.refs ?? []), ...(m.files ?? []), ...(m.open ? [m] : [])]) if (f.path && f.open) opens.set(f.path, f.open);
+        const files = Array.isArray(read.files) ? read.files.map((f) => (String(f.open ?? '').startsWith(CITE) ? (opens.has(f.path) ? { ...f, open: opens.get(f.path) } : null) : f)).filter(Boolean) : read.files;
+        return { room: this.get(id), thinking, doing, ...read, messages, ...(files !== undefined ? { files } : {}) };
+    }
+    /* A message of an AI of the room: each path it cites or shows, opened through ITS conversation (its chat's own
+       reference, signed with its member id); anyone else's, or one its conversation cannot open, opens nothing. */
+    #opened(m, members) {
+        const ai = m.by?.kind === 'ai' ? members.find((x) => x.id === m.by.id && x.kind === 'ai') : undefined;
+        const through = (path, open) => {
+            if (!String(open ?? '').startsWith(CITE)) return open ?? null;
+            if (!ai) return null;
+            let own = null; try { own = this.#reachOf(ai.ref, path); } catch { own = null; }
+            return typeof own === 'string' && own ? `ai:${ai.id}:${own}` : null;
+        };
+        const out = { ...m };
+        if (Array.isArray(m.refs)) { out.refs = m.refs.map((r) => ({ ...r, open: through(r.path, r.open) })).filter((r) => r.open !== null); if (!out.refs.length) delete out.refs; }
+        if (m.kind === 'show' && typeof m.path === 'string') out.open = through(m.path, m.open);
+        if (m.kind === 'show' && Array.isArray(m.files)) out.files = m.files.map((f) => ({ ...f, open: through(f.path, f.open) }));
+        return out;
+    }
+    /* A FILE AN AI SHOWED HERE, to be opened (the /shown route): which conversation it is read from, and where in
+       it -- only when that AI (a member now) cited or showed it in this room, and its own chat has it. */
+    shownFile(id, open) {
+        const room = this.#find(id); const members = this.#shown(room);
+        const m = AI_OPEN.exec(String(open ?? ''));
+        const no = () => new Refusal(404, 'Nothing of that was shown in this room.');
+        if (!m) throw no();
+        const ai = members.find((x) => x.id === m[1] && x.kind === 'ai');
+        if (!ai) throw no();
+        const own = `${m[2]}:${m[3]}`;
+        const here = this.#thread(room.id).read({ all: true }).messages.filter((x) => x.by?.id === ai.id).map((x) => this.#opened(x, members))
+            .some((x) => [...(x.refs ?? []), ...(x.files ?? []), ...(x.open ? [x] : [])].some((f) => f.open === open));
+        if (!here) throw no();
+        let has = false; try { has = this.#shownIn(ai.ref, own) === true; } catch { has = false; }
+        if (!has) throw no();
+        return { conversation: ai.ref, tab: m[2], inner: m[3] };
+    }
+    /* A MAIL AN AI CITED HERE ([Subject](mail:...)): the conversation it is read for, as its own chat would (its
+       last AI of the room, a member now, to have cited it); none, refused. */
+    mailFrom(id, ref) {
+        const room = this.#find(id); const members = this.#shown(room);
+        const r = String(ref ?? '').trim();
+        if (!/^mail:\S+$/i.test(r)) throw new Refusal(400, 'Not a mail reference.');
+        const by = this.#thread(room.id).read({ all: true }).messages.filter((x) => x.by?.kind === 'ai' && [`(${r})`, `(${r} `].some((w) => String(x.text ?? '').includes(w))).map((x) => members.find((y) => y.id === x.by.id && y.kind === 'ai')).filter(Boolean).at(-1);
+        if (!by) throw new Refusal(404, 'No AI of this room cited that mail.');
+        return by.ref;
     }
 
     /* A FILE THE PERSON ATTACHES, before the message that carries it: the same checks as in a conversation's chat
@@ -247,10 +302,17 @@ export class Rooms {
             for (const ai of ais) handOver(ai, forwarded.text, from, forwarded.id);
             if (!String(entry.text ?? '').trim()) return forwarded.id;
         }
+        /* A file it shows (06-11), or a gallery: its paths as it gave them, opened here through its conversation (#opened). */
+        const show = kind === 'show' ? {
+            ...(typeof entry.path === 'string' && entry.path ? { path: entry.path } : {}),
+            ...(Array.isArray(entry.files) && entry.files.length ? { files: entry.files.filter((f) => f && typeof f.path === 'string').map((f) => ({ path: f.path, ...(f.title ? { title: f.title } : {}) })) } : {}),
+        } : null;
+        if (show && !show.path && !show.files?.length) return null;
+        if (show && !String(entry.text ?? '').trim()) entry = { ...entry, text: (show.files?.[0] ?? show).path.split('/').pop() };
         if (!String(entry.text ?? '').trim()) return null;
         /* @Name of a member, exactly: kept as its id (the screen says its name of the moment). */
         const text = masked(entry.text).replace(/@([^\s@{][^@\n]{0,40}?)(?=[\s,.;:!?)]|$)/g, (whole, name) => { const m = members.find((x) => x.name.toLowerCase() === name.toLowerCase()); return m ? `@{${m.id}}` : whole; });
-        const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai', look: me.look }, to, re, kind: kind === 'doing' ? 'doing' : 'say' });
+        const id = t.relay({ text, by: { id: me.id, name: me.name, kind: 'ai', look: me.look }, to, re, kind: show ? 'show' : 'say', ...(show ?? {}) });
         /* The boxes it is sent to say it aloud (#281): its words, a member named by its name, never an id. */
         const boxes = to.map((x) => members.find((m) => m.id === x && m.kind === 'box')).filter(Boolean).map((m) => m.ref);
         if (boxes.length) { const aloud = text.replace(/@\{([0-9a-f-]{36})\}/g, (w, mid) => members.find((x) => x.id === mid)?.name ?? ''); try { this.#speak(`room:${room.id}`, aloud, boxes, { doing: kind === 'doing', asked: kind === 'ask' }); } catch { /* the boxes' */ } }

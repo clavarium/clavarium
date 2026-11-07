@@ -99,6 +99,8 @@
  *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids], files?}: said in it; to its host, or to the AIs named
  *   POST /api/rooms/<id>/talk/file?name=    the body IS a file the person attaches there -> {path, name, size}
  *   GET  /api/rooms/<id>/file?p=<id>/<name> a file attached in it
+ *   GET  /api/rooms/<id>/shown?o=ai:<member>:<r>:<p>[&thumb=1]   a file an AI of it showed or cited there, read from ITS conversation
+ *   GET  /api/rooms/<id>/mail/open|page?ref=mail:...              a mail an AI of it cited there, opened as its conversation's chat opens it
  *   GET  /api/conversations/<name>/health-react   POST the same {on?, message?, command?}: what it does when its machine is short
  *   GET  /api/machines/places   GET /api/machines/moving   POST /api/machines/move {to}: all the machines to another disk
  *   POST /api/machines/forget-old: the copy a move left behind, removed
@@ -309,6 +311,38 @@ export async function handleApi(request, response, conversations, headers, resou
                     'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}` });
                 file.stream.pipe(response);
                 return true;
+            }
+            /* WHAT AN AI SHOWED IN A ROOM (06-11): read from its own conversation, with that conversation's rights --
+               its work folder, a folder attached to it -- only when it showed or cited it in this room (rooms.shownFile). */
+            const roomShown = /^\/api\/rooms\/([0-9a-f-]{36})\/shown$/.exec(pathname);
+            if (roomShown && rooms) {
+                const { conversation, tab, inner } = rooms.shownFile(roomShown[1], query.get('o') ?? '');
+                const folder = (need) => {
+                    if (need === 'write') throw new Refusal(403, 'Read only, from a room.');
+                    if (tab === WORK_TAB) {
+                        if (conversations.list().find((x) => x.name === conversation)?.work !== 'kept' || !resources) throw new Refusal(404, 'This conversation works on the disk of its machine: its files are not kept here.');
+                        return resources.workFolder(conversation);
+                    }
+                    if (!resources?.of(conversation).some((r) => r.name === tab)) throw new Refusal(404, 'No such folder.');
+                    return resources.folder(tab);
+                };
+                if (query.get('thumb') === '1') {
+                    const answer = await changeRoute('GET', '/files/thumb', new URLSearchParams({ p: inner }), request, folder);
+                    response.writeHead(200, { ...headers, ...IMAGE_HEADERS, 'content-type': answer.picture.type, 'content-length': answer.picture.bytes.length, etag: `"${answer.picture.version}"` });
+                    response.end(answer.picture.bytes);
+                    return true;
+                }
+                const file = await download(folder(), inner);
+                response.writeHead(200, { ...headers, 'content-type': 'application/octet-stream', 'content-length': file.size,
+                    'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`, 'x-shown-by': encodeURIComponent(conversation) });
+                file.stream.pipe(response);
+                return true;
+            }
+            /* A mail an AI of a room cited there: opened as in its conversation's chat (Reply goes to that chat, x-mail-of). */
+            const roomMail = /^\/api\/rooms\/([0-9a-f-]{36})(\/mail\/open|\/mail\/page)$/.exec(pathname);
+            if (roomMail && rooms) {
+                const c = rooms.mailFrom(roomMail[1], query.get('ref') ?? '');
+                return await mailRoute(roomMail[2], query, response, { tethers, headers: { ...headers, 'x-mail-of': encodeURIComponent(c) }, who: { id: `person:${identity || 'owner'}`, name: identity || 'Owner' }, may: () => true, offline: conversations.list().find((x) => x.name === c)?.offline === true, of: c });
             }
             if (roomTalk && rooms) { const last = Number(query.get('last')); return send(200, rooms.read(roomTalk[1], Number.isInteger(last) && last > 0 ? { last } : undefined)), true; }
             if (pathname === '/api/mailboxes' && mailboxes) return send(200, mailboxes.list()), true;
