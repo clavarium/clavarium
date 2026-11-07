@@ -733,6 +733,12 @@
             <div class="salon-members-tools"><input id="salon-new-search" type="search" placeholder="Find a conversation" aria-label="Find a conversation" autocomplete="off"></div>
             <div id="salon-new-ais" class="salon-member-list" role="list" aria-label="AIs"></div>
           </div>
+          <!-- Each AI's assets (06-11): its own, as its conversation has them; no room asset. -->
+          <div class="nc-card" id="salon-assets-card" hidden>
+            <div class="row"><span class="sub-head" data-said="set-room-assets">Their assets</span><span class="sp"></span><button type="button" id="salon-assets-all" data-said="set-room-give-all">Give to all its AIs…</button></div>
+            <div id="salon-assets-give" class="salon-give" hidden></div>
+            <div id="salon-assets" class="salon-member-list salon-assets-list" role="list" aria-label="Their assets"></div>
+          </div>
           <h3 class="room-group" id="salon-new-voice-head" data-said="set-tab-chat">Chat &amp; voice</h3>
           <div class="nc-card" id="salon-new-boxes-card">
             <div class="row"><span class="sub-head">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>

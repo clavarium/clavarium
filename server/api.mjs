@@ -95,6 +95,8 @@
  *   POST /api/rooms                         {name, conversations: [names], boxes: [ids], host?}: a new room
  *   POST /api/rooms/<id>                    {name?, host?, add?: {conversations, boxes}, remove?: [member ids]}
  *   POST /api/rooms/<id>/remove             the room and its thread
+ *   POST /api/rooms/<id>/give               {asset, rights, shared?}: the same right given to each AI of it, its own
+ *                                           conversation's -> {asset, rights, given: [{conversation, ok, kept?, error?}]}
  *   GET  /api/rooms/<id>/talk?last=         its thread, with the room: {room, messages, ...}
  *   POST /api/rooms/<id>/talk               {text, to?: [AI member ids], files?}: said in it; to its host, or to the AIs named
  *   POST /api/rooms/<id>/talk/file?name=    the body IS a file the person attaches there -> {path, name, size}
@@ -156,6 +158,7 @@ import { writeFileSync } from 'node:fs';
 import { suggest } from './suggest.mjs';
 import { sameOrigin } from './bridge.mjs';
 import { Refusal, DISK_GB } from './conversations.mjs';
+import { readRights, typeOf, nameOf } from './grants.mjs';
 import { VmUnknown } from './vm.mjs';
 import { list, download, importFile, page, PAGE_HEADERS, changeRoute, IMAGE_HEADERS, mailFile, mailPage } from './files.mjs';
 import { mailRoute } from './mailref.mjs';
@@ -684,6 +687,57 @@ export async function handleApi(request, response, conversations, headers, resou
         }
         /* A setting its tool is told about changed: its guide follows (never waking a machine). */
         const retell = (conversation) => { void guide?.changed(conversation).catch(() => {}); };
+        /* THE ONE GIVE TO A CONVERSATION, as its own settings do it: a folder, a repository, a mailbox attached at
+           an access; a secret handed or taken back. A room's « give to all its AIs » calls the same, once for each. */
+        const attachResource = async (conversation, name, access, shared) => {
+            if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
+            /* A second writer next to one that sends by itself: confirmed first. */
+            if (access === 'write') gitKeeper?.beforeWriter(name, conversation, shared === true);
+            /* Its automatic sending goes with the write attachment -- forgotten
+               BEFORE the change, so that a change that fails half-way (unmounted,
+               not mounted again) never leaves settings to come back later. */
+            if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
+            await resources.attach(conversation, name, access);
+            retell(conversation);
+        };
+        const handSecret = async (conversation, name, attached) => {
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            secrets.attach(conversation, name, attached);
+            /* A machine that runs gets it (or loses it) now, in /run/secrets -- not only at the next
+               opening of a terminal; its tool's variables still wait for the tool's next start. */
+            const c = conversations.list().find((x) => x.name === conversation);
+            if (c?.phase === 'ready' && !c.asleep) await secrets.deliver(conversation).catch(() => {});
+            retell(conversation);
+        };
+        /* GIVE ONE ASSET TO EVERY AI OF A ROOM (06-11): there is no room asset -- each AI of the room gets the same
+           ordinary right of its own conversation, taken back one by one. A box or the person gets nothing; a secret
+           goes to conversations only. Checked once before any is given (the asset, its rights as for one
+           conversation); then each gets it whole or not at all, and the answer says which: {asset, rights, given:
+           [{conversation, ok, kept?, error?}]}. A right already wider is kept, never lowered. */
+        const roomGive = /^\/api\/rooms\/([0-9a-f-]{36})\/give$/.exec(pathname);
+        if (roomGive && rooms) {
+            const asset = String(body.asset ?? ''); const rights = readRights(asset, body.rights);
+            const type = typeOf(asset); const name = nameOf(asset);
+            if (type === 'secret') { if (!secrets?.list({ held: true }).some((x) => x.name === name)) throw new Refusal(404, 'No such secret.'); }
+            else if (['folder', 'git', 'mailbox'].includes(type)) { if (!resources?.list().some((r) => resources.assetOf(r) === asset)) throw new Refusal(404, 'No such asset.'); }
+            else throw new Refusal(400, 'A folder, a repository, a mailbox or a secret is given to the AIs of a room.');
+            const ais = rooms.ais(roomGive[1]);
+            if (!ais.length) throw new Refusal(409, 'This room has no AI.');
+            const given = [];
+            for (const conversation of ais) {
+                try {
+                    if (type === 'secret') await handSecret(conversation, name, true);
+                    else {
+                        const access = rights.includes('w') ? 'write' : 'read';
+                        const had = resources.of(conversation).find((r) => r.name === name)?.access;
+                        if (had === 'write' && access === 'read') { given.push({ conversation, ok: true, kept: 'write' }); continue; }
+                        await attachResource(conversation, name, access, body.shared === true);
+                    }
+                    given.push({ conversation, ok: true });
+                } catch (error) { given.push({ conversation, ok: false, error: error.message, ...(error.kind ? { kind: error.kind } : {}) }); }
+            }
+            return send(200, { asset, rights, given }), true;
+        }
         const talking = /^\/api\/conversations\/([^/]+)\/talk(\/invite|\/remind|\/react)?$/.exec(pathname);
         if (talking && talk) {
             const conversation = decodeURIComponent(talking[1]);
@@ -729,13 +783,7 @@ export async function handleApi(request, response, conversations, headers, resou
         const handed = /^\/api\/conversations\/([^/]+)\/secrets$/.exec(pathname);
         if (handed && secrets) {
             const conversation = decodeURIComponent(handed[1]);
-            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
-            secrets.attach(conversation, String(body.secret ?? ''), body.attached === true);
-            /* A machine that runs gets it (or loses it) now, in /run/secrets -- not only at the next
-               opening of a terminal; its tool's variables still wait for the tool's next start. */
-            const c = conversations.list().find((x) => x.name === conversation);
-            if (c?.phase === 'ready' && !c.asleep) await secrets.deliver(conversation).catch(() => {});
-            retell(conversation);
+            await handSecret(conversation, String(body.secret ?? ''), body.attached === true);
             return send(200, { ok: true, secrets: secrets.of(conversation) }), true;
         }
         /* Forget an ephemeral secret now (its stars in the chat have a button): gone from the vault and the machine. */
@@ -798,16 +846,7 @@ export async function handleApi(request, response, conversations, headers, resou
         const attach = /^\/api\/conversations\/([^/]+)\/resources$/.exec(pathname);
         if (attach && resources) {
             const conversation = decodeURIComponent(attach[1]);
-            if (!conversations.list().some((c) => c.name === conversation && c.phase === 'ready')) throw new Refusal(404, 'No such conversation, or it is not ready.');
-            const name = String(body.resource ?? ''); const access = String(body.access ?? '');
-            /* A second writer next to one that sends by itself: confirmed first. */
-            if (access === 'write') gitKeeper?.beforeWriter(name, conversation, body.shared === true);
-            /* Its automatic sending goes with the write attachment -- forgotten
-               BEFORE the change, so that a change that fails half-way (unmounted,
-               not mounted again) never leaves settings to come back later. */
-            if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
-            await resources.attach(conversation, name, access);
-            retell(conversation);
+            await attachResource(conversation, String(body.resource ?? ''), String(body.access ?? ''), body.shared === true);
             return send(200, { ok: true, resources: resources.of(conversation) }), true;
         }
         const moved = /^\/api\/conversations\/([^/]+)\/work$/.exec(pathname);
