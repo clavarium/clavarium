@@ -166,7 +166,7 @@ CADDYFILE="/etc/caddy/Caddyfile"
 MESH_CADDY="/etc/caddy/clavarium-meshcentral.caddy"
 
 refuse() { echo "REFUSED: $*" >&2; exit 78; }
-usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi|meshcentral> <verb> [arguments]" >&2; exit 64; }
+usage() { echo "usage: clavarium-host [--say-only [--data DIR] [--mnt DIR]] <vm|shelf|folder|work|view|tools|mounts|operator|machines|disks|net|git|server|update|wifi|meshcentral|relay> <verb> [arguments]" >&2; exit 64; }
 
 SAY="no"; DATA=""; MNT=""; TEST=""
 while [ $# -gt 0 ]; do
@@ -738,6 +738,8 @@ AREA="$1"; VERB="$2"; shift 2
 # verbs, and commands run inside a machine (the server's own probes, mostly), are not written.
 case "$AREA $VERB" in
     "vm exec"|"vm ping"|"vm states"|"vm info"|"server logs"|"server room"|"server usage"|"shelf info"|"shelf room"|"shelf list"|"shelf size"|"shelf exec"|"git read"|"work room"|"disks list"|"disks room"|"machines places"|"machines moving"|"machines old"|"net taps"|"net leases"|"wifi status"|"wifi scan"|"path held"|"disk room"|"update check"|"meshcentral status"|"operator "*) : ;;
+    # A one-time code is not written down, even spent.
+    "relay join") [ "$SAY" = yes ] || logger -t clavarium-host -- "relay join (a home asks to join the relay)" 2>/dev/null || true ;;
     *) [ "$SAY" = yes ] || logger -t clavarium-host -- "$AREA $VERB$(printf ' %.80s' "$@" | head -c 400)" 2>/dev/null || true ;;
 esac
 
@@ -1521,6 +1523,15 @@ OOMScoreAdjust=-900'
         systemctl stop "clvread-$1_*.service" >/dev/null 2>&1 || true
         systemctl reset-failed "clvread-$1_*.service" >/dev/null 2>&1 || true
         exit 0 ;;
+    "relay join")
+        # A HOME ASKS TO JOIN THIS MACHINE'S RELAY (server/relayjoin.mjs, POST /c/relay-join): <code>
+        # ssh-ed25519 <key>. The code is one the owner made here as root (`sudo clavarium relay invite
+        # NAME`); its hash, its name and its end are kept where the server cannot read them. Checked,
+        # spent and acted on as root by deploy/online.mjs (relay join): a wrong, used or expired code is
+        # refused (78) and counted; a good one adds this PUBLIC key to the relay, bounded to two ports
+        # of its own. What it prints holds nothing secret: the relay's address, fingerprint, two ports.
+        [ $# -eq 3 ] && [[ "$1" =~ ^[A-HJKMNP-Z2-9]{8}$ ]] && [ "$2" = "ssh-ed25519" ] && [[ "$3" =~ ^[A-Za-z0-9+/]{68}$ ]] || usage
+        run "$UPDATER_NODE" "$CODE/current/app/deploy/clavarium.mjs" relay join "$1" "$2 $3" ;;
     "update check")
         # Asks the registry what is out on the channel, now, and prints what
         # the updater knows (state.json). No argument: the registry, the name

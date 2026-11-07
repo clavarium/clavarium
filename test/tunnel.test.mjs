@@ -29,7 +29,18 @@ test('its unit: the program of the release, the relay and its port read from wha
     for (const line of ['ExecStart=/usr/local/sbin/clavarium-tunnel relay.example.com 2222', 'Restart=always', 'RestartSec=5', 'StartLimitIntervalSec=0', 'RuntimeDirectory=clavarium-tunnel', 'RuntimeDirectoryPreserve=yes', 'User=clavarium-tunnel']) assert.ok(unit.includes(`${line}\n`), line);
     assert.equal(relayOfUnit('[Service]\nExecStart=/bin/true\n'), null);
     /* install.sh writes this very text. */
-    assert.match(readFileSync(new URL('../deploy/install.sh', import.meta.url), 'utf8'), /tunnelUnit\(process\.argv\[2\], process\.argv\[3\]\).*\n.*deploy\/tunnel\.mjs" "\$RELAY" "\$RELAY_PORT" > \/etc\/systemd\/system\/clavarium-tunnel\.service/);
+    assert.match(readFileSync(new URL('../deploy/install.sh', import.meta.url), 'utf8'), /tunnelUnit\(process\.argv\[2\], process\.argv\[3\], undefined, t \? \{ tls: t, http: h \} : null\)\).*\n.*deploy\/tunnel\.mjs" "\$RELAY" "\$RELAY_PORT" "\$RELAY_PORTS" > \/etc\/systemd\/system\/clavarium-tunnel\.service/);
+});
+
+test('a home the principal added: its own two ports in its unit, kept by the updater', async (t) => {
+    const unit = tunnelUnit('relay.example.com', '22', undefined, { tls: '8444', http: '8081' });
+    assert.ok(unit.includes('ExecStart=/usr/local/sbin/clavarium-tunnel relay.example.com 22 8444 8081\n'));
+    assert.deepEqual(relayOfUnit(unit), { relay: 'relay.example.com', port: '22', ports: { tls: '8444', http: '8081' } });
+    const d = folder(t);
+    const file = join(d, 'clavarium-tunnel.service'); const program = join(d, 'sbin-clavarium-tunnel');
+    writeFileSync(program, readFileSync(WRAPPER));
+    writeFileSync(file, tunnelUnit('relay.example.com', '22', program, { tls: '8444', http: '8081' }));
+    assert.equal(await ensureTunnel({ file, program, from: WRAPPER, run: async () => ({ code: 0 }) }), false, 'the ports kept: nothing to write');
 });
 
 test('the updater writes it over an older one, the program first; then nothing more', async (t) => {
@@ -47,11 +58,11 @@ test('the updater writes it over an older one, the program first; then nothing m
 });
 
 /* The program, with an ssh that says what a relay would. */
-function wrapper(t, said, code = 255) {
+function wrapper(t, said, code = 255, ports = []) {
     const d = folder(t);
     mkdirSync(join(d, 'bin')); mkdirSync(join(d, 'run'));
     writeFileSync(join(d, 'bin', 'ssh'), `#!/bin/sh\necho "$*" > "${d}/args"\nprintf '%s\\n' "${said}" >&2\nexit ${code}\n`, { mode: 0o755 });
-    const go = () => spawnSync('bash', [WRAPPER, 'relay.example.com', '2222'], { env: { PATH: `${join(d, 'bin')}:/usr/bin:/bin`, RUNTIME_DIRECTORY: join(d, 'run'), CLAVARIUM_TUNNEL_STEP: '0' }, encoding: 'utf8' });
+    const go = () => spawnSync('bash', [WRAPPER, 'relay.example.com', '2222', ...ports], { env: { PATH: `${join(d, 'bin')}:/usr/bin:/bin`, RUNTIME_DIRECTORY: join(d, 'run'), CLAVARIUM_TUNNEL_STEP: '0' }, encoding: 'utf8' });
     return { d, go, count: () => (existsSync(join(d, 'run', 'refused')) ? readFileSync(join(d, 'run', 'refused'), 'utf8').trim() : '') };
 }
 
@@ -63,6 +74,18 @@ test('a cut of the network: keepalives every 10 s, two missed; tried again at on
     const args = readFileSync(join(w.d, 'args'), 'utf8');
     for (const o of ['ServerAliveInterval=10', 'ServerAliveCountMax=2', 'ExitOnForwardFailure=yes', 'StrictHostKeyChecking=yes', '*:8443:127.0.0.1:443', '*:8080:127.0.0.1:80', '-p 2222', at('clavarium-tunnel')]) assert.ok(args.includes(o), o);
     assert.doesNotMatch(r.stderr, /refused this machine/);
+});
+
+test('a home the principal added holds its own ports, on the relay\'s loopback only', (t) => {
+    const w = wrapper(t, 'ssh: connect to host relay.example.com port 2222: Network is unreachable', 255, ['8444', '8081']);
+    w.go();
+    const args = readFileSync(join(w.d, 'args'), 'utf8');
+    for (const o of ['-R 127.0.0.1:8444:127.0.0.1:443', '-R 127.0.0.1:8081:127.0.0.1:80']) assert.ok(args.includes(o), o);
+    assert.ok(!args.includes('*:'), 'never every address');
+    for (const bad of [['8444'], ['84', '8081'], ['8444', '8081;id']]) {
+        const v = wrapper(t, 'x', 255, bad);
+        assert.equal(v.go().status, 64, bad.join(' '));
+    }
 });
 
 test('a refusal (its key, the relay\'s host key) is not a cut: counted, said, waited for longer each time; held again, the count starts over', (t) => {

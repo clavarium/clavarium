@@ -38,6 +38,8 @@
 #                      server mode)
 #   --relay-installed  the relay was set up already (by `clavarium online`):
 #                      do not print the command to run on it
+#   --relay-ports T,H  the two ports the relay gave this machine, when it is
+#                      not the relay's first home (`clavarium online --join`)
 #   --name NAME        the name of this Clavarium, under its icon and in its
 #                      tab (default: drawn from --domain); changed in Settings.
 #                      Letters, digits, spaces, dots, hyphens: 30 at most
@@ -118,7 +120,7 @@ bad() { echo "install: $*" >&2; echo "usage: install.sh --domain NAME --operator
 refuse() { echo "install: REFUSED: $*" >&2; exit 78; }
 step() { echo "== $*"; }
 
-DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
+DOMAIN=""; OPERATORS=""; PORT="7717"; CORE_ONLY="no"; DRY="no"; RELAY=""; RELAY_PORT="22"; RELAY_PORTS=""; LOCAL="no"; KEEP_RELEASE="no"; RELAY_INSTALLED="no"
 VERSION=""; FROM_DIR=""; UPDATES=""; WINDOW=""; CHANNEL=""; APP_NAME=""; CLIENT_ID=""
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -136,6 +138,7 @@ while [ $# -gt 0 ]; do
         --channel) CHANNEL="${2:-}"; shift 2 || bad "--channel needs a value" ;;
         --keep-release) KEEP_RELEASE="yes"; shift ;;
         --relay-installed) RELAY_INSTALLED="yes"; shift ;;
+        --relay-ports) RELAY_PORTS="${2:-}"; shift 2 || bad "--relay-ports needs a value" ;;
         --name) APP_NAME="${2:-}"; [ -n "$APP_NAME" ] || bad "--name needs a value"; shift 2 ;;
         --client-id) CLIENT_ID="${2:-}"; [ -n "$CLIENT_ID" ] || bad "--client-id needs a value"; shift 2 ;;
         --dry-run) DRY="yes"; shift ;;
@@ -161,7 +164,9 @@ if [ -n "$RELAY" ]; then
     [[ "$RELAY" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$|^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || bad "--relay is the name or the address of the relay machine"
     [[ "$RELAY_PORT" =~ ^[0-9]{1,5}$ ]] && [ "$RELAY_PORT" -ge 1 ] && [ "$RELAY_PORT" -le 65535 ] || bad "--relay-port is a port number"
     [ "$CORE_ONLY" = "no" ] || bad "--relay comes with the edge: it cannot go with --core-only"
+    [ -z "$RELAY_PORTS" ] || [[ "$RELAY_PORTS" =~ ^[0-9]{4,5},[0-9]{4,5}$ ]] || bad "--relay-ports is two ports: TLS,HTTP"
 fi
+[ -z "$RELAY_PORTS" ] || [ -n "$RELAY" ] || bad "--relay-ports goes with --relay"
 
 # WHAT IS INSTALLED: an exact version from npm, or a working tree (development).
 [ -z "$VERSION" ] || [[ "$VERSION" =~ ^[0-9]{1,4}\.[0-9]{1,4}\.[0-9]{1,6}(-[0-9A-Za-z.-]{1,40})?$ ]] || bad "--version is an exact version, like 1.2.3 or 1.3.0-next.1"
@@ -744,8 +749,8 @@ if [ -n "$RELAY" ]; then
     fi
     # The unit is the updater's (deploy/tunnel.mjs, tunnelUnit): one text, kept up to date by each update.
     install -o root -g root -m 0755 "$APP/deploy/clavarium-tunnel" /usr/local/sbin/clavarium-tunnel
-    "$NODE_DIR/bin/node" --input-type=module -e 'const { tunnelUnit } = await import(process.argv[1]); process.stdout.write(tunnelUnit(process.argv[2], process.argv[3]));' \
-        "$APP/deploy/tunnel.mjs" "$RELAY" "$RELAY_PORT" > /etc/systemd/system/clavarium-tunnel.service
+    "$NODE_DIR/bin/node" --input-type=module -e 'const { tunnelUnit } = await import(process.argv[1]); const [t, h] = (process.argv[4] || "").split(","); process.stdout.write(tunnelUnit(process.argv[2], process.argv[3], undefined, t ? { tls: t, http: h } : null));' \
+        "$APP/deploy/tunnel.mjs" "$RELAY" "$RELAY_PORT" "$RELAY_PORTS" > /etc/systemd/system/clavarium-tunnel.service
     systemctl daemon-reload
     systemctl enable --quiet clavarium-tunnel.service
     systemctl restart clavarium-tunnel.service

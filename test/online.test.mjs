@@ -218,7 +218,7 @@ test('--relay: key shown, waited for, fingerprint confirmed, relay set up by its
         assert.ok(text.includes(PRINT));
         assert.equal(w.log.filter((e) => e.ask).length, 1);
         const setup = w.remote.find((r) => r.command.includes('relay.sh --key'));
-        assert.match(setup.command, /^sudo -n bash -c '.*cat > "\$f"; bash "\$f" "\$@" <\/dev\/null.*' relay\.sh --key 'ssh-ed25519 \S+ clavarium-tunnel' --keeper-key 'ssh-ed25519 \S+ clavarium-keeper'$/);
+        assert.match(setup.command, /^sudo -n bash -c '.*cat > "\$f"; bash "\$f" "\$@" <\/dev\/null.*' relay\.sh --key 'ssh-ed25519 \S+ clavarium-tunnel' --keeper-key 'ssh-ed25519 \S+ clavarium-keeper' --name 'clav\.example\.com'$/);
         assert.equal(setup.input, readFileSync(RELAY_SH, 'utf8'), 'the relay script itself, sent on standard input');
         assert.ok(w.remote.some((r) => r.command.includes('authorized_keys') && r.command.includes('grep -vF')), 'the setup key is taken out');
         assert.match(readFileSync(P.relayConf, 'utf8'), /HOST=relay\.example\.net[\s\S]*USER=ubuntu[\s\S]*SETUP_KEY=removed/);
@@ -352,4 +352,168 @@ test('a relay that does not exist yet: its key shown, its address asked, the dom
     await waitDns(sys, o);
     assert.ok(printed.join('\n').includes(`clav.example.com  A  ${IP}`));
     assert.ok(t >= 60_000, 'it waited');
+});
+
+/* --------------------------- another home on the relay --------------------------- */
+const HOME_KEY = keyLine('tunnel-of-b');
+const PRINCIPAL_UNIT = 'ExecStart=node server/main.mjs --operators a@example.com --public-origin https://clav.example.com\n';
+/* A principal: online, its relay kept through its maintenance key. `relay` answers what the relay would. */
+function principalPlace({ relay } = {}) {
+    const p = place();
+    writeFileSync(p.P.unit, PRINCIPAL_UNIT);
+    mkdirSync(join(p.P.relayConf, '..'), { recursive: true });
+    writeFileSync(p.P.relayConf, 'HOST=relay.example.net\nPORT=22\nUSER=ubuntu\nSETUP_KEY=removed\n');
+    const sent = [];
+    const w = world({ root: p.root, ssh: (user, host, command) => {
+        sent.push(command);
+        if (user !== 'clavarium-keeper') return { code: 255, out: '', err: 'Permission denied' };
+        return relay ? relay(command) : command.startsWith('add-home ') ? { code: 0, out: `home ${command.split(' ')[1]}\ntls-port 8444\nhttp-port 8081\nfingerprint ${PRINT}\n`, err: '' } : OK;
+    } });
+    return { ...p, w, sent };
+}
+
+test('the parameters of a home that joins: a code from the principal, by its name; or ports and a fingerprint by hand', () => {
+    const o = parseOnline(['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'abcd-efgh']);
+    assert.equal(o.join, 'ABCDEFGH'); assert.equal(o.principal, 'clav.example.com');
+    const h = parseOnline(['--relay', 'relay.example.net', '--domain', 'clav2.example.com', '--relay-ports', '8444,8081', '--relay-fingerprint', PRINT]);
+    assert.deepEqual(h.ports, { tls: '8444', http: '8081' });
+    for (const args of [
+        ['--domain', 'clav2.example.com', '--join', 'ABCDEFGH'],
+        ['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'ABCDEFG0'],
+        ['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'ABCD'],
+        ['--relay', RELAY_IP, '--domain', 'clav2.example.com', '--join', 'ABCDEFGH'],
+        ['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'ABCDEFGH', '--relay-user', 'ubuntu'],
+        ['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'ABCDEFGH', '--relay-fingerprint', PRINT],
+        ['--relay', 'relay.example.net', '--domain', 'clav2.example.com', '--relay-ports', '8444,8081'],
+        ['--relay', 'relay.example.net', '--domain', 'clav2.example.com', '--relay-ports', '80,443', '--relay-fingerprint', PRINT],
+        ['--relay', 'relay.example.net', '--domain', 'clav2.example.com', '--relay-ports', '8444,8081;id', '--relay-fingerprint', PRINT],
+        ['--port', '--domain', 'clav2.example.com', '--join', 'ABCDEFGH'],
+    ]) assert.throws(() => parseOnline(args), Bad, args.join(' '));
+});
+
+test('invite and join: the code is good once and for 30 minutes; a wrong one is refused and counted; the answer holds nothing secret', async () => {
+    const { invite, joinWithCode, INVITE_MS, WRONG_MAX } = await import('../deploy/online.mjs');
+    const p = principalPlace();
+    try {
+        const made = await invite(p.w.sys, p.P, 'clav2.example.com');
+        assert.match(made.code, /^[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$/);
+        assert.ok(p.w.text().includes(`sudo clavarium online --relay clav.example.com --domain clav2.example.com --join ${made.code}`), 'what to type on the new home');
+        /* Only its hash is kept, root's alone. */
+        const kept = readFileSync(join(p.P.access, 'invites.json'), 'utf8');
+        assert.ok(!kept.includes(made.code.replace('-', '')));
+        const a = await joinWithCode(p.w.sys, p.P, made.code.toLowerCase(), HOME_KEY);
+        assert.deepEqual(a, { name: 'clav2.example.com', relay: { host: 'relay.example.net', port: 22, fingerprint: PRINT }, ports: { tls: 8444, http: 8081 } });
+        assert.deepEqual(p.sent, ['name-principal clav.example.com', `add-home clav2.example.com ${HOME_KEY}`], 'the principal named, then the home added, through the maintenance account');
+        await assert.rejects(joinWithCode(p.w.sys, p.P, made.code, HOME_KEY), (e) => e instanceof Refused && /not a valid code/.test(e.message), 'used: refused');
+        /* Expired. */
+        const late = await invite(p.w.sys, p.P, 'clav3.example.com');
+        const sys = { ...p.w.sys, now: () => INVITE_MS + 1 };
+        await assert.rejects(joinWithCode(sys, p.P, late.code, HOME_KEY), Refused, 'expired: refused');
+        /* Wrong codes, counted: at WRONG_MAX within the window, every invitation is cancelled. */
+        const good = await invite(p.w.sys, p.P, 'clav4.example.com');
+        const before = p.sent.length;
+        /* One wrong already counted in this window (the used code; the expired one was in a later window). */
+        for (let i = 0; i < WRONG_MAX - 2; i++) await assert.rejects(joinWithCode(p.w.sys, p.P, 'ZZZZZZZZ', HOME_KEY), /not a valid code \(wrong/);
+        assert.equal(JSON.parse(readFileSync(join(p.P.access, 'invites.json'), 'utf8')).wrong.length, WRONG_MAX - 1, 'counted');
+        await assert.rejects(joinWithCode(p.w.sys, p.P, 'ZZZZZZZZ', HOME_KEY), /every invitation was cancelled/);
+        await assert.rejects(joinWithCode(p.w.sys, p.P, good.code, HOME_KEY), /not a valid code/, 'cancelled with the others');
+        assert.equal(p.sent.length, before, 'the relay was never asked');
+        await assert.rejects(joinWithCode(p.w.sys, p.P, 'ABCD', HOME_KEY), Bad);
+        await assert.rejects(joinWithCode(p.w.sys, p.P, 'ABCDEFGH', `${HOME_KEY}\nssh-ed25519 x`), Bad);
+    } finally { p.done(); }
+});
+
+test('only the principal invites: not a home, not a machine offline; a relay that refuses is said', async () => {
+    const { invite, joinWithCode } = await import('../deploy/online.mjs');
+    const p = principalPlace({ relay: (c) => (c.startsWith('add-home') ? { code: 78, out: '', err: 'clavarium-relay: REFUSED: clav2.example.com is served by this relay already' } : OK) });
+    try {
+        const made = await invite(p.w.sys, p.P, 'clav2.example.com');
+        await assert.rejects(joinWithCode(p.w.sys, p.P, made.code, HOME_KEY), (e) => e instanceof Refused && /served by this relay already/.test(e.message));
+        await assert.rejects(invite(p.w.sys, p.P, 'clav.example.com'), Bad, 'itself');
+        writeFileSync(p.P.unit, 'ExecStart=node server/main.mjs\n');
+        await assert.rejects(invite(p.w.sys, p.P, 'clav2.example.com'), /not online yet/);
+        writeFileSync(p.P.unit, PRINCIPAL_UNIT);
+        writeFileSync(p.P.relayConf, 'HOST=relay.example.net\nPORT=22\nTLS_PORT=8444\nHTTP_PORT=8081\nROLE=home\n');
+        await assert.rejects(invite(p.w.sys, p.P, 'clav2.example.com'), /only its principal/);
+        await assert.rejects(relayCommand(['status'], p.w.sys, p.P), /kept by its principal/);
+    } finally { p.done(); }
+});
+
+test('relay add-home by hand prints what to type on the new home; remove-home and homes go through the maintenance account', async () => {
+    const p = principalPlace();
+    try {
+        await relayCommand(['add-home', 'clav2.example.com', '--key', ...HOME_KEY.split(' ')], p.w.sys, p.P);
+        assert.ok(p.w.text().includes(`sudo clavarium online --relay relay.example.net --domain clav2.example.com --relay-ports 8444,8081 --relay-fingerprint ${PRINT}`));
+        await relayCommand(['remove-home', 'clav2.example.com'], p.w.sys, p.P);
+        await relayCommand(['homes'], p.w.sys, p.P);
+        assert.deepEqual(p.sent.slice(-2), ['remove-home clav2.example.com', 'homes']);
+        for (const args of [['add-home', 'clav2.example.com', HOME_KEY], ['add-home', 'Clav2', '--key', HOME_KEY], ['remove-home'], ['homes', 'x'], ['invite']]) await assert.rejects(relayCommand(args, p.w.sys, p.P), Bad, args.join(' '));
+    } finally { p.done(); }
+});
+
+/* The new home: the principal answers over HTTPS; the relay is checked, then the tunnel holds its own ports. */
+function joiningWorld(root, { answer, caddy = [[CERT], [CERT]] } = {}) {
+    const posted = [];
+    const w = world({ root, caddy, dns: { 'clav2.example.com': [RELAY_IP], 'clav.example.com': [RELAY_IP], 'relay.example.net': [RELAY_IP] },
+        ssh: () => ({ code: 255, out: '', err: 'Permission denied' }) });
+    w.sys.post = async (url, body) => { posted.push({ url, body }); return answer ?? { status: 200, body: { name: 'clav2.example.com', relay: { host: 'relay.example.net', port: 22, fingerprint: PRINT }, ports: { tls: 8444, http: 8081 } } }; };
+    return { ...w, posted };
+}
+const JOIN_ARGS = ['--relay', 'clav.example.com', '--domain', 'clav2.example.com', '--join', 'ABCD-EFGH'];
+
+test('--join: the code and the PUBLIC key to the principal, the relay checked, the test and the tunnel on its own ports, no account of the relay used', async () => {
+    const { root, P, done } = place();
+    try {
+        const w = joiningWorld(root);
+        await online(parseOnline(JOIN_ARGS), w.sys, P);
+        assert.equal(w.posted.length, 1);
+        assert.equal(w.posted[0].url, 'https://clav.example.com/c/relay-join');
+        assert.deepEqual(Object.keys(w.posted[0].body).sort(), ['code', 'key']);
+        assert.equal(w.posted[0].body.code, 'ABCDEFGH');
+        assert.match(w.posted[0].body.key, /^ssh-ed25519 [A-Za-z0-9+/]{68}$/, 'the public key, nothing else');
+        assert.equal(ran(w.log, (a) => a[0] === 'ssh').length, 0, 'no SSH login to the relay: no setup key, no maintenance key');
+        assert.match(readFileSync(join(P.tunnel, 'known_hosts'), 'utf8'), /relay\.example\.net ssh-ed25519/);
+        assert.match(readFileSync(P.relayConf, 'utf8'), /HOST=relay\.example\.net[\s\S]*TLS_PORT=8444[\s\S]*HTTP_PORT=8081[\s\S]*ROLE=home[\s\S]*PRINCIPAL=clav\.example\.com/);
+        const tunnel = w.log.find((e) => e.start && e.start.includes(['clavarium-tunnel', 'relay.example.net'].join('@')));
+        assert.ok(tunnel.start.includes('127.0.0.1:8444:127.0.0.1:443') && tunnel.start.includes('127.0.0.1:8081:127.0.0.1:80'), 'its own ports, on the loopback');
+        assert.ok(!tunnel.start.some((a) => a.startsWith('*:')));
+        const runs = installRuns(w.log);
+        assert.deepEqual(runs[0].argv.slice(-7), ['--relay', 'relay.example.net', '--relay-port', '22', '--relay-installed', '--relay-ports', '8444,8081']);
+        assert.match(w.text(), /TO KEEP THE RELAY BLIND for clav2\.example\.com, add a CAA record/);
+        /* Its updater leaves the relay to its principal. */
+        const { keepRelayCurrent } = await import('../deploy/online.mjs');
+        assert.deepEqual(await keepRelayCurrent(w.sys, P, { done: join(root, 'done') }), { state: 'none' });
+    } finally { done(); }
+});
+
+test('--join: a refused code, an answer for another name, a relay with another key: stopped, nothing changed', async () => {
+    for (const [answer, why, Kind] of [
+        [{ status: 403, body: { error: 'This code is not valid: wrong, used or expired.' } }, /refused the code: This code is not valid[\s\S]*relay invite clav2\.example\.com/, Refused],
+        [{ status: 429, body: {} }, /too many tries/, Failed],
+        [{ status: 200, body: { name: 'other.example.com', relay: { host: 'relay.example.net', port: 22, fingerprint: PRINT }, ports: { tls: 8444, http: 8081 } } }, /made for other\.example\.com/, Refused],
+        [{ status: 200, body: { name: 'clav2.example.com', relay: { host: 'relay.example.net', port: 22, fingerprint: `SHA256:${'Z'.repeat(43)}` }, ports: { tls: 8444, http: 8081 } } }, /may not be the relay/, Refused],
+        [{ status: 200, body: { name: 'clav2.example.com', relay: { host: 'relay.example.net; id', port: 22, fingerprint: PRINT }, ports: { tls: 8444, http: 8081 } } }, /something else/, Failed],
+    ]) {
+        const { root, P, done } = place();
+        try {
+            const w = joiningWorld(root, { answer });
+            await assert.rejects(online(parseOnline(JOIN_ARGS), w.sys, P), (e) => e instanceof Kind && why.test(e.message), String(why));
+            assert.ok(!existsSync(P.relayConf));
+            assert.equal(installRuns(w.log).length, 0);
+        } finally { done(); }
+    }
+});
+
+test('--join run again after a failed test: the relay and ports kept, the code not sent twice', async () => {
+    const { root, P, done } = place();
+    try {
+        const fail = JSON.stringify({ level: 'error', msg: 'could not get certificate from issuer', error: 'Connection refused' });
+        const w = joiningWorld(root, { caddy: [[fail]] });
+        await assert.rejects(online(parseOnline(JOIN_ARGS), w.sys, P), /Nothing was changed/);
+        const again = joiningWorld(root);
+        await online(parseOnline(JOIN_ARGS), again.sys, P);
+        assert.equal(again.posted.length, 0);
+        assert.match(again.text(), /joined the relay relay\.example\.net already/);
+        assert.equal(installRuns(again.log).length, 1);
+    } finally { done(); }
 });
