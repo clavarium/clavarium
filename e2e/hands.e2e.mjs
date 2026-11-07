@@ -232,9 +232,9 @@ test('a git repository is added from the page, attached like a folder, and is a 
     await me.page.locator('#share').click();
     const offered = me.page.locator('#share-add .folder', { hasText: 'site' });
     await me.until('the repository is offered', async () => (await offered.count()) === 1);
-    assert.match(await offered.innerText(), /site repository, attached here/);
+    assert.match(await offered.innerText(), /site\s+repository, attached here/);
     await offered.locator('button').click();
-    assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.levels button').allInnerTexts(), ['Read', 'Write']);
+    assert.deepEqual(await me.page.locator('#share-basket .folder', { hasText: 'site' }).locator('.kit-rights-pick button').allInnerTexts(), ['Read', 'Write']);
     await me.page.locator('#sharing-close').click();
     /* An address that is not one is refused before git is run; ssh asks for a key. */
     assert.match((await me.api('/api/resources', { name: 'bad', type: 'git', from: 'file:///etc' })).body.error, /repository address is https/);

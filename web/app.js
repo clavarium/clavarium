@@ -3858,21 +3858,6 @@
         for (const d of ['m3 17 2 2 4-4', 'm3 7 2 2 4-4', 'M13 6h8', 'M13 12h8', 'M13 18h8']) { const path = document.createElementNS(SVG, 'path'); path.setAttribute('d', d); svg.append(path); }
         return svg;
     }
-    const roundPlus = (label, onclick) => { const b = el('button', 'as-add', '+'); b.type = 'button'; b.setAttribute('aria-label', label); b.title = label; b.addEventListener('click', onclick); return b; };
-    /* One row, used by both the by-type and the by-group views. The icon
-       follows the item's own kind (a group mixes kinds). */
-    function assetRow(item, { chosen, choose }) {
-        const row = el('button', 'as-row'); row.type = 'button'; row.dataset.asset = item.key; row.dataset.name = item.name;
-        if (item.key === chosen) row.setAttribute('aria-current', 'true');
-        const name = el('b', '', item.name);
-        if (item.badge) { const badge = el('span', `as-badge${item.badgeTone ? ` ${item.badgeTone}` : ''}`, item.badge); if (item.badgeTitle) badge.title = item.badgeTitle; name.append(badge); }
-        const sub = el('small', item.tone ? `as-sub ${item.tone}` : 'as-sub', item.sub ?? '');
-        if (item.dot) { sub.classList.add('status-line'); sub.dataset.tone = item.dot; }
-        const words = el('span', 'as-words'); words.append(name, sub);
-        row.append(kindIcon(item.kind), words);
-        row.addEventListener('click', () => choose(item.key));
-        return row;
-    }
     /* AN ITEM OF THESE LISTS, as the kit's AssetCard takes it (06-11, assets step 2): its point when it asks for
        you (a secret soon or past, a mailbox failing), the shade of its line, who has it or its right. */
     const cardOf = (item) => ({ key: item.key, kind: item.kind, name: item.name, sub: item.sub ?? '', live: item.live,
@@ -3946,9 +3931,6 @@
         /* Once a finger's drag has begun, the page must not scroll under it. */
         holder.addEventListener('touchmove', (e) => { if (drag?.on) e.preventDefault(); }, { passive: false });
     }
-    /* The shortcut "give all": each member at the lightest real level for its type. */
-    const giveValue = (item, on) => (!on ? (item.target || item.kind !== 'secret' ? 'none' : 'off')
-        : item.target ? 'watch' : item.kind === 'secret' ? 'use' : 'read');
     async function applyMemberGrant(item, conversationName, value) {
         if (item.target) return grantTarget(item.target.id, conversationName, value);
         if (item.kind === 'secret') return handTo(conversationName, item.name, value === 'use', asErrId());
@@ -3968,14 +3950,15 @@
         bar.replaceChildren(KIT.Segmented({ options: [{ value: 'group', label: uiSaid('set-as-by-group', 'Groups') }, { value: 'type', label: uiSaid('set-as-by-type', 'Types') }], value: view, label: 'Arrange assets',
             onChange: (by) => { if (by === view) return; assetsBy = by; keepAssetsBy(); groupAdding = false; void paintAssets(); } }));
     }
-    /* "+ New group", above the groups: a name in place, then made and opened. */
+    /* "+ New group", above the list in either view (05-11, step 5: groups are made from any view): a name in place,
+       then made and opened. */
     function newGroupBar() {
         const addBar = el('div', 'as-group-new');
         if (groupAdding) {
             const form = el('form', 'as-group-form'); form.autocomplete = 'off';
-            const input = el('input'); input.placeholder = 'Group name'; input.maxLength = 40; input.setAttribute('aria-label', 'New group name');
-            const make = el('button', 'primary', 'Add'); make.type = 'submit';
-            const cancel = el('button', '', 'Cancel'); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
+            const input = el('input'); input.placeholder = uiSaid('set-group-name', 'Group name'); input.maxLength = 40; input.setAttribute('aria-label', input.placeholder);
+            const make = el('button', 'primary', uiSaid('set-group-add', 'Add')); make.type = 'submit';
+            const cancel = el('button', '', uiSaid('set-group-cancel', 'Cancel')); cancel.type = 'button'; cancel.addEventListener('click', () => { groupAdding = false; void paintAssets(); });
             form.append(input, make, cancel);
             form.addEventListener('submit', async (event) => {
                 event.preventDefault(); $('assets-error').hidden = true;
@@ -3985,112 +3968,128 @@
             });
             addBar.append(form);
             queueMicrotask(() => input.focus());
-        } else addBar.append(roundPlus('New group', () => { groupAdding = true; void paintAssets(); }), el('span', 'hint', 'New group'));
+        } else {
+            const word = uiSaid('set-group-new', 'New group');
+            const go = el('button', 'as-group-add'); go.type = 'button';
+            go.append(el('span', 'as-add', '+'), el('span', 'hint', word));
+            go.addEventListener('click', () => { groupAdding = true; void paintAssets(); });
+            addBar.append(go);
+        }
         return addBar;
     }
-    /* In an asset's detail: which group it is in. Moving it is a folder move
-       (it leaves any other group). New groups are made in the by-group view. */
-    function groupPicker(chosen, groups) {
-        const wrap = el('div', 'as-group-of'); wrap.append(el('span', 'as-group-of-label', uiSaid('set-as-group', 'Group')));
-        if (!groups.length) { wrap.append(el('small', 'hint', uiSaid('set-as-group-make', 'Make one in “By group”.'))); return wrap; }
-        const sel = el('select'); sel.setAttribute('aria-label', `Group for ${chosen.name}`);
-        const none = el('option', '', uiSaid('set-as-no-group', 'No group')); none.value = ''; sel.append(none);
-        const inId = groupOf(chosen.key, groups);
-        for (const g of groups) { const o = el('option', '', g.label); o.value = g.id; if (g.id === inId) o.selected = true; sel.append(o); }
-        if (!inId) none.selected = true;
-        sel.addEventListener('change', async () => {
+    /* AN ASSET'S GROUP, a chip on its head in the menu (kit GroupChip: « Home ▾ »): moving it is a folder move (it leaves any
+       other group); « New group… » makes one in place and puts it there. */
+    function groupChip(chosen, groups) {
+        const place = async (group) => {
             $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group: sel.value || null }); }
+            try { await post(`${API}/asset-groups/place`, { asset: chosen.key, group }); }
             catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
             void paintAssets();
-        });
-        wrap.append(sel);
-        return wrap;
-    }
-    /* A group's own detail: rename it, remove it (the assets stay), give the
-       whole group to a conversation at a level, and its members (each opens). */
-    function groupDetail(detail, group, items, back) {
-        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
-        const top = el('div', 'as-title');
-        const all = el('button', 'as-link as-back', '‹ Assets'); all.type = 'button'; all.addEventListener('click', () => { if (!nav.close('asset')) back(); });
-        const h = el('h2'); h.append(el('span', '', group.label), el('span', 'as-badge count', String(members.length)));
-        top.append(all, h);
-        detail.append(top);
-        const repaint = () => void paintAssets();
-        const openAsset = (key) => { placeAssetStep(); if (key !== assetOpen) groupGiveShow.clear(); assetOpen = key; remember(); void paintAssets(); };
-
-        /* GIVE THE GROUP: a block per conversation, a row per asset AT ITS OWN
-           level. Two shortcuts set or clear all at once (not a sticky state).
-           Rights stay stored per asset -- this is just a handy place to set them. */
-        const ready = conversations.filter((c) => c.phase === 'ready');
-        const isGiven = (c) => members.some((m) => !['none', 'off'].includes(memberCurrent(m, c.name)));
-        const shownConvs = ready.filter((c) => isGiven(c) || groupGiveShow.has(c.name));
-        const setAll = async (c, on) => { for (const m of members) { try { await applyMemberGrant(m, c.name, giveValue(m, on)); } catch { /* shown by the grant */ } } repaint(); };
-        const convBlock = (c) => {
-            const block = el('div', 'as-give-conv');
-            const head = el('div', 'as-give-head');
-            const giveAll = el('button', 'as-mini', 'Give all'); giveAll.type = 'button'; giveAll.addEventListener('click', () => setAll(c, true));
-            const clearAll = el('button', 'as-mini', uiSaid('set-group-none-all', 'All to None')); clearAll.type = 'button'; clearAll.addEventListener('click', () => setAll(c, false));
-            head.append(el('b', '', shownName(c)), el('span', 'as-give-acts', ''));
-            head.lastChild.append(giveAll, clearAll);
-            block.append(head);
-            for (const m of members) {
-                const line = el('div', 'as-give-row');
-                const nm = el('span', 'as-give-name'); nm.append(kindIcon(m.kind), el('span', '', m.name));
-                /* The one picker (kit RightsPicker, « None » first): the same levels as the asset's own panel. */
-                const pick = KIT.RightsPicker({ key: KIT.rightsKey(m), kind: m.kind, value: memberCurrent(m, c.name), label: `${m.name} for ${shownName(c)}`,
-                    onChange: async (level, stored) => { await applyMemberGrant(m, c.name, stored ?? level); repaint(); } });
-                if (pick) line.append(nm, pick); else line.append(nm);
-                block.append(line);
-            }
-            if (members.length === 0) block.append(el('p', 'hint', 'The group is empty.'));
-            return block;
         };
-        detail.append(chapter('Give the group to a conversation'));
-        const giveBox = el('div', 'as-give');
-        for (const c of shownConvs) giveBox.append(convBlock(c));
-        if (shownConvs.length === 0) giveBox.append(el('p', 'hint', members.length ? 'Not given to any conversation yet.' : 'Add assets to the group first (open an asset, pick this group).'));
-        detail.append(giveBox);
-        /* Add a conversation to set up, even before any asset is given to it. */
-        const others = ready.filter((c) => !shownConvs.includes(c));
-        const addConv = el('button', 'as-link as-add-conv', '+ a conversation'); addConv.type = 'button';
-        const picker = el('div', 'as-pick'); picker.hidden = true;
-        for (const c of others) { const b = el('button', 'as-pick-conv', shownName(c)); b.type = 'button'; b.addEventListener('click', () => { groupGiveShow.add(c.name); repaint(); }); picker.append(b); }
-        if (others.length === 0) picker.append(el('p', 'hint', ready.length ? 'Every conversation is shown.' : 'No conversation is ready.'));
-        addConv.addEventListener('click', () => { picker.hidden = !picker.hidden; });
-        if (members.length) detail.append(addConv, picker);
-        const note = el('p', 'as-assoc hint');
-        note.append(el('b', '', 'Per asset'), document.createTextNode(': each keeps the levels of its own type (a mailbox reads, a secret is used, a connexion watches…). The two shortcuts just set or clear all at once; each row stays editable, and the right is stored per asset.'));
-        detail.append(note);
-
-        /* The assets in the group, each opens its own detail. */
-        detail.append(chapter('Assets in the group'));
-        const rowsBox = el('div', 'as-group-members');
-        for (const m of members) rowsBox.append(assetRow(m, { chosen: '', choose: openAsset }));
-        if (members.length === 0) rowsBox.append(el('p', 'hint', 'Open an asset and pick this group to put it here.'));
-        detail.append(rowsBox);
-
-        /* Rename, then remove (a plain link -- it only drops the grouping). */
-        detail.append(chapter('Name'));
-        const form = el('form', 'as-group-rename'); form.autocomplete = 'off';
-        const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', 'Group name');
-        const go = el('button', 'btn', 'Rename'); go.type = 'submit';
-        form.append(name, go);
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault(); $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-            repaint();
+        return KIT.GroupChip({ groups, value: groupOf(chosen.key, groups), name: chosen.name, onPlace: place,
+            onMake: async (label) => {
+                $('assets-error').hidden = true;
+                let made;
+                try { made = await post(`${API}/asset-groups`, { label }); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return false; }
+                await place(made.id);
+                return true;
+            } });
+    }
+    /* A GROUP OPENED (05-11, assets step 5): the same panel as an asset (kit AssetPanel). Who has it: a conversation or a
+       device given a level gets it on every member that takes it, « None » takes it from every member (kit groupFanOut);
+       those skipped are said once. A right stays stored asset by asset: the group is only a label. Then its members (each
+       opens), Rename, Remove (the assets stay). */
+    let groupSaid = null;
+    /* One holder's level of each member: { [key]: level }. */
+    function groupCurrent(members, row) {
+        if (String(row.id).startsWith('device:')) {
+            const grants = sharedDevices.find((d) => `device:${d.id}` === row.id)?.grants ?? [];
+            return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), grants.find((g) => g.asset === m.key)?.rights, 'device')]));
+        }
+        const name = String(row.id).slice('conversation:'.length);
+        return Object.fromEntries(members.map((m) => [m.key, KIT.rightOf(KIT.rightsKey(m), memberCurrent(m, name))]));
+    }
+    function groupHolders(members) {
+        const rows = [];
+        const has = (g) => (g.level === 'some' ? uiSaid('set-group-has', '{has} of {of}', { has: g.has, of: g.of }) : '');
+        /* Given in part: each member it has, with its right (as the old screen showed each one's level). */
+        const parts = (g, now) => (g.level === 'some' ? members.filter((m) => (now[m.key] ?? 'none') !== 'none').map((m) => ({ name: m.name, key: KIT.rightsKey(m), level: now[m.key] })) : undefined);
+        for (const c of conversations) {
+            const id = `conversation:${c.name}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'conversation');
+            if (c.phase !== 'ready' && g.level === 'none') continue;
+            rows.push({ id, name: shownName(c) || c.name, sub: has(g) || (c.toolLabel ?? ''), level: g.level, ready: c.phase === 'ready', parts: parts(g, now) });
+        }
+        for (const d of sharedDevices) {
+            if (!(d.grants ?? []).some((x) => members.some((m) => m.key === x.asset))) continue;
+            const id = `device:${d.id}`;
+            const now = groupCurrent(members, { id });
+            const g = KIT.groupLevel(members, now, 'device');
+            rows.push({ id, name: d.label ?? d.name ?? d.id, sub: has(g) || undefined, level: g.level, parts: parts(g, now) });
+        }
+        return rows;
+    }
+    async function setGroupAccess(group, members, row, level) {
+        const err = $('assets-error'); err.hidden = true;
+        const fan = KIT.groupFanOut({ members, level, holder: row.holder, current: groupCurrent(members, row) });
+        let ok = true;
+        for (const x of fan.give) {
+            if (row.holder === 'device') {
+                const id = String(row.id).slice('device:'.length);
+                try { if (x.stored) await post(`${API}/devices/${id}/give`, { asset: x.key, rights: x.stored }); else await post(`${API}/devices/${id}/take`, { asset: x.key }); }
+                catch (error) { sayAsErr(error); ok = false; }
+            } else await applyMemberGrant(x.m, String(row.id).slice('conversation:'.length), x.stored ?? x.level);
+            /* The first refusal stops it, said (a repository shared for writing asks its confirmation there). */
+            if (!ok || !err.hidden) { ok = false; break; }
+        }
+        if (row.holder === 'device') await readDevices();
+        groupSaid = { id: group.id, text: KIT.skippedSaid(fan.skip) };
+        await paintAssets();
+        return ok;
+    }
+    function groupPanel(detail, group, items, { back, choose }) {
+        const members = (group.members ?? []).map((k) => items.find((i) => i.key === k)).filter(Boolean);
+        if (groupSaid?.id !== group.id) groupSaid = null;
+        const parts = [];
+        if (members.length) {
+            const levels = { conversation: KIT.groupLevels(members, 'conversation'), device: KIT.groupLevels(members, 'device') };
+            const model = KIT.accessModel({ key: 'group', holders: groupHolders(members), levels });
+            parts.push(KIT.AccessList(model, { key: 'group', name: group.label, levels, onChange: (row, level) => setGroupAccess(group, members, row, level) }));
+            if (groupSaid?.text) parts.push(el('p', 'hint as-group-skipped', groupSaid.text));
+            parts.push(el('p', 'hint as-group-note', uiSaid('set-group-per-asset', 'A right stays on each asset.')));
+        }
+        const rows = el('div', 'as-group-members');
+        for (const m of members) rows.append(KIT.AssetCard(cardOf(m), { cls: 'as-row', onOpen: choose }));
+        if (!members.length) rows.append(el('p', 'hint', uiSaid('set-group-empty-hint', 'Empty: pick this group on an asset.')));
+        parts.push({ title: uiSaid('set-group-in', 'In the group'), body: [rows], cls: 'as-group-in' });
+        /* Rename in place; remove, asked in place: the assets stay, only the label goes. */
+        const rename = el('button', 'as-link as-group-rename-open', uiSaid('set-group-rename', 'Rename…')); rename.type = 'button';
+        rename.addEventListener('click', () => {
+            const form = el('form', 'as-group-rename'); form.autocomplete = 'off';
+            const name = el('input'); name.value = group.label; name.maxLength = 40; name.setAttribute('aria-label', uiSaid('set-group-name', 'Group name'));
+            const go = el('button', 'primary', uiSaid('set-group-save', 'Rename')); go.type = 'submit';
+            const keep = el('button', '', uiSaid('set-group-cancel', 'Cancel')); keep.type = 'button';
+            keep.addEventListener('click', () => { form.replaceWith(rename); });
+            form.append(name, go, keep);
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault(); $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/rename`, { label: name.value.trim() }); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; return; }
+                void paintAssets();
+            });
+            rename.replaceWith(form); focusField(name);
         });
-        detail.append(form);
-        const remove = el('div', 'as-group-remove');
-        const del = el('button', 'as-remove-link', 'Remove the group'); del.type = 'button';
-        del.addEventListener('click', async () => {
-            $('assets-error').hidden = true;
-            try { await post(`${API}/asset-groups/${group.id}/remove`, {}); groupGiveShow.clear(); assetOpen = ''; remember(); } catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
-            repaint();
-        });
-        remove.append(del, el('p', 'hint', 'The assets stay; only the group is removed.'));
-        detail.append(remove);
+        const remove = KIT.AssetDelete({ label: uiSaid('set-group-remove', 'Remove group…'), lost: uiSaid('set-group-remove-q', 'Its assets stay; only the group goes.'), yes: uiSaid('set-group-remove-yes', 'Remove'),
+            onYes: async () => {
+                $('assets-error').hidden = true;
+                try { await post(`${API}/asset-groups/${group.id}/remove`, {}); assetOpen = ''; groupSaid = null; remember(); }
+                catch (error) { $('assets-error').textContent = error.message; $('assets-error').hidden = false; }
+                void paintAssets();
+            } });
+        const n = members.length;
+        const card = { key: `group:${group.id}`, kind: 'group', name: group.label, sub: uiSaid(n === 1 ? 'set-acc-asset-1' : 'set-acc-asset-n', n === 1 ? '1 asset' : '{n} assets', { n }) };
+        detail.append(KIT.AssetPanel(card, { back: { onBack: () => { if (!nav.close('asset')) back(); } }, parts, foot: [rename, remove], cls: 'as-group-panel' }));
     }
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
     const boxSub = (box) => (!box ? '' : box.failure ? box.failure : uiSaid(box.messages === 1 ? 'set-as-message' : 'set-as-messages', box.messages === 1 ? '1 message' : '{n} messages', { n: box.messages }));
@@ -4891,12 +4890,8 @@
     let assetsBy = '';
     try { const kept = localStorage.getItem('clavarium-assets-by'); if (kept === 'group' || kept === 'type') assetsBy = kept; } catch { /* a private window */ }
     const keepAssetsBy = () => { try { localStorage.setItem('clavarium-assets-by', assetsBy); } catch { /* as above */ } };
-    /* The "+ New group" inline form being shown in the by-group view. */
+    /* The "+ New group" inline form being shown above the list. */
     let groupAdding = false;
-    /* Conversations shown in a group's "give" settings although none of its
-       assets is given to them yet (the owner just added them to set levels).
-       Cleared when the open group changes. */
-    const groupGiveShow = new Set();
     /* A binder opened in Assets: its screen, the card of the address (a reload); a card, a step (binderSteps). */
     let assetsView = null; let assetsAt = null;
     const assetsSteps = binderSteps(() => assetsView, { address: () => remember() });
@@ -5202,7 +5197,6 @@
         const copyBox = (chosen.kind === 'mailbox' || chosen.kind === 'folder') && !t;
         /* WHAT IT IS. */
         if (chosen.kind === 'mailbox' && !t) parts.push(el('p', chosen.box?.failure ? 'error' : 'hint', boxSub(chosen.box)));
-        if (inMenu && groups) parts.push(groupPicker(chosen, groups));
         /* ACTIONS TOO (02-11): a mailbox copied as files is read only; the same mailbox, connected live, can
            send, reply, move, flag -- within the rights given. Made here with its address and password (they
            stay on the server); only its sending server is asked, found from the address when known. */
@@ -5422,14 +5416,14 @@
             foot.push(there);
         }
         /* Its right said once: by its own row's picker when it has one (« Lire » pressed), else by the head's badge. */
-        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: chipsOf(chosen) };
+        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: [inMenu && groups && !own ? { node: groupChip(chosen, groups) } : null, ...chipsOf(chosen)] };
         /* A later paint began while this one read: it draws, not this one. */
         if (stale()) return;
         detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
         if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
     }
     const ASSET_WORD = { folder: 'Folder', git: 'Repository', mailbox: 'Mailbox', agenda: 'Calendar', contacts: 'Contacts', secret: 'Secret', list: LISTS_WORD.one, acces: 'Access' };
-    /* Under its name: its kind (its group is the picker below it, in the menu). */
+    /* Under its name: its kind (its group, a chip before it, in the menu). */
     function chipsOf(chosen) {
         const kind = chosen.target ? (TETHER_CAT[chosen.target.kind] ?? 'acces') : chosen.kind;
         const word = uiSaid(`set-acc-kind-${kind}`, ASSET_WORD[kind] ?? kind);
@@ -5479,15 +5473,15 @@
         const allApprovals = Array.isArray(tether.approvals) ? tether.approvals : [];
         const onDemandes = !assetsAdding && !chosen && !chosenGroup && assetOpen === 'demandes:all';
         $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
-        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupGiveShow.clear(); clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
+        const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupSaid = null; clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
         /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
         const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: assetKinds() });
         paintAssetsView(model.view);
         /* Above them all, once something waits: the owner reaches every call from here, not only by opening the
-           right connexion. Then, in the view by group, "+ New group". */
+           right connexion. Then "+ New group", in either view. */
         const pinned = [];
         if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: allApprovals.length }), count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
-        if (model.view === 'group') pinned.push(newGroupBar());
+        if (!assetsQuery || groupAdding) pinned.push(newGroupBar());
         paintAssetList($('assets-rows'), model, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : onDemandes ? 'demandes:all' : ''), onOpen: choose, pinned,
             onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
             onGroup: (id) => choose(`group:${id}`), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
@@ -5504,7 +5498,7 @@
             if (kind) focusFirst(detail);
             return;
         }
-        if (chosenGroup) { groupDetail(detail, chosenGroup, items, back); return; }
+        if (chosenGroup) { groupPanel(detail, chosenGroup, items, { back, choose }); return; }
         if (onDemandes) {
             const body = [el('p', 'hint', 'Each is a Tether call its agent asked you to allow. Accept, and it runs; refuse, and it is told so.'),
                 allApprovals.length ? demandesList(allApprovals, { withWho: true, after: () => paintAssets() }) : el('p', 'hint', 'Nothing is waiting now.')];
@@ -6146,7 +6140,7 @@
         newAsset: () => newAssetFromMap(),
         autoSending: (conversation, name) => autoSending(conversation, name),
         partsFor: (name) => partsFor(name),
-        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? deviceCard(d, '', true) : null; },
+        deviceCard: (id) => { const d = sharedDevices.find((x) => x.id === id); return d ? devicePanel(d, '', true) : null; },
         /* The map says when it turns to its flows by itself (a box's "Trace it"). */
         modeIs: (mode) => { if (mode !== mapMode) { mapMode = mode; paintTabs(); subStep(); } },
         /* Its box rising from the bottom on a phone: over the screen, closed by Back. */
@@ -9259,13 +9253,35 @@
         return box;
     }
 
+    /* THE DEVICE'S FILES (/c/, assets step 6): the owner's one list (kit AssetList), scoped to this device -- by type, its
+       right on each row, no « + New », no « Give… » -- and the one chosen opened in the asset panel (AssetPanel), its
+       files inside it, read-only unless given to write. On a phone, the list or the one opened (« ‹ Files » back to the
+       list); wider, both side by side. One thing only: opened at once. */
+    let filesListing = false;
+    function paintDeviceAssets(items) {
+        const sheet = $('files');
+        const model = KIT.assetListModel({ items, scope: `device:${pairing}`, kinds: assetKinds() });
+        const chosen = items.find((i) => i.name === filesOf) ?? null;
+        sheet.dataset.open = chosen && (!filesListing || items.length <= 1) ? 'detail' : 'list';
+        sheet.dataset.many = String(items.length > 1);
+        paintAssetList($('files-assets'), model, { chosen: chosen?.key ?? '',
+            onOpen: (key) => { const i = items.find((x) => x.key === key); if (!i) return; filesListing = false; if (filesOf !== i.name) { filesOf = i.name; filesAt = ''; } void paintFiles(); } });
+        const holder = $('files-panel');
+        if (!chosen) { holder.replaceChildren(); holder.append($('files-body')); $('files-body').hidden = true; return; }
+        $('files-body').hidden = false;
+        const panel = KIT.AssetPanel(chosen, { back: items.length > 1 ? { label: `‹ ${uiSaid('set-dev-files', 'Files')}`, onBack: () => { filesListing = true; sheet.dataset.open = 'list'; } } : null,
+            parts: [{ title: uiSaid('set-dev-files', 'Files'), body: [$('files-body')] }], cls: 'files-asset' });
+        holder.replaceChildren(panel);
+    }
     /* `keep`: an error just said stays (painted after a change that failed in part). */
     async function paintFiles({ keep = false } = {}) {
         const ownerOthers = DEVICE ? [] : (await (await fetch(`${API}/resources`)).json().catch(() => [])).map((r) => ({ name: r.name, access: r.type === 'mailbox' ? 'read' : 'write', yours: true }));
         /* First, where the tool works -- when that is kept here; then what is attached. */
         const here = conversations.find((x) => x.name === current);
         const attachedHere = here?.resources ?? [];
-        const mine = noTerminal() ? deviceShared.map((s) => ({ name: s.name, access: s.access, given: true })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
+        /* ON A DEVICE (/c/, assets step 6): what it sees is the kit's (deviceItems), drawn as the owner's one list. */
+        const seen = DEVICE ? KIT.deviceItems({ shared: deviceShared, resources: attachedHere, work: here?.work, chatOnly: noTerminal(), conversation: shownName(here) || current }) : [];
+        const mine = DEVICE ? seen.map((i) => ({ name: i.name, access: i.access, given: i.via === 'device', own: i.via === 'work' })) : [...(here?.work === 'kept' ? [{ name: 'work', access: 'write', own: true }] : []), ...attachedHere.map((r) => ({ ...r })),
             /* On a device: what it was given for itself, whatever the conversation. */
             ...deviceShared.filter((s) => !attachedHere.some((r) => r.name === s.name)).map((s) => ({ name: s.name, access: s.access, given: true })),
             /* For the owner: everything else that is kept here, attached to this conversation or not. */
@@ -9278,7 +9294,8 @@
         if (!mine.some((r) => r.name === filesOf)) { filesOf = mine[0]?.name ?? ''; filesAt = ''; }
         const tabs = $('files-tabs');
         tabs.replaceChildren();
-        for (const r of mine) {
+        if (DEVICE) paintDeviceAssets(seen);
+        for (const r of DEVICE ? [] : mine) {
             const b = document.createElement('button');
             b.type = 'button'; b.textContent = r.own ? 'work - where the tool works' : `${r.name} - ${r.access === 'write' ? 'read-write' : 'read-only'}${r.given ? ' (given to this device)' : r.yours ? ' (not attached here)' : ''}`; b.setAttribute('role', 'tab');
             b.setAttribute('aria-selected', r.name === filesOf ? 'true' : 'false');
@@ -10595,8 +10612,9 @@
 
     /* FILES, a sheet over the screen: on a device's page only (the owner's are in the Assets tab of a conversation). */
     function showFiles() { if ($('assets-detail').contains($('files'))) unembedFiles(); nav.over('files', () => { if (!$('files').classList.contains('embedded')) { $('files').hidden = true; focusTerminal(); } }); $('files').hidden = false; }
-    $('files-open').addEventListener('click', async () => { await paintFiles(); showFiles(); });
-    $('files-close').addEventListener('click', () => { if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
+    /* On a device, Files opens on its list (a phone): the one to open is chosen there. */
+    $('files-open').addEventListener('click', async () => { filesListing = DEVICE; await paintFiles(); showFiles(); });
+    $('files-close').addEventListener('click', () => { filesListing = false; if (!nav.dropOver('files')) { $('files').hidden = true; focusTerminal(); } });
 
     /* ---------- sign-in mailbox ---------- */
     /* While a conversation with a mailbox is open, the page asks every few
@@ -10672,56 +10690,35 @@
         $('sharing-top').hidden = which === 'manage';
     };
 
-    /* A two-way control: Read | Write. `onChange(rights)`. */
-    function levelControl(rights, onChange, label) {
-        const group = document.createElement('div'); group.className = 'levels'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', label);
-        for (const [value, text] of [['r', 'Read'], ['rw', 'Write']]) {
-            const b = document.createElement('button'); b.type = 'button'; b.textContent = text; b.dataset.rights = value;
-            b.setAttribute('aria-pressed', String(value === rights));
-            b.addEventListener('click', () => { if (value !== rights) onChange(value); });
-            group.append(b);
-        }
-        return group;
-    }
-    const fixedRight = (type) => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = type === 'conversation' ? 'Use - the whole terminal' : 'Read only'; return s; };
-    /* A CONVERSATION IS GIVEN IN TWO PARTS, ticked one by one: its terminal
-       ("x") and its chat ("rw": read, and write there). At least one: the
-       last one ticked cannot be unticked (taking it all back is "Take back").
-       The server holds the device to it (see server/door.mjs). */
+    /* A DEVICE'S RIGHT ON ONE THING (07-11, assets step 6): the kit's RightsPicker, its device column -- a folder, a
+       repository: Read, Write; a mailbox: Read; a conversation in parts: Terminal, Chat, Both. « None » takes it back
+       where it is given; in the share basket it is not offered (« Remove » is). Was levelControl, partsControl, fixedRight. */
     const talksHere = (name) => Boolean(conversations.find((c) => c.name === name)?.talk);
     /* What is proposed when a conversation is added: its chat where it talks through the app, else its terminal. */
     const partsFor = (name) => (talksHere(name) ? 'rw' : 'x');
-    function partsControl(rights, onChange, name) {
-        const group = document.createElement('div'); group.className = 'parts'; group.setAttribute('role', 'group'); group.setAttribute('aria-label', `What of ${name} it gets`);
-        const has = { terminal: rights.includes('x'), chat: rights.includes('r') };
-        const boxes = {};
-        for (const [part, text] of [['terminal', 'Terminal'], ['chat', 'Chat']]) {
-            const label = document.createElement('label'); label.className = 'check'; label.dataset.part = part;
-            const box = document.createElement('input'); box.type = 'checkbox'; box.checked = has[part];
-            box.addEventListener('change', () => {
-                const next = { ...has, [part]: box.checked };
-                /* The last one ticked stays ticked, and says why. */
-                if (!next.terminal && !next.chat) { box.checked = true; need.hidden = false; return; }
-                const chat = next.chat ? (has.chat ? rights.replace('x', '') : 'rw') : '';
-                onChange(`${chat}${next.terminal ? 'x' : ''}`);
-            });
-            boxes[part] = box;
-            label.append(box, ` ${text}`); group.append(label);
-        }
-        /* The one left ticked cannot be unticked: marked so, and said when tried. */
-        for (const [part, other] of [['terminal', 'chat'], ['chat', 'terminal']]) if (has[part] && !has[other]) boxes[part].setAttribute('aria-disabled', 'true');
-        const need = document.createElement('small'); need.className = 'hint parts-need'; need.hidden = true; need.textContent = 'At least one. To give nothing, take it back.';
-        group.append(need);
-        /* Its chat, given while it is off: said, so that nobody wonders why the device shows nothing. */
-        if (has.chat && !talksHere(name)) {
-            const off = document.createElement('small'); off.className = 'hint parts-off'; off.textContent = 'Its chat is off: the device waits until you turn it on (General).'; off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
-            group.append(off);
-        }
-        return group;
+    function deviceRight(type, name, rights, onChange, { who = '', none = true } = {}) {
+        const levels = KIT.rightsFor(type, 'device').filter((l) => none || l !== 'none');
+        return KIT.RightsPicker({ key: type, holder: 'device', value: rights, levels, label: uiSaid('set-acc-what', 'What {who} may do with {name}', { who: who || 'it', name }), onChange });
     }
-    /* The right control of a thing given: a conversation in parts, a folder or a repository to read or write. */
-    const rightControl = (type, name, rights, onChange, label) => (type === 'conversation' ? partsControl(rights, onChange, name)
-        : type === 'folder' || type === 'git' ? levelControl(rights, onChange, label) : fixedRight(type));
+    /* Its chat given while it is off: said, so that nobody wonders why the device shows nothing. */
+    function chatOff(type, name, rights) {
+        if (type !== 'conversation' || !String(rights ?? '').includes('r') || talksHere(name)) return null;
+        const off = el('small', 'hint parts-off', uiSaid('set-dev-chat-off', 'Chat off: the device waits'));
+        off.title = 'Given, and waiting: the device sees its chat once you turn it on, in This conversation, then General.';
+        return off;
+    }
+    /* One thing given, or to give, to a device: the asset it is (an AssetCard row), its right and gestures on its right. */
+    function deviceThing(asset, { sub, actions = [], cls = '' } = {}) {
+        const at = asset.indexOf(':'); const type = asset.slice(0, at); const name = asset.slice(at + 1);
+        const row = KIT.AssetCard({ key: asset, kind: type, name, sub: sub ?? KIND_WORD[type] ?? type }, { tag: 'div', cls: `given-row dev-thing${cls ? ` ${cls}` : ''}`, actions });
+        row.dataset.asset = asset;
+        return row;
+    }
+    /* A right set from any of these places: given at its level, or taken back (« None »). */
+    async function setDeviceRight(id, asset, level, stored) {
+        if (level === 'none') await post(`${API}/devices/${id}/take`, { asset }).catch(() => {});
+        else await post(`${API}/devices/${id}/give`, { asset, rights: stored }).catch(() => {});
+    }
 
     async function loadCatalog() {
         const things = await (await fetch(`${API}/resources`)).json().catch(() => []);
@@ -10769,13 +10766,12 @@
         const box = $('share-basket'); box.replaceChildren();
         for (const [asset, rights] of basket) {
             const [type, name] = asset.split(':');
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = asset;
-            const label = document.createElement('b'); label.textContent = name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-            const right = rightControl(type, name, rights, (value) => { basket.set(asset, value); paintCompose(); }, `What it may do with ${name}`);
-            const out = document.createElement('button'); out.type = 'button'; out.textContent = 'Remove'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
+            const out = el('button', '', uiSaid('set-dev-remove', 'Remove')); out.type = 'button'; out.setAttribute('aria-label', `Remove ${name} from what it will get`);
             out.addEventListener('click', () => { basket.delete(asset); paintCompose(); });
-            row.append(label, right, out); box.append(row);
+            const right = deviceRight(type, name, rights, (level, stored) => { basket.set(asset, stored); paintCompose(); }, { none: false });
+            const row = deviceThing(asset, { actions: [right, out], cls: 'folder' });
+            const off = chatOff(type, name, rights); if (off) row.append(off);
+            box.append(row);
         }
         $('share-basket-title').textContent = `It will get (${basket.size})`;
         $('share-basket-empty').hidden = basket.size > 0;
@@ -10793,17 +10789,14 @@
         const order = (c) => `${c.near ? 0 : 1}${KINDS.findIndex(([k]) => k === c.type)}${c.name}`;
         for (const c of [...catalog].sort((a, b2) => order(a).localeCompare(order(b2)))) {
             if ((shareKind && c.type !== shareKind) || (wanted && !c.name.includes(wanted))) continue;
-            const row = document.createElement('div'); row.className = 'folder'; row.dataset.asset = c.asset;
-            const label = document.createElement('b'); label.textContent = c.name;
-            const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`; label.append(kind);
-            const plus = document.createElement('button'); plus.type = 'button';
-            if (basket.has(c.asset)) { plus.textContent = 'Added'; plus.disabled = true; }
+            const plus = el('button'); plus.type = 'button';
+            if (basket.has(c.asset)) { plus.textContent = uiSaid('set-dev-added', 'Added'); plus.disabled = true; }
             else {
-                plus.textContent = '+ Add'; plus.setAttribute('aria-label', `Add ${c.name}`);
+                plus.textContent = uiSaid('set-dev-add', '+ Add'); plus.setAttribute('aria-label', `Add ${c.name}`);
                 /* A conversation is given whole; anything else to read -- writing is asked for, never assumed. */
                 plus.addEventListener('click', () => { basket.set(c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r'); paintCompose(); });
             }
-            row.append(label, plus); add.append(row);
+            add.append(deviceThing(c.asset, { sub: `${KIND_WORD[c.type]}${c.near && c.type !== 'conversation' ? ', attached here' : ''}`, actions: [plus], cls: 'folder' }));
         }
         sayChoice();
     }
@@ -10854,77 +10847,67 @@
         const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
         button.replaceWith(ask); sure.focus();
     }
-    function grantRow(device, g) {
+    /* One thing a device has, its right set in place; « None » takes it back. */
+    function deviceGrantRow(device, g) {
         const [type, name] = g.asset.split(':');
-        const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = g.asset;
-        const label = document.createElement('span'); label.textContent = name;
-        const kind = document.createElement('small'); kind.className = 'hint'; kind.textContent = ` ${KIND_WORD[type] ?? type}`; label.append(kind);
-        const right = rightControl(type, name, g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset: g.asset, rights: value }).catch(() => {}); await repaintDevices(); }, `What ${device.label} may do with ${name}`);
-        const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-        take.addEventListener('click', () => takeBack(take, `Take ${name} back from ${device.label}`, () => post(`${API}/devices/${device.id}/take`, { asset: g.asset })));
-        row.append(label, right, take);
+        const right = deviceRight(type, name, g.rights, async (level, stored) => { await setDeviceRight(device.id, g.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); }, { who: device.label });
+        const row = deviceThing(g.asset, { actions: [right] });
+        const off = chatOff(type, name, g.rights); if (off) row.append(off);
         return row;
     }
     let manageBy = 'device';
-    const deviceShut = new Set();      /* the device cards folded on this page */
+    const deviceShut = new Set();      /* the device panels folded on this page */
     /* After a change to a device: its list (the Devices pane) or the map, drawn again. */
     async function repaintDevices() {
         if (place === 'access' && accessTab === 'devices') { await paintManage(); return; }
         await readDevices(); await links?.changed();
     }
-    /* One device's card: its name (renamed here), what it has, revoke it. On
-       the map's card of the device too (`onMap`: never folded). */
-    function deviceCard(device, only, onMap = false) {
-        const card = document.createElement('div'); card.className = 'device card'; card.dataset.device = device.id;
-        const name = document.createElement('b'); name.textContent = device.label;
-        const rename = document.createElement('button'); rename.type = 'button'; rename.textContent = 'Rename';
-        rename.addEventListener('click', () => {
-            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', 'Name of this device');
-            const save = document.createElement('button'); save.type = 'button'; save.className = 'primary'; save.textContent = 'Save';
-            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
-            save.addEventListener('click', () => { void done(); });
-            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
-            name.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
-        });
-        const seen = document.createElement('small'); seen.textContent = `${ago(device.seenAt)} · paired ${new Date(device.createdAt).toLocaleDateString()}`;
-        if (!device.seenAt) seen.className = 'warn';
-        const revoke = document.createElement('button'); revoke.type = 'button'; revoke.textContent = 'Revoke device';
-        revoke.addEventListener('click', () => takeBack(revoke, `Revoke ${device.label}: it loses all ${device.grants.length} thing${device.grants.length > 1 ? 's' : ''}, now`, () => post(`${API}/devices/${device.id}/revoke`)));
-        /* A card that folds, as the chapters of a conversation do: open unless folded on purpose. */
+    const thingsSaid = (n) => (n === 1 ? uiSaid('set-dev-things-1', '1 thing') : uiSaid('set-dev-things-n', '{n} things', { n }));
+    /* ONE DEVICE OPENED (07-11, assets step 6): the asset panel -- its head (its name, how many things, when it was
+       last seen; folded here), what it has (each thing with its right, « None » takes it back), then + Give more,
+       Rename, Revoke device (asked in place). On the map's card of the device too (`onMap`: never folded). */
+    function devicePanel(device, only, onMap = false) {
         const shut = !onMap && deviceShut.has(device.id);
-        const fold = document.createElement('button'); fold.type = 'button'; fold.className = 'card-fold'; fold.textContent = shut ? 'Expand' : 'Collapse';
-        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${shut ? 'Expand' : 'Collapse'} ${device.label}`);
+        const fold = el('button', 'card-fold', shut ? uiSaid('set-dev-expand', 'Expand') : uiSaid('set-dev-collapse', 'Collapse')); fold.type = 'button';
+        fold.setAttribute('aria-expanded', String(!shut)); fold.setAttribute('aria-label', `${fold.textContent} ${device.label}`);
         fold.addEventListener('click', () => { if (shut) deviceShut.delete(device.id); else deviceShut.add(device.id); void repaintDevices(); });
-        const count = document.createElement('small'); count.className = 'device-count'; count.textContent = `${device.grants.length} thing${device.grants.length === 1 ? '' : 's'}`;
-        const sub = document.createElement('span'); sub.className = 'device-sub'; sub.append(count, ' · ', seen);
-        const head = document.createElement('div'); head.className = 'device-head'; head.append(name, sub, fold);
-        const given = document.createElement('div'); given.className = 'given';
+        const seen = uiSaid('set-dev-seen', '{ago} · paired {date}', { ago: ago(device.seenAt), date: new Date(device.createdAt).toLocaleDateString() });
+        const given = el('div', 'given');
         const mine = only ? device.grants.filter((g) => g.asset === only) : device.grants;
-        for (const g of mine) given.append(grantRow(device, g));
-        /* Several chats given while off: said once for the card, not under each. */
+        for (const g of mine) given.append(deviceGrantRow(device, g));
+        /* Several chats given while off: said once for the panel, not under each. */
         const waiting = [...given.querySelectorAll('.parts-off')];
         if (waiting.length > 1) {
             for (const w of waiting) w.remove();
-            const once = document.createElement('p'); once.className = 'hint parts-off'; once.title = waiting[0].title;
-            once.textContent = `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`;
+            const once = el('p', 'hint parts-off', `${waiting.length} chats are off: the device waits until you turn each on (the conversation's General).`); once.title = waiting[0].title;
             given.prepend(once);
         }
         if (only && mine.length === 0) {
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.asset = only;
-            const label = document.createElement('span'); label.textContent = accessFor;
-            const none = document.createElement('small'); none.className = 'hint'; none.textContent = ' not shared'; label.append(none);
-            const give = document.createElement('button'); give.type = 'button'; give.className = 'primary'; give.textContent = `Give ${accessFor}`;
+            const give = el('button', 'primary', `Give ${accessFor}`); give.type = 'button';
             give.addEventListener('click', async () => { give.disabled = true; await post(`${API}/devices/${device.id}/give`, { asset: only, rights: partsFor(accessFor) }).catch(() => {}); await repaintDevices(); void refresh(); });
-            row.append(label, give); given.append(row);
+            given.append(deviceThing(only, { sub: 'not shared', actions: [give] }));
         }
         /* What the filter leaves out is named, never only counted. */
-        if (only && device.grants.length > mine.length) { const rest = document.createElement('p'); rest.className = 'hint'; rest.textContent = `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`; given.append(rest); }
-        const more = document.createElement('button'); more.type = 'button'; more.textContent = '+ Give more';
+        if (only && device.grants.length > mine.length) given.append(el('p', 'hint', `It also has: ${device.grants.filter((g) => g.asset !== only).map((g) => { const [type, what] = g.asset.split(':'); return `${what} (${KIND_WORD[type] ?? type})`; }).join(', ')}.`));
+        const more = el('button', '', uiSaid('set-dev-more', '+ Give more')); more.type = 'button';
         more.addEventListener('click', () => { void openCompose([], device.id); });
-        const acts = document.createElement('div'); acts.className = 'action-row device-acts'; acts.append(more, rename, revoke);
-        const body = document.createElement('div'); body.className = 'card-body'; body.hidden = shut; body.append(given, acts);
-        card.append(head, body);
-        return card;
+        const rename = el('button', '', uiSaid('set-dev-rename', 'Rename')); rename.type = 'button';
+        const revoke = KIT.AssetDelete({ label: uiSaid('set-dev-revoke', 'Revoke device'), lost: uiSaid('set-dev-revoke-q', '{name} loses everything, now', { name: device.label }), yes: uiSaid('set-dev-revoke-yes', 'Revoke'),
+            onYes: async () => { await post(`${API}/devices/${device.id}/revoke`).catch(() => {}); await repaintDevices(); void refresh(); } });
+        const panel = KIT.AssetPanel({ key: `device:${device.id}`, kind: 'device', name: device.label, sub: `${thingsSaid(device.grants.length)} · ${seen}`, tone: device.seenAt ? '' : 'warn' },
+            { cls: 'device-panel', actions: onMap ? [] : [fold], parts: [{ title: uiSaid('set-dev-has', 'What it has'), body: [given] }], foot: [more, rename, revoke] });
+        panel.dataset.device = device.id;
+        if (shut) for (const part of panel.children) if (!part.classList.contains('as-title')) part.hidden = true;
+        rename.addEventListener('click', () => {
+            const name = panel.querySelector('.kit-asset-name');
+            const field = document.createElement('input'); field.value = device.label; field.maxLength = 40; field.setAttribute('aria-label', uiSaid('set-dev-name', 'Name of this device'));
+            const save = el('button', 'primary', uiSaid('set-dev-save', 'Save')); save.type = 'button';
+            const done = async () => { if (field.value.trim()) await post(`${API}/devices/${device.id}/rename`, { label: field.value.trim() }).catch(() => {}); await repaintDevices(); };
+            save.addEventListener('click', () => { void done(); });
+            field.addEventListener('keydown', (event) => { if (event.key === 'Enter') void done(); event.stopPropagation(); });
+            name?.replaceWith(field); rename.replaceWith(save); focusField(field); if (document.activeElement === field) field.select();
+        });
+        return panel;
     }
     /* ---- voice boxes (boxes.mjs): pairing codes, the flash from this browser, the list ---- */
     /* THE WAKE WORD THAT LEARNS (wakelearn.mjs): normal, or each wake clip kept with its label to train a better one. */
@@ -11271,34 +11254,32 @@
         if (manageBy === 'device' || only) {
             rows.hidden = false; things.hidden = true;
             for (const device of [...sharedDevices].sort((a, b2) => String(b2.seenAt ?? '').localeCompare(String(a.seenAt ?? '')))) {
-                rows.append(deviceCard(device, only));
+                rows.append(devicePanel(device, only));
             }
             return;
         }
-        /* By thing: who can see this folder? What nobody has is folded away. */
+        /* By thing: who can see this folder? Each thing (an AssetCard), who has it (the kit's AccessList, devices only:
+           each with its right, « None » takes it back). What nobody has is folded away, each with « Share… ». */
         await loadCatalog();
         const alone = [];
         for (const c of catalog) {
             const holders = devicesWith(c.asset);
             if (holders.length === 0) { alone.push(c); continue; }
-            const block = document.createElement('details'); block.className = 'thing'; block.dataset.asset = c.asset; block.open = true;
-            const top = document.createElement('summary'); top.textContent = `${c.name} - ${KIND_WORD[c.type]} - ${holders.length} device${holders.length > 1 ? 's' : ''}`;
+            const block = el('details', 'thing'); block.dataset.asset = c.asset; block.open = true;
+            const top = el('summary');
+            top.append(KIT.AssetCard({ key: c.asset, kind: c.type, name: c.name, sub: `${KIND_WORD[c.type]} · ${holders.length === 1 ? uiSaid('set-device', '1 device') : uiSaid('set-devices', '{n} devices', { n: holders.length })}` }, { tag: 'span' }));
             block.append(top);
-            for (const device of holders) {
-                const row = grantRow(device, device.grants.find((g) => g.asset === c.asset));
-                row.firstChild.textContent = device.label;
-                block.append(row);
-            }
+            const model = KIT.accessModel({ key: c.type, holders: holders.map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((g) => g.asset === c.asset).rights })) });
+            block.append(KIT.AccessList(model, { key: c.type, name: c.name, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), c.asset, level, stored); await repaintDevices(); if (level === 'none') void refresh(); } }));
             things.append(block);
         }
-        const rest = document.createElement('details'); rest.className = 'thing';
-        const top = document.createElement('summary'); top.textContent = `Not shared (${alone.length})`; rest.append(top);
+        const rest = el('details', 'thing');
+        rest.append(el('summary', '', uiSaid('set-dev-not-shared', 'Not shared ({n})', { n: alone.length })));
         for (const c of alone) {
-            const row = document.createElement('div'); row.className = 'given-row';
-            const label = document.createElement('span'); label.textContent = `${c.name} - ${KIND_WORD[c.type]}`;
-            const give = document.createElement('button'); give.type = 'button'; give.textContent = 'Share...';
+            const give = el('button', '', uiSaid('set-dev-share', 'Share…')); give.type = 'button';
             give.addEventListener('click', () => { void openCompose([[c.asset, c.type === 'conversation' ? partsFor(c.name) : 'r']]); });
-            row.append(label, give); rest.append(row);
+            rest.append(deviceThing(c.asset, { actions: [give] }));
         }
         things.append(rest);
     }
@@ -11322,23 +11303,15 @@
         await readDevices();
         const box = $('share-here'); box.replaceChildren();
         const asset = `conversation:${current}`;
-        for (const device of devicesWith(asset)) {
-            const g = device.grants.find((x) => x.asset === asset);
-            const row = document.createElement('div'); row.className = 'given-row'; row.dataset.device = device.id;
-            const label = document.createElement('span'); label.textContent = device.label;
-            const right = partsControl(g.rights, async (value) => { await post(`${API}/devices/${device.id}/give`, { asset, rights: value }).catch(() => {}); await paintShareHere(); }, current);
-            const take = document.createElement('button'); take.type = 'button'; take.textContent = 'Take back';
-            take.addEventListener('click', () => {
-                const sure = document.createElement('button'); sure.type = 'button'; sure.className = 'danger'; sure.textContent = `Take ${current} back from ${device.label}`;
-                const keep = document.createElement('button'); keep.type = 'button'; keep.textContent = 'Keep';
-                keep.addEventListener('click', () => { void paintShareHere(); });
-                sure.addEventListener('click', async () => { await post(`${API}/devices/${device.id}/take`, { asset }).catch(() => {}); await paintShareHere(); void refresh(); });
-                const ask = document.createElement('span'); ask.className = 'callout bad confirm'; ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
-                take.replaceWith(ask); sure.focus();
-            });
-            row.append(label, right, take); box.append(row);
+        /* The devices that have it (the kit's AccessList): each with its parts, « None » takes it back. */
+        const holders = devicesWith(asset).map((d) => ({ id: `device:${d.id}`, name: d.label, sub: ago(d.seenAt), value: d.grants.find((x) => x.asset === asset).rights }));
+        if (holders.length) {
+            box.append(KIT.AccessList(KIT.accessModel({ key: 'conversation', holders }), { key: 'conversation', name: current, title: '', give: false,
+                onChange: async (row, level, stored) => { await setDeviceRight(row.id.slice('device:'.length), asset, level, stored); await paintShareHere(); if (level === 'none') void refresh(); } }));
+            const off = chatOff('conversation', current, holders.find((h) => String(h.value).includes('r'))?.value);
+            if (off) box.append(off);
         }
-        $('share-here-none').hidden = box.children.length > 0;
+        $('share-here-none').hidden = holders.length > 0;
     }
     /* Back from choosing or from the code: where it was opened from, as Back and Escape. */
     const leaveCompose = () => { void refresh(); if (!nav.close('compose')) leavePlace(); };

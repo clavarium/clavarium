@@ -108,7 +108,7 @@ test('shared with a phone: files of the conversation, and only where the owner a
     writeFileSync(local, 'the sea\n');
     await phone.menu();
     await phone.page.locator('#files-open').click();
-    await phone.page.locator('#files-tabs button', { hasText: 'photos' }).click();
+    await phone.page.locator('#files-assets .as-row', { hasText: 'photos' }).click();
     const [chooser] = await Promise.all([phone.page.waitForEvent('filechooser'), phone.page.locator('#files-import').click()]);
     await chooser.setFiles(local);
     await phone.until('the import is listed', async () => (await phone.page.locator('#files-rows').innerText()).includes('beach.txt'));
@@ -120,7 +120,7 @@ test('shared with a phone: files of the conversation, and only where the owner a
     /* Read-only is said, and enforced by the server whatever the page shows. */
     await phone.menu();
     await phone.page.locator('#files-open').click();
-    await phone.page.locator('#files-tabs button', { hasText: 'papers' }).click();
+    await phone.page.locator('#files-assets .as-row', { hasText: 'papers' }).click();
     await phone.until('read-only is said', async () => phone.page.locator('#files-readonly').isVisible());
     assert.equal(await phone.page.evaluate(async () => (await fetch(`/c/api/${document.documentElement.dataset.pairing}/files/import?r=papers&p=&name=x.txt`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: 'x' })).status), 403);
 });
@@ -224,16 +224,16 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await owner.page.locator('#share').click();
     /* Only the conversation the owner came from is in the basket; nothing else was chosen for them. */
     await owner.until('the basket is shown', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
-    assert.match(await owner.page.locator('#share-basket').innerText(), /garden conversation\s+Terminal\s+Chat/);
+    assert.match(await owner.page.locator('#share-basket').innerText(), /garden\s+conversation\s+Terminal\s+Chat\s+Both\s+Remove/);
     /* It does not talk through the app: its terminal is proposed, not its chat. */
     const garden = owner.page.locator('#share-basket .folder', { hasText: 'garden' });
-    assert.deepEqual([await garden.locator('label[data-part=terminal] input').isChecked(), await garden.locator('label[data-part=chat] input').isChecked()], [true, false]);
+    assert.equal(await garden.locator('.kit-rights-pick button[aria-pressed=true]').innerText(), 'Terminal');
     const add = (name) => owner.page.locator('#share-add .folder', { hasText: name }).locator('button').click();
     await add('family');
     await add('recipes');
     /* Added to read: writing is asked for, never assumed. */
     const recipes = owner.page.locator('#share-basket .folder', { hasText: 'recipes' });
-    assert.equal(await recipes.locator('.levels button[aria-pressed=true]').innerText(), 'Read');
+    assert.equal(await recipes.locator('.kit-rights-pick button[aria-pressed=true]').innerText(), 'Read');
     assert.equal(await owner.page.locator('#share-add .folder', { hasText: 'recipes' }).locator('button').innerText(), 'Added');
     /* No name, no code. */
     assert.equal(await owner.page.locator('#sharing-new').isDisabled(), true);
@@ -253,15 +253,15 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     assert.equal(await tablet.page.locator('#others').innerText(), 'Conversations (2)');
     await tablet.menu();
     await tablet.page.locator('#files-open').click();
-    const tab = tablet.page.locator('#files-tabs button', { hasText: 'recipes' });
-    assert.match(await tab.innerText(), /recipes - read-only \(given to this device\)/);
+    const tab = tablet.page.locator('#files-assets .as-row', { hasText: 'recipes' });
+    assert.match(await tab.innerText(), /recipes\s+Given to this device\s+Reads/);
     await tablet.page.locator('#files-close').click();
 
     /* WHO HAS WHAT, by device: a card with a name, what it has, each thing with its way back. */
     const card = await owner.openDevice("Dad's tablet");
     await owner.until('the card lists what it has', async () => (await card.locator('.given-row').count()) === 3);
     /* A right is changed in place, with no new code... */
-    await card.locator('.given-row', { hasText: 'recipes' }).locator('.levels button', { hasText: 'Write' }).click();
+    await card.locator('.given-row', { hasText: 'recipes' }).locator('.kit-rights-pick button[data-value=write]').click();
     await owner.until('recipes is to write now', async () => (await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes' && g.rights === 'rw'));
     /* ...more is given the same way... */
     await card.locator('button', { hasText: '+ Give more' }).click();
@@ -269,17 +269,16 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await add('accounts');
     assert.equal(await owner.page.locator('#sharing-new').innerText(), 'Save changes');
     await owner.page.locator('#sharing-new').click();
-    await owner.until('back on its card, accounts is given', async () => (await owner.page.locator('#links-card .device .given-row').count()) === 4);
+    await owner.until('back on its card, accounts is given', async () => (await owner.page.locator('#links-card .device-panel .given-row').count()) === 4);
     /* ...it is renamed in place... */
-    await owner.page.locator('#links-card .device button', { hasText: 'Rename' }).click();
-    const only = owner.page.locator('#links-card .device').first();      /* its name is a field now */
+    await owner.page.locator('#links-card .device-panel button', { hasText: 'Rename' }).click();
+    const only = owner.page.locator('#links-card .device-panel').first();      /* its name is a field now */
     await only.locator('input[aria-label="Name of this device"]').fill('Papa');
     await only.locator('button', { hasText: 'Save' }).click();
     await owner.until('it is called Papa', async () => (await owner.page.locator('#links .lk-node[data-id^="device:"]', { hasText: 'Papa' }).count()) === 1);
-    /* Taken back from its card, asked twice. */
+    /* Taken back from its panel: « None », as everywhere a right is set. */
     const papa = await owner.openDevice('Papa');
-    await papa.locator('.given-row', { hasText: 'recipes' }).locator('button', { hasText: 'Take back' }).click();
-    await owner.page.locator('#links-card .device button.danger').click();
+    await papa.locator('.given-row', { hasText: 'recipes' }).locator('.kit-rights-pick button[data-value=none]').click();
     await owner.until('recipes is shared with nobody', async () => !(await owner.api('/api/devices')).body[0].grants.some((g) => g.asset === 'folder:recipes'));
     await owner.page.locator('#access-close').click();
     /* Said in Access, not on every row of the list (where it said the same again and again). */
@@ -291,7 +290,7 @@ test('a share is a basket: the conversation shown, one more, a folder to read --
     await tablet.until('live again', async () => (await tablet.state()) === 'live');
     await tablet.menu();
     await tablet.page.locator('#files-open').click();
-    await tablet.until('its tabs follow', async () => { const tabs = (await tablet.page.locator('#files-tabs button').allInnerTexts()).join('|'); return /accounts/.test(tabs) && !/recipes/.test(tabs); });
+    await tablet.until('its list follows', async () => { const rows = (await tablet.page.locator('#files-assets .as-row').allInnerTexts()).join('|'); return /accounts/.test(rows) && !/recipes/.test(rows); });
     assert.deepEqual(owner.errors, []);
 });
 
@@ -304,7 +303,7 @@ test('a folder is shared from its own row, alone and to read; a code not wanted 
     await album.locator('button', { hasText: 'Share with a device...' }).click();
     /* The folder, to read, and NOT the conversation behind the panel. */
     await owner.until('the basket holds the folder only', async () => (await owner.page.locator('#share-basket .folder').count()) === 1);
-    assert.match(await owner.page.locator('#share-basket').innerText(), /album folder/);
+    assert.match(await owner.page.locator('#share-basket').innerText(), /album\s+folder/);
     await owner.page.fill('#sharing-label', 'Aunt');
     await owner.page.locator('#sharing-new').click();
     await owner.until('a code is shown', async () => owner.page.locator('#sharing-qr').isVisible());
@@ -370,4 +369,62 @@ test('a phone whose terminal is taken back while it is open loses it at once: no
     await wait(1500);
     assert.equal(await phone.page.evaluate(() => [...document.querySelectorAll('button')].some((x) => x.offsetParent !== null && /See the terminal/.test(x.textContent))), false);
     assert.equal(received, 0, 'nothing of the terminal reaches the page');
+});
+
+test('device mode on the same pieces: given one folder to read, the device sees it in the one list, opens it read-only, nothing to make or give; the owner\'s basket and revoke still work', { skip: SKIP }, async (t) => {
+    const b = await bench(t);
+    const owner = await b.person();
+    await owner.create('private');
+    await owner.api('/api/resources', { name: 'album' });
+    await owner.api('/api/conversations/private/resources', { resource: 'album', access: 'write' });
+    await owner.type('echo "a picture" > ../resources/album/one.txt; echo ok');
+    await owner.sees('\nok');
+    /* The owner's basket: the folder as an asset row, to read (no « None » there: « Remove » is). */
+    const album = await owner.openAsset('folder', 'album');
+    await album.locator('button', { hasText: 'Share with a device...' }).click();
+    const row = owner.page.locator('#share-basket .dev-thing[data-asset="folder:album"]');
+    await owner.until('the basket holds the folder', async () => (await row.count()) === 1);
+    assert.deepEqual(await row.locator('.kit-rights-pick button').evaluateAll((bs) => bs.map((x) => [x.dataset.value, x.getAttribute('aria-pressed')])), [['read', 'true'], ['write', 'false']]);
+    await owner.page.fill('#sharing-label', 'Aunt');
+    await owner.page.locator('#sharing-new').click();
+    await owner.until('a code is shown', async () => owner.page.locator('#sharing-qr').isVisible());
+    const url = (await owner.page.locator('#sharing-link').innerText()).replace(/^https?:\/\/[^/]+/, '');
+    const viewer = await b.person({ phone: true, at: url });
+    /* /c/: the one list, scoped to the device; its one folder opened at once, in the asset panel, read-only. */
+    await viewer.until('its files are shown', async () => (await viewer.page.locator('#files-rows').innerText().catch(() => '')).includes('one.txt'));
+    assert.equal(await viewer.page.locator('#files-assets .kit-aslist').getAttribute('data-scope'), 'device');
+    /* One thing only: the list is behind the panel on a phone, its row there all the same. */
+    assert.deepEqual(await viewer.page.locator('#files-assets .as-row').allTextContents(), ['albumGiven to this deviceReads']);
+    const panel = viewer.page.locator('#files-panel .kit-aspanel[data-asset="folder:album"]');
+    assert.equal(await panel.isVisible(), true);
+    assert.equal(await panel.locator('.kit-asset-head .kit-rights').innerText(), 'Reads');
+    assert.equal(await viewer.page.locator('#files-readonly').isVisible(), true, 'read-only is said');
+    assert.equal(await viewer.page.locator('#files-import').isVisible(), false, 'nothing to upload');
+    assert.equal(await viewer.page.locator('.kit-access, .kit-rights-pick, #assets-new, #cassets-attach').count(), 0, 'no one else, no right to set');
+    assert.equal(await viewer.page.evaluate(() => [...document.querySelectorAll('button')].some((x) => x.offsetParent !== null && /^\+?\s*(New|Give)/.test(x.textContent.trim()))), false, 'no New, no Give');
+    assert.equal(await viewer.page.locator('#files-panel .kit-aspanel-part .as-chapter h3').textContent(), 'Files', 'the word Files kept');
+    const id = await viewer.page.evaluate(() => document.documentElement.dataset.pairing);
+    assert.equal(await viewer.page.evaluate(async (pairing) => (await fetch(`/c/api/${pairing}/files/import?r=album&p=&name=x.txt`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: 'x' })).status, id), 403, 'and the server holds it to read');
+    /* The owner: connected; its panel; revoked in place, asked once. */
+    await owner.until('it says Aunt is connected', async () => /Aunt is connected/.test(await owner.page.locator('#share-waiting').innerText()), 20_000);
+    await owner.page.locator('#share-done').click();
+    const card = await owner.openDevice('Aunt');
+    assert.equal(await card.locator('.given-row[data-asset="folder:album"] .kit-rights-pick button[aria-pressed=true]').innerText(), 'Read');
+    /* Its right changed in place, on the same picker as everywhere. */
+    await card.locator('.given-row[data-asset="folder:album"] .kit-rights-pick button[data-value=write]').click();
+    await owner.until('album is to write now', async () => (await owner.api('/api/devices')).body[0]?.grants.some((g) => g.asset === 'folder:album' && g.rights === 'rw'));
+    /* All devices, by thing: the thing's row, who has it with its right. */
+    await owner.page.locator('#map-all-devices').click();
+    await owner.page.locator('#share-by-thing').click();
+    const thing = owner.page.locator('#share-things .thing[data-asset="folder:album"]');
+    await owner.until('album is listed by thing', async () => (await thing.count()) === 1);
+    assert.equal(await thing.locator('.given-row[data-device] .kit-rights-pick button[aria-pressed=true]').innerText(), 'Write');
+    await owner.page.locator('#share-by-device').click();
+    const panelOf = owner.page.locator('#sharing-devices .device-panel', { hasText: 'Aunt' });
+    await owner.until('its panel is listed', async () => (await panelOf.count()) === 1);
+    await panelOf.locator('button', { hasText: 'Revoke device' }).click();
+    await panelOf.locator('button.danger').click();
+    await owner.until('no device left', async () => (await owner.api('/api/devices')).body.length === 0);
+    assert.notEqual((await viewer.api(`/c/api/${id}/files?r=album&p=`)).status, 200, 'the device reads nothing any more');
+    assert.deepEqual([owner.errors, viewer.errors], [[], []]);
 });
