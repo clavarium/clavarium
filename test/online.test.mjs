@@ -23,7 +23,7 @@ function place() {
     const root = mkdtempSync(join(tmpdir(), 'clavarium-online-'));
     const P = {
         access: join(root, 'access'), tunnel: join(root, 'tunnel'), relayConf: join(root, 'etc', 'relay.conf'),
-        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), code: join(root, 'code'), caddy: join(root, 'caddy'), passwords: join(root, 'passwords'),
+        updateConf: join(root, 'etc', 'update.conf'), unit: join(root, 'clavarium.service'), tunnelUnit: join(root, 'clavarium-tunnel.service'), code: join(root, 'code'), caddy: join(root, 'caddy'), passwords: join(root, 'passwords'),
     };
     mkdirSync(join(P.code, 'current', 'app', 'deploy'), { recursive: true });
     copyFileSync(RELAY_SH, join(P.code, 'current', 'app', 'deploy', 'relay.sh'));
@@ -300,6 +300,10 @@ test('clavarium relay: verbs go through the maintenance account; update-relay de
     try {
         const w0 = world({ root });
         await assert.rejects(relayCommand(['status'], w0.sys, P), Refused);
+        /* 07-11: a machine put online before relay.conf existed -- its tunnel unit alone says the relay. */
+        writeFileSync(P.tunnelUnit, '[Service]\nExecStart=/usr/local/sbin/clavarium-tunnel relay.example.net 22\n');
+        await relayCommand(['status'], w0.sys, P).catch((e) => assert.doesNotMatch(String(e.message), /has no relay/, 'found by its tunnel unit'));
+        rmSync(P.tunnelUnit);
         mkdirSync(join(P.relayConf, '..'), { recursive: true });
         writeFileSync(P.relayConf, 'HOST=relay.example.net\nPORT=22\nUSER=ubuntu\nSETUP_KEY=kept\n');
         await showKeys(world({ root }).sys, P);

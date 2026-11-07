@@ -58,6 +58,7 @@ import { doctor, servedCert, DOCTOR_PATHS } from './doctor.mjs';
 export const PATHS = {
     access: '/var/lib/clavarium-relay-access',
     tunnel: '/var/lib/clavarium-tunnel',
+    tunnelUnit: TUNNEL_UNIT,
     relayConf: '/etc/clavarium/relay.conf',
     updateConf: '/etc/clavarium/update.conf',
     unit: '/etc/systemd/system/clavarium.service',
@@ -206,6 +207,15 @@ export function readRelayConf(P = PATHS) {
     const conf = {};
     try { for (const line of readFileSync(P.relayConf, 'utf8').split('\n')) { const m = /^([A-Z_]+)=(.*)$/.exec(line.trim()); if (m) conf[m[1]] = m[2]; } } catch { return null; }
     return conf.HOST ? conf : null;
+}
+/* The relay of a machine put online before relay.conf existed (07-11, found on a test machine): only
+   its tunnel unit says it. Read there, as the updater does (tunnel.mjs, relayOfUnit); never written back. */
+export function relayOf(P = PATHS) {
+    const conf = readRelayConf(P);
+    if (conf) return conf;
+    let unit = null;
+    try { unit = relayOfUnit(readFileSync(P.tunnelUnit ?? TUNNEL_UNIT, 'utf8')); } catch { return null; }
+    return unit ? { HOST: unit.relay, PORT: unit.port } : null;
 }
 function writeRelayConf(P, conf) {
     mkdirSync(join(P.relayConf, '..'), { recursive: true });
@@ -662,7 +672,7 @@ function writeInvites(P, v) {
 }
 /* Only the principal adds homes: the machine that holds the relay's maintenance key, online. */
 function principal(P) {
-    const conf = readRelayConf(P);
+    const conf = relayOf(P);
     if (!conf) throw new Refused('this machine has no relay (sudo clavarium online --relay HOST --domain NAME)');
     if (conf.ROLE === 'home') throw new Refused(`this machine is a home of the relay ${conf.HOST}: only its principal${conf.PRINCIPAL ? ` (${conf.PRINCIPAL})` : ''} adds or removes homes`);
     const domain = serverModeOf(P);
@@ -729,7 +739,7 @@ export async function joinWithCode(sys, P, given, key) {
 
 /* `sudo clavarium relay VERB` */
 export async function relayCommand(args, sys, P = PATHS) {
-    const conf = readRelayConf(P);
+    const conf = relayOf(P);
     if (!conf) throw new Refused('this machine has no relay (sudo clavarium online --relay HOST --domain NAME)');
     const [verb, ...rest] = args;
     if (conf.ROLE === 'home') throw new Refused(`this machine is a home of the relay ${conf.HOST}: the relay is kept by its principal${conf.PRINCIPAL ? `, ${conf.PRINCIPAL}` : ''}`);
