@@ -161,11 +161,17 @@ test('a call of an MCP server\'s tool: server, tool, kind, arguments in short, w
     const v = demandeView({ id, verb: 'mcp.call', detail: 'erase id=42', target: { title: 'CRM' }, why: 'the duplicate you named', rule: undefined,
         card: { kind: 'mcp', action: 'call', server: 'CRM', tool: 'erase', class: 'destructive', open: true, fresh: true, args } });
     assert.equal(v.kind, 'other', 'Parley\'s generic card');
-    for (const r of [en(v), fr(v)]) {
-        assert.equal(r.title, 'Use erase on CRM');
-        assert.equal(r.sub, 'CRM · Deletes or overwrites');
-        assert.deepEqual(r.facts.map((f) => [f.label, f.text]), [['Server', 'CRM'], ['Tool', 'erase'], ['Kind', 'Deletes or overwrites']]);
-        assert.deepEqual(r.risk, ['New or changed on its server', 'May delete or overwrite', 'Reaches outside']);
+    /* Each screen in its language (Parley 0.17.87 has the words). */
+    const said = {
+        en: ['Use erase on CRM', 'CRM · Deletes or overwrites', [['Server', 'CRM'], ['Tool', 'erase'], ['Kind', 'Deletes or overwrites']], ['New or changed on its server', 'May delete or overwrite', 'Reaches outside']],
+        fr: ['Utiliser erase sur CRM', 'CRM · Supprime ou écrase', [['Serveur', 'CRM'], ['Outil', 'erase'], ['Nature', 'Supprime ou écrase']], ['Nouveau ou modifié sur son serveur', 'Peut supprimer ou écraser', 'Va à l’extérieur']],
+    };
+    for (const [lang, r] of [['en', en(v)], ['fr', fr(v)]]) {
+        const [title, sub, facts, risk] = said[lang];
+        assert.equal(r.title, title);
+        assert.equal(r.sub, sub);
+        assert.deepEqual(r.facts.map((f) => [f.label, f.text]), facts);
+        assert.deepEqual(r.risk, risk);
         assert.equal(r.why, 'the duplicate you named');
         assert.equal(r.irreversible, true);
         assert.equal(r.others.length, 0, 'no Always for a destructive tool (Tether gives no rule)');

@@ -15,9 +15,17 @@ const DEVICE = pairingSubject('0f8fad5b-d9cb-469f-a165-70867728950e');
 const TALK = conversationSubject('family');
 
 test('each type of asset takes only the rights that mean something for it', () => {
-    assert.deepEqual(RIGHTS, { conversation: 'rwx', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'r', room: 'rw', box: 'rw' });
-    /* The state of the server, read by an API key (apikeys.mjs). */
+    assert.deepEqual(RIGHTS, { conversation: 'rwxm', folder: 'rw', mailbox: 'r', git: 'rw', secret: 'x', server: 'rw', room: 'rwm', box: 'rw' });
+    /* The state of the server, read by an API key (apikeys.mjs); rooms made by one, never read. */
     assert.equal(readRights('server:status', 'r'), 'r');
+    assert.throws(() => readRights('server:status', 'w'), /rights: r\./);
+    assert.equal(readRights('server:rooms', 'w'), 'w');
+    assert.throws(() => readRights('server:rooms', 'r'), /rights: w\./);
+    /* Act, manage (07-11): Talk and more -- "m" brings "rw". */
+    assert.equal(readRights('conversation:family', 'm'), 'rwm');
+    assert.equal(readRights('room:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'm'), 'rwm');
+    assert.throws(() => readRights('box:aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', 'm'), /rights/);
+    assert.throws(() => readRights('folder:reports', 'm'), /rights/);
     assert.equal(readRights('folder:reports', 'r'), 'r');
     assert.equal(readRights('folder:reports', 'wr'), 'rw', 'one way to write them');
     assert.equal(readRights('folder:reports', 'w'), 'rw', 'writing brings reading');

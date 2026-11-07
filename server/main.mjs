@@ -45,7 +45,7 @@ import { Dockets } from './dockets.mjs';
 import { PULSE_MS } from 'clavarium-parley/ui';
 import { Wakeups, TypingWatch, CALL_PATH } from './wakeups.mjs';
 import { Alerts } from './alerts.mjs';
-import { Talk } from './talk.mjs';
+import { Talk, escapeCommand } from './talk.mjs';
 import { Toolbox } from './toolbox.mjs';
 import { Guide, commonText } from './guide.mjs';
 import { SignInMailboxes } from './signin.mjs';
@@ -235,7 +235,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, events, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -739,13 +739,31 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             chatOn: (name) => { try { return talk.of(name, { state: '1' }).on === true; } catch { return false; } },
             read: (name, part) => talk.of(name, part),
             say: (name, text, by) => talk.say(name, text, undefined, [], undefined, { by }),
+            /* To act (level "act"): what the owner's buttons do. Woken as a terminal opened is (its machine started,
+               its terminal kept), not waited for; put to sleep as Sleep does; its turn stopped as the Esc key does. */
+            wake: (name) => {
+                const c = all.get(name);
+                if (c?.phase !== 'ready') throw new Refusal(409, 'This conversation is not ready.');
+                void bridge?.warm(name);
+                return { state: c.asleep === true ? 'waking' : 'awake' };
+            },
+            sleep: async (name) => { await all.sleep(name); return { state: 'asleep' }; },
+            stop: async (name) => {
+                const c = all.get(name);
+                if (c?.phase !== 'ready' || c.asleep === true) throw new Refusal(409, 'This conversation is asleep: nothing to stop.');
+                const r = await vms.exec(name, escapeCommand(), { timeoutMs: 30_000 });
+                if (r.code !== 0) throw new Refusal(502, 'Its turn could not be stopped.');
+                return { state: 'awake' };
+            },
         },
         /* Its rooms: read as the room's page reads them (names of the moment), never marked seen; posted as the person
            posts there (rooms.mjs say, `as` the key). */
         rooms: {
-            list: () => rooms.list().map((r) => ({ id: r.id, name: r.name, host: r.members.find((m) => m.host)?.name ?? null, members: r.members.map((m) => ({ name: m.name, kind: m.kind })) })),
+            list: () => rooms.list().map((r) => ({ id: r.id, name: r.name, host: r.members.find((m) => m.host)?.name ?? null, members: r.members.map((m) => ({ id: m.id, ref: m.ref, name: m.name, kind: m.kind, ...(m.host ? { host: true } : {}) })) })),
             read: (id, part) => rooms.read(id, { ...part, ...(part.last ? { last: Number(part.last) } : {}), seen: false }),
             say: (id, text, how) => rooms.say(id, text, how),
+            /* To manage (level "manage", or "create rooms"): as the page asks (api.mjs /api/rooms). */
+            create: (asked) => rooms.create(asked), change: (id, asked) => rooms.change(id, asked), remove: (id) => rooms.remove(id),
         },
         /* Its voice boxes: their state only, and a short text said aloud (boxes.mjs announce). */
         boxes: {

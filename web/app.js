@@ -6612,13 +6612,15 @@
        scope until one is ticked; its secret shown this once, then never; revoked at once, confirmed in place.
        Administrators only: hidden on a device, and where the server does not answer it. */
     const shortDate = (t) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
-    /* Its conversations, one by one (step 2): each Off / Read / Talk -- never "all". `chosen`: name -> level. */
-    const apiKeyLevelWord = (level) => (level === 'talk' ? uiSaid('set-apikeys-talk', 'Talk') : uiSaid('set-apikeys-read', 'Read'));
+    /* Its conversations, one by one (step 2): each Off / Read / Talk / Act -- never "all". `chosen`: name -> level.
+       Act (07-11): Talk, and wake it, put it to sleep, stop its turn. A room's Manage: Talk, and its name, members, host. */
+    const apiKeyLevelWord = (level) => (level === 'act' ? uiSaid('set-apikeys-act', 'Act') : level === 'manage' ? uiSaid('set-apikeys-manage', 'Manage')
+        : level === 'talk' ? uiSaid('set-apikeys-talk', 'Talk') : uiSaid('set-apikeys-read', 'Read'));
     function apiKeyConvPicker(chosen, onChange) {
         const box = el('div', 'apikey-convs');
         const list = conversations.filter((c) => c && c.name);
         if (!list.length) box.append(el('small', 'hint', uiSaid('set-apikeys-no-convs', 'No conversation yet')));
-        const options = [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }];
+        const options = [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }, { value: 'act', label: apiKeyLevelWord('act') }];
         for (const c of list) {
             const row = el('div', 'apikey-conv'); row.dataset.name = c.name;
             row.append(el('span', '', shownName(c)), KIT.Segmented({ options, value: chosen.get(c.name) ?? '', label: shownName(c), onChange: (v) => onChange(c.name, v || null) }));
@@ -6635,7 +6637,7 @@
         const list = apiKeyItems(kind);
         if (!list.length) box.append(el('small', 'hint', kind === 'rooms' ? uiSaid('set-apikeys-no-rooms', 'No room yet') : uiSaid('set-apikeys-no-boxes', 'No voice box yet')));
         const options = kind === 'rooms'
-            ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }]
+            ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }, { value: 'manage', label: apiKeyLevelWord('manage') }]
             : [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'state', label: apiKeyBoxWord('state') }, { value: 'speak', label: apiKeyBoxWord('speak') }];
         for (const x of list) {
             const row = el('div', kind === 'rooms' ? 'apikey-conv apikey-room' : 'apikey-conv apikey-box'); row.dataset.id = x.id;
@@ -6687,8 +6689,8 @@
             what.append(head);
             const tags = el('span', 'apikey-scopes');
             const given = [...k.scopes.map((sc) => ({ text: scopeWord(sc) })),
-                ...(k.conversations ?? []).map((c) => ({ text: `${shownName(conversations.find((x) => x.name === c.name) ?? { name: c.name })} · ${apiKeyLevelWord(c.level)}`, tone: c.level === 'talk' ? 'note' : undefined })),
-                ...(k.rooms ?? []).map((r) => ({ text: `${roomsNow().find((x) => x.id === r.id)?.name ?? r.id.slice(0, 8)} · ${apiKeyLevelWord(r.level)}`, icon: 'room', tone: r.level === 'talk' ? 'note' : undefined })),
+                ...(k.conversations ?? []).map((c) => ({ text: `${shownName(conversations.find((x) => x.name === c.name) ?? { name: c.name })} · ${apiKeyLevelWord(c.level)}`, tone: c.level === 'read' ? undefined : 'note' })),
+                ...(k.rooms ?? []).map((r) => ({ text: `${roomsNow().find((x) => x.id === r.id)?.name ?? r.id.slice(0, 8)} · ${apiKeyLevelWord(r.level)}`, icon: 'room', tone: r.level === 'read' ? undefined : 'note' })),
                 ...(k.boxes ?? []).map((b) => ({ text: `${boxesNow().find((x) => x.id === b.id)?.name ?? b.id.slice(0, 8)} · ${apiKeyBoxWord(b.level)}`, icon: 'box', tone: b.level === 'speak' ? 'note' : undefined }))];
             tags.append(KIT.Chips(given.length ? given : [{ text: uiSaid('set-apikeys-no-scope', 'No scope') }]));
             what.append(tags);

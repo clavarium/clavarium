@@ -14,6 +14,8 @@
  *     read    read its chat                                   conversation:<name> r
  *     talk    and post a message in it, as the chat does,
  *             signed with the key's name, never as the person  conversation:<name> rw
+ *     act     and wake it, put it to sleep, stop its turn --
+ *             as the owner's buttons do                       conversation:<name> rwm
  *   A conversation archived takes its lines with it (devices.forget). Its
  *   terminal ("x") is never given to a key.
  *
@@ -22,6 +24,11 @@
  *             secrets masked)                                 room:<id> r
  *     talk    and post in it as the person does -- to its host, or to the AIs
  *             named -- signed with the key's name and look    room:<id> rw
+ *     manage  and rename it, add or take away members, change
+ *             its host, remove it -- its members only among the
+ *             conversations and boxes the key was given        room:<id> rwm
+ *   create rooms   make a room (its members as above): the room a key
+ *             makes is given to it at "manage"                server:rooms w
  *
  *   a voice box, given ONE BY ONE:
  *     state   online, where it speaks, when it last heard, its volume --
@@ -44,7 +51,14 @@
  * never the secret, nor anything of it. Its own file, one JSON line each,
  * cut to its newest half past JOURNAL_MAX. Each key is limited to
  * RATE_PER_MIN calls a minute; calls with a key nobody has are limited too,
- * all together, so that they cannot flood the journal.
+ * all together, so that they cannot flood the journal. What a key DOES (a
+ * conversation woken, a room made...) is said in What happened too, with
+ * its name.
+ *
+ * THE KEY'S RIGHTS ARE THE SECURITY (07-11, the owner): no approval card for
+ * what a key was given. Three limits hold whatever it was given: a key never
+ * reads a secret's value; never makes a key or an account; never changes its
+ * own rights or any key's -- no route under /api/ext/ reaches any of them.
  *
  * Who manages keys: whoever passes the gate (an administrator), from
  * Settings, Access. A device (/c/) never reaches these routes; a key never
@@ -65,14 +79,20 @@
  *   GET  /api/ext/v1/conversations                       those it may read: {conversations: [{id, name, level, chat}]}
  *   GET  /api/ext/v1/conversations/<name>/messages       ?last=1..200 (50) | ?since=<cursor>: {chat, messages, cursor}
  *   POST /api/ext/v1/conversations/<name>/messages       {text}: posted in its chat, signed with the key's name
+ *   POST /api/ext/v1/conversations/<name>/wake|sleep|stop  (act) woken, put to sleep, its turn stopped (Escape)
  *   GET  /api/ext/v1/rooms                               those it may read: {rooms: [{id, name, level, host, members}]}
  *   GET  /api/ext/v1/rooms/<id>/messages                 as a conversation's: {messages, cursor}
  *   POST /api/ext/v1/rooms/<id>/messages                 {text, to?: [names of its AIs]}: posted in the room, signed with the key
+ *   POST /api/ext/v1/rooms                               (create rooms) {name, conversations?: [ids], boxes?: [ids], host?: id}
+ *   POST /api/ext/v1/rooms/<id>                          (manage) {name?, host?: id, add?: {conversations, boxes}, remove?: {conversations, boxes}}
+ *   POST /api/ext/v1/rooms/<id>/remove                   (manage) the room removed
  *   GET  /api/ext/v1/boxes                               {boxes: [{id, name, level, online, where, heardAt, volume}]}
  *   POST /api/ext/v1/boxes/<id>/say                      {text}: said aloud by the box
  *   POST /api/ext/mcp                   the same as MCP tools (clavarium_status, clavarium_conversations,
  *                                       clavarium_read, clavarium_say, clavarium_rooms, clavarium_room_read,
- *                                       clavarium_room_say, clavarium_boxes, clavarium_box_say), JSON-RPC over HTTP
+ *                                       clavarium_room_say, clavarium_boxes, clavarium_box_say, clavarium_conversation_wake,
+ *                                       clavarium_conversation_sleep, clavarium_conversation_stop, clavarium_room_create,
+ *                                       clavarium_room_change, clavarium_room_remove), JSON-RPC over HTTP
  *   A conversation, room or box not given, or not there, is the same 403: a key learns nothing of what it was not given.
  *
  * The front lets /api/ext/ through without sign-on, as it does /c/
@@ -102,16 +122,18 @@ const USED_SAVE_MS = 60_000;
 export const EXT_PREFIX = '/api/ext/';
 
 /* The scopes a key may be given: [asset, rights] in the table. */
-export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Its state (memory, disk, versions)' } });
+export const SCOPES = Object.freeze({ status: { asset: 'server:status', rights: 'r', label: 'Its state (memory, disk, versions)' },
+    'create-rooms': { asset: 'server:rooms', rights: 'w', label: 'Create rooms' } });
 /* What a key may do in one conversation: [rights in the table]. */
-export const LEVELS = Object.freeze({ read: 'r', talk: 'rw' });
-export const levelOf = (rights) => (String(rights).includes('w') ? 'talk' : String(rights).includes('r') ? 'read' : null);
+export const LEVELS = Object.freeze({ read: 'r', talk: 'rw', act: 'rwm' });
+export const levelOf = (rights) => (String(rights).includes('m') ? 'act' : String(rights).includes('w') ? 'talk' : String(rights).includes('r') ? 'read' : null);
 /* The messages one read gives, by default and at most. */
 export const READ_DEFAULT = 50;
 export const READ_MAX = 200;
 export const SAY_MAX = 8000;
 /* What a room and a voice box may be given: [rights in the table]. */
-export const ROOM_LEVELS = Object.freeze({ read: 'r', talk: 'rw' });
+export const ROOM_LEVELS = Object.freeze({ read: 'r', talk: 'rw', manage: 'rwm' });
+export const roomLevelOf = (rights) => (String(rights).includes('m') ? 'manage' : String(rights).includes('w') ? 'talk' : String(rights).includes('r') ? 'read' : null);
 export const BOX_LEVELS = Object.freeze({ state: 'r', speak: 'rw' });
 export const boxLevelOf = (rights) => (String(rights).includes('w') ? 'speak' : String(rights).includes('r') ? 'state' : null);
 /* Said aloud in the home: short, and a few a minute (per key and box). */
@@ -135,7 +157,7 @@ export class ApiKeys {
         this.#store = store; this.#grants = grants; this.#journal = journal; this.#now = now; this.#exists = exists;
         /* What is given one by one: its asset type, its levels, a valid name, whether it is there, its words. */
         this.#kinds = {
-            room: { levels: ROOM_LEVELS, of: levelOf, valid: (v) => typeof v === 'string' && UUID.test(v), exists: roomExists, what: 'room', the: 'a room' },
+            room: { levels: ROOM_LEVELS, of: roomLevelOf, valid: (v) => typeof v === 'string' && UUID.test(v), exists: roomExists, what: 'room', the: 'a room' },
             box: { levels: BOX_LEVELS, of: boxLevelOf, valid: (v) => typeof v === 'string' && UUID.test(v), exists: boxExists, what: 'voice box', the: 'a voice box' },
         };
     }
@@ -187,7 +209,7 @@ export class ApiKeys {
 
     #conversationAsked(name, level) {
         if (!isConversationName(name) || !this.#exists(name)) throw new Refusal(404, 'No such conversation.');
-        if (level !== null && !Object.hasOwn(LEVELS, level)) throw new Refusal(400, `A conversation is given to read or to talk: ${Object.keys(LEVELS).join(', ')}.`);
+        if (level !== null && !Object.hasOwn(LEVELS, level)) throw new Refusal(400, `A conversation is given to read, to talk or to act: ${Object.keys(LEVELS).join(', ')}.`);
     }
 
     /* One conversation given to a key, its level changed, or taken back (level null). */
@@ -282,6 +304,7 @@ export class ApiKeys {
         const rights = isConversationName(name) ? this.#grants.rightsOf(apiKeySubject(id), `conversation:${name}`) : '';
         if (!rights.includes('r')) throw Object.assign(new Refusal(403, 'This key was not given this conversation.'), { key: id });
         if (level === 'talk' && !rights.includes('w')) throw Object.assign(new Refusal(403, 'This key may read this conversation, not talk in it.'), { key: id });
+        if (level === 'act' && !rights.includes('m')) throw Object.assign(new Refusal(403, 'This key may not act on this conversation (wake, sleep, stop).'), { key: id });
         return levelOf(rights);
     }
 
@@ -291,7 +314,17 @@ export class ApiKeys {
         const rights = typeof room === 'string' && UUID.test(room) && this.#kinds.room.exists(room) ? this.#grants.rightsOf(apiKeySubject(id), `room:${room}`) : '';
         if (!rights.includes('r')) throw Object.assign(new Refusal(403, 'This key was not given this room.'), { key: id });
         if (level === 'talk' && !rights.includes('w')) throw Object.assign(new Refusal(403, 'This key may read this room, not talk in it.'), { key: id });
-        return levelOf(rights);
+        if (level === 'manage' && !rights.includes('m')) throw Object.assign(new Refusal(403, 'This key may not manage this room.'), { key: id });
+        return roomLevelOf(rights);
+    }
+
+    /* A ROOM THE KEY MADE ITSELF (with "create rooms") is given to it at "manage". This is the one right a key ever
+       gets on its own, and it is not a key changing its rights: it is scoped to what it created, and nothing else
+       of this key or any other changes -- a room made by another, a conversation, a box, a scope stay as they were. */
+    madeRoom(id, room) {
+        if (!this.may(id, 'create-rooms')) throw Object.assign(new Refusal(403, `This key was not given the scope "${SCOPES['create-rooms'].label}".`), { key: id });
+        if (typeof room !== 'string' || !UUID.test(room) || !this.#kinds.room.exists(room)) throw new Refusal(404, 'No such room.');
+        this.#grants.give(apiKeySubject(id), `room:${room}`, ROOM_LEVELS.manage);
     }
     /* Whether a key may see the state of ('state') or make speak ('speak') one voice box; 403 if not. */
     mayBox(id, box, level = 'state') {
@@ -437,7 +470,7 @@ export const STATUS_TOOL = {
 export const CONVERSATIONS_TOOL = {
     name: 'clavarium_conversations',
     title: 'Conversations of this key',
-    description: 'The conversations this key was given, each with its id, name, level (read or talk) and whether its chat is on.',
+    description: 'The conversations this key was given, each with its id, name, level (read, talk or act) and whether its chat is on.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
@@ -460,7 +493,7 @@ const BOX_ARG = { type: 'string', description: 'The voice box\'s id, as clavariu
 export const ROOMS_TOOL = {
     name: 'clavarium_rooms',
     title: 'Rooms of this key',
-    description: 'The rooms this key was given, each with its id, name, level (read or talk), its host and its members by name.',
+    description: 'The rooms this key was given, each with its id, name, level (read, talk or manage), its host and its members by name (with their id when this key was given them).',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
 };
@@ -492,15 +525,52 @@ export const BOX_SAY_TOOL = {
     inputSchema: { type: 'object', properties: { box: BOX_ARG, text: { type: 'string', minLength: 1, maxLength: SPEAK_MAX } }, required: ['box', 'text'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
 };
-export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL, BOXES_TOOL, BOX_SAY_TOOL];
+/* To act on a conversation (level "act"), and to manage rooms (level "manage", or "create rooms"). */
+const actTool = (act, title, description, destructive) => ({
+    name: `clavarium_conversation_${act}`, title, description: `${description} The conversation must have been given to this key to act.`,
+    inputSchema: { type: 'object', properties: { conversation: CONVERSATION_ARG }, required: ['conversation'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: destructive, idempotentHint: true, openWorldHint: false },
+});
+export const WAKE_TOOL = actTool('wake', 'Wake a conversation', 'Wake one conversation\'s machine (asleep: it starts again; awake: nothing changes).', false);
+export const SLEEP_TOOL = actTool('sleep', 'Put a conversation to sleep', 'Put one conversation\'s machine to sleep, as the owner\'s Sleep button does: its files and chat are kept.', false);
+export const STOP_TOOL = actTool('stop', 'Stop a conversation\'s turn', 'Stop what one conversation\'s AI is doing now (its current turn, as Escape does); the conversation stays awake.', true);
+const IDS = { type: 'array', items: { type: 'string' }, maxItems: 40 };
+const MEMBERS_ARG = { type: 'object', properties: { conversations: { ...IDS, description: 'Conversation ids, as clavarium_conversations gives them.' }, boxes: { ...IDS, description: 'Voice box ids, as clavarium_boxes gives them.' } }, additionalProperties: false };
+export const ROOM_CREATE_TOOL = {
+    name: 'clavarium_room_create',
+    title: 'Create a room',
+    description: 'Make a room with conversations (AIs) and voice boxes this key was given; one conversation at least, its host (the first by default). The room is then given to this key to manage. Needs the scope "Create rooms".',
+    inputSchema: { type: 'object', properties: { name: { type: 'string', minLength: 1, maxLength: 60 }, conversations: { ...IDS, minItems: 1, description: 'Conversation ids, as clavarium_conversations gives them.' }, boxes: { ...IDS, description: 'Voice box ids, as clavarium_boxes gives them.' }, host: CONVERSATION_ARG }, required: ['name', 'conversations'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+};
+export const ROOM_CHANGE_TOOL = {
+    name: 'clavarium_room_change',
+    title: 'Change a room',
+    description: 'Rename a room, add or take away members (only conversations and voice boxes this key was given), or change its host (one of its conversations). The room must have been given to this key to manage.',
+    inputSchema: { type: 'object', properties: { room: ROOM_ARG, name: { type: 'string', minLength: 1, maxLength: 60 }, host: CONVERSATION_ARG, add: MEMBERS_ARG, remove: MEMBERS_ARG }, required: ['room'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+};
+export const ROOM_REMOVE_TOOL = {
+    name: 'clavarium_room_remove',
+    title: 'Remove a room',
+    description: 'Remove one room and its thread, for good. The room must have been given to this key to manage.',
+    inputSchema: { type: 'object', properties: { room: ROOM_ARG }, required: ['room'], additionalProperties: false },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+};
+export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL,
+    ROOM_CREATE_TOOL, ROOM_CHANGE_TOOL, ROOM_REMOVE_TOOL, BOXES_TOOL, BOX_SAY_TOOL];
 
 /* Returns true when the request was under /api/ext/ (answered here). `status()`: the state, as statusOf
    makes it. `chats`: { list() -> [{ id, name }], read(name, part) -> talk.of's answer, chatOn(name),
    say(name, text, by) -> { told } }. `rooms`: { list() -> [{ id, name, host, members: [{ name, kind }] }],
    read(id, part) -> rooms.read's answer, say(id, text, { as, to }) }. `boxes`: { list() -> [{ id, name, online, where,
    heardAt, volume }], say(id, text, by) -> { seconds? } }. `originOk(headers)`: whether an Origin is this site's (gate.mjs); a
-   call from a page of another site is refused. */
-export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, headers = {}, originOk = () => false, version = null }) {
+   call from a page of another site is refused.
+   To act (07-11): `chats` also { wake(name) -> { state }, sleep(name), stop(name) } -- the owner's own calls; `rooms` also
+   { create({ name, conversations, boxes, host }) -> { id }, change(id, { name, host, add, remove }) -- by member ids, as the
+   page asks --, remove(id) }, and its list's members carry `ref` (a conversation's name, a box's id) and `id` (the member's).
+   `events`: What happened (events.mjs), where each act is said with the key's name. */
+export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, events = null, headers = {}, originOk = () => false, version = null }) {
     const url = new URL(request.url ?? '/', 'http://local');
     const { pathname } = url;
     if (!pathname.startsWith(EXT_PREFIX) && pathname !== EXT_PREFIX.slice(0, -1)) return false;
@@ -546,8 +616,11 @@ export async function handleExternal(request, response, { keys, status, chats = 
     /* The same for rooms and voice boxes. */
     const roomsListed = (id) => {
         const there = new Map((rooms?.list() ?? []).map((r) => [r.id, r]));
+        /* A member's id only when the key was given it (a conversation's, a box's): what it may add or take away. */
+        const convs = new Set(keys.conversationsOf(id).map((c) => c.name)); const bs = new Set(keys.boxesOf(id).map((b) => b.id));
+        const mine = (m) => (m.kind === 'ai' && convs.has(m.ref)) || (m.kind === 'box' && bs.has(m.ref));
         return { rooms: keys.roomsOf(id).filter((g) => there.has(g.id)).map((g) => { const r = there.get(g.id);
-            return { id: g.id, name: String(r.name ?? ''), level: g.level, host: r.host ?? null, members: (Array.isArray(r.members) ? r.members : []).map((m) => ({ name: String(m.name ?? ''), kind: String(m.kind ?? '') })) }; }) };
+            return { id: g.id, name: String(r.name ?? ''), level: g.level, host: r.host ?? null, members: (Array.isArray(r.members) ? r.members : []).map((m) => ({ name: String(m.name ?? ''), kind: String(m.kind ?? ''), ...(typeof m.ref === 'string' && mine(m) ? { id: m.ref } : {}) })) }; }) };
     };
     const roomKnown = (room) => { if (!(rooms?.list() ?? []).some((r) => r.id === room)) throw new Refusal(403, 'This key was not given this room.'); };
     const roomReading = (id, room, part) => {
@@ -577,6 +650,95 @@ export async function handleExternal(request, response, { keys, status, chats = 
         const done = await boxes.say(box, text, keys.signature(id));
         return { ok: true, ...(Number.isFinite(done?.seconds) ? { seconds: done.seconds } : {}) };
     };
+    /* SAID IN WHAT HAPPENED, with the key's name: what a key did, never what it read. */
+    const said = (id, kind, text, conversation = null) => {
+        const label = keys.signature(id)?.name ?? '';
+        try { events?.add({ kind, text, ...(conversation ? { conversation } : {}), who: `API key "${label}"` }); } catch { /* never in the way */ }
+    };
+    /* ACT on a conversation (level "act"): the owner's own calls -- woken, put to sleep, its turn stopped. */
+    const ACTS = { wake: 'woken', sleep: 'put to sleep', stop: 'its turn stopped' };
+    const acting = async (id, name, act) => {
+        keys.mayConversation(id, name, 'act'); known(name);
+        if (typeof chats?.[act] !== 'function') throw new Refusal(409, 'Not possible here.');
+        const done = await chats[act](name);
+        said(id, act === 'stop' ? 'conversation' : 'machine', act === 'stop' ? `${name}: its turn stopped` : `Machine of ${name} ${ACTS[act]}`, name);
+        return { ok: true, ...(typeof done?.state === 'string' ? { state: done.state } : {}) };
+    };
+    /* MANAGE a room (level "manage"), or make one ("create rooms"). Its members are named as the key knows them --
+       a conversation by its id, a box by its id -- and only among those this key was given (at any level): else 403,
+       the same for one not there. The body takes these fields and no other: never a level, a right, a key. */
+    const refs = (value, what) => {
+        if (value === undefined || value === null) return [];
+        if (!Array.isArray(value) || value.length > 40 || value.some((x) => typeof x !== 'string')) throw new Refusal(400, `${what}: a list of ids.`);
+        return [...new Set(value)];
+    };
+    const sides = (value, what) => {
+        if (value === undefined || value === null) return { conversations: [], boxes: [] };
+        if (typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some((k) => !['conversations', 'boxes'].includes(k))) throw new Refusal(400, `${what}: {conversations: [ids], boxes: [ids]}.`);
+        return { conversations: refs(value.conversations, `${what}.conversations`), boxes: refs(value.boxes, `${what}.boxes`) };
+    };
+    const onlyFields = (body, fields) => {
+        if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Refusal(400, 'Send JSON: an object.');
+        const other = Object.keys(body).filter((k) => !fields.includes(k));
+        if (other.length) throw new Refusal(400, `Not a field here: ${other[0].slice(0, 40)}. Only: ${fields.join(', ')}.`);
+    };
+    const givenMembers = (id, { conversations, boxes: bs }) => {
+        const convs = new Set(keys.conversationsOf(id).map((c) => c.name));
+        const there = new Set((chats?.list() ?? []).map((c) => c.id));
+        for (const c of conversations) if (!convs.has(c) || !there.has(c)) throw Object.assign(new Refusal(403, 'This key was not given this conversation.'), { key: id });
+        const given = new Set(keys.boxesOf(id).map((b) => b.id));
+        const boxesThere = new Set((boxes?.list() ?? []).map((b) => b.id));
+        for (const b of bs) if (!given.has(b) || !boxesThere.has(b)) throw Object.assign(new Refusal(403, 'This key was not given this voice box.'), { key: id });
+    };
+    const roomShown = (id, room) => roomsListed(id).rooms.find((r) => r.id === room) ?? null;
+    const roomCreating = (id, body) => {
+        if (!keys.may(id, 'create-rooms')) throw Object.assign(new Refusal(403, `This key was not given the scope "${SCOPES['create-rooms'].label}".`), { key: id });
+        onlyFields(body, ['name', 'conversations', 'boxes', 'host']);
+        const members = { conversations: refs(body.conversations, 'conversations'), boxes: refs(body.boxes, 'boxes') };
+        if (body.host !== undefined && body.host !== null && (typeof body.host !== 'string' || !members.conversations.includes(body.host))) throw new Refusal(400, 'host: one of its conversations.');
+        givenMembers(id, members);
+        if (typeof rooms?.create !== 'function') throw new Refusal(409, 'Not possible here.');
+        const made = rooms.create({ name: body.name, conversations: members.conversations, boxes: members.boxes, ...(body.host ? { host: body.host } : {}) });
+        /* The one right a key gets on its own: the room it made, at "manage" (see madeRoom). */
+        keys.madeRoom(id, made.id);
+        const shown = roomShown(id, made.id);
+        said(id, 'conversation', `Room "${String(shown?.name ?? made.name ?? '').slice(0, 60)}" made`);
+        return { ok: true, room: shown };
+    };
+    const roomChanging = (id, room, body) => {
+        keys.mayRoom(id, room, 'manage'); roomKnown(room);
+        onlyFields(body, ['name', 'host', 'add', 'remove']);
+        const add = sides(body.add, 'add'); const remove = sides(body.remove, 'remove');
+        if (body.host !== undefined && body.host !== null && typeof body.host !== 'string') throw new Refusal(400, 'host: the id of one of its conversations.');
+        const host = typeof body.host === 'string' ? body.host : null;
+        givenMembers(id, { conversations: [...add.conversations, ...remove.conversations, ...(host ? [host] : [])], boxes: [...add.boxes, ...remove.boxes] });
+        const before = rooms.list().find((r) => r.id === room);
+        const members = Array.isArray(before?.members) ? before.members : [];
+        const member = (kind, ref) => members.find((m) => m.kind === kind && m.ref === ref);
+        const gone = [...remove.conversations.map((c) => ['ai', c]), ...remove.boxes.map((b) => ['box', b])].map(([kind, ref]) => {
+            const m = member(kind, ref); if (!m) throw new Refusal(400, 'Not a member of this room.'); return m.id; });
+        /* The host: one of its AIs once the change is made (one added now, too). */
+        if (host && !(member('ai', host) && !remove.conversations.includes(host)) && !add.conversations.includes(host)) throw new Refusal(400, 'host: one of its conversations.');
+        const name = body.name === undefined || body.name === null ? undefined : String(body.name);
+        rooms.change(room, { ...(name !== undefined ? { name } : {}), add, remove: gone });
+        if (host) {
+            const now = rooms.list().find((r) => r.id === room)?.members ?? [];
+            const m = now.find((x) => x.kind === 'ai' && x.ref === host);
+            if (m && !m.host) rooms.change(room, { host: m.id });
+        }
+        const shown = roomShown(id, room);
+        const what = [...(name !== undefined ? [`renamed "${String(shown?.name ?? name).slice(0, 60)}"`] : []), ...(add.conversations.length + add.boxes.length ? [`${add.conversations.length + add.boxes.length} added`] : []),
+            ...(gone.length ? [`${gone.length} taken away`] : []), ...(host ? [`host ${host}`] : [])];
+        said(id, 'conversation', `Room "${String(before?.name ?? '').slice(0, 60)}" changed${what.length ? `: ${what.join(', ')}` : ''}`);
+        return { ok: true, room: shown };
+    };
+    const roomRemoving = (id, room) => {
+        keys.mayRoom(id, room, 'manage'); roomKnown(room);
+        const name = rooms.list().find((r) => r.id === room)?.name ?? '';
+        rooms.remove(room);
+        said(id, 'conversation', `Room "${String(name).slice(0, 60)}" removed`);
+        return { ok: true, removed: room };
+    };
     const ownError = (error, id) => (error instanceof Refusal ? Object.assign(error, { key: error.key ?? id }) : error);
     try {
         if (route === '/v1/status') {
@@ -587,9 +749,9 @@ export async function handleExternal(request, response, { keys, status, chats = 
             note(id, 200);
             return send(200, body);
         }
-        const one = /^\/v1\/conversations(?:\/([^/]+)\/messages)?$/.exec(route);
+        const one = /^\/v1\/conversations(?:\/([^/]+)\/(messages|wake|sleep|stop))?$/.exec(route);
         if (one) {
-            const allowed = one[1] ? 'GET, POST' : 'GET';
+            const allowed = one[2] && one[2] !== 'messages' ? 'POST' : one[1] ? 'GET, POST' : 'GET';
             if (!allowed.split(', ').includes(request.method)) return send(405, { error: `Call this address with ${allowed}.` }, { allow: allowed });
             let id;
             try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error); }
@@ -597,6 +759,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 if (!one[1]) { const body = listed(id); note(id, 200); return send(200, body); }
                 let name;
                 try { name = decodeURIComponent(one[1]); } catch { name = ''; }
+                if (one[2] !== 'messages') { const done = await acting(id, name, one[2]); const code = one[2] === 'wake' ? 202 : 200; note(id, code); return send(code, done); }
                 if (request.method === 'GET') { const body = reading(id, name, readPart((k) => url.searchParams.get(k))); note(id, 200); return send(200, body); }
                 if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) throw new Refusal(415, 'Send JSON: {"text": "..."}.');
                 let body;
@@ -606,17 +769,26 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 return send(201, done);
             } catch (error) { return refused(ownError(error, id)); }
         }
-        const room = /^\/v1\/rooms(?:\/([^/]+)\/messages)?$/.exec(route);
+        const room = /^\/v1\/rooms(?:\/([^/]+)(\/messages|\/remove)?)?$/.exec(route);
         if (room) {
-            const allowed = room[1] ? 'GET, POST' : 'GET';
+            const allowed = room[2] === '/messages' || !room[1] ? 'GET, POST' : 'POST';
             if (!allowed.split(', ').includes(request.method)) return send(405, { error: `Call this address with ${allowed}.` }, { allow: allowed });
             let id;
             try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error); }
             try {
-                if (!room[1]) { const body = roomsListed(id); note(id, 200); return send(200, body); }
+                if (!room[1] && request.method === 'GET') { const body = roomsListed(id); note(id, 200); return send(200, body); }
                 let ref;
-                try { ref = decodeURIComponent(room[1]); } catch { ref = ''; }
+                try { ref = decodeURIComponent(room[1] ?? ''); } catch { ref = ''; }
+                if (room[2] === '/remove') { const done = roomRemoving(id, ref); note(id, 200); return send(200, done); }
                 if (request.method === 'GET') { const body = roomReading(id, ref, readPart((k) => url.searchParams.get(k))); note(id, 200); return send(200, body); }
+                if (room[2] !== '/messages') {
+                    if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) throw new Refusal(415, 'Send JSON.');
+                    let body;
+                    try { body = JSON.parse(await bodyOf(16_384)); } catch (error) { if (error instanceof Refusal) throw error; throw new Refusal(400, 'The request is not JSON.'); }
+                    const done = room[1] ? roomChanging(id, ref, body) : roomCreating(id, body);
+                    const code = room[1] ? 200 : 201;
+                    note(id, code); return send(code, done);
+                }
                 if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) throw new Refusal(415, 'Send JSON: {"text": "..."}.');
                 let body;
                 try { body = JSON.parse(await bodyOf(SAY_MAX * 4 + 4096)); } catch (error) { if (error instanceof Refusal) throw error; throw new Refusal(400, 'The request is not JSON.'); }
@@ -668,7 +840,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 const asked = String(msg.params?.protocolVersion ?? '');
                 return answer({ protocolVersion: MCP_VERSIONS.includes(asked) ? asked : MCP_VERSIONS[0], capabilities: { tools: { listChanged: false } },
                     serverInfo: { name: 'clavarium', title: 'Clavarium', version: version ?? '0' },
-                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home).' });
+                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home). Where it was given more: a conversation woken, put to sleep, its turn stopped (clavarium_conversation_wake, _sleep, _stop); rooms made, changed, removed (clavarium_room_create, clavarium_room_change, clavarium_room_remove).' });
             }
             case 'ping': return answer({});
             case 'tools/list': return answer({ tools: TOOLS });
@@ -685,17 +857,22 @@ export async function handleExternal(request, response, { keys, status, chats = 
                     if (name === BOXES_TOOL.name) return result(boxesListed(id));
                     const part = () => readPart((k) => (args[k] === undefined ? null : typeof args[k] === 'number' ? String(args[k]) : args[k]));
                     let done;
-                    if (name === ROOM_READ_TOOL.name || name === ROOM_SAY_TOOL.name) {
+                    if (name === ROOM_CREATE_TOOL.name) {
+                        done = roomCreating(id, args);
+                    } else if (name === ROOM_READ_TOOL.name || name === ROOM_SAY_TOOL.name || name === ROOM_CHANGE_TOOL.name || name === ROOM_REMOVE_TOOL.name) {
                         if (typeof args.room !== 'string') return fail(-32602, 'room: the id of a room.');
                         if (name === ROOM_READ_TOOL.name) return result(roomReading(id, args.room, part()));
-                        done = await roomSaying(id, args.room, args.text, args.to);
+                        if (name === ROOM_CHANGE_TOOL.name) { const { room: target, ...change } = args; done = roomChanging(id, target, change); }
+                        else if (name === ROOM_REMOVE_TOOL.name) done = roomRemoving(id, args.room);
+                        else done = await roomSaying(id, args.room, args.text, args.to);
                     } else if (name === BOX_SAY_TOOL.name) {
                         if (typeof args.box !== 'string') return fail(-32602, 'box: the id of a voice box.');
                         done = await boxSaying(id, args.box, args.text);
                     } else {
                         if (typeof args.conversation !== 'string') return fail(-32602, 'conversation: the id of a conversation.');
                         if (name === READ_TOOL.name) return result(reading(id, args.conversation, part()));
-                        done = await saying(id, args.conversation, args.text);
+                        const act = { [WAKE_TOOL.name]: 'wake', [SLEEP_TOOL.name]: 'sleep', [STOP_TOOL.name]: 'stop' }[name];
+                        done = act ? await acting(id, args.conversation, act) : await saying(id, args.conversation, args.text);
                     }
                     note(id, 201, what);
                     return send(200, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(done) }], structuredContent: done, isError: false } });
