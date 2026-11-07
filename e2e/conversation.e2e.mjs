@@ -11,13 +11,14 @@ test('a conversation is created from the page, built, and its terminal answers',
     await me.page.locator('#newconv-create').click();
     /* While the machine is being built, the page says so, and offers nothing that cannot work yet. */
     await me.until('the page says it is building', async () => (await me.state()) === 'building');
-    assert.match(await me.page.locator('#notice-text').innerText(), /a new machine takes a few minutes/i);
-    /* A wheel turns and the steps say where it is; the shortcut bar stays away for the whole wait (it used to come and go at each poll). */
-    assert.equal(await me.page.locator('#notice-steps li[data-state="now"] .spin').isVisible(), true);
+    /* The step under way, in one line; what is usual only once it is passed (03-11, less is more). */
+    assert.ok((await me.page.locator('#notice-steps li').allInnerTexts()).includes(await me.page.locator('#notice-text').innerText()), 'its line is one of its steps');
+    /* The steps say where it is; the shortcut bar stays away for the whole wait (it used to come and go at each poll). */
+    assert.equal(await me.page.locator('#notice-steps').isVisible(), false, 'its steps one tap away (03-11)');
     assert.equal(await me.page.locator('#notice-steps li[data-state="now"]').count(), 1);
     /* The same panel as a restart or a wake: what it is, and the step of how many. */
     assert.match(await me.page.locator('#notice-title').innerText(), /building its machine/i);
-    assert.match(await me.page.locator('#notice-count').innerText(), /^Step [1-5] of 5 \u00b7 \d+:\d\d$/);
+    assert.match(await me.page.locator('#notice-count').innerText(), /^[1-5] \/ 5 \u00b7 \d+:\d\d$/);
     for (let i = 0; i < 4; i++) { assert.equal(await me.page.locator('#shortcuts').isVisible(), false); await me.page.waitForTimeout(700); }
     assert.equal(await me.page.locator('#keys').isVisible(), false);
     assert.equal(await me.page.locator('#sleep').isVisible(), false);
@@ -49,7 +50,7 @@ test('a conversation is created from the page, built, and its terminal answers',
 test('reloading the page finds the same session, with what was on screen', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('keeps-going');
+    await me.create('keeps-going', 'Shell', { chat: false });
     await me.type('MARK=still-here; echo set');
     await me.sees('set');
     await me.page.reload();
@@ -129,7 +130,7 @@ test('leaving the tool ends the session; its machine stops after the delay and s
 test('a sleep that was asked for holds through a reload, shows in the list, and ends on "Wake it"', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
-    await me.create('sleeper');
+    await me.create('sleeper', 'Shell', { chat: false });
     await me.type('KEPT=through-sleep; echo ok');
     await me.sees('ok');
     await me.page.locator('#folders').click();
@@ -157,8 +158,13 @@ test('archiving asks first, then removes the conversation and its machine', { sk
     assert.match(await me.page.locator('#notice-text').innerText(), /Its machine is deleted/);
     await me.page.locator('#notice-cancel').click();
     assert.equal(await me.state(), 'live', 'Cancel changes nothing');
-    await me.page.locator('#folders').click();
-    await me.chapter('advanced');
+    /* Its settings may still be open behind the question, or closing: the gear toggles them, so it is pressed only when they are shut. */
+    await me.until('Archive at hand again', async () => {
+        if (await me.page.locator('#archive').isVisible()) return true;
+        if (!(await me.page.locator('#panel').isVisible())) await me.page.locator('#folders').click();
+        else await me.chapter('advanced');
+        return false;
+    });
     await me.page.locator('#archive').click();
     await me.page.locator('#notice-action', { hasText: 'Archive' }).click();
     await me.until('gone from the list', async () => (await me.page.locator('#items .item').count()) === 0);
