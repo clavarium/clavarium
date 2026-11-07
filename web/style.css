@@ -148,7 +148,6 @@ footer button.wide { flex: 1 0 auto; background: transparent; border-color: var(
 .sheet { position: absolute; inset: 0; z-index: 3; display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--panel); overflow-y: auto; }
 .panel-top { display: flex; align-items: center; justify-content: space-between; }
 .panel-actions { margin: 2px 0 12px; }
-#panel-rows { display: flex; flex-direction: column; }
 .folder { display: flex; align-items: center; gap: 8px; padding: 8px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .folder b { flex: 1; min-width: 100px; overflow: hidden; text-overflow: ellipsis; }
 .levels { display: flex; }
@@ -365,11 +364,10 @@ footer button.careful { border-style: dashed; color: var(--ink2); }
 @media (prefers-reduced-motion: reduce) { .asset-head b::before { transition: none; } }
 .asset-inside { flex-basis: 100%; padding: 0 0 8px 12px; display: flex; flex-direction: column; gap: 4px; }
 @media (max-width: 700px) { .asset-head { grid-template-columns: 1fr; gap: 2px; } }
-#assets details > summary, #access-advanced > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button); font-weight: 600; list-style: none; align-self: flex-start; }
-#assets details > summary::before, #access-advanced > summary::before { content: '+ '; }
-#assets details[open] > summary::before, #access-advanced[open] > summary::before { content: '- '; }
+#assets details > summary, #access-advanced > summary, #cassets .auto-send > summary { cursor: pointer; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--button); font-weight: 600; list-style: none; align-self: flex-start; }
+#assets details > summary::before, #access-advanced > summary::before, #cassets .auto-send > summary::before { content: '+ '; }
+#assets details[open] > summary::before, #access-advanced[open] > summary::before, #cassets .auto-send[open] > summary::before { content: '- '; }
 #assets details form, #access-advanced > div { margin-top: 8px; }
-#attach-picker { border: 1px solid var(--brass); border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
 #chips { cursor: pointer; }
 #settings .row { align-items: center; gap: 10px; }
 /* One kind of event a line: its name, then its level, wrapped under it on a narrow screen. */
@@ -2911,6 +2909,19 @@ button.kit-switch[aria-checked="true"]::after { left: 18px; background: var(--ok
 .kit-access-acts { display: flex; gap: 14px; flex-wrap: wrap; }
 .kit-rights-pick > button > .kit-rights-same { display: block; font-size: .6875rem; font-weight: 500; opacity: .8; }
 .kit-asdelete { display: inline; }
+/* GIVE… (07-11, assets step 4: kit AssetPicker): what it has not yet, searched; the one chosen opens its right and
+   « Give » under it; a new asset below. Settings › Access: one line to its tab. */
+.kit-aspick { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.kit-aspick-search { width: 100%; padding: 9px 12px; border-radius: 9px; }
+.kit-aspick-list .kit-aslist-sec:first-child { margin-top: 0; }
+.kit-aspick-give { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin: 0 0 6px 40px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--brass) 45%, var(--line)); border-radius: 10px; background: color-mix(in srgb, var(--brass) 7%, var(--bar)); }
+.kit-aspick-give > .kit-rights-pick { margin-right: auto; }
+.kit-aspick-go { min-height: 30px; padding: 0 16px; }
+.kit-aspick-or { margin-top: 10px; }
+.kit-asset-ic[data-kind="give"] { color: var(--brass-ink); }
+.as-tools .as-new[aria-pressed="true"] { background: var(--brass); color: var(--on-brass, #fff); border-color: var(--brass); }
+.access-assets { margin: 2px 0 8px; }
+.access-assets > .as-link { font-size: .9375rem; font-weight: 600; }
 .as-files-menu #files.embedded > .panel-top { display: none; }
 /* IDLE 12 H OR MORE (07-11): « rien depuis 14 h », in grey, never bold. */
 .item small.kit-conv-idle { color: var(--ink2); opacity: .8; }

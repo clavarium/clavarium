@@ -73,7 +73,7 @@ test('who gets what: every agent, every thing, a line for each right, what an ag
     await me.until('brand is written by client-b', async () => (await brandOf()) === 'write');
     await page.locator('.lk-pop .lk-rm').click();
     /* Asked in words, then two short buttons. */
-    assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Detach brand from client-b?');
+    assert.equal(await page.locator('.lk-pop .lk-ask').innerText(), 'Take brand from client-b? It stays in Assets.');
     await page.locator('.lk-pop button', { hasText: /^Remove$/ }).click();
     await me.until('brand is detached from client-b', async () => (await brandOf()) === undefined);
     /* Zoomed in, a link is still drawn from the dot of a box to another. */

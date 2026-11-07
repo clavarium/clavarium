@@ -262,24 +262,41 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             if ((await row.getAttribute('data-asset')).startsWith('git:')) await page.locator('#cassets-detail button[data-act="files"]').click();
             await until(`the files of ${name}`, async () => await page.locator('#cassets-detail #files').isVisible());
         }
-        /* What the conversation shown may do with it, set in Access: 'Read', 'Write', or 'Off' (detached). */
+        /* What the conversation shown may do with it, set in its Assets tab (07-11, assets step 4): 'Read', 'Write', 'Use',
+           or 'None' ('Off' says the same). Had already: its own row's picker; else « + Give… », the row, its right, « Give ».
+           Then back to the tab it was on. */
         async function access(name, level) {
-            await page.locator('#folders').click();
-            const row = page.locator(`#panel-rows .folder[data-name="${name}"]`);
-            await until('its sheet is painted', async () => (await page.locator('#panel-title').innerText()).startsWith('This conversation - '));
-            await chapter('access');
-            if (level === 'Off') {
-                await row.locator('button', { hasText: 'Detach' }).click();
-                await until(`${name} is detached`, async () => (await row.count()) === 0);
-            } else if ((await row.count()) > 0) {
-                await row.locator('.levels button', { hasText: level }).click();
-                await until(`${name} is ${level}`, async () => (await row.locator('.levels button[aria-pressed=true]').innerText().catch(() => '')) === level);
-            } else {
-                await page.locator('#attach-open').click();
-                await page.locator(`#attach-rows .folder[data-name="${name}"]`).locator('button', { hasText: level }).click();
-                await until(`${name} is attached`, async () => (await row.count()) === 1);
+            const want = level === 'Off' ? 'None' : level;
+            if ((await page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await page.locator('#view-assets').click();
+            await until('its Assets tab is painted', async () => (await page.locator('#cassets').isVisible()) && (await page.locator('#cassets-rows .kit-aslist').count()) === 1);
+            const row = page.locator(`#cassets-rows .as-row[data-name="${name}"]`);
+            const mine = page.locator(`#cassets-detail .kit-access-here .kit-rights-pick`);
+            if ((await row.count()) > 0) {
+                await row.click();
+                await until(`${name} is opened`, async () => (await mine.count()) === 1);
+                await mine.locator('button', { hasText: want }).click();
+                if (want === 'None') await until(`${name} is taken back`, async () => (await row.count()) === 0);
+                else await until(`${name} is ${want}`, async () => (await mine.locator('button[aria-pressed=true]').innerText().catch(() => '')) === want);
+            } else if (want !== 'None') {
+                await page.locator('#cassets-attach').click();
+                const offer = page.locator(`#cassets-detail .kit-aspick-row[data-name="${name}"]`);
+                await until(`${name} is offered`, async () => (await offer.count()) === 1);
+                await offer.click();
+                const bar = page.locator('#cassets-detail .kit-aspick-give');
+                await bar.locator('.kit-rights-pick button', { hasText: want }).click();
+                await bar.locator('.kit-aspick-go').click();
+                await until(`${name} is given`, async () => (await row.count()) === 1);
             }
-            await page.goBack();
+            for (let i = 0; i < 4 && await page.locator('#cassets').isVisible(); i++) { await page.goBack(); await page.waitForTimeout(150); }
+            await until('back from its Assets tab', async () => !(await page.locator('#cassets').isVisible()));
+        }
+        /* A repository of the conversation shown, its review: its Assets tab, the repository, « Open the review ». */
+        async function review(name) {
+            if ((await page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await page.locator('#view-assets').click();
+            const row = page.locator(`#cassets-rows .as-row[data-asset="git:${name}"]`);
+            await until(`${name} is in its Assets`, async () => (await row.count()) === 1);
+            await row.click();
+            await page.locator('#cassets-detail button[data-act="review"]').click();
         }
         /* A chapter of "This conversation" is unfolded, if it is not already. */
         async function chapter(key) {
@@ -293,7 +310,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         async function menu() { if (await page.locator('#menu').isVisible() && (await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
         /* On a phone: the keys behind "More". */
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, review, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot, engineKeys, engineLanguages, engineUrl: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` };
 }

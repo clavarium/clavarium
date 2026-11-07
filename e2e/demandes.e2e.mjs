@@ -111,3 +111,32 @@ test('a request in the chat: its card, unfolded, everything in a sheet; refused 
     assert.deepEqual(fr.errors, [], 'no page error (French)');
     assert.deepEqual(me.errors, [], 'no page error');
 });
+
+/* A REQUEST IN A ROOM (07-11): its AI at work for a room (a message of it, not yet answered) asks -- the same card in the
+   room's thread, named by the AI; refused there as the owner, Tether is told, the card folds to one line. */
+test('a request in a room: the card of an AI at work for it, named; refused from the room, it reaches Tether and folds', { skip: SKIP }, async (t) => {
+    const b = await bench(t, { tetherTargets: [MAILBOX] });
+    const me = await b.person();
+    await me.create('asker');
+    assert.equal((await me.api('/api/conversations/asker/talk', { on: true })).status, 200);
+    assert.equal((await me.api('/api/tether/level', { target: 'work-mail', agent: 'conversation:asker', level: 'propose' })).status, 200);
+    const room = (await me.api('/api/rooms', { name: 'Kitchen', conversations: ['asker'] })).body;
+    assert.equal((await me.api(`/api/rooms/${room.id}/talk`, { text: 'Send the minutes, please' })).status, 201);
+    const side = join(b.dir, 'kept-work', 'asker', 'work', '.tether');
+    mkdirSync(side, { recursive: true });
+    appendFileSync(join(side, 'asks.jsonl'), `${JSON.stringify({ id: 'r1', op: 'mail.send', args: { target: 'work-mail', to: 'team@example.org', subject: 'Minutes', body: 'Here are the minutes.' }, at: new Date().toISOString() })}\n`);
+    await me.page.goto(`${b.origin}/?open=salon&room=${room.id}`);
+    const card = me.page.locator('#salon-thread .parley-request:not([data-state])');
+    await me.until('the request is a card in the room', async () => (await card.count()) === 1, 30_000);
+    assert.equal(await card.locator('.parley-request-title').innerText(), 'Send “Minutes” to team@example.org');
+    assert.match(await card.locator('.parley-request-sub').innerText(), /^asker · Work mailbox/, 'it names the AI that asks');
+    await card.locator('.parley-request-no').click();
+    const answers = join(side, 'answers.jsonl');
+    const answerOf = (id) => (existsSync(answers) ? readFileSync(answers, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).find((a) => a.ask === id && a.held !== true) : undefined);
+    await me.until('the agent is told it was refused', async () => Boolean(answerOf('r1')), 15_000);
+    assert.equal(answerOf('r1').ok, false);
+    const decided = me.page.locator('#salon-thread .parley-request[data-state="no"]');
+    await me.until('the room card folds to one line', async () => (await decided.count()) === 1, 15_000);
+    assert.equal(await decided.locator('button').count(), 0);
+    assert.deepEqual(me.errors, [], 'no page error');
+});

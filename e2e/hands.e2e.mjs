@@ -135,45 +135,68 @@ test('folders, from the owner: a read attachment mounts the read-only view, and 
     assert.equal((await me.api('/api/resources')).body.length, 0);
 });
 
-test('one Attach in a conversation: what is there, or a new one made in the same box and attached to it at the end', { skip: SKIP }, async (t) => {
+test('one Give… in a conversation\'s tab: what it has not yet, its right, then Give; or a new one made below and given at the end', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const me = await b.person();
     const page = me.page;
     await me.create('coder');
     await me.newFolder('seeds');
+    /* Settings › Access: one line, to its tab. */
     await page.locator('#folders').click();
     await me.chapter('access');
-    await page.locator('#attach-open').click();
-    const box = page.locator('#attach-picker .kit-newasset');
-    await me.until('the box, on its kinds', async () => (await box.getAttribute('data-step').catch(() => '')) === 'kind');
-    /* What is there already, to tick; or a new one, of every kind. */
-    assert.equal(await box.locator('#attach-rows .folder[data-name="seeds"]').count(), 1);
-    assert.equal(await box.locator('.as-kinds button').count(), 9, 'every kind, a voice box and a device too');
-    assert.match(await box.locator('.kit-na-context').innerText(), /Will be attached to coder/);
+    await me.until('its line', async () => /assets? · see/.test(await page.locator('#access-assets').innerText()));
+    await page.locator('#access-assets').click();
+    await me.until('its Assets tab', async () => page.locator('#cassets').isVisible());
+    await page.locator('#cassets-attach').click();
+    const give = page.locator('#cassets-detail .kit-aspick');
+    await me.until('the picker', async () => give.isVisible());
+    /* What is there already, by type; nothing chosen, no right yet. */
+    const seeds = give.locator('.kit-aspick-row[data-name="seeds"]');
+    assert.equal(await seeds.count(), 1);
+    assert.equal(await give.locator('.kit-aspick-give').count(), 0);
+    await seeds.click();
+    const bar = give.locator('.kit-aspick-give');
+    assert.deepEqual(await bar.locator('.kit-rights-pick button').allInnerTexts(), ['Read', 'Write'], 'no None to give');
+    await bar.locator('.kit-rights-pick button', { hasText: 'Write' }).click();
+    await bar.locator('.kit-aspick-go').click();
+    await me.until('given, listed with its right', async () => (await page.locator('#cassets-rows .as-row[data-name="seeds"] .kit-rights').innerText().catch(() => '')) === 'Writes');
+    assert.ok((await me.api('/api/conversations')).body.find((c) => c.name === 'coder').resources.some((r) => r.name === 'seeds' && r.access === 'write'));
+    assert.equal(await give.locator('.kit-aspick-row[data-name="seeds"]').count(), 0, 'no longer offered');
+    /* Or a new one, of every kind, below the list. */
+    const box = give.locator('.kit-newasset');
+    assert.equal(await box.locator('.as-kinds button').count(), 10, 'every kind, a voice box, a device, an MCP server too');
     assert.equal(await box.locator('[aria-current="step"]').innerText().then((x) => x.replace(/\s+/g, ' ').trim()), '1 Kind');
-    /* A folder, to read: made, then attached by itself. */
+    /* A folder, to read: made, then given by itself. */
     await box.locator('.as-kinds button[data-kind="folder"]').click();
-    await box.locator('.kit-na-context .kit-seg button[data-value="read"]').click();
+    const made = page.locator('#cassets-detail .kit-newasset');
+    assert.match(await made.locator('.kit-na-context').innerText(), /Will be given to coder/);
+    await made.locator('.kit-na-context .kit-seg button[data-value="read"]').click();
     await page.fill('#folder-name', 'notes');
     await page.locator('#folder-new button[type=submit]').click();
-    await me.until('the ending', async () => /notes created and attached to coder/.test(await box.locator('.kit-na-made').innerText().catch(() => '')));
+    await me.until('the ending', async () => /notes created and given to coder/.test(await made.locator('.kit-na-made').innerText().catch(() => '')));
     assert.ok((await me.api('/api/conversations')).body.find((c) => c.name === 'coder').resources.some((r) => r.name === 'notes' && r.access === 'read'));
-    assert.equal(await page.locator('#panel-rows .folder[data-name="notes"]').count(), 1, 'listed with what it has');
+    assert.equal(await page.locator('#cassets-rows .as-row[data-name="notes"]').count(), 1, 'listed with what it has');
     /* Create another: the same kind's form again; Back, the kinds. A secret, used by its tool. */
-    await box.locator('button[data-act="another"]').click();
-    await me.until('the form again', async () => page.locator('#attach-picker #folder-box').isVisible());
-    await box.locator('.kit-na-back').click();
-    await box.locator('.as-kinds button[data-kind="secret"]').click();
-    assert.equal(await box.locator('.kit-na-context .kit-seg').count(), 0, 'a secret is used or not');
+    await made.locator('button[data-act="another"]').click();
+    await me.until('the form again', async () => page.locator('#cassets-detail #folder-box').isVisible());
+    await made.locator('.kit-na-back').click();
+    await page.locator('#cassets-detail .as-kinds button[data-kind="secret"]').click();
+    assert.equal(await made.locator('.kit-na-context .kit-seg').count(), 0, 'a secret is used or not');
     await page.fill('#secret-name', 'NOTES_KEY');
     await page.fill('#secret-value', 'not-shown-again');
     await page.locator('#secret-new button[type=submit]').click();
-    await me.until('the secret, made and handed', async () => /NOTES_KEY created and attached to coder/.test(await box.locator('.kit-na-made').innerText().catch(() => '')));
+    await me.until('the secret, made and handed', async () => /NOTES_KEY created and given to coder/.test(await made.locator('.kit-na-made').innerText().catch(() => '')));
     assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'NOTES_KEY').conversations, ['coder']);
-    /* Done: the box goes; its forms wait where they wait. */
-    await box.locator('button[data-act="done"]').click();
-    await me.until('closed', async () => !(await page.locator('#attach-picker').isVisible()));
+    assert.match(await page.locator('#cassets-note').innerText(), /NOTES_KEY: handed to its tool at its next start/);
+    /* Done: the picker goes; its forms wait where they wait. */
+    await made.locator('button[data-act="done"]').click();
+    await me.until('closed', async () => (await page.locator('#cassets-detail .kit-newasset').count()) === 0);
     assert.equal(await page.locator('#assets-forms #secret-box').count(), 1);
+    /* « None » in its own panel takes it back; it stays in Assets. */
+    await page.locator('#cassets-rows .as-row[data-name="seeds"]').click();
+    await page.locator('#cassets-detail .kit-access-here .kit-rights-pick button', { hasText: 'None' }).click();
+    await me.until('taken back', async () => (await page.locator('#cassets-rows .as-row[data-name="seeds"]').count()) === 0);
+    assert.ok((await me.api('/api/resources')).body.some((r) => r.name === 'seeds'));
 });
 
 test('a git repository is added from the page, attached like a folder, and is a repository for the tool', { skip: SKIP }, async (t) => {
@@ -230,9 +253,7 @@ test('what a tool committed is shown to the owner, then sent -- by the server, w
     await me.api('/api/conversations/pusher/resources', { resource: 'site', access: 'write' });
     await me.type('cd ../resources/site && echo "<h1>hello</h1>" > index.html && git add index.html && git -c user.name=Tool -c user.email=tool@example.com commit -q -m "Add the home page" && echo committed; cd - >/dev/null');
     await me.sees('\ncommitted');
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.review('site');
     /* No address yet: said, and the form is open. */
     await me.until('it says where nothing is set', async () => /No address is set/.test(await me.page.locator('#gitview-state').innerText()));
     assert.equal(await me.page.locator('#gitview-push').isVisible(), false);

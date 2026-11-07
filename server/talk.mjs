@@ -61,7 +61,7 @@
 import { posix, join } from 'node:path';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync, lstatSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { install, Parley, WAKE, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
+import { install, Parley, WAKE, URGENT, reread, texts, fill, LANGUAGES, SHOWN_MAX, FILES_MAX } from 'clavarium-parley/host';
 import { featureWords } from './features.mjs';
 import { settingsWords } from './settingswords.mjs';
 import { importFile } from './files.mjs';
@@ -717,14 +717,14 @@ export class Talk {
        'typed', 'read' (nothing waits), 'told' (typed already, not read yet),
        'asleep', 'typing', 'failed' -- the last three wait, and are tried
        again. `again`: the owner asked to remind it, typed before or not. */
-    #wake(name, again = false) {
+    #wake(name, again = false, urgent = false) {
         const going = this.#trying.get(name);
         if (going) return going;
-        const run = this.#tryWake(name, again).finally(() => this.#trying.delete(name));
+        const run = this.#tryWake(name, again, urgent).finally(() => this.#trying.delete(name));
         this.#trying.set(name, run);
         return run;
     }
-    async #tryWake(name, again) {
+    async #tryWake(name, again, urgent = false) {
         const r = this.#store.get(name);
         if (r?.on !== true) return 'read';
         const waits = (why, ms) => { this.#store.put({ ...this.#store.get(name), pending: true, why, again }); this.#nextTry.set(name, this.#now() + ms); return why; };
@@ -736,15 +736,16 @@ export class Talk {
         const quiet = this.#now() - (this.#typedAt.get(name) ?? 0);
         if (quiet < TYPING_QUIET_MS) return waits('typing', TYPING_QUIET_MS - quiet + 100);
         if (!(await this.#runs(name))) return waits('asleep', RETRY_MS);
-        if (!(await this.#type(name, WAKE).catch(() => false))) return waits('failed', RETRY_MS);
+        if (!(await this.#type(name, urgent ? URGENT : WAKE).catch(() => false))) return waits('failed', RETRY_MS);
         this.#store.put({ ...this.#store.get(name), pending: false, woke: true, why: null, again: false, typedAt: new Date(this.#now()).toISOString() });
         return 'typed';
     }
 
     /* The owner asks to remind it: the line is typed again, now if it can be. */
-    async remind(name) {
+    /* `urgent` (#322): the owner wants it read now, while it works -- the line says so. */
+    async remind(name, { urgent = false } = {}) {
         if (!this.of(name).on) throw new Refusal(409, 'Talking through the app is not turned on for this conversation.');
-        const told = await this.#wake(name, true);
+        const told = await this.#wake(name, true, urgent === true);
         return { ...this.of(name), told };
     }
 

@@ -450,3 +450,35 @@ test('an AI that cannot be reached: the message is kept, the others get it, the 
     assert.equal(rooms.read(r.id).thinking?.includes?.(hugo.name) ?? false, false, 'not shown as thinking');
     assert.equal((await rooms.say(r.id, 'Compta ?', { to: [compta.id] })).missed, undefined);
 });
+
+/* A TETHER CALL HELD FOR AN AI AT WORK FOR A ROOM (07-11): its card in the room too, named by the AI, masked; closed there. */
+test('a call held for an AI at work for a room: its card in that room, named, masked; nothing for one not at work; closed there', async (t) => {
+    const { rooms } = setup(t);
+    const a = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const b = rooms.create({ name: 'Le bureau', conversations: ['hugo'] });
+    const c = rooms.create({ name: 'Le jardin', conversations: ['compta'] });
+    const id = randomUUID();
+    const card = { kind: 'mail', title: 'Send “Quote” to sales@example.com', sub: ['1 line'], quote: 'the key is ghp_abcdefghijklmnopqrstuvwxyz0123456789AB', yes: { id: `allow:${id}`, label: 'Send' }, no: { id: `deny:${id}` } };
+    const event = { kind: 'tether-demande', text: 'mail.send', topic: 'Request', tone: 'warn', actions: [`allow:${id}`, `deny:${id}`], request: card };
+    assert.deepEqual(rooms.held('hugo', event), [], 'not at work for a room: nothing');
+    await rooms.say(a.id, 'Envoie le devis'); await rooms.say(b.id, 'Et ici ?');
+    const ids = rooms.held('hugo', event);
+    assert.deepEqual(ids.sort(), [a.id, b.id].sort(), 'each room it works for');
+    assert.deepEqual(rooms.held('compta', event), [], 'compta was given nothing');
+    const line = rooms.read(a.id).messages.find((m) => m.from === 'system');
+    assert.equal(line.event, 'tether-demande'); assert.equal(line.level, 'needs-you');
+    assert.deepEqual(line.actions, [`allow:${id}`, `deny:${id}`]);
+    assert.equal(line.request.yes.id, `allow:${id}`, 'its buttons as they were');
+    assert.deepEqual(line.request.sub, ['Hugo', '1 line'], 'who asks, first');
+    assert.equal(line.text, 'Hugo: mail.send');
+    assert.doesNotMatch(line.request.quote, /ghp_/, 'a secret in the card is masked');
+    assert.equal(rooms.read(c.id).messages.filter((m) => m.from === 'system').length, 0, 'not in a room it does not work for');
+    assert.ok(rooms.read(a.id).messages.some((m) => m.from === 'person' && m.text === 'Envoie le devis'), 'its messages, as they were');
+    rooms.closed(ids, { kind: 'tether-done', text: 'Refused: mail.send', topic: 'Request', brief: id, outcome: 'no' });
+    for (const r of [a, b]) {
+        const done = rooms.read(r.id).messages.filter((m) => m.from === 'system' && m.event === 'tether-done');
+        assert.deepEqual(done.map((m) => [m.brief, m.outcome, m.level]), [[id, 'no', 'trace']], 'its closing line, carrying its id');
+    }
+    rooms.answered('hugo', { room: a.id, text: 'Fait.' });
+    assert.deepEqual(rooms.held('hugo', event), [b.id], 'answered in one: only the other');
+});

@@ -39,9 +39,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     writeFileSync(join(work, 'page.html'), '<p>hi</p>\n'); git(work, 'add', 'page.html'); git(work, 'commit', '--quiet', '-m', 'Add a page');
     const mine = git(work, 'rev-parse', 'HEAD');
 
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.review('site');
     await me.until('the commit is shown', async () => /1 commit\(s\) would be sent to main/.test(await me.page.locator('#gitview-state').innerText()));
     /* Where the tool finds the origin, said plainly. */
     assert.match(await me.page.locator('#gitview-origin').innerText(), /\/resources\/site-origin in the agent's machine, read-only/);
@@ -101,15 +99,16 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
     await me.until('refreshed', async () => /Refreshed .*Up to date with the origin/.test(await me.page.locator('#gitview-origin-state').innerText()));
 
     /* Automatic sending to the branches listed, set for this conversation in
-       its Access panel: the tool commits on try/idea, the hook passes again. */
+       its repository, in its Assets tab: the tool commits on try/idea, the hook passes again. */
     writeFileSync(hook, '#!/bin/sh\nexit 0\n');
     await me.page.locator('#gitview-close').click();
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    const line = me.page.locator('#panel-rows .folder[data-name="site"] .auto-send');
+    if ((await me.page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await me.page.locator('#view-assets').click();
+    await me.page.locator('#cassets-rows .as-row[data-asset="git:site"]').click();
+    const line = me.page.locator('#cassets-detail .auto-send');
+    await me.until('its automatic sending', async () => (await line.count()) === 1);
     await line.locator('summary').click();
-    await me.page.fill('#panel-rows .auto-send [name=branches]', 'try/*');
-    await me.page.fill('#panel-rows .auto-send [name=quietSeconds]', '0');
+    await me.page.fill('#cassets-detail .auto-send [name=branches]', 'try/*');
+    await me.page.fill('#cassets-detail .auto-send [name=quietSeconds]', '0');
     await line.locator('button[type=submit]').click();
     await me.until('saved again', async () => (await line.locator('.auto-state').innerText()) === 'on: try/*');
     await me.page.goBack();
@@ -122,9 +121,7 @@ test('the owner chooses the branch, sees the checks from the machine, refreshes 
        push, so a moment after the remote has the commit: the page is asked
        again once the server has written it. */
     await me.until('the server logged it', async () => (await me.api('/api/git/site/keep')).body?.log?.some((e) => /Sent automatically/.test(e.what)));
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.review('site');
     /* (Its box is still open from above.) */
     await me.until('the log says it', async () => /Sent automatically for coder: 2 commit\(s\) to try\/idea, checks passed/.test(await me.page.locator('#gitview-log').innerText()));
     assert.match(await me.page.locator('#gitview-auto-where').innerText(), /Now: coder \(try\/\*\)\./);
@@ -146,9 +143,7 @@ test('the review shows the agent\'s branches, what the changes alone hide, asks 
     writeFileSync(join(work, 'secret.bin'), 'x'.repeat(5000)); git(work, 'add', 'secret.bin'); git(work, 'commit', '--quiet', '-m', 'add');
     git(work, 'rm', '--quiet', 'secret.bin'); git(work, 'commit', '--quiet', '-m', 'Tidy up\n\nNothing to see here.');
 
-    await me.page.locator('#folders').click();
-    await me.chapter('access');
-    await me.page.locator('#panel-rows .folder[data-name="site"]').locator('button', { hasText: 'Review & send' }).click();
+    await me.review('site');
     await me.until('a review is shown', async () => /would be sent to/.test(await me.page.locator('#gitview-state').innerText()));
     assert.deepEqual(await me.page.locator('#gitview-branch option').allInnerTexts(), ['feature', 'main']);
     await me.page.locator('#gitview-branch').selectOption('feature');
@@ -188,7 +183,7 @@ test('the review shows the agent\'s branches, what the changes alone hide, asks 
     assert.deepEqual(me.errors, []);
 });
 
-test('automatic sending is set per conversation, right under its write access: hidden read-only, kept across a reload, "*" and the default branch confirmed first', { skip: SKIP }, async (t) => {
+test('automatic sending is set per conversation, in its repository seen from it, under its write right: hidden read-only, kept across a reload, "*" and the default branch confirmed first', { skip: SKIP }, async (t) => {
     const b = await bench(t);
     const remote = join(b.dir, 'remote.git');
     git(b.dir, 'init', '--quiet', '--bare', '--initial-branch=main', remote);
@@ -197,15 +192,23 @@ test('automatic sending is set per conversation, right under its write access: h
     await me.api('/api/resources', { name: 'shop', type: 'git' });
     await me.api('/api/git/shop/remote', { url: remote });
     await me.api('/api/conversations/builder/resources', { resource: 'shop', access: 'read' });
-    await me.page.locator('#folders').click();
-    const row = me.page.locator('#panel-rows .folder[data-name="shop"]');
-    await me.until('the repository is listed', async () => (await row.count()) === 1);
-    const line = row.locator('.auto-send');
-    const field = (named) => row.locator(`.auto-send [name=${named}]`);
+    /* Its repository, opened in its Assets tab: its own right first, then its automatic sending. */
+    const open = async () => {
+        if ((await me.page.locator('#view-assets').getAttribute('aria-pressed')) !== 'true') await me.page.locator('#view-assets').click();
+        const r = me.page.locator('#cassets-rows .as-row[data-asset="git:shop"]');
+        await me.until('the repository is listed', async () => (await r.count()) === 1);
+        await r.click();
+        await me.until('it is opened', async () => (await me.page.locator('#cassets-detail .kit-access-here').count()) === 1);
+    };
+    await open();
+    const panel = me.page.locator('#cassets-detail');
+    const right = (word) => panel.locator('.kit-access-here .kit-rights-pick button', { hasText: word });
+    const line = panel.locator('.auto-send');
+    const field = (named) => panel.locator(`.auto-send [name=${named}]`);
     assert.equal(await line.count(), 0, 'read-only: no automatic sending');
 
     /* Write: the line appears under the access, folded, off, and empty by default. */
-    await row.locator('.levels button', { hasText: 'Write' }).click();
+    await right('Write').click();
     await me.until('the line appears', async () => (await line.count()) === 1);
     await me.until('it says off', async () => (await line.locator('.auto-state').innerText()) === 'off');
     assert.equal(await field('branches').isVisible(), false, 'folded');
@@ -252,7 +255,7 @@ test('automatic sending is set per conversation, right under its write access: h
     /* Shown again after a reload, as saved. */
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
-    await me.page.locator('#folders').click();
+    await open();
     await me.until('the line is back', async () => (await line.count()) === 1 && (await line.locator('.auto-state').innerText()) === 'on: try/*, main');
     await line.locator('summary').click();
     assert.deepEqual([await field('branches').inputValue(), await field('quietSeconds').inputValue(), await field('perHour').inputValue(), await field('create').isChecked(), await field('checks').isChecked()],
@@ -275,16 +278,16 @@ test('automatic sending is set per conversation, right under its write access: h
     await me.leaveAssets();
     await me.page.reload();
     await me.until('live again', async () => (await me.state()) === 'live');
-    await me.page.locator('#folders').click();
+    await open();
     await me.until('the line is back', async () => (await line.count()) === 1);
     await line.locator('summary').click();
     assert.match(await line.locator('.auto-shared').innerText(), /Other conversations write in this same folder \(helper\): their commits can be sent by this setting/);
 
     /* Read-only again: the line goes, and so do its settings. */
-    await row.locator('.levels button', { hasText: 'Read' }).click();
-    await me.until('the line goes', async () => (await row.locator('.levels button[aria-pressed=true]').innerText().catch(() => '')) === 'Read' && (await line.count()) === 0);
+    await right('Read').click();
+    await me.until('the line goes', async () => (await panel.locator('.kit-access-here .kit-rights-pick button[aria-pressed=true]').innerText().catch(() => '')) === 'Read' && (await line.count()) === 0);
     assert.equal((await me.api('/api/conversations/builder/git/shop/auto')).status, 409);
-    await row.locator('.levels button', { hasText: 'Write' }).click();
+    await right('Write').click();
     await me.until('back, empty', async () => (await line.count()) === 1 && (await line.locator('.auto-state').innerText()) === 'off');
     assert.deepEqual(me.errors, []);
 });
