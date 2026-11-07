@@ -1022,7 +1022,7 @@
     function enter(keepSheets = false) {
         if (welcoming) return;
         const c = conversations.find((x) => x.name === current);
-        $('name').textContent = (c ? shownName(c) : current) || 'No conversation';
+        $('name').textContent = (c ? shownName(c) : current) || uiSaid('set-no-conv', 'No conversation');
         pageTitle = current ? (c ? shownName(c) : current) : ''; paintTitle();
         $('tool').hidden = !c; $('tool').textContent = c?.toolLabel ?? '';
         paintActions();
@@ -1030,7 +1030,7 @@
         if (!keepSheets) resetTabs();
         paintChips();
         $('keys').hidden = !current;
-        if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? 'Choose a conversation, or create one.' : 'This address names no conversation.'); return; }
+        if (!current) { disconnect(); terminal.reset(); say('', 'ended'); show(home ? uiSaid('set-home-choose', 'Choose a conversation, or create one.') : uiSaid('set-home-no-such', 'This address names no conversation.')); return; }
         if (home && !c) { disconnect(); say('unknown', 'ended'); show('No such conversation.'); return; }
         const usable = Boolean(c) && c.phase === 'ready' && !holds(c);
         $('shortcuts').hidden = $('keys').hidden = !current || (home && !usable);
@@ -1271,24 +1271,24 @@
         /* Under way: the step the panel shows, in its words (the tool named once). */
         const under = c.progress && ['building', 'restarting', 'ready'].includes(c.phase) ? stepNow(c.progress, c.toolLabel) : '';
         /* What it is doing, when it says something: its tool is not named on every row. */
-        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? 'starting' : 'restarting') : c.phase === 'ready' ? (c.asleep ? 'asleep, wakes when opened' : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? 'moving its work' : c.phase === 'restarting' ? 'restarting' : 'failed');
+        const now = under || (holds(c) && c.phase !== 'building' ? (c.progress.kind === 'build' ? uiSaid('set-list-starting', 'starting') : uiSaid('set-list-restarting', 'restarting')) : c.phase === 'ready' ? (c.asleep ? uiSaid('set-list-asleep', 'asleep, wakes when opened') : '') : c.phase === 'building' ? (c.step ?? 'building') : c.phase === 'moving' ? uiSaid('set-list-moving', 'moving its work') : c.phase === 'restarting' ? uiSaid('set-list-restarting', 'restarting') : uiSaid('set-list-failed', 'failed'));
         /* The line of its tool only when it says something: under way, asleep, failed -- not "Claude Code" again and again. */
         const plain = c.phase === 'ready' && !c.asleep && !under && !holds(c);
         const chips = [];
         /* Found by a search while hidden: said. */
-        if (c.hidden === true && query) chips.push({ text: 'hidden', cls: 'shared-mark', tone: 'note' });
+        if (c.hidden === true && query) chips.push({ text: uiSaid('set-list-hidden', 'hidden'), cls: 'shared-mark', tone: 'note' });
         /* Several models answer its simple questions; or they stopped, and it waits for its owner. */
         const waking = (c.wakeups?.items ?? []).filter((w) => w.on).length;
-        if (waking > 0) chips.push({ text: `${waking} wake-up${waking > 1 ? 's' : ''}`, cls: 'shared-mark', tone: 'note' });
+        if (waking > 0) chips.push({ text: uiSaid(waking > 1 ? 'set-list-wakeups' : 'set-list-wakeup', waking > 1 ? '{n} wake-ups' : '1 wake-up', { n: waking }), cls: 'shared-mark', tone: 'note' });
         /* It talks through the app, and asks or waits for its owner there. */
-        if (!c.asleep && talkNeeds(c)) chips.push({ text: c.talk.waiting > 0 ? 'asks you' : 'waits for you', cls: 'needs-mark', tone: 'need' });
-        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; chips.push({ text: needs ? 'asks for you' : 'answered in your place', cls: needs ? 'needs-mark' : 'shared-mark', tone: needs ? 'need' : 'note' }); }
+        if (!c.asleep && talkNeeds(c)) chips.push({ text: c.talk.waiting > 0 ? uiSaid('set-list-asks', 'asks you') : uiSaid('set-list-waits', 'waits for you'), cls: 'needs-mark', tone: 'need' });
+        if (c.answerer?.on) { const needs = c.answerer.needs && !c.asleep; chips.push({ text: needs ? uiSaid('set-list-asks-for', 'asks for you') : uiSaid('set-list-answered', 'answered in your place'), cls: needs ? 'needs-mark' : 'shared-mark', tone: needs ? 'need' : 'note' }); }
         /* Where else it speaks: its rooms, its voice boxes (said on a card). */
         for (const r of roomsNow()) if (r.members?.some((m) => m.kind === 'ai' && m.ref === c.name)) chips.push({ text: r.name, icon: 'room', wide: true });
         for (const b of boxesNow()) if (b.conversation === c.name) chips.push({ text: b.name, icon: 'box', wide: true });
         /* Its last message. The agent is the usual speaker, so its name is left off (just the words); only
            the person's own last word is marked "You:", which tells you it is your move. */
-        const last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? `You: ${c.talk.lastText}` : c.talk.lastText) : '';
+        const last = told && c.talk?.lastText ? (c.talk.lastFrom === 'person' ? uiSaid('set-list-you', 'You: {text}', { text: c.talk.lastText }) : c.talk.lastText) : '';
         const state = rollup(c);
         return { title: shownName(c), state, stateLabel: STATE_WORDS[state], avatar: { name: shownName(c) }, when: told ? whenWords(activityOf(c)) : '', last, now: plain ? '' : now, who: agentWho(c), chips };
     }
@@ -1321,10 +1321,11 @@
     const boxesNow = () => { try { return Array.isArray(boxesKnown) ? boxesKnown : []; } catch { return []; } };
     const roomOpenNow = () => { try { return place === 'salon' ? salonId : ''; } catch { return ''; } };
     /* Words of the screen's language (Parley's texts, /api/talk/words) once read; English till then. */
-    const uiSaid = (key, fallback, vars = {}) => {
+    /* A declaration (hoisted): any painting, however early, may ask for its words. */
+    function uiSaid(key, fallback, vars = {}) {
         let words = null; try { words = chatWords; } catch { /* not read yet */ }
         return (typeof words?.[key] === 'string' ? words[key] : fallback).replace(/\{(\w+)\}/g, (all, k) => (k in vars ? String(vars[k]) : all));
-    };
+    }
     /* The kit says its few words in the screen's language too (Holders' "nobody", the rights, the list's). */
     KIT.setWords((key, fallback) => uiSaid(key, fallback));
     /* Who of a room speaks now (#282, an AI given a message and not done): « Cuisine parle… ». */
@@ -1447,7 +1448,7 @@
             };
             /* NEEDS YOU: whatever its date, until its owner acts; hidden ones too (they said so). */
             const needs = conversations.filter(needsYou).sort((a, b) => activityOf(b) - activityOf(a));
-            if (needs.length && section(NEEDS, 'Needs you', needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
+            if (needs.length && section(NEEDS, uiSaid('set-list-needs', 'Needs you'), needs)) top.append(...unfolding(NEEDS, needs.map((c) => itemButton(c, true))));
             /* RECENT: by when it was last used; up to seven awake, then all. Never a hidden one. Only once there
                are groups: before, the one list below says the same, in the order chosen by hand. */
             /* One in Needs you just above is not said twice. */
@@ -1465,12 +1466,12 @@
             /* The rooms used in the last day, among them by when (03-11: « dans le récent, indifféremment »). */
             const recentRooms = roomsNow().filter((r) => r.last && Date.parse(r.last.at) >= dayAgo);
             const rowsOfRecent = (list) => [...list.map((c) => ({ at: activityOf(c), el: () => itemButton(c, true) })), ...recentRooms.map((r) => ({ at: Date.parse(r.last.at), el: () => roomItem(r) }))].sort((a, b) => b.at - a.at).map((x) => x.el());
-            if ((recent.length || recentRooms.length) && groups.length && section(RECENT, 'Recent', recent)) {
+            if ((recent.length || recentRooms.length) && groups.length && section(RECENT, uiSaid('set-list-recent', 'Recent'), recent)) {
                 top.append(...unfolding(RECENT, rowsOfRecent(showAllRecent ? recent : recent.filter((c) => inSight.includes(c)))));
                 if (recent.length > few) {
                     const more = document.createElement('button'); more.type = 'button'; more.className = 'inline more-recent';
                     /* A chevron, centred: the words for the pointer and for a screen reader. */
-                    const words = showAllRecent ? 'Show fewer' : `Show ${recent.length - few} more`;
+                    const words = showAllRecent ? uiSaid('set-list-fewer', 'Show fewer') : uiSaid('set-list-more', 'Show {n} more', { n: recent.length - few });
                     more.replaceChildren(Object.assign(document.createElement('span'), { className: 'more-chevron', textContent: showAllRecent ? '\u2303' : '\u2304' }));
                     more.title = words; more.setAttribute('aria-label', words); more.setAttribute('aria-expanded', String(showAllRecent));
                     more.addEventListener('click', () => { showAllRecent = !showAllRecent; paint(); });
@@ -1480,15 +1481,15 @@
             /* GROUPS: the order chosen by hand, and those in no group as one of their own. */
             if (groups.length) {
                 const loose = shown.filter((c) => !c.group);
-                groupsOpen = section(GROUPS, 'Conversation groups', conversations.filter((c) => c.hidden !== true));
-                if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), 'Not filed'));
+                groupsOpen = section(GROUPS, uiSaid('set-list-groups', 'Conversation groups'), conversations.filter((c) => c.hidden !== true));
+                if (loose.length && groupsOpen) items.append(groupBox(NONE, loose, conversations.filter((c) => !c.group).sort(byRank), !folded.has(NONE), uiSaid('set-list-not-filed', 'Not filed')));
             } else {
                 /* No group yet: one list, each with what was said last and when -- without those in Needs you
                    just above (said once), under a heading of its own when Needs you is there. */
                 if (needs.length) top.append(heading('Conversations'));
                 items.append(...shown.filter((c) => !needsYou(c)).map((c) => itemButton(c, false, true)));
                 if (conversations.length > 1) {
-                    const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = 'Put conversations in groups to find them by subject: open one, then Settings, Group.';
+                    const tip = document.createElement('p'); tip.className = 'hint list-tip'; tip.textContent = uiSaid('set-list-tip', 'Put conversations in groups to find them by subject: open one, then Settings, Group.');
                     items.append(tip);
                 }
             }
@@ -1507,7 +1508,7 @@
             const b = document.createElement('button'); b.type = 'button'; b.className = 'list-head list-fold'; b.dataset.section = 'rooms';
             const open = onlyRooms || !folded.has(ROOMS); b.setAttribute('aria-expanded', String(open));
             const chevron = document.createElement('span'); chevron.className = 'list-chevron'; chevron.setAttribute('aria-hidden', 'true'); chevron.textContent = open ? '\u25BE' : '\u25B8';
-            b.append(chevron, document.createTextNode('Rooms'));
+            b.append(chevron, document.createTextNode(uiSaid('set-list-rooms', 'Rooms')));
             b.addEventListener('click', () => { if (onlyRooms) return; if (folded.has(ROOMS)) folded.delete(ROOMS); else folded.add(ROOMS); keepFolded(); paint(); });
             items.append(b);
             if (open) items.append(...roomsShown.map((r) => roomItem(r)));
@@ -1520,7 +1521,7 @@
         $('search-none').hidden = !query || hits.length > 0;
         const toggle = $('hidden-toggle');
         toggle.hidden = DEVICE || hidden.length === 0 || Boolean(query) || onlyRooms;
-        toggle.textContent = showHidden ? `Hide ${hidden.length} hidden` : `${hidden.length} hidden`;
+        toggle.textContent = showHidden ? uiSaid('set-list-hide-hidden', 'Hide {n} hidden', { n: hidden.length }) : uiSaid('set-list-n-hidden', '{n} hidden', { n: hidden.length });
         toggle.setAttribute('aria-expanded', String(showHidden));
         const calling = hidden.some(needsYou);
         toggle.dataset.needs = String(calling);
@@ -2058,14 +2059,20 @@
         secretsKnown = Array.isArray(list) ? list : []; secretsReadAt = Date.now();
         $('nav-assets').toggleAttribute('data-attention', secretsKnown.some(secretDue));
         $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
+        paintAssetsCount();
     }
     async function readSecretsNow() { if (!DEVICE) markSecrets(await (await fetch(`${API}/secrets`)).json().catch(() => [])); }
+    /* « Assets N »: N, the rows its tab lists (givenCount). */
+    function paintAssetsCount() {
+        if (DEVICE) return;
+        const n = givenCount(conversations.find((x) => x.name === current));
+        $('assets-count').textContent = n ? String(n) : '';
+    }
     function paintChips() {
         if (DEVICE) return;
         const c = conversations.find((x) => x.name === current);
         $('views').hidden = !c;
-        const n = (c?.resources?.length ?? 0) + (c?.secrets?.length ?? 0) + (c?.work === 'kept' ? 1 : 0);
-        $('assets-count').textContent = n ? String(n) : '';
+        paintAssetsCount();
         $('view-assets').toggleAttribute('data-attention', secretsKnown.some((s) => secretDue(s) && s.conversations.includes(current)));
         if (Date.now() - secretsReadAt > 60_000) { secretsReadAt = Date.now(); void readSecretsNow().catch(() => {}); }
         /* Its title names each of them, with what it may do. */
@@ -2292,7 +2299,7 @@
     /* ---------- Access: this conversation ---------- */
     async function paintPanel() {
         const here = conversations.find((x) => x.name === current);
-        $('panel-title').textContent = `This conversation - ${current}`;
+        $('panel-title').textContent = uiSaid('set-this-conv', 'This conversation - {name}', { name: current });
         const all = await (await fetch(`${API}/resources`)).json();
         const mine = new Map((here?.resources ?? []).map((r) => [r.name, r.access]));
         const rows = $('panel-rows');
@@ -2301,9 +2308,9 @@
             const kind = kindOf(resource);
             const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = resource.name;
             const label = document.createElement('b'); label.textContent = resource.name;
-            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${KIND_WORD[kind]}`; label.append(about);
+            const about = document.createElement('small'); about.className = 'hint'; about.textContent = ` ${uiSaid(`set-as-kind-${kind}`, KIND_WORD[kind] ?? kind)}`; label.append(about);
             const levels = kind === 'mailbox' ? fixedRight('mailbox')
-                : modes([['read', 'Read'], ['write', 'Write']], mine.get(resource.name), async (access) => { await attachTo(current, resource.name, access); await paintPanel(); }, `Access of this conversation to ${resource.name}`);
+                : modes([['read', uiSaid('set-rt-pick-read', 'Read')], ['write', uiSaid('set-rt-pick-write', 'Write')]], mine.get(resource.name), async (access) => { await attachTo(current, resource.name, access); await paintPanel(); }, `Access of this conversation to ${resource.name}`);
             row.append(label, levels);
             if (kind === 'git') {
                 const review = document.createElement('button'); review.type = 'button'; review.textContent = 'Review & send';
@@ -2311,7 +2318,7 @@
                 row.append(review);
             }
             /* Detached, not removed: it stays in Assets. */
-            const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = 'Detach'; detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
+            const detach = document.createElement('button'); detach.type = 'button'; detach.textContent = uiSaid('set-acc-detach', 'Detach'); detach.setAttribute('aria-label', `Detach ${resource.name} from this conversation`);
             detach.addEventListener('click', async () => { detach.disabled = true; detach.textContent = 'Detaching...'; await attachTo(current, resource.name, 'none'); await paintPanel(); });
             row.append(detach);
             /* Right under the access it depends on: read-only, the agent has nothing of its own to send. */
@@ -2325,7 +2332,7 @@
         for (const secret of secrets.filter((x) => x.conversations.includes(current))) {
             const row = document.createElement('div'); row.className = 'folder'; row.dataset.name = secret.name;
             const label = document.createElement('b'); label.textContent = secret.name;
-            const off = document.createElement('button'); off.type = 'button'; off.textContent = 'Detach'; off.setAttribute('aria-label', `Stop handing ${secret.name} to this conversation`);
+            const off = document.createElement('button'); off.type = 'button'; off.textContent = uiSaid('set-acc-detach', 'Detach'); off.setAttribute('aria-label', `Stop handing ${secret.name} to this conversation`);
             off.addEventListener('click', async () => {
                 await handTo(current, secret.name, false); await paintPanel();
                 $('secret-note').textContent = `${secret.name} will no longer be handed to the tool the next time it starts (leave the tool, then "Start it again").`;
@@ -3687,7 +3694,7 @@
         try { await post(`${API}/conversations/${encodeURIComponent(current)}/answerer/resume`, {}); await refresh(); await paintAnswerer(); }
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
     });
-    const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = 'Use'; return s; };
+    const fixedUse = () => { const s = document.createElement('span'); s.className = 'hint'; s.textContent = uiSaid('set-rt-pick-use', 'Use'); return s; };
     for (const b of $('network').children) {
         b.addEventListener('click', async () => {
             $('panel-error').hidden = true;
@@ -3767,6 +3774,8 @@
     const LISTS_WORD = { many: 'Binders', one: 'Binder', a: 'a binder', its: 'Its binders' };
     $('view-lists-word').textContent = LISTS_WORD.many; $('listnew-head').textContent = `New ${LISTS_WORD.one.toLowerCase()}`;
     const ASSET_KINDS = [['git', 'Git repositories', 'git-branch'], ['folder', 'Folders', 'folder'], ['mailbox', 'Mailboxes', 'mail'], ['agenda', 'Calendars', 'calendar'], ['contacts', 'Contacts', 'users'], ['secret', 'Secrets', 'key-round'], ['list', LISTS_WORD.many, ''], ['acces', 'Accesses', 'link']];
+    /* The same kinds, their titles in the screen's language (asked at each painting: the words may come late). */
+    const assetKinds = () => ASSET_KINDS.map(([k, title, icon]) => [k, uiSaid(`set-as-k-${k}`, title), icon]);
     /* A live Tether target shows in the category of its kind (a mailbox among the
        mailboxes), not apart. Its connecting account is the rest of its id. */
     const TETHER_CAT = { mail: 'mailbox', calendar: 'agenda', contacts: 'contacts' };
@@ -3956,10 +3965,10 @@
     /* In an asset's detail: which group it is in. Moving it is a folder move
        (it leaves any other group). New groups are made in the by-group view. */
     function groupPicker(chosen, groups) {
-        const wrap = el('div', 'as-group-of'); wrap.append(el('span', 'as-group-of-label', 'Group'));
-        if (!groups.length) { wrap.append(el('small', 'hint', 'Make one in “By group”.')); return wrap; }
+        const wrap = el('div', 'as-group-of'); wrap.append(el('span', 'as-group-of-label', uiSaid('set-as-group', 'Group')));
+        if (!groups.length) { wrap.append(el('small', 'hint', uiSaid('set-as-group-make', 'Make one in “By group”.'))); return wrap; }
         const sel = el('select'); sel.setAttribute('aria-label', `Group for ${chosen.name}`);
-        const none = el('option', '', 'No group'); none.value = ''; sel.append(none);
+        const none = el('option', '', uiSaid('set-as-no-group', 'No group')); none.value = ''; sel.append(none);
         const inId = groupOf(chosen.key, groups);
         for (const g of groups) { const o = el('option', '', g.label); o.value = g.id; if (g.id === inId) o.selected = true; sel.append(o); }
         if (!inId) none.selected = true;
@@ -4055,8 +4064,9 @@
         detail.append(remove);
     }
     const chapter = (title, ...extra) => { const head = el('div', 'as-chapter'); head.append(el('h3', '', title), ...extra); return head; };
-    const boxSub = (box) => (!box ? 'mailbox' : box.failure ? box.failure : `${box.messages} message${box.messages === 1 ? '' : 's'}`);
-    const gitSub = (r) => (r.from ? `from ${hostOf(r.from)}` : 'repository');
+    const boxSub = (box) => (!box ? '' : box.failure ? box.failure : uiSaid(box.messages === 1 ? 'set-as-message' : 'set-as-messages', box.messages === 1 ? '1 message' : '{n} messages', { n: box.messages }));
+    const gitSub = (r) => (r.from ? uiSaid('set-as-from', 'from {host}', { host: hostOf(r.from) }) : '');
+    const cardsSub = (n) => uiSaid(n === 1 ? 'set-as-card' : 'set-as-cards', n === 1 ? '1 card' : '{n} cards', { n });
     /* A secret's expiry, as said: `due` when it asks for the person (near, or past). */
     const secretState = (s) => {
         /* Short-lived, lifted from a message (secrets.mjs): minutes, not days -- shown so it can be seen and let go. */
@@ -4564,64 +4574,90 @@
     }
 
     /* Nothing is opened by itself: the wide detail says what it is for. */
-    const noAssetChosen = () => el('p', 'hint as-none', 'Select an asset to see its detail.');
+    const noAssetChosen = () => el('p', 'hint as-none', uiSaid('set-as-pick', 'Select an asset to see its detail.'));
 
     /* ---- a conversation's own ---- */
     /* A conversation's tab, searched: its words, and whose they are. */
     let cassetsQuery = ''; let cassetsFor = '';
     $('cassets-search').addEventListener('input', () => { cassetsQuery = $('cassets-search').value.trim(); void paintRoomAssets(); });
     $('cassets-attach').addEventListener('click', () => { void openAccess(true); });
+    /* WHAT A CONVERSATION WAS GIVEN, the rows of its Assets tab (each with its right): its work folder, its folders,
+       repositories and mailboxes, its secrets, what it was given live (Tether) and its binders. The tab draws them,
+       its bar counts them, a room's settings show them for each of its AIs: the same rows everywhere. */
+    function givenItems(name, { all = [], secrets = [], boxes = [], tether = {}, lists = {} } = {}) {
+        const c = conversations.find((x) => x.name === name);
+        const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
+        const items = [];
+        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: uiSaid('set-as-work', 'where its tool works'), badge: 'write', badgeTone: 'write', right: { level: 'write' } });
+        for (const r of (Array.isArray(all) ? all : []).filter((x) => mine.has(x.name))) {
+            const kind = kindOf(r); const access = mine.get(r.name);
+            const box = kind === 'mailbox' ? (Array.isArray(boxes) ? boxes : []).find((m) => m.name === r.name) : undefined;
+            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only', right: { key: kind, value: access },
+                sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
+        }
+        for (const s2 of (Array.isArray(secrets) ? secrets : []).filter((x) => (x.conversations ?? []).includes(name))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, right: { level: 'use' }, ...secretItem(s2, uiSaid('set-as-secret-used', 'name only · used by its agent')) });
+        /* WHAT IT WAS GIVEN LIVE AND ITS BINDERS (06-11, assets step 3): a calendar, contacts, a mailbox or an access
+           connected (Tether), its binders -- shown at last, the same rows, each with its right. */
+        const allTargets = Array.isArray(tether?.targets) ? tether.targets : [];
+        for (const tgt of allTargets) {
+            const level = tgt.grants?.[`conversation:${name}`]?.level;
+            if (!level || level === 'none') continue;
+            const acct = tetherAccount(tgt.id);
+            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
+            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, right: { key: 'connexion', value: level }, sub: connexionOwnSub(tgt.kind) });
+        }
+        const givenLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${name}`]) : [];
+        for (const l of givenLists) items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, right: { key: 'list', value: l.grants[`conversation:${name}`] }, sub: cardsSub(l.count) });
+        return items;
+    }
+    /* What the bar's « Assets N » counts: the rows its tab lists (givenItems), from what this page last read of the live
+       links and the binders (read again at most once a minute, the tab's own reading keeps it fresh). */
+    let givenKnown = { tether: {}, lists: {}, at: 0 };
+    const keepGiven = (tether, lists) => { givenKnown = { tether: tether ?? {}, lists: lists ?? {}, at: Date.now() }; };
+    function givenCount(c) {
+        if (!c) return 0;
+        try { return givenCountNow(c); } catch { return (c.resources?.length ?? 0) + (c.secrets?.length ?? 0) + (c.work === 'kept' ? 1 : 0); }   /* painted before this part of the page ran */
+    }
+    function givenCountNow(c) {
+        if (Date.now() - givenKnown.at > 60_000 && !DEVICE) {
+            givenKnown.at = Date.now();
+            void Promise.all([getJson('/tether', {}), binderCall('lists', {})]).then(([tether, lists]) => { keepGiven(tether, lists); paintAssetsCount(); }).catch(() => {});
+        }
+        const all = (c.resources ?? []).map((r) => ({ name: r.name, type: r.type }));
+        const secrets = secretsKnown.length ? secretsKnown : (c.secrets ?? []).map((n) => ({ name: n, conversations: [c.name] }));
+        return givenItems(c.name, { all, secrets, tether: givenKnown.tether, lists: givenKnown.lists }).length;
+    }
     async function paintRoomAssets() {
         if (!assetsShown) return;
         watchTether();
         const c = conversations.find((x) => x.name === current);
         roomSig = JSON.stringify([current, c?.resources, c?.secrets, c?.work]);
         const [all, secrets, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {}), readDevices()]);
+        keepGiven(tether, lists); paintAssetsCount();
         /* The calls this conversation's agent asked the owner to allow: validated here,
            in the parloir, without leaving for the Assets page. */
         const mineDemandes = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.agent?.id ?? '') === `conversation:${current}`);
         /* Approved calls only this browser can do (a device to flash over USB): Tether's jobs. */
         const mineJobs = (Array.isArray(tether.jobs) ? tether.jobs : []).filter((j) => j.agent === `conversation:${current}`);
-        const mine = new Map((c?.resources ?? []).map((r) => [r.name, r.access]));
-        const items = [];
-        if (c?.work === 'kept') items.push({ key: 'folder:work', kind: 'folder', name: 'work', own: true, sub: 'where its tool works', badge: 'write', badgeTone: 'write', right: { level: 'write' } });
-        for (const r of all.filter((x) => mine.has(x.name))) {
-            const kind = kindOf(r); const access = mine.get(r.name);
-            const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
-            items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, badge: access, badgeTone: access, badgeLong: access === 'write' ? 'read and write' : 'read only', right: { key: kind, value: access },
-                sub: kind === 'git' ? gitSub(r) : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
-        }
         markSecrets(secrets);
-        for (const s2 of secrets.filter((x) => x.conversations.includes(current))) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, right: { level: 'use' }, ...secretItem(s2, 'name only · used by its agent') });
-        /* WHAT IT WAS GIVEN LIVE AND ITS BINDERS (06-11, assets step 3): a calendar, contacts, a mailbox or an access
-           connected (Tether), its binders -- shown at last, the same rows, each with its right. */
-        const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
-        for (const tgt of allTargets) {
-            const level = tgt.grants?.[`conversation:${current}`]?.level;
-            if (!level || level === 'none') continue;
-            const acct = tetherAccount(tgt.id);
-            const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
-            items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, right: { key: 'connexion', value: level }, sub: connexionSub(tgt.kind) });
-        }
-        const givenLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived && l.grants?.[`conversation:${current}`]) : [];
-        for (const l of givenLists) items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, right: { key: 'list', value: l.grants[`conversation:${current}`] }, sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
+        const items = givenItems(current, { all, secrets, boxes, tether, lists });
         /* TO SEND, above them all, once it has a repository: every one of them on one screen. */
         const gits = items.filter((i) => i.kind === 'git').map((i) => i.name);
-        const outbox = gits.length ? { key: 'send:all', kind: 'send', name: 'To send', sub: 'every repository, reviewed and sent at once' } : null;
+        const outbox = gits.length ? { key: 'send:all', kind: 'send', name: uiSaid('set-as-to-send', 'To send'), sub: uiSaid('set-as-to-send-sub', 'every repository, reviewed and sent at once') } : null;
         const waitingCount = mineDemandes.length + mineJobs.length;
-        const demandes = waitingCount ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: `${waitingCount} waiting for you` } : null;
+        const demandes = waitingCount ? { key: 'demandes:mine', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: waitingCount }) } : null;
         const chosen = (outbox && roomPick === outbox.key ? outbox : null) ?? (demandes && roomPick === demandes.key ? demandes : null) ?? items.find((i) => i.key === roomPick) ?? null;
         const as = $('cassets-as');
         as.dataset.open = chosen ? 'detail' : 'list';
         /* THE ONE LIST (kit AssetList), scope this conversation: by type, its right on each row; To send and
            Demandes pinned above. Its search is its own, emptied when another conversation is shown. */
         if (cassetsFor !== current) { cassetsFor = current; cassetsQuery = ''; $('cassets-search').value = ''; }
-        const model = KIT.assetListModel({ items: items.map(cardOf), scope: `conversation:${current}`, query: cassetsQuery, kinds: ASSET_KINDS });
+        const model = KIT.assetListModel({ items: items.map(cardOf), scope: `conversation:${current}`, query: cassetsQuery, kinds: assetKinds() });
         const pinned = cassetsQuery ? [] : [
             demandes && pinnedCard({ ...demandes, count: waitingCount }, { chosen: chosen?.key, onOpen: pickRoomAsset, extra: 'demande-entry' }),
             outbox && pinnedCard(outbox, { chosen: chosen?.key, onOpen: pickRoomAsset }),
         ];
-        paintAssetList($('cassets-rows'), model, { chosen: chosen?.key, onOpen: pickRoomAsset, pinned, empty: 'Nothing is given to it yet.', noMatch: 'Nothing by that name.' });
+        paintAssetList($('cassets-rows'), model, { chosen: chosen?.key, onOpen: pickRoomAsset, pinned, empty: uiSaid('set-as-none-given', 'Nothing is given to it yet.'), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
         if (c?.work === 'disk') $('cassets-rows').append(el('p', 'hint as-disk', 'Its work is on the disk of its machine: nothing of it is kept here.'));
         const detail = $('cassets-detail');
         if (!chosen) { unembedFiles(); detail.replaceChildren(); if (items.length) detail.append(noAssetChosen()); return; }
@@ -4752,8 +4788,9 @@
         await refresh();
     }
     /* The plain word for a Tether target's kind, in a Connexion's sub-line. */
-    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen' };
-    const connexionSub = (kind) => CONNEXION_SUB[kind] ?? kind;
+    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen', device: 'device' };
+    const connexionSub = (kind) => (kind in CONNEXION_SUB ? uiSaid(`set-cx-${kind}`, CONNEXION_SUB[kind]) : kind);
+    const connexionOwnSub = (kind) => (tetherCat(kind) === 'acces' ? connexionSub(kind) : '');
     /* Give a Tether target to a conversation at a level, or take it back (none). */
     async function grantTarget(id, name, level) {
         $(asErrId()).hidden = true;
@@ -5088,7 +5125,7 @@
         const model = own ? null : KIT.accessModel({ key: KIT.rightsKey(chosen), holders: accessHolders(chosen), from: from ? `conversation:${from}` : '' });
         if (model) {
             /* Given to a device: from here too (the map shows who has it). */
-            const share = !t && ['folder', 'git', 'mailbox'].includes(chosen.kind) ? el('button', 'as-link', 'Share with a device...') : null;
+            const share = !t && ['folder', 'git', 'mailbox'].includes(chosen.kind) ? el('button', 'as-link', uiSaid('set-acc-share', 'Share with a device...')) : null;
             if (share) { share.type = 'button'; share.addEventListener('click', () => { void openCompose([[chosen.key, 'r']]); }); }
             parts.push(KIT.AccessList(model, { key: KIT.rightsKey(chosen), kind: chosen.kind, name: chosen.name, onChange: (row, level, stored) => setAccess(chosen, row, level, stored), actions: [share] }));
         }
@@ -5097,9 +5134,9 @@
             /* Its files: at once in a conversation; in the menu, a button opens them in the panel (the files sheet, moved in). */
             const holder = el('div', 'as-files');
             if (inMenu) {
-                const browse = el('button', '', 'Browse'); browse.type = 'button'; browse.dataset.act = 'files';
+                const browse = el('button', '', uiSaid('set-as-browse', 'Browse')); browse.type = 'button'; browse.dataset.act = 'files';
                 browse.addEventListener('click', () => { browse.disabled = true; filesBrowsing = chosen.key; embedFiles(holder, chosen.name, { owner: true }); });
-                parts.push({ title: 'Files', extra: [browse], body: [holder], cls: 'as-files-menu' });
+                parts.push({ title: uiSaid('set-as-files', 'Files'), extra: [browse], body: [holder], cls: 'as-files-menu' });
                 if (filesBrowsing === chosen.key) queueMicrotask(() => browse.click());
             } else parts.push({ body: [holder], cls: 'as-files-part' });
             if (!inMenu) queueMicrotask(() => embedFiles(holder, chosen.name));
@@ -5172,8 +5209,8 @@
             const using = model ? model.given.filter((x) => x.holder === 'conversation').length : 0;
             const inUse = chosen.kind !== 'secret' && using > 0;
             const lost = t ? 'The connection is removed; the account token stays on the server.' : ({ secret: 'Its value is lost for good.', list: 'Its cards are lost for good.' }[chosen.kind] ?? 'Its files are kept aside on the server.');
-            foot.push(KIT.AssetDelete({ label: 'Delete...', lost,
-                blocked: inUse ? `used by ${using} conversation${using > 1 ? 's' : ''}: set ${using > 1 ? 'them' : 'it'} to None first` : '',
+            foot.push(KIT.AssetDelete({ label: uiSaid('set-acc-delete', 'Delete...'), lost,
+                blocked: inUse ? uiSaid(using > 1 ? 'set-acc-used-n' : 'set-acc-used-1', using > 1 ? 'used by {n} conversations: set them to None first' : 'used by 1 conversation: set it to None first', { n: using }) : '',
                 yes: chosen.kind === 'secret' || chosen.kind === 'list' ? `Yes, delete ${chosen.name}` : `Yes, remove ${chosen.name}`,
                 onYes: async () => {
                     try {
@@ -5186,11 +5223,12 @@
                     await paintAssets();
                 } }));
         } else if (!inMenu && !own) {
-            const there = el('button', 'as-link', 'Open in Assets'); there.type = 'button'; there.dataset.act = 'in-assets';
+            const there = el('button', 'as-link', uiSaid('set-acc-in-assets', 'Open in Assets')); there.type = 'button'; there.dataset.act = 'in-assets';
             there.addEventListener('click', () => { void openAssetsPlace(chosen.key); });
             foot.push(there);
         }
-        const card = { ...cardOf(chosen), holders: undefined, right: inMenu ? undefined : chosen.right, chips: chipsOf(chosen) };
+        /* Its right said once: by its own row's picker when it has one (« Lire » pressed), else by the head's badge. */
+        const card = { ...cardOf(chosen), holders: undefined, right: inMenu || model?.here ? undefined : chosen.right, chips: chipsOf(chosen) };
         detail.append(KIT.AssetPanel(card, { back: back ? { onBack: () => { if (!nav.close('asset')) back(); } } : null, parts, foot }));
         if (gitHolder) await gitDetail(gitHolder, chosen.name, { place: inMenu, others: gits.length > 1 });
     }
@@ -5217,9 +5255,9 @@
             const kind = kindOf(r);
             const box = kind === 'mailbox' ? boxes.find((m) => m.name === r.name) : undefined;
             items.push({ key: `${kind}:${r.name}`, kind, name: r.name, resource: r, box, ...usedBy(Object.keys(r.attachments ?? {}), `${kind}:${r.name}`),
-                sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : 'folder', tone: box?.failure ? 'bad' : '' });
+                sub: kind === 'git' ? `${gitSub(r)}${viaText(r.via)}` : kind === 'mailbox' ? boxSub(box) : '', tone: box?.failure ? 'bad' : '' });
         }
-        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...usedBy(s2.conversations, `secret:${s2.name}`), ...secretItem(s2, 'name only') });
+        for (const s2 of secrets) items.push({ key: `secret:${s2.name}`, kind: 'secret', name: s2.name, secret: s2, ...usedBy(s2.conversations, `secret:${s2.name}`), ...secretItem(s2, uiSaid('set-as-name-only', 'name only')) });
         /* Tether targets ("Connexions"): a mailbox, calendar or address book connected
            by token, given to a conversation at a level. The token lives on the server. */
         const allTargets = Array.isArray(tether.targets) ? tether.targets : [];
@@ -5228,13 +5266,13 @@
             const acct = tetherAccount(tgt.id);
             const siblings = allTargets.filter((o) => o.id !== tgt.id && tetherAccount(o.id) === acct).map((o) => connexionSub(o.kind));
             items.push({ key: `connexion:${tgt.id}`, kind: tetherCat(tgt.kind), name: tgt.title, target: tgt, siblings, live: true, ...usedBy(users, `connexion:${tgt.id}`),
-                sub: siblings.length ? `linked: ${siblings.join(', ')}` : connexionSub(tgt.kind) });
+                sub: siblings.length ? uiSaid('set-as-linked', 'linked: {list}', { list: siblings.join(', ') }) : connexionOwnSub(tgt.kind) });
         }
         /* Binder's lists: given to a conversation (read, write) in Binder itself. */
         const shownLists = lists.ok && Array.isArray(lists.data) ? lists.data.filter((l) => !l.archived) : [];
         listsSig = binderSig(lists.data);
         for (const l of shownLists) {
-            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, ...usedBy(givenTo(l).map((id) => id.slice('conversation:'.length)), `list:${l.id}`), sub: `${l.count} card${l.count === 1 ? '' : 's'}` });
+            items.push({ key: `list:${l.id}`, kind: 'list', name: l.title, list: l, ...usedBy(givenTo(l).map((id) => id.slice('conversation:'.length)), `list:${l.id}`), sub: cardsSub(l.count) });
         }
         const chosen = assetsAdding ? null : items.find((i) => i.key === assetOpen) ?? null;
         if (justMade && !justMade.to && justMade.key !== chosen?.key) justMade = null;
@@ -5247,16 +5285,16 @@
         $('assets-as').dataset.open = chosen || chosenGroup || assetsAdding || onDemandes ? 'detail' : 'list';
         const choose = (key) => { placeAssetStep(); if (key !== assetOpen) { groupGiveShow.clear(); clearAssetDetail(); } assetOpen = key; assetsAdding = ''; remoteEditing = false; remember(); void paintAssets(); };
         /* THE ONE LIST (kit AssetList), scope all: groups by default once one exists; who has each on its right. */
-        const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: ASSET_KINDS });
+        const model = KIT.assetListModel({ items: items.map(cardOf), groups: assetGroups, scope: 'all', by: assetsBy, query: assetsQuery, folded: [...groupsFolded], kinds: assetKinds() });
         paintAssetsView(model.view);
         /* Above them all, once something waits: the owner reaches every call from here, not only by opening the
            right connexion. Then, in the view by group, "+ New group". */
         const pinned = [];
-        if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: `${allApprovals.length} waiting for you`, count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
+        if (allApprovals.length && !assetsQuery) pinned.push(pinnedCard({ key: 'demandes:all', kind: 'demandes', name: 'Demandes', sub: uiSaid('set-as-waiting', '{n} waiting for you', { n: allApprovals.length }), count: allApprovals.length }, { chosen: onDemandes ? 'demandes:all' : '', onOpen: choose, extra: 'demande-entry' }));
         if (model.view === 'group') pinned.push(newGroupBar());
         paintAssetList($('assets-rows'), model, { chosen: chosen?.key ?? (chosenGroup ? `group:${chosenGroup.id}` : onDemandes ? 'demandes:all' : ''), onOpen: choose, pinned,
             onFold: (id) => { if (groupsFolded.has(id)) groupsFolded.delete(id); else groupsFolded.add(id); keepGroupsFolded(); void paintAssets(); },
-            onGroup: (id) => choose(`group:${id}`), noMatch: 'Nothing by that name.' });
+            onGroup: (id) => choose(`group:${id}`), noMatch: uiSaid('set-as-no-match', 'Nothing by that name.') });
         if (model.view === 'group') dragToGroups($('assets-rows'));
         const detail = clearAssetDetail();
         const back = () => { assetOpen = ''; assetsAdding = ''; remember(); void paintAssets(); };
@@ -5328,7 +5366,6 @@
     $('assets-search').addEventListener('input', () => { assetsQuery = $('assets-search').value.trim(); void paintAssets(); });
     /* ONE "+ New" (06-11, assets step 2), in place of a "+" per kind: the New asset box, its kind chosen in it. */
     $('assets-new').addEventListener('click', () => { placeAssetStep(); assetsAdding = 'choose'; remoteEditing = false; $('assets-error').hidden = true; void paintAssets(); });
-    $('assets-close').addEventListener('click', () => leavePlace());
     /* The Assets place, on one asset (`key`), its remote form open (`remote`). */
     async function openAssetsPlace(key, { remote = false, push = true } = {}) {
         if (DEVICE) return;
@@ -5358,7 +5395,9 @@
         for (const m of members.slice(0, max)) { const i = el('i', `salon-chip salon-chip-${m.kind}`, m.kind === 'box' ? '' : KIT.initialOf(m.name)); if (m.kind !== 'box') i.style.setProperty('--h', String(huePick(m.name))); i.title = m.name; stack.append(i); }
         return stack;
     };
-    const countOf = (members) => { const n = (k) => members.filter((m) => m.kind === k).length; const say = (k, one, many) => (n(k) ? `${n(k)} ${n(k) > 1 ? many : one}` : ''); return [say('person', 'person', 'people'), say('ai', 'AI', 'AIs'), say('box', 'box', 'boxes')].filter(Boolean).join(' \u00b7 '); };
+    const countOf = (members) => { const n = (k) => members.filter((m) => m.kind === k).length; return [n('person') ? uiSaid(n('person') > 1 ? 'set-room-n-people' : 'set-room-n-person', n('person') > 1 ? '{n} people' : '1 person', { n: n('person') }) : '',
+        n('ai') ? uiSaid(n('ai') > 1 ? 'set-room-n-ais' : 'set-room-n-ai', n('ai') > 1 ? '{n} AIs' : '1 AI', { n: n('ai') }) : '',
+        n('box') ? uiSaid(n('box') > 1 ? 'set-room-n-boxes' : 'set-room-n-box', n('box') > 1 ? '{n} boxes' : '1 box', { n: n('box') }) : ''].filter(Boolean).join(' \u00b7 '); };
     /* A ROOM AS A CARD: the kit's card, as a conversation's (a card behind it says it holds several). */
     function roomCard(r) {
         const card = KIT.ConvCard(roomModel(r), { size: 'card', cls: 'conv-card conv-card-room', onOpen: () => { void openSalon(r.id); } });
@@ -5379,7 +5418,7 @@
         salonLive(thinkingOf(r));
         $('salon-who').replaceChildren(memberChips(r.members), el('span', 'hint', `${countOf(r.members)} \u25BE`));
         $('salon-who').setAttribute('aria-expanded', 'false'); $('salon-members').hidden = true;
-        const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? 'People' : k === 'ai' ? 'AIs' : 'Boxes'), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', 'host')); return x; })); return row; }).filter(Boolean);
+        const rows = ['person', 'ai', 'box'].map((k) => { const of = r.members.filter((m) => m.kind === k); if (!of.length) return null; const row = el('div', 'salon-members-row'); row.append(el('span', 'hint', k === 'person' ? uiSaid('set-room-people', 'People') : k === 'ai' ? uiSaid('set-room-ais-of', 'AIs') : uiSaid('set-room-boxes-of', 'Boxes')), ...of.map((m) => { const x = el('span', 'salon-member'); x.append(memberChips([m], 1), document.createTextNode(m.name)); if (m.host) x.append(el('span', 'salon-host', uiSaid('set-room-host-mark', 'host'))); return x; })); return row; }).filter(Boolean);
         $('salon-members').replaceChildren(...rows);
     }
     function salonLeft() { clearInterval(salonTimer); salonTimer = null; salonThread?.destroy(); salonThread = null; salonId = ''; }
@@ -5473,22 +5512,22 @@
     function paintSalonMembers() {
         const hostC = conversations.find((c) => c.name === salonHost);
         const box = $('salon-new-host'); box.replaceChildren();
-        if (hostC) box.append(KIT.ConvCard({ ...convModel(hostC), now: 'answers, or hands the message on' }, { size: 'member', cls: 'salon-host-what' }));
-        else box.append(el('small', 'hint', 'Pick one below: « Welcomes »'));
+        if (hostC) box.append(KIT.ConvCard({ ...convModel(hostC), now: uiSaid('set-room-host-what', 'answers, or hands the message on') }, { size: 'member', cls: 'salon-host-what' }));
+        else box.append(el('small', 'hint', uiSaid('set-room-host-pick', 'Pick one below: « Welcomes »')));
         const q = $('salon-new-search').value.trim().toLowerCase();
         const rows = conversations.filter((c) => !q || `${shownName(c)} ${c.chatName ?? ''}`.toLowerCase().includes(q)).sort((a, b) => Number(salonIn.has(b.name)) - Number(salonIn.has(a.name)));
         $('salon-new-ais').replaceChildren(...rows.map((c) => {
-            const welcome = el('button', 'salon-welcome-btn', 'Welcomes'); welcome.type = 'button'; welcome.setAttribute('aria-pressed', String(c.name === salonHost)); welcome.setAttribute('aria-label', `${shownName(c)} welcomes the room`);
+            const welcome = el('button', 'salon-welcome-btn', uiSaid('set-room-welcomes', 'Welcomes')); welcome.type = 'button'; welcome.setAttribute('aria-pressed', String(c.name === salonHost)); welcome.setAttribute('aria-label', `${shownName(c)} welcomes the room`);
             welcome.addEventListener('click', () => { salonIn.add(c.name); salonHost = c.name; paintSalonMembers(); });
             const sw = KIT.Switch({ on: salonIn.has(c.name), label: `${shownName(c)} in the room`, onChange: (on) => { if (!on) { salonIn.delete(c.name); if (salonHost === c.name) salonHost = [...salonIn][0] ?? ''; } else { salonIn.add(c.name); if (!salonHost) salonHost = c.name; } paintSalonMembers(); } });
             const row = KIT.ConvCard(convModel(c), { size: 'member', cls: 'salon-member-row', actions: [welcome, sw] });
             row.setAttribute('role', 'listitem'); row.draggable = true; row.dataset.name = c.name;
             return row;
         }));
-        $('salon-new-count').textContent = `\u00b7 ${salonIn.size} in the room`;
+        $('salon-new-count').textContent = `\u00b7 ${uiSaid('set-room-in', '{n} in the room', { n: salonIn.size })}`;
         $('salon-new-boxes').replaceChildren(...salonBoxList.map((b) => {
             const row = el('div', 'salon-member-row'); row.setAttribute('role', 'listitem');
-            const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || 'Voice box'));
+            const what = el('span', 'salon-member-what'); what.append(el('b', '', b.name), el('small', '', b.place || uiSaid('set-na-k-box', 'Voice box')));
             const sw = KIT.Switch({ on: salonBoxes.has(b.id), label: `${b.name} in the room`, onChange: (on) => { if (on) salonBoxes.add(b.id); else salonBoxes.delete(b.id); paintSalonMembers(); } });
             row.append(what, sw);
             return row;
@@ -5504,16 +5543,14 @@
     async function paintSalonAssets() {
         const r = salonEditing; const card = $('salon-assets-card');
         card.hidden = !r; if (!r) return;
-        const [all, held] = await Promise.all([getJson('/resources', []), getJson('/secrets', [])]);
+        const [all, held, boxes, tether, lists] = await Promise.all([getJson('/resources', []), getJson('/secrets', []), getJson('/mailboxes', []), getJson('/tether', {}), binderCall('lists', {})]);
         if (salonEditing !== r) return;
         const list = (Array.isArray(all) ? all : []).map((x) => { const kind = kindOf(x); return { key: `${kind}:${x.name}`, kind, name: x.name }; });
         const keys = Array.isArray(held) ? held : [];
         const ais = r.members.filter((m) => m.kind === 'ai').sort((a, b) => Number(Boolean(b.host)) - Number(Boolean(a.host)));
-        const assetsOf = (name) => {
-            const mine = new Map((conversations.find((x) => x.name === name)?.resources ?? []).map((x) => [x.name, x.access]));
-            return [...list.filter((a) => mine.has(a.name)).map((a) => ({ ...a, right: { key: a.kind, value: mine.get(a.name) } })),
-                ...keys.filter((k) => (k.conversations ?? []).includes(name)).map((k) => ({ key: `secret:${k.name}`, kind: 'secret', name: k.name, right: { key: 'secret', level: 'use' } }))];
-        };
+        /* What its own Assets tab lists, row for row (06-11 showed a part: no calendar, contacts, binder or access). */
+        const assetsOf = (name) => givenItems(name, { all, secrets: keys, boxes, tether, lists }).map((a) => ({ key: a.key, kind: a.kind, name: a.name, live: a.live, right: a.right }))
+            .sort((a, b) => ASSET_KINDS.findIndex((k) => k[0] === a.kind) - ASSET_KINDS.findIndex((k) => k[0] === b.kind));
         $('salon-assets').replaceChildren(...ais.map((m) => {
             const c = conversations.find((x) => x.name === m.ref);
             const give = el('button', 'salon-give-btn', uiSaid('set-room-give', '+ Give\u2026')); give.type = 'button';
@@ -5593,10 +5630,10 @@
         if (DEVICE) return;
         salonEditing = editing;
         enterPlace('salon-new', push);
-        $('salon-new-title').textContent = editing ? editing.name : 'New room';
+        $('salon-new-title').textContent = editing ? editing.name : uiSaid('set-room-new', 'New room');
         /* Its settings say its state as the room's bar does; a room to be made has none yet. */
         const dot = $('salon-new-state'); if (dot) { dot.hidden = !editing; dot.dataset.state = thinkingOf(editing).length ? 'work' : 'ok'; }
-        $('salon-new-create').textContent = editing ? 'Save' : 'Create';
+        $('salon-new-create').textContent = editing ? uiSaid('set-room-save', 'Save') : uiSaid('set-room-create', 'Create');
         $('salon-new-remove-card').hidden = $('salon-new-advanced-head').hidden = !editing;
         $('salon-new-remove').hidden = false; $('salon-new-remove-card').querySelector('.confirm')?.remove();
         $('salon-new-error').hidden = true; $('salon-new-name').value = editing?.name ?? ''; $('salon-new-search').value = '';
@@ -5615,8 +5652,8 @@
     $('salon-settings').addEventListener('click', async () => { await loadRooms(); const r = rooms.find((x) => x.id === salonId); if (r) await openSalonNew(true, r); });
     $('salon-new-remove').addEventListener('click', () => {
         const r = salonEditing; if (!r) return;
-        const keep = el('button', '', 'Keep'); keep.type = 'button';
-        const sure = el('button', 'danger', `Remove ${r.name}`); sure.type = 'button';
+        const keep = el('button', '', uiSaid('set-room-keep', 'Keep')); keep.type = 'button';
+        const sure = el('button', 'danger', uiSaid('set-room-remove-yes', 'Remove {name}', { name: r.name })); sure.type = 'button';
         const ask = el('span', 'callout bad confirm'); ask.setAttribute('role', 'alertdialog'); ask.append(keep, sure);
         keep.addEventListener('click', () => { ask.remove(); $('salon-new-remove').hidden = false; });
         sure.addEventListener('click', async () => { try { await post(`${API}/rooms/${r.id}/remove`, {}); salonEditing = null; await loadRooms(); paint(); openDeck(false); } catch (error) { $('salon-new-error').textContent = error.message; $('salon-new-error').hidden = false; } });
@@ -6534,8 +6571,16 @@
         const s = document.querySelector('#settings .settings-search'); if (s) s.placeholder = uiSaid('set-search', 'Search');
         const p = document.querySelector('#panel .settings-search'); if (p) p.placeholder = uiSaid('set-search', 'Search');
         $('cassets-search').placeholder = uiSaid('set-search', 'Search');
+        $('assets-search').placeholder = uiSaid('set-search', 'Search');
+        for (const e of document.querySelectorAll('[data-said-placeholder]')) { e.dataset.enPlaceholder ??= e.placeholder; e.placeholder = uiSaid(e.dataset.saidPlaceholder, e.dataset.enPlaceholder); }
         /* The lists of assets drawn before the words came: drawn again, the kit's words in the screen's language. */
         try { if (place === 'assets') void paintAssets(); if (assetsShown) void paintRoomAssets(); } catch { /* not drawn yet */ }
+        /* The list, a conversation's bar and settings, a room's: drawn again in the screen's language -- only when it has
+           words of its own (in English nothing changes, and a row is not swapped under a finger). */
+        let own = false; try { own = Object.keys(chatWords ?? {}).some((k) => k.startsWith('set-')); } catch { /* not read */ }
+        if (!own) return;
+        try { paint(); if (!current) enter(true); else if (panelShown) void paintPanel(); } catch { /* not drawn yet */ }
+        try { if (salonEditing) { paintSalonMembers(); void paintSalonAssets(); } else if (place === 'salon' && salonId) { const r = rooms.find((x) => x.id === salonId); if (r) salonHead(r); } } catch { /* not drawn yet */ }
     }
     void readWords().then(saySettings).catch(() => {});
 
@@ -8929,7 +8974,7 @@
         $('files-actions').hidden = !filesOf || !filesWritable;
         $('files-readonly').hidden = !filesOf || filesWritable;
         $('files-readonly').textContent = mine.find((r) => r.name === filesOf)?.given ? 'Read-only: given to this device to read. Nothing can be added or changed here.'
-            : filesOwner && place === 'assets' ? 'Read-only: a copy of the mail. Nothing can be added or changed here.' : 'Read-only: attached to this conversation to read. Nothing can be added or changed here.';
+            : filesOwner && place === 'assets' ? 'Read-only: a copy of the mail. Nothing can be added or changed here.' : uiSaid('set-files-read-only', 'Read-only: attached to this conversation to read. Nothing can be added or changed here.');
         $('files-views').hidden = !filesOf;
         for (const b of $('files-views').querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset.view === filesView));
         if (!filesOf) { rows.replaceChildren(); path.replaceChildren(); $('files-empty').hidden = true; return; }
@@ -8959,7 +9004,7 @@
         path.hidden = parts.length === 0;
         for (const entry of listing.entries) rows.append(entryOf(entry));
         $('files-empty').hidden = listing.entries.length > 0;
-        $('files-empty').textContent = filesWritable ? (FINE_POINTER ? 'This folder is empty. Drop files or folders here, or use Upload.' : 'This folder is empty. Add files with Upload.') : 'This folder is empty.';
+        $('files-empty').textContent = filesWritable ? (FINE_POINTER ? 'This folder is empty. Drop files or folders here, or use Upload.' : 'This folder is empty. Add files with Upload.') : uiSaid('set-files-empty', 'This folder is empty.');
     }
     /* A mouse: dragging and dropping is offered; a finger: the buttons are. */
     const FINE_POINTER = window.matchMedia?.('(pointer: fine)').matches ?? true;

@@ -276,7 +276,7 @@ async function walk(t, { phone }) {
     assert.equal(await page.locator('#sharing-close').innerText(), '‹ Assets');
     await page.locator('#sharing-close').click();
     await until('"< Assets"', () => shown('#assets'));
-    await page.locator('#assets-close').click();
+    await me.leaveAssets();
     await until('Assets closed', async () => !(await shown('#assets')));
 
     /* A conversation picked while a page is open: the page gives way, with no step of it left behind. */

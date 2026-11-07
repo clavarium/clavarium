@@ -21,7 +21,7 @@ test('a secret handed to the tool is a variable of the tool after it restarts, a
     await me.until('the secret is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:MODEL_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('sk-not-shown-again'), false, 'the value is nowhere in the page');
     assert.equal(JSON.stringify((await me.api('/api/secrets')).body).includes('sk-not-shown-again'), false, 'nor in what the server gives back');
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     /* Handed to this conversation's tool from Access, in two taps. */
     await me.page.locator('#folders').click();
     await me.chapter('access');
@@ -74,7 +74,7 @@ test('a secret of several lines (a key) pasted into the line comes whole into it
     await me.until('the secret is listed', async () => (await me.page.locator('#assets-rows .as-row[data-asset="secret:DEPLOY_KEY"]').count()) === 1);
     assert.equal((await me.page.content()).includes('line one'), false, 'the value is nowhere in the page');
     assert.equal(await me.page.locator('#secret-lines').isVisible(), false, 'back to one line for the next one');
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.page.locator('#folders').click();
     await me.chapter('access');
     await me.page.locator('#attach-open').click();
@@ -110,7 +110,7 @@ test('a secret is renamed: its value and the conversation it is handed to go wit
     assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'A B' })).status, 400);
     await me.api('/api/secrets', { name: 'TAKEN', value: 'x' });
     assert.equal((await me.api('/api/secrets/NEW_KEY/rename', { name: 'TAKEN' })).status, 409);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.type('exit');
     await me.until('the tool has exited', async () => (await me.state()) === 'ended');
     await me.page.locator('#notice-action').click();
@@ -166,7 +166,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     await me.api('/api/conversations/expiring/secrets', { secret: 'PAST_KEY', attached: true });
     const listed = (await me.api('/api/secrets')).body;
     assert.deepEqual(listed.map((x) => [x.name, x.expired, x.days]).sort(), [['PAST_KEY', true, -1], ['SOON_KEY', false, 3]]);
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.openAsset('secret', 'PAST_KEY');
     await me.until('shown Expired, in red', async () => (await me.page.locator('#assets-detail .secret-expiry-state').innerText().catch(() => '')).startsWith('Expired'));
     assert.equal(await me.page.locator('#assets-detail .secret-expiry-state').getAttribute('data-tone'), 'bad');
@@ -187,7 +187,7 @@ test('an expiry: said a few days ahead, with a dot on Assets; past it the secret
     assert.deepEqual((await me.api('/api/secrets')).body.find((x) => x.name === 'SOON_KEY').conversations, ['expiring'], 'still given to it');
 
     /* Its own Assets show the expired one too. */
-    await me.page.locator('#assets-close').click();
+    await me.leaveAssets();
     await me.page.locator('#view-assets').click();
     const pastHere = me.page.locator('#cassets-rows .as-row[data-asset="secret:PAST_KEY"] .kit-asset-sub');
     await me.until('its own Assets say it expired', async () => (await pastHere.innerText().catch(() => '')) === 'Expired');
@@ -229,7 +229,7 @@ test('the sheets of a secret, photographed: near its expiry, expired, and Replac
         await me.page.locator('#secret-replace-open').click();
         await me.page.fill('#secret-replace-value', 'typed-not-shown');
         await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-replace.png`) });
-        await me.page.locator('#assets-close').click();
+        await me.leaveAssets();
         await me.addAsset('secret');
         await me.page.screenshot({ path: join(SHOTS, `secrets-1-${look}-new.png`) });
         assert.equal(me.errors.length, 0, me.errors.join('\n'));

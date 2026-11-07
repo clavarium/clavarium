@@ -232,13 +232,25 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
             await until(`${name} is opened`, async () => (await page.locator('#assets-detail h2').innerText().catch(() => '')).includes(name));
             return page.locator('#assets-detail');
         }
+        /* Out of the Assets place, back where it was opened from (07-11: its bar has no « ‹ Conversations » of its own;
+           Back, as a person's browser or phone does). */
+        async function leaveAssets() {
+            for (let i = 0; i < 6 && await page.locator('#assets').isVisible(); i++) {
+                /* One step at a time: the next Back only once this one is done (its address changed), never one too many. */
+                const before = page.url();
+                await page.goBack();
+                for (let t = 0; t < 40 && page.url() === before && await page.locator('#assets').isVisible(); t++) await page.waitForTimeout(50);
+                await page.waitForTimeout(100);
+            }
+            await until('the Assets place is closed', async () => !(await page.locator('#assets').isVisible()));
+        }
         /* A folder is made in Assets. */
         async function newFolder(name) {
             await addAsset('folder');
             await page.fill('#folder-name', name);
             await page.locator('#folder-new button[type=submit]').click();
             await until(`${name} is listed in Assets`, async () => (await page.locator(`#assets-rows .as-row[data-asset="folder:${name}"]`).count()) === 1);
-            await page.locator('#assets-close').click();
+            await leaveAssets();
         }
         /* The files of a folder of the conversation shown: its Assets, that folder. */
         async function files(name) {
@@ -281,7 +293,7 @@ export async function bench(t, { stopDelayMs = 60_000, launchSeconds = '1', micr
         async function menu() { if (await page.locator('#menu').isVisible() && (await page.locator('header').getAttribute('data-menu')) !== 'open') await page.locator('#menu').click(); }
         /* On a phone: the keys behind "More". */
         async function more() { if ((await page.locator('#keys').getAttribute('data-more')) !== 'true') await page.locator('#keys-more').click(); }
-        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, newFolder, files, access, chapter, menu, more };
+        return { page, context, errors, screen, until, state, sees, printed, type, api, create, fullSize, openAccess, openDevice, addAsset, openAsset, leaveAssets, newFolder, files, access, chapter, menu, more };
     }
     return { origin, dir, person, browser, sshRoot, engineKeys, engineLanguages, engineUrl: `http://127.0.0.1:${engine.address().port}/v1/audio/transcriptions` };
 }
