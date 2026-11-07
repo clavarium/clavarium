@@ -10660,6 +10660,48 @@
         void getJson(`/boxes/${b.id}/wake`, null).then((w) => { if (w) paint(w); });
         return part;
     }
+    /* A LEARNING SESSION (boxcollect.mjs): the box's false wakes kept, nothing answered, the Google Home playing
+       the radio -- programmed here in one tap (today, local hours); its one line says where it stands. */
+    function boxCollect(b) {
+        const part = el('div', 'box-wake box-collect');
+        const at = (hhmm, after = 0) => { const d = new Date(); const [h, m] = String(hhmm).split(':').map(Number); d.setHours(h, m || 0, 0, 0); if (d.getTime() <= after) d.setDate(d.getDate() + 1); return d; };
+        const from = el('input'); from.type = 'time'; from.value = '09:00'; from.setAttribute('aria-label', uiSaid('set-collect-from', 'from'));
+        const to = el('input'); to.type = 'time'; to.value = '17:00'; to.setAttribute('aria-label', uiSaid('set-collect-to', 'to'));
+        const go = el('button', 'primary'); go.type = 'button';
+        const line = el('div', 'box-wake-lines');
+        const row = el('div', 'action-row box-wake-row');
+        row.append(el('span', '', uiSaid('set-collect', 'Learning session (radio)')), el('span', '', uiSaid('set-collect-from', 'from')), from, el('span', '', uiSaid('set-collect-to', 'to')), to, go);
+        part.append(row, line);
+        const hour = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+        let busy = false;
+        const paint = (c) => {
+            const m = KIT.collectModel(c);
+            busy = m.state === 'scheduled' || m.state === 'running';
+            go.textContent = busy ? uiSaid('set-collect-stop', 'Stop') : uiSaid('set-collect-go', 'Schedule');
+            const hhmm = (iso) => { const d = new Date(iso); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+            if (busy) { from.value = hhmm(m.from); to.value = hhmm(m.until); }
+            from.disabled = busy; to.disabled = busy; go.disabled = false;
+            line.replaceChildren();
+            if (m.state === 'scheduled') line.append(el('small', 'hint', uiSaid('set-collect-scheduled', 'Scheduled from {from} to {to}', { from: hour(m.from), to: hour(m.until) })));
+            if (m.state === 'running') line.append(el('small', 'hint', uiSaid('set-collect-running', 'Running: {n} wakes kept', { n: m.kept })));
+            if (m.state === 'ended') {
+                const out = el('a', '', uiSaid('set-collect-export', 'Export')); out.href = `${API}/boxes/collect-export?tag=radio`; out.setAttribute('download', '');
+                const said = el('small', 'hint', `${uiSaid('set-collect-ended', 'Ended: {n} wakes', { n: m.kept })} \u2014 `); said.append(out);
+                line.append(said);
+            }
+        };
+        go.addEventListener('click', async () => {
+            go.disabled = true;
+            try {
+                if (busy) { paint(await post(`${API}/boxes/${b.id}/collect`, { on: false })); return; }
+                const start = at(from.value); const end = at(to.value, start.getTime());
+                paint(await post(`${API}/boxes/${b.id}/collect`, { from: start.toISOString(), until: end.toISOString(), tag: 'radio', radio: true }));
+            } catch (error) { go.disabled = false; line.replaceChildren(el('small', 'warn', error.message)); }
+        });
+        paint({});
+        void getJson(`/boxes/${b.id}/collect`, null).then((c) => { if (c) paint(c); });
+        return part;
+    }
     async function paintBoxes() {
         const list = await getJson('/boxes', []); await loadRooms();
         const rows = $('box-list'); rows.replaceChildren();
@@ -10704,7 +10746,7 @@
             const volRow = el('label', 'box-volume'); volRow.append('Volume ', vol, volSaid);
             const acts = el('div', 'action-row'); acts.append(whereRow, place, volRow, rename, remove);
             card.append(head, acts);
-            card.append(boxWake(b));
+            card.append(boxWake(b), boxCollect(b));
             /* TESTED FROM HERE (01-11): its sound -- it says a test sentence -- and its microphone -- it listens
                once, and what it heard shows here, not in the conversation. */
             if (b.online) {

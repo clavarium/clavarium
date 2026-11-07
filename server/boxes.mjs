@@ -15,13 +15,14 @@
  *
  * Both are under /c/: the edge lets them through without sign-on, as the
  * device door. Nothing is kept of the audio, here or on the box -- but the wake word's own
- * 1.6 s of a box set to learn it (wakelearn.mjs).
+ * 1.6 s of a box set to learn it (wakelearn.mjs), and what a box hears in a COLLECT session (boxcollect.mjs).
  */
 import { spawn as spawnProcess } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { randomBytes, randomUUID, createHash, timingSafeEqual } from 'node:crypto';
 import { Refusal } from './conversations.mjs';
 import { WIRE, cutoffOf, scoreOf } from './wakelearn.mjs';
+import { STOP_PHRASE } from './boxcollect.mjs';
 
 export const CODE_MINUTES = 10;
 export const PAIR_PATH = '/c/api/box/pair';
@@ -283,12 +284,12 @@ export function piecesOf(pcm, { least = 8, most = 14 } = {}) {
 
 export class Boxes {
     #file; #codes = new Map(); #links = new Map(); #tries = []; #now;
-    #exists; #hear; #say; #note; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn;
+    #exists; #hear; #say; #note; #speak; #log; #changed; #images = new Map(); #origin; #spawn; #fetch; #streams = new Map(); #recordDir; #parts; #keep; #react; #learn; #collect; #stopSay = new Map();
 
     /* file: a JsonFile holding [{ id, name, conversation, keyHash, firmware, createdAt, seenAt }].
        exists(conversation), hear(wav) -> text, say(conversation, text, room), speak(text) -> PCM 16 kHz. */
-    constructor({ file, exists = () => true, hear, say, note = null, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null }) {
-        this.#react = react; this.#learn = learn;
+    constructor({ file, exists = () => true, hear, say, note = null, speak, changed = () => {}, origin = () => null, now = () => Date.now(), log = () => {}, spawn = spawnProcess, fetcher = fetch, recordDir = null, parts = null, keep = null, react = async () => null, learn = null, collect = null }) {
+        this.#react = react; this.#learn = learn; this.#collect = collect;
         this.#spawn = spawn; this.#fetch = fetcher; this.#recordDir = recordDir; this.#parts = parts; this.#keep = keep;
         this.#file = file; this.#changed = changed; this.#origin = origin; this.#exists = exists; this.#hear = hear; this.#say = say; this.#note = note; this.#speak = speak; this.#now = now; this.#log = log;
     }
@@ -424,13 +425,13 @@ export class Boxes {
     /* SPEAKING TO ANOTHER DEVICE in the room (a Google Home: « OK Google, baisse la clim »): said as given, its
        call included, then the box listens; what it hears within twenty seconds comes back to the conversation as
        that device's answer, not as the person's words (31-10: the box set the heating that way). */
-    async speakTo(id, text) {
+    async speakTo(id, text, { listen = true } = {}) {
         const link = this.#links.get(id);
         if (!link) throw new Refusal(409, 'This voice box is not connected.');
         const words = forSpeech(text, { callOthers: true });
         if (!words) throw new Refusal(400, 'Nothing to say.');
-        link.play(await this.#speak(words), 'listen');
-        link.relay = this.#now();
+        link.play(await this.#speak(words), listen ? 'listen' : null);
+        if (listen) link.relay = this.#now();
         this.#log(`voice box ${link.box().name}: spoke to a device in the room`);
         return { ok: true };
     }
@@ -778,7 +779,7 @@ export class Boxes {
                 return;
             }
             if (m.t === WIRE.clip && m.edge === 'start') { link.clip = { parts: [], bytes: 0, score: scoreOf(m.score) };   /* none (before 0.1.49): unknown, left out of tuning */ return; }
-            if (m.t === WIRE.clip && m.edge === 'end' && link.clip) { const { parts, score } = link.clip; link.clip = null; link.wakeCheck = this.#checkWake(link, Buffer.concat(parts), { score }); return; }
+            if (m.t === WIRE.clip && m.edge === 'end' && link.clip) { const { parts, score } = link.clip; link.clip = null; link.clipPcm = Buffer.concat(parts); link.clipScore = score; link.wakeCheck = this.#checkWake(link, link.clipPcm, { score }); return; }
             if (m.t === WIRE.near && m.edge === 'start') { link.near = { parts: [], bytes: 0, score: scoreOf(m.score) }; return; }
             if (m.t === WIRE.near && m.edge === 'end' && link.near) { const { parts, score } = link.near; link.near = null; void this.#checkNear(link, Buffer.concat(parts), score); return; }
             if (m.t === 'event' && m.name === 'wake.own') { this.#log(`voice box ${box.name}: heard its own voice say the wake word, ignored`); return; }
@@ -790,8 +791,17 @@ export class Boxes {
                 this.#log(`voice box ${box.name}: a sentence while recording here, the recording closed`);
                 r.out.end(() => { void this.#recorded(link, r); });
             }
+            if (m.t === 'listen.start') { link.listening = true; link.startScore = scoreOf(m.score); link.clipPcm = null; link.clipScore = null; }
             if (m.t === 'listen.start') { link.why = whyOf(m); link.wakeCheck = null; link.voice = NaN; link.endReason = ''; link.startReason = String(m.reason ?? ''); link.clipSeen = false; }   /* its clip, if any, comes after listen.start: an older check never carries over */
             if (m.t === 'listen.start') { if (this.stop(box.id)) this.#log(`voice box ${box.name}: stopped playing, someone speaks`); sentence = []; size = 0; return; }
+            if (m.t === 'listen.end') link.listening = false;
+            /* A COLLECT SESSION (boxcollect.mjs): nothing goes to the conversation, nothing is answered; kept. */
+            if (m.t === 'listen.end' && sentence && this.#collect?.on(box.id)) {
+                const pcm = Buffer.concat(sentence); sentence = null;
+                link.endReason = String(m.reason ?? ''); link.voice = Number(m.ep?.voice);
+                void this.#collected(link, pcm);
+                return;
+            }
             if (m.t === 'listen.end' && sentence && m.reason === 'nobody') {
                 /* Listened again, nobody spoke: a conversation ends there, in silence. */
                 sentence = null;
@@ -873,7 +883,8 @@ export class Boxes {
         const ok = wakeHeard(heard);
         /* Counted, and kept when the box learns (the clip only: never the sentence), with the box's score. */
         const box = link.box();
-        try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard, score, near }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
+        /* Not during a collect session: a radio asked for on purpose would count as the room's false wakes (tuning). */
+        if (!this.#collect?.on(box.id)) try { this.#learn?.checked(box.id, pcm, ok, { keep: box.wake === 'learn', heard, score, near }); } catch (error) { this.#log(`voice box ${box.name}: wake clip not kept (${error.message})`); }
         return { heard, ok };
     }
     /* A NEAR MISS (wake.near): checked the same way, only when the box learns; one at a time; nothing said. */
@@ -973,6 +984,58 @@ export class Boxes {
         link.doingSaid = false;
     }
 
+    /* COLLECT (boxcollect.mjs): a listen of the box, kept, never sent on. The box is told « done » at once. After
+       it asked the speaker for a station (reason follow), what it heard is the speaker's answer: dictated, logged. */
+    async #collected(link, pcm) {
+        const box = link.box();
+        link.send({ t: 'cue', name: 'done' });
+        const reason = link.startReason;
+        const clip = link.clipPcm; const score = link.clipScore ?? link.startScore; link.clipPcm = null;
+        if (reason === 'follow') {
+            link.wakeCheck = null;
+            if (pcm.length < 16_000) return;
+            try {
+                const text = String(await this.#hear(wavOf(pcm.subarray(0, 20 * 32_000)), box.lang) ?? '').trim();
+                this.#log(`voice box ${box.name}: collect, the speaker answered « ${text.slice(0, 60)} »`);
+                this.#collect.answered(box.id, text);
+            } catch (error) { this.#log(`voice box ${box.name}: collect, the speaker's answer not dictated (${error.message})`); }
+            return;
+        }
+        const check = link.wakeCheck ? await link.wakeCheck.catch(() => null) : null; link.wakeCheck = null;
+        let line = null;
+        try { line = this.#collect.keep(box.id, { clip, after: pcm, reason, score, heard: check?.heard ?? null, word: check?.ok ?? null, voice: link.voice, end: link.endReason }); } catch (error) { this.#log(`voice box ${box.name}: collect, not kept (${error.message})`); return; }
+        this.#log(line ? `voice box ${box.name}: collect, ${reason} #${line.n} kept (mot ${check ? (check.ok ? '\u2713' : '\u2717') : '?'}, ${link.endReason})` : `voice box ${box.name}: collect, ${reason} not kept (full, or the session ended)`);
+    }
+    collectStart(id, body) { this.#box(id); return this.#collecting().start(id, body); }
+    collectStop(id) {
+        this.#box(id);
+        const was = this.#collecting().stop(id, 'asked');
+        if (was?.radio) this.#stopSay.set(id, this.#now());
+        void this.collectTick();
+        return this.#collect.state(id);
+    }
+    collectState(id) { this.#box(id); return this.#collecting().state(id); }
+    collectExport(tag, days) { return this.#collecting().exportZip({ tag, days }); }
+    #collecting() { if (!this.#collect) throw new Refusal(501, 'This server collects no wake clips.'); return this.#collect; }
+    /* Its clock (every half minute, main.mjs): stations asked, the end, « Ok Google, stop » once the box is free. */
+    async collectTick() {
+        if (!this.#collect) return;
+        const tell = async (id, text, listen) => { await this.speakTo(id, text, { listen }); this.#log(`voice box ${id.slice(0, 8)}: collect, said « ${text} »`); };
+        for (const id of this.#collect.boxes()) {
+            const link = this.#links.get(id);
+            const d = this.#collect.due(id, { online: Boolean(link), busy: Boolean(link?.listening) });
+            if (!d) continue;
+            if (d.end) { const was = this.#collect.stop(id, d.end); if (was?.radio) this.#stopSay.set(id, this.#now()); continue; }
+            if (d.warn) { this.#log(`voice box ${id.slice(0, 8)}: collect, ${d.warn}`); continue; }
+            try { await tell(id, d.say, true); } catch (error) { this.#log(`voice box ${id.slice(0, 8)}: collect, « ${d.say} » not said (${error.message})`); }
+        }
+        for (const [id, at] of this.#stopSay) {
+            const link = this.#links.get(id);
+            if (link && !link.listening) { this.#stopSay.delete(id); try { await tell(id, STOP_PHRASE, false); } catch (error) { this.#log(`voice box ${id.slice(0, 8)}: collect, the speaker not stopped (${error.message})`); } }
+            else if (this.#now() - at > 10 * 60_000) { this.#stopSay.delete(id); this.#log(`voice box ${id.slice(0, 8)}: collect, the speaker could not be told to stop (box ${link ? 'busy' : 'offline'})`); }
+        }
+    }
+
     /* Wires the box link on an HTTP server: the key in Authorization, else 401. */
     attach(server, WebSocketServer) {
         const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
@@ -1015,6 +1078,10 @@ export class Boxes {
  *   POST /api/boxes/<id>/wake-erase      every clip of the box deleted -> the same
  *   POST /api/boxes/<id>/wake-improve    -> 202 {queued, at, tuning}: the threshold tuned now; nothing better, the
  *                                          trainer asked (queued)
+ *   GET  /api/boxes/<id>/collect         -> the COLLECT session (boxcollect.mjs): {on, from, until, tag, kept, ...}
+ *   POST /api/boxes/<id>/collect         {until, from?, tag?, after?, radio?, every?, volume?, stations?} -> the same;
+ *                                          {on: false}: stopped now
+ *   GET  /api/boxes/collect-export?tag=radio&day=YYYY-MM-DD   -> a zip of the wake clips kept (any day: all)
  */
 export async function handleBoxes(request, response, boxes, originOk, headers = {}, qr = null) {
     const { pathname } = new URL(request.url ?? '/', 'http://local');
@@ -1023,6 +1090,14 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         if (request.method === 'GET' && pathname === '/api/boxes') return send(200, boxes.all());
         const asked = request.method === 'GET' && /^\/api\/boxes\/([0-9a-f-]{36})\/wake$/.exec(pathname);
         if (asked) return send(200, boxes.wakeStats(asked[1]));
+        const collecting = request.method === 'GET' && /^\/api\/boxes\/([0-9a-f-]{36})\/collect$/.exec(pathname);
+        if (collecting) return send(200, boxes.collectState(collecting[1]));
+        if (request.method === 'GET' && pathname === '/api/boxes/collect-export') {
+            const q = new URL(request.url ?? '/', 'http://local').searchParams;
+            const { zip, clips } = boxes.collectExport(q.get('tag') ?? 'radio', q.getAll('day'));
+            response.writeHead(200, { ...headers, 'content-type': 'application/zip', 'content-length': zip.length, 'content-disposition': `attachment; filename="faux-reveils-${q.get('tag') ?? 'radio'}.zip"`, 'x-clips': String(clips) }).end(zip);
+            return true;
+        }
         if (request.method !== 'POST') return false;
         if (!originOk(request.headers)) return send(403, { error: 'This request does not come from this site.' });
         let text = '';
@@ -1060,6 +1135,7 @@ export async function handleBoxes(request, response, boxes, originOk, headers = 
         case 'wake-mode': return send(200, boxes.wakeMode(id, String(body.mode ?? '')));
         case 'wake-erase': return send(200, boxes.wakeErase(id));
         case 'wake-improve': return send(202, boxes.wakeImprove(id));
+        case 'collect': return send(200, body.on === false ? boxes.collectStop(id) : boxes.collectStart(id, body));
         default: return false;
         }
     } catch (error) {

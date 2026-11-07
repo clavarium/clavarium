@@ -17,6 +17,10 @@ export const SETTINGS_WORDS_FR = {
     'set-free-of': '{free} libres sur {total}', 'set-left-of': '{free} restants sur {total}', 'set-highest': 'au plus {n} % en 1 h',
     'set-core': '1 cœur', 'set-cores': '{n} cœurs',
     'set-update-out': '{v} est sortie', 'set-up-to-date': 'À jour · {v}', 'set-wifi-on': 'Wi-Fi · {name}', 'set-wifi-off': 'Wi-Fi non utilisé', 'set-cable': 'Câble',
+    /* A box's learning session (boxcollect.mjs): the radio, its false wakes kept. */
+    'set-collect': 'Séance d\'apprentissage (radio)', 'set-collect-from': 'de', 'set-collect-to': 'à',
+    'set-collect-go': 'Programmer', 'set-collect-stop': 'Arrêter', 'set-collect-scheduled': 'Programmée de {from} à {to}',
+    'set-collect-running': 'En cours : {n} réveils gardés', 'set-collect-ended': 'Terminée : {n} réveils', 'set-collect-export': 'Exporter',
     'set-not-well': 'ne va pas bien', 'set-box-away': '{name} hors ligne',
     'set-just-now': 'à l\'instant', 'set-min-ago': 'il y a {n} min', 'set-h-ago': 'il y a {n} h', 'set-days-ago': 'il y a {n} jours',
     'set-on': 'Activé', 'set-off': 'Désactivé', 'set-none': 'Aucun', 'set-changed': '{n} modifiés', 'set-as-given': 'Comme livrés',
