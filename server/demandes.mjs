@@ -34,7 +34,7 @@ const plain = (body) => String(body ?? '').replace(/\*\*(\S[^*\n]*?)\*\*/g, '$1'
 
 /* A CALL OF AN EXTERNAL MCP SERVER'S TOOL (Tether's card { kind: 'mcp', action: 'call', server, tool, title?, class, open?,
  * fresh?, args }, 07-11): which server, which tool, its class, its arguments in short, the AI's why. Parley has no card
- * of this kind nor its words yet: drawn as its generic card (kind 'other'), each word with its English (`t`), which an
+ * of this kind (its words since 0.17.87): drawn as its generic card (kind 'other'), each word with its English (`t`), which an
  * older or unknowing screen says as it is. A tool that deletes or overwrites: irreversible (amber, never in Accept all). */
 export const MCP_CLASS_SAID = { read: 'Reads only', write: 'Writes', destructive: 'Deletes or overwrites' };
 const MCP_ARGS_MAX = 6; const MCP_ARG_MAX = 160;
