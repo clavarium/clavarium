@@ -190,7 +190,8 @@ export function withoutOldSetting(record) {
 /* WHAT TO DO about a refused automatic sending, said after it in the chat;
    by the reason #once is given (its first word when not listed whole). */
 const TODO = Object.freeze({
-    cap: 'Raise the cap of this conversation, or send it from the review.',
+    /* 07-11: where it is set, said (the owner asked « on configure ça où ? »). */
+    cap: 'Raise the cap in this conversation: Assets, the repository, Automatic sending, « Sendings an hour ». Or send it from the review.',
     create: 'Make the branch on the remote, send it from the review, or let this conversation create branches.',
     'checks-failed': 'The agent was told; see the checks in the review.',
     'checks-none': 'Set a check command or a pre-push hook, or stop asking for checks for this conversation.',

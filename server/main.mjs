@@ -238,7 +238,7 @@ function serve(port, conversations, resources, { gate = () => 'local', originOk,
         /* THE DOOR FOR PROGRAMS (apikeys.mjs): an API key is the right, never the gate -- the front lets
            /api/ext/ through without sign-on, and strips the identity headers there. */
         if (apikeys && (pathname === '/api/ext' || pathname.startsWith('/api/ext/'))) {
-            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, events, headers: HEADERS, originOk, version: platform?.version ?? null });
+            await handleExternal(request, response, { keys: apikeys.keys, status: apikeys.status, chats: apikeys.chats, rooms: apikeys.rooms, boxes: apikeys.boxes, reminders: apikeys.reminders, binder: apikeys.binder, events, headers: HEADERS, originOk, version: platform?.version ?? null });
             return;
         }
         if (door && pathname.startsWith('/c/')) {
@@ -733,7 +733,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         try { components[name.slice('clavarium-'.length)] = JSON.parse(readFileSync(packageFile(name, 'package.json'), 'utf8')).version; } catch { /* not installed here */ }
     }
     const apiKeys = new ApiKeys({ store: new Store(`${dataDir}/apikeys.json`), grants, journal: `${dataDir}/apikeys.log`, exists: (name) => all.list().some((c) => c.name === name),
-        roomExists: (id) => rooms.has(id), boxExists: (id) => boxes.all().some((b) => b.id === id) });
+        roomExists: (id) => rooms.has(id), boxExists: (id) => boxes.all().some((b) => b.id === id),
+        /* Its binder lists, kept on each list by Binder (binders.mjs), as a conversation's are. */
+        binders: { lists: () => binders.lists(), grant: (list, subject, level, who) => binders.grant(list, subject, level, who) } });
     /* What the host program says of the server is never waited for long: a key gets what is known. */
     const briefly = { brief: () => quick(capacity.brief(), 3000, null), room: () => quick(capacity.room(), 3000, null) };
     const apikeys = { keys: apiKeys, status: () => statusOf({ conversations: all, talk, health, answerer, capacity: briefly, history, platform, updates, components }),
@@ -770,6 +772,10 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
             /* To manage (level "manage", or "create rooms"): as the page asks (api.mjs /api/rooms). */
             create: (asked) => rooms.create(asked), change: (id, asked) => rooms.change(id, asked), remove: (id) => rooms.remove(id),
         },
+        /* A conversation's reminders, its Docket (dockets.mjs): what the owner sees of it, one set as the tool sets one. */
+        reminders: { of: (name) => dockets.of(name), set: (name, asked, by) => dockets.remind(name, asked, by), cancel: (name, plan) => dockets.cancel(name, plan) },
+        /* Its binder lists: Binder asked as the key, an agent (binders.mjs asKey). */
+        binder: { act: (op, args, who) => binders.asKey(op, args, who) },
         /* Its voice boxes: their state only, and a short text said aloud (boxes.mjs announce). */
         boxes: {
             list: () => { const names = new Map([...all.list().map((c) => [c.name, c.title || c.name]), ...rooms.list().map((r) => [`room:${r.id}`, r.name])]);

@@ -38,6 +38,23 @@
  *             change its settings nor update it               box:<id> rw
  *   A room removed, a box withdrawn, takes its lines with it (main.mjs).
  *
+ *   a binder list (Binder), given ONE BY ONE (07-11):
+ *     read    list its records, read one with its notes (secrets masked)
+ *     write   and add a record, change its title, description, fields and
+ *             due date, move it between states, add a note, archive or
+ *             restore it -- as a conversation given the list to change may
+ *   Kept where Binder keeps a conversation's lists: the list's own access
+ *   ("apikey:<id>": read | write), not this table. The key asks Binder as an
+ *   agent, signed with its name: Binder's own rules hold -- past a gate only
+ *   what a person approved; never approve, delete, give access, change a
+ *   list. Revoked, a key's lists go with it.
+ *
+ *   a conversation's REMINDERS (its tool's Docket), folded into its level:
+ *     read    sees them
+ *     talk    and sets one: at a time, or a cron line, with a short text
+ *     act     and takes one back
+ *   Its chat must be on (a docket is there only then).
+ *
  * THE SECRET IS SHOWN ONCE. It is made here (32 random bytes, "clv_" before
  * them), given back by `create` and never again: only its sha256 is kept, as
  * a pairing's session is (devices.mjs). A 256-bit random secret needs no salt
@@ -70,7 +87,8 @@
  *   POST /api/apikeys/<id>/conversations {conversation, level: 'read'|'talk'|null}: one given, changed, taken back
  *   POST /api/apikeys/<id>/rooms        {room, level: 'read'|'talk'|null}
  *   POST /api/apikeys/<id>/boxes        {box, level: 'state'|'speak'|null}
- *   (and on creation: rooms: {id: level}, boxes: {id: level})
+ *   POST /api/apikeys/<id>/binders      {binder, level: 'read'|'write'|null}
+ *   (and on creation: rooms: {id: level}, boxes: {id: level}, binders: {id: level})
  *   POST /api/apikeys/<id>/revoke
  *   GET  /api/apikeys/<id>/journal      its last uses
  *
@@ -88,12 +106,26 @@
  *   POST /api/ext/v1/rooms/<id>/remove                   (manage) the room removed
  *   GET  /api/ext/v1/boxes                               {boxes: [{id, name, level, online, where, heardAt, volume}]}
  *   POST /api/ext/v1/boxes/<id>/say                      {text}: said aloud by the box
+ *   GET  /api/ext/v1/conversations/<name>/reminders      (read) {reminders: [{id, text, cron, next}]}
+ *   POST /api/ext/v1/conversations/<name>/reminders      (talk) {text, at: "2026-11-20 09:00" | cron: "0 9 * * 1"}
+ *   POST /api/ext/v1/conversations/<name>/reminders/<id>/cancel  (act) taken back
+ *   GET  /api/ext/v1/binders                             {binders: [{id, title, level, states, fields, count}]}
+ *   GET  /api/ext/v1/binders/<list>/records              ?state=&archived=1: {records}
+ *   GET  /api/ext/v1/binders/<list>/records/<id>         {record}: with its notes
+ *   POST /api/ext/v1/binders/<list>/records              (write) {title, description?, state?, fields?, due?}
+ *   POST /api/ext/v1/binders/<list>/records/<id>         (write) {title?, description?, fields?, due?}
+ *   POST /api/ext/v1/binders/<list>/records/<id>/move    (write) {state}: never past a gate a person did not tick
+ *   POST /api/ext/v1/binders/<list>/records/<id>/notes   (write) {text}
+ *   POST /api/ext/v1/binders/<list>/records/<id>/archive|restore  (write)
  *   POST /api/ext/mcp                   the same as MCP tools (clavarium_status, clavarium_conversations,
  *                                       clavarium_read, clavarium_say, clavarium_rooms, clavarium_room_read,
  *                                       clavarium_room_say, clavarium_boxes, clavarium_box_say, clavarium_conversation_wake,
  *                                       clavarium_conversation_sleep, clavarium_conversation_stop, clavarium_room_create,
- *                                       clavarium_room_change, clavarium_room_remove), JSON-RPC over HTTP
- *   A conversation, room or box not given, or not there, is the same 403: a key learns nothing of what it was not given.
+ *                                       clavarium_room_change, clavarium_room_remove, clavarium_reminders, clavarium_remind,
+ *                                       clavarium_reminder_cancel, clavarium_binders, clavarium_binder_records,
+ *                                       clavarium_binder_record, clavarium_binder_add, clavarium_binder_edit,
+ *                                       clavarium_binder_move, clavarium_binder_note, clavarium_binder_archive), JSON-RPC over HTTP
+ *   A conversation, room, box or list not given, or not there, is the same 403: a key learns nothing of what it was not given.
  *
  * The front lets /api/ext/ through without sign-on, as it does /c/
  * (deploy/install.sh, skip_auth_routes; deploy/updater.mjs for installs made
@@ -136,6 +168,12 @@ export const ROOM_LEVELS = Object.freeze({ read: 'r', talk: 'rw', manage: 'rwm' 
 export const roomLevelOf = (rights) => (String(rights).includes('m') ? 'manage' : String(rights).includes('w') ? 'talk' : String(rights).includes('r') ? 'read' : null);
 export const BOX_LEVELS = Object.freeze({ state: 'r', speak: 'rw' });
 export const boxLevelOf = (rights) => (String(rights).includes('w') ? 'speak' : String(rights).includes('r') ? 'state' : null);
+/* What a binder list may be given: Binder's own access words. */
+export const BINDER_LEVELS = Object.freeze({ read: 'read', write: 'write' });
+/* A reminder a key sets: a short text. */
+export const REMINDER_MAX = 200;
+/* A binder list's id, as Binder makes it. */
+const LIST_ID = /^[a-z0-9][a-z0-9-]{0,99}$/;
 /* Said aloud in the home: short, and a few a minute (per key and box). */
 export const SPEAK_MAX = 300;
 export const SPEAK_PER_MIN = 3;
@@ -147,14 +185,15 @@ const oneLine = (value) => typeof value === 'string' && value.trim() !== '' && v
 const SECRET = /^clv_[A-Za-z0-9_-]{43}$/;
 
 export class ApiKeys {
-    #store; #grants; #now; #journal; #exists; #kinds;
+    #store; #grants; #now; #journal; #exists; #kinds; #binders;
     #used = new Map();       /* id -> { at, savedAt } */
     #calls = new Map();      /* id ('' for unknown keys) -> [times of the last minute] */
 
     /* `exists(name)`: whether a conversation is there (one is given only then); `roomExists(id)`,
-       `boxExists(id)`: the same for a room, a voice box (none, without them). */
-    constructor({ store, grants = new Grants(), journal = null, now = () => Date.now(), exists = () => true, roomExists = () => false, boxExists = () => false }) {
-        this.#store = store; this.#grants = grants; this.#journal = journal; this.#now = now; this.#exists = exists;
+       `boxExists(id)`: the same for a room, a voice box (none, without them). `binders`: Binder's lists, as a person
+       sees them -- { lists() -> [{ id, title, archived, grants }], grant(list, subject, level | null, who) } (none, without). */
+    constructor({ store, grants = new Grants(), journal = null, now = () => Date.now(), exists = () => true, roomExists = () => false, boxExists = () => false, binders = null }) {
+        this.#store = store; this.#grants = grants; this.#journal = journal; this.#now = now; this.#exists = exists; this.#binders = binders;
         /* What is given one by one: its asset type, its levels, a valid name, whether it is there, its words. */
         this.#kinds = {
             room: { levels: ROOM_LEVELS, of: roomLevelOf, valid: (v) => typeof v === 'string' && UUID.test(v), exists: roomExists, what: 'room', the: 'a room' },
@@ -165,7 +204,7 @@ export class ApiKeys {
     #scopesOf(id) { return Object.entries(SCOPES).filter(([, s]) => this.#grants.can(apiKeySubject(id), s.asset, s.rights)).map(([name]) => name); }
     #shown(k) {
         const used = this.#used.get(k.name)?.at ?? k.usedAt ?? null;
-        return { id: k.name, label: k.label, scopes: this.#scopesOf(k.name), conversations: this.conversationsOf(k.name), rooms: this.roomsOf(k.name), boxes: this.boxesOf(k.name), createdBy: k.createdBy ?? null, createdAt: k.createdAt, expiresAt: k.expiresAt ?? null,
+        return { id: k.name, label: k.label, scopes: this.#scopesOf(k.name), conversations: this.conversationsOf(k.name), rooms: this.roomsOf(k.name), boxes: this.boxesOf(k.name), binders: this.bindersOf(k.name), createdBy: k.createdBy ?? null, createdAt: k.createdAt, expiresAt: k.expiresAt ?? null,
             usedAt: used, expired: Boolean(k.expiresAt && Date.parse(k.expiresAt) <= this.#now()) };
     }
 
@@ -207,6 +246,37 @@ export class ApiKeys {
     setRoom(id, room, level) { return this.#setOne('room', id, room, level); }
     setBox(id, box, level) { return this.#setOne('box', id, box, level); }
 
+    /* ITS BINDER LISTS: kept in Binder, on each list (see above). Archived lists are not given (nor shown). */
+    #lists() { try { return (this.#binders?.lists() ?? []).filter((l) => l && typeof l.id === 'string'); } catch { return []; } }
+    bindersOf(id) {
+        const subject = apiKeySubject(id);
+        return this.#lists().filter((l) => !l.archived && Object.hasOwn(BINDER_LEVELS, l.grants?.[subject] ?? '')).map((l) => ({ id: l.id, level: l.grants[subject] }))
+            .sort((a, b) => a.id.localeCompare(b.id));
+    }
+    #binderAsked(list, level) {
+        if (!this.#binders || typeof list !== 'string' || !LIST_ID.test(list) || !this.#lists().some((l) => l.id === list && !l.archived)) throw new Refusal(404, 'No such binder.');
+        if (level !== null && !Object.hasOwn(BINDER_LEVELS, level)) throw new Refusal(400, `A binder is given at one of: ${Object.keys(BINDER_LEVELS).join(', ')}.`);
+    }
+    /* One list given to a key, its level changed, or taken back (level null). `who`: the person, as Binder's history says it. */
+    setBinder(id, list, level, who = '') {
+        if (typeof id !== 'string' || !this.#store.get(id)) throw new Refusal(404, 'No such key.');
+        this.#binderAsked(list, level);
+        this.#binders.grant(list, apiKeySubject(id), level, who);
+        return this.get(id);
+    }
+    /* Whether a key (already checked) may read ('read') or change ('write') one list; 403 if not -- the same for one
+       not given, archived, or not there. */
+    mayBinder(id, list, level = 'read') {
+        const l = typeof list === 'string' && LIST_ID.test(list) ? this.#lists().find((x) => x.id === list && !x.archived) : undefined;
+        const has = l?.grants?.[apiKeySubject(id)];
+        if (!Object.hasOwn(BINDER_LEVELS, has ?? '')) throw Object.assign(new Refusal(403, 'This key was not given this binder.'), { key: id });
+        if (level === 'write' && has !== 'write') throw Object.assign(new Refusal(403, 'This key may read this binder, not change it.'), { key: id });
+        return has;
+    }
+    binderTitle(list) { return this.#lists().find((l) => l.id === list)?.title ?? list; }
+    /* Who the key is to Binder: an agent, signed with its name -- never a person (a person approves, deletes, gives). */
+    binderWho(id) { const k = this.#store.get(id); return k ? { id: apiKeySubject(id), kind: 'agent', name: k.label } : null; }
+
     #conversationAsked(name, level) {
         if (!isConversationName(name) || !this.#exists(name)) throw new Refusal(404, 'No such conversation.');
         if (level !== null && !Object.hasOwn(LEVELS, level)) throw new Refusal(400, `A conversation is given to read, to talk or to act: ${Object.keys(LEVELS).join(', ')}.`);
@@ -223,12 +293,14 @@ export class ApiKeys {
 
     /* A new key: its secret is in the answer, this once. `days`: its life (null: it does not expire).
        `conversations`: { name: 'read' | 'talk' }, each named -- there is no "all". */
-    create({ label, scopes = [], conversations = {}, rooms = {}, boxes = {}, days = DEFAULT_DAYS } = {}, who = '') {
+    create({ label, scopes = [], conversations = {}, rooms = {}, boxes = {}, binders = {}, days = DEFAULT_DAYS } = {}, who = '') {
         if (!oneLine(label)) throw new Refusal(400, `A key has a name: one line, ${LABEL_MAX} characters at most.`);
         if (!Array.isArray(scopes) || scopes.some((s) => !Object.hasOwn(SCOPES, s))) throw new Refusal(400, `Scopes are among: ${Object.keys(SCOPES).join(', ')}.`);
         if (!conversations || typeof conversations !== 'object' || Array.isArray(conversations)) throw new Refusal(400, 'Conversations are given by name: {name: "read" | "talk"}.');
         for (const [name, level] of Object.entries(conversations)) this.#conversationAsked(name, level);
         this.#givenAll('room', rooms); this.#givenAll('box', boxes);
+        if (!binders || typeof binders !== 'object' || Array.isArray(binders)) throw new Refusal(400, 'Binders are given by id: {id: level}.');
+        for (const [list, level] of Object.entries(binders)) this.#binderAsked(list, level);
         if (days !== null && !(Number.isInteger(days) && days >= 1 && days <= DAYS_MAX)) throw new Refusal(400, `A key lasts 1 to ${DAYS_MAX} days, or does not expire.`);
         if (this.#store.all().length >= KEYS_MAX) throw new Refusal(409, `At most ${KEYS_MAX} keys: revoke one first.`);
         const name = label.trim();
@@ -243,6 +315,7 @@ export class ApiKeys {
         for (const [name, level] of Object.entries(conversations)) if (level !== null) this.#grants.give(apiKeySubject(id), `conversation:${name}`, LEVELS[level]);
         for (const [ref, level] of Object.entries(rooms)) if (level !== null) this.#grants.give(apiKeySubject(id), `room:${ref}`, ROOM_LEVELS[level]);
         for (const [ref, level] of Object.entries(boxes)) if (level !== null) this.#grants.give(apiKeySubject(id), `box:${ref}`, BOX_LEVELS[level]);
+        for (const [list, level] of Object.entries(binders)) if (level !== null) this.#binders.grant(list, apiKeySubject(id), level, who);
         return { key: this.#shown(record), secret };
     }
 
@@ -251,6 +324,7 @@ export class ApiKeys {
         if (typeof id !== 'string' || !this.#store.get(id)) throw new Refusal(404, 'No such key.');
         this.#store.remove(id);
         this.#grants.forgetSubject(apiKeySubject(id));
+        for (const l of this.#lists()) if (l.grants?.[apiKeySubject(id)]) { try { this.#binders.grant(l.id, apiKeySubject(id), null); } catch { /* gone already */ } }
         this.#used.delete(id); this.#calls.delete(id);
         for (const c of [...this.#calls.keys()]) if (c.startsWith(`speak:${id}:`)) this.#calls.delete(c);
     }
@@ -557,8 +631,48 @@ export const ROOM_REMOVE_TOOL = {
     inputSchema: { type: 'object', properties: { room: ROOM_ARG }, required: ['room'], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 };
-export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL,
-    ROOM_CREATE_TOOL, ROOM_CHANGE_TOOL, ROOM_REMOVE_TOOL, BOXES_TOOL, BOX_SAY_TOOL];
+/* A conversation's reminders (its tool's Docket): seen at Read, set at Talk, taken back at Act. */
+const tool = (name, title, description, properties, required, write, destructive = false) => ({ name, title, description,
+    inputSchema: { type: 'object', properties, required, additionalProperties: false },
+    annotations: { readOnlyHint: !write, destructiveHint: destructive, idempotentHint: !write, openWorldHint: false } });
+export const REMINDERS_TOOL = tool('clavarium_reminders', 'Reminders of a conversation',
+    'The reminders set in one conversation\'s tool (its Docket): each with its id, text, cron line (if it recurs) and when it is next due. The conversation must have been given to this key, its chat on.',
+    { conversation: CONVERSATION_ARG }, ['conversation'], false);
+export const REMIND_TOOL = tool('clavarium_remind', 'Set a reminder in a conversation',
+    `Set a reminder for one conversation's AI: once at a time ("at": "2026-11-20 09:00", in this server's time zone) or recurring ("cron": "0 9 * * 1", Mondays at 9:00), with a short text (${REMINDER_MAX} characters at most). It wakes the AI when due. The conversation must have been given to this key to talk.`,
+    { conversation: CONVERSATION_ARG, text: { type: 'string', minLength: 1, maxLength: REMINDER_MAX }, at: { type: 'string' }, cron: { type: 'string' } }, ['conversation', 'text'], true);
+export const REMINDER_CANCEL_TOOL = tool('clavarium_reminder_cancel', 'Take back a reminder',
+    'Take back one reminder of a conversation, by its id (as clavarium_reminders gives it). The conversation must have been given to this key to act.',
+    { conversation: CONVERSATION_ARG, reminder: { type: 'string' } }, ['conversation', 'reminder'], true, true);
+const BINDER_ARG = { type: 'string', description: 'The binder list\'s id, as clavarium_binders gives it.' };
+const RECORD_ARG = { type: 'string', description: 'The record\'s id, as clavarium_binder_records gives it.' };
+const FIELDS_ARG = { type: 'object', description: 'Field values by field id or name, as clavarium_binders gives them; null clears one.', additionalProperties: { type: ['string', 'number', 'null'] } };
+const DUE_ARG = { type: ['string', 'null'], description: 'A due date: "2026-11-20", or "2026-11-20 09:00"; null clears it.' };
+export const BINDERS_TOOL = tool('clavarium_binders', 'Binders of this key',
+    'The binder lists this key was given, each with its id, title, level (read or write), its states (a gate is one only a person approves past) and its fields.', {}, [], false);
+export const BINDER_RECORDS_TOOL = tool('clavarium_binder_records', 'Records of a binder',
+    'The records of one binder list, in the order of its states: id, title, state, fields, owners, due date. "state" keeps one state; "archived": true lists the archived ones instead.',
+    { binder: BINDER_ARG, state: { type: 'string' }, archived: { type: 'boolean' } }, ['binder'], false);
+export const BINDER_RECORD_TOOL = tool('clavarium_binder_record', 'Read a record',
+    'One record of a binder list, with its description and its notes.', { binder: BINDER_ARG, record: RECORD_ARG }, ['binder', 'record'], false);
+export const BINDER_ADD_TOOL = tool('clavarium_binder_add', 'Add a record',
+    'Add a record to a binder list, signed with this key\'s name: a title, and a description, a state (not past a gate), fields, a due date. The list must have been given to this key to write.',
+    { binder: BINDER_ARG, title: { type: 'string', minLength: 1, maxLength: 200 }, description: { type: 'string' }, state: { type: 'string' }, fields: FIELDS_ARG, due: DUE_ARG }, ['binder', 'title'], true);
+export const BINDER_EDIT_TOOL = tool('clavarium_binder_edit', 'Change a record',
+    'Change a record\'s title, description, fields or due date. The list must have been given to this key to write.',
+    { binder: BINDER_ARG, record: RECORD_ARG, title: { type: 'string', minLength: 1, maxLength: 200 }, description: { type: ['string', 'null'] }, fields: FIELDS_ARG, due: DUE_ARG }, ['binder', 'record'], true);
+export const BINDER_MOVE_TOOL = tool('clavarium_binder_move', 'Move a record',
+    'Move a record to another state of its list. Past a gate, only a record a person approved: a key never approves. The list must have been given to this key to write.',
+    { binder: BINDER_ARG, record: RECORD_ARG, state: { type: 'string', description: 'A state\'s id or name.' } }, ['binder', 'record', 'state'], true);
+export const BINDER_NOTE_TOOL = tool('clavarium_binder_note', 'Add a note to a record',
+    'Add a note to a record, signed with this key\'s name. The list must have been given to this key to write.',
+    { binder: BINDER_ARG, record: RECORD_ARG, text: { type: 'string', minLength: 1, maxLength: 2000 } }, ['binder', 'record', 'text'], true);
+export const BINDER_ARCHIVE_TOOL = tool('clavarium_binder_archive', 'Archive a record',
+    'Archive a record (or restore it: "restore": true). Never deleted: only a person deletes. The list must have been given to this key to write.',
+    { binder: BINDER_ARG, record: RECORD_ARG, restore: { type: 'boolean' } }, ['binder', 'record'], true);
+const BINDER_TOOLS = [BINDERS_TOOL, BINDER_RECORDS_TOOL, BINDER_RECORD_TOOL, BINDER_ADD_TOOL, BINDER_EDIT_TOOL, BINDER_MOVE_TOOL, BINDER_NOTE_TOOL, BINDER_ARCHIVE_TOOL];
+export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE_TOOL, SLEEP_TOOL, STOP_TOOL, REMINDERS_TOOL, REMIND_TOOL, REMINDER_CANCEL_TOOL,
+    ROOMS_TOOL, ROOM_READ_TOOL, ROOM_SAY_TOOL, ROOM_CREATE_TOOL, ROOM_CHANGE_TOOL, ROOM_REMOVE_TOOL, BOXES_TOOL, BOX_SAY_TOOL, ...BINDER_TOOLS];
 
 /* Returns true when the request was under /api/ext/ (answered here). `status()`: the state, as statusOf
    makes it. `chats`: { list() -> [{ id, name }], read(name, part) -> talk.of's answer, chatOn(name),
@@ -569,8 +683,11 @@ export const TOOLS = [STATUS_TOOL, CONVERSATIONS_TOOL, READ_TOOL, SAY_TOOL, WAKE
    To act (07-11): `chats` also { wake(name) -> { state }, sleep(name), stop(name) } -- the owner's own calls; `rooms` also
    { create({ name, conversations, boxes, host }) -> { id }, change(id, { name, host, add, remove }) -- by member ids, as the
    page asks --, remove(id) }, and its list's members carry `ref` (a conversation's name, a box's id) and `id` (the member's).
-   `events`: What happened (events.mjs), where each act is said with the key's name. */
-export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, events = null, headers = {}, originOk = () => false, version = null }) {
+   `events`: What happened (events.mjs), where each act is said with the key's name.
+   07-11: `reminders`: { of(name) -> { on, plans: [{ id, text, cron, next }] }, set(name, { at, cron, text }, by) -> plan,
+   cancel(name, plan) -> bool } -- a conversation's Docket (dockets.mjs). `binder`: { act(op, args, who) -> { ok, text, data } }
+   -- Binder's keeper, asked as the key (an agent): its rules are Binder's. */
+export async function handleExternal(request, response, { keys, status, chats = null, rooms = null, boxes = null, reminders = null, binder = null, events = null, headers = {}, originOk = () => false, version = null }) {
     const url = new URL(request.url ?? '/', 'http://local');
     const { pathname } = url;
     if (!pathname.startsWith(EXT_PREFIX) && pathname !== EXT_PREFIX.slice(0, -1)) return false;
@@ -739,6 +856,120 @@ export async function handleExternal(request, response, { keys, status, chats = 
         said(id, 'conversation', `Room "${String(name).slice(0, 60)}" removed`);
         return { ok: true, removed: room };
     };
+    /* A CONVERSATION'S REMINDERS (its tool's Docket), folded into its level: seen at Read, set at Talk, taken back at Act. */
+    const docketOf = (name) => {
+        const d = reminders?.of(name);
+        if (!d?.on) throw new Refusal(409, 'Its chat is off: it has no reminders.');
+        return d;
+    };
+    const remindersListed = (id, name) => {
+        keys.mayConversation(id, name, 'read'); known(name);
+        return { reminders: (docketOf(name).plans ?? []).map((p) => ({ id: String(p.id), text: String(p.text ?? ''), cron: typeof p.cron === 'string' ? p.cron : null, next: p.next ?? null })) };
+    };
+    const reminding = (id, name, body) => {
+        keys.mayConversation(id, name, 'talk'); known(name);
+        onlyFields(body, ['text', 'at', 'cron']);
+        const text = typeof body.text === 'string' ? body.text.trim() : '';
+        if (!text) throw new Refusal(400, 'Say what it is for: text.');
+        if (text.length > REMINDER_MAX) throw new Refusal(400, `${REMINDER_MAX} characters at most: a short text.`);
+        const at = typeof body.at === 'string' && body.at.trim() ? body.at.trim() : null;
+        const cron = typeof body.cron === 'string' && body.cron.trim() ? body.cron.trim() : null;
+        if (Boolean(at) === Boolean(cron)) throw new Refusal(400, 'Give one of: at ("2026-11-20 09:00") or cron ("0 9 * * 1").');
+        docketOf(name);
+        let plan;
+        try { plan = reminders.set(name, { ...(at ? { at } : { cron }), text }, keys.signature(id)); } catch (error) { if (error instanceof Refusal) throw error; throw new Refusal(400, String(error?.message ?? 'Not a reminder.').slice(0, 200)); }
+        said(id, 'conversation', `${name}: reminder set "${text.slice(0, 60)}"`, name);
+        return { ok: true, reminder: { id: String(plan.id), text: String(plan.text ?? text), cron: plan.cron ?? null, next: plan.next ?? null } };
+    };
+    const unreminding = (id, name, plan) => {
+        keys.mayConversation(id, name, 'act'); known(name);
+        const d = docketOf(name);
+        const p = typeof plan === 'string' ? (d.plans ?? []).find((x) => x.id === plan) : undefined;
+        if (!p || !reminders.cancel(name, plan)) throw new Refusal(404, 'No such reminder.');
+        said(id, 'conversation', `${name}: reminder taken back "${String(p.text ?? '').slice(0, 60)}"`, name);
+        return { ok: true, cancelled: plan };
+    };
+    /* ITS BINDER LISTS: Binder asked as the key -- an agent, its name on what it writes. Only these asks, never a
+       person's (approve, delete, grant, settings, a list's columns). What Binder refuses is refused: a gate a person
+       did not tick says so (403). A record is reached through its own list only. */
+    const asked = (id, op, args) => {
+        if (typeof binder?.act !== 'function') throw new Refusal(409, 'Not possible here.');
+        const r = binder.act(op, args, keys.binderWho(id));
+        if (r?.ok) return r.data;
+        const why = String(r?.text ?? 'Not done.').slice(0, 300);
+        throw Object.assign(new Refusal(/^only a person/.test(why) ? 403 : 400, why), { key: id });
+    };
+    const clean = (v) => (typeof v === 'string' ? masked(v) : v);
+    const stateOf = (l, sid) => l?.states?.find((x) => x.id === sid)?.name ?? null;
+    const recordShown = (r, l, whole = false) => ({ id: String(r.id), title: masked(String(r.title ?? '')), state: String(r.state ?? ''), stateName: stateOf(l, r.state),
+        fields: Object.fromEntries(Object.entries(r.fields ?? {}).map(([k, v]) => [k, clean(v)])), owners: Array.isArray(r.owners) ? r.owners.slice(0, 8) : [],
+        due: r.due ?? null, ...(r.approved ? { approved: true } : {}), ...(r.archived ? { archived: true } : {}), changed: r.changed ?? null,
+        ...(whole ? { description: masked(String(r.description ?? '')), created: r.created ?? null,
+            notes: (Array.isArray(r.notes) ? r.notes : []).map((n) => ({ at: n.at, by: String(n.by?.name ?? ''), text: masked(String(n.text ?? '')) })),
+            attached: (Array.isArray(r.attached) ? r.attached : []).map((a) => ({ kind: String(a.kind ?? ''), title: masked(String(a.title ?? '')) })) } : {}) });
+    const bindersListed = (id) => {
+        const given = keys.bindersOf(id);
+        const shown = given.length ? asked(id, 'lists', {}) : [];
+        const lists = new Map((Array.isArray(shown) ? shown : []).map((l) => [l.id, l]));
+        return { binders: given.filter((g) => lists.has(g.id)).map((g) => { const l = lists.get(g.id);
+            return { id: g.id, title: String(l.title ?? ''), level: g.level, count: l.count ?? 0,
+                states: (l.states ?? []).map((x) => ({ id: x.id, name: x.name, ...(x.gate ? { gate: true } : {}), ...(x.done ? { done: true } : {}) })),
+                fields: (l.fields ?? []).map((f) => ({ id: f.id, name: f.name, type: f.type })) }; }) };
+    };
+    const recordsListed = (id, list, { state, archived } = {}) => {
+        keys.mayBinder(id, list, 'read');
+        if (state !== undefined && state !== null && typeof state !== 'string') throw new Refusal(400, 'state: a state\'s id or name.');
+        const d = asked(id, 'show', { list, ...(state ? { state } : {}), archived: archived === true });
+        return { records: (d.records ?? []).map((r) => recordShown(r, d.list)) };
+    };
+    /* The record, as the key may reach it: in this list, the list given. */
+    const recordIn = (id, list, record, level) => {
+        keys.mayBinder(id, list, level);
+        if (typeof record !== 'string' || !/^\d{1,9}$/.test(record)) throw new Refusal(404, 'No such record in this binder.');
+        let d;
+        try { d = asked(id, 'get', { id: record }); } catch (error) { if (error instanceof Refusal && error.status === 400) throw new Refusal(404, 'No such record in this binder.'); throw error; }
+        if (d?.record?.list !== list) throw new Refusal(404, 'No such record in this binder.');
+        return d;
+    };
+    const recordRead = (id, list, record) => { const d = recordIn(id, list, record, 'read'); return { record: recordShown(d.record, d.list, true) }; };
+    const binderSaid = (id, list, what) => said(id, 'asset', `Binder "${String(keys.binderTitle(list)).slice(0, 60)}": ${what}`);
+    const RECORD_FIELDS = ['title', 'description', 'fields', 'due'];
+    const recordAdding = (id, list, body) => {
+        keys.mayBinder(id, list, 'write');
+        onlyFields(body, ['title', 'description', 'state', 'fields', 'due']);
+        const r = asked(id, 'add', { list, title: body.title, description: body.description, state: body.state, fields: body.fields, due: body.due });
+        binderSaid(id, list, `#${r.id} added`);
+        return { ok: true, record: recordRead(id, list, String(r.id)).record };
+    };
+    const recordEditing = (id, list, record, body) => {
+        recordIn(id, list, record, 'write');
+        onlyFields(body, RECORD_FIELDS);
+        asked(id, 'edit', { id: record, ...Object.fromEntries(RECORD_FIELDS.filter((k) => body[k] !== undefined).map((k) => [k, body[k]])) });
+        binderSaid(id, list, `#${record} changed`);
+        return { ok: true, record: recordRead(id, list, record).record };
+    };
+    const recordMoving = (id, list, record, body) => {
+        recordIn(id, list, record, 'write');
+        onlyFields(body, ['state']);
+        if (typeof body.state !== 'string' || !body.state) throw new Refusal(400, 'state: a state\'s id or name.');
+        const r = asked(id, 'move', { id: record, state: body.state });
+        binderSaid(id, list, `#${record} moved to ${String(r.stateName ?? r.state).slice(0, 40)}`);
+        return { ok: true, record: recordRead(id, list, record).record };
+    };
+    const recordNoting = (id, list, record, body) => {
+        recordIn(id, list, record, 'write');
+        onlyFields(body, ['text']);
+        if (typeof body.text !== 'string' || !body.text.trim()) throw new Refusal(400, 'Say something: text.');
+        asked(id, 'note', { id: record, text: body.text });
+        binderSaid(id, list, `#${record} noted`);
+        return { ok: true, record: recordRead(id, list, record).record };
+    };
+    const recordArchiving = (id, list, record, restore) => {
+        recordIn(id, list, record, 'write');
+        asked(id, 'archive', { id: record, restore: restore === true });
+        binderSaid(id, list, `#${record} ${restore === true ? 'restored' : 'archived'}`);
+        return { ok: true, record: recordRead(id, list, record).record };
+    };
     const ownError = (error, id) => (error instanceof Refusal ? Object.assign(error, { key: error.key ?? id }) : error);
     try {
         if (route === '/v1/status') {
@@ -748,6 +979,51 @@ export async function handleExternal(request, response, { keys, status, chats = 
             const body = await status();
             note(id, 200);
             return send(200, body);
+        }
+        /* A JSON body, or a refusal. */
+        const jsonOf = async (max) => {
+            if (!String(request.headers['content-type'] ?? '').startsWith('application/json')) throw new Refusal(415, 'Send JSON.');
+            const text = await bodyOf(max);
+            if (!text) return {};
+            try { return JSON.parse(text); } catch { throw new Refusal(400, 'The request is not JSON.'); }
+        };
+        const reminder = /^\/v1\/conversations\/([^/]+)\/reminders(?:\/([^/]+)\/cancel)?$/.exec(route);
+        if (reminder) {
+            const allowed = reminder[2] ? 'POST' : 'GET, POST';
+            if (!allowed.split(', ').includes(request.method)) return send(405, { error: `Call this address with ${allowed}.` }, { allow: allowed });
+            let id;
+            try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error); }
+            try {
+                let name; let plan = '';
+                try { name = decodeURIComponent(reminder[1]); plan = reminder[2] ? decodeURIComponent(reminder[2]) : ''; } catch { name = ''; }
+                if (reminder[2]) { const done = unreminding(id, name, plan); note(id, 200); return send(200, done); }
+                if (request.method === 'GET') { const body = remindersListed(id, name); note(id, 200); return send(200, body); }
+                const done = reminding(id, name, await jsonOf(4096));
+                note(id, 201); return send(201, done);
+            } catch (error) { return refused(ownError(error, id)); }
+        }
+        const binderRoute = /^\/v1\/binders(?:\/([^/]+)\/records(?:\/([^/]+)(?:\/(move|notes|archive|restore))?)?)?$/.exec(route);
+        if (binderRoute) {
+            const [, listRef, recordRef, verb] = binderRoute;
+            const allowed = !listRef ? 'GET' : verb ? 'POST' : 'GET, POST';
+            if (!allowed.split(', ').includes(request.method)) return send(405, { error: `Call this address with ${allowed}.` }, { allow: allowed });
+            let id;
+            try { id = keys.check(request.headers.authorization); } catch (error) { return refused(error); }
+            try {
+                if (!listRef) { const body = bindersListed(id); note(id, 200); return send(200, body); }
+                let list; let record;
+                try { list = decodeURIComponent(listRef); record = recordRef === undefined ? undefined : decodeURIComponent(recordRef); } catch { list = ''; }
+                if (request.method === 'GET') {
+                    const body = record === undefined ? recordsListed(id, list, { state: url.searchParams.get('state') || undefined, archived: url.searchParams.get('archived') === '1' }) : recordRead(id, list, record);
+                    note(id, 200); return send(200, body);
+                }
+                if (verb === 'archive' || verb === 'restore') { const done = recordArchiving(id, list, record, verb === 'restore'); note(id, 200); return send(200, done); }
+                const body = await jsonOf(16_384);
+                const done = record === undefined ? recordAdding(id, list, body) : verb === 'move' ? recordMoving(id, list, record, body)
+                    : verb === 'notes' ? recordNoting(id, list, record, body) : recordEditing(id, list, record, body);
+                const code = record === undefined || verb === 'notes' ? 201 : 200;
+                note(id, code); return send(code, done);
+            } catch (error) { return refused(ownError(error, id)); }
         }
         const one = /^\/v1\/conversations(?:\/([^/]+)\/(messages|wake|sleep|stop))?$/.exec(route);
         if (one) {
@@ -828,7 +1104,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
             }
             const args = msg.params?.arguments && typeof msg.params.arguments === 'object' && !Array.isArray(msg.params.arguments) ? msg.params.arguments : {};
             /* The journal says which tool, and on which conversation, room or box. */
-            const on = [args.conversation, args.room, args.box].find((v) => typeof v === 'string');
+            const on = [args.conversation, args.room, args.box, args.binder].find((v) => typeof v === 'string');
             const what = `/mcp ${msg.method.slice(0, 40)}${msg.method === 'tools/call' ? ` ${String(msg.params?.name ?? '').slice(0, 40)}${on ? ` ${on.slice(0, 36)}` : ''}` : ''}`;
             /* A notification (no id) is taken, never answered. */
             if (msg.id === undefined || msg.id === null) { note(id, 202, what); response.writeHead(202, { ...headers, 'cache-control': 'no-store' }).end(); return true; }
@@ -840,7 +1116,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
                 const asked = String(msg.params?.protocolVersion ?? '');
                 return answer({ protocolVersion: MCP_VERSIONS.includes(asked) ? asked : MCP_VERSIONS[0], capabilities: { tools: { listChanged: false } },
                     serverInfo: { name: 'clavarium', title: 'Clavarium', version: version ?? '0' },
-                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home). Where it was given more: a conversation woken, put to sleep, its turn stopped (clavarium_conversation_wake, _sleep, _stop); rooms made, changed, removed (clavarium_room_create, clavarium_room_change, clavarium_room_remove).' });
+                    instructions: 'This Clavarium, as far as this key was given it: its state (clavarium_status), the conversations given to it (clavarium_conversations), to read (clavarium_read) or to talk in (clavarium_say); its rooms (clavarium_rooms, clavarium_room_read, clavarium_room_say); its voice boxes (clavarium_boxes; clavarium_box_say says a short text aloud in the home). Where it was given more: a conversation woken, put to sleep, its turn stopped (clavarium_conversation_wake, _sleep, _stop); rooms made, changed, removed (clavarium_room_create, clavarium_room_change, clavarium_room_remove); a conversation\'s reminders seen, set, taken back (clavarium_reminders, clavarium_remind, clavarium_reminder_cancel); binder lists read and written (clavarium_binders, clavarium_binder_records, clavarium_binder_record, clavarium_binder_add, _edit, _move, _note, _archive).' });
             }
             case 'ping': return answer({});
             case 'tools/list': return answer({ tools: TOOLS });
@@ -855,6 +1131,19 @@ export async function handleExternal(request, response, { keys, status, chats = 
                     if (name === CONVERSATIONS_TOOL.name) return result(listed(id));
                     if (name === ROOMS_TOOL.name) return result(roomsListed(id));
                     if (name === BOXES_TOOL.name) return result(boxesListed(id));
+                    if (name === BINDERS_TOOL.name) return result(bindersListed(id));
+                    if (BINDER_TOOLS.some((x) => x.name === name)) {
+                        if (typeof args.binder !== 'string') return fail(-32602, 'binder: the id of a binder list.');
+                        if (name === BINDER_RECORDS_TOOL.name) return result(recordsListed(id, args.binder, { state: args.state, archived: args.archived === true }));
+                        if (name !== BINDER_ADD_TOOL.name && typeof args.record !== 'string') return fail(-32602, 'record: the id of a record.');
+                        if (name === BINDER_RECORD_TOOL.name) return result(recordRead(id, args.binder, args.record));
+                        const { binder: list, record, ...rest } = args;
+                        const done = name === BINDER_ADD_TOOL.name ? recordAdding(id, list, rest) : name === BINDER_EDIT_TOOL.name ? recordEditing(id, list, record, rest)
+                            : name === BINDER_MOVE_TOOL.name ? recordMoving(id, list, record, rest) : name === BINDER_NOTE_TOOL.name ? recordNoting(id, list, record, rest)
+                            : recordArchiving(id, list, record, rest.restore === true);
+                        note(id, 201, what);
+                        return send(200, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(done) }], structuredContent: done, isError: false } });
+                    }
                     const part = () => readPart((k) => (args[k] === undefined ? null : typeof args[k] === 'number' ? String(args[k]) : args[k]));
                     let done;
                     if (name === ROOM_CREATE_TOOL.name) {
@@ -871,8 +1160,13 @@ export async function handleExternal(request, response, { keys, status, chats = 
                     } else {
                         if (typeof args.conversation !== 'string') return fail(-32602, 'conversation: the id of a conversation.');
                         if (name === READ_TOOL.name) return result(reading(id, args.conversation, part()));
+                        if (name === REMINDERS_TOOL.name) return result(remindersListed(id, args.conversation));
+                        if (name === REMIND_TOOL.name) { const { conversation: c, ...rest } = args; done = reminding(id, c, rest); }
+                        else if (name === REMINDER_CANCEL_TOOL.name) done = unreminding(id, args.conversation, args.reminder);
+                        else {
                         const act = { [WAKE_TOOL.name]: 'wake', [SLEEP_TOOL.name]: 'sleep', [STOP_TOOL.name]: 'stop' }[name];
                         done = act ? await acting(id, args.conversation, act) : await saying(id, args.conversation, args.text);
+                        }
                     }
                     note(id, 201, what);
                     return send(200, { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: JSON.stringify(done) }], structuredContent: done, isError: false } });
@@ -889,7 +1183,7 @@ export async function handleExternal(request, response, { keys, status, chats = 
             }
         }
         note(null, 404);
-        return send(404, { error: 'Not found. GET /api/ext/v1/status, /api/ext/v1/conversations, /api/ext/v1/rooms, /api/ext/v1/boxes, or MCP at /api/ext/mcp.' });
+        return send(404, { error: 'Not found. GET /api/ext/v1/status, /api/ext/v1/conversations, /api/ext/v1/rooms, /api/ext/v1/boxes, /api/ext/v1/binders, or MCP at /api/ext/mcp.' });
     } catch (error) {
         if (error instanceof Refusal) return refused(error);
         note(null, 500);
@@ -915,9 +1209,9 @@ export async function handleApiKeys(request, response, keys, originOk, headers =
         try { body = text ? JSON.parse(text) : {}; } catch { return send(400, { error: 'The request is not JSON.' }); }
         if (!body || typeof body !== 'object') body = {};
         if (pathname === '/api/apikeys') {
-            const made = keys.create({ label: body.label, scopes: body.scopes ?? [], conversations: body.conversations ?? {}, rooms: body.rooms ?? {}, boxes: body.boxes ?? {}, days: body.days === undefined ? DEFAULT_DAYS : body.days }, who);
+            const made = keys.create({ label: body.label, scopes: body.scopes ?? [], conversations: body.conversations ?? {}, rooms: body.rooms ?? {}, boxes: body.boxes ?? {}, binders: body.binders ?? {}, days: body.days === undefined ? DEFAULT_DAYS : body.days }, who);
             /* Its name and scopes; never the secret. */
-            const what = [...made.key.scopes, ...made.key.conversations.map((c) => `${c.name} ${c.level}`), ...made.key.rooms.map((r) => `room ${r.id.slice(0, 8)} ${r.level}`), ...made.key.boxes.map((b) => `voice box ${b.id.slice(0, 8)} ${b.level}`)];
+            const what = [...made.key.scopes, ...made.key.conversations.map((c) => `${c.name} ${c.level}`), ...made.key.rooms.map((r) => `room ${r.id.slice(0, 8)} ${r.level}`), ...made.key.boxes.map((b) => `voice box ${b.id.slice(0, 8)} ${b.level}`), ...made.key.binders.map((l) => `binder ${l.id.slice(0, 40)} ${l.level}`)];
             events?.add({ kind: 'access', text: `API key "${made.key.label}" made${what.length ? ` (${what.join(', ')})` : ' (no scope)'}`, who: who || null });
             return send(201, made);
         }
@@ -935,6 +1229,13 @@ export async function handleApiKeys(request, response, keys, originOk, headers =
             const ref = room ? body.room : body.box;
             const key = room ? keys.setRoom(one[1], ref, level) : keys.setBox(one[1], ref, level);
             events?.add({ kind: 'access', text: `API key "${key.label}": ${room ? 'room' : 'voice box'} ${String(ref).slice(0, 8)} ${level ?? 'taken back'}`, who: who || null });
+            return send(200, { key });
+        }
+        const binding = /^\/api\/apikeys\/([0-9a-f-]{36})\/binders$/.exec(pathname);
+        if (binding) {
+            const level = body.level === undefined ? null : body.level;
+            const key = keys.setBinder(binding[1], body.binder, level, who);
+            events?.add({ kind: 'access', text: `API key "${key.label}": binder ${String(body.binder).slice(0, 40)} ${level ?? 'taken back'}`, who: who || null });
             return send(200, { key });
         }
         const revoke = /^\/api\/apikeys\/([0-9a-f-]{36})\/revoke$/.exec(pathname);

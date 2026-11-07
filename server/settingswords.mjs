@@ -26,6 +26,18 @@ export const SETTINGS_WORDS_FR = {
     'set-update-out': '{v} est sortie', 'set-up-to-date': 'À jour · {v}', 'set-wifi-on': 'Wi-Fi · {name}', 'set-wifi-off': 'Wi-Fi non utilisé', 'set-cable': 'Câble',
     /* A room message an AI could not get (its chat off): rooms.mjs say, missed. */
     'set-room-missed': '{names} ne l\'a pas reçu : discussion coupée',
+    /* A repository's automatic sending (gitkeeper.mjs), in a conversation's Assets. */
+    'set-auto-title': 'Envoi automatique',
+    'set-auto-branches': 'Branches envoyées seules (vide : jamais)',
+    'set-auto-quiet': 'Délai de calme, en secondes',
+    'set-auto-hour': 'Envois par heure, au plus (0 : sans limite)',
+    'set-auto-create': 'Peut créer une branche absente du distant',
+    'set-auto-checks': 'Seulement après les vérifications',
+    'set-auto-off': 'désactivé',
+    'set-auto-on': 'activé : {list}',
+    'set-auto-saved': 'Enregistré.',
+    'set-auto-save': 'Enregistrer',
+    'set-auto-confirm': 'Confirmer et enregistrer',
     /* A box's learning session (boxcollect.mjs): the radio, its false wakes kept. */
     'set-collect': 'Séance d\'apprentissage (radio)', 'set-collect-from': 'de', 'set-collect-to': 'à',
     'set-collect-go': 'Programmer', 'set-collect-stop': 'Arrêter', 'set-collect-scheduled': 'Programmée de {from} à {to}',
@@ -86,6 +98,7 @@ export const SETTINGS_WORDS_FR = {
     'set-apikeys-rooms': 'Salons', 'set-apikeys-rooms-hint': 'Un par un : lire, parler ou gérer', 'set-apikeys-no-rooms': 'Aucun salon pour l\'instant',
     'set-apikeys-boxes': 'Boîtiers vocaux', 'set-apikeys-boxes-hint': 'Un par un : état, ou parler à voix haute', 'set-apikeys-no-boxes': 'Aucun boîtier pour l\'instant',
     'set-apikeys-state': 'État', 'set-apikeys-speak': 'Parler à voix haute',
+    'set-apikeys-binders': 'Classeurs', 'set-apikeys-binders-hint': 'Un par un : lire ou écrire', 'set-apikeys-write': 'Écrire',
     /* The rights of an asset (06-11, kit.js RIGHTS): what it has (a pill), a choice, its one line. */
     'set-rt-none': 'Aucun', 'set-rt-read': 'Lit', 'set-rt-write': 'Écrit', 'set-rt-use': 'Utilise', 'set-rt-watch': 'Surveille',
     'set-rt-propose': 'Propose', 'set-rt-frame': 'Encadré', 'set-rt-free': 'Libre', 'set-rt-terminal': 'Terminal', 'set-rt-chat': 'Chat',

@@ -14,6 +14,8 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     await me.create('beta');
     /* A room, given to the key to talk in (07-11): its rows beside the conversations', Off first. */
     const kitchen = (await me.api('/api/rooms', { name: 'Kitchen', conversations: ['alpha'] })).body;
+    /* A binder list, given to the key to write (07-11): its picker shown only when there are lists. */
+    const tasks = (await me.api('/api/binder', { op: 'create-list', args: { template: 'simple', title: 'Tasks' } })).body.data;
     await me.page.locator('#nav-settings').click();
     await me.until('Settings are shown', async () => me.page.locator('#settings').isVisible());
     await me.until('the chapter is there', async () => !(await me.page.locator('#settings-ch-apikeys').evaluate((d) => d.hidden)));
@@ -39,6 +41,11 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.deepEqual(await roomPick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'talk', 'manage'], 'Off, Read, Talk, Manage');
     await roomPick.locator('button[data-value="manage"]').click();
     assert.match(await me.page.locator('#apikeys-boxes').innerText(), /No voice box yet/);
+    assert.equal(await me.page.locator('#apikeys-binders-row').isVisible(), true, 'Binders: there is a list');
+    const listPick = me.page.locator(`#apikeys-binders .apikey-binder[data-id="${tasks.id}"] .kit-seg`);
+    assert.equal(await listPick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'a list: Off until chosen');
+    assert.deepEqual(await listPick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'write'], 'Off, Read, Write');
+    await listPick.locator('button[data-value="write"]').click();
     await me.page.locator('#apikeys-form button[type="submit"]').click();
 
     /* Shown this once, copied. */
@@ -51,7 +58,7 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal(secret, shown);
     await me.until('the key is listed', async () => (await me.page.locator('#apikeys-rows .list-item').count()) === 1);
     const row = me.page.locator('#apikeys-rows .list-item').first();
-    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*Create rooms[\s\S]*alpha · Talk[\s\S]*Kitchen · Manage[\s\S]*Never used[\s\S]*Expires/);
+    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*Create rooms[\s\S]*alpha · Talk[\s\S]*Kitchen · Manage[\s\S]*Tasks · Write[\s\S]*Never used[\s\S]*Expires/);
     await me.page.locator('#apikeys-done').click();
     assert.equal(await me.page.locator('#apikeys-once').isVisible(), false);
     assert.equal(await me.page.locator('#apikeys-secret').inputValue(), '', 'Done: gone from the page');
@@ -88,6 +95,12 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal((await ext(`/rooms/${kitchen.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Dinner at eight' }) })).status, 201);
     const inRoom = (await (await ext(`/rooms/${kitchen.id}/messages?last=10`)).json()).messages.find((m) => m.text === 'Dinner at eight');
     assert.equal(inRoom?.by, 'Home automation');
+    /* Its list: listed, a record added signed with the key's name. */
+    assert.deepEqual((await (await ext('/binders')).json()).binders.map((l) => [l.title, l.level]), [['Tasks', 'write']]);
+    const card = await ext(`/binders/${tasks.id}/records`, { method: 'POST', body: JSON.stringify({ title: 'Buy bulbs' }) });
+    assert.equal(card.status, 201);
+    const history = (await me.api('/api/binder', { op: 'get', args: { id: (await card.json()).record.id } })).body.data.history;
+    assert.equal(history[0].by.name, 'Home automation');
     assert.deepEqual((await (await ext('/boxes')).json()).boxes, [], 'no box given');
 
     /* Its journal, under it: its last calls, the newest first. */

@@ -130,6 +130,18 @@ export class Binders {
         }
         return out;
     }
+    /* FOR API KEYS (apikeys.mjs): every list with who was given it, as a person sees them; a key given a list, or
+       taken back, on the list's own access -- as a conversation is. `identity`: the person, as its history says. */
+    lists() { return this.#keeper.store.lists({ id: 'person:keeper', kind: 'person', name: 'keeper' }).map((l) => ({ id: l.id, title: l.title, archived: Boolean(l.archived), grants: { ...(l.grants ?? {}) } })); }
+    grant(list, subject, level, identity = '') {
+        if (!/^apikey:[0-9a-f-]{36}$/.test(String(subject))) throw new Error('A list is given here to an API key only.');
+        this.#keeper.store.grant(list, subject, level, { id: `person:${identity || 'owner'}`, kind: 'person', name: identity || 'Owner' });
+    }
+    /* An API key asks, as an agent (never a person: Binder's gates hold). */
+    asKey(op, args, who) {
+        if (!who || who.kind !== 'agent' || !/^apikey:/.test(String(who.id))) throw new Error('Not an API key.');
+        return this.#keeper.act(String(op ?? ''), args && typeof args === 'object' ? args : {}, who);
+    }
     /* A number that moves with every change: the page reads again when it moved. */
     changes() { return this.#changes; }
 }
