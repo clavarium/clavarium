@@ -682,7 +682,9 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         say: (name, text, extra, files) => talk.say(name, text, undefined, files, undefined, extra),
         attach: (name, fileName, request) => talk.attach(name, fileName, request),
         rooms: (name, list) => talk.rooms(name, list), conversations: () => all.list(), boxes: () => boxes.all(),
-        speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); } });
+        speak: (where, text, ids, how) => { void boxes.agentSaid(where, text, ids, how); },
+        /* What an AI shows in a room: opened through its own conversation, with its rights (talk.mjs). */
+        reach: (name, path) => talk.reachOf(name, path), shown: (name, ref) => talk.shown(name, ref) });
     rooms.boxesBound(boxes.all());
     rooms.refresh();
     /* FEATURES (features.mjs): read from what the modules say, never a secret's value. The remote screen and the

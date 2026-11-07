@@ -255,3 +255,74 @@ test('a room file: refused too large, a name leaving its folder refused, a path 
     await assert.rejects(rooms.say(r.id, 'x', { files: ['/etc/passwd'] }), (e) => e.status === 400);
     assert.equal(said.length, 0);
 });
+
+/* WHAT AN AI SHOWS IN A ROOM (06-11): a file of its own it cites is opened through ITS conversation, with its
+   rights; never another conversation's; a mail it cites is read for its conversation. The stand-ins below are
+   talk.reachOf and talk.shown: hugo keeps /work and has the folder `shared`; compta has neither. */
+const showing = (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'roomshow-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const convs = [{ name: 'hugo' }, { name: 'compta' }];
+    const own = { hugo: { work: true, folders: ['shared'] }, compta: { work: false, folders: [] } };
+    const reach = (name, path) => {
+        if (path.startsWith('/work/')) return own[name]?.work ? `work:${path.slice('/work/'.length)}` : null;
+        const m = /^\/resources\/([a-z][a-z0-9-]*)\/(.+)$/.exec(path);
+        return m && own[name]?.folders.includes(m[1]) ? `${m[1]}:${m[2]}` : null;
+    };
+    /* What each conversation's own chat has: what its agent cited (its from-agent, refs computed by its reach). */
+    const chats = new Map(convs.map((c) => [c.name, new Set()]));
+    const shown = (name, ref) => chats.get(name)?.has(ref) === true;
+    const rooms = new Rooms({ file: new JsonFile(join(dir, 'rooms.json'), []), dir: join(dir, 'rooms'), say: async () => {}, conversations: () => convs, reach, shown });
+    const answer = (name, roomId, text) => { for (const p of text.match(/\/(work|resources)\/[^\s)]+/g) ?? []) { const o = reach(name, p.replace(/[.,;:!?]+$/, '')); if (o) chats.get(name).add(o); } return rooms.answered(name, { room: roomId, text }); };
+    return { rooms, chats, answer };
+};
+
+test('a file an AI of a room cites (a path, a picture): opened through its conversation, with its rights; never another\'s', (t) => {
+    const { rooms, answer } = showing(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const hugo = r.members.find((m) => m.ref === 'hugo'); const compta = r.members.find((m) => m.ref === 'compta');
+    answer('hugo', r.id, 'Le rapport : /work/out/report.html et ![plan](/resources/shared/plan.png)');
+    const m = rooms.read(r.id).messages.at(-1);
+    assert.deepEqual(m.refs.map((x) => x.open).sort(), [`ai:${hugo.id}:shared:plan.png`, `ai:${hugo.id}:work:out/report.html`]);
+    assert.deepEqual(rooms.shownFile(r.id, `ai:${hugo.id}:work:out/report.html`), { conversation: 'hugo', tab: 'work', inner: 'out/report.html' });
+    assert.equal(rooms.shownFile(r.id, `ai:${hugo.id}:shared:plan.png`).conversation, 'hugo');
+    assert.ok(rooms.read(r.id).files.every((f) => f.open.startsWith('ai:')), 'the thread\'s files list: each opened through its AI');
+    /* compta cites a path it cannot open (another conversation's folder, a work folder not kept): no link, nothing opens. */
+    answer('compta', r.id, 'Et /resources/shared/plan.png ou /work/out/report.html ?');
+    assert.equal(rooms.read(r.id).messages.at(-1).refs, undefined, 'its conversation cannot open them: no link');
+    assert.throws(() => rooms.shownFile(r.id, `ai:${compta.id}:shared:plan.png`), (e) => e.status === 404, 'another conversation\'s file, through compta: refused');
+    assert.throws(() => rooms.shownFile(r.id, `ai:${compta.id}:work:out/report.html`), (e) => e.status === 404);
+    assert.throws(() => rooms.shownFile(r.id, `ai:${hugo.id}:shared:secret.txt`), (e) => e.status === 404, 'never cited here: refused');
+    assert.throws(() => rooms.shownFile(r.id, `ai:${hugo.id}:work:../rooms.json`), (e) => e.status === 404);
+    assert.throws(() => rooms.shownFile(r.id, 'work:out/report.html'), (e) => e.status === 404, 'not an AI\'s reference');
+    /* Gone from the room, its files go with it. */
+    rooms.change(r.id, { remove: [hugo.id] });
+    assert.throws(() => rooms.shownFile(r.id, `ai:${hugo.id}:work:out/report.html`), (e) => e.status === 404);
+});
+
+test('a file an AI cites in a room but its own chat no longer has (a folder taken away): refused', (t) => {
+    const { rooms, chats, answer } = showing(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo'] });
+    const hugo = r.members.find((m) => m.ref === 'hugo');
+    answer('hugo', r.id, 'Voir /resources/shared/plan.png');
+    chats.get('hugo').clear();
+    assert.throws(() => rooms.shownFile(r.id, `ai:${hugo.id}:shared:plan.png`), (e) => e.status === 404);
+});
+
+test('a mail an AI cites in a room: read for that AI\'s conversation; one nobody cited, refused', (t) => {
+    const { rooms, answer } = showing(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'] });
+    const ref = 'mail:work-mail/quote-1%40example.com?in=INBOX&uid=7';
+    answer('compta', r.id, `Le devis : [Devis](${ref})`);
+    assert.equal(rooms.mailFrom(r.id, ref), 'compta');
+    assert.throws(() => rooms.mailFrom(r.id, 'mail:work-mail/other%40example.com'), (e) => e.status === 404);
+    assert.throws(() => rooms.mailFrom(r.id, '/etc/passwd'), (e) => e.status === 400);
+});
+
+test('a file an AI shows in a room (show): relayed in its thread, never empty', (t) => {
+    const { rooms } = showing(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo'] });
+    assert.ok(rooms.answered('hugo', { room: r.id, kind: 'show', text: '', path: '/work/out/plan.png' }, 'show'));
+    assert.match(rooms.read(r.id).messages.at(-1).text, /plan\.png/);
+    assert.equal(rooms.answered('hugo', { room: r.id, kind: 'show', text: 'rien' }, 'show'), null, 'nothing shown: nothing relayed');
+});

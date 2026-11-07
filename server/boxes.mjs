@@ -40,6 +40,9 @@ export const WAKE_DROP = process.env.CLAVARIUM_WAKE_DROP === '1';
    the room (« Oui, à l'ombre ») not. */
 const WAKE_SOUND = /^(?:\S+ )?[ml](?:a|e|i|ai|ei)(?:s|z|ss|se|ze|sse) (?:a|e|o)n|^m[ae]s doi/;
 export const wakeHeard = (text) => { const t = plainWords(text); return WAKE_HEARD.test(t) || WAKE_SOUND.test(t.replace(/^l /, '')); };
+/* Heard by its sound only (« Mise en œuvre », « Mise en jeu »), not by its spelling: the real calls read so had a
+   firm voice; with a faint one it is the room's talk (06-11, 23h20: « Mise en œuvre… moment », voice 396). */
+export const wakeBySoundOnly = (text) => { const t = plainWords(text); return !WAKE_HEARD.test(t) && WAKE_SOUND.test(t.replace(/^l /, '')); };
 /* DROPPED IN SILENCE (05-11, the owner's go): a wake whose word is not heard again AND whose voice was faint --
    the room's talk from afar, not someone speaking to the box. Every real call of 05-11 that the word missed
    had a firm voice or none measured; the false wake of 05-11, 429. Said by one discreet line in the thread. */
@@ -937,7 +940,8 @@ export class Boxes {
             /* First in the line: Parley keeps 120 characters of `why`, and the end stats after it can pass that. */
             link.why = `mot ${check.ok ? '\u2713' : '\u2717'} « ${check.heard.slice(0, 30)} »${link.why ? ` · ${link.why}` : ''}`;
             this.#log(`voice box ${box.name}: wake word heard again: ${check.ok ? 'yes' : 'NO'} (« ${check.heard.slice(0, 40)} »)`);
-            if (dropsWake(check.ok, link.voice, link.endReason, check.heard)) {
+            const soundOnlyFaint = check.ok && wakeBySoundOnly(check.heard) && Number.isFinite(link.voice) && link.voice > 0 && link.voice < WAKE_FAINT;
+            if (dropsWake(check.ok, link.voice, link.endReason, check.heard) || soundOnlyFaint) {
                 link.send({ t: 'cue', name: 'done' });
                 this.#log(`voice box ${box.name}: wake ignored (word not heard again, ${link.endReason === 'timeout' ? 'a sentence that never ended' : !check.heard.trim() ? 'no word in its clip' : `faint voice ${Math.round(link.voice || 0)}`})`);
                 try { this.#note?.(box.conversation, { kind: 'box-wake-ignored', text: `Wake ignored on ${box.name}: « ${check.heard.slice(0, 40)} », ${link.endReason === 'timeout' ? 'a sound that never stopped (radio, TV)' : !check.heard.trim() ? 'no word where the wake word should be' : 'faint voice'}`, topic: 'Voice box', tone: 'info' }); } catch { /* the log has it */ }
