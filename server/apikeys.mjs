@@ -559,8 +559,9 @@ export async function handleExternal(request, response, { keys, status, chats = 
         if (typeof text !== 'string' || !text.trim()) throw new Refusal(400, 'Say something: text.');
         if (text.length > SAY_MAX) throw new Refusal(400, `${SAY_MAX} characters at most.`);
         if (to !== undefined && to !== null && (!Array.isArray(to) || to.length > 20 || to.some((x) => typeof x !== 'string'))) throw new Refusal(400, 'to: the names of AIs of this room.');
-        await rooms.say(room, text, { as: keys.roomSignature(id), to: Array.isArray(to) ? to : [] });
-        return { ok: true };
+        const done = await rooms.say(room, text, { as: keys.roomSignature(id), to: Array.isArray(to) ? to : [] });
+        /* Posted; an AI it could not reach (its chat off) said by name. */
+        return done?.missed?.length ? { ok: true, notReached: done.missed.map((m) => m.name) } : { ok: true };
     };
     const boxesListed = (id) => {
         const there = new Map((boxes?.list() ?? []).map((b) => [b.id, b]));

@@ -272,16 +272,25 @@ export class Rooms {
         const said = now.messages.at(-1);
         const named = (Array.isArray(to) ? to : []).map((x) => members.find((m) => m.id === x && m.kind === 'ai')).filter(Boolean);
         const host = members.find((m) => m.id === room.host);
+        /* Kept in the room whatever happens next: an AI that cannot be reached (its chat off) is said back by name,
+           never as a failure of what was already posted (07-11). */
+        const missed = [];
         for (const ai of named.length ? named : host ? [host] : []) {
             this.#think(room.id, ai.id, true);
-            /* Its own copy of each file, in its chat's files: as if attached there (a fresh read of the room's file). */
-            const copies = [];
-            for (const f of attached) { const stream = createReadStream(f.file); stream.headers = { 'content-length': String(f.size) }; copies.push((await this.#attach(ai.ref, f.name, stream)).path); }
-            await this.#say(ai.ref, text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } }, ...(copies.length ? [copies] : []));
+            try {
+                /* Its own copy of each file, in its chat's files: as if attached there (a fresh read of the room's file). */
+                const copies = [];
+                for (const f of attached) { const stream = createReadStream(f.file); stream.headers = { 'content-length': String(f.size) }; copies.push((await this.#attach(ai.ref, f.name, stream)).path); }
+                await this.#say(ai.ref, text, { by: { id: who.id, name: who.name, kind: who.kind, look: who.look }, room: { id: room.id, name: room.name, message: said.id } }, ...(copies.length ? [copies] : []));
+            } catch (error) {
+                if (!(error instanceof Refusal)) throw error;
+                this.#think(room.id, ai.id, false);
+                missed.push({ name: ai.name, why: error.message });
+            }
         }
         /* Handed to its AIs: read, as a conversation's agent would say it (06-11: the clock stayed on every message). */
         try { t.seen?.(); } catch { /* an older Parley */ }
-        return this.read(id);
+        return missed.length ? { ...this.read(id), missed } : this.read(id);
     }
 
     /* AN AI ANSWERS IN A ROOM (what its own folder says, entry.room): only to a room it is in; signed by where it

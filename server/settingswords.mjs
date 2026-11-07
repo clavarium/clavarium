@@ -24,6 +24,8 @@ export const SETTINGS_WORDS_FR = {
     'set-free-of': '{free} libres sur {total}', 'set-left-of': '{free} restants sur {total}', 'set-highest': 'au plus {n} % en 1 h',
     'set-core': '1 cœur', 'set-cores': '{n} cœurs',
     'set-update-out': '{v} est sortie', 'set-up-to-date': 'À jour · {v}', 'set-wifi-on': 'Wi-Fi · {name}', 'set-wifi-off': 'Wi-Fi non utilisé', 'set-cable': 'Câble',
+    /* A room message an AI could not get (its chat off): rooms.mjs say, missed. */
+    'set-room-missed': '{names} ne l\'a pas reçu : discussion coupée',
     /* A box's learning session (boxcollect.mjs): the radio, its false wakes kept. */
     'set-collect': 'Séance d\'apprentissage (radio)', 'set-collect-from': 'de', 'set-collect-to': 'à',
     'set-collect-go': 'Programmer', 'set-collect-stop': 'Arrêter', 'set-collect-scheduled': 'Programmée de {from} à {to}',

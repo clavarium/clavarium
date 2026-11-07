@@ -5613,7 +5613,13 @@
                 if (known && JSON.stringify(thinkingOf(known)) !== JSON.stringify(who)) { known.thinking = who; paint(); }
                 return d;
             }),
-            send: (text, answers, files) => post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) }),
+            /* Kept in the room even when an AI of it could not get it (its chat off, 07-11): said for a moment, by name. */
+            send: async (text, answers, files) => {
+                const d = await post(`${API}/rooms/${id}/talk`, { text, ...(files?.length ? { files: files.map((f) => f.path) } : {}) });
+                const missed = Array.isArray(d?.missed) ? d.missed.map((m) => String(m?.name ?? '')).filter(Boolean) : [];
+                if (missed.length) flash(uiSaid('set-room-missed', '{names} did not get it: chat off', { names: missed.join(', ') }));
+                return d;
+            },
             /* A file attached in a room (06-11): as in a conversation's chat; kept in the room, a copy to each AI the message goes to. */
             attach: { upload: async (file) => { const x = await fetch(`${API}/rooms/${id}/talk/file?${new URLSearchParams({ name: file.name })}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: file }); const j = await x.json().catch(() => ({})); if (!x.ok) throw new Error(j.error || 'The file could not be sent.'); return j; } },
             /* A file an AI of the room showed or cited (ai:<member>:work:a.png): read from its own conversation, in the same viewer as in its chat. */
