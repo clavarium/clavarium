@@ -5380,7 +5380,8 @@
             parts.push({ title: 'Settings', extra: [edit], body }, gitHolder);
         }
         if (t) {
-            parts.push(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
+            /* An MCP server's rights say themselves (Off / Read / All with approval / All / Custom): no levels' words under them. */
+            if (t.kind !== 'mcp') parts.push(el('p', 'hint', 'A level is: watch (read only), propose (asks before each action), frame (acts within its rules, asks for the rest), free (acts, kept in the journal).'));
             /* Calls waiting for a person (propose/frame). Accept or refuse each. */
             const waiting = (Array.isArray(tether.approvals) ? tether.approvals : []).filter((q) => (q.target?.id ?? q.target) === t.id);
             if (waiting.length) {
