@@ -2689,6 +2689,43 @@
         catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
         finally { $('health-check').disabled = false; $('health-check').textContent = 'Look now'; }
     });
+    /* "CHECK SHARED FOLDERS": each mounted and readable (put back when loose), each link the share cannot
+       serve (removed where safe), now; what was found or done, one line each (health.mjs, linkguard.mjs). */
+    const FOLDER_WHY = { loop: ['set-link-loop', 'loops'], dangling: ['set-link-dangling', 'target missing'], absolute: ['set-link-absolute', 'absolute target'], outside: ['set-link-outside', 'target outside the folder'] };
+    function folderLine(x) {
+        const why = FOLDER_WHY[x.why] ? uiSaid(...FOLDER_WHY[x.why]) : (x.why ?? '');
+        const at = x.folder ? `/resources/${x.folder}/${x.path ?? ''}`.replace(/\/$/, '') : x.path;
+        switch (x.kind) {
+            case 'mount-ok': return ['ok', uiSaid('set-fold-ok', '{path}: mounted, readable', { path: at })];
+            case 'mount-remounted': return ['info', uiSaid('set-fold-remounted', '{path}: had come loose, mounted again', { path: at })];
+            case 'mount-missing': return ['warn', uiSaid('set-fold-missing', '{path}: not reachable', { path: at })];
+            case 'mount-failed': return ['bad', uiSaid('set-fold-failed', '{path}: not reachable, not mounted again', { path: at })];
+            case 'link-removed': return ['info', uiSaid('set-fold-link-removed', '{path}: broken link removed ({why})', { path: at, why })];
+            case 'link-found': return ['warn', uiSaid('set-fold-link-found', '{path}: unusable link ({why})', { path: at, why })];
+            case 'links-cut': return ['info', uiSaid('set-fold-cut', '{path}: too large, looked at in part', { path: at })];
+            case 'machine-off': return ['info', uiSaid('set-fold-off', 'Its machine does not run: only links looked at')];
+            default: return ['info', x.kind];
+        }
+    }
+    $('folders-check').addEventListener('click', async () => {
+        const b = $('folders-check'); const list = $('folders-lines');
+        b.disabled = true; b.textContent = uiSaid('set-looking', 'Looking…');
+        try {
+            const r = await post(`${API}/conversations/${encodeURIComponent(current)}/folders/check`, {});
+            list.replaceChildren();
+            const items = r?.items ?? [];
+            if (items.length === 0) items.push({ kind: 'none' });
+            for (const x of items) {
+                const li = document.createElement('li');
+                const [level, text] = x.kind === 'none' ? ['ok', uiSaid('set-fold-none', 'No shared folder')] : folderLine(x);
+                li.dataset.level = level; li.textContent = text; list.append(li);
+            }
+            list.hidden = false;
+            const c = conversations.find((x) => x.name === current); if (c && r?.health) { c.health = r.health; paintMachine(c); paintHealth(); }
+        }
+        catch (error) { $('panel-error').textContent = error.message; $('panel-error').hidden = false; }
+        finally { b.disabled = false; b.textContent = uiSaid('set-check-folders', 'Check shared folders'); }
+    });
     const MEMORY_CHOICES = [768, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384];
     const DISK_CHOICES = [8, 10, 16, 20, 32, 48, 64, 96, 128, 192, 256];
     /* WHEN ITS MACHINE IS SHORT: its agent told (a line you can change), or a command run when it has no agent. */

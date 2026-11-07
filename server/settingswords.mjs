@@ -13,6 +13,13 @@ export const SETTINGS_WORDS_FR = {
     'set-ch-s-usage': 'Usage', 'set-ch-s-backup': 'Sauvegarde', 'set-ch-s-advanced': 'Avancé',
     'set-check-updates': 'Chercher une mise à jour', 'set-activity': 'Activité', 'set-restart-dots': 'Redémarrer…', 'set-terminal': 'Terminal',
     'set-search': 'Chercher', 'set-why': 'Pourquoi',
+    /* Diagnostics › « Vérifier les dossiers partagés » (health.mjs, linkguard.mjs). */
+    'set-check-folders': 'Vérifier les dossiers partagés', 'set-looking': 'Vérification…',
+    'set-fold-ok': '{path} : monté, lisible', 'set-fold-remounted': '{path} : détaché, remonté', 'set-fold-missing': '{path} : inaccessible',
+    'set-fold-failed': '{path} : inaccessible, pas remonté', 'set-fold-link-removed': '{path} : lien cassé retiré ({why})',
+    'set-fold-link-found': '{path} : lien inutilisable ({why})', 'set-fold-cut': '{path} : trop gros, vérifié en partie',
+    'set-fold-off': 'Machine arrêtée : liens seuls vérifiés', 'set-fold-none': 'Aucun dossier partagé',
+    'set-link-loop': 'boucle', 'set-link-dangling': 'cible absente', 'set-link-absolute': 'cible en chemin absolu', 'set-link-outside': 'cible hors du dossier',
     'set-memory': 'Mémoire', 'set-disk': 'Disque', 'set-cpu': 'Processeur',
     'set-free-of': '{free} libres sur {total}', 'set-left-of': '{free} restants sur {total}', 'set-highest': 'au plus {n} % en 1 h',
     'set-core': '1 cœur', 'set-cores': '{n} cœurs',

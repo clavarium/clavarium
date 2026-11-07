@@ -24,6 +24,7 @@
    should be mounted; they are passed as arguments, never parsed by the
    shell. It prints one fact per line; the server reads only these lines. */
 import { SHARING_STEP } from './vm.mjs';
+import { WHY } from './linkguard.mjs';
 
 /* How long installing the shared-folder helper in a machine may take (it comes from the snap store). */
 export const SHARING_MS = 180_000;
@@ -123,13 +124,16 @@ export function judge(record) {
         for (const { path, why } of record.failed ?? []) add('bad', 'mount', `failed:${path}`, `${path} is not reachable in the machine and could not be mounted again${why ? `: ${why}` : ''}.`);
         for (const path of record.missing ?? []) if (!(record.failed ?? []).some((f) => f.path === path)) add('warn', 'mount', `missing:${path}`, `${path} is not reachable in the machine.`);
     }
+    /* Links its folders hold that the share cannot serve (linkguard.mjs): looked at on this server, whatever its machine does. */
+    for (const l of record.links?.removed ?? []) add('info', 'link', `link-removed:${l.folder}/${l.path}`, `/resources/${l.folder}/${l.path} was a broken link (${WHY[l.kind] ?? l.kind}): it was removed on the server, what it pointed to left as it was.`);
+    for (const l of record.links?.found ?? []) add('warn', 'link', `link:${l.folder}/${l.path}`, `/resources/${l.folder}/${l.path} is a link its machine cannot follow (${WHY[l.kind] ?? l.kind}): make it point inside the folder, or remove it.`);
     const order = ['ok', 'info', 'warn', 'bad'];
     const level = problems.reduce((worst, p) => (order.indexOf(p.level) > order.indexOf(worst) ? p.level : worst), 'ok');
     return { level, problems: problems.slice(0, PROBLEMS_MAX).map((p) => ({ ...p, text: p.text.slice(0, TEXT_MAX) })) };
 }
 
 export class Health {
-    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen;
+    #vms; #conversations; #resources; #records = new Map(); #running = new Map(); #quiet = new Map(); #settleMs; #probeMs; #lookMs; #seen; #links;
     /* Set by the server: told each judgment (the chat of a conversation says what is wrong: talk.mjs). */
     judged = () => {};
     /* Set by the server: told a conversation is forgotten (what else is kept of its machine goes too). */
@@ -139,8 +143,9 @@ export class Health {
        again (a machine that has just started may still be mounting it).
        `lookMs`: how long the clock waits for one conversation's look. */
     /* `seen`: a store of the problems its owner marked seen ("Seen"), by conversation. */
-    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null }) {
-        this.#seen = seen;
+    /* `links`: the guard of links its folders cannot serve (linkguard.mjs), or null. */
+    constructor({ vms, conversations, resources, settleMs = 5000, probeMs = PROBE_MS, lookMs = LOOK_MS, seen = null, links = null }) {
+        this.#seen = seen; this.#links = links;
         this.#vms = vms; this.#conversations = conversations; this.#resources = resources; this.#settleMs = settleMs; this.#probeMs = probeMs; this.#lookMs = lookMs;
     }
 
@@ -217,11 +222,43 @@ export class Health {
                 }
             }
         }
+        const links = await this.#lookLinks(name, asked);
         return this.#keep(name, {
             at, state, answering: true, memory: facts.memory, oomKills: facts.oomKills ?? 0, ...(facts.oomKinds ? { oomKinds: facts.oomKinds } : {}), disks: facts.disks,
-            missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}),
+            paths, missing: loose(), ...(remounted.length ? { remounted } : {}), ...(failed.length ? { failed } : {}), ...(links ? { links } : {}),
             /* What was put back stays said until a later look finds nothing to put back. */
         });
+    }
+
+    /* Its folders' links, bounded (linkguard.mjs); never what holds up a look. */
+    async #lookLinks(name, force) {
+        if (!this.#links) return null;
+        return this.#links.check(name, { force }).catch(() => null);
+    }
+
+    /* "CHECK SHARED FOLDERS", asked by its owner: the same looks, now -- each
+       folder mounted and readable (put back when loose), each link the share
+       cannot serve -- and what was found or done, one item each. A machine
+       that does not run is not woken: only its folders' links are looked at. */
+    async checkFolders(name) {
+        const record = await this.check(name, { asked: true });
+        if (!record) return null;
+        let links = record.links;
+        if (!links && this.#links) links = await this.#links.check(name, { force: true }).catch(() => null);
+        const items = [];
+        if (record.state === 'Running' && record.answering === true) {
+            const failed = new Map((record.failed ?? []).map((f) => [f.path, f.why]));
+            for (const path of record.paths ?? []) {
+                if (failed.has(path)) items.push({ kind: 'mount-failed', path, why: failed.get(path) });
+                else if ((record.remounted ?? []).includes(path)) items.push({ kind: 'mount-remounted', path });
+                else if ((record.missing ?? []).includes(path)) items.push({ kind: 'mount-missing', path });
+                else items.push({ kind: 'mount-ok', path });
+            }
+        } else items.push({ kind: 'machine-off', state: record.state ?? null });
+        for (const l of links?.removed ?? []) items.push({ kind: 'link-removed', folder: l.folder, path: l.path, why: l.kind });
+        for (const l of links?.found ?? []) items.push({ kind: 'link-found', folder: l.folder, path: l.path, why: l.kind });
+        for (const c of links?.cut ?? []) items.push({ kind: 'links-cut', folder: c.folder, why: c.why });
+        return { at: record.at, items, health: this.of(name) };
     }
 
     async #probe(name, paths) {

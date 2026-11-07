@@ -700,6 +700,8 @@ export async function handleApi(request, response, conversations, headers, resou
             if (access !== 'write') gitKeeper?.forgetAttachment(name, conversation);
             await resources.attach(conversation, name, access);
             retell(conversation);
+            /* Newly attached: its links looked at (and its mounts), not waited for. */
+            if (access !== 'none') void health?.check?.(conversation, { asked: true })?.catch?.(() => {});
         };
         const handSecret = async (conversation, name, attached) => {
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
@@ -867,6 +869,13 @@ export async function handleApi(request, response, conversations, headers, resou
             const conversation = decodeURIComponent(seenOf[1]);
             if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
             return send(200, health.markSeen(conversation)), true;
+        }
+        /* "Check shared folders": each mounted and readable (put back when loose), each link the share cannot serve (health.mjs). */
+        const foldersOf = /^\/api\/conversations\/([^/]+)\/folders\/check$/.exec(pathname);
+        if (foldersOf && health) {
+            const conversation = decodeURIComponent(foldersOf[1]);
+            if (!conversations.list().some((c) => c.name === conversation)) throw new Refusal(404, 'No such conversation.');
+            return send(200, await health.checkFolders(conversation)), true;
         }
         const machine = /^\/api\/conversations\/([^/]+)\/(restart|machine|health)$/.exec(pathname);
         if (machine) {
