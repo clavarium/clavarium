@@ -248,7 +248,7 @@ test('Recent above the groups: the last used first, with when; never a hidden on
     assert.deepEqual(recent, ['third', 'second', 'first'], 'the newest first; the hidden one never');
     assert.match(await me.page.locator('#recent .item[data-name="third"] .when').innerText(), /^\d{1,2}:\d{2}/);
     assert.match(await me.page.locator('#recent .list-head').first().innerText(), /recent/i);
-    await me.until('asleep, in words', async () => /asleep, wakes when opened/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
+    await me.until('asleep, in words', async () => /asleep/.test(await me.page.locator('#recent .item[data-name="first"]').innerText()));
     /* The groups below it: Box, and those in no group. */
     assert.deepEqual(await me.page.locator('#recent .list-head').allInnerTexts().then((x) => x.map((s) => s.replace(/[^A-Za-z ]/g, '').trim().toLowerCase())), ['recent', 'groups']);
     assert.equal(await me.page.locator('#recent .list-fold[data-section="recent"] .state-sum').count(), 0, 'open: nothing, its rows say it');

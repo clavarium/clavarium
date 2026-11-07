@@ -73,7 +73,7 @@ test('three places at the bottom left -- Assets, Access, Settings; Access is the
     assert.equal(await page.locator('#nav-settings').getAttribute('aria-current'), 'page');
     /* A conversation touched in the list: Settings gives way to it. */
     await page.locator('#items .item', { hasText: 'garden' }).click();
-    await me.until('settings gave way to garden', async () => !(await page.locator('#settings').isVisible()) && (await page.locator('#items .item[aria-current=true]').innerText()).includes('garden'));
+    await me.until('settings gave way to garden', async () => !(await page.locator('#settings').isVisible()) && (await page.locator('#list .item[aria-current=true]').innerText()).includes('garden'));
     assert.deepEqual(me.errors, []);
 });
 

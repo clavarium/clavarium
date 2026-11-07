@@ -25,7 +25,7 @@ const record = (page) => page.evaluate(() => {
             steps: items.map((li) => li.dataset.step), now: now?.dataset.step, words: now?.textContent, done: items.filter((li) => li.dataset.state === 'done').map((li) => li.dataset.step) };
         if (JSON.stringify(window.clavariumSeen.at(-1)) !== JSON.stringify(seen)) window.clavariumSeen.push(seen);
         /* The line of the list says the step the panel says. */
-        const line = document.querySelector('#items .item[aria-current="true"] small')?.textContent ?? '';
+        const line = document.querySelector('#list .item[aria-current="true"] small')?.textContent ?? '';
         const label = now?.querySelector('span:not(.spin)')?.textContent ?? '';
         if (label && line === label) window.clavariumSame = (window.clavariumSame ?? 0) + 1;
         window.clavariumWords.add(notice.innerText); window.clavariumWords.add(document.getElementById('state').innerText);

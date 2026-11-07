@@ -774,3 +774,100 @@ test('a box\'s learning session in one state for its line: none, scheduled, runn
     assert.equal(KIT.collectModel({ on: false, ...s, kept: 80 }, now + 10 * 3_600_000).state, 'ended', 'its end passed, before the clock turned it off');
     assert.deepEqual(KIT.collectModel({ on: false, last: { ...s, kept: 84 } }, now + 10 * 3_600_000), { state: 'ended', kept: 84, ...s });
 });
+
+test('idle (the tidy-up, 07-11): 12 h or more; never one that waits for you, never one asleep; said in hours, days, weeks', async () => {
+    const H = 3600_000; const now = Date.parse('2026-11-07T12:00:00Z');
+    assert.equal(KIT.IDLE_MS, 12 * H);
+    assert.equal(KIT.idleFor(now - 11.9 * H, { now }), 0, 'under 12 h: not idle');
+    assert.equal(KIT.idleFor(now - 12 * H, { now }), 12 * H, '12 h exactly: idle');
+    assert.equal(KIT.idleFor(new Date(now - 30 * H).toISOString(), { now }), 30 * H, 'a date as text too');
+    assert.equal(KIT.idleFor(now - 40 * H, { now, waits: true }), 0, 'waits for you: never');
+    assert.equal(KIT.idleFor(now - 40 * H, { now, asleep: true }), 0, 'asleep already: never');
+    assert.equal(KIT.idleFor(0, { now }), 0, 'nothing known: not idle');
+    const list = KIT.tidyList([
+        { id: 'fresh', at: now - 2 * H }, { id: 'quiet', at: now - 22 * H }, { id: 'old', at: now - 9 * 24 * H },
+        { id: 'asks', at: now - 50 * H, waits: true }, { id: 'sleeps', at: now - 50 * H, asleep: true }, { id: 'hidden', at: now - 50 * H, hidden: true },
+    ], now);
+    assert.deepEqual(list.map((x) => x.id), ['old', 'quiet'], 'the idle ones only, the longest first');
+    assert.equal(list[1].idle, 22 * H);
+    assert.equal(KIT.idleWords(14 * H), 'idle for 14 h');
+    assert.equal(KIT.idleWords(50 * H), 'idle for 2 d');
+    assert.equal(KIT.idleWords(21 * 24 * H), 'idle for 3 wk');
+    assert.equal(KIT.idleWords(90 * 24 * H), 'idle for 3 mo');
+    const { SETTINGS_WORDS_FR } = await import('../server/settingswords.mjs');
+    KIT.setWords((key, fallback) => SETTINGS_WORDS_FR[key] ?? fallback);
+    try {
+        assert.equal(KIT.idleWords(14 * H), 'rien depuis 14 h');
+        assert.equal(KIT.idleWords(50 * H), 'rien depuis 2 j');
+        assert.equal(KIT.idleWords(21 * 24 * H), 'rien depuis 3 sem.');
+    } finally { KIT.setWords((key, fallback) => fallback); }
+    /* A row says it in grey (its own class), in place of what it does now. */
+    const row = KIT.ConvCard({ title: 'Main', state: 'ok', now: 'idle for 22 h', idle: true }, { size: 'row' });
+    assert.ok(row.find('kit-conv-idle'));
+    assert.equal(KIT.ConvCard({ title: 'Main', state: 'ok', now: 'restarting' }, { size: 'row' }).find('kit-conv-idle'), null);
+});
+
+/* A ROOM'S BAR (07-11): who is in it as up to 3 small stacked avatars on its right, a click opens the list. */
+const ROOM = { id: 'r1', name: 'Family room', members: [
+    { id: 'm4', kind: 'person', ref: 'owner', name: 'Owner' }, { id: 'm3', kind: 'box', ref: 'b1', name: 'Kitchen box' },
+    { id: 'm2', kind: 'ai', ref: 'devoirs', name: 'Homework' }, { id: 'm1', kind: 'ai', ref: 'cuisine', name: 'Kitchen helper', host: true }] };
+test('room members at a glance: the one that welcomes first, then its AIs, people, boxes; never more than 3 circles', () => {
+    const m = KIT.memberStackModel(ROOM.members);
+    assert.deepEqual(m.names, ['Kitchen helper', 'Homework', 'Owner', 'Kitchen box']);
+    assert.deepEqual(m.shown.map((x) => x.name), ['Kitchen helper', 'Homework'], 'over 3: two avatars and "+2"');
+    assert.equal(m.more, 2); assert.equal(m.shown[0].host, true);
+    const three = KIT.memberStackModel(ROOM.members.slice(1));
+    assert.deepEqual(three.shown.map((x) => x.name), ['Kitchen helper', 'Homework', 'Kitchen box']); assert.equal(three.more, 0);
+    assert.deepEqual(KIT.memberStackModel([]), { shown: [], more: 0, names: [] });
+    assert.equal(KIT.memberStackModel(ROOM.members, { max: 1 }).more, 4, 'one circle: "+4" alone');
+});
+test('room members drawn: in the page\'s own button (its id kept), avatars then "+n", the names said; a click opens', () => {
+    let opened = 0;
+    const own = document.createElement('button'); own.id = 'salon-who';
+    const b = KIT.MemberStack(ROOM.members, { button: own, label: '1 person · 2 AIs · 1 box', onOpen: () => { opened += 1; } });
+    assert.equal(b, own); assert.equal(b.id, 'salon-who'); assert.ok(b.classes.includes('kit-stack'));
+    const parts = kids(b);
+    assert.equal(parts.length, 3);
+    assert.deepEqual(parts.slice(0, 2).map((a) => [a.className, a.textContent, a.dataset.kind]), [['kit-av', 'K', 'ai'], ['kit-av', 'H', 'ai']]);
+    assert.ok(parts[2].classes.includes('kit-stack-more')); assert.equal(parts[2].textContent, '+2');
+    assert.equal(b.getAttribute('aria-label'), '1 person · 2 AIs · 1 box: Kitchen helper, Homework, Owner, Kitchen box');
+    b.click(); assert.equal(opened, 1);
+    /* Drawn again (the room read again): the same button, its avatars replaced, not added. */
+    KIT.MemberStack(ROOM.members.slice(1), { button: own });
+    assert.deepEqual(kids(own).map((a) => a.dataset.kind), ['ai', 'ai', 'box']);
+    assert.ok(kids(own)[2].find('kit-stack-box'), 'a box: its sign, not an initial');
+});
+
+/* A ROOM'S SETTINGS (07-11): each change saved at once -- one change, one request, or none. */
+test('a room\'s change saved at once: its name, an AI or a box in or out, the one that welcomes; nothing when nothing changes', () => {
+    assert.deepEqual(KIT.roomPatch(ROOM, { name: '  Home  ' }), { name: 'Home' });
+    assert.equal(KIT.roomPatch(ROOM, { name: 'Family room' }), null, 'the same name');
+    assert.equal(KIT.roomPatch(ROOM, { name: '   ' }), null, 'empty: the field shows its name again');
+    assert.deepEqual(KIT.roomPatch(ROOM, { ai: 'factures', on: true }), { add: { conversations: ['factures'] } });
+    assert.equal(KIT.roomPatch(ROOM, { ai: 'devoirs', on: true }), null, 'in already');
+    assert.deepEqual(KIT.roomPatch(ROOM, { ai: 'devoirs', on: false }), { remove: ['m2'] });
+    assert.equal(KIT.roomPatch(ROOM, { ai: 'factures', on: false }), null, 'not in it');
+    assert.deepEqual(KIT.roomPatch(ROOM, { box: 'b2', on: true }), { add: { boxes: ['b2'] } });
+    assert.deepEqual(KIT.roomPatch(ROOM, { box: 'b1', on: false }), { remove: ['m3'] });
+    /* A box and an AI never mixed up: the same ref, another kind. */
+    assert.equal(KIT.roomPatch({ members: [{ id: 'x', kind: 'box', ref: 'cuisine', name: 'Box' }] }, { ai: 'cuisine', on: false }), null);
+    assert.deepEqual(KIT.roomPatch(ROOM, { host: 'devoirs' }), { host: 'm2' });
+    assert.equal(KIT.roomPatch(ROOM, { host: 'cuisine' }), null, 'welcomes already');
+    assert.equal(KIT.roomPatch(ROOM, { host: 'factures' }), null, 'not of the room');
+    assert.equal(KIT.roomPatch(ROOM, {}), null);
+});
+
+test('a room\'s settings: the chapters of every settings page, saved at once (no Cancel / Save), « Welcomes » once, danger last', () => {
+    const app = web('app.js'); const html = web('index.html');
+    const page = html.slice(html.indexOf('<div id="salon-new"'), html.indexOf('<div id="assets"'));
+    const chapters = [...page.matchAll(/<details class="chapter" id="([a-z-]+)" data-chapter="(room-[a-z]+)"/g)].map((m) => m[2]);
+    assert.deepEqual(chapters, ['room-general', 'room-ais', 'room-assets', 'room-voice', 'room-advanced']);
+    assert.doesNotMatch(page, /salon-new-cancel|set-room-save|set-room-cancel|room-group|sub-head|salon-new-host/);
+    assert.equal((page.match(/data-said="set-room-welcomes"/g) ?? []).length, 0, 'the pill is drawn on the row that welcomes only');
+    assert.equal((app.match(/uiSaid\('set-room-welcomes'/g) ?? []).length, 1);
+    assert.match(app, /KIT\.roomPatch\(r, change\)/);
+    assert.match(app, /\$\('salon-new-actions'\)\.hidden = Boolean\(editing\)/, '« Create » for a new room only');
+    /* Its bar: one line, the members on its right before the gear, no line of counts under the name. */
+    assert.match(app, /sub: \[live\], actions: \[\$\('salon-who'\), views\]/);
+    assert.doesNotMatch(app, /\\u25BE`\)/);
+});

@@ -100,7 +100,7 @@ export class Rooms {
        in its row of the list and on its bar, « Hugo réfléchit… » in its thread. */
     #thinkingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => Date.now() - v.at < THINKING_MS).map(([mid]) => members.find((m) => m.id === mid)?.name).filter(Boolean); }
     #doingOf(id, members) { return [...(this.#thinking.get(id) ?? new Map()).entries()].filter(([, v]) => v.text && Date.now() - v.at < THINKING_MS).map(([mid, v]) => ({ name: members.find((m) => m.id === mid)?.name, text: v.text })).filter((x) => x.name); }
-    list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members) }; }); }
+    list() { return this.#all().map((r) => { const members = this.#shown(r); return { id: r.id, name: r.name, host: r.host, members, at: r.at, unread: this.#unread(r), last: this.#last(r), thinking: this.#thinkingOf(r.id, members), ...(r.quiet ? { quiet: true } : {}) }; }); }
     /* ITS AIs, as conversations (06-11): the names of the conversations of its AI members that are there now --
        never a box, never the person, never one taken out of the room. What « give to all its AIs » gives to. */
     ais(id) { return this.#shown(this.#find(id)).filter((m) => m.kind === 'ai').map((m) => m.ref); }
@@ -139,10 +139,11 @@ export class Rooms {
         if (new Set(names).size !== names.length) throw new Refusal(409, 'Two members of a room cannot have the same name: rename one first.');
         if (room.members.length > MEMBERS_MAX) throw new Refusal(409, `${MEMBERS_MAX} members at most.`);
     }
-    /* Its name, its host, members added or taken away. */
-    change(id, { name, host, add = {}, remove = [] } = {}) {
+    /* Its name, its host, members added or taken away; `quiet` (07-11, the tidy-up): muted in the list, or not. */
+    change(id, { name, host, add = {}, remove = [], quiet } = {}) {
         const list = this.#all(); const room = list.find((r) => r.id === id);
         if (!room) throw new Refusal(404, 'No such room.');
+        if (quiet !== undefined) { if (quiet === true) room.quiet = true; else delete room.quiet; }
         if (name !== undefined) {
             const n = nameOf(name); if (!n) throw new Refusal(400, 'Give the room a name.');
             if (list.some((r) => r.id !== id && r.name.toLowerCase() === n.toLowerCase())) throw new Refusal(409, 'A room has that name already.');

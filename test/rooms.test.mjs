@@ -35,6 +35,19 @@ test('a room: its members each with an id of their own, its host the first AI by
     assert.throws(() => rooms.create({ name: 'la maison', conversations: ['hugo'] }), /has that name/);
 });
 
+test('a room muted in the list (the tidy-up): said by its list, kept, undone; nothing else changes', (t) => {
+    const { rooms } = setup(t);
+    const r = rooms.create({ name: 'La maison', conversations: ['hugo'] });
+    assert.equal(rooms.list()[0].quiet, undefined, 'not muted at first');
+    rooms.change(r.id, { quiet: true });
+    assert.equal(rooms.list()[0].quiet, true);
+    rooms.change(r.id, { name: 'Maison' });
+    assert.equal(rooms.list()[0].quiet, true, 'another change keeps it');
+    rooms.change(r.id, { quiet: false });
+    assert.equal(rooms.list()[0].quiet, undefined, 'undone');
+    assert.equal(rooms.list()[0].members.length, 2);
+});
+
 test('what the person says goes to the host alone, with who said it and where; an AI named gets it instead', async (t) => {
     const { rooms, said } = setup(t);
     const r = rooms.create({ name: 'La maison', conversations: ['hugo', 'compta'], boxes: ['box-1'] });

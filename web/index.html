@@ -715,44 +715,49 @@
         <div id="salon-thread" class="salon-thread"></div>
         <p id="salon-thinking" class="salon-thinking" hidden></p>
       </div>
+      <!-- A ROOM'S SETTINGS (07-11, charte-reglages): the chapters of every settings page, folding; a row = its name and
+           a short line on the left, one control on the right; each change saved at once (a new room: « Create » at the end). -->
       <div id="salon-new" class="sheet as-place" hidden>
-        <div class="panel-top"><b id="salon-new-title">New room</b><button type="button" id="salon-new-close" class="as-link place-back">&lsaquo; Back</button></div>
+        <div class="panel-top"><b id="salon-new-title">New room</b><span class="hint salon-saved" id="salon-new-status" role="status"></span><button type="button" id="salon-new-close" class="as-link place-back">&lsaquo; Back</button></div>
         <div class="nc-body">
-          <!-- The same names as every settings page (General, Access, Chat & voice, Advanced): a room has no machine. -->
-          <h3 class="room-group" data-said="set-tab-general">General</h3>
-          <div class="nc-card">
-            <div class="set-row"><div class="set-what"><label for="salon-new-name" data-said="set-room-name">Name</label></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off"></div></div>
-          </div>
-          <h3 class="room-group" data-said="set-tab-access">Access</h3>
-          <div class="nc-card">
-            <span class="sub-head" data-said="set-room-host">Welcomes the room</span>
-            <div id="salon-new-host" class="salon-host-box" aria-live="polite"></div>
-          </div>
-          <div class="nc-card">
-            <span class="sub-head"><span data-said="set-room-ais">Its AIs</span> <span id="salon-new-count" class="hint"></span></span>
-            <small class="tip" hidden>The switch puts it in the room or takes it out; « Welcomes » makes it the one that answers first. On a computer, a row can also be dragged into the box above.</small>
-            <div class="salon-members-tools"><input id="salon-new-search" type="search" placeholder="Find a conversation" data-said-placeholder="set-room-find" aria-label="Find a conversation" autocomplete="off"></div>
-            <div id="salon-new-ais" class="salon-member-list" role="list" aria-label="AIs"></div>
-          </div>
-          <!-- Each AI's assets (06-11): its own, as its conversation has them; no room asset. -->
-          <div class="nc-card" id="salon-assets-card" hidden>
-            <div class="row"><span class="sub-head" data-said="set-room-assets">Their assets</span><span class="sp"></span><button type="button" id="salon-assets-all" data-said="set-room-give-all">Give to all its AIs…</button></div>
-            <div id="salon-assets-give" class="salon-give" hidden></div>
-            <div id="salon-assets" class="salon-member-list salon-assets-list" role="list" aria-label="Their assets"></div>
-          </div>
-          <h3 class="room-group" id="salon-new-voice-head" data-said="set-tab-chat">Chat &amp; voice</h3>
-          <div class="nc-card" id="salon-new-boxes-card">
-            <div class="row"><span class="sub-head" data-said="set-room-boxes">Voice boxes</span><span class="sp"></span><button type="button" id="salon-new-box-add" data-said="set-na-plus-box">+ Voice box</button></div>
-            <div id="salon-box-newasset" hidden></div>
-            <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
-          </div>
-          <h3 class="room-group" id="salon-new-advanced-head" data-said="set-tab-advanced" hidden>Advanced</h3>
-          <div class="nc-card" id="salon-new-remove-card" hidden>
-            <div class="set-row"><div class="set-what"><label data-said="set-room-remove">Remove the room</label><small data-said="set-room-remove-what">The thread goes · AIs and boxes stay</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger" data-said="set-room-remove-dots">Remove…</button></div></div>
-          </div>
           <span id="salon-new-error" class="err" role="alert" hidden></span>
+          <details class="chapter" id="salon-ch-general" data-chapter="room-general">
+            <summary><span class="chapter-title" data-said="set-tab-general">General</span><span class="chapter-about" id="salon-sum-general"></span></summary>
+            <div class="chapter-body">
+              <div class="set-row"><div class="set-what"><label for="salon-new-name" data-said="set-room-name">Name</label></div><div class="set-control"><input id="salon-new-name" maxlength="60" placeholder="Home" spellcheck="false" autocomplete="off" enterkeyhint="done"></div></div>
+            </div>
+          </details>
+          <details class="chapter" id="salon-ch-ais" data-chapter="room-ais">
+            <summary><span class="chapter-title" data-said="set-room-ais">Its AIs</span><span class="chapter-about" id="salon-new-count"></span></summary>
+            <div class="chapter-body">
+              <div class="set-row salon-members-tools"><div class="set-what"><small data-said="set-room-host-how">Tap another AI of the room to move it</small></div><div class="set-control"><input id="salon-new-search" type="search" placeholder="Find a conversation" data-said-placeholder="set-room-find" aria-label="Find a conversation" autocomplete="off"></div></div>
+              <div id="salon-new-ais" class="salon-member-list" role="list" aria-label="AIs"></div>
+            </div>
+          </details>
+          <!-- Each AI's assets (06-11): its own, as its conversation has them; no room asset. -->
+          <details class="chapter" id="salon-assets-card" data-chapter="room-assets" hidden>
+            <summary><span class="chapter-title" data-said="set-room-assets">Their assets</span><span class="chapter-about" id="salon-sum-assets"></span><button type="button" id="salon-assets-all" class="chapter-add" data-said="set-room-give-all">Give to all its AIs…</button></summary>
+            <div class="chapter-body">
+              <div id="salon-assets-give" class="salon-give" hidden></div>
+              <div id="salon-assets" class="salon-member-list salon-assets-list" role="list" aria-label="Their assets"></div>
+            </div>
+          </details>
+          <details class="chapter" id="salon-new-boxes-card" data-chapter="room-voice">
+            <summary><span class="chapter-title" data-said="set-tab-chat">Chat &amp; voice</span><span class="chapter-about" id="salon-sum-voice"></span><button type="button" id="salon-new-box-add" class="chapter-add" data-said="set-na-plus-box">+ Voice box</button></summary>
+            <div class="chapter-body">
+              <div id="salon-box-newasset" hidden></div>
+              <div id="salon-new-boxes" class="salon-member-list" role="list" aria-label="Voice boxes"></div>
+            </div>
+          </details>
+          <details class="chapter" id="salon-new-remove-card" data-chapter="room-advanced" hidden>
+            <summary><span class="chapter-title" data-said="set-tab-advanced">Advanced</span><span class="chapter-about"></span></summary>
+            <div class="chapter-body">
+              <div class="set-row"><div class="set-what"><span data-said="set-room-remove">Remove the room</span><small data-said="set-room-remove-what">The thread goes · AIs and boxes stay</small></div><div class="set-control"><button type="button" id="salon-new-remove" class="danger" data-said="set-room-remove-dots">Remove…</button></div></div>
+            </div>
+          </details>
         </div>
-        <div class="action-row"><span class="hint" id="salon-new-status"></span><button type="button" id="salon-new-cancel" data-said="set-room-cancel">Cancel</button><button type="button" id="salon-new-create" class="primary">Create</button></div>
+        <!-- A new room only: nothing is saved before it exists. -->
+        <div class="action-row" id="salon-new-actions"><button type="button" id="salon-new-create" class="primary" data-said="set-room-create">Create</button></div>
       </div>
       <div id="assets" class="sheet as-place" hidden>
         <div class="panel-top"><b>Assets</b></div>
