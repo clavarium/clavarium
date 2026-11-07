@@ -205,7 +205,8 @@ test('a real server: administrators manage keys, a program reads the status with
     assert.equal(init.result.protocolVersion, '2025-06-18'); assert.ok(init.result.capabilities.tools);
     assert.equal((await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' })).status, 202);
     const tools = await (await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' })).json();
-    assert.deepEqual(tools.result.tools.map((x) => x.name), ['clavarium_status', 'clavarium_conversations', 'clavarium_read', 'clavarium_say', 'clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_boxes', 'clavarium_box_say']);
+    assert.deepEqual(tools.result.tools.map((x) => x.name), ['clavarium_status', 'clavarium_conversations', 'clavarium_read', 'clavarium_say', 'clavarium_conversation_wake', 'clavarium_conversation_sleep', 'clavarium_conversation_stop',
+        'clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_room_create', 'clavarium_room_change', 'clavarium_room_remove', 'clavarium_boxes', 'clavarium_box_say']);
     assert.equal(tools.result.tools[0].annotations.readOnlyHint, true);
     const called = await (await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'clavarium_status', arguments: {} } })).json();
     assert.ok(Array.isArray(called.result.structuredContent.conversations));
@@ -293,7 +294,7 @@ test('a conversation is given one by one, to read or to talk; never "all"; one t
     assert.deepEqual(key.conversations, [{ name: 'alpha', level: 'talk' }, { name: 'beta', level: 'read' }]);
     assert.equal(grants.rightsOf(apiKeySubject(key.id), 'conversation:alpha'), 'rw');
     assert.equal(grants.rightsOf(apiKeySubject(key.id), 'conversation:beta'), 'r');
-    for (const conversations of [{ '*': 'read' }, { all: 'read' }, { gamma: 'read' }, { alpha: 'act' }, { alpha: 'x' }, ['alpha']]) {
+    for (const conversations of [{ '*': 'read' }, { all: 'read' }, { gamma: 'read' }, { alpha: 'manage' }, { alpha: 'x' }, ['alpha']]) {
         assert.ok([400, 404].includes(statusOfError(() => k2.create({ label: `Bad ${JSON.stringify(conversations)}`.slice(0, 40), conversations }))), JSON.stringify(conversations));
     }
     assert.equal(k2.list().length, 1, 'a refused key is not made');

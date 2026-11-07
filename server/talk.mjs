@@ -111,6 +111,8 @@ export const HEALTH_KNOWN_MS = 150_000;
    end of a command: such a last ";" is written "\;", which tmux gives back
    as ";" (tried). */
 export const enterCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Enter'];
+/* Escape, alone: what the Esc key of the page's key row sends -- a tool's current turn stopped (an API key that may act, apikeys.mjs). */
+export const escapeCommand = () => ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, 'Escape'];
 export function typeCommand(line) {
     const text = line.endsWith(';') ? `${line.slice(0, -1)}\\;` : line;
     return ['tmux', '-L', SOCKET, 'send-keys', '-t', PANE, '-l', '--', text, ';', 'run-shell', '-d', String(ENTER_AFTER_MS / 1000), ';', 'send-keys', '-t', PANE, 'Enter'];

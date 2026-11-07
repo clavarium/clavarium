@@ -26,13 +26,18 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal(await me.page.locator('#apikeys-days').inputValue(), '90');
     await me.page.fill('#apikeys-label', 'Home automation');
     await me.page.locator('#apikeys-scopes input[value="status"]').check();
+    /* And "Create rooms" (07-11): a room it makes is its own to manage. */
+    assert.equal(await me.page.locator('#apikeys-scopes input[value="create-rooms"]').isChecked(), false);
+    await me.page.locator('#apikeys-scopes input[value="create-rooms"]').check();
     /* Its conversations, one by one: Off until chosen. */
     const pick = me.page.locator('#apikeys-convs .apikey-conv[data-name="alpha"] .kit-seg');
     assert.equal(await pick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'Off until chosen');
+    assert.deepEqual(await pick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'talk', 'act'], 'Off, Read, Talk, Act');
     await pick.locator('button[data-value="talk"]').click();
     const roomPick = me.page.locator(`#apikeys-rooms .apikey-room[data-id="${kitchen.id}"] .kit-seg`);
     assert.equal(await roomPick.locator('button[aria-pressed="true"]').getAttribute('data-value'), '', 'a room: Off until chosen');
-    await roomPick.locator('button[data-value="talk"]').click();
+    assert.deepEqual(await roomPick.locator('button').evaluateAll((bs) => bs.map((b) => b.dataset.value)), ['', 'read', 'talk', 'manage'], 'Off, Read, Talk, Manage');
+    await roomPick.locator('button[data-value="manage"]').click();
     assert.match(await me.page.locator('#apikeys-boxes').innerText(), /No voice box yet/);
     await me.page.locator('#apikeys-form button[type="submit"]').click();
 
@@ -46,7 +51,7 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal(secret, shown);
     await me.until('the key is listed', async () => (await me.page.locator('#apikeys-rows .list-item').count()) === 1);
     const row = me.page.locator('#apikeys-rows .list-item').first();
-    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*alpha · Talk[\s\S]*Kitchen · Talk[\s\S]*Never used[\s\S]*Expires/);
+    assert.match(await row.innerText(), /Home automation[\s\S]*Its state[\s\S]*Create rooms[\s\S]*alpha · Talk[\s\S]*Kitchen · Manage[\s\S]*Never used[\s\S]*Expires/);
     await me.page.locator('#apikeys-done').click();
     assert.equal(await me.page.locator('#apikeys-once').isVisible(), false);
     assert.equal(await me.page.locator('#apikeys-secret').inputValue(), '', 'Done: gone from the page');
@@ -74,7 +79,12 @@ test('API keys: made in Settings, copied once, read the status, talk in a conver
     assert.equal((await ext('/conversations/beta/messages')).status, 403, 'a conversation not given');
 
     /* Its room: listed by name, a message posted there signed with the key, read back by names. */
-    assert.deepEqual((await (await ext('/rooms')).json()).rooms.map((r) => [r.name, r.level]), [['Kitchen', 'talk']]);
+    assert.deepEqual((await (await ext('/rooms')).json()).rooms.map((r) => [r.name, r.level]), [['Kitchen', 'manage']]);
+    /* Managed, and one made by the key: its own, at Manage. */
+    assert.equal((await ext(`/rooms/${kitchen.id}`, { method: 'POST', body: JSON.stringify({ add: { conversations: ['alpha'] } }) })).status, 200);
+    assert.equal((await ext(`/rooms/${kitchen.id}`, { method: 'POST', body: JSON.stringify({ add: { conversations: ['beta'] } }) })).status, 403, 'beta was not given');
+    const hall = await ext('/rooms', { method: 'POST', body: JSON.stringify({ name: 'Hall', conversations: ['alpha'] }) });
+    assert.equal(hall.status, 201); assert.equal((await hall.json()).room.level, 'manage');
     assert.equal((await ext(`/rooms/${kitchen.id}/messages`, { method: 'POST', body: JSON.stringify({ text: 'Dinner at eight' }) })).status, 201);
     const inRoom = (await (await ext(`/rooms/${kitchen.id}/messages?last=10`)).json()).messages.find((m) => m.text === 'Dinner at eight');
     assert.equal(inRoom?.by, 'Home automation');
