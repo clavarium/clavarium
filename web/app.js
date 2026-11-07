@@ -3172,7 +3172,7 @@
             /* A message attached to a card (#180), from its menu: its id, as the card opens it again. */
             ...(!DEVICE ? { card: (m) => attachToCard({ kind: 'message', ref: m.id, title: String(m.short || m.text || '').replace(/\s+/g, ' ').trim().slice(0, 80) }) } : {}),
             /* The buttons of a line of the machine: what this screen may do. */
-            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (/^(allow|deny|always):/.test(id)) void decideTether(id.slice(id.indexOf(':') + 1), DECISION[id.slice(0, id.indexOf(':'))], () => thread?.refresh?.()); else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
+            act: (id) => { if (id === 'seen-done') return; if (id.startsWith('salon:')) { void openSalon(id.slice('salon:'.length)); return; } if (id === 'seen') void markSeen(); else if (id === 'memory') void openMemory(); else if (id === 'disk') void openDisk(); else if (id === 'room') seeTerminal(); else if (id === 'restart') void restartMachine(false); else if (id === 'terminal') seeTerminal(); else if (tetherAct(id, () => thread?.refresh?.())) return; else if (id.startsWith('flash:')) void flashFromThread(id.slice('flash:'.length)); else if (id.startsWith('review:')) void openGit(id.slice('review:'.length)); else openCommits(id); },
             /* What it opens over the thread (a picture, its media, a search...) is a step of this page's: one Back closes it. */
             back: { open: (name, close) => nav.over(`chat-${name}`, () => close(), { stack: true }), closed: (step) => { if (step) nav.drop(step); } },
             /* Files attached to a message: wherever the chat may be written in. */
@@ -3311,6 +3311,8 @@
     /* A Tether call an agent asked the owner to allow, offered right in the thread: allow:<id> / deny:<id>. */
     const DEMANDE = /^(allow|deny|always|flash):[0-9a-f-]{36}$/;
     const DECISION = { allow: 'yes', deny: 'no', always: 'always' };
+    /* Accept / Refuse a Tether call from a line that asks (a conversation's chat, a room): decided as the owner, then `after`. */
+    const tetherAct = (id, after) => { const m = /^(allow|deny|always):(.+)$/.exec(String(id)); if (!m) return false; void decideTether(m[2], DECISION[m[1]], after); return true; };
     const COMMIT = /^commit:([a-z0-9][a-z0-9-]*)\.([0-9a-f]{7,40})$/;
     function openCommits(id) {
         if (DEVICE) return;
@@ -5655,7 +5657,8 @@
             words, markdown: true, agentName: '',
             /* A mail an AI of the room cites: the same chip and viewer as in a conversation's chat, read for the conversation of the AI that cited it. */
             schemes: { mail: { icon: 'mail', open: (ref, label) => { void openMailRef(ref, { label, of: '', room: id }); } } },
-            load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then((d) => {
+            /* Its lines (a Tether call held for one of its AIs): drawn and decided as in a conversation's chat (machineLines, tetherAct). */
+            load: (asked = {}) => fetch(`${API}/rooms/${id}/talk${asked.last ? `?last=${asked.last}` : ''}`).then((x) => x.json()).then(machineLines).then((d) => {
                 /* Read for a room no longer shown: its words go nowhere (Parley drops them with its screen). */
                 if (salonId !== id || place !== 'salon') return d;
                 /* Read, it is seen (the server says so): its count in the list goes at once, as a conversation's. */
@@ -5698,6 +5701,7 @@
             diagram: drawDiagram, highlight: colourCode, touch: touchScreen,
             voice: chatVoice(), autoSend: chatAuto, autoSendMs: chatAutoMs, onAutoSendMs: keepAutoMs, onAutoSend: (on) => { chatAuto = on; try { localStorage.setItem('clavarium-chat-auto', on ? '1' : '0'); } catch { /* as above */ } },
             draft: `room:${id}`,
+            act: (action) => { tetherAct(action, () => salonThread?.refresh?.()); },
         });
         salonTimer = setInterval(() => { if (salonThread && salonId === id) void salonThread.refresh(); }, 3000);
     }

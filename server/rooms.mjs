@@ -30,6 +30,11 @@ export const HOPS_MAX = 8;
 /* How long an AI given a message is said to be thinking, at most (it may never answer). */
 export const THINKING_MS = 10 * 60_000;
 const KINDS = ['person', 'ai', 'box'];
+/* A ROOM'S OWN LINES (a Tether call held for one of its AIs, and what closes it): the kinds, their level, at most kept. */
+const LINE_LEVELS = Object.freeze({ 'tether-demande': 'needs-you', 'tether-done': 'trace' });
+const LEVELS = ['needs-you', 'news', 'trace'];
+const LINE_ACTION = /^[a-z]{1,20}(:[a-z0-9][a-z0-9._-]{0,63})?$/;
+export const ROOM_LINES_MAX = 50;
 /* A FILE THE PERSON ATTACHES IN A ROOM (06-11: a room carries what the chat carries): kept in the room's own folder
    (rooms/<id>/attached/<uuid>/<name>), named in its thread by ROOM_FILE's path; a copy goes to each AI the message
    goes to, attached in its own chat as the person attaches one there (talk.attach) -- never to the others. */
@@ -55,6 +60,11 @@ const nameOf = (v) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, ROOM_
    own short-lived store by its chat, as any secret said to it). What an AI writes in a room is masked the same way:
    a secret never passes from one AI to another through a room. */
 export const masked = (text) => { const str = String(text ?? ''); const hits = scan(str); if (!hits.length) return str; let out = ''; let last = 0; for (const h of hits) { out += str.slice(last, h.start) + '••••••'; last = h.end; } return out + str.slice(last); };
+
+/* Every text of a line masked (a card's title, facts, quote...: plain data, words of the screen and their values) --
+   never a button's id nor a word's key. */
+const maskedAll = (v, depth = 0) => (typeof v === 'string' ? masked(v) : depth > 8 || v === null || typeof v !== 'object' ? v
+    : Array.isArray(v) ? v.map((x) => maskedAll(x, depth + 1)) : Object.fromEntries(Object.entries(v).map(([k, x]) => [k, k === 'id' || k === 'k' ? x : maskedAll(x, depth + 1)])));
 
 /* A sign as the cards draw it (web/kit.js hueOf, initialOf): the same name, the same letter and colour. */
 export const lookOf = (name) => { const text = String(name ?? ''); let h = 0; for (const ch of text) h = (h * 31 + ch.codePointAt(0)) >>> 0; return { initial: ([...text.trim()][0] ?? '?').toUpperCase(), hue: h % 360 }; };
@@ -171,6 +181,10 @@ export class Rooms {
         if (options?.seen !== false) { const list = this.#all(); const r = list.find((x) => x.id === id); if (r) { r.seen = this.#now().toISOString(); this.#file.set(list); } }
         const thinking = this.#thinkingOf(id, members); const doing = this.#doingOf(id, members);
         const messages = (read.messages ?? []).map((m) => this.#opened(m, members)).map((m) => (typeof m.text === 'string' && m.text.includes('@{') ? { ...m, text: named(m.text) } : m));
+        /* Its lines (a Tether call of one of its AIs, held): among its messages, where they happened -- those of the time read. */
+        const from = read.window?.more > 0 ? String(messages[0]?.at ?? '') : '';
+        const lines = (Array.isArray(room.lines) ? room.lines : []).filter((l) => String(l.at) >= from).map((l) => ({ from: 'system', kind: 'system', choices: [], ...l }));
+        if (lines.length) { messages.push(...lines); messages.sort((a, b) => String(a.at).localeCompare(String(b.at))); }
         /* The files of the thread (shown, cited): each as the message that has it opens it; one nobody opens here, not listed. */
         const opens = new Map(); for (const m of messages) for (const f of [...(m.refs ?? []), ...(m.files ?? []), ...(m.open ? [m] : [])]) if (f.path && f.open) opens.set(f.path, f.open);
         const files = Array.isArray(read.files) ? read.files.map((f) => (String(f.open ?? '').startsWith(CITE) ? (opens.has(f.path) ? { ...f, open: opens.get(f.path) } : null) : f)).filter(Boolean) : read.files;
@@ -385,6 +399,41 @@ export class Rooms {
             } catch { /* not given */ } finally { file?.stream?.destroy?.(); }
         }
         return copies;
+    }
+
+    /* A TETHER CALL HELD FOR AN AI AT WORK FOR A ROOM (07-11): an AI given a message of the room and not done with it
+       asks the person to allow a call -- its card goes in that room's thread too (and each room it works for), the
+       same line its own chat has (talk.event's shape: Accept / Refuse, Parley's request card), named by the AI.
+       Kept apart from the thread (the room's `lines`, ROOM_LINES_MAX), read among its messages; masked as any line
+       of a room. Gives the rooms it went to: what is said once it is decided goes there (closed). */
+    held(conversation, event) {
+        const list = this.#all(); const now = Date.now(); const ids = [];
+        for (const r of list) {
+            const on = this.#thinking.get(r.id);
+            const me = on && this.#shown(r).find((m) => m.kind === 'ai' && m.ref === conversation && on.has(m.id) && now - on.get(m.id).at < THINKING_MS);
+            if (!me) continue;
+            const request = event?.request && typeof event.request === 'object' ? { ...event.request, sub: [me.name, ...(Array.isArray(event.request.sub) ? event.request.sub : event.request.sub ? [event.request.sub] : [])].slice(0, 4) } : undefined;
+            const text = event?.text && typeof event.text === 'object' ? event.text : `${me.name}: ${String(event?.text ?? '')}`;
+            if (this.#line(r, { ...event, text, ...(request ? { request } : {}) })) ids.push(r.id);
+        }
+        if (ids.length) this.#file.set(list);
+        return ids;
+    }
+    /* What closes it (a 'tether-done' carrying its id), in the rooms its card went to. */
+    closed(ids, event) {
+        const list = this.#all(); let any = false;
+        for (const r of list) if ((Array.isArray(ids) ? ids : []).includes(r.id) && this.#line(r, event)) any = true;
+        if (any) this.#file.set(list);
+    }
+    #line(room, { kind, text, level, tone, topic, brief, actions, request, outcome } = {}) {
+        if (!Object.hasOwn(LINE_LEVELS, kind)) return null;
+        const kept = { id: randomUUID(), at: this.#now().toISOString(), event: kind, text: maskedAll(text), level: LEVELS.includes(level) ? level : LINE_LEVELS[kind],
+            ...(tone === 'warn' || tone === 'bad' ? { tone } : {}), ...(topic ? { topic: maskedAll(topic) } : {}), ...(typeof brief === 'string' && brief ? { brief: brief.slice(0, 60) } : {}),
+            actions: (Array.isArray(actions) ? actions : []).filter((a) => typeof a === 'string' && LINE_ACTION.test(a)).slice(0, 4),
+            ...(request && typeof request === 'object' && JSON.stringify(request).length <= 8000 ? { request: maskedAll(request) } : {}),
+            ...(typeof outcome === 'string' && outcome ? { outcome: outcome.slice(0, 20) } : {}) };
+        room.lines = [...(Array.isArray(room.lines) ? room.lines : []), kept].slice(-ROOM_LINES_MAX);
+        return kept;
     }
 
     /* Each conversation told the rooms it is in, and who is there. */

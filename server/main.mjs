@@ -718,6 +718,8 @@ export async function startHome({ port, host, dataDir, mntDir = dataDir, gitRese
         } });
     rooms.boxesBound(boxes.all());
     rooms.refresh();
+    /* A Tether call held for an AI at work for a room: said in that room too, closed there once decided (tethers.mjs). */
+    tethers.rooms = { held: (name, event) => rooms.held(name, event), closed: (ids, event) => rooms.closed(ids, event) };
     /* FEATURES (features.mjs): read from what the modules say, never a secret's value. The remote screen and the
        catalogue are slow to ask: kept a while, and never waited for long. */
     const screenNow = cached(() => meshcentral.status().catch(() => null), 60_000);

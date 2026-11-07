@@ -103,6 +103,9 @@ export class Tethers {
     /* Set by the server once the thread is ready (main.mjs): (name, event) => talk.event(...).
        A call waiting for the owner is said in its conversation's thread when there is one. */
     announce = null;
+    /* Set by the server too (main.mjs): the rooms (rooms.mjs) -- a call held for an AI at work for a room is said in
+       that room as well (held: the rooms it went to), and closed there (closed) when it is decided. */
+    rooms = null;
 
     /* `resources`: Resources (workFolder). `conversations()`: the names of the conversations.
        `secrets`: the vault, read by name for a connector only (reveal). `dockets`: { on(name), post(name,
@@ -152,7 +155,10 @@ export class Tethers {
             /* `request`: the card Parley draws (demandes.mjs); the text and its buttons stay for an older screen. */
             let request;
             try { request = demandeView(r); } catch { request = undefined; }
-            try { this.announce(name, { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: TOPIC_REQUEST, tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) }); } catch { /* its chat is off */ }
+            const event = { kind: 'tether-demande', text: text || (r.verb ?? 'A Tether call'), topic: TOPIC_REQUEST, tone: 'warn', actions: [`allow:${r.id}`, `deny:${r.id}`], ...(request ? { request } : {}) };
+            try { this.announce(name, event); } catch { /* its chat is off */ }
+            /* At work for a room (a message of it not yet answered): the same card there, decided there as here. */
+            try { const ids = this.rooms?.held(name, event); if (Array.isArray(ids) && ids.length) this.#seen.get(r.id).rooms = ids; } catch { /* its rooms' */ }
         }
         /* An approved call only the owner's browser can do (a device to flash): said once, with where to do it. */
         let jobs = [];
@@ -178,7 +184,9 @@ export class Tethers {
             const accepted = outcome === 'yes' || outcome === 'always';
             if (accepted) { this.#acting.push({ id, ...info }); if (this.#acting.length > ACTING_MAX) this.#acting.shift(); }
             const text = endedLine(info.verb, outcome);
-            try { this.announce(info.name, { kind: 'tether-done', text, topic: TOPIC_REQUEST, brief: id, ...(outcome ? { outcome } : {}) }); } catch { /* its chat is off */ }
+            const done = { kind: 'tether-done', text, topic: TOPIC_REQUEST, brief: id, ...(outcome ? { outcome } : {}) };
+            try { this.announce(info.name, done); } catch { /* its chat is off */ }
+            if (info.rooms) try { this.rooms?.closed(info.rooms, done); } catch { /* its rooms' */ }
         }
         for (const id of [...this.#ended.keys()]) if (!this.#seen.has(id)) this.#ended.delete(id);
     }
