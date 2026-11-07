@@ -206,7 +206,9 @@ test('a real server: administrators manage keys, a program reads the status with
     assert.equal((await mcp({ jsonrpc: '2.0', method: 'notifications/initialized' })).status, 202);
     const tools = await (await mcp({ jsonrpc: '2.0', id: 2, method: 'tools/list' })).json();
     assert.deepEqual(tools.result.tools.map((x) => x.name), ['clavarium_status', 'clavarium_conversations', 'clavarium_read', 'clavarium_say', 'clavarium_conversation_wake', 'clavarium_conversation_sleep', 'clavarium_conversation_stop',
-        'clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_room_create', 'clavarium_room_change', 'clavarium_room_remove', 'clavarium_boxes', 'clavarium_box_say']);
+        'clavarium_reminders', 'clavarium_remind', 'clavarium_reminder_cancel',
+        'clavarium_rooms', 'clavarium_room_read', 'clavarium_room_say', 'clavarium_room_create', 'clavarium_room_change', 'clavarium_room_remove', 'clavarium_boxes', 'clavarium_box_say',
+        'clavarium_binders', 'clavarium_binder_records', 'clavarium_binder_record', 'clavarium_binder_add', 'clavarium_binder_edit', 'clavarium_binder_move', 'clavarium_binder_note', 'clavarium_binder_archive']);
     assert.equal(tools.result.tools[0].annotations.readOnlyHint, true);
     const called = await (await mcp({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'clavarium_status', arguments: {} } })).json();
     assert.ok(Array.isArray(called.result.structuredContent.conversations));

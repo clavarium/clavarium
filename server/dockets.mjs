@@ -15,6 +15,9 @@
  * events here (tick), and told the same way. Its owner sees them in the
  * conversation's settings, and may take one back.
  *
+ * AN API KEY (apikeys.mjs) given the conversation to talk may set it one too,
+ * as the tool does (remind): its chat says which key set it.
+ *
  * ITS CHAT SAYS what was handled, what failed (and why: the owner is alerted)
  * and what was never handled; a reminder the tool set is a trace.
  *
@@ -23,6 +26,7 @@
  */
 import { mkdirSync, lstatSync } from 'node:fs';
 import { Docket, WAKE } from 'clavarium-docket/host';
+import { verbs } from 'clavarium-docket/server';
 
 export { WAKE };
 export const FOLDER = '.docket';
@@ -38,6 +42,8 @@ const cut = (text, max) => { const s = String(text ?? '').replace(/\s+/g, ' ').t
 export class Dockets {
     #resources; #store; #say; #event; #alert; #idle; #awake; #chatOn; #now; #every; #zone;
     #listening = new Map(); #zoned = new Set(); #busy = false;
+    /* The reminders a key set: plan id -> its name, for the line its chat shows. */
+    #setBy = new Map();
 
     /* `say(name, line)`: types one line into its terminal (true when typed). `event(name, line)`: a line
        in its chat (Talk.event). `alert({title, body, url})`: the owner's devices. `idle(name)`: not in a
@@ -87,6 +93,19 @@ export class Dockets {
             waiting: s.waiting,
         };
     }
+    /* AN API KEY sets a reminder, as the tool would (Docket's own rules: one of `at` or `cron`, ahead, within a year).
+       `by`: its signature ({ name }). Returns the plan: { id, text, cron, next }; throws a RangeError-like Error when not. */
+    remind(name, { at, cron, text }, by = null) {
+        if (!this.on(name)) throw new Error('Its chat is off: it has no docket.');
+        const d = this.#docket(name);
+        const before = new Set(d.read().plans.map((p) => p.id));
+        this.#listen(name);
+        verbs(this.#dir(name), { env: {}, now: this.#now }).remind({ ...(at ? { at } : {}), ...(cron ? { cron } : {}), text });
+        const plan = d.read().plans.find((p) => !before.has(p.id));
+        if (!plan) throw new Error('The reminder was not set.');
+        if (by?.name) this.#setBy.set(plan.id, String(by.name).slice(0, 80));
+        return { id: plan.id, text: plan.text, cron: plan.cron ?? null, next: plan.next === null ? null : new Date(plan.next).toISOString() };
+    }
     /* The owner takes back a reminder of the tool. */
     cancel(name, plan) {
         const d = this.#docket(name);
@@ -105,7 +124,7 @@ export class Dockets {
             this.#line(name, { kind: 'docket-failed', text: `Could not be handled: ${e.event.text} -- ${e.ack.note}`, tone: 'warn', topic: 'Not handled' });
             try { this.#alert({ title: `${name}: could not be handled`, body: `${e.event.text}: ${e.ack.note}`, url: `/?c=${name}` }); } catch { /* as said */ }
         }
-        if (e.type === 'planned') this.#line(name, { kind: 'docket-reminder', text: `Reminder set by the tool: ${e.plan.text} (${e.plan.cron ? `"${e.plan.cron}", next ` : ''}${new Date(e.plan.next ?? e.plan.due).toISOString().slice(0, 16).replace('T', ' ')} UTC)`, topic: 'Reminder' });
+        if (e.type === 'planned') this.#line(name, { kind: 'docket-reminder', text: `Reminder set by ${this.#setBy.has(e.plan.id) ? `API key "${this.#setBy.get(e.plan.id)}"` : 'the tool'}: ${e.plan.text} (${e.plan.cron ? `"${e.plan.cron}", next ` : ''}${new Date(e.plan.next ?? e.plan.due).toISOString().slice(0, 16).replace('T', ' ')} UTC)`, topic: 'Reminder' });
     }
 
     /* Every few seconds: the reminders due posted; what waits told, or told again; what was never handled said. */

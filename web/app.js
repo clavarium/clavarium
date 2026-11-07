@@ -6632,16 +6632,21 @@
     /* ITS ROOMS AND VOICE BOXES (07-11), one by one the same way: a room Off / Read / Talk, a box Off / State /
        Speak aloud -- said plainly: it is heard in the home. `kind`: 'rooms' or 'boxes'; `chosen`: id -> level. */
     const apiKeyBoxWord = (level) => (level === 'speak' ? uiSaid('set-apikeys-speak', 'Speak aloud') : uiSaid('set-apikeys-state', 'State'));
-    const apiKeyItems = (kind) => (kind === 'rooms' ? roomsNow().filter((r) => r && r.id).map((r) => ({ id: r.id, name: r.name })) : boxesNow().filter((b) => b && b.id).map((b) => ({ id: b.id, name: b.name })));
+    /* ITS BINDERS (07-11): each list Off / Read / Write; offered only when there are lists. */
+    let apiKeyLists = [];
+    const apiKeyItems = (kind) => (kind === 'binders' ? apiKeyLists : kind === 'rooms' ? roomsNow().filter((r) => r && r.id).map((r) => ({ id: r.id, name: r.name })) : boxesNow().filter((b) => b && b.id).map((b) => ({ id: b.id, name: b.name })));
+    const apiKeyBinderWord = (level) => (level === 'write' ? uiSaid('set-apikeys-write', 'Write') : uiSaid('set-apikeys-read', 'Read'));
     function apiKeyOnePicker(kind, chosen, onChange) {
         const box = el('div', `apikey-${kind}`);
         const list = apiKeyItems(kind);
         if (!list.length) box.append(el('small', 'hint', kind === 'rooms' ? uiSaid('set-apikeys-no-rooms', 'No room yet') : uiSaid('set-apikeys-no-boxes', 'No voice box yet')));
-        const options = kind === 'rooms'
+        const options = kind === 'binders'
+            ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyBinderWord('read') }, { value: 'write', label: apiKeyBinderWord('write') }]
+            : kind === 'rooms'
             ? [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'read', label: apiKeyLevelWord('read') }, { value: 'talk', label: apiKeyLevelWord('talk') }, { value: 'manage', label: apiKeyLevelWord('manage') }]
             : [{ value: '', label: uiSaid('set-apikeys-off', 'Off') }, { value: 'state', label: apiKeyBoxWord('state') }, { value: 'speak', label: apiKeyBoxWord('speak') }];
         for (const x of list) {
-            const row = el('div', kind === 'rooms' ? 'apikey-conv apikey-room' : 'apikey-conv apikey-box'); row.dataset.id = x.id;
+            const row = el('div', kind === 'binders' ? 'apikey-conv apikey-binder' : kind === 'rooms' ? 'apikey-conv apikey-room' : 'apikey-conv apikey-box'); row.dataset.id = x.id;
             row.append(el('span', '', x.name), KIT.Segmented({ options, value: chosen.get(x.id) ?? '', label: x.name, onChange: (v) => onChange(x.id, v || null) }));
             box.append(row);
         }
@@ -6650,6 +6655,7 @@
     const apiKeyNewConvs = new Map();
     const apiKeyNewRooms = new Map();
     const apiKeyNewBoxes = new Map();
+    const apiKeyNewBinders = new Map();
     /* The key whose conversations or journal are open under it, kept across a repaint. */
     let apiKeyOpen = null;
     async function paintApiKeyJournal(box, id) {
@@ -6669,7 +6675,9 @@
         const got = DEVICE ? null : await fetch(`${API}/apikeys`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
         $('settings-ch-apikeys').hidden = !got || !Array.isArray(got.keys);
         if (!got || !Array.isArray(got.keys)) return;
-        await Promise.all([loadRooms(), loadBoxes()]);
+        const [, , lists] = await Promise.all([loadRooms(), loadBoxes(), binderCall('lists', {})]);
+        apiKeyLists = lists?.ok && Array.isArray(lists.data) ? lists.data.filter((l) => l && l.id && !l.archived).map((l) => ({ id: l.id, name: l.title })) : [];
+        $('apikeys-binders-row').hidden = !apiKeyLists.length;
         const scopeWord = (id) => uiSaid(`set-apikeys-scope-${id}`, got.scopes.find((x) => x.id === id)?.label ?? id);
         const live = got.keys.filter((k) => !k.expired).length;
         chapterNow('s-apikeys', got.keys.length ? uiSaid(live === 1 ? 'set-apikeys-n1' : 'set-apikeys-n', live === 1 ? '1 key' : '{n} keys', { n: live }) : uiSaid('set-apikeys-about', 'For a program or an AI.'));
@@ -6692,7 +6700,8 @@
             const given = [...k.scopes.map((sc) => ({ text: scopeWord(sc) })),
                 ...(k.conversations ?? []).map((c) => ({ text: `${shownName(conversations.find((x) => x.name === c.name) ?? { name: c.name })} · ${apiKeyLevelWord(c.level)}`, tone: c.level === 'read' ? undefined : 'note' })),
                 ...(k.rooms ?? []).map((r) => ({ text: `${roomsNow().find((x) => x.id === r.id)?.name ?? r.id.slice(0, 8)} · ${apiKeyLevelWord(r.level)}`, icon: 'room', tone: r.level === 'read' ? undefined : 'note' })),
-                ...(k.boxes ?? []).map((b) => ({ text: `${boxesNow().find((x) => x.id === b.id)?.name ?? b.id.slice(0, 8)} · ${apiKeyBoxWord(b.level)}`, icon: 'box', tone: b.level === 'speak' ? 'note' : undefined }))];
+                ...(k.boxes ?? []).map((b) => ({ text: `${boxesNow().find((x) => x.id === b.id)?.name ?? b.id.slice(0, 8)} · ${apiKeyBoxWord(b.level)}`, icon: 'box', tone: b.level === 'speak' ? 'note' : undefined })),
+                ...(k.binders ?? []).map((l) => ({ text: `${apiKeyLists.find((x) => x.id === l.id)?.name ?? l.id} · ${apiKeyBinderWord(l.level)}`, tone: l.level === 'write' ? 'note' : undefined }))];
             tags.append(KIT.Chips(given.length ? given : [{ text: uiSaid('set-apikeys-no-scope', 'No scope') }]));
             what.append(tags);
             const by = k.createdBy ? (k.createdBy === got.me ? uiSaid('set-apikeys-by-you', 'by you') : k.createdBy) : '';
@@ -6715,16 +6724,16 @@
             const more = el('div', 'apikey-more'); more.hidden = true;
             const open = async (kind) => {
                 apiKeyOpen = apiKeyOpen?.id === k.id && apiKeyOpen.what === kind ? null : { id: k.id, what: kind };
-                for (const b of acts.querySelectorAll('button[data-act="convs"], button[data-act="rooms"], button[data-act="boxes"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
+                for (const b of acts.querySelectorAll('button[data-act="convs"], button[data-act="rooms"], button[data-act="boxes"], button[data-act="binders"], button[data-act="journal"]')) b.setAttribute('aria-expanded', String(apiKeyOpen?.id === k.id && apiKeyOpen.what === b.dataset.act));
                 more.hidden = apiKeyOpen?.id !== k.id;
                 more.replaceChildren();
                 if (!apiKeyOpen || apiKeyOpen.id !== k.id) return;
                 if (kind === 'journal') { more.dataset.what = 'journal'; await paintApiKeyJournal(more, k.id); return; }
                 more.dataset.what = kind;
-                if (kind === 'rooms' || kind === 'boxes') {
+                if (kind === 'rooms' || kind === 'boxes' || kind === 'binders') {
                     more.append(apiKeyOnePicker(kind, new Map((k[kind] ?? []).map((x) => [x.id, x.level])), async (ref, level) => {
                         $('apikeys-error').hidden = true;
-                        try { await post(`${API}/apikeys/${k.id}/${kind}`, { [kind === 'rooms' ? 'room' : 'box']: ref, level }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
+                        try { await post(`${API}/apikeys/${k.id}/${kind}`, { [kind === 'rooms' ? 'room' : kind === 'boxes' ? 'box' : 'binder']: ref, level }); } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; }
                         await paintApiKeys();
                     }));
                     return;
@@ -6740,8 +6749,8 @@
             convs.addEventListener('click', () => void open('convs'));
             journal.addEventListener('click', () => void open('journal'));
             acts.append(convs);
-            /* Rooms, voice boxes: offered when there are some (or the key has some still). */
-            for (const [kind, word] of [['rooms', uiSaid('set-apikeys-rooms', 'Rooms')], ['boxes', uiSaid('set-apikeys-boxes', 'Voice boxes')]]) {
+            /* Rooms, voice boxes, binders: offered when there are some (or the key has some still). */
+            for (const [kind, word] of [['rooms', uiSaid('set-apikeys-rooms', 'Rooms')], ['boxes', uiSaid('set-apikeys-boxes', 'Voice boxes')], ['binders', uiSaid('set-apikeys-binders', 'Binders')]]) {
                 if (!apiKeyItems(kind).length && !(k[kind] ?? []).length) continue;
                 const b = el('button', '', word); b.type = 'button'; b.dataset.act = kind;
                 b.addEventListener('click', () => void open(kind));
@@ -6757,10 +6766,11 @@
         $('apikeys-form').hidden = !on; $('apikeys-new-row').hidden = on; $('apikeys-error').hidden = true;
         if (on) {
             $('apikeys-label').value = ''; $('apikeys-days').value = '90'; for (const b of $('apikeys-scopes').querySelectorAll('input')) b.checked = false;
-            apiKeyNewConvs.clear(); apiKeyNewRooms.clear(); apiKeyNewBoxes.clear();
+            apiKeyNewConvs.clear(); apiKeyNewRooms.clear(); apiKeyNewBoxes.clear(); apiKeyNewBinders.clear();
             $('apikeys-convs').replaceChildren(apiKeyConvPicker(apiKeyNewConvs, (name, level) => { if (level) apiKeyNewConvs.set(name, level); else apiKeyNewConvs.delete(name); }));
             $('apikeys-rooms').replaceChildren(apiKeyOnePicker('rooms', apiKeyNewRooms, (id, level) => { if (level) apiKeyNewRooms.set(id, level); else apiKeyNewRooms.delete(id); }));
             $('apikeys-boxes').replaceChildren(apiKeyOnePicker('boxes', apiKeyNewBoxes, (id, level) => { if (level) apiKeyNewBoxes.set(id, level); else apiKeyNewBoxes.delete(id); }));
+            $('apikeys-binders').replaceChildren(apiKeyOnePicker('binders', apiKeyNewBinders, (id, level) => { if (level) apiKeyNewBinders.set(id, level); else apiKeyNewBinders.delete(id); }));
             $('apikeys-label').focus();
         }
     };
@@ -6772,14 +6782,14 @@
         const days = $('apikeys-days').value;
         try {
             const scopes = [...$('apikeys-scopes').querySelectorAll('input:checked')].map((b) => b.value);
-            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes, conversations: Object.fromEntries(apiKeyNewConvs), rooms: Object.fromEntries(apiKeyNewRooms), boxes: Object.fromEntries(apiKeyNewBoxes), days: days === 'never' ? null : Number(days) });
+            const r = await post(`${API}/apikeys`, { label: $('apikeys-label').value.trim(), scopes, conversations: Object.fromEntries(apiKeyNewConvs), rooms: Object.fromEntries(apiKeyNewRooms), boxes: Object.fromEntries(apiKeyNewBoxes), binders: Object.fromEntries(apiKeyNewBinders), days: days === 'never' ? null : Number(days) });
             apiKeyFormShown(false);
             $('apikeys-secret').value = r.secret; $('apikeys-once').hidden = false;
             /* 06-11 (the owner): the configuration an AI tool takes, ready to paste -- its MCP door and the key, shown this once too. */
             const slug = (appName || 'clavarium').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'clavarium';
             $('apikeys-config').textContent = JSON.stringify({ mcpServers: { [slug]: { type: 'http', url: `${location.origin}/api/ext/mcp`, headers: { Authorization: `Bearer ${r.secret}` } } } }, null, 2);
             /* The curl line reads what it was given: the status, or else its conversations, rooms or voice boxes. */
-            const first = scopes.includes('status') ? 'status' : apiKeyNewConvs.size ? 'conversations' : apiKeyNewRooms.size ? 'rooms' : apiKeyNewBoxes.size ? 'boxes' : 'status';
+            const first = scopes.includes('status') ? 'status' : apiKeyNewConvs.size ? 'conversations' : apiKeyNewRooms.size ? 'rooms' : apiKeyNewBoxes.size ? 'boxes' : apiKeyNewBinders.size ? 'binders' : 'status';
             $('apikeys-curl').textContent = `curl -H "Authorization: Bearer ${r.secret}" ${location.origin}/api/ext/v1/${first}`;
         } catch (error) { $('apikeys-error').textContent = error.message; $('apikeys-error').hidden = false; return; }
         await paintApiKeys();

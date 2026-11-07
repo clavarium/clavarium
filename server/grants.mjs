@@ -42,6 +42,8 @@
  * ("rw": never to listen, record, set or update it) -- never a secret nor a
  * folder in this version; nothing else is ever given "server:", "room:" or
  * "box:".
+ * Its binder lists (07-11) are not lines here: Binder keeps who was given a
+ * list on the list itself, for a key as for a conversation (apikeys.mjs).
  *
  * No groups, no inheritance. One rule sits on top, in the door: whoever was
  * given a conversation, its terminal or its chat, sees the files of that
