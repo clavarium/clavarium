@@ -167,6 +167,7 @@ import { WORK_TAB } from './resources.mjs';
 import { transcribe, AUDIO_MAX } from './voice.mjs';
 import { FILE_MAX } from './setup.mjs';
 import { demandeView } from './demandes.mjs';
+import { mcpAdd, mcpImport, mcpRefresh, mcpRights, mcpSeen, forgetKey } from './mcpx.mjs';
 
 const BODY_MAX = 16 * 1024;
 /* A setup file travels inside the JSON of a request: room for it, escaped. */
@@ -614,7 +615,18 @@ export async function handleApi(request, response, conversations, headers, resou
         /* Assets > Access: the owner sets a conversation's level and rules on a
            target, decides a call that waited, or removes a target. Each is an op the
            keeper runs as the owner (person), never as an agent. */
+        /* External MCP servers (mcpx.mjs): added with their key (kept host-only in the vault, Tether given its name),
+           imported from a pasted mcpServers block, listed again, a conversation's rights on their tools, new tools seen. */
+        const mcpOp = /^\/api\/tether\/mcp-(add|import|refresh|rights|seen)$/.exec(pathname);
+        if (mcpOp && tethers) {
+            const ctx = { tethers, secrets };
+            const done = await { add: mcpAdd, import: mcpImport, refresh: mcpRefresh, rights: mcpRights, seen: mcpSeen }[mcpOp[1]](ctx, body ?? {});
+            return send(mcpOp[1] === 'add' || mcpOp[1] === 'import' ? 201 : 200, done), true;
+        }
+        /* A server taken away: the key kept for it goes too. */
+        const mcpGone = pathname === '/api/tether/remove-target' && tethers ? tethers.store().target(String(body?.target ?? '')) : null;
         const tetherOp = /^\/api\/tether\/(level|allow|unallow|decide|remove-target|stop|resume|job-done|job-file)$/.exec(pathname);
+        if (tetherOp && tethers && mcpGone?.kind === 'mcp') { const r = await tethers.act('remove-target', body, ''); if (!r.ok) throw new Refusal(400, r.text); forgetKey(secrets, mcpGone); return send(200, r.data ?? { ok: true }), true; }
         if (tetherOp && tethers) { const r = await tethers.act(tetherOp[1], body, ''); if (!r.ok) throw new Refusal(400, r.text); return send(200, r.data ?? { ok: true }), true; }
         /* A mailbox's signature (Markdown), added under what the agent sends from it. */
         if (pathname === '/api/tether/signature' && tethers) {

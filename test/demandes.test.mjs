@@ -153,3 +153,40 @@ test('the mail a reply answers (about.ref): a chip under the title, « en répon
     assert.equal(demandeView(q({ kind: 'mail', action: 'send', to: ['b@example.org'], about: { ref } })).re, undefined, 'a new mail answers none');
     assert.equal(demandeView(q({ kind: 'mail', action: 'reply', about: { ref: 'https://example.com/x' } })).re, undefined, 'only a mail reference');
 });
+
+/* An external MCP server's tool (Tether's mcp card, 07-11): drawn as Parley's generic card (it has no mcp kind nor its
+   words yet), each word with its English; its server, tool, kind, arguments in short and why. */
+test('a call of an MCP server\'s tool: server, tool, kind, arguments in short, why; destructive is irreversible', () => {
+    const args = [{ name: 'id', value: '42' }, { name: 'note', value: 'x'.repeat(400) }, ...Array.from({ length: 6 }, (_, i) => ({ name: `a${i}`, value: String(i) }))];
+    const v = demandeView({ id, verb: 'mcp.call', detail: 'erase id=42', target: { title: 'CRM' }, why: 'the duplicate you named', rule: undefined,
+        card: { kind: 'mcp', action: 'call', server: 'CRM', tool: 'erase', class: 'destructive', open: true, fresh: true, args } });
+    assert.equal(v.kind, 'other', 'Parley\'s generic card');
+    for (const r of [en(v), fr(v)]) {
+        assert.equal(r.title, 'Use erase on CRM');
+        assert.equal(r.sub, 'CRM · Deletes or overwrites');
+        assert.deepEqual(r.facts.map((f) => [f.label, f.text]), [['Server', 'CRM'], ['Tool', 'erase'], ['Kind', 'Deletes or overwrites']]);
+        assert.deepEqual(r.risk, ['New or changed on its server', 'May delete or overwrite', 'Reaches outside']);
+        assert.equal(r.why, 'the duplicate you named');
+        assert.equal(r.irreversible, true);
+        assert.equal(r.others.length, 0, 'no Always for a destructive tool (Tether gives no rule)');
+    }
+    const lines = v.code.split('\n');
+    assert.equal(lines[0], 'id: 42');
+    assert.ok(lines[1].length < 180 && lines[1].endsWith('…'), 'a long value cut');
+    assert.equal(lines.length, 7);
+    assert.equal(lines[6], '… +2');
+    assert.equal(fr(v).yes.label, 'Accepter');
+});
+
+test('a read tool, its title known, not fresh: reversible, no risk; Always offered when Tether gives the rule', () => {
+    const v = demandeView({ id, verb: 'mcp.call', rule: { kind: 'tool', value: 'search' }, card: { kind: 'mcp', action: 'call', server: 'CRM', tool: 'search', title: 'Search contacts', class: 'read', args: [] } });
+    const r = en(v);
+    assert.equal(r.title, 'Use Search contacts on CRM');
+    assert.equal(r.facts[1].text, 'Search contacts (search)');
+    assert.deepEqual(r.risk, []);
+    assert.equal(r.irreversible, false);
+    assert.equal(r.code, '');
+    assert.equal(r.others.length, 1);
+    const w = en(demandeView({ id, verb: 'mcp.call', card: { kind: 'mcp', action: 'call', server: 'CRM', tool: 'update', class: 'write', open: true, args: [] } }));
+    assert.deepEqual([w.sub, w.risk, w.irreversible], ['CRM · Writes', ['Reaches outside'], false]);
+});

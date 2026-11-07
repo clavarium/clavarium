@@ -2159,6 +2159,17 @@ details.commit > pre { margin: 6px 0 0 1.6em; white-space: pre-wrap; overflow-wr
 .demandes-box { display: flex; flex-direction: column; gap: 10px; }
 .as-signature { display: flex; flex-direction: column; gap: 6px; margin: .6rem 0; }
 .as-signature textarea { width: 100%; font: inherit; }
+/* An external MCP server (app.js mcpParts): its tools, each with its kind; a new one marked; Custom rights by kind. */
+.mcp-url { overflow-wrap: anywhere; }
+.mcp-tools { list-style: none; margin: .3rem 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.mcp-tool { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.mcp-tool-name { font-weight: 600; overflow-wrap: anywhere; }
+.mcp-tool-class { color: var(--ink2); }
+.mcp-tool-class[data-class="destructive"] { color: var(--danger); }
+.mcp-tool-fresh { color: var(--warn); }
+.mcp-custom { display: flex; flex-direction: column; gap: 4px; margin: .4rem 0 .8rem; }
+.mcp-custom-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; }
+#mcp-config { width: 100%; font: .8125rem var(--mono, monospace); }
 .as-drag-ghost { position: fixed; z-index: 90; pointer-events: none; opacity: .9; box-shadow: 0 12px 30px -10px rgba(0,0,0,.5); border-radius: 10px; background: var(--panel); }
 .kit-aslist-group.as-drop-over { outline: 2px dashed var(--brass); outline-offset: 2px; border-radius: 10px; background: color-mix(in srgb, var(--brass) 7%, transparent); }
 body.as-dragging { user-select: none; -webkit-user-select: none; }

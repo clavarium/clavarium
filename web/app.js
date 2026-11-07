@@ -3947,7 +3947,7 @@
         line.append(summary, el('pre', '', rest));
         return line;
     }
-    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
+    const kindIcon = (kind) => { const name = kind === 'send' || kind === 'demandes' ? 'arrow-up' : kind === 'box' ? 'mic' : kind === 'device' ? 'smartphone' : kind === 'mcp' ? 'link' : ASSET_KINDS.find((k) => k[0] === kind)?.[2]; const holder = el('span', 'as-ic'); holder.dataset.kind = kind; const svg = kind === 'list' ? listIcon() : name ? window.clavariumIcons?.icon(name) : null; if (svg) holder.append(svg); return holder; };
     /* A list (Binder's): the set has no such sign, so it is drawn here, in its style. */
     function listIcon() {
         const SVG = 'http://www.w3.org/2000/svg';
@@ -4916,7 +4916,7 @@
         await refresh();
     }
     /* The plain word for a Tether target's kind, in a Connexion's sub-line. */
-    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen', device: 'device' };
+    const CONNEXION_SUB = { mail: 'mailbox', calendar: 'calendar', contacts: 'address book', files: 'online folder', ssh: 'machine', computer: 'computer', browser: 'browser', screen: 'screen', device: 'device', mcp: 'MCP server' };
     const connexionSub = (kind) => (kind in CONNEXION_SUB ? uiSaid(`set-cx-${kind}`, CONNEXION_SUB[kind]) : kind);
     const connexionOwnSub = (kind) => (tetherCat(kind) === 'acces' ? connexionSub(kind) : '');
     /* Give a Tether target to a conversation at a level, or take it back (none). */
@@ -5034,7 +5034,7 @@
     const newKinds = () => [['folder', uiSaid('set-na-k-folder', 'Folder')], ['git', uiSaid('set-na-k-git', 'Git repository')], ['mailbox', uiSaid('set-na-k-mailbox', 'Mailbox')],
         ['agenda', uiSaid('set-na-k-agenda', 'Calendar')], ['contacts', uiSaid('set-na-k-contacts', 'Contacts')], ['secret', uiSaid('set-na-k-secret', 'Secret')], ['list', uiSaid('set-na-k-list', LISTS_WORD.one)],
         /* Step 4: a voice box (paired with a code) and a device (the share sheet, its code) are two kinds of it too. */
-        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')]]
+        ['box', uiSaid('set-na-k-box', 'Voice box')], ['device', uiSaid('set-na-k-device', 'Device')], ['mcp', uiSaid('set-na-k-mcp', 'MCP server')]]
         .map(([kind, label]) => ({ kind, label, icon: kindIcon(kind) }));
     /* A voice box's steps after its kind (the flow: "A NEW VOICE BOX", with the boxes), and the one under way. */
     const BOX_STEPS = ['where', 'plug', 'pair'];
@@ -5131,6 +5131,70 @@
         await repaintAsset();
         return true;
     }
+    /* AN EXTERNAL MCP SERVER (mcpx.mjs, Tether's mcp target): its address, its tools each with its kind, « Refresh »;
+       a new tool marked until seen (« Mark as seen »); then, for each conversation at Custom, what each kind may do. */
+    const MCP_CLASS = { read: ['set-mcp-c-read', 'Reads only'], write: ['set-mcp-c-write', 'Writes'], destructive: ['set-mcp-c-destructive', 'Deletes or overwrites'] };
+    const mcpClass = (c) => uiSaid(...(MCP_CLASS[c] ?? MCP_CLASS.destructive));
+    function mcpParts(t) {
+        const out = [];
+        if (t.config?.url) out.push(el('p', 'hint mcp-url', t.config.url));
+        const tools = Array.isArray(t.catalog?.tools) ? t.catalog.tools : [];
+        const refresh = el('button', '', uiSaid('set-mcp-refresh', 'Refresh')); refresh.type = 'button'; refresh.dataset.act = 'mcp-refresh';
+        refresh.addEventListener('click', async () => {
+            refresh.disabled = true; $(asErrId()).hidden = true;
+            try { const r = await post(`${API}/tether/mcp-refresh`, { target: t.id }); if (r?.error) sayAsErr(new Error(r.error)); }
+            catch (error) { sayAsErr(error); }
+            await repaintAsset();
+        });
+        const fresh = tools.filter((x) => x.fresh === true);
+        const seen = fresh.length ? el('button', '', uiSaid('set-mcp-seen', 'Mark as seen')) : null;
+        if (seen) {
+            seen.type = 'button'; seen.dataset.act = 'mcp-seen';
+            seen.addEventListener('click', async () => {
+                seen.disabled = true; $(asErrId()).hidden = true;
+                try { await post(`${API}/tether/mcp-seen`, { target: t.id }); } catch (error) { sayAsErr(error); }
+                await repaintAsset();
+            });
+        }
+        const list = el('ul', 'mcp-tools');
+        for (const x of tools) {
+            const li = el('li', 'mcp-tool'); li.dataset.tool = x.name; li.dataset.class = x.class;
+            const nm = el('span', 'mcp-tool-name', x.title || x.name);
+            if (x.description) nm.title = x.description;
+            const kind = el('small', 'mcp-tool-class', mcpClass(x.class)); kind.dataset.class = x.class;
+            li.append(nm, kind);
+            if (x.open && x.class !== 'read') li.append(el('small', 'hint', uiSaid('set-mcp-open', 'reaches outside')));
+            if (x.fresh === true) li.append(el('small', 'mcp-tool-fresh', uiSaid('set-mcp-fresh', 'New — asked until you\'ve seen it')));
+            list.append(li);
+        }
+        const body = [];
+        if (t.catalog?.error) body.push(el('p', 'error', uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: t.catalog.error })));
+        body.push(tools.length ? list : el('p', 'hint', uiSaid('set-mcp-none', 'No tools listed yet.')));
+        out.push({ title: uiSaid('set-mcp-tools', 'Tools'), extra: [seen, refresh], body, cls: 'as-mcp-tools' });
+        /* Custom: each kind of tool Yes / Ask / No, for each conversation set to it. */
+        const custom = Object.entries(t.grants ?? {}).filter(([id, g]) => id.startsWith('conversation:') && g?.level === 'frame');
+        if (custom.length) {
+            const goes = [['yes', uiSaid('set-mcp-yes', 'Yes')], ['ask', uiSaid('set-mcp-ask', 'Ask')], ['no', uiSaid('set-mcp-no', 'No')]].map(([value, label]) => ({ value, label }));
+            const rows = custom.map(([id, g]) => {
+                const box = el('div', 'mcp-custom'); box.dataset.conversation = id.slice('conversation:'.length);
+                const who = conversations.find((c) => c.name === id.slice('conversation:'.length));
+                box.append(el('b', '', (who && shownName(who)) || id.slice('conversation:'.length)));
+                for (const c of ['read', 'write', 'destructive']) {
+                    const now = g.classes?.[c] ?? (c === 'read' ? 'yes' : 'ask');
+                    const line = el('div', 'mcp-custom-line'); line.dataset.class = c;
+                    line.append(el('span', '', mcpClass(c)), KIT.Segmented({ options: goes, value: now, label: mcpClass(c), onChange: async (go) => {
+                        $(asErrId()).hidden = true;
+                        try { await post(`${API}/tether/mcp-rights`, { target: t.id, agent: id, classes: { [c]: go } }); } catch (error) { sayAsErr(error); }
+                        await repaintAsset();
+                    } }));
+                    box.append(line);
+                }
+                return box;
+            });
+            out.push({ title: uiSaid('set-mcp-custom', 'Custom rights'), body: rows, cls: 'as-mcp-custom' });
+        }
+        return out;
+    }
     /* `detail`: where it is drawn. `from`: the conversation it is seen from ('' : the menu). `back`: the way back (a phone).
        `tether`, `groups`: as the page read them. `gits`: the conversation's repositories (To send, beside). */
     async function assetPanel(detail, chosen, { from = '', back, tether = {}, groups = [], gits = [] } = {}) {
@@ -5217,6 +5281,7 @@
                 box.append(lab, ta, row);
                 parts.push(box);
             }
+            if (t.kind === 'mcp') parts.push(...mcpParts(t));
             if (chosen.siblings?.length) {
                 const a = el('p', 'as-assoc hint');
                 a.append(el('b', '', 'Linked'), document.createTextNode(` to the same account: ${chosen.siblings.join(', ')}. They share the account's sign-in (kept on the server); rights are given separately.`));
@@ -8787,6 +8852,34 @@
         } catch (error) { $('connexion-error').textContent = error.message; $('connexion-error').hidden = false; }
         $('connexion-password').value = '';
         btn.disabled = false; btn.textContent = was;
+        await paintAssets();
+    });
+    /* ADD AN MCP SERVER (mcpx.mjs): its name, address and key -- the key kept on the server, never shown again. Or a
+       pasted { "mcpServers": ... } block, its keys named as secrets. */
+    $('mcp-new').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        $('mcp-error').hidden = true;
+        const btn = $('mcp-add'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/mcp-add`, { name: $('mcp-name').value.trim(), url: $('mcp-url').value.trim(), key: $('mcp-key').value });
+            $('mcp-new').reset();
+            await assetMade($('mcp-box'), { key: `connexion:${made.id}`, name: made.title, note: made.error ? uiSaid('set-mcp-unreached', 'Not reached: {why}', { why: made.error }) : '',
+                give: (to, level) => grantTarget(made.id, to, targetLevel(level)) });
+        } catch (error) { $('mcp-error').textContent = error.message; $('mcp-error').hidden = false; }
+        $('mcp-key').value = '';
+        btn.disabled = false;
+        await paintAssets();
+    });
+    $('mcp-import').addEventListener('click', async () => {
+        $('mcp-error').hidden = true;
+        const btn = $('mcp-import'); btn.disabled = true;
+        try {
+            const made = await post(`${API}/tether/mcp-import`, { config: $('mcp-config').value });
+            $('mcp-config').value = '';
+            const first = made.servers?.[0];
+            if (first) await assetMade($('mcp-box'), { key: `connexion:${first.id}`, name: first.title, give: (to, level) => Promise.all(made.servers.map((x) => grantTarget(x.id, to, targetLevel(level)))) });
+        } catch (error) { $('mcp-error').textContent = error.message; $('mcp-error').hidden = false; }
+        btn.disabled = false;
         await paintAssets();
     });
     const connexionKinds = () => [['connexion-mail', 'mail'], ['connexion-calendar', 'calendar'], ['connexion-contacts', 'contacts']].filter(([id]) => $(id).checked && !$(id).disabled).map(([, k]) => k);

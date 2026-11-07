@@ -879,6 +879,24 @@
             <p id="connexion-error" class="error" role="alert" hidden></p>
           </form>
           </div>
+          <div id="mcp-box" class="as-form" data-kind="mcp"><h3 data-said="set-mcp-head">Add an MCP server</h3>
+          <p class="hint" data-said="set-mcp-hint">Its tools, given to the AIs you choose. The key stays on the server.</p>
+          <form id="mcp-new" autocomplete="off">
+            <label for="mcp-name" data-said="set-mcp-name">Name</label>
+            <input id="mcp-name" maxlength="120" spellcheck="false" placeholder="CRM" required>
+            <label for="mcp-url" data-said="set-mcp-url">Address</label>
+            <input id="mcp-url" type="url" spellcheck="false" autocapitalize="off" placeholder="https://mcp.example.com/mcp" required>
+            <label for="mcp-key" data-said="set-mcp-key">Key</label>
+            <input id="mcp-key" type="password" autocomplete="new-password" placeholder="optional, never shown again">
+            <div class="row"><button type="submit" id="mcp-add" class="primary" data-said="set-mcp-add">Add</button></div>
+            <details class="more"><summary data-said="set-mcp-paste">Paste a configuration</summary>
+              <textarea id="mcp-config" rows="6" spellcheck="false" autocapitalize="off" aria-label="mcpServers configuration" placeholder='{ "mcpServers": { "crm": { "url": "https://mcp.example.com/mcp", "headers": { "Authorization": "Bearer ${CRM_KEY}" } } } }'></textarea>
+              <p class="hint" data-said="set-mcp-paste-hint">Keys named as secrets: ${NAME}. No programs to start.</p>
+              <div class="row"><button type="button" id="mcp-import" data-said="set-mcp-import">Import</button></div>
+            </details>
+            <p id="mcp-error" class="error" role="alert" hidden></p>
+          </form>
+          </div>
           <div id="list-box" class="as-form" data-kind="list"><h3 id="listnew-head">New binder</h3>
         <form id="list-new" autocomplete="off">
           <label for="listnew-template">Template</label>
